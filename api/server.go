@@ -84,7 +84,7 @@ type (
 	// A SlabMover uploads, downloads, and migrates slabs.
 	SlabMover interface {
 		UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) ([]slab.Slab, error)
-		DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.SlabSlice, offset, length int64, currentHeight uint64, contracts []Contract) error
+		DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, currentHeight uint64, contracts []Contract) error
 	}
 
 	// An ObjectStore stores objects.

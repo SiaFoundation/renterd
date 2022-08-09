@@ -6,7 +6,7 @@ import (
 
 type Object struct {
 	Key   slab.EncryptionKey
-	Slabs []slab.SlabSlice
+	Slabs []slab.Slice
 }
 
 func (o Object) Size() int64 {

@@ -30,7 +30,7 @@ func TestSingleSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ss := slab.SlabSlice{
+	ss := slab.Slice{
 		Slab:   s,
 		Offset: 0,
 		Length: uint32(len(data)),
@@ -49,7 +49,7 @@ func TestSingleSlab(t *testing.T) {
 		t.Fatal("wrong number of shards")
 	}
 	var buf bytes.Buffer
-	if err := slab.WriteSlab(&buf, ss, downloaded); err != nil {
+	if err := slab.RecoverSlab(&buf, ss, downloaded); err != nil {
 		t.Fatal(err)
 	}
 	exp := data

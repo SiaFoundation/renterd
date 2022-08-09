@@ -241,7 +241,7 @@ func (c *Client) UploadSlabs(src io.Reader, m, n uint8, contracts []Contract) (s
 }
 
 // DownloadSlabs downloads data from a set of hosts.
-func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.SlabSlice, offset, length int64, contracts []Contract) (err error) {
+func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.Slice, offset, length int64, contracts []Contract) (err error) {
 	js, _ := json.Marshal(SlabsDownloadRequest{
 		Slabs:     slabs,
 		Offset:    offset,

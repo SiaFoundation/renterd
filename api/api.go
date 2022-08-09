@@ -128,8 +128,8 @@ type SlabsUploadRequest struct {
 }
 
 type SlabsDownloadRequest struct {
-	Slabs     []slab.SlabSlice `json:"slabs"`
-	Offset    int64            `json:"offset"`
-	Length    int64            `json:"length"`
-	Contracts []Contract       `json:"contracts"`
+	Slabs     []slab.Slice `json:"slabs"`
+	Offset    int64        `json:"offset"`
+	Length    int64        `json:"length"`
+	Contracts []Contract   `json:"contracts"`
 }

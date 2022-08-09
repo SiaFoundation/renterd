@@ -24,7 +24,7 @@ type refSlab struct {
 	refs      uint32
 }
 
-type refSlabSlice struct {
+type refSlice struct {
 	slabID slab.EncryptionKey
 	offset uint32
 	length uint32
@@ -32,7 +32,7 @@ type refSlabSlice struct {
 
 type refObject struct {
 	key   slab.EncryptionKey
-	slabs []refSlabSlice
+	slabs []refSlice
 }
 
 // EphemeralStore implements server.ObjectStore in memory.
@@ -59,7 +59,7 @@ func (es *EphemeralStore) Put(key string, o object.Object) error {
 	defer es.mu.Unlock()
 	ro := refObject{
 		key:   o.Key,
-		slabs: make([]refSlabSlice, len(o.Slabs)),
+		slabs: make([]refSlice, len(o.Slabs)),
 	}
 	for i, ss := range o.Slabs {
 		rs, ok := es.slabs[ss.Key]
@@ -75,7 +75,7 @@ func (es *EphemeralStore) Put(key string, o object.Object) error {
 		}
 		rs.refs++
 		es.slabs[ss.Key] = rs
-		ro.slabs[i] = refSlabSlice{ss.Key, ss.Offset, ss.Length}
+		ro.slabs[i] = refSlice{ss.Key, ss.Offset, ss.Length}
 	}
 	es.objects[key] = ro
 	return nil
@@ -89,7 +89,7 @@ func (es *EphemeralStore) Get(key string) (object.Object, error) {
 	if !ok {
 		return object.Object{}, errors.New("not found")
 	}
-	slabs := make([]slab.SlabSlice, len(ro.slabs))
+	slabs := make([]slab.Slice, len(ro.slabs))
 	for i, rss := range ro.slabs {
 		rs := es.slabs[rss.slabID]
 		shards := make([]slab.Sector, len(rs.shards))
@@ -99,7 +99,7 @@ func (es *EphemeralStore) Get(key string) (object.Object, error) {
 				Root: rs.shards[i].root,
 			}
 		}
-		slabs[i] = slab.SlabSlice{
+		slabs[i] = slab.Slice{
 			Slab: slab.Slab{
 				Key:       rss.slabID,
 				MinShards: rs.minShards,

@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/cipher"
 	"io"
 	"net"
 	"net/http"
@@ -101,7 +102,7 @@ func (sm mockSlabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8
 	return ssu.UploadSlabs(ctx, slab.NewUniformSlabReader(r, m, n))
 }
 
-func (sm mockSlabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.SlabSlice, offset, length int64, currentHeight uint64, contracts []api.Contract) error {
+func (sm mockSlabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, currentHeight uint64, contracts []api.Contract) error {
 	ssd := slab.SerialSlabsDownloader{SlabDownloader: sm.hs.SlabDownloader()}
 	return ssd.DownloadSlabs(ctx, w, slabs, offset, length)
 }
@@ -180,15 +181,18 @@ func TestSlabs(t *testing.T) {
 
 	// upload
 	data := frand.Bytes(20)
-	slabs, err := c.UploadSlabs(bytes.NewReader(data), 2, 3, contracts)
+	key := slab.NewEncryptionKey()
+	r := cipher.StreamReader{S: slab.NewCipher(key, 0), R: bytes.NewReader(data)}
+	slabs, err := c.UploadSlabs(r, 2, 3, contracts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	o := object.Object{
-		Slabs: make([]slab.SlabSlice, len(slabs)),
+		Key:   key,
+		Slabs: make([]slab.Slice, len(slabs)),
 	}
 	for i := range slabs {
-		o.Slabs[i] = slab.SlabSlice{
+		o.Slabs[i] = slab.Slice{
 			Slab:   slabs[i],
 			Offset: 0,
 			Length: uint32(len(data)),
@@ -208,7 +212,8 @@ func TestSlabs(t *testing.T) {
 
 	// download
 	var buf bytes.Buffer
-	if err := c.DownloadSlabs(&buf, o.Slabs, 0, o.Size(), contracts); err != nil {
+	w := cipher.StreamWriter{S: slab.NewCipher(key, 0), W: &buf}
+	if err := c.DownloadSlabs(w, o.Slabs, 0, o.Size(), contracts); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatalf("data mismatch:\n%v (%v)\n%v (%v)", buf.Bytes(), len(buf.Bytes()), data, len(data))

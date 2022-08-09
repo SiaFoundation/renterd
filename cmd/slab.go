@@ -19,7 +19,7 @@ func (slabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, curre
 	return ssu.UploadSlabs(ctx, slab.NewUniformSlabReader(r, m, n))
 }
 
-func (slabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.SlabSlice, offset, length int64, currentHeight uint64, contracts []api.Contract) error {
+func (slabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, currentHeight uint64, contracts []api.Contract) error {
 	hs := slab.NewHostSet(currentHeight)
 	for _, c := range contracts {
 		hs.AddHost(c.HostKey, c.HostIP, c.ID, c.RenterKey)

@@ -17,8 +17,7 @@ import (
 func TestObject(t *testing.T) {
 	// generate data and encryption key
 	data := frand.Bytes(1000000)
-	var key slab.EncryptionKey
-	frand.Read(key[:])
+	key := slab.NewEncryptionKey()
 	r := cipher.StreamReader{S: slab.NewCipher(key, 0), R: bytes.NewReader(data)}
 
 	// upload slabs
@@ -38,10 +37,10 @@ func TestObject(t *testing.T) {
 	// construct object
 	o := object.Object{
 		Key:   key,
-		Slabs: make([]slab.SlabSlice, len(slabs)),
+		Slabs: make([]slab.Slice, len(slabs)),
 	}
 	for i, s := range slabs {
-		o.Slabs[i] = slab.SlabSlice{
+		o.Slabs[i] = slab.Slice{
 			Slab:   s,
 			Offset: 0,
 			Length: uint32(len(data)),
