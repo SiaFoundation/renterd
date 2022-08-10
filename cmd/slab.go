@@ -27,3 +27,12 @@ func (slabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Sl
 	ssd := slab.SerialSlabsDownloader{SlabDownloader: slab.NewSerialSlabDownloader(hs)}
 	return ssd.DownloadSlabs(ctx, w, slabs, offset, length)
 }
+
+func (slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, contracts []api.Contract) error {
+	hs := slab.NewHostSet(currentHeight)
+	for _, c := range contracts {
+		hs.AddHost(c.HostKey, c.HostIP, c.ID, c.RenterKey)
+	}
+	ssd := slab.NewSerialSlabsDeleter(hs)
+	return ssd.DeleteSlabs(ctx, slabs)
+}

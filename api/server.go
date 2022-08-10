@@ -85,6 +85,7 @@ type (
 	SlabMover interface {
 		UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) ([]slab.Slab, error)
 		DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, currentHeight uint64, contracts []Contract) error
+		DeleteSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, contracts []Contract) error
 	}
 
 	// An ObjectStore stores objects.
@@ -573,6 +574,19 @@ func (s *server) slabsDownloadHandler(w http.ResponseWriter, req *http.Request, 
 	}
 }
 
+func (s *server) slabsDeleteHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var sdr SlabsDeleteRequest
+	if err := json.NewDecoder(req.Body).Decode(&sdr); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	err := s.sm.DeleteSlabs(req.Context(), sdr.Slabs, s.cm.TipState().Index.Height, sdr.Contracts)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 func (s *server) objectsKeyHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	if strings.HasSuffix(ps.ByName("key"), "/") {
 		WriteJSON(w, s.os.List(ps.ByName("key")))
@@ -654,6 +668,7 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 	mux.POST("/slabs/upload", srv.slabsUploadHandler)
 	mux.POST("/slabs/download", srv.slabsDownloadHandler)
 	//mux.POST("/slabs/migrate", srv.slabsMigrateHandler)
+	mux.POST("/slabs/delete", srv.slabsDeleteHandler)
 
 	mux.GET("/objects/*key", srv.objectsKeyHandlerGET)
 	mux.PUT("/objects/*key", srv.objectsKeyHandlerPUT)

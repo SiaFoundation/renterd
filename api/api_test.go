@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/cipher"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"testing"
@@ -105,6 +106,11 @@ func (sm mockSlabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8
 func (sm mockSlabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, currentHeight uint64, contracts []api.Contract) error {
 	ssd := slab.SerialSlabsDownloader{SlabDownloader: sm.hs.SlabDownloader()}
 	return ssd.DownloadSlabs(ctx, w, slabs, offset, length)
+}
+
+func (sm mockSlabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, contracts []api.Contract) error {
+	sd := sm.hs.SlabDeleter()
+	return sd.DeleteSlabs(ctx, slabs)
 }
 
 type node struct {
@@ -217,5 +223,21 @@ func TestSlabs(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatalf("data mismatch:\n%v (%v)\n%v (%v)", buf.Bytes(), len(buf.Bytes()), data, len(data))
+	}
+
+	// delete slabs
+	if err := c.DeleteSlabs(slabs, contracts); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DownloadSlabs(ioutil.Discard, o.Slabs, 0, o.Size(), contracts); err == nil {
+		t.Error("slabs should no longer be retrievable")
+	}
+
+	// delete object
+	if err := c.DeleteObject("foo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Object("foo"); err == nil {
+		t.Error("object should no longer be retrievable")
 	}
 }

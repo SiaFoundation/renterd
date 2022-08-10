@@ -32,6 +32,14 @@ func (h *MockHost) DownloadSector(ctx context.Context, w io.Writer, root consens
 	return err
 }
 
+// DeleteSectors implements slab.SectorDeleter.
+func (h *MockHost) DeleteSectors(ctx context.Context, roots []consensus.Hash256) error {
+	for _, root := range roots {
+		delete(h.sectors, root)
+	}
+	return nil
+}
+
 // NewMockHost creates a new MockHost.
 func NewMockHost() *MockHost {
 	return &MockHost{
@@ -69,6 +77,17 @@ func (hs *MockHostSet) SlabDownloader() slab.Downloader {
 		hosts[hostKey] = sess
 	}
 	return &slab.SerialSlabDownloader{
+		Hosts: hosts,
+	}
+}
+
+// SlabDeleter returns a slab.Deleter for the host set.
+func (hs *MockHostSet) SlabDeleter() *slab.SerialSlabsDeleter {
+	hosts := make(map[consensus.PublicKey]slab.SectorDeleter)
+	for hostKey, sess := range hs.Hosts {
+		hosts[hostKey] = sess
+	}
+	return &slab.SerialSlabsDeleter{
 		Hosts: hosts,
 	}
 }

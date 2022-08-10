@@ -114,6 +114,40 @@ func (s *Session) DownloadSector(ctx context.Context, w io.Writer, root consensu
 	return s.Read(w, sections, price)
 }
 
+// DeleteSectors implements SectorDeleter.
+func (s *Session) DeleteSectors(ctx context.Context, roots []consensus.Hash256) error {
+	// download the full set of SectorRoots
+	contractSectors := s.Contract().NumSectors()
+	rootIndices := make(map[consensus.Hash256]uint64, contractSectors)
+	for offset := uint64(0); offset < contractSectors; {
+		n := uint64(130000) // a little less than 4MiB of roots
+		if offset+n > contractSectors {
+			n = contractSectors - offset
+		}
+		price := rhpv2.RPCSectorRootsCost(s.settings, n)
+		roots, err := s.SectorRoots(offset, n, price)
+		if err != nil {
+			return err
+		}
+		for i, root := range roots {
+			rootIndices[root] = offset + uint64(i)
+		}
+		offset += n
+	}
+
+	// look up the index of each sector
+	badIndices := make([]uint64, 0, len(roots))
+	for _, r := range roots {
+		if index, ok := rootIndices[r]; ok {
+			badIndices = append(badIndices, index)
+			delete(rootIndices, r) // prevent duplicates
+		}
+	}
+
+	price := rhpv2.RPCDeleteCost(s.settings, len(badIndices))
+	return s.Session.Delete(badIndices, price)
+}
+
 // A HostSet is a set of hosts that can be used for uploading and downloading.
 type HostSet struct {
 	hosts         map[consensus.PublicKey]*Session

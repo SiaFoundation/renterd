@@ -137,3 +137,9 @@ type SlabsDownloadRequest struct {
 	Length    int64        `json:"length"`
 	Contracts []Contract   `json:"contracts"`
 }
+
+// SlabsDeleteRequest is the request type for the /slabs/delete endpoint.
+type SlabsDeleteRequest struct {
+	Slabs     []slab.Slab `json:"slabs"`
+	Contracts []Contract  `json:"contracts"`
+}

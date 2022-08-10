@@ -268,6 +268,16 @@ func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.Slice, offset, length
 	return
 }
 
+// DeleteSlabs deletes the specified slabs.
+func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error) {
+	req := SlabsDeleteRequest{
+		Slabs:     slabs,
+		Contracts: contracts,
+	}
+	err = c.post("/slabs/delete", req, nil)
+	return
+}
+
 // Object returns the object with the given name.
 func (c *Client) Object(name string) (o object.Object, err error) {
 	err = c.get("/objects/"+name, &o)

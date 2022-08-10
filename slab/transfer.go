@@ -23,7 +23,7 @@ type (
 
 	// A SectorDeleter deletes sectors.
 	SectorDeleter interface {
-		DeleteSector(ctx context.Context, root consensus.Hash256) error
+		DeleteSectors(ctx context.Context, roots []consensus.Hash256) error
 	}
 
 	// A Reader returns slab data, erasure-encoded into sector-sized shards.
@@ -42,11 +42,6 @@ type (
 	// beginning and/or end.
 	Downloader interface {
 		DownloadSlab(ctx context.Context, s Slice) ([][]byte, error)
-	}
-
-	// A Deleter deletes slab data.
-	Deleter interface {
-		DeleteSlab(ctx context.Context, s Slab) error
 	}
 )
 
@@ -216,17 +211,44 @@ func (ssd SerialSlabsDownloader) DownloadSlabs(ctx context.Context, w io.Writer,
 	return nil
 }
 
-// A SerialSlabsDeleter deletes slabs one at a time.
+// A SerialSlabDeleter deletes slabs one host at a time.
 type SerialSlabsDeleter struct {
-	SlabDeleter Deleter
+	Hosts map[consensus.PublicKey]SectorDeleter
 }
 
-// DeleteSlabs deletes the specified slabs.
+// DeleteSlab implements Deleter.
 func (ssd SerialSlabsDeleter) DeleteSlabs(ctx context.Context, slabs []Slab) error {
+	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
-		if err := ssd.SlabDeleter.DeleteSlab(ctx, s); err != nil {
-			return err
+		for _, sector := range s.Shards {
+			rootsByHost[sector.Host] = append(rootsByHost[sector.Host], sector.Root)
 		}
 	}
+	var errs HostErrorSet
+	for hostKey, roots := range rootsByHost {
+		sd, ok := ssd.Hosts[hostKey]
+		if !ok {
+			errs = append(errs, &HostError{hostKey, errors.New("unknown host")})
+			continue
+		}
+		if err := sd.DeleteSectors(ctx, roots); err != nil {
+			errs = append(errs, &HostError{hostKey, err})
+			continue
+		}
+	}
+	if len(errs) > 0 {
+		return errs
+	}
 	return nil
+}
+
+// NewSerialSlabsDeleter creates a SerialSlabsDeleter from a HostSet.
+func NewSerialSlabsDeleter(set *HostSet) *SerialSlabsDeleter {
+	hosts := make(map[consensus.PublicKey]SectorDeleter)
+	for hostKey, sess := range set.hosts {
+		hosts[hostKey] = sess
+	}
+	return &SerialSlabsDeleter{
+		Hosts: hosts,
+	}
 }

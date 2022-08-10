@@ -77,6 +77,13 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 		[]types.Currency{rev.NewMissedProofOutputs[0].Value, rev.NewMissedProofOutputs[1].Value, rev.NewMissedProofOutputs[2].Value}
 }
 
+// RPCSectorRootsCost returns the price of a SectorRoots RPC.
+func RPCSectorRootsCost(settings HostSettings, n uint64) types.Currency {
+	return settings.BaseRPCPrice.
+		Add(settings.DownloadBandwidthPrice.Mul64(n * 32)).  // roots
+		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
+}
+
 // RPCReadCost returns the price of a Read RPC.
 func RPCReadCost(settings HostSettings, sections []RPCReadRequestSection) types.Currency {
 	sectorAccessPrice := settings.SectorAccessPrice.Mul64(uint64(len(sections)))
@@ -104,6 +111,13 @@ func RPCAppendCost(settings HostSettings, storageDuration uint64) (price, collat
 	price = price.MulFloat(1.05)
 	collateral = collateral.MulFloat(0.95)
 	return
+}
+
+// RPCDeleteCost returns the price of a Write RPC that deletes n sectors.
+func RPCDeleteCost(settings HostSettings, n int) types.Currency {
+	price := settings.BaseRPCPrice.
+		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
+	return price.MulFloat(1.05)
 }
 
 // A Session pairs a Transport with a Contract, enabling RPCs that modify the
@@ -439,6 +453,47 @@ func (s *Session) Append(sector *[SectorSize]byte, price, collateral types.Curre
 		return consensus.Hash256{}, err
 	}
 	return s.appendRoots[0], nil
+}
+
+// Delete calls the Write RPC with a set of Swap and Trim actions that delete
+// the specified sectors.
+func (s *Session) Delete(sectorIndices []uint64, price types.Currency) error {
+	if len(sectorIndices) == 0 {
+		return nil
+	}
+
+	// sort in descending order so that we can use 'range'
+	sort.Slice(sectorIndices, func(i, j int) bool {
+		return sectorIndices[i] > sectorIndices[j]
+	})
+
+	// iterate backwards from the end of the contract, swapping each "good"
+	// sector with one of the "bad" sectors.
+	var actions []RPCWriteAction
+	cIndex := s.contract.NumSectors() - 1
+	for _, rIndex := range sectorIndices {
+		if cIndex != rIndex {
+			// swap a "good" sector for a "bad" sector
+			actions = append(actions, RPCWriteAction{
+				Type: RPCWriteActionSwap,
+				A:    uint64(cIndex),
+				B:    uint64(rIndex),
+			})
+		}
+		cIndex--
+	}
+	// trim all "bad" sectors
+	actions = append(actions, RPCWriteAction{
+		Type: RPCWriteActionTrim,
+		A:    uint64(len(sectorIndices)),
+	})
+
+	// request the swap+delete operation
+	//
+	// NOTE: siad hosts will accept up to 20 MiB of data in the request,
+	// which should be sufficient to delete up to 2.5 TiB of sector data
+	// at a time.
+	return s.Write(actions, price, types.ZeroCurrency)
 }
 
 // Unlock calls the Unlock RPC, unlocking the currently-locked contract and
