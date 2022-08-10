@@ -229,8 +229,8 @@ func (t *Transport) WriteResponse(resp ProtocolObject) (e error) {
 	return t.writeMessage(&rpcResponse{nil, resp})
 }
 
-// WriteResponse writes an error. If err is an *RPCError, it is sent directly;
-// otherwise, a generic RPCError is created from err's Error string.
+// WriteResponseErr writes an error. If err is an *RPCError, it is sent
+// directly; otherwise, a generic RPCError is created from err's Error string.
 func (t *Transport) WriteResponseErr(err error) (e error) {
 	defer wrapErr(&e, "WriteResponseErr")
 	re, ok := err.(*RPCError)

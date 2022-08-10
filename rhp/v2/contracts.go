@@ -20,10 +20,12 @@ func hashRevision(rev types.FileContractRevision) consensus.Hash256 {
 	return blake2b.Sum256(b.bytes())
 }
 
+// ContractFormationCost returns the cost of forming a contract.
 func ContractFormationCost(fc types.FileContract, contractFee types.Currency) types.Currency {
 	return fc.ValidRenterPayout().Add(contractFee).Add(types.Tax(fc.WindowStart, fc.Payout))
 }
 
+// PrepareContractFormation constructs a contract formation transaction.
 func PrepareContractFormation(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
 	uc := types.UnlockConditions{
 		PublicKeys: []types.SiaPublicKey{
@@ -61,10 +63,12 @@ func PrepareContractFormation(renterKey consensus.PrivateKey, hostKey consensus.
 	}
 }
 
+// ContractRenewalCost returns the cost of renewing a contract.
 func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) types.Currency {
 	return fc.ValidRenterPayout().Add(contractFee).Add(types.Tax(fc.WindowStart, fc.Payout))
 }
 
+// PrepareContractRenewal constructs a contract renewal transaction.
 func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
 	// calculate "base" price and collateral -- the storage cost and collateral
 	// contribution for the amount of data already in contract. If the contract
@@ -131,7 +135,7 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 	}
 }
 
-// FormContract forms a contract with a host.
+// RPCFormContract forms a contract with a host.
 func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, txnSet []types.Transaction, walletKey consensus.PrivateKey) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
 

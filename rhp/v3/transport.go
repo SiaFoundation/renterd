@@ -35,22 +35,22 @@ func (e *RPCError) Is(target error) bool {
 // represent either valid data or an error.
 type rpcResponse struct {
 	err  *RPCError
-	data ProtocolObject
+	data protocolObject
 }
 
-type ProtocolObject interface {
+type protocolObject interface {
 	encoding.SiaMarshaler
 	encoding.SiaUnmarshaler
 }
 
-func writeRequest(s *mux.Stream, id Specifier, req ProtocolObject) error {
+func writeRequest(s *mux.Stream, id Specifier, req protocolObject) error {
 	if _, err := s.Write(id[:]); err != nil {
 		return err
 	}
 	return req.MarshalSia(s)
 }
 
-func readResponse(s *mux.Stream, resp ProtocolObject) error {
+func readResponse(s *mux.Stream, resp protocolObject) error {
 	rr := rpcResponse{nil, resp}
 	if err := rr.UnmarshalSia(s); err != nil {
 		return err
@@ -60,7 +60,7 @@ func readResponse(s *mux.Stream, resp ProtocolObject) error {
 	return nil
 }
 
-func writeResponse(s *mux.Stream, resp ProtocolObject) error {
+func writeResponse(s *mux.Stream, resp protocolObject) error {
 	return (&rpcResponse{nil, resp}).MarshalSia(s)
 }
 
@@ -90,6 +90,7 @@ type Transport struct {
 	mux *mux.Mux
 }
 
+// DialStream opens a new stream with the host.
 func (t *Transport) DialStream() *mux.Stream {
 	buf := make([]byte, 8+8+len("host"))
 	binary.LittleEndian.PutUint64(buf[8:], uint64(len(buf[16:])))
@@ -101,10 +102,12 @@ func (t *Transport) DialStream() *mux.Stream {
 	return s
 }
 
+// Close closes the protocol connection.
 func (t *Transport) Close() error {
 	return t.mux.Close()
 }
 
+// NewRenterTransport establishes a new RHPv3 session over the supplied connection.
 func NewRenterTransport(conn net.Conn, hostKey consensus.PublicKey) (*Transport, error) {
 	m, err := mux.Dial(conn, hostKey[:])
 	if err != nil {

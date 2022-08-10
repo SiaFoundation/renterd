@@ -153,6 +153,7 @@ func (es *EphemeralStore) List(prefix string) []string {
 	return keys
 }
 
+// NewEphemeralStore returns a new EphemeralStore.
 func NewEphemeralStore() *EphemeralStore {
 	return &EphemeralStore{
 		slabs:   make(map[slab.EncryptionKey]refSlab),
@@ -216,11 +217,13 @@ func (s *JSONStore) load() error {
 	return nil
 }
 
+// Put implements server.ObjectStore.
 func (s *JSONStore) Put(key string, o object.Object) error {
 	s.EphemeralStore.Put(key, o)
 	return s.save()
 }
 
+// Delete implements server.ObjectStore.
 func (s *JSONStore) Delete(key string) error {
 	s.EphemeralStore.Delete(key)
 	return s.save()

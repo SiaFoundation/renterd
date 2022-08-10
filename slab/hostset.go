@@ -44,6 +44,7 @@ func (hes HostErrorSet) Error() string {
 	return "\n" + strings.Join(strs, "\n")
 }
 
+// A Session wraps a RHPv2 session with useful metadata and methods.
 type Session struct {
 	*rhpv2.Session
 	hostKey       consensus.PublicKey
@@ -95,12 +96,14 @@ func (s *Session) reconnect(ctx context.Context) error {
 	return nil
 }
 
+// UploadSector implements SectorUploader.
 func (s *Session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	storageDuration := s.currentHeight - uint64(s.Contract().Revision.NewWindowStart)
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
 	return s.Append(sector, price, collateral)
 }
 
+// DownloadSector implements SectorDownloader.
 func (s *Session) DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
@@ -111,6 +114,7 @@ func (s *Session) DownloadSector(ctx context.Context, w io.Writer, root consensu
 	return s.Read(w, sections, price)
 }
 
+// A HostSet is a set of hosts that can be used for uploading and downloading.
 type HostSet struct {
 	hosts         map[consensus.PublicKey]*Session
 	currentHeight uint64
@@ -125,6 +129,8 @@ func (hs *HostSet) Close() error {
 	return nil
 }
 
+// Host returns the host with the given key, reconnecting to it if necessary to
+// establish a protocol session.
 func (hs *HostSet) Host(host consensus.PublicKey) (*Session, error) {
 	sess, ok := hs.hosts[host]
 	if !ok {
@@ -147,6 +153,7 @@ func (hs *HostSet) AddHost(hostKey consensus.PublicKey, hostIP string, contractI
 	}
 }
 
+// NewHostSet creates a new HostSet.
 func NewHostSet(currentHeight uint64) *HostSet {
 	return &HostSet{
 		hosts:         make(map[consensus.PublicKey]*Session),

@@ -24,14 +24,16 @@ type Account consensus.PublicKey
 // ZeroAccount is a sentinel value that indicates the lack of an account.
 var ZeroAccount Account
 
+// A PaymentMethod is a way of paying for an arbitrary host operation.
 type PaymentMethod interface {
-	ProtocolObject
+	protocolObject
 	isPaymentMethod()
 }
 
 func (PayByEphemeralAccountRequest) isPaymentMethod() {}
 func (PayByContractRequest) isPaymentMethod()         {}
 
+// PayByEphemeralAccount creates a PayByEphemeralAccountRequest.
 func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64, sk consensus.PrivateKey) PayByEphemeralAccountRequest {
 	p := PayByEphemeralAccountRequest{
 		Account:  account,
@@ -44,6 +46,8 @@ func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64
 	return p
 }
 
+// PayByContract creates a PayByContractRequest by revising the supplied
+// contract.
 func PayByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct Account, sk consensus.PrivateKey) (PayByContractRequest, bool) {
 	if rev.ValidRenterPayout().Cmp(amount) < 0 || rev.MissedRenterPayout().Cmp(amount) < 0 {
 		return PayByContractRequest{}, false
@@ -122,8 +126,8 @@ type HostPriceTable struct {
 	RegistryEntriesTotal         uint64         `json:"registryentriestotal"`
 }
 
-// Payment types.
 type (
+	// PayByEphemeralAccountRequest represents a payment made using an ephemeral account.
 	PayByEphemeralAccountRequest struct {
 		Account   Account
 		Expiry    uint64
@@ -133,6 +137,7 @@ type (
 		Priority  int64
 	}
 
+	// PayByContractRequest represents a payment made using a contract revision.
 	PayByContractRequest struct {
 		ContractID           types.FileContractID
 		NewRevisionNumber    uint64

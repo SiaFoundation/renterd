@@ -53,6 +53,8 @@ type SingleAddressStore interface {
 	Transactions(since time.Time, max int) ([]Transaction, error)
 }
 
+// A TransactionPool contains transactions that have not yet been included in a
+// block.
 type TransactionPool interface {
 	ContainsElement(id types.OutputID) bool
 }

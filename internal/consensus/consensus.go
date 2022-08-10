@@ -18,6 +18,7 @@ type Hash256 [32]byte
 // A BlockID uniquely identifies a block.
 type BlockID Hash256
 
+// A ChainIndex pairs a block's height with its ID.
 type ChainIndex struct {
 	Height uint64
 	ID     BlockID
@@ -65,10 +66,13 @@ func (pk PublicKey) VerifyHash(h Hash256, s Signature) bool {
 	return ed25519consensus.Verify(pk[:], h[:], s[:])
 }
 
+// State represents the full state of the chain as of a particular block.
 type State struct {
 	Index ChainIndex
 }
 
+// InputSigHash returns the signature hash for the i'th TransactionSignature in
+// txn.
 func (s State) InputSigHash(txn types.Transaction, i int) Hash256 {
 	return Hash256(txn.SigHash(i, types.BlockHeight(s.Index.Height+1)))
 }

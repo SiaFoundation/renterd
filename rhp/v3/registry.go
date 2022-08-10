@@ -24,6 +24,7 @@ const (
 	MaxValueDataSize = 113
 )
 
+// A RegistryKey uniquely identifies a value in the host's registry.
 type RegistryKey struct {
 	PublicKey types.SiaPublicKey
 	Tweak     crypto.Hash

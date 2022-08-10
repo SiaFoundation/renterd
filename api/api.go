@@ -114,6 +114,8 @@ type RHPPaymentRequest struct {
 	AccountKey consensus.PrivateKey `json:"accountKey"`
 }
 
+// A Contract contains all the information necessary to access and revise an
+// existing file contract.
 type Contract struct {
 	HostKey   consensus.PublicKey  `json:"hostKey"`
 	HostIP    string               `json:"hostIP"`
@@ -121,12 +123,14 @@ type Contract struct {
 	RenterKey consensus.PrivateKey `json:"renterKey"`
 }
 
+// SlabsUploadRequest is the request type for the /slabs/upload endpoint.
 type SlabsUploadRequest struct {
 	MinShards   uint8      `json:"minShards"`
 	TotalShards uint8      `json:"totalShards"`
 	Contracts   []Contract `json:"contracts"`
 }
 
+// SlabsDownloadRequest is the request type for the /slabs/download endpoint.
 type SlabsDownloadRequest struct {
 	Slabs     []slab.Slice `json:"slabs"`
 	Offset    int64        `json:"offset"`

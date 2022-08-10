@@ -8,26 +8,31 @@ import (
 	"go.sia.tech/siad/types"
 )
 
+// MarshalSia implements encoding.SiaMarshaler.
 func (s *Specifier) MarshalSia(w io.Writer) error {
 	_, err := w.Write(s[:])
 	return err
 }
 
+// UnmarshalSia implements encoding.SiaUnmarshaler.
 func (s *Specifier) UnmarshalSia(r io.Reader) error {
 	_, err := r.Read(s[:])
 	return err
 }
 
+// MarshalSia implements encoding.SiaMarshaler.
 func (s *SettingsID) MarshalSia(w io.Writer) error {
 	_, err := w.Write(s[:])
 	return err
 }
 
+// UnmarshalSia implements encoding.SiaUnmarshaler.
 func (s *SettingsID) UnmarshalSia(r io.Reader) error {
 	_, err := r.Read(s[:])
 	return err
 }
 
+// MarshalSia implements encoding.SiaMarshaler.
 func (resp *rpcResponse) MarshalSia(w io.Writer) error {
 	if resp.err != nil {
 		return encoding.NewEncoder(w).EncodeAll(true, resp.err)
@@ -47,7 +52,8 @@ func (resp *rpcResponse) UnmarshalSia(r io.Reader) error {
 	return d.Decode(resp.data)
 }
 
-// MarshalSia implements encoding.SiaMarshaler.
+// MarshalSia im
+// MarshalSia implements encoding.SiaMarshaler.plements encoding.SiaMarshaler.
 func (a *Account) MarshalSia(w io.Writer) error {
 	if *a == ZeroAccount {
 		return (types.SiaPublicKey{}).MarshalSia(w)
@@ -73,18 +79,22 @@ func (a *Account) UnmarshalSia(r io.Reader) error {
 	return nil
 }
 
+// MarshalSia implements encoding.SiaMarshaler.
 func (r *PayByEphemeralAccountRequest) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.Account, r.Expiry, r.Account, r.Nonce, r.Signature, r.Priority)
 }
 
+// UnmarshalSia implements encoding.SiaUnmarshaler.
 func (r *PayByEphemeralAccountRequest) UnmarshalSia(rd io.Reader) error {
 	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.Account, &r.Expiry, &r.Account, &r.Nonce, &r.Signature, &r.Priority)
 }
 
+// MarshalSia implements encoding.SiaMarshaler.
 func (r *PayByContractRequest) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.ContractID, r.NewRevisionNumber, r.NewValidProofValues, r.NewMissedProofValues, r.RefundAccount, r.Signature)
 }
 
+// UnmarshalSia implements encoding.SiaUnmarshaler.
 func (r *PayByContractRequest) UnmarshalSia(rd io.Reader) error {
 	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.ContractID, &r.NewRevisionNumber, &r.NewValidProofValues, &r.NewMissedProofValues, &r.RefundAccount, &r.Signature)
 }
