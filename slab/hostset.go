@@ -97,14 +97,14 @@ func (s *Session) reconnect(ctx context.Context) error {
 }
 
 // UploadSector implements SectorUploader.
-func (s *Session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+func (s *Session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	storageDuration := s.currentHeight - uint64(s.Contract().Revision.NewWindowStart)
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
 	return s.Append(sector, price, collateral)
 }
 
 // DownloadSector implements SectorDownloader.
-func (s *Session) DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (s *Session) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
 		Offset:     uint64(offset),
@@ -115,7 +115,7 @@ func (s *Session) DownloadSector(ctx context.Context, w io.Writer, root consensu
 }
 
 // DeleteSectors implements SectorDeleter.
-func (s *Session) DeleteSectors(ctx context.Context, roots []consensus.Hash256) error {
+func (s *Session) DeleteSectors(roots []consensus.Hash256) error {
 	// download the full set of SectorRoots
 	contractSectors := s.Contract().NumSectors()
 	rootIndices := make(map[consensus.Hash256]uint64, contractSectors)

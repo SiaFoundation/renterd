@@ -2,7 +2,6 @@ package object_test
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"testing"
 
@@ -25,7 +24,7 @@ func TestObject(t *testing.T) {
 		hs.AddHost()
 	}
 	su := slab.SerialSlabsUploader{SlabUploader: hs.SlabUploader()}
-	slabs, err := su.UploadSlabs(context.Background(), key.Encrypt(bytes.NewReader(data)), 3, 10)
+	slabs, err := su.UploadSlabs(key.Encrypt(bytes.NewReader(data)), 3, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(slabs) != 1 {
@@ -62,7 +61,7 @@ func TestObject(t *testing.T) {
 		t.Helper()
 		var buf bytes.Buffer
 		ssd := slab.SerialSlabsDownloader{SlabDownloader: hs.SlabDownloader()}
-		if err := ssd.DownloadSlabs(context.Background(), key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
+		if err := ssd.DownloadSlabs(key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
 			t.Error(err)
 			return
 		}
@@ -87,7 +86,7 @@ func TestObject(t *testing.T) {
 		t.Helper()
 		var buf bytes.Buffer
 		ssd := slab.SerialSlabsDownloader{SlabDownloader: hs.SlabDownloader()}
-		if err := ssd.DownloadSlabs(context.Background(), &buf, o.Slabs, int64(offset), int64(length)); err == nil {
+		if err := ssd.DownloadSlabs(&buf, o.Slabs, int64(offset), int64(length)); err == nil {
 			t.Error("expected error, got nil")
 		}
 	}
@@ -121,7 +120,7 @@ func TestMultipleObjects(t *testing.T) {
 		hs.AddHost()
 	}
 	ssu := slab.SerialSlabsUploader{SlabUploader: hs.SlabUploader()}
-	slabs, err := ssu.UploadSlabs(context.Background(), r, 3, 10)
+	slabs, err := ssu.UploadSlabs(r, 3, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +144,7 @@ func TestMultipleObjects(t *testing.T) {
 		t.Helper()
 		var buf bytes.Buffer
 		ssd := slab.SerialSlabsDownloader{SlabDownloader: hs.SlabDownloader()}
-		if err := ssd.DownloadSlabs(context.Background(), o.Key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
+		if err := ssd.DownloadSlabs(o.Key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
 			t.Error(err)
 			return
 		}

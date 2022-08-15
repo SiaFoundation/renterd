@@ -1,7 +1,6 @@
 package slabutil
 
 import (
-	"context"
 	"errors"
 	"io"
 
@@ -16,14 +15,14 @@ type MockHost struct {
 }
 
 // UploadSector implements slab.SectorUploader.
-func (h *MockHost) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+func (h *MockHost) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	root := rhpv2.SectorRoot(sector)
 	h.sectors[root] = append([]byte(nil), sector[:]...)
 	return root, nil
 }
 
 // DownloadSector implements slab.SectorDownloader.
-func (h *MockHost) DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (h *MockHost) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")
@@ -33,7 +32,7 @@ func (h *MockHost) DownloadSector(ctx context.Context, w io.Writer, root consens
 }
 
 // DeleteSectors implements slab.SectorDeleter.
-func (h *MockHost) DeleteSectors(ctx context.Context, roots []consensus.Hash256) error {
+func (h *MockHost) DeleteSectors(roots []consensus.Hash256) error {
 	for _, root := range roots {
 		delete(h.sectors, root)
 	}

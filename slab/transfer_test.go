@@ -2,7 +2,6 @@ package slab_test
 
 import (
 	"bytes"
-	"context"
 	"testing"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -32,7 +31,7 @@ func TestSingleSlab(t *testing.T) {
 		hostKey := consensus.GeneratePrivateKey().PublicKey()
 		ssu.Hosts[hostKey] = slabutil.NewMockHost()
 	}
-	sectors, err := ssu.UploadSlab(context.Background(), shards)
+	sectors, err := ssu.UploadSlab(shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +50,7 @@ func TestSingleSlab(t *testing.T) {
 	for hostKey, host := range ssu.Hosts {
 		ssd.Hosts[hostKey] = host.(slab.SectorDownloader)
 	}
-	downloaded, err := ssd.DownloadSlab(context.Background(), ss)
+	downloaded, err := ssd.DownloadSlab(ss)
 	if err != nil {
 		t.Fatal(err)
 	}
