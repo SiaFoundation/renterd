@@ -3,7 +3,7 @@ package object_test
 import (
 	"bytes"
 	"context"
-	"crypto/cipher"
+	"io"
 	"testing"
 
 	"go.sia.tech/renterd/internal/objectutil"
@@ -17,17 +17,15 @@ import (
 func TestObject(t *testing.T) {
 	// generate data and encryption key
 	data := frand.Bytes(1000000)
-	key := slab.NewEncryptionKey()
-	r := cipher.StreamReader{S: slab.NewCipher(key, 0), R: bytes.NewReader(data)}
+	key := object.GenerateEncryptionKey()
 
 	// upload slabs
-	sr := slab.NewUniformSlabReader(r, 3, 10)
 	hs := slabutil.NewMockHostSet()
 	for i := 0; i < 10; i++ {
 		hs.AddHost()
 	}
 	su := slab.SerialSlabsUploader{SlabUploader: hs.SlabUploader()}
-	slabs, err := su.UploadSlabs(context.Background(), sr)
+	slabs, err := su.UploadSlabs(context.Background(), key.Encrypt(bytes.NewReader(data)), 3, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(slabs) != 1 {
@@ -64,8 +62,7 @@ func TestObject(t *testing.T) {
 		t.Helper()
 		var buf bytes.Buffer
 		ssd := slab.SerialSlabsDownloader{SlabDownloader: hs.SlabDownloader()}
-		w := cipher.StreamWriter{S: slab.NewCipher(key, int64(offset)), W: &buf}
-		if err := ssd.DownloadSlabs(context.Background(), w, o.Slabs, int64(offset), int64(length)); err != nil {
+		if err := ssd.DownloadSlabs(context.Background(), key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
 			t.Error(err)
 			return
 		}
@@ -98,4 +95,86 @@ func TestObject(t *testing.T) {
 	checkInvalidRange(-1, 0)
 	checkInvalidRange(0, len(data)+1)
 	checkInvalidRange(len(data), 1)
+}
+
+func TestMultipleObjects(t *testing.T) {
+	data := [][]byte{
+		frand.Bytes(111),
+		frand.Bytes(222),
+		make([]byte, rhpv2.SectorSize*5), // will require multiple slabs
+		frand.Bytes(333),
+		frand.Bytes(444),
+	}
+	keys := make([]object.EncryptionKey, len(data))
+	for i := range keys {
+		keys[i] = object.GenerateEncryptionKey()
+	}
+	rs := make([]io.Reader, len(data))
+	for i := range rs {
+		rs[i] = keys[i].Encrypt(bytes.NewReader(data[i]))
+	}
+	r := io.MultiReader(rs...)
+
+	// upload
+	hs := slabutil.NewMockHostSet()
+	for i := 0; i < 10; i++ {
+		hs.AddHost()
+	}
+	ssu := slab.SerialSlabsUploader{SlabUploader: hs.SlabUploader()}
+	slabs, err := ssu.UploadSlabs(context.Background(), r, 3, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// construct objects
+	os := make([]object.Object, len(data))
+	lengths := make([]int, len(data))
+	for i := range data {
+		lengths[i] = len(data[i])
+	}
+	ss := object.SplitSlabs(slabs, lengths)
+	for i := range os {
+		os[i] = object.Object{
+			Key:   keys[i],
+			Slabs: ss[i],
+		}
+	}
+
+	// download
+	checkDownload := func(data []byte, o object.Object, offset, length int) {
+		t.Helper()
+		var buf bytes.Buffer
+		ssd := slab.SerialSlabsDownloader{SlabDownloader: hs.SlabDownloader()}
+		if err := ssd.DownloadSlabs(context.Background(), o.Key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
+			t.Error(err)
+			return
+		}
+		exp := data[offset:][:length]
+		got := buf.Bytes()
+		if !bytes.Equal(got, exp) {
+			if len(exp) > 20 {
+				exp = exp[:20]
+			}
+			if len(got) > 20 {
+				got = got[:20]
+			}
+			t.Errorf("download(%v, %v):\nexpected: %x (%v)\ngot:      %x (%v)",
+				offset, length,
+				exp, len(exp),
+				got, len(got))
+		}
+	}
+
+	for i, o := range os {
+		for _, r := range []struct{ offset, length int }{
+			{0, 0},
+			{0, 1},
+			{0, len(data[i]) / 2},
+			{len(data[i]) / 2, len(data[i]) / 2},
+			{len(data[i]) - 1, 1},
+			{0, len(data[i])},
+		} {
+			checkDownload(data[i], o, r.offset, r.length)
+		}
+	}
 }

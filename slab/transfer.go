@@ -26,11 +26,6 @@ type (
 		DeleteSectors(ctx context.Context, roots []consensus.Hash256) error
 	}
 
-	// A Reader returns slab data, erasure-encoded into sector-sized shards.
-	Reader interface {
-		ReadSlab() (Slab, [][]byte, error)
-	}
-
 	// An Uploader uploads slab data.
 	Uploader interface {
 		UploadSlab(ctx context.Context, shards [][]byte) ([]Sector, error)
@@ -135,20 +130,35 @@ type SerialSlabsUploader struct {
 }
 
 // UploadSlabs uploads slabs read from the provided Reader.
-func (ssu SerialSlabsUploader) UploadSlabs(ctx context.Context, sr Reader) ([]Slab, error) {
+func (ssu SerialSlabsUploader) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8) ([]Slab, error) {
+	rsc := NewRSCode(m, n)
+	buf := make([]byte, int(m)*rhpv2.SectorSize)
+	shards := make([][]byte, n)
+	for i := range shards {
+		shards[i] = make([]byte, 0, rhpv2.SectorSize)
+	}
+
 	var slabs []Slab
 	for {
-		s, shards, err := sr.ReadSlab()
-		if err == io.EOF {
+		// read slab data, encode, and encrypt
+		if _, err := io.ReadFull(r, buf); err == io.EOF {
 			break
-		} else if err != nil {
+		} else if err != nil && err != io.ErrUnexpectedEOF {
 			return nil, err
 		}
-		s.Shards, err = ssu.SlabUploader.UploadSlab(ctx, shards)
+		rsc.Encode(buf, shards)
+		key := GenerateEncryptionKey()
+		key.EncryptShards(shards)
+
+		sectors, err := ssu.SlabUploader.UploadSlab(ctx, shards)
 		if err != nil {
 			return nil, err
 		}
-		slabs = append(slabs, s)
+		slabs = append(slabs, Slab{
+			Key:       key,
+			MinShards: m,
+			Shards:    sectors,
+		})
 	}
 	return slabs, nil
 }
@@ -161,6 +171,9 @@ func slabsSize(slabs []Slice) (n int64) {
 }
 
 func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
+	// mutate a copy
+	slabs = append([]Slice(nil), slabs...)
+
 	firstOffset := offset
 	for i, ss := range slabs {
 		if firstOffset <= int64(ss.Length) {
@@ -169,6 +182,9 @@ func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
 		}
 		firstOffset -= int64(ss.Length)
 	}
+	slabs[0].Offset += uint32(firstOffset)
+	slabs[0].Length -= uint32(firstOffset)
+
 	lastLength := length
 	for i, ss := range slabs {
 		if lastLength <= int64(ss.Length) {
@@ -177,10 +193,6 @@ func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
 		}
 		lastLength -= int64(ss.Length)
 	}
-	// mutate a copy
-	slabs = append([]Slice(nil), slabs...)
-	slabs[0].Offset += uint32(firstOffset)
-	slabs[0].Length -= uint32(firstOffset)
 	slabs[len(slabs)-1].Length = uint32(lastLength)
 	return slabs
 }

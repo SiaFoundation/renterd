@@ -31,7 +31,7 @@ type refSlice struct {
 }
 
 type refObject struct {
-	key   slab.EncryptionKey
+	key   object.EncryptionKey
 	slabs []refSlice
 }
 

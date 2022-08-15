@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/slabutil"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/slab"
 	"lukechampine.com/frand"
 )
@@ -14,24 +15,33 @@ import (
 func TestSingleSlab(t *testing.T) {
 	// generate shards
 	data := frand.Bytes(777)
-	usr := slab.NewUniformSlabReader(bytes.NewReader(data), 3, 10)
+	shards := make([][]byte, 10)
+	for i := range shards {
+		shards[i] = make([]byte, 0, rhpv2.SectorSize)
+	}
+	slab.NewRSCode(3, 10).Encode(data, shards)
+	for i := range shards {
+		shards[i] = shards[i][:rhpv2.SectorSize]
+	}
+	key := slab.GenerateEncryptionKey()
+	key.EncryptShards(shards)
 
 	// upload
-	s, shards, err := usr.ReadSlab()
-	if err != nil {
-		t.Fatal(err)
-	}
 	ssu := slab.SerialSlabUploader{Hosts: make(map[consensus.PublicKey]slab.SectorUploader)}
 	for range shards {
 		hostKey := consensus.GeneratePrivateKey().PublicKey()
 		ssu.Hosts[hostKey] = slabutil.NewMockHost()
 	}
-	s.Shards, err = ssu.UploadSlab(context.Background(), shards)
+	sectors, err := ssu.UploadSlab(context.Background(), shards)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ss := slab.Slice{
-		Slab:   s,
+		Slab: slab.Slab{
+			Key:       key,
+			MinShards: 3,
+			Shards:    sectors,
+		},
 		Offset: 0,
 		Length: uint32(len(data)),
 	}

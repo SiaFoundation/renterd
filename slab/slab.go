@@ -32,32 +32,34 @@ func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// XORKeyStream xors msg with the keystream derived from s, using shardIndex as
-// the nonce and startIndex as the starting offset within the stream.
-func (k EncryptionKey) XORKeyStream(msg []byte, shardIndex uint8, startIndex uint32) {
-	if len(msg)%rhpv2.LeafSize != 0 {
-		panic("message must be a multiple of leaf size")
+// EncryptShards xors shards with the keystream derived from s, using a
+// different nonce for each shard.
+func (k EncryptionKey) EncryptShards(shards [][]byte) {
+	for i, shard := range shards {
+		nonce := [24]byte{1: byte(i)}
+		c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce[:])
+		c.XORKeyStream(shard, shard)
 	}
-	nonce := [24]byte{1: shardIndex}
-	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce[:])
-	c.SetCounter(startIndex)
-	c.XORKeyStream(msg, msg)
 }
 
-// NewEncryptionKey returns a random encryption key.
-func NewEncryptionKey() EncryptionKey {
+// DecryptShards xors shards with the keystream derived from s (starting at the
+// specified offset), using a different nonce for each shard.
+func (k EncryptionKey) DecryptShards(shards [][]byte, offset uint32) {
+	var buf [64]byte
+	for i, shard := range shards {
+		nonce := [24]byte{1: byte(i)}
+		c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce[:])
+		c.SetCounter(offset / 64)
+		c.XORKeyStream(buf[:offset%64], buf[:offset%64])
+		c.XORKeyStream(shard, shard)
+	}
+}
+
+// GenerateEncryptionKey returns a random encryption key.
+func GenerateEncryptionKey() EncryptionKey {
 	key := EncryptionKey{entropy: new([32]byte)}
 	frand.Read(key.entropy[:])
 	return key
-}
-
-// NewCipher returns a ChaCha cipher with the specified seek offset.
-func NewCipher(key EncryptionKey, offset int64) *chacha20.Cipher {
-	c, _ := chacha20.NewUnauthenticatedCipher(key.entropy[:], make([]byte, 24))
-	c.SetCounter(uint32(offset / 64))
-	var buf [64]byte
-	c.XORKeyStream(buf[:offset%64], buf[:offset%64])
-	return c
 }
 
 // A Sector uniquely identifies a sector stored on a particular host.
@@ -72,6 +74,11 @@ type Slab struct {
 	Key       EncryptionKey
 	MinShards uint8
 	Shards    []Sector
+}
+
+// Length returns the length of the raw data stored in s.
+func (s Slab) Length() int {
+	return rhpv2.SectorSize * int(s.MinShards)
 }
 
 // A Slice is a contiguous region within a Slab. Note that the offset and length

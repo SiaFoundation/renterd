@@ -114,55 +114,12 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, skip, writeLen int) error {
 	return nil
 }
 
-// A UniformSlabReader reads slabs from a single input stream.
-type UniformSlabReader struct {
-	r         io.Reader
-	rsc       RSCode
-	buf       []byte
-	shards    [][]byte
-	minShards uint8
-}
-
-// ReadSlab implements SlabReader.
-func (usr *UniformSlabReader) ReadSlab() (Slab, [][]byte, error) {
-	_, err := io.ReadFull(usr.r, usr.buf)
-	if err != nil && err != io.ErrUnexpectedEOF {
-		return Slab{}, nil, err
-	}
-	usr.rsc.Encode(usr.buf, usr.shards)
-	key := NewEncryptionKey()
-	for i := range usr.shards {
-		key.XORKeyStream(usr.shards[i], uint8(i), 0)
-	}
-	return Slab{
-		Key:       key,
-		MinShards: usr.minShards,
-	}, usr.shards, nil
-}
-
-// NewUniformSlabReader returns a UnformSlabReader with the specified erasure
-// coding parameters.
-func NewUniformSlabReader(r io.Reader, m, n uint8) *UniformSlabReader {
-	shards := make([][]byte, n)
-	for i := range shards {
-		shards[i] = make([]byte, 0, rhpv2.SectorSize)
-	}
-	return &UniformSlabReader{
-		r:         r,
-		rsc:       NewRSCode(m, n),
-		buf:       make([]byte, int(m)*rhpv2.SectorSize),
-		shards:    shards,
-		minShards: m,
-	}
-}
-
 // RecoverSlab recovers a slice of slab data from the supplied shards.
-func RecoverSlab(w io.Writer, ss Slice, shards [][]byte) error {
-	rsc := NewRSCode(ss.MinShards, uint8(len(shards)))
-	minChunkSize := rhpv2.LeafSize * uint32(ss.MinShards)
-	for i := range shards {
-		ss.Key.XORKeyStream(shards[i], uint8(i), ss.Offset/minChunkSize)
-	}
-	skip := ss.Offset % minChunkSize
-	return rsc.Recover(w, shards, int(skip), int(ss.Length))
+func RecoverSlab(w io.Writer, s Slice, shards [][]byte) error {
+	minChunkSize := (rhpv2.LeafSize * uint32(s.MinShards))
+	skip := s.Offset % minChunkSize
+	offset := (s.Offset / minChunkSize) * rhpv2.LeafSize
+	s.Key.DecryptShards(shards, offset)
+	rsc := NewRSCode(s.MinShards, uint8(len(shards)))
+	return rsc.Recover(w, shards, int(skip), int(s.Length))
 }
