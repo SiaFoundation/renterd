@@ -84,8 +84,8 @@ type (
 	// A SlabMover uploads, downloads, and migrates slabs.
 	SlabMover interface {
 		UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) ([]slab.Slab, error)
-		DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, currentHeight uint64, contracts []Contract) error
-		DeleteSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, contracts []Contract) error
+		DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []Contract) error
+		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) error
 	}
 
 	// An ObjectStore stores objects.
@@ -548,7 +548,7 @@ func (s *server) slabsUploadHandler(w http.ResponseWriter, req *http.Request, ps
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	slabs, err := s.sm.UploadSlabs(req.Context(), f, sur.MinShards, sur.TotalShards, s.cm.TipState().Index.Height, sur.Contracts)
+	slabs, err := s.sm.UploadSlabs(req.Context(), f, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -567,7 +567,7 @@ func (s *server) slabsDownloadHandler(w http.ResponseWriter, req *http.Request, 
 			sdr.Length += int64(ss.Length)
 		}
 	}
-	err := s.sm.DownloadSlabs(req.Context(), w, sdr.Slabs, sdr.Offset, sdr.Length, s.cm.TipState().Index.Height, sdr.Contracts)
+	err := s.sm.DownloadSlabs(req.Context(), w, sdr.Slabs, sdr.Offset, sdr.Length, sdr.Contracts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -580,7 +580,7 @@ func (s *server) slabsDeleteHandler(w http.ResponseWriter, req *http.Request, ps
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	err := s.sm.DeleteSlabs(req.Context(), sdr.Slabs, s.cm.TipState().Index.Height, sdr.Contracts)
+	err := s.sm.DeleteSlabs(req.Context(), sdr.Slabs, sdr.Contracts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

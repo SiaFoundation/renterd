@@ -98,6 +98,9 @@ func (s *Session) reconnect(ctx context.Context) error {
 
 // UploadSector implements SectorUploader.
 func (s *Session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+	if s.currentHeight == 0 {
+		panic("must call SetCurrentHeight before calling UploadSector") // developer error
+	}
 	storageDuration := s.currentHeight - uint64(s.Contract().Revision.NewWindowStart)
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
 	return s.Append(sector, price, collateral)
@@ -163,6 +166,15 @@ func (hs *HostSet) Close() error {
 	return nil
 }
 
+// SetCurrentHeight sets the current chain height. This is required before
+// calling the UploadSector method of Session.
+func (hs *HostSet) SetCurrentHeight(height uint64) {
+	hs.currentHeight = height
+	for _, sess := range hs.hosts {
+		sess.currentHeight = height
+	}
+}
+
 // Host returns the host with the given key, reconnecting to it if necessary to
 // establish a protocol session.
 func (hs *HostSet) Host(host consensus.PublicKey) (*Session, error) {
@@ -188,9 +200,8 @@ func (hs *HostSet) AddHost(hostKey consensus.PublicKey, hostIP string, contractI
 }
 
 // NewHostSet creates a new HostSet.
-func NewHostSet(currentHeight uint64) *HostSet {
+func NewHostSet() *HostSet {
 	return &HostSet{
-		hosts:         make(map[consensus.PublicKey]*Session),
-		currentHeight: currentHeight,
+		hosts: make(map[consensus.PublicKey]*Session),
 	}
 }

@@ -10,7 +10,7 @@ import (
 )
 
 type (
-	// A SectorUploader uploads sectors, returning their Merkle root.
+	// A SectorUploader uploads a sector, returning its Merkle root.
 	SectorUploader interface {
 		UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
 	}

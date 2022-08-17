@@ -125,9 +125,10 @@ type Contract struct {
 
 // SlabsUploadRequest is the request type for the /slabs/upload endpoint.
 type SlabsUploadRequest struct {
-	MinShards   uint8      `json:"minShards"`
-	TotalShards uint8      `json:"totalShards"`
-	Contracts   []Contract `json:"contracts"`
+	MinShards     uint8      `json:"minShards"`
+	TotalShards   uint8      `json:"totalShards"`
+	Contracts     []Contract `json:"contracts"`
+	CurrentHeight uint64     `json:"currentHeight"`
 }
 
 // SlabsDownloadRequest is the request type for the /slabs/download endpoint.
