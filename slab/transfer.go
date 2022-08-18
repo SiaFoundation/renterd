@@ -37,6 +37,11 @@ type (
 	Downloader interface {
 		DownloadSlab(s Slice) ([][]byte, error)
 	}
+
+	// A Migrator migrates slab data.
+	Migrator interface {
+		MigrateSlab(s *Slab, shards [][]byte) error
+	}
 )
 
 // A SerialSlabUploader uploads the shards comprising a slab one at a time.
@@ -66,17 +71,6 @@ func (ssu SerialSlabUploader) UploadSlab(shards [][]byte) ([]Sector, error) {
 		return nil, errs
 	}
 	return sectors, nil
-}
-
-// NewSerialSlabUploader creates a SerialSlabUploader from a HostSet.
-func NewSerialSlabUploader(set *HostSet) *SerialSlabUploader {
-	hosts := make(map[consensus.PublicKey]SectorUploader)
-	for hostKey, sess := range set.hosts {
-		hosts[hostKey] = sess
-	}
-	return &SerialSlabUploader{
-		Hosts: hosts,
-	}
 }
 
 // A SerialSlabDownloader downloads the shards comprising a slab one at a time.
@@ -110,17 +104,6 @@ func (ssd SerialSlabDownloader) DownloadSlab(s Slice) ([][]byte, error) {
 		return nil, errs
 	}
 	return shards, nil
-}
-
-// NewSerialSlabDownloader creates a SerialSlabDownloader from a HostSet.
-func NewSerialSlabDownloader(set *HostSet) *SerialSlabDownloader {
-	hosts := make(map[consensus.PublicKey]SectorDownloader)
-	for hostKey, sess := range set.hosts {
-		hosts[hostKey] = sess
-	}
-	return &SerialSlabDownloader{
-		Hosts: hosts,
-	}
 }
 
 // A SerialSlabsUploader uploads slabs one at a time.
@@ -253,13 +236,53 @@ func (ssd SerialSlabsDeleter) DeleteSlabs(slabs []Slab) error {
 	return nil
 }
 
-// NewSerialSlabsDeleter creates a SerialSlabsDeleter from a HostSet.
-func NewSerialSlabsDeleter(set *HostSet) *SerialSlabsDeleter {
-	hosts := make(map[consensus.PublicKey]SectorDeleter)
-	for hostKey, sess := range set.hosts {
-		hosts[hostKey] = sess
+// A SerialSlabMigrator migrates the shards comprising a slab one at a time.
+type SerialSlabMigrator struct {
+	Hosts map[consensus.PublicKey]SectorUploader
+}
+
+// MigrateSlab implements Migrator.
+func (ssd SerialSlabMigrator) MigrateSlab(s *Slab, shards [][]byte) error {
+	var hosts []consensus.PublicKey
+outer:
+	for hostKey := range ssd.Hosts {
+		for _, sector := range s.Shards {
+			if sector.Host == hostKey {
+				continue outer
+			}
+		}
+		hosts = append(hosts, hostKey)
 	}
-	return &SerialSlabsDeleter{
-		Hosts: hosts,
+
+	migrate := func(shard []byte) (Sector, error) {
+		var errs HostErrorSet
+		for len(hosts) > 0 {
+			hostKey := hosts[0]
+			hosts = hosts[1:]
+			root, err := ssd.Hosts[hostKey].UploadSector((*[rhpv2.SectorSize]byte)(shard))
+			if err != nil {
+				errs = append(errs, &HostError{hostKey, err})
+				continue
+			}
+			return Sector{
+				Host: hostKey,
+				Root: root,
+			}, nil
+		}
+		if len(errs) > 0 {
+			return Sector{}, errs
+		}
+		return Sector{}, errors.New("no hosts available")
 	}
+
+	for i, shard := range shards {
+		if shard != nil {
+			sector, err := migrate(shard)
+			if err != nil {
+				return err
+			}
+			s.Shards[i] = sector
+		}
+	}
+	return nil
 }

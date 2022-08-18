@@ -199,6 +199,33 @@ func (hs *HostSet) AddHost(hostKey consensus.PublicKey, hostIP string, contractI
 	}
 }
 
+// Uploaders returns the hosts as a set of SectorUploaders.
+func (hs *HostSet) Uploaders() map[consensus.PublicKey]SectorUploader {
+	m := make(map[consensus.PublicKey]SectorUploader)
+	for hostKey, sess := range hs.hosts {
+		m[hostKey] = sess
+	}
+	return m
+}
+
+// Downloaders returns the hosts as a set of SectorDownloaders.
+func (hs *HostSet) Downloaders() map[consensus.PublicKey]SectorDownloader {
+	m := make(map[consensus.PublicKey]SectorDownloader)
+	for hostKey, sess := range hs.hosts {
+		m[hostKey] = sess
+	}
+	return m
+}
+
+// Deleters returns the hosts as a set of SectorDeleters.
+func (hs *HostSet) Deleters() map[consensus.PublicKey]SectorDeleter {
+	m := make(map[consensus.PublicKey]SectorDeleter)
+	for hostKey, sess := range hs.hosts {
+		m[hostKey] = sess
+	}
+	return m
+}
+
 // NewHostSet creates a new HostSet.
 func NewHostSet() *HostSet {
 	return &HostSet{

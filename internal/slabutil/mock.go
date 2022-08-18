@@ -58,37 +58,31 @@ func (hs *MockHostSet) AddHost() consensus.PublicKey {
 	return hostKey
 }
 
-// SlabUploader returns a slab.Uploader for the host set.
-func (hs *MockHostSet) SlabUploader() slab.Uploader {
-	hosts := make(map[consensus.PublicKey]slab.SectorUploader)
+// Uploaders returns the hosts as a set of slab.SectorUploaders.
+func (hs *MockHostSet) Uploaders() map[consensus.PublicKey]slab.SectorUploader {
+	m := make(map[consensus.PublicKey]slab.SectorUploader)
 	for hostKey, sess := range hs.Hosts {
-		hosts[hostKey] = sess
+		m[hostKey] = sess
 	}
-	return &slab.SerialSlabUploader{
-		Hosts: hosts,
-	}
+	return m
 }
 
-// SlabDownloader returns a slab.Downloader for the host set.
-func (hs *MockHostSet) SlabDownloader() slab.Downloader {
-	hosts := make(map[consensus.PublicKey]slab.SectorDownloader)
+// Downloaders returns the hosts as a set of slab.SectorDownloaders.
+func (hs *MockHostSet) Downloaders() map[consensus.PublicKey]slab.SectorDownloader {
+	m := make(map[consensus.PublicKey]slab.SectorDownloader)
 	for hostKey, sess := range hs.Hosts {
-		hosts[hostKey] = sess
+		m[hostKey] = sess
 	}
-	return &slab.SerialSlabDownloader{
-		Hosts: hosts,
-	}
+	return m
 }
 
-// SlabDeleter returns a slab.Deleter for the host set.
-func (hs *MockHostSet) SlabDeleter() *slab.SerialSlabsDeleter {
-	hosts := make(map[consensus.PublicKey]slab.SectorDeleter)
+// Deleters returns the hosts as a set of slab.SectorDeleters.
+func (hs *MockHostSet) Deleters() map[consensus.PublicKey]slab.SectorDeleter {
+	m := make(map[consensus.PublicKey]slab.SectorDeleter)
 	for hostKey, sess := range hs.Hosts {
-		hosts[hostKey] = sess
+		m[hostKey] = sess
 	}
-	return &slab.SerialSlabsDeleter{
-		Hosts: hosts,
-	}
+	return m
 }
 
 // NewMockHostSet creates a new MockHostSet.
