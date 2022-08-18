@@ -84,6 +84,21 @@ func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Tra
 	return
 }
 
+// WalletFund funds txn using inputs controlled by the wallet.
+func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Transaction, error) {
+	req := WalletFundRequest{
+		Transaction: *txn,
+		Amount:      amount,
+	}
+	var resp WalletFundResponse
+	err := c.post("/wallet/fund", req, &resp)
+	if err != nil {
+		return nil, err
+	}
+	*txn = resp.Transaction
+	return resp.DependsOn, nil
+}
+
 // SyncerPeers returns the current peers of the syncer.
 func (c *Client) SyncerPeers() (resp []SyncerPeer, err error) {
 	err = c.get("/syncer/peers", &resp)
@@ -103,18 +118,19 @@ func (c *Client) RHPScan(hostKey consensus.PublicKey, hostIP string) (resp rhpv2
 }
 
 // RHPPrepareForm prepares a contract formation transaction.
-func (c *Client) RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, error) {
+func (c *Client) RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error) {
 	req := RHPPrepareFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
 		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
 		HostCollateral: hostCollateral,
 		EndHeight:      endHeight,
 		HostSettings:   hostSettings,
 	}
 	var resp RHPPrepareFormResponse
 	err := c.post("/rhp/prepare/form", req, &resp)
-	return resp.TransactionSet, err
+	return resp.Contract, resp.Cost, err
 }
 
 // RHPForm forms a contract with a host.
@@ -132,19 +148,20 @@ func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.Publi
 }
 
 // RHPPrepareRenew prepares a contract renewal transaction.
-func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, error) {
+func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error) {
 	req := RHPPrepareRenewRequest{
 		Contract:       contract,
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
 		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
 		HostCollateral: hostCollateral,
 		EndHeight:      endHeight,
 		HostSettings:   hostSettings,
 	}
 	var resp RHPPrepareRenewResponse
 	err := c.post("/rhp/prepare/renew", req, &resp)
-	return resp.TransactionSet, err
+	return resp.Contract, resp.Cost, resp.FinalPayment, err
 }
 
 // RHPRenew renews an existing contract with a host.

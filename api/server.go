@@ -214,6 +214,41 @@ func (s *server) walletOutputsHandler(w http.ResponseWriter, req *http.Request, 
 	WriteJSON(w, utxos)
 }
 
+func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	var wfr WalletFundRequest
+	if err := json.NewDecoder(req.Body).Decode(&wfr); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	txn := wfr.Transaction
+	fee := s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
+	txn.MinerFees = []types.Currency{fee}
+	_, err := s.w.FundTransaction(s.cm.TipState(), &wfr.Transaction, wfr.Amount.Add(txn.MinerFees[0]), s.tp.Transactions())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	parents, err := s.tp.UnconfirmedParents(txn)
+	if err != nil {
+		s.w.ReleaseInputs(txn)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	WriteJSON(w, WalletFundResponse{
+		Transaction: txn,
+		DependsOn:   parents,
+	})
+}
+
+func (s *server) walletDiscardHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	var txn types.Transaction
+	if err := json.NewDecoder(req.Body).Decode(&txn); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.w.ReleaseInputs(txn)
+}
+
 func (s *server) hostsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	// TODO: support filtering via query params
 	hosts, err := s.hdb.SelectHosts(-1, func(hostdb.Host) bool { return true })
@@ -280,25 +315,11 @@ func (s *server) rhpPrepareFormHandler(w http.ResponseWriter, req *http.Request,
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, s.w.Address())
+	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
 	cost := rhpv2.ContractFormationCost(fc, rpfr.HostSettings.ContractPrice)
-	txn := types.Transaction{
-		FileContracts: []types.FileContract{fc},
-		MinerFees:     []types.Currency{s.tp.RecommendedFee().Mul64(2048)},
-	}
-	_, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	parents, err := s.tp.UnconfirmedParents(txn)
-	if err != nil {
-		s.w.ReleaseInputs(txn)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	WriteJSON(w, RHPPrepareFormResponse{
-		TransactionSet: append(parents, txn),
+		Contract: fc,
+		Cost:     cost,
 	})
 }
 
@@ -308,30 +329,16 @@ func (s *server) rhpPrepareRenewHandler(w http.ResponseWriter, req *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, s.w.Address())
+	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
 	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
-	txn := types.Transaction{
-		FileContracts: []types.FileContract{fc},
-		MinerFees:     []types.Currency{s.tp.RecommendedFee().Mul64(2048)},
-	}
-	_, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	parents, err := s.tp.UnconfirmedParents(txn)
-	if err != nil {
-		s.w.ReleaseInputs(txn)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	finalPayment := rprr.HostSettings.BaseRPCPrice
 	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
 		finalPayment = rprr.Contract.ValidRenterPayout()
 	}
 	WriteJSON(w, RHPPrepareRenewResponse{
-		TransactionSet: append(parents, txn),
-		FinalPayment:   finalPayment,
+		Contract:     fc,
+		Cost:         cost,
+		FinalPayment: finalPayment,
 	})
 }
 
@@ -644,6 +651,8 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 	mux.GET("/wallet/address", srv.walletAddressHandler)
 	mux.GET("/wallet/transactions", srv.walletTransactionsHandler)
 	mux.GET("/wallet/outputs", srv.walletOutputsHandler)
+	mux.POST("/wallet/fund", srv.walletFundHandler)
+	mux.POST("/wallet/discard", srv.walletDiscardHandler)
 
 	mux.GET("/hosts", srv.hostsHandler)
 	mux.GET("/hosts/:pubkey", srv.hostsPubkeyHandler)

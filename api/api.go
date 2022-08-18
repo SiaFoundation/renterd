@@ -8,11 +8,6 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// WalletBalanceResponse is the response to /wallet/balance.
-type WalletBalanceResponse struct {
-	Siacoins types.Currency `json:"siacoins"`
-}
-
 // A SyncerPeer is a unique peer that is being used by the syncer.
 type SyncerPeer struct {
 	NetAddress string `json:"netAddress"`
@@ -21,6 +16,23 @@ type SyncerPeer struct {
 // A SyncerConnectRequest requests that the syncer connect to a peer.
 type SyncerConnectRequest struct {
 	NetAddress string `json:"netAddress"`
+}
+
+// WalletBalanceResponse is the response to /wallet/balance.
+type WalletBalanceResponse struct {
+	Siacoins types.Currency `json:"siacoins"`
+}
+
+// WalletFundRequest is the request type for /wallet/fund.
+type WalletFundRequest struct {
+	Transaction types.Transaction `json:"transaction"`
+	Amount      types.Currency    `json:"amount"`
+}
+
+// WalletFundResponse is the response type for /wallet/fund.
+type WalletFundResponse struct {
+	Transaction types.Transaction   `json:"transaction"`
+	DependsOn   []types.Transaction `json:"dependsOn"`
 }
 
 // An RHPScanRequest contains the address and pubkey of the host to scan.
@@ -34,6 +46,7 @@ type RHPPrepareFormRequest struct {
 	RenterKey      consensus.PrivateKey `json:"renterKey"`
 	HostKey        consensus.PublicKey  `json:"hostKey"`
 	RenterFunds    types.Currency       `json:"renterFunds"`
+	RenterAddress  types.UnlockHash     `json:"renterAddress"`
 	HostCollateral types.Currency       `json:"hostCollateral"`
 	EndHeight      uint64               `json:"endHeight"`
 	HostSettings   rhpv2.HostSettings   `json:"hostSettings"`
@@ -41,7 +54,8 @@ type RHPPrepareFormRequest struct {
 
 // An RHPPrepareFormResponse is the response to /rhp/prepare/form.
 type RHPPrepareFormResponse struct {
-	TransactionSet []types.Transaction `json:"transactionSet"`
+	Contract types.FileContract `json:"contract"`
+	Cost     types.Currency     `json:"cost"`
 }
 
 // An RHPFormRequest requests that the host create a contract.
@@ -66,6 +80,7 @@ type RHPPrepareRenewRequest struct {
 	RenterKey      consensus.PrivateKey       `json:"renterKey"`
 	HostKey        consensus.PublicKey        `json:"hostKey"`
 	RenterFunds    types.Currency             `json:"renterFunds"`
+	RenterAddress  types.UnlockHash           `json:"renterAddress"`
 	HostCollateral types.Currency             `json:"hostCollateral"`
 	EndHeight      uint64                     `json:"endHeight"`
 	HostSettings   rhpv2.HostSettings         `json:"hostSettings"`
@@ -73,8 +88,9 @@ type RHPPrepareRenewRequest struct {
 
 // An RHPPrepareRenewResponse is the response to /rhp/prepare/renew.
 type RHPPrepareRenewResponse struct {
-	TransactionSet []types.Transaction `json:"transactionSet"`
-	FinalPayment   types.Currency      `json:"finalPayment"`
+	Contract     types.FileContract `json:"contract"`
+	Cost         types.Currency     `json:"cost"`
+	FinalPayment types.Currency     `json:"finalPayment"`
 }
 
 // An RHPRenewRequest requests that the host renew a contract.

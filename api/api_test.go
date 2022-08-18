@@ -168,11 +168,19 @@ func TestSlabs(t *testing.T) {
 			t.Fatal(err)
 		}
 		renterKey := consensus.GeneratePrivateKey()
-		txns, err := c.RHPPrepareForm(renterKey, hostKey, types.ZeroCurrency, types.ZeroCurrency, 0, settings)
+		addr, _ := c.WalletAddress()
+		fc, cost, err := c.RHPPrepareForm(renterKey, hostKey, types.ZeroCurrency, addr, types.ZeroCurrency, 0, settings)
 		if err != nil {
 			t.Fatal(err)
 		}
-		c, _, err := c.RHPForm(renterKey, hostKey, hostIP, txns, n.walletKey)
+		txn := types.Transaction{
+			FileContracts: []types.FileContract{fc},
+		}
+		parents, err := c.WalletFund(&txn, cost)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, _, err := c.RHPForm(renterKey, hostKey, hostIP, append(parents, txn), n.walletKey)
 		if err != nil {
 			t.Fatal(err)
 		}
