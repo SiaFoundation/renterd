@@ -2,7 +2,6 @@ package slab
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -99,15 +98,21 @@ func (s *Session) reconnect(ctx context.Context) error {
 // UploadSector implements SectorUploader.
 func (s *Session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	if s.currentHeight == 0 {
-		panic("must call SetCurrentHeight before calling UploadSector") // developer error
+		panic("cannot upload without knowing current height") // developer error
 	}
-	storageDuration := s.currentHeight - uint64(s.Contract().Revision.NewWindowStart)
+	if err := s.reconnect(context.TODO()); err != nil {
+		return consensus.Hash256{}, err
+	}
+	storageDuration := uint64(s.Contract().Revision.NewWindowStart) - s.currentHeight
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
 	return s.Append(sector, price, collateral)
 }
 
 // DownloadSector implements SectorDownloader.
 func (s *Session) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
+	if err := s.reconnect(context.TODO()); err != nil {
+		return err
+	}
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
 		Offset:     uint64(offset),
@@ -119,6 +124,9 @@ func (s *Session) DownloadSector(w io.Writer, root consensus.Hash256, offset, le
 
 // DeleteSectors implements SectorDeleter.
 func (s *Session) DeleteSectors(roots []consensus.Hash256) error {
+	if err := s.reconnect(context.TODO()); err != nil {
+		return err
+	}
 	// download the full set of SectorRoots
 	contractSectors := s.Contract().NumSectors()
 	rootIndices := make(map[consensus.Hash256]uint64, contractSectors)
@@ -153,8 +161,7 @@ func (s *Session) DeleteSectors(roots []consensus.Hash256) error {
 
 // A HostSet is a set of hosts that can be used for uploading and downloading.
 type HostSet struct {
-	hosts         map[consensus.PublicKey]*Session
-	currentHeight uint64
+	hosts map[consensus.PublicKey]*Session
 }
 
 // Close closes all of the sessions in the set.
@@ -166,43 +173,21 @@ func (hs *HostSet) Close() error {
 	return nil
 }
 
-// SetCurrentHeight sets the current chain height. This is required before
-// calling the UploadSector method of Session.
-func (hs *HostSet) SetCurrentHeight(height uint64) {
-	hs.currentHeight = height
-	for _, sess := range hs.hosts {
-		sess.currentHeight = height
-	}
-}
-
-// Host returns the host with the given key, reconnecting to it if necessary to
-// establish a protocol session.
-func (hs *HostSet) Host(host consensus.PublicKey) (*Session, error) {
-	sess, ok := hs.hosts[host]
-	if !ok {
-		return nil, errors.New("unknown host")
-	}
-	if err := sess.reconnect(context.TODO()); err != nil {
-		return nil, err
-	}
-	return sess, nil
-}
-
 // AddHost adds a host to the set.
 func (hs *HostSet) AddHost(hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey) {
 	hs.hosts[hostKey] = &Session{
-		hostKey:       hostKey,
-		hostIP:        hostIP,
-		contractID:    contractID,
-		renterKey:     renterKey,
-		currentHeight: hs.currentHeight,
+		hostKey:    hostKey,
+		hostIP:     hostIP,
+		contractID: contractID,
+		renterKey:  renterKey,
 	}
 }
 
 // Uploaders returns the hosts as a set of SectorUploaders.
-func (hs *HostSet) Uploaders() map[consensus.PublicKey]SectorUploader {
+func (hs *HostSet) Uploaders(currentHeight uint64) map[consensus.PublicKey]SectorUploader {
 	m := make(map[consensus.PublicKey]SectorUploader)
 	for hostKey, sess := range hs.hosts {
+		sess.currentHeight = currentHeight
 		m[hostKey] = sess
 	}
 	return m

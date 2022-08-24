@@ -24,6 +24,10 @@ var (
 	// unable to provide sufficient payment to the host.
 	ErrInsufficientFunds = errors.New("insufficient funds")
 
+	// ErrInsufficientCollateral is returned by various RPCs when the host is
+	// unable to provide sufficient collateral.
+	ErrInsufficientCollateral = errors.New("insufficient collateral")
+
 	// ErrInvalidMerkleProof is returned by various RPCs when the host supplies
 	// an invalid Merkle proof.
 	ErrInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
@@ -144,6 +148,10 @@ func (s *Session) isRevisable() bool {
 
 func (s *Session) sufficientFunds(price types.Currency) bool {
 	return s.contract.RenterFunds().Cmp(price) >= 0
+}
+
+func (s *Session) sufficientCollateral(collateral types.Currency) bool {
+	return s.contract.Revision.NewMissedProofOutputs[1].Value.Cmp(collateral) >= 0
 }
 
 // SectorRoots calls the SectorRoots RPC, returning the requested range of
@@ -362,6 +370,8 @@ func (s *Session) Write(actions []RPCWriteAction, price, collateral types.Curren
 		return nil
 	} else if !s.sufficientFunds(price) {
 		return ErrInsufficientFunds
+	} else if !s.sufficientCollateral(collateral) {
+		return ErrInsufficientCollateral
 	}
 
 	rev := s.contract.Revision

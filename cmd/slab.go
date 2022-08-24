@@ -34,8 +34,7 @@ func (slabMover) withHostSet(ctx context.Context, contracts []api.Contract, fn f
 
 func (sm slabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (slabs []slab.Slab, err error) {
 	err = sm.withHostSet(ctx, contracts, func(hs *slab.HostSet) error {
-		hs.SetCurrentHeight(currentHeight)
-		ssu := slab.SerialSlabsUploader{SlabUploader: slab.SerialSlabUploader{Hosts: hs.Uploaders()}}
+		ssu := slab.SerialSlabsUploader{SlabUploader: slab.SerialSlabUploader{Hosts: hs.Uploaders(currentHeight)}}
 		slabs, err = ssu.UploadSlabs(r, m, n)
 		return err
 	})

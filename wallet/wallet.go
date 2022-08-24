@@ -71,6 +71,11 @@ type SingleAddressWallet struct {
 	used map[types.OutputID]bool
 }
 
+// PrivateKey returns the private key of the wallet.
+func (w *SingleAddressWallet) PrivateKey() consensus.PrivateKey {
+	return w.priv
+}
+
 // Address returns the address of the wallet.
 func (w *SingleAddressWallet) Address() types.UnlockHash {
 	return w.addr
@@ -167,26 +172,17 @@ func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
 // SignTransaction adds a signature to each of the specified inputs using the
 // provided seed.
 func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error {
-	inputWithID := func(id types.OutputID) *types.SiacoinInput {
-		for i := range txn.SiacoinInputs {
-			if in := &txn.SiacoinInputs[i]; types.OutputID(in.ParentID) == id {
-				return in
+outer:
+	for _, id := range toSign {
+		for i := range txn.TransactionSignatures {
+			ts := &txn.TransactionSignatures[i]
+			if ts.ParentID == crypto.Hash(id) {
+				sig := w.priv.SignHash(cs.InputSigHash(*txn, i))
+				ts.Signature = sig[:]
+				continue outer
 			}
 		}
-		return nil
-	}
-	for _, id := range toSign {
-		in := inputWithID(id)
-		if in == nil {
-			return errors.New("no input with specified ID")
-		}
-		sig := w.priv.SignHash(cs.InputSigHash(*txn, len(txn.TransactionSignatures)))
-		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
-			ParentID:       crypto.Hash(id),
-			CoveredFields:  types.FullCoveredFields,
-			PublicKeyIndex: 0,
-			Signature:      sig[:],
-		})
+		return errors.New("no signature with specified ID")
 	}
 	return nil
 }

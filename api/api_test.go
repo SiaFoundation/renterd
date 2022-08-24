@@ -52,7 +52,7 @@ func (mockRHP) Settings(ctx context.Context, hostIP string, hostKey consensus.Pu
 	return rhpv2.HostSettings{}, nil
 }
 
-func (mockRHP) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction, walletKey consensus.PrivateKey) (rhpv2.Contract, []types.Transaction, error) {
+func (mockRHP) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error) {
 	txn := txns[len(txns)-1]
 	fc := txn.FileContracts[0]
 	return rhpv2.Contract{
@@ -77,7 +77,7 @@ func (mockRHP) FormContract(ctx context.Context, cs consensus.State, hostIP stri
 	}, nil, nil
 }
 
-func (mockRHP) RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency, walletKey consensus.PrivateKey) (rhpv2.Contract, []types.Transaction, error) {
+func (mockRHP) RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error) {
 	return rhpv2.Contract{}, nil, nil
 }
 
@@ -149,7 +149,7 @@ func runServer(n *node) (*api.Client, func()) {
 	return c, func() { l.Close() }
 }
 
-func TestSlabs(t *testing.T) {
+func TestObject(t *testing.T) {
 	n := newTestNode()
 	c, shutdown := runServer(n)
 	defer shutdown()
@@ -193,7 +193,7 @@ func TestSlabs(t *testing.T) {
 	}
 
 	// upload
-	data := frand.Bytes(20)
+	data := frand.Bytes(12345)
 	key := object.GenerateEncryptionKey()
 	slabs, err := c.UploadSlabs(key.Encrypt(bytes.NewReader(data)), 2, 3, contracts)
 	if err != nil {

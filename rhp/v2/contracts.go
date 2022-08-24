@@ -2,6 +2,7 @@ package rhp
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"math/big"
 
@@ -10,6 +11,31 @@ import (
 	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
 )
+
+// A TransactionSigner can sign transaction inputs.
+type TransactionSigner interface {
+	SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error
+}
+
+// A SingleKeySigner signs transaction using a single key.
+type SingleKeySigner consensus.PrivateKey
+
+// SignTransaction implements TransactionSigner.
+func (s SingleKeySigner) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error {
+outer:
+	for _, id := range toSign {
+		for i := range txn.TransactionSignatures {
+			ts := &txn.TransactionSignatures[i]
+			if ts.ParentID == crypto.Hash(id) {
+				sig := consensus.PrivateKey(s).SignHash(cs.InputSigHash(*txn, i))
+				ts.Signature = sig[:]
+				continue outer
+			}
+		}
+		return errors.New("no signature with specified ID")
+	}
+	return nil
+}
 
 func hashRevision(rev types.FileContractRevision) consensus.Hash256 {
 	or := (*objFileContractRevision)(&rev)
@@ -27,9 +53,10 @@ func ContractFormationCost(fc types.FileContract, contractFee types.Currency) ty
 
 // PrepareContractFormation constructs a contract formation transaction.
 func PrepareContractFormation(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
+	renterPubkey := renterKey.PublicKey()
 	uc := types.UnlockConditions{
 		PublicKeys: []types.SiaPublicKey{
-			{Algorithm: types.SignatureEd25519, Key: renterKey[:]},
+			{Algorithm: types.SignatureEd25519, Key: renterPubkey[:]},
 			{Algorithm: types.SignatureEd25519, Key: hostKey[:]},
 		},
 		SignaturesRequired: 2,
@@ -136,22 +163,23 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 }
 
 // RPCFormContract forms a contract with a host.
-func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, txnSet []types.Transaction, walletKey consensus.PrivateKey) (_ Contract, _ []types.Transaction, err error) {
+func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, txnSet []types.Transaction, txnSigner TransactionSigner) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
 
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
 	ourSignatures := txn.TransactionSignatures
-	txn.TransactionSignatures = nil
+	txnSet[len(txnSet)-1].TransactionSignatures = nil
 	toSign := make([]types.OutputID, len(ourSignatures))
 	for i := range ourSignatures {
 		toSign[i] = types.OutputID(ourSignatures[i].ParentID)
 	}
 
+	renterPubkey := renterKey.PublicKey()
 	req := &RPCFormContractRequest{
 		Transactions: txnSet,
 		RenterKey: types.SiaPublicKey{
 			Algorithm: types.SignatureEd25519,
-			Key:       renterKey[:],
+			Key:       renterPubkey[:],
 		},
 	}
 	if err := t.WriteRequest(RPCFormContractID, req); err != nil {
@@ -169,9 +197,8 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 
 	// sign the txn
 	txn.TransactionSignatures = ourSignatures
-	for i := range txn.TransactionSignatures {
-		sig := walletKey.SignHash(cs.InputSigHash(txn, i))
-		txn.TransactionSignatures[i].Signature = sig[:]
+	if err := txnSigner.SignTransaction(cs, &txn, toSign); err != nil {
+		return Contract{}, nil, err
 	}
 
 	// create initial (no-op) revision, transaction, and signature
@@ -180,7 +207,7 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 		ParentID: txn.FileContractID(0),
 		UnlockConditions: types.UnlockConditions{
 			PublicKeys: []types.SiaPublicKey{
-				{Algorithm: types.SignatureEd25519, Key: renterKey[:]},
+				{Algorithm: types.SignatureEd25519, Key: renterPubkey[:]},
 				{Algorithm: types.SignatureEd25519, Key: hostKey[:]},
 			},
 			SignaturesRequired: 2,
@@ -198,7 +225,7 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 	revSig := renterKey.SignHash(hashRevision(initRevision))
 	renterRevisionSig := types.TransactionSignature{
 		ParentID:       crypto.Hash(initRevision.ParentID),
-		CoveredFields:  types.CoveredFields{FileContracts: []uint64{0}},
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
 		Signature:      revSig[:],
 	}
@@ -232,12 +259,12 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host. The old contract is "cleared," reverting its
 // filesize to zero.
-func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, finalPayment types.Currency, walletKey consensus.PrivateKey) (_ Contract, _ []types.Transaction, err error) {
+func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, finalPayment types.Currency, txnSigner TransactionSigner) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
 	ourSignatures := txn.TransactionSignatures
-	txn.TransactionSignatures = nil
+	txnSet[len(txnSet)-1].TransactionSignatures = nil
 	toSign := make([]types.OutputID, len(ourSignatures))
 	for i := range ourSignatures {
 		toSign[i] = types.OutputID(ourSignatures[i].ParentID)
@@ -272,9 +299,8 @@ func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, 
 
 	// sign the txn
 	txn.TransactionSignatures = ourSignatures
-	for i := range txn.TransactionSignatures {
-		sig := walletKey.SignHash(cs.InputSigHash(txn, i))
-		txn.TransactionSignatures[i].Signature = sig[:]
+	if err := txnSigner.SignTransaction(cs, &txn, toSign); err != nil {
+		return Contract{}, nil, err
 	}
 
 	// create initial (no-op) revision, transaction, and signature
@@ -295,7 +321,7 @@ func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, 
 	revSig := s.key.SignHash(hashRevision(initRevision))
 	renterRevisionSig := types.TransactionSignature{
 		ParentID:       crypto.Hash(initRevision.ParentID),
-		CoveredFields:  types.CoveredFields{FileContracts: []uint64{0}},
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
 		Signature:      revSig[:],
 	}

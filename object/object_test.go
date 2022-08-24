@@ -5,7 +5,6 @@ import (
 	"io"
 	"testing"
 
-	"go.sia.tech/renterd/internal/objectutil"
 	"go.sia.tech/renterd/internal/slabutil"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -13,90 +12,8 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestObject(t *testing.T) {
-	// generate data and encryption key
-	data := frand.Bytes(1000000)
-	key := object.GenerateEncryptionKey()
-
-	// upload slabs
-	hs := slabutil.NewMockHostSet()
-	for i := 0; i < 10; i++ {
-		hs.AddHost()
-	}
-	ssu := slab.SerialSlabsUploader{SlabUploader: slab.SerialSlabUploader{Hosts: hs.Uploaders()}}
-	slabs, err := ssu.UploadSlabs(key.Encrypt(bytes.NewReader(data)), 3, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(slabs) != 1 {
-		t.Fatal(len(slabs))
-	}
-
-	// construct object
-	o := object.Object{
-		Key:   key,
-		Slabs: make([]slab.Slice, len(slabs)),
-	}
-	for i, s := range slabs {
-		o.Slabs[i] = slab.Slice{
-			Slab:   s,
-			Offset: 0,
-			Length: uint32(len(data)),
-		}
-	}
-
-	// store object
-	es := objectutil.NewEphemeralStore()
-	if err := es.Put("foo", o); err != nil {
-		t.Fatal(err)
-	}
-
-	// retrieve object
-	o, err = es.Get("foo")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// download various ranges
-	checkDownload := func(offset, length int) {
-		t.Helper()
-		var buf bytes.Buffer
-		ssd := slab.SerialSlabsDownloader{SlabDownloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
-		if err := ssd.DownloadSlabs(key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
-			t.Error(err)
-			return
-		}
-		exp := data[offset:][:length]
-		got := buf.Bytes()
-		if !bytes.Equal(got, exp) {
-			t.Errorf("download(%v, %v):\nexpected: %x...%x (%v)\ngot:      %x...%x (%v)",
-				offset, length,
-				exp[:20], exp[len(exp)-20:], len(exp),
-				got[:20], got[len(got)-20:], len(got))
-		}
-	}
-	checkDownload(0, 0)
-	checkDownload(0, 1)
-	checkDownload(rhpv2.LeafSize*10, rhpv2.LeafSize*20)
-	checkDownload(0, len(data)/2)
-	checkDownload(0, len(data))
-	checkDownload(len(data)/2, len(data)/2)
-	checkDownload(84923, len(data[84923:])-53219)
-
-	checkInvalidRange := func(offset, length int) {
-		t.Helper()
-		var buf bytes.Buffer
-		ssd := slab.SerialSlabsDownloader{SlabDownloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
-		if err := ssd.DownloadSlabs(&buf, o.Slabs, int64(offset), int64(length)); err == nil {
-			t.Error("expected error, got nil")
-		}
-	}
-	checkInvalidRange(0, -1)
-	checkInvalidRange(-1, 0)
-	checkInvalidRange(0, len(data)+1)
-	checkInvalidRange(len(data), 1)
-}
-
 func TestMultipleObjects(t *testing.T) {
+	// generate object data
 	data := [][]byte{
 		frand.Bytes(111),
 		frand.Bytes(222),
