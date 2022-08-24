@@ -75,10 +75,11 @@ type jsonPersistData struct {
 func (s *JSONStore) save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cs, _ := s.Contracts()
-	js, _ := json.MarshalIndent(jsonPersistData{
-		Contracts: cs,
-	}, "", "  ")
+	var p jsonPersistData
+	for _, c := range s.contracts {
+		p.Contracts = append(p.Contracts, c)
+	}
+	js, _ := json.MarshalIndent(p, "", "  ")
 
 	// atomic save
 	dst := filepath.Join(s.dir, "contracts.json")
