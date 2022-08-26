@@ -37,6 +37,31 @@ outer:
 	return nil
 }
 
+// MinimizeContractSignatures changes the TransactionSignatures of txn to only
+// cover the data already present in the transaction. Normally, transaction
+// signatures use the 'WholeTransaction' flag, which means that the signature
+// covers all transaction data. But when negotiating a new contract, the host
+// will add inputs and outputs to the contract transaction, which will
+// invalidate any existing WholeTransaction signatures.
+func MinimizeContractSignatures(txn *types.Transaction) {
+	var cf types.CoveredFields
+	for i := range txn.SiacoinInputs {
+		cf.SiacoinInputs = append(cf.SiacoinInputs, uint64(i))
+	}
+	for i := range txn.SiacoinOutputs {
+		cf.SiacoinOutputs = append(cf.SiacoinOutputs, uint64(i))
+	}
+	for i := range txn.FileContracts {
+		cf.FileContracts = append(cf.FileContracts, uint64(i))
+	}
+	for i := range txn.MinerFees {
+		cf.MinerFees = append(cf.MinerFees, uint64(i))
+	}
+	for i := range txn.TransactionSignatures {
+		txn.TransactionSignatures[i].CoveredFields = cf
+	}
+}
+
 func hashRevision(rev types.FileContractRevision) consensus.Hash256 {
 	or := (*objFileContractRevision)(&rev)
 	var b objBuffer
@@ -163,16 +188,13 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 }
 
 // RPCFormContract forms a contract with a host.
-func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, txnSet []types.Transaction, txnSigner TransactionSigner) (_ Contract, _ []types.Transaction, err error) {
+func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, txnSet []types.Transaction) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
 
+	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
-	ourSignatures := txn.TransactionSignatures
+	renterContractSignatures := txn.TransactionSignatures
 	txnSet[len(txnSet)-1].TransactionSignatures = nil
-	toSign := make([]types.OutputID, len(ourSignatures))
-	for i := range ourSignatures {
-		toSign[i] = types.OutputID(ourSignatures[i].ParentID)
-	}
 
 	renterPubkey := renterKey.PublicKey()
 	req := &RPCFormContractRequest{
@@ -194,12 +216,6 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 	// merge host additions with txn
 	txn.SiacoinInputs = append(txn.SiacoinInputs, resp.Inputs...)
 	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
-
-	// sign the txn
-	txn.TransactionSignatures = ourSignatures
-	if err := txnSigner.SignTransaction(cs, &txn, toSign); err != nil {
-		return Contract{}, nil, err
-	}
 
 	// create initial (no-op) revision, transaction, and signature
 	fc := txn.FileContracts[0]
@@ -232,19 +248,19 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 
 	// write our signatures
 	renterSigs := &RPCFormContractSignatures{
-		ContractSignatures: txn.TransactionSignatures,
+		ContractSignatures: renterContractSignatures,
 		RevisionSignature:  renterRevisionSig,
 	}
 	if err := t.WriteResponse(renterSigs); err != nil {
 		return Contract{}, nil, err
 	}
 
-	// read the host's signatures
+	// read the host's signatures and merge them with our own
 	var hostSigs RPCFormContractSignatures
 	if err := t.ReadResponse(&hostSigs, 4096); err != nil {
 		return Contract{}, nil, err
 	}
-	txn.TransactionSignatures = append(txn.TransactionSignatures, hostSigs.ContractSignatures...)
+	txn.TransactionSignatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
 	return Contract{
@@ -259,16 +275,13 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host. The old contract is "cleared," reverting its
 // filesize to zero.
-func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, finalPayment types.Currency, txnSigner TransactionSigner) (_ Contract, _ []types.Transaction, err error) {
+func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, finalPayment types.Currency) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 
+	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
-	ourSignatures := txn.TransactionSignatures
+	renterContractSignatures := txn.TransactionSignatures
 	txnSet[len(txnSet)-1].TransactionSignatures = nil
-	toSign := make([]types.OutputID, len(ourSignatures))
-	for i := range ourSignatures {
-		toSign[i] = types.OutputID(ourSignatures[i].ParentID)
-	}
 
 	// construct the final revision of the old contract
 	finalOldRevision := s.contract.Revision
@@ -297,12 +310,6 @@ func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, 
 	txn.SiacoinInputs = append(txn.SiacoinInputs, resp.Inputs...)
 	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
 
-	// sign the txn
-	txn.TransactionSignatures = ourSignatures
-	if err := txnSigner.SignTransaction(cs, &txn, toSign); err != nil {
-		return Contract{}, nil, err
-	}
-
 	// create initial (no-op) revision, transaction, and signature
 	fc := txn.FileContracts[0]
 	initRevision := types.FileContractRevision{
@@ -326,10 +333,10 @@ func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, 
 		Signature:      revSig[:],
 	}
 
-	// Send signatures.
+	// send signatures
 	finalRevSig := s.key.SignHash(hashRevision(finalOldRevision))
 	renterSigs := &RPCRenewAndClearContractSignatures{
-		ContractSignatures:     txn.TransactionSignatures,
+		ContractSignatures:     renterContractSignatures,
 		RevisionSignature:      renterRevisionSig,
 		FinalRevisionSignature: finalRevSig,
 	}
@@ -337,12 +344,12 @@ func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, 
 		return Contract{}, nil, err
 	}
 
-	// Read the host signatures.
+	// read the host signatures and merge them with our own
 	var hostSigs RPCRenewAndClearContractSignatures
 	if err := s.transport.ReadResponse(&hostSigs, 4096); err != nil {
 		return Contract{}, nil, err
 	}
-	txn.TransactionSignatures = append(txn.TransactionSignatures, hostSigs.ContractSignatures...)
+	txn.TransactionSignatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
 	return Contract{

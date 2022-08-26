@@ -114,7 +114,7 @@ func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Tra
 }
 
 // WalletFund funds txn using inputs controlled by the wallet.
-func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Transaction, error) {
+func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error) {
 	req := WalletFundRequest{
 		Transaction: *txn,
 		Amount:      amount,
@@ -122,10 +122,19 @@ func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]ty
 	var resp WalletFundResponse
 	err := c.post("/wallet/fund", req, &resp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	*txn = resp.Transaction
-	return resp.DependsOn, nil
+	return resp.ToSign, resp.DependsOn, nil
+}
+
+// WalletSign signs txn using the wallet's private key.
+func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID) error {
+	req := WalletSignRequest{
+		Transaction: *txn,
+		ToSign:      toSign,
+	}
+	return c.post("/wallet/sign", req, txn)
 }
 
 // WalletDiscard discards the provided txn, make its inputs usable again. This
@@ -210,13 +219,12 @@ func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency,
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction, walletKey consensus.PrivateKey) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
 	req := RHPFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
 		HostIP:         hostIP,
 		TransactionSet: transactionSet,
-		WalletKey:      walletKey,
 	}
 	var resp RHPFormResponse
 	err := c.post("/rhp/form", req, &resp)
@@ -224,7 +232,7 @@ func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.Publi
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency, walletKey consensus.PrivateKey) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
 	req := RHPRenewRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -232,7 +240,6 @@ func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.Publ
 		ContractID:     contractID,
 		TransactionSet: transactionSet,
 		FinalPayment:   finalPayment,
-		WalletKey:      walletKey,
 	}
 	var resp RHPRenewResponse
 	err := c.post("/rhp/renew", req, &resp)

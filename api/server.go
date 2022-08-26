@@ -66,8 +66,8 @@ type (
 	// An RHP implements the renter-host protocol.
 	RHP interface {
 		Settings(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (rhpv2.HostSettings, error)
-		FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error)
-		RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error)
+		FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction) (rhpv2.Contract, []types.Transaction, error)
+		RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error)
 		FundAccount(ctx context.Context, hostIP string, hostKey consensus.PublicKey, contract types.FileContractRevision, renterKey consensus.PrivateKey, account rhpv3.Account, amount types.Currency) (rhpv2.Contract, error)
 		ReadRegistry(ctx context.Context, hostIP string, hostKey consensus.PublicKey, payment rhpv3.PaymentMethod, registryKey rhpv3.RegistryKey) (rhpv3.RegistryValue, error)
 		UpdateRegistry(ctx context.Context, hostIP string, hostKey consensus.PublicKey, payment rhpv3.PaymentMethod, registryKey rhpv3.RegistryKey, registryValue rhpv3.RegistryValue) error
@@ -234,6 +234,19 @@ func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ h
 	})
 }
 
+func (s *server) walletSignHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	var wsr WalletSignRequest
+	if err := json.NewDecoder(req.Body).Decode(&wsr); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.w.SignTransaction(s.cm.TipState(), &wsr.Transaction, wsr.ToSign); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	WriteJSON(w, wsr.Transaction)
+}
+
 func (s *server) walletDiscardHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var txn types.Transaction
 	if err := json.NewDecoder(req.Body).Decode(&txn); err != nil {
@@ -368,7 +381,7 @@ func (s *server) rhpFormHandler(w http.ResponseWriter, req *http.Request, _ http
 	}
 	var cs consensus.State
 	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
-	contract, txnSet, err := s.rhp.FormContract(req.Context(), cs, rfr.HostIP, rfr.HostKey, rfr.RenterKey, rfr.TransactionSet, rhpv2.SingleKeySigner(rfr.WalletKey))
+	contract, txnSet, err := s.rhp.FormContract(req.Context(), cs, rfr.HostIP, rfr.HostKey, rfr.RenterKey, rfr.TransactionSet)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -387,7 +400,7 @@ func (s *server) rhpRenewHandler(w http.ResponseWriter, req *http.Request, _ htt
 	}
 	var cs consensus.State
 	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
-	contract, txnSet, err := s.rhp.RenewContract(req.Context(), cs, rrr.HostIP, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.TransactionSet, rrr.FinalPayment, rhpv2.SingleKeySigner(rrr.WalletKey))
+	contract, txnSet, err := s.rhp.RenewContract(req.Context(), cs, rrr.HostIP, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.TransactionSet, rrr.FinalPayment)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -647,6 +660,7 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 	mux.GET("/wallet/transactions", srv.walletTransactionsHandler)
 	mux.GET("/wallet/outputs", srv.walletOutputsHandler)
 	mux.POST("/wallet/fund", srv.walletFundHandler)
+	mux.POST("/wallet/sign", srv.walletSignHandler)
 	mux.POST("/wallet/discard", srv.walletDiscardHandler)
 
 	mux.GET("/hosts", srv.hostsHandler)

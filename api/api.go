@@ -17,7 +17,14 @@ type WalletFundRequest struct {
 // WalletFundResponse is the response type for /wallet/fund.
 type WalletFundResponse struct {
 	Transaction types.Transaction   `json:"transaction"`
+	ToSign      []types.OutputID    `json:"toSign"`
 	DependsOn   []types.Transaction `json:"dependsOn"`
+}
+
+// WalletSignRequest is the request type for /wallet/sign.
+type WalletSignRequest struct {
+	Transaction types.Transaction `json:"transaction"`
+	ToSign      []types.OutputID  `json:"toSign"`
 }
 
 // An RHPScanRequest contains the address and pubkey of the host to scan.
@@ -49,7 +56,6 @@ type RHPFormRequest struct {
 	HostKey        consensus.PublicKey  `json:"hostKey"`
 	HostIP         string               `json:"hostIP"`
 	TransactionSet []types.Transaction  `json:"transactionSet"`
-	WalletKey      consensus.PrivateKey `json:"walletKey"`
 }
 
 // An RHPFormResponse is the response to /rhp/form. It contains the formed
@@ -86,7 +92,6 @@ type RHPRenewRequest struct {
 	ContractID     types.FileContractID `json:"contractID"`
 	TransactionSet []types.Transaction  `json:"transactionSet"`
 	FinalPayment   types.Currency       `json:"finalPayment"`
-	WalletKey      consensus.PrivateKey `json:"walletKey"`
 }
 
 // An RHPRenewResponse is the response to /rhp/renew. It contains the renewed

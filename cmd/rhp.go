@@ -79,18 +79,18 @@ func (r rhpImpl) Settings(ctx context.Context, hostIP string, hostKey consensus.
 	return settings, err
 }
 
-func (r rhpImpl) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error) {
+func (r rhpImpl) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
 	var contract rhpv2.Contract
 	var txnSet []types.Transaction
 	err := r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
 		var err error
-		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, renterKey, hostKey, txns, txnSigner)
+		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, renterKey, hostKey, txns)
 		return err
 	})
 	return contract, txnSet, err
 }
 
-func (r rhpImpl) RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error) {
+func (r rhpImpl) RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
 	var contract rhpv2.Contract
 	var txnSet []types.Transaction
 	err := r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
@@ -98,7 +98,7 @@ func (r rhpImpl) RenewContract(ctx context.Context, cs consensus.State, hostIP s
 		if err != nil {
 			return err
 		}
-		contract, txnSet, err = session.RenewContract(cs, txns, finalPayment, txnSigner)
+		contract, txnSet, err = session.RenewContract(cs, txns, finalPayment)
 		return err
 	})
 	return contract, txnSet, err

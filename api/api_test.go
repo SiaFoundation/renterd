@@ -52,7 +52,7 @@ func (mockRHP) Settings(ctx context.Context, hostIP string, hostKey consensus.Pu
 	return rhpv2.HostSettings{}, nil
 }
 
-func (mockRHP) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error) {
+func (mockRHP) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
 	txn := txns[len(txns)-1]
 	fc := txn.FileContracts[0]
 	return rhpv2.Contract{
@@ -77,7 +77,7 @@ func (mockRHP) FormContract(ctx context.Context, cs consensus.State, hostIP stri
 	}, nil, nil
 }
 
-func (mockRHP) RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency, txnSigner rhpv2.TransactionSigner) (rhpv2.Contract, []types.Transaction, error) {
+func (mockRHP) RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
 	return rhpv2.Contract{}, nil, nil
 }
 
@@ -176,11 +176,15 @@ func TestObject(t *testing.T) {
 		txn := types.Transaction{
 			FileContracts: []types.FileContract{fc},
 		}
-		parents, err := c.WalletFund(&txn, cost)
+		toSign, parents, err := c.WalletFund(&txn, cost)
 		if err != nil {
 			t.Fatal(err)
 		}
-		c, _, err := c.RHPForm(renterKey, hostKey, hostIP, append(parents, txn), n.walletKey)
+		rhpv2.MinimizeContractSignatures(&txn)
+		if err := c.WalletSign(&txn, toSign); err != nil {
+			t.Fatal(err)
+		}
+		c, _, err := c.RHPForm(renterKey, hostKey, hostIP, append(parents, txn))
 		if err != nil {
 			t.Fatal(err)
 		}

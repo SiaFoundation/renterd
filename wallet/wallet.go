@@ -27,6 +27,16 @@ func StandardAddress(pk consensus.PublicKey) types.UnlockHash {
 	return StandardUnlockConditions(pk).UnlockHash()
 }
 
+// StandardTransactionSignature returns the standard signature object for a
+// siacoin or siafund input.
+func StandardTransactionSignature(id types.OutputID) types.TransactionSignature {
+	return types.TransactionSignature{
+		ParentID:       crypto.Hash(id),
+		CoveredFields:  types.FullCoveredFields,
+		PublicKeyIndex: 0,
+	}
+}
+
 // A SiacoinElement is a SiacoinOutput along with its ID.
 type SiacoinElement struct {
 	types.SiacoinOutput
@@ -148,11 +158,6 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 			ParentID:         types.SiacoinOutputID(sce.ID),
 			UnlockConditions: StandardUnlockConditions(w.priv.PublicKey()),
 		})
-		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
-			ParentID:       crypto.Hash(sce.ID),
-			CoveredFields:  types.FullCoveredFields,
-			PublicKeyIndex: 0,
-		})
 		toSign[i] = sce.ID
 		w.used[sce.ID] = true
 	}
@@ -169,20 +174,22 @@ func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
 	}
 }
 
-// SignTransaction adds a signature to each of the specified inputs using the
-// provided seed.
+// SignTransaction adds a signature to each of the specified inputs. If an input
+// does not already have a corresponding TransactionSignature, one will be
+// appended.
 func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error {
-outer:
 	for _, id := range toSign {
-		for i := range txn.TransactionSignatures {
-			ts := &txn.TransactionSignatures[i]
-			if ts.ParentID == crypto.Hash(id) {
-				sig := w.priv.SignHash(cs.InputSigHash(*txn, i))
-				ts.Signature = sig[:]
-				continue outer
+		var i int
+		for i = range txn.TransactionSignatures {
+			if txn.TransactionSignatures[i].ParentID == crypto.Hash(id) {
+				break
 			}
 		}
-		return errors.New("no signature with specified ID")
+		if i == len(txn.TransactionSignatures) {
+			txn.TransactionSignatures = append(txn.TransactionSignatures, StandardTransactionSignature(id))
+		}
+		sig := w.priv.SignHash(cs.InputSigHash(*txn, i))
+		txn.TransactionSignatures[i].Signature = sig[:]
 	}
 	return nil
 }
