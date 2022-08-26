@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -59,11 +60,39 @@ func (c *Client) post(route string, d, r interface{}) error { return c.req("POST
 func (c *Client) put(route string, d interface{}) error     { return c.req("PUT", route, d, nil) }
 func (c *Client) delete(route string) error                 { return c.req("DELETE", route, nil, nil) }
 
+// SyncerPeers returns the current peers of the syncer.
+func (c *Client) SyncerPeers() (resp []string, err error) {
+	err = c.get("/syncer/peers", &resp)
+	return
+}
+
+// SyncerConnect adds the address as a peer of the syncer.
+func (c *Client) SyncerConnect(addr string) (err error) {
+	err = c.post("/syncer/connect", addr, nil)
+	return
+}
+
+// ConsensusTip returns the current tip index.
+func (c *Client) ConsensusTip() (resp consensus.ChainIndex, err error) {
+	err = c.get("/consensus/tip", &resp)
+	return
+}
+
+// TransactionPool returns the transactions currently in the pool.
+func (c *Client) TransactionPool() (txns []types.Transaction, err error) {
+	err = c.get("/txpool/transactions", &txns)
+	return
+}
+
+// BroadcastTransaction broadcasts the transaction set to the network.
+func (c *Client) BroadcastTransaction(txns []types.Transaction) error {
+	return c.post("/txpool/broadcast", txns, nil)
+}
+
 // WalletBalance returns the current wallet balance.
-func (c *Client) WalletBalance() (types.Currency, error) {
-	var resp WalletBalanceResponse
-	err := c.get("/wallet/balance", &resp)
-	return resp.Siacoins, err
+func (c *Client) WalletBalance() (bal types.Currency, err error) {
+	err = c.get("/wallet/balance", &bal)
+	return
 }
 
 // WalletAddress returns an address controlled by the wallet.
@@ -99,15 +128,33 @@ func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]ty
 	return resp.DependsOn, nil
 }
 
-// SyncerPeers returns the current peers of the syncer.
-func (c *Client) SyncerPeers() (resp []SyncerPeer, err error) {
-	err = c.get("/syncer/peers", &resp)
+// WalletDiscard discards the provided txn, make its inputs usable again. This
+// should only be called on transactions that will never be broadcast.
+func (c *Client) WalletDiscard(txn types.Transaction) error {
+	return c.post("/wallet/discard", txn, nil)
+}
+
+// Hosts returns all hosts known to the server.
+func (c *Client) Hosts() (hosts []hostdb.Host, err error) {
+	err = c.get("/hosts", &hosts)
 	return
 }
 
-// SyncerConnect adds the address as a peer of the syncer.
-func (c *Client) SyncerConnect(addr string) (err error) {
-	err = c.post("/syncer/connect", addr, nil)
+// Host returns information about a particular host known to the server.
+func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
+	err = c.get("/hosts/"+hostKey.String(), &h)
+	return
+}
+
+// SetHostScore sets the score for the supplied host.
+func (c *Client) SetHostScore(hostKey consensus.PublicKey, score float64) (err error) {
+	err = c.put("/hosts/"+hostKey.String()+"/score", score)
+	return
+}
+
+// RecordHostInteraction records an interaction for the supplied host.
+func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Interaction) (err error) {
+	err = c.post("/hosts/"+hostKey.String()+"/interaction", i, nil)
 	return
 }
 
@@ -133,20 +180,6 @@ func (c *Client) RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensu
 	return resp.Contract, resp.Cost, err
 }
 
-// RHPForm forms a contract with a host.
-func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction, walletKey consensus.PrivateKey) (rhpv2.Contract, []types.Transaction, error) {
-	req := RHPFormRequest{
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		HostIP:         hostIP,
-		TransactionSet: transactionSet,
-		WalletKey:      walletKey,
-	}
-	var resp RHPFormResponse
-	err := c.post("/rhp/form", req, &resp)
-	return resp.Contract, resp.TransactionSet, err
-}
-
 // RHPPrepareRenew prepares a contract renewal transaction.
 func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error) {
 	req := RHPPrepareRenewRequest{
@@ -164,6 +197,32 @@ func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey 
 	return resp.Contract, resp.Cost, resp.FinalPayment, err
 }
 
+// RHPPreparePayment prepares an ephemeral account payment.
+func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key consensus.PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
+	req := RHPPaymentRequest{
+		Account:    account,
+		Amount:     amount,
+		Expiry:     0, // TODO
+		AccountKey: key,
+	}
+	err = c.post("/rhp/prepare/payment", req, &resp)
+	return
+}
+
+// RHPForm forms a contract with a host.
+func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction, walletKey consensus.PrivateKey) (rhpv2.Contract, []types.Transaction, error) {
+	req := RHPFormRequest{
+		RenterKey:      renterKey,
+		HostKey:        hostKey,
+		HostIP:         hostIP,
+		TransactionSet: transactionSet,
+		WalletKey:      walletKey,
+	}
+	var resp RHPFormResponse
+	err := c.post("/rhp/form", req, &resp)
+	return resp.Contract, resp.TransactionSet, err
+}
+
 // RHPRenew renews an existing contract with a host.
 func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency, walletKey consensus.PrivateKey) (rhpv2.Contract, []types.Transaction, error) {
 	req := RHPRenewRequest{
@@ -178,6 +237,20 @@ func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.Publ
 	var resp RHPRenewResponse
 	err := c.post("/rhp/renew", req, &resp)
 	return resp.Contract, resp.TransactionSet, err
+}
+
+// RHPFund funds an ephemeral account using the supplied contract.
+func (c *Client) RHPFund(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (rev rhpv2.Contract, err error) {
+	req := RHPFundRequest{
+		Contract:  contract,
+		RenterKey: renterKey,
+		HostKey:   hostKey,
+		HostIP:    hostIP,
+		Account:   account,
+		Amount:    amount,
+	}
+	err = c.post("/rhp/fund", req, &rev)
+	return
 }
 
 // RHPReadRegistry reads a registry value.

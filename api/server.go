@@ -129,27 +129,23 @@ type server struct {
 }
 
 func (s *server) syncerPeersHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	ps := s.s.Peers()
-	sps := make([]SyncerPeer, len(ps))
-	for i, peer := range ps {
-		sps[i] = SyncerPeer{
-			NetAddress: peer,
-		}
-	}
-	WriteJSON(w, sps)
+	WriteJSON(w, s.s.Peers())
 }
 
 func (s *server) syncerConnectHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var scr SyncerConnectRequest
-	if err := json.NewDecoder(req.Body).Decode(&scr); err != nil {
+	var addr string
+	if err := json.NewDecoder(req.Body).Decode(&addr); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := s.s.Connect(addr); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+}
 
-	if err := s.s.Connect(scr.NetAddress); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+func (s *server) consensusTipHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	WriteJSON(w, s.cm.TipState().Index)
 }
 
 func (s *server) txpoolTransactionsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
@@ -169,9 +165,7 @@ func (s *server) txpoolBroadcastHandler(w http.ResponseWriter, req *http.Request
 }
 
 func (s *server) walletBalanceHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	WriteJSON(w, WalletBalanceResponse{
-		Siacoins: s.w.Balance(),
-	})
+	WriteJSON(w, s.w.Balance())
 }
 
 func (s *server) walletAddressHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
@@ -529,7 +523,6 @@ func (s *server) contractsIDHandlerPUT(w http.ResponseWriter, req *http.Request,
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	WriteJSON(w, c)
 }
 
 func (s *server) contractsIDHandlerDELETE(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
@@ -643,6 +636,8 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 
 	mux.GET("/syncer/peers", srv.syncerPeersHandler)
 	mux.POST("/syncer/connect", srv.syncerConnectHandler)
+
+	mux.GET("/consensus/tip", srv.consensusTipHandler)
 
 	mux.GET("/txpool/transactions", srv.txpoolTransactionsHandler)
 	mux.POST("/txpool/broadcast", srv.txpoolBroadcastHandler)

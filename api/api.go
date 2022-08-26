@@ -8,21 +8,6 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// A SyncerPeer is a unique peer that is being used by the syncer.
-type SyncerPeer struct {
-	NetAddress string `json:"netAddress"`
-}
-
-// A SyncerConnectRequest requests that the syncer connect to a peer.
-type SyncerConnectRequest struct {
-	NetAddress string `json:"netAddress"`
-}
-
-// WalletBalanceResponse is the response to /wallet/balance.
-type WalletBalanceResponse struct {
-	Siacoins types.Currency `json:"siacoins"`
-}
-
 // WalletFundRequest is the request type for /wallet/fund.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`
