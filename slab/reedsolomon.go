@@ -47,6 +47,11 @@ func (rsc RSCode) Encode(data []byte, shards [][]byte) {
 // shards must have the same capacity as a normal shard, but a length of
 // zero.
 func (rsc RSCode) Reconstruct(shards [][]byte) error {
+	for i := range shards {
+		if cap(shards[i]) != cap(shards[0]) {
+			panic("all shards must have same capacity")
+		}
+	}
 	return rsc.enc.Reconstruct(shards)
 }
 
@@ -114,6 +119,19 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, skip, writeLen int) error {
 	return nil
 }
 
+// EncodeSlab encodes slab data into sector-sized shards.
+func EncodeSlab(s Slab, buf []byte, shards [][]byte) {
+	for i := range shards {
+		if cap(shards[i]) < rhpv2.SectorSize {
+			shards[i] = make([]byte, 0, rhpv2.SectorSize)
+		}
+		shards[i] = shards[i][:rhpv2.SectorSize]
+	}
+	rsc := NewRSCode(s.MinShards, uint8(len(shards)))
+	rsc.Encode(buf, shards)
+	s.Key.EncryptShards(shards)
+}
+
 // RecoverSlab recovers a slice of slab data from the supplied shards.
 func RecoverSlab(w io.Writer, s Slice, shards [][]byte) error {
 	minChunkSize := (rhpv2.LeafSize * uint32(s.MinShards))
@@ -122,4 +140,15 @@ func RecoverSlab(w io.Writer, s Slice, shards [][]byte) error {
 	s.Key.DecryptShards(shards, offset)
 	rsc := NewRSCode(s.MinShards, uint8(len(shards)))
 	return rsc.Recover(w, shards, int(skip), int(s.Length))
+}
+
+// ReconstructSlab reconstructs the missing shards of a slab.
+func ReconstructSlab(s Slab, shards [][]byte) error {
+	s.Key.DecryptShards(shards, 0)
+	rsc := NewRSCode(s.MinShards, uint8(len(s.Shards)))
+	if err := rsc.Reconstruct(shards); err != nil {
+		return err
+	}
+	s.Key.EncryptShards(shards)
+	return nil
 }

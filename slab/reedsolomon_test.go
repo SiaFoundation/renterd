@@ -65,7 +65,8 @@ func TestReedSolomon(t *testing.T) {
 	shards = encodeAlloc(rsc, data)
 	// delete a random shard
 	partialShards = append([][]byte(nil), shards...)
-	partialShards[frand.Intn(len(partialShards))] = nil
+	i := frand.Intn(len(partialShards))
+	partialShards[i] = partialShards[i][:0]
 	// reconstruct should fail
 	if err := rsc.Reconstruct(partialShards); err == nil {
 		t.Error("Reconstruct should have failed with missing shard")

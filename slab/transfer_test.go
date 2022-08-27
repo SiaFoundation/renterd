@@ -74,24 +74,22 @@ func TestSlabs(t *testing.T) {
 
 	// migrate to 5 new hosts
 	for i := 0; i < 5; i++ {
-		hs.AddHost()
-	}
-	rsc := slab.NewRSCode(3, 10)
-	shards := make([][]byte, 10)
-	for i := range shards {
-		shards[i] = make([]byte, 0, rhpv2.SectorSize)
-	}
-	rsc.Encode(data, shards)
-	for i := range shards {
-		if i < 5 {
-			shards[i] = nil
-		} else {
-			shards[i] = shards[i][:rhpv2.SectorSize]
+		for h := range hs.Hosts {
+			delete(hs.Hosts, h)
+			break
 		}
 	}
-	ssm := slab.SerialSlabMigrator{Hosts: hs.Uploaders()}
+	for i := 0; i < 5; i++ {
+		hs.AddHost()
+	}
+	from := hs.Downloaders()
+	to := hs.Uploaders()
+	ssm := slab.SerialSlabMigrator{
+		From: from,
+		To:   to,
+	}
 	old := fmt.Sprint(slabs[0])
-	if err := ssm.MigrateSlab(&slabs[0], shards); err != nil {
+	if err := ssm.MigrateSlab(&slabs[0]); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(slabs[0]) == old {
@@ -99,7 +97,11 @@ func TestSlabs(t *testing.T) {
 	}
 	checkDownload(0, 0)
 	checkDownload(0, 1)
+	checkDownload(rhpv2.LeafSize*10, rhpv2.LeafSize*20)
+	checkDownload(0, len(data)/2)
 	checkDownload(0, len(data))
+	checkDownload(len(data)/2, len(data)/2)
+	checkDownload(84923, len(data[84923:])-53219)
 
 	// delete
 	ssd := slab.SerialSlabsDeleter{Hosts: hs.Deleters()}
