@@ -243,7 +243,7 @@ type SerialSlabMigrator struct {
 
 // MigrateSlab implements Migrator.
 func (ssd SerialSlabMigrator) MigrateSlab(s *Slab, shards [][]byte) error {
-	var hosts []consensus.PublicKey
+	hosts := make([]consensus.PublicKey, 0, len(shards))
 outer:
 	for hostKey := range ssd.Hosts {
 		for _, sector := range s.Shards {
