@@ -89,16 +89,13 @@ func TestSlabs(t *testing.T) {
 	}
 	from := hs.Downloaders()
 	to := hs.Uploaders()
-	ssm := slab.SerialSlabMigrator{
-		From: from,
-		To:   to,
-	}
-	old := fmt.Sprint(slabs[0])
-	if err := ssm.MigrateSlab(&slabs[0]); err != nil {
+	ssm := slab.SerialSlabsMigrator{Migrator: slab.SerialSlabMigrator{From: from, To: to}}
+	old := fmt.Sprint(slabs)
+	if err := ssm.MigrateSlabs(slabs); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(slabs[0]) == old {
-		t.Error("no change to slab after migration")
+	if fmt.Sprint(slabs) == old {
+		t.Error("no change to slabs after migration")
 	}
 	checkDownload(0, 0)
 	checkDownload(0, 1)
