@@ -129,7 +129,7 @@ func (ssu SerialSlabsUploader) UploadSlabs(r io.Reader, m, n uint8) ([]Slab, err
 			MinShards: m,
 		}
 		EncodeSlab(s, buf, shards)
-		s.Key.EncryptShards(shards)
+		s.Encrypt(shards)
 		s.Shards, err = ssu.Uploader.UploadSlab(shards)
 		if err != nil {
 			return nil, err
@@ -192,8 +192,7 @@ func (ssd SerialSlabsDownloader) DownloadSlabs(w io.Writer, slabs []Slice, offse
 		if err != nil {
 			return err
 		}
-		offset, _ := ss.SectorRegion()
-		ss.Key.DecryptShards(shards, offset)
+		ss.Decrypt(shards)
 		if err := RecoverSlab(w, ss, shards); err != nil {
 			return err
 		}
@@ -240,15 +239,16 @@ type SerialSlabMigrator struct {
 
 // MigrateSlab implements Migrator.
 func (ssd SerialSlabMigrator) MigrateSlab(s *Slab) error {
-	shards, err := SerialSlabDownloader{ssd.From}.DownloadSlab(Slice{*s, 0, uint32(s.MinShards) * rhpv2.SectorSize})
+	ss := Slice{*s, 0, uint32(s.MinShards) * rhpv2.SectorSize}
+	shards, err := SerialSlabDownloader{ssd.From}.DownloadSlab(ss)
 	if err != nil {
 		return err
 	}
-	s.Key.DecryptShards(shards, 0)
+	ss.Decrypt(shards)
 	if err := ReconstructSlab(*s, shards); err != nil {
 		return err
 	}
-	s.Key.EncryptShards(shards)
+	s.Encrypt(shards)
 
 	hosts := make([]consensus.PublicKey, 0, len(ssd.To))
 	for hostKey := range ssd.To {
