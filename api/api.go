@@ -150,3 +150,11 @@ type SlabsDeleteRequest struct {
 	Slabs     []slab.Slab `json:"slabs"`
 	Contracts []Contract  `json:"contracts"`
 }
+
+// SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
+type SlabsMigrateRequest struct {
+	Slabs         []slab.Slab `json:"slabs"`
+	From          []Contract  `json:"from"`
+	To            []Contract  `json:"to"`
+	CurrentHeight uint64      `json:"currentHeight"`
+}

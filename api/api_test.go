@@ -98,18 +98,23 @@ type mockSlabMover struct {
 }
 
 func (sm mockSlabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) ([]slab.Slab, error) {
-	ssu := slab.SerialSlabsUploader{SlabUploader: slab.SerialSlabUploader{Hosts: sm.hs.Uploaders()}}
+	ssu := slab.SerialSlabsUploader{Uploader: slab.SerialSlabUploader{Hosts: sm.hs.Uploaders()}}
 	return ssu.UploadSlabs(r, m, n)
 }
 
 func (sm mockSlabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []api.Contract) error {
-	ssd := slab.SerialSlabsDownloader{SlabDownloader: slab.SerialSlabDownloader{Hosts: sm.hs.Downloaders()}}
+	ssd := slab.SerialSlabsDownloader{Downloader: slab.SerialSlabDownloader{Hosts: sm.hs.Downloaders()}}
 	return ssd.DownloadSlabs(w, slabs, offset, length)
 }
 
 func (sm mockSlabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) error {
 	ssd := slab.SerialSlabsDeleter{Hosts: sm.hs.Deleters()}
 	return ssd.DeleteSlabs(slabs)
+}
+
+func (sm mockSlabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []api.Contract) error {
+	ssm := slab.SerialSlabsMigrator{Migrator: slab.SerialSlabMigrator{From: sm.hs.Downloaders(), To: sm.hs.Uploaders()}}
+	return ssm.MigrateSlabs(slabs)
 }
 
 type node struct {

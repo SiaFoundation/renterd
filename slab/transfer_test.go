@@ -20,7 +20,7 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hs.AddHost()
 	}
-	ssu := slab.SerialSlabsUploader{SlabUploader: slab.SerialSlabUploader{Hosts: hs.Uploaders()}}
+	ssu := slab.SerialSlabsUploader{Uploader: slab.SerialSlabUploader{Hosts: hs.Uploaders()}}
 	slabs, err := ssu.UploadSlabs(bytes.NewReader(data), 3, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestSlabs(t *testing.T) {
 	checkDownload := func(offset, length int) {
 		t.Helper()
 		var buf bytes.Buffer
-		ssd := slab.SerialSlabsDownloader{SlabDownloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
+		ssd := slab.SerialSlabsDownloader{Downloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
 		if err := ssd.DownloadSlabs(&buf, ss, int64(offset), int64(length)); err != nil {
 			t.Error(err)
 			return
@@ -45,10 +45,15 @@ func TestSlabs(t *testing.T) {
 		exp := data[offset:][:length]
 		got := buf.Bytes()
 		if !bytes.Equal(got, exp) {
-			t.Errorf("download(%v, %v):\nexpected: %x...%x (%v)\ngot:      %x...%x (%v)",
-				offset, length,
-				exp[:20], exp[len(exp)-20:], len(exp),
-				got[:20], got[len(got)-20:], len(got))
+			if len(got) > 20 {
+				t.Errorf("download(%v, %v):\nexpected: %x...%x (%v)\ngot:      %x...%x (%v)",
+					offset, length,
+					exp[:20], exp[len(exp)-20:], len(exp),
+					got[:20], got[len(got)-20:], len(got))
+			} else {
+				t.Errorf("download(%v, %v):\nexpected: %x (%v)\ngot:      %x (%v)",
+					offset, length, exp, len(exp), got, len(got))
+			}
 		}
 	}
 	checkDownload(0, 0)
@@ -62,7 +67,7 @@ func TestSlabs(t *testing.T) {
 	checkDownloadFail := func(offset, length int) {
 		t.Helper()
 		var buf bytes.Buffer
-		ssd := slab.SerialSlabsDownloader{SlabDownloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
+		ssd := slab.SerialSlabsDownloader{Downloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
 		if err := ssd.DownloadSlabs(&buf, ss, int64(offset), int64(length)); err == nil {
 			t.Error("expected error, got nil")
 		}

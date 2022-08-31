@@ -36,7 +36,7 @@ func TestMultipleObjects(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hs.AddHost()
 	}
-	ssu := slab.SerialSlabsUploader{SlabUploader: slab.SerialSlabUploader{Hosts: hs.Uploaders()}}
+	ssu := slab.SerialSlabsUploader{Uploader: slab.SerialSlabUploader{Hosts: hs.Uploaders()}}
 	slabs, err := ssu.UploadSlabs(r, 3, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestMultipleObjects(t *testing.T) {
 	checkDownload := func(data []byte, o object.Object, offset, length int) {
 		t.Helper()
 		var buf bytes.Buffer
-		ssd := slab.SerialSlabsDownloader{SlabDownloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
+		ssd := slab.SerialSlabsDownloader{Downloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
 		if err := ssd.DownloadSlabs(o.Key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length)); err != nil {
 			t.Error(err)
 			return

@@ -108,7 +108,7 @@ func (ssd SerialSlabDownloader) DownloadSlab(s Slice) ([][]byte, error) {
 
 // A SerialSlabsUploader uploads slabs one at a time.
 type SerialSlabsUploader struct {
-	SlabUploader Uploader
+	Uploader Uploader
 }
 
 // UploadSlabs uploads slabs read from the provided Reader.
@@ -129,7 +129,7 @@ func (ssu SerialSlabsUploader) UploadSlabs(r io.Reader, m, n uint8) ([]Slab, err
 			MinShards: m,
 		}
 		EncodeSlab(s, buf, shards)
-		s.Shards, err = ssu.SlabUploader.UploadSlab(shards)
+		s.Shards, err = ssu.Uploader.UploadSlab(shards)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +174,7 @@ func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
 
 // A SerialSlabsDownloader downloads slabs one at a time.
 type SerialSlabsDownloader struct {
-	SlabDownloader Downloader
+	Downloader Downloader
 }
 
 // DownloadSlabs downloads data from the supplied slabs.
@@ -187,7 +187,7 @@ func (ssd SerialSlabsDownloader) DownloadSlabs(w io.Writer, slabs []Slice, offse
 
 	slabs = slabsForDownload(slabs, offset, length)
 	for _, ss := range slabs {
-		shards, err := ssd.SlabDownloader.DownloadSlab(ss)
+		shards, err := ssd.Downloader.DownloadSlab(ss)
 		if err != nil {
 			return err
 		}
@@ -281,6 +281,21 @@ func (ssd SerialSlabMigrator) MigrateSlab(s *Slab) error {
 		}
 		s.Shards[i], err = migrate(shard)
 		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// A SerialSlabsMigrator migrates slabs one at a time.
+type SerialSlabsMigrator struct {
+	Migrator Migrator
+}
+
+// MigrateSlabs migrates the provided slabs.
+func (ssd SerialSlabsMigrator) MigrateSlabs(slabs []Slab) error {
+	for i := range slabs {
+		if err := ssd.Migrator.MigrateSlab(&slabs[i]); err != nil {
 			return err
 		}
 	}

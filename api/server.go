@@ -86,6 +86,7 @@ type (
 		UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) ([]slab.Slab, error)
 		DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []Contract) error
 		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) error
+		MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []Contract) error
 	}
 
 	// An ObjectStore stores objects.
@@ -587,6 +588,19 @@ func (s *server) slabsDownloadHandler(w http.ResponseWriter, req *http.Request, 
 	}
 }
 
+func (s *server) slabsMigrateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var smr SlabsMigrateRequest
+	if err := json.NewDecoder(req.Body).Decode(&smr); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	err := s.sm.MigrateSlabs(req.Context(), smr.Slabs, smr.CurrentHeight, smr.From, smr.To)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 func (s *server) slabsDeleteHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var sdr SlabsDeleteRequest
 	if err := json.NewDecoder(req.Body).Decode(&sdr); err != nil {
@@ -685,7 +699,7 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 
 	mux.POST("/slabs/upload", srv.slabsUploadHandler)
 	mux.POST("/slabs/download", srv.slabsDownloadHandler)
-	//mux.POST("/slabs/migrate", srv.slabsMigrateHandler)
+	mux.POST("/slabs/migrate", srv.slabsMigrateHandler)
 	mux.POST("/slabs/delete", srv.slabsDeleteHandler)
 
 	mux.GET("/objects/*key", srv.objectsKeyHandlerGET)
