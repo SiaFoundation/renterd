@@ -152,6 +152,37 @@ func (pk PublicKey) MarshalJSON() ([]byte, error) { return marshalJSONHex("ed255
 func (pk *PublicKey) UnmarshalJSON(b []byte) error { return unmarshalJSONHex(pk[:], "ed25519", b) }
 
 // String implements fmt.Stringer.
+func (pk PrivateKey) String() string { return stringerHex("key", pk[:ed25519.SeedSize]) }
+
+// MarshalText implements encoding.TextMarshaler.
+func (pk PrivateKey) MarshalText() ([]byte, error) { return marshalHex("key", pk[:ed25519.SeedSize]) }
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (pk *PrivateKey) UnmarshalText(b []byte) error {
+	seed := make([]byte, ed25519.SeedSize)
+	if err := unmarshalHex(seed, "key", b); err != nil {
+		return err
+	}
+	*pk = NewPrivateKeyFromSeed(seed)
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (pk PrivateKey) MarshalJSON() ([]byte, error) {
+	return marshalJSONHex("key", pk[:ed25519.SeedSize])
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (pk *PrivateKey) UnmarshalJSON(b []byte) error {
+	seed := make([]byte, ed25519.SeedSize)
+	if err := unmarshalJSONHex(seed, "key", b); err != nil {
+		return err
+	}
+	*pk = NewPrivateKeyFromSeed(seed)
+	return nil
+}
+
+// String implements fmt.Stringer.
 func (sig Signature) String() string { return stringerHex("sig", sig[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
