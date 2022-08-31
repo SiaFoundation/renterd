@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -101,8 +102,16 @@ type (
 // WriteJSON writes the JSON encoded object to the http response.
 func WriteJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	// encode nil slices as [] and nil maps as {} (instead of null)
+	if val := reflect.ValueOf(v); val.Kind() == reflect.Slice && val.Len() == 0 {
+		w.Write([]byte("[]\n"))
+		return
+	} else if val.Kind() == reflect.Map && val.Len() == 0 {
+		w.Write([]byte("{}\n"))
+		return
+	}
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
+	enc.SetIndent("", "\t")
 	enc.Encode(v)
 }
 
