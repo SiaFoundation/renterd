@@ -2,12 +2,14 @@ package wallet
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
+	"lukechampine.com/frand"
 )
 
 // StandardUnlockConditions returns the standard unlock conditions for a single
@@ -131,6 +133,9 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 	if err != nil {
 		return nil, err
 	}
+	// choose outputs randomly
+	frand.Shuffle(len(utxos), reflect.Swapper(utxos))
+
 	var outputSum types.Currency
 	var fundingElements []SiacoinElement
 	for _, sce := range utxos {
