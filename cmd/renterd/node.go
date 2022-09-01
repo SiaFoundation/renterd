@@ -57,7 +57,9 @@ func newNode(addr, dir string, walletKey consensus.PrivateKey) (*node, error) {
 	cm, errCh := mconsensus.New(g, false, consensusDir)
 	select {
 	case err := <-errCh:
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	default:
 		go func() {
 			if err := <-errCh; err != nil {
