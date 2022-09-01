@@ -266,6 +266,85 @@ func (s *server) walletDiscardHandler(w http.ResponseWriter, req *http.Request, 
 	s.w.ReleaseInputs(txn)
 }
 
+func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	var rpfr RHPPrepareFormRequest
+	if err := json.NewDecoder(req.Body).Decode(&rpfr); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
+	cost := rhpv2.ContractFormationCost(fc, rpfr.HostSettings.ContractPrice)
+	txn := types.Transaction{
+		FileContracts: []types.FileContract{fc},
+	}
+	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	_, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	rhpv2.MinimizeContractSignatures(&txn)
+	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	parents, err := s.tp.UnconfirmedParents(txn)
+	if err != nil {
+		s.w.ReleaseInputs(txn)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	WriteJSON(w, append(parents, txn))
+}
+
+func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	var rprr RHPPrepareRenewRequest
+	if err := json.NewDecoder(req.Body).Decode(&rprr); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
+	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
+	finalPayment := rprr.HostSettings.BaseRPCPrice
+	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
+		finalPayment = rprr.Contract.ValidRenterPayout()
+	}
+	txn := types.Transaction{
+		FileContracts: []types.FileContract{fc},
+	}
+	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	_, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	rhpv2.MinimizeContractSignatures(&txn)
+	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	parents, err := s.tp.UnconfirmedParents(txn)
+	if err != nil {
+		s.w.ReleaseInputs(txn)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	WriteJSON(w, WalletPrepareRenewResponse{
+		TransactionSet: append(parents, txn),
+		FinalPayment:   finalPayment,
+	})
+}
+
 func (s *server) hostsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	// TODO: support filtering via query params
 	hosts, err := s.hdb.SelectHosts(-1, func(hostdb.Host) bool { return true })
@@ -685,6 +764,8 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 	mux.POST("/wallet/fund", srv.walletFundHandler)
 	mux.POST("/wallet/sign", srv.walletSignHandler)
 	mux.POST("/wallet/discard", srv.walletDiscardHandler)
+	mux.POST("/wallet/prepare/form", srv.walletPrepareFormHandler)
+	mux.POST("/wallet/prepare/renew", srv.walletPrepareRenewHandler)
 
 	mux.GET("/hosts", srv.hostsHandler)
 	mux.GET("/hosts/:pubkey", srv.hostsPubkeyHandler)

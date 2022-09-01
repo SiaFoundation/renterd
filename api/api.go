@@ -27,6 +27,12 @@ type WalletSignRequest struct {
 	ToSign      []types.OutputID  `json:"toSign"`
 }
 
+// WalletPrepareRenewResponse is the response type for /wallet/prepare/renew.
+type WalletPrepareRenewResponse struct {
+	TransactionSet []types.Transaction `json:"transactionSet"`
+	FinalPayment   types.Currency      `json:"finalPayment"`
+}
+
 // An RHPScanRequest contains the address and pubkey of the host to scan.
 type RHPScanRequest struct {
 	HostKey consensus.PublicKey `json:"hostKey"`

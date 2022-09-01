@@ -143,6 +143,38 @@ func (c *Client) WalletDiscard(txn types.Transaction) error {
 	return c.post("/wallet/discard", txn, nil)
 }
 
+// WalletPrepareForm funds and signs a contract transaction.
+func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
+	req := RHPPrepareFormRequest{
+		RenterKey:      renterKey,
+		HostKey:        hostKey,
+		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
+		HostCollateral: hostCollateral,
+		EndHeight:      endHeight,
+		HostSettings:   hostSettings,
+	}
+	err = c.post("/wallet/prepare/form", req, &txns)
+	return
+}
+
+// WalletPrepareRenew funds and signs a contract renewal transaction.
+func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
+	req := RHPPrepareRenewRequest{
+		Contract:       contract,
+		RenterKey:      renterKey,
+		HostKey:        hostKey,
+		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
+		HostCollateral: hostCollateral,
+		EndHeight:      endHeight,
+		HostSettings:   hostSettings,
+	}
+	var resp WalletPrepareRenewResponse
+	err := c.post("/wallet/prepare/renew", req, &resp)
+	return resp.TransactionSet, resp.FinalPayment, err
+}
+
 // Hosts returns all hosts known to the server.
 func (c *Client) Hosts() (hosts []hostdb.Host, err error) {
 	err = c.get("/hosts", &hosts)
