@@ -23,8 +23,9 @@ type WalletFundResponse struct {
 
 // WalletSignRequest is the request type for /wallet/sign.
 type WalletSignRequest struct {
-	Transaction types.Transaction `json:"transaction"`
-	ToSign      []types.OutputID  `json:"toSign"`
+	Transaction   types.Transaction   `json:"transaction"`
+	ToSign        []types.OutputID    `json:"toSign"`
+	CoveredFields types.CoveredFields `json:"coveredFields"`
 }
 
 // WalletPrepareRenewResponse is the response type for /wallet/prepare/renew.

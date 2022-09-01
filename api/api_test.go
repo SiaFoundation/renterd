@@ -185,8 +185,7 @@ func TestObject(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rhpv2.MinimizeContractSignatures(&txn)
-		if err := c.WalletSign(&txn, toSign); err != nil {
+		if err := c.WalletSign(&txn, toSign, wallet.ExplicitCoveredFields(txn)); err != nil {
 			t.Fatal(err)
 		}
 		c, _, err := c.RHPForm(renterKey, hostKey, hostIP, append(parents, txn))

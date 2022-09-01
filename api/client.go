@@ -129,10 +129,11 @@ func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]ty
 }
 
 // WalletSign signs txn using the wallet's private key.
-func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID) error {
+func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error {
 	req := WalletSignRequest{
-		Transaction: *txn,
-		ToSign:      toSign,
+		Transaction:   *txn,
+		ToSign:        toSign,
+		CoveredFields: cf,
 	}
 	return c.post("/wallet/sign", req, txn)
 }

@@ -39,6 +39,42 @@ func StandardTransactionSignature(id types.OutputID) types.TransactionSignature 
 	}
 }
 
+// ExplicitCoveredFields returns a CoveredFields that covers all elements
+// present in txn.
+func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
+	for i := range txn.SiacoinInputs {
+		cf.SiacoinInputs = append(cf.SiacoinInputs, uint64(i))
+	}
+	for i := range txn.SiacoinOutputs {
+		cf.SiacoinOutputs = append(cf.SiacoinOutputs, uint64(i))
+	}
+	for i := range txn.FileContracts {
+		cf.FileContracts = append(cf.FileContracts, uint64(i))
+	}
+	for i := range txn.FileContractRevisions {
+		cf.FileContractRevisions = append(cf.FileContractRevisions, uint64(i))
+	}
+	for i := range txn.StorageProofs {
+		cf.StorageProofs = append(cf.StorageProofs, uint64(i))
+	}
+	for i := range txn.SiafundInputs {
+		cf.SiafundInputs = append(cf.SiafundInputs, uint64(i))
+	}
+	for i := range txn.SiafundOutputs {
+		cf.SiafundOutputs = append(cf.SiafundOutputs, uint64(i))
+	}
+	for i := range txn.MinerFees {
+		cf.MinerFees = append(cf.MinerFees, uint64(i))
+	}
+	for i := range txn.ArbitraryData {
+		cf.ArbitraryData = append(cf.ArbitraryData, uint64(i))
+	}
+	for i := range txn.TransactionSignatures {
+		cf.TransactionSignatures = append(cf.TransactionSignatures, uint64(i))
+	}
+	return
+}
+
 // A SiacoinElement is a SiacoinOutput along with its ID.
 type SiacoinElement struct {
 	types.SiacoinOutput
@@ -179,20 +215,15 @@ func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
 	}
 }
 
-// SignTransaction adds a signature to each of the specified inputs. If an input
-// does not already have a corresponding TransactionSignature, one will be
-// appended.
-func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error {
+// SignTransaction adds a signature to each of the specified inputs.
+func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error {
 	for _, id := range toSign {
-		var i int
-		for i = range txn.TransactionSignatures {
-			if txn.TransactionSignatures[i].ParentID == crypto.Hash(id) {
-				break
-			}
-		}
-		if i == len(txn.TransactionSignatures) {
-			txn.TransactionSignatures = append(txn.TransactionSignatures, StandardTransactionSignature(id))
-		}
+		i := len(txn.TransactionSignatures)
+		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
+			ParentID:       crypto.Hash(id),
+			CoveredFields:  cf,
+			PublicKeyIndex: 0,
+		})
 		sig := w.priv.SignHash(cs.InputSigHash(*txn, i))
 		txn.TransactionSignatures[i].Signature = sig[:]
 	}

@@ -37,31 +37,6 @@ outer:
 	return nil
 }
 
-// MinimizeContractSignatures changes the TransactionSignatures of txn to only
-// cover the data already present in the transaction. Normally, transaction
-// signatures use the 'WholeTransaction' flag, which means that the signature
-// covers all transaction data. But when negotiating a new contract, the host
-// will add inputs and outputs to the contract transaction, which will
-// invalidate any existing WholeTransaction signatures.
-func MinimizeContractSignatures(txn *types.Transaction) {
-	var cf types.CoveredFields
-	for i := range txn.SiacoinInputs {
-		cf.SiacoinInputs = append(cf.SiacoinInputs, uint64(i))
-	}
-	for i := range txn.SiacoinOutputs {
-		cf.SiacoinOutputs = append(cf.SiacoinOutputs, uint64(i))
-	}
-	for i := range txn.FileContracts {
-		cf.FileContracts = append(cf.FileContracts, uint64(i))
-	}
-	for i := range txn.MinerFees {
-		cf.MinerFees = append(cf.MinerFees, uint64(i))
-	}
-	for i := range txn.TransactionSignatures {
-		txn.TransactionSignatures[i].CoveredFields = cf
-	}
-}
-
 func hashRevision(rev types.FileContractRevision) consensus.Hash256 {
 	or := (*objFileContractRevision)(&rev)
 	var b objBuffer

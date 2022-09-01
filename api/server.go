@@ -53,7 +53,7 @@ type (
 		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
 		ReleaseInputs(txn types.Transaction)
-		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error
+		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
 	}
 
 	// A HostDB stores information about hosts.
@@ -227,7 +227,7 @@ func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ h
 	txn := wfr.Transaction
 	fee := s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
 	txn.MinerFees = []types.Currency{fee}
-	_, err := s.w.FundTransaction(s.cm.TipState(), &wfr.Transaction, wfr.Amount.Add(txn.MinerFees[0]), s.tp.Transactions())
+	toSign, err := s.w.FundTransaction(s.cm.TipState(), &wfr.Transaction, wfr.Amount.Add(txn.MinerFees[0]), s.tp.Transactions())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -240,6 +240,7 @@ func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ h
 	}
 	WriteJSON(w, WalletFundResponse{
 		Transaction: txn,
+		ToSign:      toSign,
 		DependsOn:   parents,
 	})
 }
@@ -250,7 +251,7 @@ func (s *server) walletSignHandler(w http.ResponseWriter, req *http.Request, _ h
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.w.SignTransaction(s.cm.TipState(), &wsr.Transaction, wsr.ToSign); err != nil {
+	if err := s.w.SignTransaction(s.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -288,8 +289,8 @@ func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Reque
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	rhpv2.MinimizeContractSignatures(&txn)
-	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign); err != nil {
+	cf := wallet.ExplicitCoveredFields(txn)
+	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -328,8 +329,8 @@ func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	rhpv2.MinimizeContractSignatures(&txn)
-	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign); err != nil {
+	cf := wallet.ExplicitCoveredFields(txn)
+	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
