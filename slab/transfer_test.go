@@ -20,8 +20,7 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hs.AddHost()
 	}
-	ssu := slab.SerialSlabsUploader{Uploader: slab.SerialSlabUploader{Hosts: hs.Uploaders()}}
-	slabs, err := ssu.UploadSlabs(bytes.NewReader(data), 3, 10)
+	slabs, err := slab.UploadSlabs(bytes.NewReader(data), 3, 10, hs.Uploaders())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(slabs) != 1 {
@@ -37,8 +36,7 @@ func TestSlabs(t *testing.T) {
 	checkDownload := func(offset, length int) {
 		t.Helper()
 		var buf bytes.Buffer
-		ssd := slab.SerialSlabsDownloader{Downloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
-		if err := ssd.DownloadSlabs(&buf, ss, int64(offset), int64(length)); err != nil {
+		if err := slab.DownloadSlabs(&buf, ss, int64(offset), int64(length), hs.Downloaders()); err != nil {
 			t.Error(err)
 			return
 		}
@@ -67,8 +65,7 @@ func TestSlabs(t *testing.T) {
 	checkDownloadFail := func(offset, length int) {
 		t.Helper()
 		var buf bytes.Buffer
-		ssd := slab.SerialSlabsDownloader{Downloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
-		if err := ssd.DownloadSlabs(&buf, ss, int64(offset), int64(length)); err == nil {
+		if err := slab.DownloadSlabs(&buf, ss, int64(offset), int64(length), hs.Downloaders()); err == nil {
 			t.Error("expected error, got nil")
 		}
 	}
@@ -84,14 +81,13 @@ func TestSlabs(t *testing.T) {
 			break
 		}
 	}
+	from := hs.Downloaders()
 	for i := 0; i < 5; i++ {
 		hs.AddHost()
 	}
-	from := hs.Downloaders()
 	to := hs.Uploaders()
-	ssm := slab.SerialSlabsMigrator{Migrator: slab.SerialSlabMigrator{From: from, To: to}}
 	old := fmt.Sprint(slabs)
-	if err := ssm.MigrateSlabs(slabs); err != nil {
+	if err := slab.MigrateSlabs(slabs, from, to); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(slabs) == old {
@@ -106,8 +102,7 @@ func TestSlabs(t *testing.T) {
 	checkDownload(84923, len(data[84923:])-53219)
 
 	// delete
-	ssd := slab.SerialSlabsDeleter{Hosts: hs.Deleters()}
-	if err := ssd.DeleteSlabs(slabs); err != nil {
+	if err := slab.DeleteSlabs(slabs, hs.Deleters()); err != nil {
 		t.Fatal(err)
 	}
 

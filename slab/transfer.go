@@ -24,36 +24,13 @@ type (
 	SectorDeleter interface {
 		DeleteSectors(roots []consensus.Hash256) error
 	}
-
-	// An Uploader uploads slab data.
-	Uploader interface {
-		UploadSlab(shards [][]byte) ([]Sector, error)
-	}
-
-	// A Downloader downloads slab data. Sector data can only be downloaded in
-	// multiplies of rhpv2.LeafSize, so if the offset and length of s are not
-	// leaf-aligned, the returned shards will contain unwanted bytes at the
-	// beginning and/or end.
-	Downloader interface {
-		DownloadSlab(s Slice) ([][]byte, error)
-	}
-
-	// A Migrator migrates slab data.
-	Migrator interface {
-		MigrateSlab(s *Slab) error
-	}
 )
 
-// A SerialSlabUploader uploads the shards comprising a slab one at a time.
-type SerialSlabUploader struct {
-	Hosts map[consensus.PublicKey]SectorUploader
-}
-
-// UploadSlab implements Uploader.
-func (ssu SerialSlabUploader) UploadSlab(shards [][]byte) ([]Sector, error) {
+// serialUploadSlab uploads the provided shards one at a time.
+func serialUploadSlab(shards [][]byte, hosts map[consensus.PublicKey]SectorUploader) ([]Sector, error) {
 	var sectors []Sector
 	var errs HostErrorSet
-	for hostKey, su := range ssu.Hosts {
+	for hostKey, su := range hosts {
 		root, err := su.UploadSector((*[rhpv2.SectorSize]byte)(shards[len(sectors)]))
 		if err != nil {
 			errs = append(errs, &HostError{hostKey, err})
@@ -73,46 +50,8 @@ func (ssu SerialSlabUploader) UploadSlab(shards [][]byte) ([]Sector, error) {
 	return sectors, nil
 }
 
-// A SerialSlabDownloader downloads the shards comprising a slab one at a time.
-type SerialSlabDownloader struct {
-	Hosts map[consensus.PublicKey]SectorDownloader
-}
-
-// DownloadSlab implements Downloader.
-func (ssd SerialSlabDownloader) DownloadSlab(s Slice) ([][]byte, error) {
-	offset, length := s.SectorRegion()
-	shards := make([][]byte, len(s.Shards))
-	rem := s.MinShards
-	var errs HostErrorSet
-	for i, sector := range s.Shards {
-		sd, ok := ssd.Hosts[sector.Host]
-		if !ok {
-			errs = append(errs, &HostError{sector.Host, errors.New("unknown host")})
-			continue
-		}
-		var buf bytes.Buffer
-		if err := sd.DownloadSector(&buf, sector.Root, offset, length); err != nil {
-			errs = append(errs, &HostError{sector.Host, err})
-			continue
-		}
-		shards[i] = buf.Bytes()
-		if rem--; rem == 0 {
-			break
-		}
-	}
-	if rem > 0 {
-		return nil, errs
-	}
-	return shards, nil
-}
-
-// A SerialSlabsUploader uploads slabs one at a time.
-type SerialSlabsUploader struct {
-	Uploader Uploader
-}
-
 // UploadSlabs uploads slabs read from the provided Reader.
-func (ssu SerialSlabsUploader) UploadSlabs(r io.Reader, m, n uint8) ([]Slab, error) {
+func UploadSlabs(r io.Reader, m, n uint8, hosts map[consensus.PublicKey]SectorUploader) ([]Slab, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	var slabs []Slab
@@ -130,20 +69,13 @@ func (ssu SerialSlabsUploader) UploadSlabs(r io.Reader, m, n uint8) ([]Slab, err
 		}
 		EncodeSlab(s, buf, shards)
 		s.Encrypt(shards)
-		s.Shards, err = ssu.Uploader.UploadSlab(shards)
+		s.Shards, err = serialUploadSlab(shards, hosts)
 		if err != nil {
 			return nil, err
 		}
 		slabs = append(slabs, s)
 	}
 	return slabs, nil
-}
-
-func slabsSize(slabs []Slice) (n int64) {
-	for _, ss := range slabs {
-		n += int64(ss.Length)
-	}
-	return
 }
 
 func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
@@ -173,14 +105,41 @@ func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
 	return slabs
 }
 
-// A SerialSlabsDownloader downloads slabs one at a time.
-type SerialSlabsDownloader struct {
-	Downloader Downloader
+// serialDownloadSlab downloads the shards comprising a slab one at a time.
+func serialDownloadSlab(s Slice, hosts map[consensus.PublicKey]SectorDownloader) ([][]byte, error) {
+	offset, length := s.SectorRegion()
+	shards := make([][]byte, len(s.Shards))
+	rem := s.MinShards
+	var errs HostErrorSet
+	for i, sector := range s.Shards {
+		sd, ok := hosts[sector.Host]
+		if !ok {
+			errs = append(errs, &HostError{sector.Host, errors.New("unknown host")})
+			continue
+		}
+		var buf bytes.Buffer
+		if err := sd.DownloadSector(&buf, sector.Root, offset, length); err != nil {
+			errs = append(errs, &HostError{sector.Host, err})
+			continue
+		}
+		shards[i] = buf.Bytes()
+		if rem--; rem == 0 {
+			break
+		}
+	}
+	if rem > 0 {
+		return nil, errs
+	}
+	return shards, nil
 }
 
 // DownloadSlabs downloads data from the supplied slabs.
-func (ssd SerialSlabsDownloader) DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64) error {
-	if offset < 0 || length < 0 || offset+length > slabsSize(slabs) {
+func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts map[consensus.PublicKey]SectorDownloader) error {
+	var slabsSize int64
+	for _, ss := range slabs {
+		slabsSize += int64(ss.Length)
+	}
+	if offset < 0 || length < 0 || offset+length > slabsSize {
 		return errors.New("requested range is out of bounds")
 	} else if length == 0 {
 		return nil
@@ -188,7 +147,7 @@ func (ssd SerialSlabsDownloader) DownloadSlabs(w io.Writer, slabs []Slice, offse
 
 	slabs = slabsForDownload(slabs, offset, length)
 	for _, ss := range slabs {
-		shards, err := ssd.Downloader.DownloadSlab(ss)
+		shards, err := serialDownloadSlab(ss, hosts)
 		if err != nil {
 			return err
 		}
@@ -200,13 +159,8 @@ func (ssd SerialSlabsDownloader) DownloadSlabs(w io.Writer, slabs []Slice, offse
 	return nil
 }
 
-// A SerialSlabDeleter deletes slabs one host at a time.
-type SerialSlabsDeleter struct {
-	Hosts map[consensus.PublicKey]SectorDeleter
-}
-
-// DeleteSlab implements Deleter.
-func (ssd SerialSlabsDeleter) DeleteSlabs(slabs []Slab) error {
+// DeleteSlab deletes a set of slabs from the provided hosts.
+func DeleteSlabs(slabs []Slab, hosts map[consensus.PublicKey]SectorDeleter) error {
 	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
@@ -215,7 +169,7 @@ func (ssd SerialSlabsDeleter) DeleteSlabs(slabs []Slab) error {
 	}
 	var errs HostErrorSet
 	for hostKey, roots := range rootsByHost {
-		sd, ok := ssd.Hosts[hostKey]
+		sd, ok := hosts[hostKey]
 		if !ok {
 			errs = append(errs, &HostError{hostKey, errors.New("unknown host")})
 			continue
@@ -231,16 +185,10 @@ func (ssd SerialSlabsDeleter) DeleteSlabs(slabs []Slab) error {
 	return nil
 }
 
-// A SerialSlabMigrator migrates the shards comprising a slab one at a time.
-type SerialSlabMigrator struct {
-	From map[consensus.PublicKey]SectorDownloader
-	To   map[consensus.PublicKey]SectorUploader
-}
-
-// MigrateSlab implements Migrator.
-func (ssd SerialSlabMigrator) MigrateSlab(s *Slab) error {
+// serialMigrateSlab migrates a slab one shard at a time.
+func serialMigrateSlab(s *Slab, from map[consensus.PublicKey]SectorDownloader, to map[consensus.PublicKey]SectorUploader) error {
 	ss := Slice{*s, 0, uint32(s.MinShards) * rhpv2.SectorSize}
-	shards, err := SerialSlabDownloader{ssd.From}.DownloadSlab(ss)
+	shards, err := serialDownloadSlab(ss, from)
 	if err != nil {
 		return err
 	}
@@ -250,8 +198,8 @@ func (ssd SerialSlabMigrator) MigrateSlab(s *Slab) error {
 	}
 	s.Encrypt(shards)
 
-	hosts := make([]consensus.PublicKey, 0, len(ssd.To))
-	for hostKey := range ssd.To {
+	hosts := make([]consensus.PublicKey, 0, len(to))
+	for hostKey := range to {
 		hosts = append(hosts, hostKey)
 	}
 	migrate := func(shard []byte) (Sector, error) {
@@ -259,7 +207,7 @@ func (ssd SerialSlabMigrator) MigrateSlab(s *Slab) error {
 		for len(hosts) > 0 {
 			hostKey := hosts[0]
 			hosts = hosts[1:]
-			root, err := ssd.To[hostKey].UploadSector((*[rhpv2.SectorSize]byte)(shard))
+			root, err := to[hostKey].UploadSector((*[rhpv2.SectorSize]byte)(shard))
 			if err != nil {
 				errs = append(errs, &HostError{hostKey, err})
 				continue
@@ -276,7 +224,7 @@ func (ssd SerialSlabMigrator) MigrateSlab(s *Slab) error {
 	}
 
 	for i, shard := range shards {
-		if ssd.To[s.Shards[i].Host] != nil {
+		if to[s.Shards[i].Host] != nil {
 			continue // already on a good host
 		}
 		s.Shards[i], err = migrate(shard)
@@ -287,15 +235,10 @@ func (ssd SerialSlabMigrator) MigrateSlab(s *Slab) error {
 	return nil
 }
 
-// A SerialSlabsMigrator migrates slabs one at a time.
-type SerialSlabsMigrator struct {
-	Migrator Migrator
-}
-
 // MigrateSlabs migrates the provided slabs.
-func (ssd SerialSlabsMigrator) MigrateSlabs(slabs []Slab) error {
+func MigrateSlabs(slabs []Slab, from map[consensus.PublicKey]SectorDownloader, to map[consensus.PublicKey]SectorUploader) error {
 	for i := range slabs {
-		if err := ssd.Migrator.MigrateSlab(&slabs[i]); err != nil {
+		if err := serialMigrateSlab(&slabs[i], from, to); err != nil {
 			return err
 		}
 	}

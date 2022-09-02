@@ -34,8 +34,7 @@ func (slabMover) withHostSet(ctx context.Context, contracts []api.Contract, fn f
 
 func (sm slabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (slabs []slab.Slab, err error) {
 	err = sm.withHostSet(ctx, contracts, func(hs *slab.HostSet) error {
-		ssu := slab.SerialSlabsUploader{Uploader: slab.SerialSlabUploader{Hosts: hs.Uploaders(currentHeight)}}
-		slabs, err = ssu.UploadSlabs(r, m, n)
+		slabs, err = slab.UploadSlabs(r, m, n, hs.Uploaders(currentHeight))
 		return err
 	})
 	return
@@ -43,15 +42,13 @@ func (sm slabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, cu
 
 func (sm slabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []api.Contract) error {
 	return sm.withHostSet(ctx, contracts, func(hs *slab.HostSet) error {
-		ssd := slab.SerialSlabsDownloader{Downloader: slab.SerialSlabDownloader{Hosts: hs.Downloaders()}}
-		return ssd.DownloadSlabs(w, slabs, offset, length)
+		return slab.DownloadSlabs(w, slabs, offset, length, hs.Downloaders())
 	})
 }
 
 func (sm slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) error {
 	return sm.withHostSet(ctx, contracts, func(hs *slab.HostSet) error {
-		ssd := slab.SerialSlabsDeleter{Hosts: hs.Deleters()}
-		return ssd.DeleteSlabs(slabs)
+		return slab.DeleteSlabs(slabs, hs.Deleters())
 	})
 }
 
@@ -79,6 +76,5 @@ func (sm slabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, current
 			err = ctx.Err()
 		}
 	}()
-	ssm := slab.SerialSlabsMigrator{Migrator: slab.SerialSlabMigrator{From: fromHS.Downloaders(), To: toHS.Uploaders(currentHeight)}}
-	return ssm.MigrateSlabs(slabs)
+	return slab.MigrateSlabs(slabs, fromHS.Downloaders(), toHS.Uploaders(currentHeight))
 }
