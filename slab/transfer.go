@@ -67,7 +67,7 @@ func UploadSlabs(r io.Reader, m, n uint8, hosts map[consensus.PublicKey]SectorUp
 			Key:       GenerateEncryptionKey(),
 			MinShards: m,
 		}
-		EncodeSlab(s, buf, shards)
+		s.Encode(buf, shards)
 		s.Encrypt(shards)
 		s.Shards, err = serialUploadSlab(shards, hosts)
 		if err != nil {
@@ -152,7 +152,7 @@ func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts map[c
 			return err
 		}
 		ss.Decrypt(shards)
-		if err := RecoverSlab(w, ss, shards); err != nil {
+		if err := ss.Recover(w, shards); err != nil {
 			return err
 		}
 	}
@@ -193,7 +193,7 @@ func serialMigrateSlab(s *Slab, from map[consensus.PublicKey]SectorDownloader, t
 		return err
 	}
 	ss.Decrypt(shards)
-	if err := ReconstructSlab(*s, shards); err != nil {
+	if err := s.Reconstruct(shards); err != nil {
 		return err
 	}
 	s.Encrypt(shards)

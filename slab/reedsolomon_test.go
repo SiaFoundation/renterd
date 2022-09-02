@@ -10,8 +10,9 @@ import (
 )
 
 func checkRecover(s Slab, shards [][]byte, data []byte) bool {
+	ss := Slice{s, 0, uint32(len(data))}
 	var buf bytes.Buffer
-	if err := RecoverSlab(&buf, Slice{s, 0, uint32(len(data))}, shards); err != nil {
+	if err := ss.Recover(&buf, shards); err != nil {
 		return false
 	}
 	return bytes.Equal(buf.Bytes(), data)
@@ -22,7 +23,7 @@ func TestReedSolomon(t *testing.T) {
 	s := Slab{MinShards: 3, Shards: make([]Sector, 10)}
 	data := frand.Bytes(rhpv2.SectorSize * 3)
 	shards := make([][]byte, 10)
-	EncodeSlab(s, data, shards)
+	s.Encode(data, shards)
 
 	// delete 7 random shards
 	partialShards := make([][]byte, len(shards))
@@ -33,7 +34,7 @@ func TestReedSolomon(t *testing.T) {
 		partialShards[i] = nil
 	}
 	// reconstruct
-	if err := ReconstructSlab(s, partialShards); err != nil {
+	if err := s.Reconstruct(partialShards); err != nil {
 		t.Fatal(err)
 	}
 	for i := range shards {
@@ -82,14 +83,15 @@ func BenchmarkReedSolomon(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(data)))
 			for i := 0; i < b.N; i++ {
-				EncodeSlab(s, data, shards)
+				s.Encode(data, shards)
 			}
 		}
 	}
 
 	benchRecover := func(m, n, r uint8) func(*testing.B) {
 		s, data, shards := makeSlab(m, n)
-		EncodeSlab(s, data, shards)
+		s.Encode(data, shards)
+		ss := Slice{s, 0, uint32(len(data))}
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(data)))
@@ -97,7 +99,7 @@ func BenchmarkReedSolomon(b *testing.B) {
 				for j := range shards[:r] {
 					shards[j] = shards[j][:0]
 				}
-				if err := RecoverSlab(ioutil.Discard, Slice{s, 0, uint32(len(data))}, shards); err != nil {
+				if err := ss.Recover(ioutil.Discard, shards); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -106,7 +108,7 @@ func BenchmarkReedSolomon(b *testing.B) {
 
 	benchReconstruct := func(m, n, r uint8) func(*testing.B) {
 		s, data, shards := makeSlab(m, n)
-		EncodeSlab(s, data, shards)
+		s.Encode(data, shards)
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(shards[0])) * int64(r))
@@ -114,7 +116,7 @@ func BenchmarkReedSolomon(b *testing.B) {
 				for j := range shards[:r] {
 					shards[j] = shards[j][:0]
 				}
-				if err := ReconstructSlab(s, shards); err != nil {
+				if err := s.Reconstruct(shards); err != nil {
 					b.Fatal(err)
 				}
 			}

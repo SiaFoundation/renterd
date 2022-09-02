@@ -49,10 +49,9 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, skip, writeLen int) error {
 	return nil
 }
 
-// EncodeSlab encodes slab data into sector-sized shards. The supplied shards
-// should have a capacity of at least rhpv2.SectorSize, or they will be
-// reallocated.
-func EncodeSlab(s Slab, buf []byte, shards [][]byte) {
+// Encode encodes slab data into sector-sized shards. The supplied shards should
+// have a capacity of at least rhpv2.SectorSize, or they will be reallocated.
+func (s Slab) Encode(buf []byte, shards [][]byte) {
 	for i := range shards {
 		if cap(shards[i]) < rhpv2.SectorSize {
 			shards[i] = make([]byte, 0, rhpv2.SectorSize)
@@ -66,20 +65,10 @@ func EncodeSlab(s Slab, buf []byte, shards [][]byte) {
 	}
 }
 
-// RecoverSlab recovers a slice of slab data from the supplied shards.
-func RecoverSlab(w io.Writer, s Slice, shards [][]byte) error {
-	skip := s.Offset % (rhpv2.LeafSize * uint32(s.MinShards))
-	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
-	if err := rsc.ReconstructData(shards); err != nil {
-		return err
-	}
-	return stripedJoin(w, shards[:s.MinShards], int(skip), int(s.Length))
-}
-
-// ReconstructSlab reconstructs the missing shards of a slab. Missing shards
-// must have a len of zero. All shards should have a capacity of at least
+// Reconstruct reconstructs the missing shards of a slab. Missing shards must
+// have a len of zero. All shards should have a capacity of at least
 // rhpv2.SectorSize, or they will be reallocated.
-func ReconstructSlab(s Slab, shards [][]byte) error {
+func (s Slab) Reconstruct(shards [][]byte) error {
 	for i := range shards {
 		if len(shards[i]) != rhpv2.SectorSize && len(shards[i]) != 0 {
 			panic("shards must have a len of either 0 or rhpv2.SectorSize")
@@ -97,4 +86,14 @@ func ReconstructSlab(s Slab, shards [][]byte) error {
 		return err
 	}
 	return nil
+}
+
+// Recover recovers a slice of slab data from the supplied shards.
+func (s Slice) Recover(w io.Writer, shards [][]byte) error {
+	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
+	if err := rsc.ReconstructData(shards); err != nil {
+		return err
+	}
+	skip := s.Offset % (rhpv2.LeafSize * uint32(s.MinShards))
+	return stripedJoin(w, shards[:s.MinShards], int(skip), int(s.Length))
 }
