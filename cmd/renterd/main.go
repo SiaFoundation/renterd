@@ -10,7 +10,6 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/siad/modules"
 	"golang.org/x/term"
 )
 
@@ -62,10 +61,10 @@ func getWalletKey() consensus.PrivateKey {
 
 func main() {
 	log.SetFlags(0)
-	gatewayAddr := flag.String("addr", ":0", "address to listen on")
+	gatewayAddr := flag.String("addr", ":0", "address to listen on for peer connections")
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
-	bootstrap := flag.String("bootstrap", "", "peer address or explorer URL to bootstrap from")
+	stateless := flag.Bool("stateless", false, "run in stateless mode")
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")
@@ -75,8 +74,25 @@ func main() {
 		return
 	}
 
-	walletKey := getWalletKey()
+	if *stateless {
+		apiPassword := getAPIPassword()
+		l, err := net.Listen("tcp", *apiAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer l.Close()
+		log.Println("api: Listening on", l.Addr())
+		go startStatelessWeb(l, apiPassword)
+
+		signalCh := make(chan os.Signal, 1)
+		signal.Notify(signalCh, os.Interrupt)
+		<-signalCh
+		log.Println("Shutting down...")
+		return
+	}
+
 	apiPassword := getAPIPassword()
+	walletKey := getWalletKey()
 	n, err := newNode(*gatewayAddr, *dir, walletKey)
 	if err != nil {
 		log.Fatal(err)
@@ -88,19 +104,11 @@ func main() {
 	}()
 	log.Println("p2p: Listening on", n.g.Address())
 
-	if *bootstrap != "" {
-		log.Println("Connecting to bootstrap peer...")
-		if err := n.g.Connect(modules.NetAddress(*bootstrap)); err != nil {
-			log.Println(err)
-		} else {
-			log.Println("Success!")
-		}
-	}
-
 	l, err := net.Listen("tcp", *apiAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer l.Close()
 	log.Println("api: Listening on", l.Addr())
 	go startWeb(l, n, apiPassword)
 
@@ -108,6 +116,4 @@ func main() {
 	signal.Notify(signalCh, os.Interrupt)
 	<-signalCh
 	log.Println("Shutting down...")
-	n.Close()
-	l.Close()
 }

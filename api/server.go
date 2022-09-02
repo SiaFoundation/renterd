@@ -799,3 +799,29 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 
 	return mux
 }
+
+// NewStatelessServer returns an HTTP handler that serves the stateless renterd API.
+func NewStatelessServer(rhp RHP, sm SlabMover) http.Handler {
+	srv := server{
+		rhp: rhp,
+		sm:  sm,
+	}
+	mux := httprouter.New()
+
+	mux.POST("/rhp/prepare/form", srv.rhpPrepareFormHandler)
+	mux.POST("/rhp/prepare/renew", srv.rhpPrepareRenewHandler)
+	mux.POST("/rhp/prepare/payment", srv.rhpPreparePaymentHandler)
+	mux.POST("/rhp/scan", srv.rhpScanHandler)
+	mux.POST("/rhp/form", srv.rhpFormHandler)
+	mux.POST("/rhp/renew", srv.rhpRenewHandler)
+	mux.POST("/rhp/fund", srv.rhpFundHandler)
+	mux.GET("/rhp/registry/:host/:key", srv.rhpRegistryHandlerGET)
+	mux.PUT("/rhp/registry/:host/:key", srv.rhpRegistryHandlerPUT)
+
+	mux.POST("/slabs/upload", srv.slabsUploadHandler)
+	mux.POST("/slabs/download", srv.slabsDownloadHandler)
+	mux.POST("/slabs/migrate", srv.slabsMigrateHandler)
+	mux.POST("/slabs/delete", srv.slabsDeleteHandler)
+
+	return mux
+}
