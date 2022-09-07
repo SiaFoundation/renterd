@@ -77,7 +77,7 @@ type RHPFormRequest struct {
 
 // RHPFormResponse is the response type for the /rhp/form endpoint.
 type RHPFormResponse struct {
-	Contract       rhpv2.Contract      `json:"contract"`
+	Contract       Contract            `json:"contract"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
 }
 
@@ -114,7 +114,7 @@ type RHPRenewRequest struct {
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.
 type RHPRenewResponse struct {
-	Contract       rhpv2.Contract      `json:"contract"`
+	Contract       Contract            `json:"contract"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
 }
 

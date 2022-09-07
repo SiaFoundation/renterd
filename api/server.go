@@ -477,7 +477,12 @@ func (s *server) rhpFormHandler(w http.ResponseWriter, req *http.Request, _ http
 		return
 	}
 	WriteJSON(w, RHPFormResponse{
-		Contract:       contract,
+		Contract: Contract{
+			HostKey:   contract.HostKey(),
+			HostIP:    rfr.HostIP,
+			ID:        contract.ID(),
+			RenterKey: rfr.RenterKey,
+		},
 		TransactionSet: txnSet,
 	})
 }
@@ -496,7 +501,12 @@ func (s *server) rhpRenewHandler(w http.ResponseWriter, req *http.Request, _ htt
 		return
 	}
 	WriteJSON(w, RHPRenewResponse{
-		Contract:       contract,
+		Contract: Contract{
+			HostKey:   contract.HostKey(),
+			HostIP:    rrr.HostIP,
+			ID:        contract.ID(),
+			RenterKey: rrr.RenterKey,
+		},
 		TransactionSet: txnSet,
 	})
 }
@@ -507,12 +517,11 @@ func (s *server) rhpFundHandler(w http.ResponseWriter, req *http.Request, _ http
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	rev, err := s.rhp.FundAccount(req.Context(), rfr.HostIP, rfr.HostKey, rfr.Contract, rfr.RenterKey, rfr.Account, rfr.Amount)
+	_, err := s.rhp.FundAccount(req.Context(), rfr.HostIP, rfr.HostKey, rfr.Contract, rfr.RenterKey, rfr.Account, rfr.Amount)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	WriteJSON(w, rev)
 }
 
 func (s *server) rhpRegistryHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {

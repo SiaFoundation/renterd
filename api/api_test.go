@@ -188,12 +188,7 @@ func TestObject(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		contracts = append(contracts, api.Contract{
-			HostKey:   c.HostKey(),
-			HostIP:    hostIP,
-			ID:        c.ID(),
-			RenterKey: renterKey,
-		})
+		contracts = append(contracts, c)
 	}
 
 	// upload

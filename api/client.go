@@ -252,7 +252,7 @@ func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency,
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (Contract, []types.Transaction, error) {
 	req := RHPFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -265,7 +265,7 @@ func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.Publi
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (Contract, []types.Transaction, error) {
 	req := RHPRenewRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -280,7 +280,7 @@ func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.Publ
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (rev rhpv2.Contract, err error) {
+func (c *Client) RHPFund(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
 	req := RHPFundRequest{
 		Contract:  contract,
 		RenterKey: renterKey,
@@ -289,7 +289,7 @@ func (c *Client) RHPFund(contract types.FileContractRevision, renterKey consensu
 		Account:   account,
 		Amount:    amount,
 	}
-	err = c.post("/rhp/fund", req, &rev)
+	err = c.post("/rhp/fund", req, nil)
 	return
 }
 
