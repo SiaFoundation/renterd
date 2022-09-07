@@ -146,7 +146,7 @@ func (c *Client) WalletDiscard(txn types.Transaction) error {
 
 // WalletPrepareForm funds and signs a contract transaction.
 func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
-	req := RHPPrepareFormRequest{
+	req := WalletPrepareFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
 		RenterFunds:    renterFunds,
@@ -161,7 +161,7 @@ func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey conse
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
 func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
-	req := RHPPrepareRenewRequest{
+	req := WalletPrepareRenewRequest{
 		Contract:       contract,
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -241,7 +241,7 @@ func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey 
 
 // RHPPreparePayment prepares an ephemeral account payment.
 func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key consensus.PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
-	req := RHPPaymentRequest{
+	req := RHPPreparePaymentRequest{
 		Account:    account,
 		Amount:     amount,
 		Expiry:     0, // TODO

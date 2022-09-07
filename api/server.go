@@ -268,13 +268,13 @@ func (s *server) walletDiscardHandler(w http.ResponseWriter, req *http.Request, 
 }
 
 func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var rpfr RHPPrepareFormRequest
-	if err := json.NewDecoder(req.Body).Decode(&rpfr); err != nil {
+	var wpfr WalletPrepareFormRequest
+	if err := json.NewDecoder(req.Body).Decode(&wpfr); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
-	cost := rhpv2.ContractFormationCost(fc, rpfr.HostSettings.ContractPrice)
+	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
+	cost := rhpv2.ContractFormationCost(fc, wpfr.HostSettings.ContractPrice)
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
@@ -304,16 +304,16 @@ func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Reque
 }
 
 func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var rprr RHPPrepareRenewRequest
-	if err := json.NewDecoder(req.Body).Decode(&rprr); err != nil {
+	var wprr WalletPrepareRenewRequest
+	if err := json.NewDecoder(req.Body).Decode(&wprr); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
-	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
-	finalPayment := rprr.HostSettings.BaseRPCPrice
-	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
-		finalPayment = rprr.Contract.ValidRenterPayout()
+	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.HostCollateral, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)
+	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice)
+	finalPayment := wprr.HostSettings.BaseRPCPrice
+	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {
+		finalPayment = wprr.Contract.ValidRenterPayout()
 	}
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
@@ -440,12 +440,12 @@ func (s *server) rhpPrepareRenewHandler(w http.ResponseWriter, req *http.Request
 }
 
 func (s *server) rhpPreparePaymentHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var rpr RHPPaymentRequest
-	if err := json.NewDecoder(req.Body).Decode(&rpr); err != nil {
+	var rppr RHPPreparePaymentRequest
+	if err := json.NewDecoder(req.Body).Decode(&rppr); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	payment := rhpv3.PayByEphemeralAccount(rpr.Account, rpr.Amount, rpr.Expiry, rpr.AccountKey)
+	payment := rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey)
 	WriteJSON(w, payment)
 }
 

@@ -8,39 +8,48 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// WalletFundRequest is the request type for /wallet/fund.
+// WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`
 	Amount      types.Currency    `json:"amount"`
 }
 
-// WalletFundResponse is the response type for /wallet/fund.
+// WalletFundResponse is the response type for the /wallet/fund endpoint.
 type WalletFundResponse struct {
 	Transaction types.Transaction   `json:"transaction"`
 	ToSign      []types.OutputID    `json:"toSign"`
 	DependsOn   []types.Transaction `json:"dependsOn"`
 }
 
-// WalletSignRequest is the request type for /wallet/sign.
+// WalletSignRequest is the request type for the /wallet/sign endpoint.
 type WalletSignRequest struct {
 	Transaction   types.Transaction   `json:"transaction"`
 	ToSign        []types.OutputID    `json:"toSign"`
 	CoveredFields types.CoveredFields `json:"coveredFields"`
 }
 
-// WalletPrepareRenewResponse is the response type for /wallet/prepare/renew.
+// WalletPrepareFormRequest is the request type for the /wallet/prepare/form
+// endpoint.
+type WalletPrepareFormRequest RHPPrepareFormRequest
+
+// WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
+// endpoint.
+type WalletPrepareRenewRequest RHPPrepareRenewRequest
+
+// WalletPrepareRenewResponse is the response type for the /wallet/prepare/renew
+// endpoint.
 type WalletPrepareRenewResponse struct {
 	TransactionSet []types.Transaction `json:"transactionSet"`
 	FinalPayment   types.Currency      `json:"finalPayment"`
 }
 
-// An RHPScanRequest contains the address and pubkey of the host to scan.
+// RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
 	HostKey consensus.PublicKey `json:"hostKey"`
 	HostIP  string              `json:"hostIP"`
 }
 
-// An RHPPrepareFormRequest prepares a new file contract.
+// RHPPrepareFormRequest is the request type for the /rhp/prepare/form endpoint.
 type RHPPrepareFormRequest struct {
 	RenterKey      consensus.PrivateKey `json:"renterKey"`
 	HostKey        consensus.PublicKey  `json:"hostKey"`
@@ -51,13 +60,14 @@ type RHPPrepareFormRequest struct {
 	HostSettings   rhpv2.HostSettings   `json:"hostSettings"`
 }
 
-// An RHPPrepareFormResponse is the response to /rhp/prepare/form.
+// RHPPrepareFormResponse is the response type for the /rhp/prepare/form
+// endpoint.
 type RHPPrepareFormResponse struct {
 	Contract types.FileContract `json:"contract"`
 	Cost     types.Currency     `json:"cost"`
 }
 
-// An RHPFormRequest requests that the host create a contract.
+// RHPFormRequest is the request type for the /rhp/form endpoint.
 type RHPFormRequest struct {
 	RenterKey      consensus.PrivateKey `json:"renterKey"`
 	HostKey        consensus.PublicKey  `json:"hostKey"`
@@ -65,14 +75,14 @@ type RHPFormRequest struct {
 	TransactionSet []types.Transaction  `json:"transactionSet"`
 }
 
-// An RHPFormResponse is the response to /rhp/form. It contains the formed
-// contract and its transaction set.
+// RHPFormResponse is the response type for the /rhp/form endpoint.
 type RHPFormResponse struct {
 	Contract       rhpv2.Contract      `json:"contract"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
 }
 
-// An RHPPrepareRenewRequest prepares a file contract for renewal.
+// RHPPrepareRenewRequest is the request type for the /rhp/prepare/renew
+// endpoint.
 type RHPPrepareRenewRequest struct {
 	Contract       types.FileContractRevision `json:"contract"`
 	RenterKey      consensus.PrivateKey       `json:"renterKey"`
@@ -84,14 +94,15 @@ type RHPPrepareRenewRequest struct {
 	HostSettings   rhpv2.HostSettings         `json:"hostSettings"`
 }
 
-// An RHPPrepareRenewResponse is the response to /rhp/prepare/renew.
+// RHPPrepareRenewResponse is the response type for the /rhp/prepare/renew
+// endpoint.
 type RHPPrepareRenewResponse struct {
 	Contract     types.FileContract `json:"contract"`
 	Cost         types.Currency     `json:"cost"`
 	FinalPayment types.Currency     `json:"finalPayment"`
 }
 
-// An RHPRenewRequest requests that the host renew a contract.
+// RHPRenewRequest is the request type for the /rhp/renew endpoint.
 type RHPRenewRequest struct {
 	RenterKey      consensus.PrivateKey `json:"renterKey"`
 	HostKey        consensus.PublicKey  `json:"hostKey"`
@@ -101,14 +112,13 @@ type RHPRenewRequest struct {
 	FinalPayment   types.Currency       `json:"finalPayment"`
 }
 
-// An RHPRenewResponse is the response to /rhp/renew. It contains the renewed
-// contract and its transaction set.
+// RHPRenewResponse is the response type for the /rhp/renew endpoint.
 type RHPRenewResponse struct {
 	Contract       rhpv2.Contract      `json:"contract"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
 }
 
-// An RHPFundRequest funds an ephemeral account.
+// RHPFundRequest is the request type for the /rhp/fund endpoint.
 type RHPFundRequest struct {
 	Contract  types.FileContractRevision `json:"contract"`
 	RenterKey consensus.PrivateKey       `json:"renterKey"`
@@ -118,9 +128,9 @@ type RHPFundRequest struct {
 	Amount    types.Currency             `json:"amount"`
 }
 
-// An RHPPaymentRequest creates a payment by spending value in an ephemeral
-// account.
-type RHPPaymentRequest struct {
+// RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
+// endpoint.
+type RHPPreparePaymentRequest struct {
 	Account    rhpv3.Account        `json:"account"`
 	Amount     types.Currency       `json:"amount"`
 	Expiry     uint64               `json:"expiry"`
