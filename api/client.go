@@ -294,14 +294,27 @@ func (c *Client) RHPFund(contract types.FileContractRevision, renterKey consensu
 }
 
 // RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(key rhpv3.RegistryKey) (resp rhpv3.RegistryValue, err error) {
-	err = c.get(fmt.Sprintf("/rhp/registry/%x/%x", key.PublicKey, key.Tweak[:]), &resp)
+func (c *Client) RHPReadRegistry(hostKey consensus.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
+	req := RHPRegistryReadRequest{
+		HostKey:     hostKey,
+		HostIP:      hostIP,
+		RegistryKey: key,
+		Payment:     payment,
+	}
+	err = c.post("/rhp/registry/read", req, &resp)
 	return
 }
 
 // RHPUpdateRegistry updates a registry value.
-func (c *Client) RHPUpdateRegistry(key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
-	err = c.put(fmt.Sprintf("/rhp/registry/%x/%x", key.PublicKey, key.Tweak[:]), value)
+func (c *Client) RHPUpdateRegistry(hostKey consensus.PublicKey, hostIP string, key rhpv3.RegistryKey, value rhpv3.RegistryValue, payment rhpv3.PayByEphemeralAccountRequest) (err error) {
+	req := RHPRegistryUpdateRequest{
+		HostKey:       hostKey,
+		HostIP:        hostIP,
+		RegistryKey:   key,
+		RegistryValue: value,
+		Payment:       payment,
+	}
+	err = c.post("/rhp/registry/update", req, nil)
 	return
 }
 

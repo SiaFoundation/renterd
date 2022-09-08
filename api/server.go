@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -115,8 +114,37 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 	enc.Encode(v)
 }
 
-func paramError(w http.ResponseWriter, v interface{}, err error) {
-	http.Error(w, fmt.Sprintf("couldn't decode request type (%T): %v", v, err), http.StatusBadRequest)
+func readJSON(w http.ResponseWriter, req *http.Request, v interface{}) bool {
+	if err := json.NewDecoder(req.Body).Decode(v); err != nil {
+		http.Error(w, fmt.Sprintf("couldn't decode request type (%T): %v", v, err), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func readPathParam(w http.ResponseWriter, ps httprouter.Params, param string, v interface{}) bool {
+	var err error
+	switch v := v.(type) {
+	case interface{ UnmarshalText([]byte) error }:
+		err = v.UnmarshalText([]byte(ps.ByName(param)))
+	case interface{ LoadString(string) error }:
+		err = v.LoadString(ps.ByName(param))
+	default:
+		panic("unsupported type")
+	}
+	if err != nil {
+		http.Error(w, fmt.Sprintf("couldn't parse param %q: %v", param, err), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func check(w http.ResponseWriter, ctx string, err error) bool {
+	if err != nil {
+		http.Error(w, fmt.Sprintf("%v: %v", ctx, err), http.StatusInternalServerError)
+		return true
+	}
+	return false
 }
 
 // AuthMiddleware enforces HTTP Basic Authentication on the provided handler.
@@ -148,13 +176,8 @@ func (s *server) syncerPeersHandler(w http.ResponseWriter, req *http.Request, _ 
 
 func (s *server) syncerConnectHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var addr string
-	if err := json.NewDecoder(req.Body).Decode(&addr); err != nil {
-		paramError(w, addr, err)
-		return
-	}
-	if err := s.s.Connect(addr); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	if readJSON(w, req, &addr) {
+		check(w, "couldn't connect to peer", s.s.Connect(addr))
 	}
 }
 
@@ -168,13 +191,8 @@ func (s *server) txpoolTransactionsHandler(w http.ResponseWriter, req *http.Requ
 
 func (s *server) txpoolBroadcastHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var txnSet []types.Transaction
-	if err := json.NewDecoder(req.Body).Decode(&txnSet); err != nil {
-		paramError(w, txnSet, err)
-		return
-	}
-	if err := s.tp.AddTransactionSet(txnSet); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	if readJSON(w, req, &txnSet) {
+		check(w, "couldn't broadcast transaction set", s.tp.AddTransactionSet(txnSet))
 	}
 }
 
@@ -190,8 +208,7 @@ func (s *server) walletTransactionsHandler(w http.ResponseWriter, req *http.Requ
 	var since time.Time
 	if v := req.FormValue("since"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			http.Error(w, "invalid since value: "+err.Error(), http.StatusBadRequest)
+		if check(w, "invalid 'since' value", err) {
 			return
 		}
 		since = t
@@ -199,47 +216,39 @@ func (s *server) walletTransactionsHandler(w http.ResponseWriter, req *http.Requ
 	max := -1
 	if v := req.FormValue("max"); v != "" {
 		t, err := strconv.Atoi(v)
-		if err != nil {
-			http.Error(w, "invalid max value: "+err.Error(), http.StatusBadRequest)
+		if check(w, "invalid 'max' value", err) {
 			return
 		}
 		max = t
 	}
 	txns, err := s.w.Transactions(since, max)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't load transactions", err) {
+		writeJSON(w, txns)
 	}
-	writeJSON(w, txns)
 }
 
 func (s *server) walletOutputsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	utxos, err := s.w.UnspentOutputs()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't load outputs", err) {
+		writeJSON(w, utxos)
 	}
-	writeJSON(w, utxos)
 }
 
 func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var wfr WalletFundRequest
-	if err := json.NewDecoder(req.Body).Decode(&wfr); err != nil {
-		paramError(w, wfr, err)
+	if !readJSON(w, req, &wfr) {
 		return
 	}
 	txn := wfr.Transaction
 	fee := s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
 	txn.MinerFees = []types.Currency{fee}
 	toSign, err := s.w.FundTransaction(s.cm.TipState(), &wfr.Transaction, wfr.Amount.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if check(w, "couldn't fund transaction", err) {
 		return
 	}
 	parents, err := s.tp.UnconfirmedParents(txn)
-	if err != nil {
+	if check(w, "couldn't load transaction dependencies", err) {
 		s.w.ReleaseInputs(txn)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, WalletFundResponse{
@@ -251,30 +260,25 @@ func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ h
 
 func (s *server) walletSignHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var wsr WalletSignRequest
-	if err := json.NewDecoder(req.Body).Decode(&wsr); err != nil {
-		paramError(w, wsr, err)
+	if !readJSON(w, req, &wsr) {
 		return
 	}
-	if err := s.w.SignTransaction(s.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	err := s.w.SignTransaction(s.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
+	if !check(w, "couldn't sign transaction", err) {
+		writeJSON(w, wsr.Transaction)
 	}
-	writeJSON(w, wsr.Transaction)
 }
 
 func (s *server) walletDiscardHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var txn types.Transaction
-	if err := json.NewDecoder(req.Body).Decode(&txn); err != nil {
-		paramError(w, txn, err)
-		return
+	if readJSON(w, req, &txn) {
+		s.w.ReleaseInputs(txn)
 	}
-	s.w.ReleaseInputs(txn)
 }
 
 func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var wpfr WalletPrepareFormRequest
-	if err := json.NewDecoder(req.Body).Decode(&wpfr); err != nil {
-		paramError(w, wpfr, err)
+	if !readJSON(w, req, &wpfr) {
 		return
 	}
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
@@ -283,25 +287,19 @@ func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Reque
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	_, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
+	if !check(w, "couldn't fund transaction", err) {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	err = s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf)
+	if check(w, "couldn't sign transaction", err) {
+		s.w.ReleaseInputs(txn)
 		return
 	}
 	parents, err := s.tp.UnconfirmedParents(txn)
-	if err != nil {
+	if check(w, "couldn't load transaction dependencies", err) {
 		s.w.ReleaseInputs(txn)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, append(parents, txn))
@@ -309,8 +307,7 @@ func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Reque
 
 func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var wprr WalletPrepareRenewRequest
-	if err := json.NewDecoder(req.Body).Decode(&wprr); err != nil {
-		paramError(w, wprr, err)
+	if !readJSON(w, req, &wprr) {
 		return
 	}
 	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.HostCollateral, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)
@@ -323,25 +320,19 @@ func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Requ
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	_, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
+	if !check(w, "couldn't fund transaction", err) {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	if err := s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	err = s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf)
+	if check(w, "couldn't sign transaction", err) {
+		s.w.ReleaseInputs(txn)
 		return
 	}
 	parents, err := s.tp.UnconfirmedParents(txn)
-	if err != nil {
+	if check(w, "couldn't load transaction dependencies", err) {
 		s.w.ReleaseInputs(txn)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, WalletPrepareRenewResponse{
@@ -353,67 +344,41 @@ func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Requ
 func (s *server) hostsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	// TODO: support filtering via query params
 	hosts, err := s.hdb.SelectHosts(-1, func(hostdb.Host) bool { return true })
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't load hosts", err) {
+		writeJSON(w, hosts)
 	}
-	writeJSON(w, hosts)
 }
 
 func (s *server) hostsPubkeyHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var pk consensus.PublicKey
-	if err := pk.UnmarshalText([]byte(ps.ByName("pubkey"))); err != nil {
-		paramError(w, pk, err)
+	if !readPathParam(w, ps, "pubkey", &pk) {
 		return
 	}
 	host, err := s.hdb.Host(pk)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't load host", err) {
+		writeJSON(w, host)
 	}
-	writeJSON(w, host)
 }
 
 func (s *server) hostsScoreHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var score float64
-	if err := json.NewDecoder(req.Body).Decode(&score); err != nil {
-		paramError(w, score, err)
-		return
-	}
 	var pk consensus.PublicKey
-	if err := pk.UnmarshalText([]byte(ps.ByName("pubkey"))); err != nil {
-		paramError(w, pk, err)
-		return
-	}
-	err := s.hdb.SetScore(pk, score)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if readJSON(w, req, &score) && readPathParam(w, ps, "pubkey", &pk) {
+		check(w, "couldn't set score", s.hdb.SetScore(pk, score))
 	}
 }
 
 func (s *server) hostsInteractionHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var hi hostdb.Interaction
-	if err := json.NewDecoder(req.Body).Decode(&hi); err != nil {
-		paramError(w, hi, err)
-		return
-	}
 	var pk consensus.PublicKey
-	if err := pk.UnmarshalText([]byte(ps.ByName("pubkey"))); err != nil {
-		paramError(w, pk, err)
-		return
-	}
-	err := s.hdb.RecordInteraction(pk, hi)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if readJSON(w, req, &hi) && readPathParam(w, ps, "pubkey", &pk) {
+		check(w, "couldn't record interaction", s.hdb.RecordInteraction(pk, hi))
 	}
 }
 
 func (s *server) rhpPrepareFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rpfr RHPPrepareFormRequest
-	if err := json.NewDecoder(req.Body).Decode(&rpfr); err != nil {
-		paramError(w, rpfr, err)
+	if !readJSON(w, req, &rpfr) {
 		return
 	}
 	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
@@ -426,8 +391,7 @@ func (s *server) rhpPrepareFormHandler(w http.ResponseWriter, req *http.Request,
 
 func (s *server) rhpPrepareRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rprr RHPPrepareRenewRequest
-	if err := json.NewDecoder(req.Body).Decode(&rprr); err != nil {
-		paramError(w, rprr, err)
+	if !readJSON(w, req, &rprr) {
 		return
 	}
 	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
@@ -445,39 +409,31 @@ func (s *server) rhpPrepareRenewHandler(w http.ResponseWriter, req *http.Request
 
 func (s *server) rhpPreparePaymentHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rppr RHPPreparePaymentRequest
-	if err := json.NewDecoder(req.Body).Decode(&rppr); err != nil {
-		paramError(w, rppr, err)
-		return
+	if readJSON(w, req, &rppr) {
+		writeJSON(w, rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey))
 	}
-	payment := rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey)
-	writeJSON(w, payment)
 }
 
 func (s *server) rhpScanHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rsr RHPScanRequest
-	if err := json.NewDecoder(req.Body).Decode(&rsr); err != nil {
-		paramError(w, rsr, err)
+	if !readJSON(w, req, &rsr) {
 		return
 	}
 	settings, err := s.rhp.Settings(req.Context(), rsr.HostIP, rsr.HostKey)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't scan host", err) {
+		writeJSON(w, settings)
 	}
-	writeJSON(w, settings)
 }
 
 func (s *server) rhpFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rfr RHPFormRequest
-	if err := json.NewDecoder(req.Body).Decode(&rfr); err != nil {
-		paramError(w, rfr, err)
+	if !readJSON(w, req, &rfr) {
 		return
 	}
 	var cs consensus.State
 	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
 	contract, txnSet, err := s.rhp.FormContract(req.Context(), cs, rfr.HostIP, rfr.HostKey, rfr.RenterKey, rfr.TransactionSet)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if check(w, "couldn't form contract", err) {
 		return
 	}
 	writeJSON(w, RHPFormResponse{
@@ -493,15 +449,13 @@ func (s *server) rhpFormHandler(w http.ResponseWriter, req *http.Request, _ http
 
 func (s *server) rhpRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rrr RHPRenewRequest
-	if err := json.NewDecoder(req.Body).Decode(&rrr); err != nil {
-		paramError(w, rrr, err)
+	if !readJSON(w, req, &rrr) {
 		return
 	}
 	var cs consensus.State
 	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
 	contract, txnSet, err := s.rhp.RenewContract(req.Context(), cs, rrr.HostIP, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.TransactionSet, rrr.FinalPayment)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if check(w, "couldn't renew contract", err) {
 		return
 	}
 	writeJSON(w, RHPRenewResponse{
@@ -517,146 +471,76 @@ func (s *server) rhpRenewHandler(w http.ResponseWriter, req *http.Request, _ htt
 
 func (s *server) rhpFundHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rfr RHPFundRequest
-	if err := json.NewDecoder(req.Body).Decode(&rfr); err != nil {
-		paramError(w, rfr, err)
+	if !readJSON(w, req, &rfr) {
 		return
 	}
 	_, err := s.rhp.FundAccount(req.Context(), rfr.HostIP, rfr.HostKey, rfr.Contract, rfr.RenterKey, rfr.Account, rfr.Amount)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	check(w, "couldn't fund account", err)
+}
+
+func (s *server) rhpRegistryReadHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var rrrr RHPRegistryReadRequest
+	if !readJSON(w, req, &rrrr) {
 		return
+	}
+	value, err := s.rhp.ReadRegistry(req.Context(), rrrr.HostIP, rrrr.HostKey, &rrrr.Payment, rrrr.RegistryKey)
+	if !check(w, "couldn't read registry", err) {
+		writeJSON(w, value)
 	}
 }
 
-func (s *server) rhpRegistryHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	var hostKey consensus.PublicKey
-	if err := hostKey.UnmarshalText([]byte("ed25519:" + ps.ByName("host"))); err != nil {
-		paramError(w, hostKey, err)
+func (s *server) rhpRegistryUpdateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var rrur RHPRegistryUpdateRequest
+	if !readJSON(w, req, &rrur) {
 		return
 	}
-	var registryKey rhpv3.RegistryKey
-	if err := registryKey.PublicKey.LoadString("ed25519:" + ps.ByName("key")); err != nil {
-		paramError(w, registryKey.PublicKey, err)
-		return
-	} else if err := registryKey.Tweak.LoadString(ps.ByName("tweak")); err != nil {
-		paramError(w, registryKey.Tweak, err)
-		return
-	}
-	hostIP := req.FormValue("hostIP")
-	var payment rhpv3.PayByEphemeralAccountRequest
-	if b, err := base64.StdEncoding.DecodeString(req.FormValue("payment")); err != nil {
-		paramError(w, payment, err)
-		return
-	} else if err := encoding.Unmarshal(b, &payment); err != nil {
-		paramError(w, payment, err)
-		return
-	}
-
-	value, err := s.rhp.ReadRegistry(req.Context(), hostIP, hostKey, &payment, registryKey)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, value)
-}
-
-func (s *server) rhpRegistryHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	var hostKey consensus.PublicKey
-	if err := hostKey.UnmarshalText([]byte("ed25519:" + ps.ByName("host"))); err != nil {
-		paramError(w, hostKey, err)
-		return
-	}
-	var registryKey rhpv3.RegistryKey
-	if err := registryKey.PublicKey.LoadString("ed25519:" + ps.ByName("key")); err != nil {
-		paramError(w, registryKey.PublicKey, err)
-		return
-	} else if err := registryKey.Tweak.LoadString(ps.ByName("tweak")); err != nil {
-		paramError(w, registryKey.Tweak, err)
-		return
-	}
-
-	hostIP := req.FormValue("hostIP")
-	var payment rhpv3.PayByEphemeralAccountRequest
-	if b, err := base64.StdEncoding.DecodeString(req.FormValue("payment")); err != nil {
-		paramError(w, payment, err)
-		return
-	} else if err := encoding.Unmarshal(b, &payment); err != nil {
-		paramError(w, payment, err)
-		return
-	}
-
-	var value rhpv3.RegistryValue
-	if err := json.NewDecoder(req.Body).Decode(&value); err != nil {
-		paramError(w, value, err)
-		return
-	}
-
-	err := s.rhp.UpdateRegistry(req.Context(), hostIP, hostKey, &payment, registryKey, value)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	err := s.rhp.UpdateRegistry(req.Context(), rrur.HostIP, rrur.HostKey, &rrur.Payment, rrur.RegistryKey, rrur.RegistryValue)
+	check(w, "couldn't update registry", err)
 }
 
 func (s *server) contractsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	cs, err := s.cs.Contracts()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't load contracts", err) {
+		writeJSON(w, cs)
 	}
-	writeJSON(w, cs)
 }
 
 func (s *server) contractsIDHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var id types.FileContractID
-	if err := id.LoadString(ps.ByName("id")); err != nil {
-		paramError(w, id, err)
+	if !readPathParam(w, ps, "id", &id) {
 		return
 	}
 	c, err := s.cs.Contract(id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't load contract", err) {
+		writeJSON(w, c)
 	}
-	writeJSON(w, c)
 }
 
 func (s *server) contractsIDHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var id types.FileContractID
-	if err := id.LoadString(ps.ByName("id")); err != nil {
-		paramError(w, id, err)
+	var c rhpv2.Contract
+	if !readPathParam(w, ps, "id", &id) && !readJSON(w, req, &c) {
 		return
 	}
-	var c rhpv2.Contract
-	if err := json.NewDecoder(req.Body).Decode(&c); err != nil {
-		paramError(w, c, err)
-		return
-	} else if c.ID() != id {
+	if c.ID() != id {
 		http.Error(w, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	if err := s.cs.AddContract(c); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	check(w, "couldn't store contract", s.cs.AddContract(c))
 }
 
 func (s *server) contractsIDHandlerDELETE(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var id types.FileContractID
-	if err := id.LoadString(ps.ByName("id")); err != nil {
-		paramError(w, id, err)
+	if !readPathParam(w, ps, "id", &id) {
 		return
 	}
-	if err := s.cs.RemoveContract(id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	check(w, "couldn't remove contract", s.cs.RemoveContract(id))
 }
 
 func (s *server) slabsUploadHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var sur SlabsUploadRequest
 	if err := json.NewDecoder(strings.NewReader(req.PostFormValue("meta"))).Decode(&sur); err != nil {
-		paramError(w, sur, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	f, _, err := req.FormFile("data")
@@ -665,17 +549,14 @@ func (s *server) slabsUploadHandler(w http.ResponseWriter, req *http.Request, ps
 		return
 	}
 	slabs, err := s.sm.UploadSlabs(req.Context(), f, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't upload slabs", err) {
+		writeJSON(w, slabs)
 	}
-	writeJSON(w, slabs)
 }
 
 func (s *server) slabsDownloadHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var sdr SlabsDownloadRequest
-	if err := json.NewDecoder(req.Body).Decode(&sdr); err != nil {
-		paramError(w, sdr, err)
+	if !readJSON(w, req, &sdr) {
 		return
 	}
 	if sdr.Length == 0 {
@@ -683,36 +564,26 @@ func (s *server) slabsDownloadHandler(w http.ResponseWriter, req *http.Request, 
 			sdr.Length += int64(ss.Length)
 		}
 	}
+	// TODO: if we encounter an error halfway through the download, it's too
+	// late to change the response code and send an error message. Not sure how
+	// best to handle this.
 	err := s.sm.DownloadSlabs(req.Context(), w, sdr.Slabs, sdr.Offset, sdr.Length, sdr.Contracts)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	check(w, "couldn't download slabs", err)
 }
 
 func (s *server) slabsMigrateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var smr SlabsMigrateRequest
-	if err := json.NewDecoder(req.Body).Decode(&smr); err != nil {
-		paramError(w, smr, err)
-		return
-	}
-	err := s.sm.MigrateSlabs(req.Context(), smr.Slabs, smr.CurrentHeight, smr.From, smr.To)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if readJSON(w, req, &smr) {
+		err := s.sm.MigrateSlabs(req.Context(), smr.Slabs, smr.CurrentHeight, smr.From, smr.To)
+		check(w, "couldn't migrate slabs", err)
 	}
 }
 
 func (s *server) slabsDeleteHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var sdr SlabsDeleteRequest
-	if err := json.NewDecoder(req.Body).Decode(&sdr); err != nil {
-		paramError(w, sdr, err)
-		return
-	}
-	err := s.sm.DeleteSlabs(req.Context(), sdr.Slabs, sdr.Contracts)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if readJSON(w, req, &sdr) {
+		err := s.sm.DeleteSlabs(req.Context(), sdr.Slabs, sdr.Contracts)
+		check(w, "couldn't delete slabs", err)
 	}
 }
 
@@ -722,30 +593,20 @@ func (s *server) objectsKeyHandlerGET(w http.ResponseWriter, req *http.Request, 
 		return
 	}
 	o, err := s.os.Get(ps.ByName("key"))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if !check(w, "couldn't load object", err) {
+		writeJSON(w, o)
 	}
-	writeJSON(w, o)
 }
 
 func (s *server) objectsKeyHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var o object.Object
-	if err := json.NewDecoder(req.Body).Decode(&o); err != nil {
-		paramError(w, o, err)
-		return
-	}
-	if err := s.os.Put(ps.ByName("key"), o); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if readJSON(w, req, &o) {
+		check(w, "couldn't store object", s.os.Put(ps.ByName("key"), o))
 	}
 }
 
 func (s *server) objectsKeyHandlerDELETE(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	if err := s.os.Delete(ps.ByName("key")); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+	check(w, "couldn't delete object", s.os.Delete(ps.ByName("key")))
 }
 
 // NewServer returns an HTTP handler that serves the renterd API.
@@ -793,8 +654,8 @@ func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb Host
 	mux.POST("/rhp/form", srv.rhpFormHandler)
 	mux.POST("/rhp/renew", srv.rhpRenewHandler)
 	mux.POST("/rhp/fund", srv.rhpFundHandler)
-	mux.GET("/rhp/registry/:host/:key", srv.rhpRegistryHandlerGET)
-	mux.PUT("/rhp/registry/:host/:key", srv.rhpRegistryHandlerPUT)
+	mux.POST("/rhp/registry/read", srv.rhpRegistryReadHandler)
+	mux.POST("/rhp/registry/update", srv.rhpRegistryUpdateHandler)
 
 	mux.GET("/contracts", srv.contractsHandler)
 	mux.GET("/contracts/:id", srv.contractsIDHandlerGET)
@@ -828,8 +689,8 @@ func NewStatelessServer(rhp RHP, sm SlabMover) http.Handler {
 	mux.POST("/rhp/form", srv.rhpFormHandler)
 	mux.POST("/rhp/renew", srv.rhpRenewHandler)
 	mux.POST("/rhp/fund", srv.rhpFundHandler)
-	mux.GET("/rhp/registry/:host/:key", srv.rhpRegistryHandlerGET)
-	mux.PUT("/rhp/registry/:host/:key", srv.rhpRegistryHandlerPUT)
+	mux.POST("/rhp/registry/read", srv.rhpRegistryReadHandler)
+	mux.POST("/rhp/registry/update", srv.rhpRegistryUpdateHandler)
 
 	mux.POST("/slabs/upload", srv.slabsUploadHandler)
 	mux.POST("/slabs/download", srv.slabsDownloadHandler)

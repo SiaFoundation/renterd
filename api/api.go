@@ -137,6 +137,25 @@ type RHPPreparePaymentRequest struct {
 	AccountKey consensus.PrivateKey `json:"accountKey"`
 }
 
+// RHPRegistryReadRequest is the request type for the /rhp/registry/read
+// endpoint.
+type RHPRegistryReadRequest struct {
+	HostKey     consensus.PublicKey                `json:"hostKey"`
+	HostIP      string                             `json:"hostIP"`
+	RegistryKey rhpv3.RegistryKey                  `json:"registryKey"`
+	Payment     rhpv3.PayByEphemeralAccountRequest `json:"payment"`
+}
+
+// RHPRegistryUpdateRequest is the request type for the /rhp/registry/update
+// endpoint.
+type RHPRegistryUpdateRequest struct {
+	HostKey       consensus.PublicKey                `json:"hostKey"`
+	HostIP        string                             `json:"hostIP"`
+	RegistryKey   rhpv3.RegistryKey                  `json:"registryKey"`
+	RegistryValue rhpv3.RegistryValue                `json:"registryValue"`
+	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
+}
+
 // A Contract contains all the information necessary to access and revise an
 // existing file contract.
 type Contract struct {
