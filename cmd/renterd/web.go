@@ -114,29 +114,38 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func startWeb(l net.Listener, node *node, password string) error {
-	renter := api.NewServer(&chainManager{node.cm}, &syncer{node.g, node.tp}, txpool{node.tp}, node.w, node.hdb, rhpImpl{}, node.cs, slabMover{}, node.os)
-	api := api.AuthMiddleware(renter, password)
-	web := createUIHandler()
-	return http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api") {
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
-			api.ServeHTTP(w, r)
+type treeMux struct {
+	h   http.Handler
+	sub map[string]treeMux
+}
+
+func (t treeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	for prefix, c := range t.sub {
+		if strings.HasPrefix(req.URL.Path, prefix) {
+			req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
+			c.ServeHTTP(w, req)
 			return
 		}
-		web.ServeHTTP(w, r)
-	}))
+	}
+	t.h.ServeHTTP(w, req)
+}
+
+func startWeb(l net.Listener, node *node, password string) error {
+	renter := api.NewServer(&chainManager{node.cm}, &syncer{node.g, node.tp}, txpool{node.tp}, node.w, node.hdb, rhpImpl{}, node.cs, slabMover{}, node.os)
+	return http.Serve(l, treeMux{
+		h: createUIHandler(),
+		sub: map[string]treeMux{
+			"/api": {h: api.AuthMiddleware(renter, password)},
+		},
+	})
 }
 
 func startStatelessWeb(l net.Listener, password string) error {
-	api := api.AuthMiddleware(api.NewStatelessServer(rhpImpl{}, slabMover{}), password)
-	web := createUIHandler()
-	return http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api") {
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
-			api.ServeHTTP(w, r)
-			return
-		}
-		web.ServeHTTP(w, r)
-	}))
+	renter := api.NewStatelessServer(rhpImpl{}, slabMover{})
+	return http.Serve(l, treeMux{
+		h: createUIHandler(),
+		sub: map[string]treeMux{
+			"/api": {h: api.AuthMiddleware(renter, password)},
+		},
+	})
 }
