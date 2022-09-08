@@ -10,7 +10,6 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/mux"
-	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
 )
 
@@ -213,7 +212,7 @@ func RPCReadRegistry(t *Transport, payment PaymentMethod, key RegistryKey) (rv R
 	if _, err := s.Read(buf); err != nil {
 		return RegistryValue{}, err
 	}
-	var sig crypto.Signature
+	var sig consensus.Signature
 	copy(sig[:], buf[:64])
 	rev := binary.BigEndian.Uint64(buf[64:72])
 	data := buf[72 : len(buf)-1]

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
 )
@@ -26,8 +27,8 @@ const (
 
 // A RegistryKey uniquely identifies a value in the host's registry.
 type RegistryKey struct {
-	PublicKey types.SiaPublicKey
-	Tweak     crypto.Hash
+	PublicKey consensus.PublicKey
+	Tweak     consensus.Hash256
 }
 
 // A RegistryValue is a value associated with a key and a tweak in a host's
@@ -36,7 +37,7 @@ type RegistryValue struct {
 	Data      []byte
 	Revision  uint64
 	Type      uint8
-	Signature crypto.Signature
+	Signature consensus.Signature
 }
 
 // A RegistryEntry contains the data stored by a host for each registry value.
@@ -47,25 +48,28 @@ type RegistryEntry struct {
 
 // Hash returns the hash of the Value used for signing
 // the entry.
-func (re *RegistryEntry) Hash() crypto.Hash {
+func (re *RegistryEntry) Hash() consensus.Hash256 {
 	if re.Type != EntryTypePubKey {
-		return crypto.HashAll(re.Tweak, re.Data, re.Revision)
+		return consensus.Hash256(crypto.HashAll(re.Tweak, re.Data, re.Revision))
 	}
-	return crypto.HashAll(re.Tweak, re.Data, re.Revision, re.Type)
+	return consensus.Hash256(crypto.HashAll(re.Tweak, re.Data, re.Revision, re.Type))
 }
 
 // Work returns the work of a Value.
-func (re *RegistryEntry) Work() crypto.Hash {
+func (re *RegistryEntry) Work() consensus.Hash256 {
 	data := re.Data
 	if re.Type == EntryTypePubKey {
 		data = re.Data[20:]
 	}
-	return crypto.HashAll(re.Tweak, data, re.Revision)
+	return consensus.Hash256(crypto.HashAll(re.Tweak, data, re.Revision))
 }
 
 // RegistryHostID returns the ID hash of the host for primary registry entries.
-func RegistryHostID(spk types.SiaPublicKey) crypto.Hash {
-	return crypto.HashObject(spk)
+func RegistryHostID(pk consensus.PublicKey) consensus.Hash256 {
+	return consensus.Hash256(crypto.HashObject(types.SiaPublicKey{
+		Algorithm: types.SignatureEd25519,
+		Key:       pk[:],
+	}))
 }
 
 // ValidateRegistryEntry validates the fields of a registry entry.
@@ -82,7 +86,10 @@ func ValidateRegistryEntry(re RegistryEntry) (err error) {
 	default:
 		return fmt.Errorf("invalid registry value type: %d", re.Type)
 	}
-	return crypto.VerifyHash(re.Hash(), re.PublicKey.ToPublicKey(), re.Signature)
+	if !re.PublicKey.VerifyHash(re.Hash(), re.Signature) {
+		return errors.New("invalid signature")
+	}
+	return nil
 }
 
 // ValidateRegistryUpdate validates a registry update against the current entry.
