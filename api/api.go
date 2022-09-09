@@ -8,6 +8,18 @@ import (
 	"go.sia.tech/siad/types"
 )
 
+// exported types from internal/consensus
+type (
+	// A ChainIndex pairs a block's height with its ID.
+	ChainIndex = consensus.ChainIndex
+
+	// A PublicKey is an Ed25519 public key.
+	PublicKey = consensus.PublicKey
+
+	// A PrivateKey is an Ed25519 private key.
+	PrivateKey = consensus.PrivateKey
+)
+
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`
@@ -45,19 +57,19 @@ type WalletPrepareRenewResponse struct {
 
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
-	HostKey consensus.PublicKey `json:"hostKey"`
-	HostIP  string              `json:"hostIP"`
+	HostKey PublicKey `json:"hostKey"`
+	HostIP  string    `json:"hostIP"`
 }
 
 // RHPPrepareFormRequest is the request type for the /rhp/prepare/form endpoint.
 type RHPPrepareFormRequest struct {
-	RenterKey      consensus.PrivateKey `json:"renterKey"`
-	HostKey        consensus.PublicKey  `json:"hostKey"`
-	RenterFunds    types.Currency       `json:"renterFunds"`
-	RenterAddress  types.UnlockHash     `json:"renterAddress"`
-	HostCollateral types.Currency       `json:"hostCollateral"`
-	EndHeight      uint64               `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings   `json:"hostSettings"`
+	RenterKey      PrivateKey         `json:"renterKey"`
+	HostKey        PublicKey          `json:"hostKey"`
+	RenterFunds    types.Currency     `json:"renterFunds"`
+	RenterAddress  types.UnlockHash   `json:"renterAddress"`
+	HostCollateral types.Currency     `json:"hostCollateral"`
+	EndHeight      uint64             `json:"endHeight"`
+	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
 }
 
 // RHPPrepareFormResponse is the response type for the /rhp/prepare/form
@@ -69,10 +81,10 @@ type RHPPrepareFormResponse struct {
 
 // RHPFormRequest is the request type for the /rhp/form endpoint.
 type RHPFormRequest struct {
-	RenterKey      consensus.PrivateKey `json:"renterKey"`
-	HostKey        consensus.PublicKey  `json:"hostKey"`
-	HostIP         string               `json:"hostIP"`
-	TransactionSet []types.Transaction  `json:"transactionSet"`
+	RenterKey      PrivateKey          `json:"renterKey"`
+	HostKey        PublicKey           `json:"hostKey"`
+	HostIP         string              `json:"hostIP"`
+	TransactionSet []types.Transaction `json:"transactionSet"`
 }
 
 // RHPFormResponse is the response type for the /rhp/form endpoint.
@@ -86,8 +98,8 @@ type RHPFormResponse struct {
 // endpoint.
 type RHPPrepareRenewRequest struct {
 	Contract       types.FileContractRevision `json:"contract"`
-	RenterKey      consensus.PrivateKey       `json:"renterKey"`
-	HostKey        consensus.PublicKey        `json:"hostKey"`
+	RenterKey      PrivateKey                 `json:"renterKey"`
+	HostKey        PublicKey                  `json:"hostKey"`
 	RenterFunds    types.Currency             `json:"renterFunds"`
 	RenterAddress  types.UnlockHash           `json:"renterAddress"`
 	HostCollateral types.Currency             `json:"hostCollateral"`
@@ -105,8 +117,8 @@ type RHPPrepareRenewResponse struct {
 
 // RHPRenewRequest is the request type for the /rhp/renew endpoint.
 type RHPRenewRequest struct {
-	RenterKey      consensus.PrivateKey `json:"renterKey"`
-	HostKey        consensus.PublicKey  `json:"hostKey"`
+	RenterKey      PrivateKey           `json:"renterKey"`
+	HostKey        PublicKey            `json:"hostKey"`
 	HostIP         string               `json:"hostIP"`
 	ContractID     types.FileContractID `json:"contractID"`
 	TransactionSet []types.Transaction  `json:"transactionSet"`
@@ -123,8 +135,8 @@ type RHPRenewResponse struct {
 // RHPFundRequest is the request type for the /rhp/fund endpoint.
 type RHPFundRequest struct {
 	Contract  types.FileContractRevision `json:"contract"`
-	RenterKey consensus.PrivateKey       `json:"renterKey"`
-	HostKey   consensus.PublicKey        `json:"hostKey"`
+	RenterKey PrivateKey                 `json:"renterKey"`
+	HostKey   PublicKey                  `json:"hostKey"`
 	HostIP    string                     `json:"hostIP"`
 	Account   rhpv3.Account              `json:"account"`
 	Amount    types.Currency             `json:"amount"`
@@ -133,16 +145,16 @@ type RHPFundRequest struct {
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
 // endpoint.
 type RHPPreparePaymentRequest struct {
-	Account    rhpv3.Account        `json:"account"`
-	Amount     types.Currency       `json:"amount"`
-	Expiry     uint64               `json:"expiry"`
-	AccountKey consensus.PrivateKey `json:"accountKey"`
+	Account    rhpv3.Account  `json:"account"`
+	Amount     types.Currency `json:"amount"`
+	Expiry     uint64         `json:"expiry"`
+	AccountKey PrivateKey     `json:"accountKey"`
 }
 
 // RHPRegistryReadRequest is the request type for the /rhp/registry/read
 // endpoint.
 type RHPRegistryReadRequest struct {
-	HostKey     consensus.PublicKey                `json:"hostKey"`
+	HostKey     PublicKey                          `json:"hostKey"`
 	HostIP      string                             `json:"hostIP"`
 	RegistryKey rhpv3.RegistryKey                  `json:"registryKey"`
 	Payment     rhpv3.PayByEphemeralAccountRequest `json:"payment"`
@@ -151,7 +163,7 @@ type RHPRegistryReadRequest struct {
 // RHPRegistryUpdateRequest is the request type for the /rhp/registry/update
 // endpoint.
 type RHPRegistryUpdateRequest struct {
-	HostKey       consensus.PublicKey                `json:"hostKey"`
+	HostKey       PublicKey                          `json:"hostKey"`
 	HostIP        string                             `json:"hostIP"`
 	RegistryKey   rhpv3.RegistryKey                  `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue                `json:"registryValue"`
@@ -161,10 +173,10 @@ type RHPRegistryUpdateRequest struct {
 // A Contract contains all the information necessary to access and revise an
 // existing file contract.
 type Contract struct {
-	HostKey   consensus.PublicKey  `json:"hostKey"`
+	HostKey   PublicKey            `json:"hostKey"`
 	HostIP    string               `json:"hostIP"`
 	ID        types.FileContractID `json:"id"`
-	RenterKey consensus.PrivateKey `json:"renterKey"`
+	RenterKey PrivateKey           `json:"renterKey"`
 }
 
 // SlabsUploadRequest is the request type for the /slabs/upload endpoint.

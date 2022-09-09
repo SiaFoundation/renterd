@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -73,7 +72,7 @@ func (c *Client) SyncerConnect(addr string) (err error) {
 }
 
 // ConsensusTip returns the current tip index.
-func (c *Client) ConsensusTip() (resp consensus.ChainIndex, err error) {
+func (c *Client) ConsensusTip() (resp ChainIndex, err error) {
 	err = c.get("/consensus/tip", &resp)
 	return
 }
@@ -145,7 +144,7 @@ func (c *Client) WalletDiscard(txn types.Transaction) error {
 }
 
 // WalletPrepareForm funds and signs a contract transaction.
-func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
+func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
 	req := WalletPrepareFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -160,7 +159,7 @@ func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey conse
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
+func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
 	req := WalletPrepareRenewRequest{
 		Contract:       contract,
 		RenterKey:      renterKey,
@@ -183,31 +182,31 @@ func (c *Client) Hosts() (hosts []hostdb.Host, err error) {
 }
 
 // Host returns information about a particular host known to the server.
-func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
+func (c *Client) Host(hostKey PublicKey) (h hostdb.Host, err error) {
 	err = c.get("/hosts/"+hostKey.String(), &h)
 	return
 }
 
 // SetHostScore sets the score for the supplied host.
-func (c *Client) SetHostScore(hostKey consensus.PublicKey, score float64) (err error) {
+func (c *Client) SetHostScore(hostKey PublicKey, score float64) (err error) {
 	err = c.put("/hosts/"+hostKey.String()+"/score", score)
 	return
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Interaction) (err error) {
+func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) (err error) {
 	err = c.post("/hosts/"+hostKey.String()+"/interaction", i, nil)
 	return
 }
 
 // RHPScan scans a host, returning its current settings.
-func (c *Client) RHPScan(hostKey consensus.PublicKey, hostIP string) (resp rhpv2.HostSettings, err error) {
+func (c *Client) RHPScan(hostKey PublicKey, hostIP string) (resp rhpv2.HostSettings, err error) {
 	err = c.post("/rhp/scan", RHPScanRequest{hostKey, hostIP}, &resp)
 	return
 }
 
 // RHPPrepareForm prepares a contract formation transaction.
-func (c *Client) RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error) {
+func (c *Client) RHPPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error) {
 	req := RHPPrepareFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -223,7 +222,7 @@ func (c *Client) RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensu
 }
 
 // RHPPrepareRenew prepares a contract renewal transaction.
-func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error) {
+func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error) {
 	req := RHPPrepareRenewRequest{
 		Contract:       contract,
 		RenterKey:      renterKey,
@@ -240,7 +239,7 @@ func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey 
 }
 
 // RHPPreparePayment prepares an ephemeral account payment.
-func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key consensus.PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
+func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
 	req := RHPPreparePaymentRequest{
 		Account:    account,
 		Amount:     amount,
@@ -252,7 +251,7 @@ func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency,
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
 	req := RHPFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -265,7 +264,7 @@ func (c *Client) RHPForm(renterKey consensus.PrivateKey, hostKey consensus.Publi
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
 	req := RHPRenewRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -280,7 +279,7 @@ func (c *Client) RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.Publ
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
+func (c *Client) RHPFund(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
 	req := RHPFundRequest{
 		Contract:  contract,
 		RenterKey: renterKey,
@@ -294,7 +293,7 @@ func (c *Client) RHPFund(contract types.FileContractRevision, renterKey consensu
 }
 
 // RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(hostKey consensus.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
+func (c *Client) RHPReadRegistry(hostKey PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
 	req := RHPRegistryReadRequest{
 		HostKey:     hostKey,
 		HostIP:      hostIP,
@@ -306,7 +305,7 @@ func (c *Client) RHPReadRegistry(hostKey consensus.PublicKey, hostIP string, key
 }
 
 // RHPUpdateRegistry updates a registry value.
-func (c *Client) RHPUpdateRegistry(hostKey consensus.PublicKey, hostIP string, key rhpv3.RegistryKey, value rhpv3.RegistryValue, payment rhpv3.PayByEphemeralAccountRequest) (err error) {
+func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.RegistryKey, value rhpv3.RegistryValue, payment rhpv3.PayByEphemeralAccountRequest) (err error) {
 	req := RHPRegistryUpdateRequest{
 		HostKey:       hostKey,
 		HostIP:        hostIP,

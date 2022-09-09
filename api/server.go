@@ -350,7 +350,7 @@ func (s *server) hostsHandler(w http.ResponseWriter, req *http.Request, _ httpro
 }
 
 func (s *server) hostsPubkeyHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	var pk consensus.PublicKey
+	var pk PublicKey
 	if !readPathParam(w, ps, "pubkey", &pk) {
 		return
 	}
@@ -362,7 +362,7 @@ func (s *server) hostsPubkeyHandler(w http.ResponseWriter, req *http.Request, ps
 
 func (s *server) hostsScoreHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var score float64
-	var pk consensus.PublicKey
+	var pk PublicKey
 	if readJSON(w, req, &score) && readPathParam(w, ps, "pubkey", &pk) {
 		check(w, "couldn't set score", s.hdb.SetScore(pk, score))
 	}
@@ -370,7 +370,7 @@ func (s *server) hostsScoreHandler(w http.ResponseWriter, req *http.Request, ps 
 
 func (s *server) hostsInteractionHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var hi hostdb.Interaction
-	var pk consensus.PublicKey
+	var pk PublicKey
 	if readJSON(w, req, &hi) && readPathParam(w, ps, "pubkey", &pk) {
 		check(w, "couldn't record interaction", s.hdb.RecordInteraction(pk, hi))
 	}
