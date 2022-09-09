@@ -437,12 +437,8 @@ func (s *server) rhpFormHandler(w http.ResponseWriter, req *http.Request, _ http
 		return
 	}
 	writeJSON(w, RHPFormResponse{
-		Contract: Contract{
-			HostKey:   contract.HostKey(),
-			HostIP:    rfr.HostIP,
-			ID:        contract.ID(),
-			RenterKey: rfr.RenterKey,
-		},
+		ContractID:     contract.ID(),
+		Contract:       contract,
 		TransactionSet: txnSet,
 	})
 }
@@ -459,12 +455,8 @@ func (s *server) rhpRenewHandler(w http.ResponseWriter, req *http.Request, _ htt
 		return
 	}
 	writeJSON(w, RHPRenewResponse{
-		Contract: Contract{
-			HostKey:   contract.HostKey(),
-			HostIP:    rrr.HostIP,
-			ID:        contract.ID(),
-			RenterKey: rrr.RenterKey,
-		},
+		ContractID:     contract.ID(),
+		Contract:       contract,
 		TransactionSet: txnSet,
 	})
 }
