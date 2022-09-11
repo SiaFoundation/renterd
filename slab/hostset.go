@@ -167,7 +167,9 @@ type HostSet struct {
 // Close closes all of the sessions in the set.
 func (hs *HostSet) Close() error {
 	for hostKey, sess := range hs.hosts {
-		sess.Close()
+		if sess.Session != nil {
+			sess.Close()
+		}
 		delete(hs.hosts, hostKey)
 	}
 	return nil
