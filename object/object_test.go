@@ -32,11 +32,11 @@ func TestMultipleObjects(t *testing.T) {
 	r := io.MultiReader(rs...)
 
 	// upload
-	hs := slabutil.NewMockHostSet()
+	var hosts []slab.Host
 	for i := 0; i < 10; i++ {
-		hs.AddHost()
+		hosts = append(hosts, slabutil.NewMockHost())
 	}
-	slabs, err := slab.UploadSlabs(r, 3, 10, hs.Uploaders())
+	slabs, err := slab.UploadSlabs(r, 3, 10, hosts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestMultipleObjects(t *testing.T) {
 	checkDownload := func(data []byte, o object.Object, offset, length int) {
 		t.Helper()
 		var buf bytes.Buffer
-		if err := slab.DownloadSlabs(o.Key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length), hs.Downloaders()); err != nil {
+		if err := slab.DownloadSlabs(o.Key.Decrypt(&buf, int64(offset)), o.Slabs, int64(offset), int64(length), hosts); err != nil {
 			t.Error(err)
 			return
 		}

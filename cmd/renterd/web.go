@@ -131,7 +131,7 @@ func (t treeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func startWeb(l net.Listener, node *node, password string) error {
-	renter := api.NewServer(&chainManager{node.cm}, &syncer{node.g, node.tp}, txpool{node.tp}, node.w, node.hdb, rhpImpl{}, node.cs, slabMover{}, node.os)
+	renter := api.NewServer(&syncer{node.g, node.tp}, &chainManager{node.cm}, txpool{node.tp}, node.w, node.hdb, rhpImpl{}, node.cs, newSlabMover(), node.os)
 	return http.Serve(l, treeMux{
 		h: createUIHandler(),
 		sub: map[string]treeMux{
@@ -141,7 +141,7 @@ func startWeb(l net.Listener, node *node, password string) error {
 }
 
 func startStatelessWeb(l net.Listener, password string) error {
-	renter := api.NewStatelessServer(rhpImpl{}, slabMover{})
+	renter := api.NewStatelessServer(rhpImpl{}, newSlabMover())
 	return http.Serve(l, treeMux{
 		h: createUIHandler(),
 		sub: map[string]treeMux{

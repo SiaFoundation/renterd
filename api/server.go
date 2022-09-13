@@ -602,10 +602,10 @@ func (s *server) objectsKeyHandlerDELETE(w http.ResponseWriter, req *http.Reques
 }
 
 // NewServer returns an HTTP handler that serves the renterd API.
-func NewServer(cm ChainManager, s Syncer, tp TransactionPool, w Wallet, hdb HostDB, rhp RHP, cs ContractStore, sm SlabMover, os ObjectStore) http.Handler {
+func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, rhp RHP, cs ContractStore, sm SlabMover, os ObjectStore) http.Handler {
 	srv := server{
-		cm:  cm,
 		s:   s,
+		cm:  cm,
 		tp:  tp,
 		w:   w,
 		hdb: hdb,

@@ -8,20 +8,26 @@ import (
 	"go.sia.tech/renterd/slab"
 )
 
-type slabMover struct{}
+type slabMover struct {
+	pool *slab.SessionPool
+}
 
-func (slabMover) withHostSet(ctx context.Context, contracts []api.Contract, fn func(*slab.HostSet) error) (err error) {
-	hs := slab.NewHostSet()
+func (sm slabMover) withHosts(ctx context.Context, contracts []api.Contract, fn func([]slab.Host) error) (err error) {
+	var hosts []slab.Host
 	for _, c := range contracts {
-		hs.AddHost(c.HostKey, c.HostIP, c.ID, c.RenterKey)
+		h := sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey)
+		defer sm.pool.UnlockContract(h)
+		hosts = append(hosts, h)
 	}
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-done:
 		case <-ctx.Done():
+			for _, h := range hosts {
+				sm.pool.ForceClose(h.(*slab.Session))
+			}
 		}
-		hs.Close()
 	}()
 	defer func() {
 		close(done)
@@ -29,46 +35,56 @@ func (slabMover) withHostSet(ctx context.Context, contracts []api.Contract, fn f
 			err = ctx.Err()
 		}
 	}()
-	return fn(hs)
+	return fn(hosts)
 }
 
 func (sm slabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (slabs []slab.Slab, err error) {
-	err = sm.withHostSet(ctx, contracts, func(hs *slab.HostSet) error {
-		slabs, err = slab.UploadSlabs(r, m, n, hs.Uploaders(currentHeight))
+	sm.pool.SetCurrentHeight(currentHeight)
+	err = sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+		slabs, err = slab.UploadSlabs(r, m, n, hosts)
 		return err
 	})
 	return
 }
 
 func (sm slabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []api.Contract) error {
-	return sm.withHostSet(ctx, contracts, func(hs *slab.HostSet) error {
-		return slab.DownloadSlabs(w, slabs, offset, length, hs.Downloaders())
+	return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+		return slab.DownloadSlabs(w, slabs, offset, length, hosts)
 	})
 }
 
 func (sm slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) error {
-	return sm.withHostSet(ctx, contracts, func(hs *slab.HostSet) error {
-		return slab.DeleteSlabs(slabs, hs.Deleters())
+	return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+		return slab.DeleteSlabs(slabs, hosts)
 	})
 }
 
 func (sm slabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []api.Contract) (err error) {
-	fromHS := slab.NewHostSet()
+	sm.pool.SetCurrentHeight(currentHeight)
+	var fromHosts []slab.Host
 	for _, c := range from {
-		fromHS.AddHost(c.HostKey, c.HostIP, c.ID, c.RenterKey)
+		h := sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey)
+		defer sm.pool.UnlockContract(h)
+		fromHosts = append(fromHosts, h)
 	}
-	toHS := slab.NewHostSet()
+	var toHosts []slab.Host
 	for _, c := range to {
-		toHS.AddHost(c.HostKey, c.HostIP, c.ID, c.RenterKey)
+		h := sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey)
+		defer sm.pool.UnlockContract(h)
+		toHosts = append(toHosts, h)
 	}
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-done:
 		case <-ctx.Done():
+			for _, h := range fromHosts {
+				sm.pool.ForceClose(h.(*slab.Session))
+			}
+			for _, h := range toHosts {
+				sm.pool.ForceClose(h.(*slab.Session))
+			}
 		}
-		fromHS.Close()
-		toHS.Close()
 	}()
 	defer func() {
 		close(done)
@@ -76,5 +92,11 @@ func (sm slabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, current
 			err = ctx.Err()
 		}
 	}()
-	return slab.MigrateSlabs(slabs, fromHS.Downloaders(), toHS.Uploaders(currentHeight))
+	return slab.MigrateSlabs(slabs, fromHosts, toHosts)
+}
+
+func newSlabMover() slabMover {
+	return slabMover{
+		pool: slab.NewSessionPool(),
+	}
 }

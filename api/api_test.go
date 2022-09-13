@@ -94,23 +94,23 @@ func (mockRHP) UpdateRegistry(ctx context.Context, hostIP string, hostKey consen
 }
 
 type mockSlabMover struct {
-	hs *slabutil.MockHostSet
+	hosts []slab.Host
 }
 
-func (sm mockSlabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) ([]slab.Slab, error) {
-	return slab.UploadSlabs(r, m, n, sm.hs.Uploaders())
+func (sm *mockSlabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) ([]slab.Slab, error) {
+	return slab.UploadSlabs(r, m, n, sm.hosts)
 }
 
-func (sm mockSlabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []api.Contract) error {
-	return slab.DownloadSlabs(w, slabs, offset, length, sm.hs.Downloaders())
+func (sm *mockSlabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []api.Contract) error {
+	return slab.DownloadSlabs(w, slabs, offset, length, sm.hosts)
 }
 
-func (sm mockSlabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) error {
-	return slab.DeleteSlabs(slabs, sm.hs.Deleters())
+func (sm *mockSlabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) error {
+	return slab.DeleteSlabs(slabs, sm.hosts)
 }
 
-func (sm mockSlabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []api.Contract) error {
-	return slab.MigrateSlabs(slabs, sm.hs.Downloaders(), sm.hs.Uploaders())
+func (sm *mockSlabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []api.Contract) error {
+	return slab.MigrateSlabs(slabs, sm.hosts, sm.hosts)
 }
 
 type node struct {
@@ -118,13 +118,15 @@ type node struct {
 	hdb *hostdbutil.EphemeralDB
 	cs  *contractsutil.EphemeralStore
 	os  *objectutil.EphemeralStore
-	sm  mockSlabMover
+	sm  *mockSlabMover
 
 	walletKey consensus.PrivateKey
 }
 
 func (n *node) addHost() consensus.PublicKey {
-	return n.sm.hs.AddHost()
+	h := slabutil.NewMockHost()
+	n.sm.hosts = append(n.sm.hosts, h)
+	return h.PublicKey()
 }
 
 func newTestNode() *node {
@@ -133,7 +135,7 @@ func newTestNode() *node {
 	hdb := hostdbutil.NewEphemeralDB()
 	cs := contractsutil.NewEphemeralStore()
 	os := objectutil.NewEphemeralStore()
-	sm := mockSlabMover{hs: slabutil.NewMockHostSet()}
+	sm := &mockSlabMover{}
 	return &node{w, hdb, cs, os, sm, walletKey}
 }
 
@@ -143,7 +145,7 @@ func runServer(n *node) (*api.Client, func()) {
 		panic(err)
 	}
 	go func() {
-		srv := api.NewServer(mockChainManager{}, mockSyncer{}, mockTxPool{}, n.w, n.hdb, mockRHP{}, n.cs, n.sm, n.os)
+		srv := api.NewServer(mockSyncer{}, mockChainManager{}, mockTxPool{}, n.w, n.hdb, mockRHP{}, n.cs, n.sm, n.os)
 		http.Serve(l, api.AuthMiddleware(srv, "password"))
 	}()
 	c := api.NewClient("http://"+l.Addr().String(), "password")

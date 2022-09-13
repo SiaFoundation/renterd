@@ -9,35 +9,26 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
 
-type (
-	// A SectorUploader uploads a sector, returning its Merkle root.
-	SectorUploader interface {
-		UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
-	}
-
-	// A SectorDownloader downloads a slice of a sector.
-	SectorDownloader interface {
-		DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error
-	}
-
-	// A SectorDeleter deletes sectors.
-	SectorDeleter interface {
-		DeleteSectors(roots []consensus.Hash256) error
-	}
-)
+// A Host stores contract data.
+type Host interface {
+	PublicKey() consensus.PublicKey
+	UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
+	DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error
+	DeleteSectors(roots []consensus.Hash256) error
+}
 
 // serialUploadSlab uploads the provided shards one at a time.
-func serialUploadSlab(shards [][]byte, hosts map[consensus.PublicKey]SectorUploader) ([]Sector, error) {
+func serialUploadSlab(shards [][]byte, hosts []Host) ([]Sector, error) {
 	var sectors []Sector
 	var errs HostErrorSet
-	for hostKey, su := range hosts {
-		root, err := su.UploadSector((*[rhpv2.SectorSize]byte)(shards[len(sectors)]))
+	for _, h := range hosts {
+		root, err := h.UploadSector((*[rhpv2.SectorSize]byte)(shards[len(sectors)]))
 		if err != nil {
-			errs = append(errs, &HostError{hostKey, err})
+			errs = append(errs, &HostError{h.PublicKey(), err})
 			continue
 		}
 		sectors = append(sectors, Sector{
-			Host: hostKey,
+			Host: h.PublicKey(),
 			Root: root,
 		})
 		if len(sectors) == len(shards) {
@@ -51,7 +42,7 @@ func serialUploadSlab(shards [][]byte, hosts map[consensus.PublicKey]SectorUploa
 }
 
 // UploadSlabs uploads slabs read from the provided Reader.
-func UploadSlabs(r io.Reader, m, n uint8, hosts map[consensus.PublicKey]SectorUploader) ([]Slab, error) {
+func UploadSlabs(r io.Reader, m, n uint8, hosts []Host) ([]Slab, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	var slabs []Slab
@@ -106,20 +97,25 @@ func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
 }
 
 // serialDownloadSlab downloads the shards comprising a slab one at a time.
-func serialDownloadSlab(s Slice, hosts map[consensus.PublicKey]SectorDownloader) ([][]byte, error) {
+func serialDownloadSlab(s Slice, hosts []Host) ([][]byte, error) {
 	offset, length := s.SectorRegion()
 	shards := make([][]byte, len(s.Shards))
 	rem := s.MinShards
 	var errs HostErrorSet
-	for i, sector := range s.Shards {
-		sd, ok := hosts[sector.Host]
-		if !ok {
-			errs = append(errs, &HostError{sector.Host, errors.New("unknown host")})
+	for _, h := range hosts {
+		var i int
+		for i = range s.Shards {
+			if s.Shards[i].Host == h.PublicKey() {
+				break
+			}
+		}
+		if i == len(s.Shards) {
+			errs = append(errs, &HostError{h.PublicKey(), errors.New("slab is not stored on this host")})
 			continue
 		}
 		var buf bytes.Buffer
-		if err := sd.DownloadSector(&buf, sector.Root, offset, length); err != nil {
-			errs = append(errs, &HostError{sector.Host, err})
+		if err := h.DownloadSector(&buf, s.Shards[i].Root, offset, length); err != nil {
+			errs = append(errs, &HostError{h.PublicKey(), err})
 			continue
 		}
 		shards[i] = buf.Bytes()
@@ -134,7 +130,7 @@ func serialDownloadSlab(s Slice, hosts map[consensus.PublicKey]SectorDownloader)
 }
 
 // DownloadSlabs downloads data from the supplied slabs.
-func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts map[consensus.PublicKey]SectorDownloader) error {
+func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts []Host) error {
 	var slabsSize int64
 	for _, ss := range slabs {
 		slabsSize += int64(ss.Length)
@@ -160,7 +156,7 @@ func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts map[c
 }
 
 // DeleteSlab deletes a set of slabs from the provided hosts.
-func DeleteSlabs(slabs []Slab, hosts map[consensus.PublicKey]SectorDeleter) error {
+func DeleteSlabs(slabs []Slab, hosts []Host) error {
 	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
@@ -168,14 +164,11 @@ func DeleteSlabs(slabs []Slab, hosts map[consensus.PublicKey]SectorDeleter) erro
 		}
 	}
 	var errs HostErrorSet
-	for hostKey, roots := range rootsByHost {
-		sd, ok := hosts[hostKey]
-		if !ok {
-			errs = append(errs, &HostError{hostKey, errors.New("unknown host")})
-			continue
-		}
-		if err := sd.DeleteSectors(roots); err != nil {
-			errs = append(errs, &HostError{hostKey, err})
+	for _, h := range hosts {
+		// NOTE: if host is not storing any sectors, the map lookup will return
+		// nil, making this a no-op
+		if err := h.DeleteSectors(rootsByHost[h.PublicKey()]); err != nil {
+			errs = append(errs, &HostError{h.PublicKey(), err})
 			continue
 		}
 	}
@@ -186,7 +179,7 @@ func DeleteSlabs(slabs []Slab, hosts map[consensus.PublicKey]SectorDeleter) erro
 }
 
 // serialMigrateSlab migrates a slab one shard at a time.
-func serialMigrateSlab(s *Slab, from map[consensus.PublicKey]SectorDownloader, to map[consensus.PublicKey]SectorUploader) error {
+func serialMigrateSlab(s *Slab, from, to []Host) error {
 	ss := Slice{*s, 0, uint32(s.MinShards) * rhpv2.SectorSize}
 	shards, err := serialDownloadSlab(ss, from)
 	if err != nil {
@@ -198,22 +191,19 @@ func serialMigrateSlab(s *Slab, from map[consensus.PublicKey]SectorDownloader, t
 	}
 	s.Encrypt(shards)
 
-	hosts := make([]consensus.PublicKey, 0, len(to))
-	for hostKey := range to {
-		hosts = append(hosts, hostKey)
-	}
+	queue := to
 	migrate := func(shard []byte) (Sector, error) {
 		var errs HostErrorSet
-		for len(hosts) > 0 {
-			hostKey := hosts[0]
-			hosts = hosts[1:]
-			root, err := to[hostKey].UploadSector((*[rhpv2.SectorSize]byte)(shard))
+		for len(queue) > 0 {
+			h := queue[0]
+			queue = queue[1:]
+			root, err := h.UploadSector((*[rhpv2.SectorSize]byte)(shard))
 			if err != nil {
-				errs = append(errs, &HostError{hostKey, err})
+				errs = append(errs, &HostError{h.PublicKey(), err})
 				continue
 			}
 			return Sector{
-				Host: hostKey,
+				Host: h.PublicKey(),
 				Root: root,
 			}, nil
 		}
@@ -222,10 +212,18 @@ func serialMigrateSlab(s *Slab, from map[consensus.PublicKey]SectorDownloader, t
 		}
 		return Sector{}, errors.New("no hosts available")
 	}
+	alreadyMigrated := func(shard Sector) bool {
+		for _, h := range to {
+			if shard.Host == h.PublicKey() {
+				return true
+			}
+		}
+		return false
+	}
 
 	for i, shard := range shards {
-		if to[s.Shards[i].Host] != nil {
-			continue // already on a good host
+		if alreadyMigrated(s.Shards[i]) {
+			continue
 		}
 		s.Shards[i], err = migrate(shard)
 		if err != nil {
@@ -236,7 +234,7 @@ func serialMigrateSlab(s *Slab, from map[consensus.PublicKey]SectorDownloader, t
 }
 
 // MigrateSlabs migrates the provided slabs.
-func MigrateSlabs(slabs []Slab, from map[consensus.PublicKey]SectorDownloader, to map[consensus.PublicKey]SectorUploader) error {
+func MigrateSlabs(slabs []Slab, from, to []Host) error {
 	for i := range slabs {
 		if err := serialMigrateSlab(&slabs[i], from, to); err != nil {
 			return err
