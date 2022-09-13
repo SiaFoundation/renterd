@@ -147,8 +147,6 @@ func (s *EphemeralStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 				s.txns = s.txns[:len(s.txns)-1]
 			}
 		}
-		s.tip.Height--
-		s.tip.ID = consensus.BlockID(block.ID())
 	}
 
 	for _, block := range cc.AppliedBlocks {
@@ -173,13 +171,14 @@ func (s *EphemeralStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 					Inflow:    inflow,
 					Outflow:   outflow,
 					ID:        txn.ID(),
-					Timestamp: time.Unix(int64(block.Header().Timestamp), 0),
+					Timestamp: time.Unix(int64(block.Timestamp), 0),
 				})
 			}
 		}
-		s.tip.Height++
-		s.tip.ID = consensus.BlockID(block.ID())
 	}
+
+	s.tip.Height = uint64(cc.InitialHeight()) + uint64(len(cc.AppliedBlocks)) - uint64(len(cc.RevertedBlocks))
+	s.tip.ID = consensus.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID())
 	s.ccid = cc.ID
 }
 
