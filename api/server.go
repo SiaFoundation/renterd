@@ -242,7 +242,7 @@ func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ h
 	txn := wfr.Transaction
 	fee := s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
 	txn.MinerFees = []types.Currency{fee}
-	toSign, err := s.w.FundTransaction(s.cm.TipState(), &wfr.Transaction, wfr.Amount.Add(txn.MinerFees[0]), s.tp.Transactions())
+	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), s.tp.Transactions())
 	if check(w, "couldn't fund transaction", err) {
 		return
 	}
