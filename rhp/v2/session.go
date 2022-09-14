@@ -112,7 +112,7 @@ func RPCAppendCost(settings HostSettings, storageDuration uint64) (price, collat
 		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
 	collateral = settings.Collateral.Mul64(SectorSize).Mul64(storageDuration)
 	// add some leeway to reduce chance of host rejecting
-	price = price.MulFloat(1.05)
+	price = price.MulFloat(1.25)
 	collateral = collateral.MulFloat(0.95)
 	return
 }
@@ -337,7 +337,7 @@ func (s *Session) Read(w io.Writer, sections []RPCReadRequestSection, price type
 			break
 		}
 	}
-	if hostSig != nil {
+	if hostSig == nil {
 		// the host is required to send a signature; if they haven't sent one
 		// yet, they should send an empty ReadResponse containing just the
 		// signature.
