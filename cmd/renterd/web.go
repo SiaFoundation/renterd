@@ -80,8 +80,8 @@ type txpool struct {
 }
 
 func (tp txpool) RecommendedFee() types.Currency {
-	min, _ := tp.tp.FeeEstimation()
-	return min
+	_, max := tp.tp.FeeEstimation()
+	return max
 }
 
 func (tp txpool) Transactions() []types.Transaction {
