@@ -208,6 +208,7 @@ func (s *JSONStore) save() error {
 	defer s.mu.Unlock()
 	js, _ := json.MarshalIndent(jsonPersistData{
 		Tip:             s.tip,
+		CCID:            s.ccid,
 		SiacoinElements: s.scElems,
 		Transactions:    s.txns,
 	}, "", "  ")

@@ -511,7 +511,7 @@ func (s *server) contractsIDHandlerGET(w http.ResponseWriter, req *http.Request,
 func (s *server) contractsIDHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var id types.FileContractID
 	var c rhpv2.Contract
-	if !readPathParam(w, ps, "id", &id) && !readJSON(w, req, &c) {
+	if !readPathParam(w, ps, "id", &id) || !readJSON(w, req, &c) {
 		return
 	}
 	if c.ID() != id {

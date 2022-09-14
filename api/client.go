@@ -342,7 +342,7 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 }
 
 // UploadSlabs uploads data to a set of hosts.
-func (c *Client) UploadSlabs(src io.Reader, m, n uint8, contracts []Contract) (slabs []slab.Slab, err error) {
+func (c *Client) UploadSlabs(src io.Reader, m, n uint8, height uint64, contracts []Contract) (slabs []slab.Slab, err error) {
 	// apparently, the only way to stream a multipart upload is via io.Pipe :/
 	r, w := io.Pipe()
 	mw := multipart.NewWriter(w)
@@ -351,9 +351,10 @@ func (c *Client) UploadSlabs(src io.Reader, m, n uint8, contracts []Contract) (s
 		defer w.Close()
 		defer mw.Close()
 		js, _ := json.Marshal(SlabsUploadRequest{
-			MinShards:   m,
-			TotalShards: n,
-			Contracts:   contracts,
+			MinShards:     m,
+			TotalShards:   n,
+			Contracts:     contracts,
+			CurrentHeight: height,
 		})
 		mw.WriteField("meta", string(js))
 		part, _ := mw.CreateFormFile("data", "data")
