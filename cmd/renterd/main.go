@@ -65,6 +65,7 @@ func main() {
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
 	stateless := flag.Bool("stateless", false, "run in stateless mode")
+	bootstrap := flag.Bool("bootstrap", true, "bootstrap the gateway and consensus modules")
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")
@@ -93,7 +94,7 @@ func main() {
 
 	apiPassword := getAPIPassword()
 	walletKey := getWalletKey()
-	n, err := newNode(*gatewayAddr, *dir, walletKey)
+	n, err := newNode(*gatewayAddr, *dir, *bootstrap, walletKey)
 	if err != nil {
 		log.Fatal(err)
 	}
