@@ -41,12 +41,12 @@ func (n *node) Close() error {
 	return nil
 }
 
-func newNode(addr, dir string, walletKey consensus.PrivateKey) (*node, error) {
+func newNode(addr, dir string, bootstrap bool, walletKey consensus.PrivateKey) (*node, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, err
 	}
-	g, err := gateway.New(addr, false, gatewayDir)
+	g, err := gateway.New(addr, bootstrap, gatewayDir)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func newNode(addr, dir string, walletKey consensus.PrivateKey) (*node, error) {
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
 		return nil, err
 	}
-	cm, errCh := mconsensus.New(g, false, consensusDir)
+	cm, errCh := mconsensus.New(g, bootstrap, consensusDir)
 	select {
 	case err := <-errCh:
 		if err != nil {
