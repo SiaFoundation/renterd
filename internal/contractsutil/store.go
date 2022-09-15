@@ -11,13 +11,13 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// EphemeralStore implements server.ContractStore in memory.
+// EphemeralStore implements api.ContractStore in memory.
 type EphemeralStore struct {
 	mu        sync.Mutex
 	contracts map[types.FileContractID]rhpv2.Contract
 }
 
-// Contracts implements server.ContractStore.
+// Contracts implements api.ContractStore.
 func (s *EphemeralStore) Contracts() ([]rhpv2.Contract, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -28,7 +28,7 @@ func (s *EphemeralStore) Contracts() ([]rhpv2.Contract, error) {
 	return cs, nil
 }
 
-// Contract implements server.ContractStore.
+// Contract implements api.ContractStore.
 func (s *EphemeralStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -39,7 +39,7 @@ func (s *EphemeralStore) Contract(id types.FileContractID) (rhpv2.Contract, erro
 	return c, nil
 }
 
-// AddContract implements server.ContractStore.
+// AddContract implements api.ContractStore.
 func (s *EphemeralStore) AddContract(c rhpv2.Contract) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -47,7 +47,7 @@ func (s *EphemeralStore) AddContract(c rhpv2.Contract) error {
 	return nil
 }
 
-// RemoveContract implements server.ContractStore.
+// RemoveContract implements api.ContractStore.
 func (s *EphemeralStore) RemoveContract(id types.FileContractID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -62,7 +62,7 @@ func NewEphemeralStore() *EphemeralStore {
 	}
 }
 
-// JSONStore implements server.ContractStore in memory, backed by a JSON file.
+// JSONStore implements api.ContractStore in memory, backed by a JSON file.
 type JSONStore struct {
 	*EphemeralStore
 	dir string
@@ -115,13 +115,13 @@ func (s *JSONStore) load() error {
 	return nil
 }
 
-// AddContract implements server.ContractStore.
+// AddContract implements api.ContractStore.
 func (s *JSONStore) AddContract(c rhpv2.Contract) error {
 	s.EphemeralStore.AddContract(c)
 	return s.save()
 }
 
-// RemoveContract implements server.ContractStore.
+// RemoveContract implements api.ContractStore.
 func (s *JSONStore) RemoveContract(id types.FileContractID) error {
 	s.EphemeralStore.RemoveContract(id)
 	return s.save()

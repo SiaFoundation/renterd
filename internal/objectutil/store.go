@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -35,7 +36,7 @@ type refObject struct {
 	slabs []refSlice
 }
 
-// EphemeralStore implements server.ObjectStore in memory.
+// EphemeralStore implements api.ObjectStore in memory.
 type EphemeralStore struct {
 	hosts   []consensus.PublicKey
 	slabs   map[slab.EncryptionKey]refSlab
@@ -53,7 +54,7 @@ func (es *EphemeralStore) addHost(hostKey consensus.PublicKey) uint32 {
 	return uint32(len(es.hosts) - 1)
 }
 
-// Put implements server.ObjectStore.
+// Put implements api.ObjectStore.
 func (es *EphemeralStore) Put(key string, o object.Object) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
@@ -81,7 +82,7 @@ func (es *EphemeralStore) Put(key string, o object.Object) error {
 	return nil
 }
 
-// Get implements server.ObjectStore.
+// Get implements api.ObjectStore.
 func (es *EphemeralStore) Get(key string) (object.Object, error) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
@@ -115,7 +116,7 @@ func (es *EphemeralStore) Get(key string) (object.Object, error) {
 	}, nil
 }
 
-// Delete implements server.ObjectStore.
+// Delete implements api.ObjectStore.
 func (es *EphemeralStore) Delete(key string) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
@@ -140,16 +141,27 @@ func (es *EphemeralStore) Delete(key string) error {
 	return nil
 }
 
-// List implements server.ObjectStore.
-func (es *EphemeralStore) List(prefix string) []string {
+// List implements api.ObjectStore.
+func (es *EphemeralStore) List(path string) []string {
+	if !strings.HasSuffix(path, "/") {
+		panic("path must end in /")
+	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	var keys []string
+	seen := make(map[string]bool)
 	for k := range es.objects {
-		if strings.HasPrefix(k, prefix) && !strings.ContainsRune(k[len(prefix):], '/') {
-			keys = append(keys, k)
+		if strings.HasPrefix(k, path) {
+			if rem := k[len(path):]; strings.ContainsRune(rem, '/') {
+				k = path + rem[:strings.IndexRune(rem, '/')+1]
+			}
+			if !seen[k] {
+				keys = append(keys, k)
+				seen[k] = true
+			}
 		}
 	}
+	sort.Strings(keys)
 	return keys
 }
 
@@ -161,7 +173,7 @@ func NewEphemeralStore() *EphemeralStore {
 	}
 }
 
-// JSONStore implements server.ObjectStore in memory, backed by a JSON file.
+// JSONStore implements api.ObjectStore in memory, backed by a JSON file.
 type JSONStore struct {
 	*EphemeralStore
 	dir string
@@ -217,13 +229,13 @@ func (s *JSONStore) load() error {
 	return nil
 }
 
-// Put implements server.ObjectStore.
+// Put implements api.ObjectStore.
 func (s *JSONStore) Put(key string, o object.Object) error {
 	s.EphemeralStore.Put(key, o)
 	return s.save()
 }
 
-// Delete implements server.ObjectStore.
+// Delete implements api.ObjectStore.
 func (s *JSONStore) Delete(key string) error {
 	s.EphemeralStore.Delete(key)
 	return s.save()
