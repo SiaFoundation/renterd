@@ -113,6 +113,7 @@ func (s *sharedSession) Close() error {
 	return nil
 }
 
+// Session implements Host via the renter-host protocol.
 type Session struct {
 	hostKey    consensus.PublicKey
 	hostIP     string

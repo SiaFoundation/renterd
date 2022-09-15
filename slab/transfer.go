@@ -155,7 +155,7 @@ func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts []Hos
 	return nil
 }
 
-// DeleteSlab deletes a set of slabs from the provided hosts.
+// DeleteSlabs deletes a set of slabs from the provided hosts.
 func DeleteSlabs(slabs []Slab, hosts []Host) error {
 	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {

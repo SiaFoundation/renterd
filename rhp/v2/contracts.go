@@ -338,8 +338,8 @@ func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, 
 // contract payout (instead of the sum of the renter and host payouts). So the
 // equation for the payout is:
 //
-//      payout = renterPayout + hostPayout + payout*tax
-//   ∴  payout = (renterPayout + hostPayout) / (1 - tax)
+//	   payout = renterPayout + hostPayout + payout*tax
+//	∴  payout = (renterPayout + hostPayout) / (1 - tax)
 //
 // This would work if 'tax' were a simple fraction, but because the tax must
 // be evenly distributed among siafund holders, 'tax' is actually a function

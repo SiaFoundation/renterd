@@ -55,7 +55,7 @@ func GeneratePrivateKey() PrivateKey {
 // A Signature is an Ed25519 signature.
 type Signature [64]byte
 
-// SignHash signs h with priv, producing a Signature.
+// SignHash signs h, producing a Signature.
 func (priv PrivateKey) SignHash(h Hash256) (s Signature) {
 	copy(s[:], ed25519.Sign(ed25519.PrivateKey(priv), h[:]))
 	return
@@ -152,33 +152,35 @@ func (pk PublicKey) MarshalJSON() ([]byte, error) { return marshalJSONHex("ed255
 func (pk *PublicKey) UnmarshalJSON(b []byte) error { return unmarshalJSONHex(pk[:], "ed25519", b) }
 
 // String implements fmt.Stringer.
-func (pk PrivateKey) String() string { return stringerHex("key", pk[:ed25519.SeedSize]) }
+func (priv PrivateKey) String() string { return stringerHex("key", priv[:ed25519.SeedSize]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (pk PrivateKey) MarshalText() ([]byte, error) { return marshalHex("key", pk[:ed25519.SeedSize]) }
+func (priv PrivateKey) MarshalText() ([]byte, error) {
+	return marshalHex("key", priv[:ed25519.SeedSize])
+}
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (pk *PrivateKey) UnmarshalText(b []byte) error {
+func (priv *PrivateKey) UnmarshalText(b []byte) error {
 	seed := make([]byte, ed25519.SeedSize)
 	if err := unmarshalHex(seed, "key", b); err != nil {
 		return err
 	}
-	*pk = NewPrivateKeyFromSeed(seed)
+	*priv = NewPrivateKeyFromSeed(seed)
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
-func (pk PrivateKey) MarshalJSON() ([]byte, error) {
-	return marshalJSONHex("key", pk[:ed25519.SeedSize])
+func (priv PrivateKey) MarshalJSON() ([]byte, error) {
+	return marshalJSONHex("key", priv[:ed25519.SeedSize])
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (pk *PrivateKey) UnmarshalJSON(b []byte) error {
+func (priv *PrivateKey) UnmarshalJSON(b []byte) error {
 	seed := make([]byte, ed25519.SeedSize)
 	if err := unmarshalJSONHex(seed, "key", b); err != nil {
 		return err
 	}
-	*pk = NewPrivateKeyFromSeed(seed)
+	*priv = NewPrivateKeyFromSeed(seed)
 	return nil
 }
 
