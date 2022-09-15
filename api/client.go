@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -22,93 +23,59 @@ import (
 
 // A Client provides methods for interacting with a renterd API server.
 type Client struct {
-	baseURL  string
-	password string
+	c jape.Client
 }
-
-func (c *Client) req(method string, route string, data, resp interface{}) error {
-	var body io.Reader
-	if data != nil {
-		js, _ := json.Marshal(data)
-		body = bytes.NewReader(js)
-	}
-	req, err := http.NewRequest(method, fmt.Sprintf("%v%v", c.baseURL, route), body)
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.SetBasicAuth("", c.password)
-	r, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer io.Copy(ioutil.Discard, r.Body)
-	defer r.Body.Close()
-	if r.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(r.Body)
-		return errors.New(string(err))
-	}
-	if resp == nil {
-		return nil
-	}
-	return json.NewDecoder(r.Body).Decode(resp)
-}
-
-func (c *Client) get(route string, r interface{}) error     { return c.req("GET", route, nil, r) }
-func (c *Client) post(route string, d, r interface{}) error { return c.req("POST", route, d, r) }
-func (c *Client) put(route string, d interface{}) error     { return c.req("PUT", route, d, nil) }
-func (c *Client) delete(route string) error                 { return c.req("DELETE", route, nil, nil) }
 
 // SyncerPeers returns the current peers of the syncer.
 func (c *Client) SyncerPeers() (resp []string, err error) {
-	err = c.get("/syncer/peers", &resp)
+	err = c.c.GET("/syncer/peers", &resp)
 	return
 }
 
 // SyncerConnect adds the address as a peer of the syncer.
 func (c *Client) SyncerConnect(addr string) (err error) {
-	err = c.post("/syncer/connect", addr, nil)
+	err = c.c.POST("/syncer/connect", addr, nil)
 	return
 }
 
 // ConsensusTip returns the current tip index.
 func (c *Client) ConsensusTip() (resp ChainIndex, err error) {
-	err = c.get("/consensus/tip", &resp)
+	err = c.c.GET("/consensus/tip", &resp)
 	return
 }
 
 // TransactionPool returns the transactions currently in the pool.
 func (c *Client) TransactionPool() (txns []types.Transaction, err error) {
-	err = c.get("/txpool/transactions", &txns)
+	err = c.c.GET("/txpool/transactions", &txns)
 	return
 }
 
 // BroadcastTransaction broadcasts the transaction set to the network.
 func (c *Client) BroadcastTransaction(txns []types.Transaction) error {
-	return c.post("/txpool/broadcast", txns, nil)
+	return c.c.POST("/txpool/broadcast", txns, nil)
 }
 
 // WalletBalance returns the current wallet balance.
 func (c *Client) WalletBalance() (bal types.Currency, err error) {
-	err = c.get("/wallet/balance", &bal)
+	err = c.c.GET("/wallet/balance", &bal)
 	return
 }
 
 // WalletAddress returns an address controlled by the wallet.
 func (c *Client) WalletAddress() (resp types.UnlockHash, err error) {
-	err = c.get("/wallet/address", &resp)
+	err = c.c.GET("/wallet/address", &resp)
 	return
 }
 
 // WalletOutputs returns the set of unspent outputs controlled by the wallet.
 func (c *Client) WalletOutputs() (resp []wallet.SiacoinElement, err error) {
-	err = c.get("/wallet/outputs", &resp)
+	err = c.c.GET("/wallet/outputs", &resp)
 	return
 }
 
 // WalletTransactions returns all transactions relevant to the wallet.
 func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Transaction, err error) {
-	err = c.get(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", since.Format(time.RFC3339), max), &resp)
+	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", since.Format(time.RFC3339), max), &resp)
 	return
 }
 
@@ -119,7 +86,7 @@ func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]ty
 		Amount:      amount,
 	}
 	var resp WalletFundResponse
-	err := c.post("/wallet/fund", req, &resp)
+	err := c.c.POST("/wallet/fund", req, &resp)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -134,13 +101,13 @@ func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf 
 		ToSign:        toSign,
 		CoveredFields: cf,
 	}
-	return c.post("/wallet/sign", req, txn)
+	return c.c.POST("/wallet/sign", req, txn)
 }
 
 // WalletDiscard discards the provided txn, make its inputs usable again. This
 // should only be called on transactions that will never be broadcast.
 func (c *Client) WalletDiscard(txn types.Transaction) error {
-	return c.post("/wallet/discard", txn, nil)
+	return c.c.POST("/wallet/discard", txn, nil)
 }
 
 // WalletPrepareForm funds and signs a contract transaction.
@@ -154,7 +121,7 @@ func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, rent
 		EndHeight:      endHeight,
 		HostSettings:   hostSettings,
 	}
-	err = c.post("/wallet/prepare/form", req, &txns)
+	err = c.c.POST("/wallet/prepare/form", req, &txns)
 	return
 }
 
@@ -171,37 +138,37 @@ func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterK
 		HostSettings:   hostSettings,
 	}
 	var resp WalletPrepareRenewResponse
-	err := c.post("/wallet/prepare/renew", req, &resp)
+	err := c.c.POST("/wallet/prepare/renew", req, &resp)
 	return resp.TransactionSet, resp.FinalPayment, err
 }
 
 // Hosts returns all hosts known to the server.
 func (c *Client) Hosts() (hosts []hostdb.Host, err error) {
-	err = c.get("/hosts", &hosts)
+	err = c.c.GET("/hosts", &hosts)
 	return
 }
 
 // Host returns information about a particular host known to the server.
 func (c *Client) Host(hostKey PublicKey) (h hostdb.Host, err error) {
-	err = c.get("/hosts/"+hostKey.String(), &h)
+	err = c.c.GET("/hosts/"+hostKey.String(), &h)
 	return
 }
 
 // SetHostScore sets the score for the supplied host.
 func (c *Client) SetHostScore(hostKey PublicKey, score float64) (err error) {
-	err = c.put("/hosts/"+hostKey.String()+"/score", score)
+	err = c.c.PUT("/hosts/"+hostKey.String()+"/score", score)
 	return
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
 func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) (err error) {
-	err = c.post("/hosts/"+hostKey.String()+"/interaction", i, nil)
+	err = c.c.POST("/hosts/"+hostKey.String()+"/interaction", i, nil)
 	return
 }
 
 // RHPScan scans a host, returning its current settings.
 func (c *Client) RHPScan(hostKey PublicKey, hostIP string) (resp rhpv2.HostSettings, err error) {
-	err = c.post("/rhp/scan", RHPScanRequest{hostKey, hostIP}, &resp)
+	err = c.c.POST("/rhp/scan", RHPScanRequest{hostKey, hostIP}, &resp)
 	return
 }
 
@@ -217,7 +184,7 @@ func (c *Client) RHPPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterF
 		HostSettings:   hostSettings,
 	}
 	var resp RHPPrepareFormResponse
-	err := c.post("/rhp/prepare/form", req, &resp)
+	err := c.c.POST("/rhp/prepare/form", req, &resp)
 	return resp.Contract, resp.Cost, err
 }
 
@@ -234,7 +201,7 @@ func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey 
 		HostSettings:   hostSettings,
 	}
 	var resp RHPPrepareRenewResponse
-	err := c.post("/rhp/prepare/renew", req, &resp)
+	err := c.c.POST("/rhp/prepare/renew", req, &resp)
 	return resp.Contract, resp.Cost, resp.FinalPayment, err
 }
 
@@ -246,7 +213,7 @@ func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency,
 		Expiry:     0, // TODO
 		AccountKey: key,
 	}
-	err = c.post("/rhp/prepare/payment", req, &resp)
+	err = c.c.POST("/rhp/prepare/payment", req, &resp)
 	return
 }
 
@@ -259,7 +226,7 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 		TransactionSet: transactionSet,
 	}
 	var resp RHPFormResponse
-	err := c.post("/rhp/form", req, &resp)
+	err := c.c.POST("/rhp/form", req, &resp)
 	return resp.Contract, resp.TransactionSet, err
 }
 
@@ -274,7 +241,7 @@ func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string
 		FinalPayment:   finalPayment,
 	}
 	var resp RHPRenewResponse
-	err := c.post("/rhp/renew", req, &resp)
+	err := c.c.POST("/rhp/renew", req, &resp)
 	return resp.Contract, resp.TransactionSet, err
 }
 
@@ -288,7 +255,7 @@ func (c *Client) RHPFund(contract types.FileContractRevision, renterKey PrivateK
 		Account:   account,
 		Amount:    amount,
 	}
-	err = c.post("/rhp/fund", req, nil)
+	err = c.c.POST("/rhp/fund", req, nil)
 	return
 }
 
@@ -300,7 +267,7 @@ func (c *Client) RHPReadRegistry(hostKey PublicKey, hostIP string, key rhpv3.Reg
 		RegistryKey: key,
 		Payment:     payment,
 	}
-	err = c.post("/rhp/registry/read", req, &resp)
+	err = c.c.POST("/rhp/registry/read", req, &resp)
 	return
 }
 
@@ -313,31 +280,31 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 		RegistryValue: value,
 		Payment:       payment,
 	}
-	err = c.post("/rhp/registry/update", req, nil)
+	err = c.c.POST("/rhp/registry/update", req, nil)
 	return
 }
 
 // Contracts returns the current set of contracts.
 func (c *Client) Contracts() (contracts []rhpv2.Contract, err error) {
-	err = c.get("/contracts", &contracts)
+	err = c.c.GET("/contracts", &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
 func (c *Client) Contract(id types.FileContractID) (contract rhpv2.Contract, err error) {
-	err = c.get("/contracts/"+id.String(), &contract)
+	err = c.c.GET("/contracts/"+id.String(), &contract)
 	return
 }
 
 // AddContract adds the provided contract to the current contract set.
 func (c *Client) AddContract(contract rhpv2.Contract) (err error) {
-	err = c.put("/contracts/"+contract.ID().String(), &contract)
+	err = c.c.PUT("/contracts/"+contract.ID().String(), &contract)
 	return
 }
 
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(id types.FileContractID) (err error) {
-	err = c.delete("/contracts/" + id.String())
+	err = c.c.DELETE("/contracts/" + id.String())
 	return
 }
 
@@ -361,12 +328,12 @@ func (c *Client) UploadSlabs(src io.Reader, m, n uint8, height uint64, contracts
 		_, err := io.Copy(part, src)
 		errChan <- err
 	}()
-	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.baseURL, "/slabs/upload"), r)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/upload"), r)
 	if err != nil {
 		panic(err)
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.SetBasicAuth("", c.password)
+	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -391,12 +358,12 @@ func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.Slice, offset, length
 		Length:    length,
 		Contracts: contracts,
 	})
-	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.baseURL, "/slabs/download"), bytes.NewReader(js))
+	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/download"), bytes.NewReader(js))
 	if err != nil {
 		panic(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.SetBasicAuth("", c.password)
+	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -417,33 +384,33 @@ func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error
 		Slabs:     slabs,
 		Contracts: contracts,
 	}
-	err = c.post("/slabs/delete", req, nil)
+	err = c.c.POST("/slabs/delete", req, nil)
 	return
 }
 
 // Object returns the object with the given name.
 func (c *Client) Object(name string) (o object.Object, err error) {
-	err = c.get("/objects/"+name, &o)
+	err = c.c.GET("/objects/"+name, &o)
 	return
 }
 
 // AddObject stores the provided object under the given name.
 func (c *Client) AddObject(name string, o object.Object) (err error) {
-	err = c.put("/objects/"+name, &o)
+	err = c.c.PUT("/objects/"+name, &o)
 	return
 }
 
 // DeleteObject deletes the object with the given name.
 func (c *Client) DeleteObject(name string) (err error) {
-	err = c.delete("/objects/" + name)
+	err = c.c.DELETE("/objects/" + name)
 	return
 }
 
 // NewClient returns a client that communicates with a renterd server listening
 // on the specified address.
 func NewClient(addr, password string) *Client {
-	return &Client{
-		baseURL:  addr,
-		password: password,
-	}
+	return &Client{jape.Client{
+		BaseURL:  addr,
+		Password: password,
+	}}
 }

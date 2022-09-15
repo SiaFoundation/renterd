@@ -3,16 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"reflect"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
 	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -99,65 +96,6 @@ type (
 	}
 )
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	// encode nil slices as [] and nil maps as {} (instead of null)
-	if val := reflect.ValueOf(v); val.Kind() == reflect.Slice && val.Len() == 0 {
-		w.Write([]byte("[]\n"))
-		return
-	} else if val.Kind() == reflect.Map && val.Len() == 0 {
-		w.Write([]byte("{}\n"))
-		return
-	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "\t")
-	enc.Encode(v)
-}
-
-func readJSON(w http.ResponseWriter, req *http.Request, v interface{}) bool {
-	if err := json.NewDecoder(req.Body).Decode(v); err != nil {
-		http.Error(w, fmt.Sprintf("couldn't decode request type (%T): %v", v, err), http.StatusBadRequest)
-		return false
-	}
-	return true
-}
-
-func readPathParam(w http.ResponseWriter, ps httprouter.Params, param string, v interface{}) bool {
-	var err error
-	switch v := v.(type) {
-	case interface{ UnmarshalText([]byte) error }:
-		err = v.UnmarshalText([]byte(ps.ByName(param)))
-	case interface{ LoadString(string) error }:
-		err = v.LoadString(ps.ByName(param))
-	default:
-		panic("unsupported type")
-	}
-	if err != nil {
-		http.Error(w, fmt.Sprintf("couldn't parse param %q: %v", param, err), http.StatusBadRequest)
-		return false
-	}
-	return true
-}
-
-func check(w http.ResponseWriter, ctx string, err error) bool {
-	if err != nil {
-		http.Error(w, fmt.Sprintf("%v: %v", ctx, err), http.StatusInternalServerError)
-		return true
-	}
-	return false
-}
-
-// AuthMiddleware enforces HTTP Basic Authentication on the provided handler.
-func AuthMiddleware(handler http.Handler, requiredPass string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if _, password, ok := req.BasicAuth(); !ok || password != requiredPass {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			return
-		}
-		handler.ServeHTTP(w, req)
-	})
-}
-
 type server struct {
 	s   Syncer
 	cm  ChainManager
@@ -170,115 +108,104 @@ type server struct {
 	os  ObjectStore
 }
 
-func (s *server) syncerPeersHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, s.s.Peers())
+func (s *server) syncerPeersHandler(jc jape.Context) {
+	jc.Encode(s.s.Peers())
 }
 
-func (s *server) syncerConnectHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) syncerConnectHandler(jc jape.Context) {
 	var addr string
-	if readJSON(w, req, &addr) {
-		check(w, "couldn't connect to peer", s.s.Connect(addr))
+	if jc.Decode(&addr) == nil {
+		jc.Check("couldn't connect to peer", s.s.Connect(addr))
 	}
 }
 
-func (s *server) consensusTipHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, s.cm.TipState().Index)
+func (s *server) consensusTipHandler(jc jape.Context) {
+	jc.Encode(s.cm.TipState().Index)
 }
 
-func (s *server) txpoolTransactionsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, s.tp.Transactions())
+func (s *server) txpoolTransactionsHandler(jc jape.Context) {
+	jc.Encode(s.tp.Transactions())
 }
 
-func (s *server) txpoolBroadcastHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
-	if readJSON(w, req, &txnSet) {
-		check(w, "couldn't broadcast transaction set", s.tp.AddTransactionSet(txnSet))
+	if jc.Decode(&txnSet) == nil {
+		jc.Check("couldn't broadcast transaction set", s.tp.AddTransactionSet(txnSet))
 	}
 }
 
-func (s *server) walletBalanceHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, s.w.Balance())
+func (s *server) walletBalanceHandler(jc jape.Context) {
+	jc.Encode(s.w.Balance())
 }
 
-func (s *server) walletAddressHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, s.w.Address())
+func (s *server) walletAddressHandler(jc jape.Context) {
+	jc.Encode(s.w.Address())
 }
 
-func (s *server) walletTransactionsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) walletTransactionsHandler(jc jape.Context) {
 	var since time.Time
-	if v := req.FormValue("since"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if check(w, "invalid 'since' value", err) {
-			return
-		}
-		since = t
-	}
 	max := -1
-	if v := req.FormValue("max"); v != "" {
-		t, err := strconv.Atoi(v)
-		if check(w, "invalid 'max' value", err) {
-			return
-		}
-		max = t
+	if jc.DecodeForm("since", &since) != nil || jc.DecodeForm("max", &max) != nil {
+		return
 	}
 	txns, err := s.w.Transactions(since, max)
-	if !check(w, "couldn't load transactions", err) {
-		writeJSON(w, txns)
+	if jc.Check("couldn't load transactions", err) == nil {
+		jc.Encode(txns)
 	}
 }
 
-func (s *server) walletOutputsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) walletOutputsHandler(jc jape.Context) {
 	utxos, err := s.w.UnspentOutputs()
-	if !check(w, "couldn't load outputs", err) {
-		writeJSON(w, utxos)
+	if jc.Check("couldn't load outputs", err) == nil {
+		jc.Encode(utxos)
 	}
 }
 
-func (s *server) walletFundHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) walletFundHandler(jc jape.Context) {
 	var wfr WalletFundRequest
-	if !readJSON(w, req, &wfr) {
+	if jc.Decode(&wfr) != nil {
 		return
 	}
 	txn := wfr.Transaction
 	fee := s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
 	txn.MinerFees = []types.Currency{fee}
 	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if check(w, "couldn't fund transaction", err) {
+	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	parents, err := s.tp.UnconfirmedParents(txn)
-	if check(w, "couldn't load transaction dependencies", err) {
+	if jc.Check("couldn't load transaction dependencies", err) != nil {
 		s.w.ReleaseInputs(txn)
 		return
 	}
-	writeJSON(w, WalletFundResponse{
+	jc.Encode(WalletFundResponse{
 		Transaction: txn,
 		ToSign:      toSign,
 		DependsOn:   parents,
 	})
 }
 
-func (s *server) walletSignHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) walletSignHandler(jc jape.Context) {
 	var wsr WalletSignRequest
-	if !readJSON(w, req, &wsr) {
+	if jc.Decode(&wsr) != nil {
 		return
 	}
 	err := s.w.SignTransaction(s.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
-	if !check(w, "couldn't sign transaction", err) {
-		writeJSON(w, wsr.Transaction)
+	if jc.Check("couldn't sign transaction", err) == nil {
+		jc.Encode(wsr.Transaction)
 	}
 }
 
-func (s *server) walletDiscardHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) walletDiscardHandler(jc jape.Context) {
 	var txn types.Transaction
-	if readJSON(w, req, &txn) {
+	if jc.Decode(&txn) == nil {
 		s.w.ReleaseInputs(txn)
 	}
 }
 
-func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) walletPrepareFormHandler(jc jape.Context) {
 	var wpfr WalletPrepareFormRequest
-	if !readJSON(w, req, &wpfr) {
+	if jc.Decode(&wpfr) != nil {
 		return
 	}
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
@@ -288,26 +215,26 @@ func (s *server) walletPrepareFormHandler(w http.ResponseWriter, req *http.Reque
 	}
 	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if !check(w, "couldn't fund transaction", err) {
+	if jc.Check("couldn't fund transaction", err) == nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
 	err = s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf)
-	if check(w, "couldn't sign transaction", err) {
+	if jc.Check("couldn't sign transaction", err) != nil {
 		s.w.ReleaseInputs(txn)
 		return
 	}
 	parents, err := s.tp.UnconfirmedParents(txn)
-	if check(w, "couldn't load transaction dependencies", err) {
+	if jc.Check("couldn't load transaction dependencies", err) != nil {
 		s.w.ReleaseInputs(txn)
 		return
 	}
-	writeJSON(w, append(parents, txn))
+	jc.Encode(append(parents, txn))
 }
 
-func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) walletPrepareRenewHandler(jc jape.Context) {
 	var wprr WalletPrepareRenewRequest
-	if !readJSON(w, req, &wprr) {
+	if jc.Decode(&wprr) != nil {
 		return
 	}
 	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.HostCollateral, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)
@@ -321,77 +248,77 @@ func (s *server) walletPrepareRenewHandler(w http.ResponseWriter, req *http.Requ
 	}
 	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if !check(w, "couldn't fund transaction", err) {
+	if jc.Check("couldn't fund transaction", err) == nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
 	err = s.w.SignTransaction(s.cm.TipState(), &txn, toSign, cf)
-	if check(w, "couldn't sign transaction", err) {
+	if jc.Check("couldn't sign transaction", err) != nil {
 		s.w.ReleaseInputs(txn)
 		return
 	}
 	parents, err := s.tp.UnconfirmedParents(txn)
-	if check(w, "couldn't load transaction dependencies", err) {
+	if jc.Check("couldn't load transaction dependencies", err) != nil {
 		s.w.ReleaseInputs(txn)
 		return
 	}
-	writeJSON(w, WalletPrepareRenewResponse{
+	jc.Encode(WalletPrepareRenewResponse{
 		TransactionSet: append(parents, txn),
 		FinalPayment:   finalPayment,
 	})
 }
 
-func (s *server) hostsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) hostsHandler(jc jape.Context) {
 	// TODO: support filtering via query params
 	hosts, err := s.hdb.SelectHosts(-1, func(hostdb.Host) bool { return true })
-	if !check(w, "couldn't load hosts", err) {
-		writeJSON(w, hosts)
+	if jc.Check("couldn't load hosts", err) == nil {
+		jc.Encode(hosts)
 	}
 }
 
-func (s *server) hostsPubkeyHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) hostsPubkeyHandler(jc jape.Context) {
 	var pk PublicKey
-	if !readPathParam(w, ps, "pubkey", &pk) {
+	if jc.DecodeParam("pubkey", &pk) != nil {
 		return
 	}
 	host, err := s.hdb.Host(pk)
-	if !check(w, "couldn't load host", err) {
-		writeJSON(w, host)
+	if jc.Check("couldn't load host", err) == nil {
+		jc.Encode(host)
 	}
 }
 
-func (s *server) hostsScoreHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) hostsScoreHandler(jc jape.Context) {
 	var score float64
 	var pk PublicKey
-	if readJSON(w, req, &score) && readPathParam(w, ps, "pubkey", &pk) {
-		check(w, "couldn't set score", s.hdb.SetScore(pk, score))
+	if jc.Decode(&score) == nil && jc.DecodeParam("pubkey", &pk) == nil {
+		jc.Check("couldn't set score", s.hdb.SetScore(pk, score))
 	}
 }
 
-func (s *server) hostsInteractionHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) hostsInteractionHandler(jc jape.Context) {
 	var hi hostdb.Interaction
 	var pk PublicKey
-	if readJSON(w, req, &hi) && readPathParam(w, ps, "pubkey", &pk) {
-		check(w, "couldn't record interaction", s.hdb.RecordInteraction(pk, hi))
+	if jc.Decode(&hi) == nil && jc.DecodeParam("pubkey", &pk) == nil {
+		jc.Check("couldn't record interaction", s.hdb.RecordInteraction(pk, hi))
 	}
 }
 
-func (s *server) rhpPrepareFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) rhpPrepareFormHandler(jc jape.Context) {
 	var rpfr RHPPrepareFormRequest
-	if !readJSON(w, req, &rpfr) {
+	if jc.Decode(&rpfr) != nil {
 		return
 	}
 	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
 	cost := rhpv2.ContractFormationCost(fc, rpfr.HostSettings.ContractPrice)
-	writeJSON(w, RHPPrepareFormResponse{
+	jc.Encode(RHPPrepareFormResponse{
 		Contract: fc,
 		Cost:     cost,
 	})
 }
 
-func (s *server) rhpPrepareRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) rhpPrepareRenewHandler(jc jape.Context) {
 	var rprr RHPPrepareRenewRequest
-	if !readJSON(w, req, &rprr) {
+	if jc.Decode(&rprr) != nil {
 		return
 	}
 	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
@@ -400,155 +327,155 @@ func (s *server) rhpPrepareRenewHandler(w http.ResponseWriter, req *http.Request
 	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
 		finalPayment = rprr.Contract.ValidRenterPayout()
 	}
-	writeJSON(w, RHPPrepareRenewResponse{
+	jc.Encode(RHPPrepareRenewResponse{
 		Contract:     fc,
 		Cost:         cost,
 		FinalPayment: finalPayment,
 	})
 }
 
-func (s *server) rhpPreparePaymentHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) rhpPreparePaymentHandler(jc jape.Context) {
 	var rppr RHPPreparePaymentRequest
-	if readJSON(w, req, &rppr) {
-		writeJSON(w, rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey))
+	if jc.Decode(&rppr) == nil {
+		jc.Encode(rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey))
 	}
 }
 
-func (s *server) rhpScanHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) rhpScanHandler(jc jape.Context) {
 	var rsr RHPScanRequest
-	if !readJSON(w, req, &rsr) {
+	if jc.Decode(&rsr) != nil {
 		return
 	}
-	settings, err := s.rhp.Settings(req.Context(), rsr.HostIP, rsr.HostKey)
-	if !check(w, "couldn't scan host", err) {
-		writeJSON(w, settings)
+	settings, err := s.rhp.Settings(jc.Request.Context(), rsr.HostIP, rsr.HostKey)
+	if jc.Check("couldn't scan host", err) == nil {
+		jc.Encode(settings)
 	}
 }
 
-func (s *server) rhpFormHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) rhpFormHandler(jc jape.Context) {
 	var rfr RHPFormRequest
-	if !readJSON(w, req, &rfr) {
+	if jc.Decode(&rfr) != nil {
 		return
 	}
 	var cs consensus.State
 	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
-	contract, txnSet, err := s.rhp.FormContract(req.Context(), cs, rfr.HostIP, rfr.HostKey, rfr.RenterKey, rfr.TransactionSet)
-	if check(w, "couldn't form contract", err) {
+	contract, txnSet, err := s.rhp.FormContract(jc.Request.Context(), cs, rfr.HostIP, rfr.HostKey, rfr.RenterKey, rfr.TransactionSet)
+	if jc.Check("couldn't form contract", err) != nil {
 		return
 	}
-	writeJSON(w, RHPFormResponse{
+	jc.Encode(RHPFormResponse{
 		ContractID:     contract.ID(),
 		Contract:       contract,
 		TransactionSet: txnSet,
 	})
 }
 
-func (s *server) rhpRenewHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) rhpRenewHandler(jc jape.Context) {
 	var rrr RHPRenewRequest
-	if !readJSON(w, req, &rrr) {
+	if jc.Decode(&rrr) != nil {
 		return
 	}
 	var cs consensus.State
 	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
-	contract, txnSet, err := s.rhp.RenewContract(req.Context(), cs, rrr.HostIP, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.TransactionSet, rrr.FinalPayment)
-	if check(w, "couldn't renew contract", err) {
+	contract, txnSet, err := s.rhp.RenewContract(jc.Request.Context(), cs, rrr.HostIP, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.TransactionSet, rrr.FinalPayment)
+	if jc.Check("couldn't renew contract", err) != nil {
 		return
 	}
-	writeJSON(w, RHPRenewResponse{
+	jc.Encode(RHPRenewResponse{
 		ContractID:     contract.ID(),
 		Contract:       contract,
 		TransactionSet: txnSet,
 	})
 }
 
-func (s *server) rhpFundHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) rhpFundHandler(jc jape.Context) {
 	var rfr RHPFundRequest
-	if !readJSON(w, req, &rfr) {
+	if jc.Decode(&rfr) != nil {
 		return
 	}
-	_, err := s.rhp.FundAccount(req.Context(), rfr.HostIP, rfr.HostKey, rfr.Contract, rfr.RenterKey, rfr.Account, rfr.Amount)
-	check(w, "couldn't fund account", err)
+	_, err := s.rhp.FundAccount(jc.Request.Context(), rfr.HostIP, rfr.HostKey, rfr.Contract, rfr.RenterKey, rfr.Account, rfr.Amount)
+	jc.Check("couldn't fund account", err)
 }
 
-func (s *server) rhpRegistryReadHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) rhpRegistryReadHandler(jc jape.Context) {
 	var rrrr RHPRegistryReadRequest
-	if !readJSON(w, req, &rrrr) {
+	if jc.Decode(&rrrr) != nil {
 		return
 	}
-	value, err := s.rhp.ReadRegistry(req.Context(), rrrr.HostIP, rrrr.HostKey, &rrrr.Payment, rrrr.RegistryKey)
-	if !check(w, "couldn't read registry", err) {
-		writeJSON(w, value)
+	value, err := s.rhp.ReadRegistry(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, &rrrr.Payment, rrrr.RegistryKey)
+	if jc.Check("couldn't read registry", err) == nil {
+		jc.Encode(value)
 	}
 }
 
-func (s *server) rhpRegistryUpdateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) rhpRegistryUpdateHandler(jc jape.Context) {
 	var rrur RHPRegistryUpdateRequest
-	if !readJSON(w, req, &rrur) {
+	if jc.Decode(&rrur) != nil {
 		return
 	}
-	err := s.rhp.UpdateRegistry(req.Context(), rrur.HostIP, rrur.HostKey, &rrur.Payment, rrur.RegistryKey, rrur.RegistryValue)
-	check(w, "couldn't update registry", err)
+	err := s.rhp.UpdateRegistry(jc.Request.Context(), rrur.HostIP, rrur.HostKey, &rrur.Payment, rrur.RegistryKey, rrur.RegistryValue)
+	jc.Check("couldn't update registry", err)
 }
 
-func (s *server) contractsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+func (s *server) contractsHandler(jc jape.Context) {
 	cs, err := s.cs.Contracts()
-	if !check(w, "couldn't load contracts", err) {
-		writeJSON(w, cs)
+	if jc.Check("couldn't load contracts", err) == nil {
+		jc.Encode(cs)
 	}
 }
 
-func (s *server) contractsIDHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) contractsIDHandlerGET(jc jape.Context) {
 	var id types.FileContractID
-	if !readPathParam(w, ps, "id", &id) {
+	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
 	c, err := s.cs.Contract(id)
-	if !check(w, "couldn't load contract", err) {
-		writeJSON(w, c)
+	if jc.Check("couldn't load contract", err) == nil {
+		jc.Encode(c)
 	}
 }
 
-func (s *server) contractsIDHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) contractsIDHandlerPUT(jc jape.Context) {
 	var id types.FileContractID
 	var c rhpv2.Contract
-	if !readPathParam(w, ps, "id", &id) || !readJSON(w, req, &c) {
+	if jc.DecodeParam("id", &id) != nil || jc.Decode(&c) != nil {
 		return
 	}
 	if c.ID() != id {
-		http.Error(w, "contract ID mismatch", http.StatusBadRequest)
+		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	check(w, "couldn't store contract", s.cs.AddContract(c))
+	jc.Check("couldn't store contract", s.cs.AddContract(c))
 }
 
-func (s *server) contractsIDHandlerDELETE(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) contractsIDHandlerDELETE(jc jape.Context) {
 	var id types.FileContractID
-	if !readPathParam(w, ps, "id", &id) {
+	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	check(w, "couldn't remove contract", s.cs.RemoveContract(id))
+	jc.Check("couldn't remove contract", s.cs.RemoveContract(id))
 }
 
-func (s *server) slabsUploadHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) slabsUploadHandler(jc jape.Context) {
 	var sur SlabsUploadRequest
-	if err := json.NewDecoder(strings.NewReader(req.PostFormValue("meta"))).Decode(&sur); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := json.NewDecoder(strings.NewReader(jc.Request.PostFormValue("meta"))).Decode(&sur); err != nil {
+		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return
 	}
-	f, _, err := req.FormFile("data")
+	f, _, err := jc.Request.FormFile("data")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return
 	}
-	slabs, err := s.sm.UploadSlabs(req.Context(), f, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
-	if !check(w, "couldn't upload slabs", err) {
-		writeJSON(w, slabs)
+	slabs, err := s.sm.UploadSlabs(jc.Request.Context(), f, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
+	if jc.Check("couldn't upload slabs", err) == nil {
+		jc.Encode(slabs)
 	}
 }
 
-func (s *server) slabsDownloadHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) slabsDownloadHandler(jc jape.Context) {
 	var sdr SlabsDownloadRequest
-	if !readJSON(w, req, &sdr) {
+	if jc.Decode(&sdr) != nil {
 		return
 	}
 	if sdr.Length == 0 {
@@ -559,46 +486,46 @@ func (s *server) slabsDownloadHandler(w http.ResponseWriter, req *http.Request, 
 	// TODO: if we encounter an error halfway through the download, it's too
 	// late to change the response code and send an error message. Not sure how
 	// best to handle this.
-	err := s.sm.DownloadSlabs(req.Context(), w, sdr.Slabs, sdr.Offset, sdr.Length, sdr.Contracts)
-	check(w, "couldn't download slabs", err)
+	err := s.sm.DownloadSlabs(jc.Request.Context(), jc.ResponseWriter, sdr.Slabs, sdr.Offset, sdr.Length, sdr.Contracts)
+	jc.Check("couldn't download slabs", err)
 }
 
-func (s *server) slabsMigrateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) slabsMigrateHandler(jc jape.Context) {
 	var smr SlabsMigrateRequest
-	if readJSON(w, req, &smr) {
-		err := s.sm.MigrateSlabs(req.Context(), smr.Slabs, smr.CurrentHeight, smr.From, smr.To)
-		check(w, "couldn't migrate slabs", err)
+	if jc.Decode(&smr) == nil {
+		err := s.sm.MigrateSlabs(jc.Request.Context(), smr.Slabs, smr.CurrentHeight, smr.From, smr.To)
+		jc.Check("couldn't migrate slabs", err)
 	}
 }
 
-func (s *server) slabsDeleteHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) slabsDeleteHandler(jc jape.Context) {
 	var sdr SlabsDeleteRequest
-	if readJSON(w, req, &sdr) {
-		err := s.sm.DeleteSlabs(req.Context(), sdr.Slabs, sdr.Contracts)
-		check(w, "couldn't delete slabs", err)
+	if jc.Decode(&sdr) == nil {
+		err := s.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
+		jc.Check("couldn't delete slabs", err)
 	}
 }
 
-func (s *server) objectsKeyHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	if strings.HasSuffix(ps.ByName("key"), "/") {
-		writeJSON(w, s.os.List(ps.ByName("key")))
+func (s *server) objectsKeyHandlerGET(jc jape.Context) {
+	if strings.HasSuffix(jc.PathParam("key"), "/") {
+		jc.Encode(s.os.List(jc.PathParam("key")))
 		return
 	}
-	o, err := s.os.Get(ps.ByName("key"))
-	if !check(w, "couldn't load object", err) {
-		writeJSON(w, o)
+	o, err := s.os.Get(jc.PathParam("key"))
+	if jc.Check("couldn't load object", err) == nil {
+		jc.Encode(o)
 	}
 }
 
-func (s *server) objectsKeyHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func (s *server) objectsKeyHandlerPUT(jc jape.Context) {
 	var o object.Object
-	if readJSON(w, req, &o) {
-		check(w, "couldn't store object", s.os.Put(ps.ByName("key"), o))
+	if jc.Decode(&o) == nil {
+		jc.Check("couldn't store object", s.os.Put(jc.PathParam("key"), o))
 	}
 }
 
-func (s *server) objectsKeyHandlerDELETE(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	check(w, "couldn't delete object", s.os.Delete(ps.ByName("key")))
+func (s *server) objectsKeyHandlerDELETE(jc jape.Context) {
+	jc.Check("couldn't delete object", s.os.Delete(jc.PathParam("key")))
 }
 
 // NewServer returns an HTTP handler that serves the renterd API.
@@ -614,56 +541,54 @@ func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb Host
 		sm:  sm,
 		os:  os,
 	}
-	mux := httprouter.New()
+	return jape.Mux(map[string]jape.Handler{
+		"GET    /syncer/peers":   srv.syncerPeersHandler,
+		"POST   /syncer/connect": srv.syncerConnectHandler,
 
-	mux.GET("/syncer/peers", srv.syncerPeersHandler)
-	mux.POST("/syncer/connect", srv.syncerConnectHandler)
+		"GET    /consensus/tip": srv.consensusTipHandler,
 
-	mux.GET("/consensus/tip", srv.consensusTipHandler)
+		"GET    /txpool/transactions": srv.txpoolTransactionsHandler,
+		"POST   /txpool/broadcast":    srv.txpoolBroadcastHandler,
 
-	mux.GET("/txpool/transactions", srv.txpoolTransactionsHandler)
-	mux.POST("/txpool/broadcast", srv.txpoolBroadcastHandler)
+		"GET    /wallet/balance":       srv.walletBalanceHandler,
+		"GET    /wallet/address":       srv.walletAddressHandler,
+		"GET    /wallet/transactions":  srv.walletTransactionsHandler,
+		"GET    /wallet/outputs":       srv.walletOutputsHandler,
+		"POST   /wallet/fund":          srv.walletFundHandler,
+		"POST   /wallet/sign":          srv.walletSignHandler,
+		"POST   /wallet/discard":       srv.walletDiscardHandler,
+		"POST   /wallet/prepare/form":  srv.walletPrepareFormHandler,
+		"POST   /wallet/prepare/renew": srv.walletPrepareRenewHandler,
 
-	mux.GET("/wallet/balance", srv.walletBalanceHandler)
-	mux.GET("/wallet/address", srv.walletAddressHandler)
-	mux.GET("/wallet/transactions", srv.walletTransactionsHandler)
-	mux.GET("/wallet/outputs", srv.walletOutputsHandler)
-	mux.POST("/wallet/fund", srv.walletFundHandler)
-	mux.POST("/wallet/sign", srv.walletSignHandler)
-	mux.POST("/wallet/discard", srv.walletDiscardHandler)
-	mux.POST("/wallet/prepare/form", srv.walletPrepareFormHandler)
-	mux.POST("/wallet/prepare/renew", srv.walletPrepareRenewHandler)
+		"GET    /hosts":                     srv.hostsHandler,
+		"GET    /hosts/:pubkey":             srv.hostsPubkeyHandler,
+		"PUT    /hosts/:pubkey/score":       srv.hostsScoreHandler,
+		"POST   /hosts/:pubkey/interaction": srv.hostsInteractionHandler,
 
-	mux.GET("/hosts", srv.hostsHandler)
-	mux.GET("/hosts/:pubkey", srv.hostsPubkeyHandler)
-	mux.PUT("/hosts/:pubkey/score", srv.hostsScoreHandler)
-	mux.POST("/hosts/:pubkey/interaction", srv.hostsInteractionHandler)
+		"POST   /rhp/prepare/form":    srv.rhpPrepareFormHandler,
+		"POST   /rhp/prepare/renew":   srv.rhpPrepareRenewHandler,
+		"POST   /rhp/prepare/payment": srv.rhpPreparePaymentHandler,
+		"POST   /rhp/scan":            srv.rhpScanHandler,
+		"POST   /rhp/form":            srv.rhpFormHandler,
+		"POST   /rhp/renew":           srv.rhpRenewHandler,
+		"POST   /rhp/fund":            srv.rhpFundHandler,
+		"POST   /rhp/registry/read":   srv.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update": srv.rhpRegistryUpdateHandler,
 
-	mux.POST("/rhp/prepare/form", srv.rhpPrepareFormHandler)
-	mux.POST("/rhp/prepare/renew", srv.rhpPrepareRenewHandler)
-	mux.POST("/rhp/prepare/payment", srv.rhpPreparePaymentHandler)
-	mux.POST("/rhp/scan", srv.rhpScanHandler)
-	mux.POST("/rhp/form", srv.rhpFormHandler)
-	mux.POST("/rhp/renew", srv.rhpRenewHandler)
-	mux.POST("/rhp/fund", srv.rhpFundHandler)
-	mux.POST("/rhp/registry/read", srv.rhpRegistryReadHandler)
-	mux.POST("/rhp/registry/update", srv.rhpRegistryUpdateHandler)
+		"GET    /contracts":     srv.contractsHandler,
+		"GET    /contracts/:id": srv.contractsIDHandlerGET,
+		"PUT    /contracts/:id": srv.contractsIDHandlerPUT,
+		"DELETE /contracts/:id": srv.contractsIDHandlerDELETE,
 
-	mux.GET("/contracts", srv.contractsHandler)
-	mux.GET("/contracts/:id", srv.contractsIDHandlerGET)
-	mux.PUT("/contracts/:id", srv.contractsIDHandlerPUT)
-	mux.DELETE("/contracts/:id", srv.contractsIDHandlerDELETE)
+		"POST   /slabs/upload":   srv.slabsUploadHandler,
+		"POST   /slabs/download": srv.slabsDownloadHandler,
+		"POST   /slabs/migrate":  srv.slabsMigrateHandler,
+		"POST   /slabs/delete":   srv.slabsDeleteHandler,
 
-	mux.POST("/slabs/upload", srv.slabsUploadHandler)
-	mux.POST("/slabs/download", srv.slabsDownloadHandler)
-	mux.POST("/slabs/migrate", srv.slabsMigrateHandler)
-	mux.POST("/slabs/delete", srv.slabsDeleteHandler)
-
-	mux.GET("/objects/*key", srv.objectsKeyHandlerGET)
-	mux.PUT("/objects/*key", srv.objectsKeyHandlerPUT)
-	mux.DELETE("/objects/*key", srv.objectsKeyHandlerDELETE)
-
-	return mux
+		"GET    /objects/*key": srv.objectsKeyHandlerGET,
+		"PUT    /objects/*key": srv.objectsKeyHandlerPUT,
+		"DELETE /objects/*key": srv.objectsKeyHandlerDELETE,
+	})
 }
 
 // NewStatelessServer returns an HTTP handler that serves the stateless renterd API.
@@ -672,22 +597,21 @@ func NewStatelessServer(rhp RHP, sm SlabMover) http.Handler {
 		rhp: rhp,
 		sm:  sm,
 	}
-	mux := httprouter.New()
 
-	mux.POST("/rhp/prepare/form", srv.rhpPrepareFormHandler)
-	mux.POST("/rhp/prepare/renew", srv.rhpPrepareRenewHandler)
-	mux.POST("/rhp/prepare/payment", srv.rhpPreparePaymentHandler)
-	mux.POST("/rhp/scan", srv.rhpScanHandler)
-	mux.POST("/rhp/form", srv.rhpFormHandler)
-	mux.POST("/rhp/renew", srv.rhpRenewHandler)
-	mux.POST("/rhp/fund", srv.rhpFundHandler)
-	mux.POST("/rhp/registry/read", srv.rhpRegistryReadHandler)
-	mux.POST("/rhp/registry/update", srv.rhpRegistryUpdateHandler)
+	return jape.Mux(map[string]jape.Handler{
+		"POST   /rhp/prepare/form":    srv.rhpPrepareFormHandler,
+		"POST   /rhp/prepare/renew":   srv.rhpPrepareRenewHandler,
+		"POST   /rhp/prepare/payment": srv.rhpPreparePaymentHandler,
+		"POST   /rhp/scan":            srv.rhpScanHandler,
+		"POST   /rhp/form":            srv.rhpFormHandler,
+		"POST   /rhp/renew":           srv.rhpRenewHandler,
+		"POST   /rhp/fund":            srv.rhpFundHandler,
+		"POST   /rhp/registry/read":   srv.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update": srv.rhpRegistryUpdateHandler,
 
-	mux.POST("/slabs/upload", srv.slabsUploadHandler)
-	mux.POST("/slabs/download", srv.slabsDownloadHandler)
-	mux.POST("/slabs/migrate", srv.slabsMigrateHandler)
-	mux.POST("/slabs/delete", srv.slabsDeleteHandler)
-
-	return mux
+		"POST   /slabs/upload":   srv.slabsUploadHandler,
+		"POST   /slabs/download": srv.slabsDownloadHandler,
+		"POST   /slabs/migrate":  srv.slabsMigrateHandler,
+		"POST   /slabs/delete":   srv.slabsDeleteHandler,
+	})
 }

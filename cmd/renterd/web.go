@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
@@ -135,7 +136,7 @@ func startWeb(l net.Listener, node *node, password string) error {
 	return http.Serve(l, treeMux{
 		h: createUIHandler(),
 		sub: map[string]treeMux{
-			"/api": {h: api.AuthMiddleware(renter, password)},
+			"/api": {h: jape.AuthMiddleware(renter, password)},
 		},
 	})
 }
@@ -145,7 +146,7 @@ func startStatelessWeb(l net.Listener, password string) error {
 	return http.Serve(l, treeMux{
 		h: createUIHandler(),
 		sub: map[string]treeMux{
-			"/api": {h: api.AuthMiddleware(renter, password)},
+			"/api": {h: jape.AuthMiddleware(renter, password)},
 		},
 	})
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"testing"
 
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/contractsutil"
@@ -146,7 +147,7 @@ func runServer(n *node) (*api.Client, func()) {
 	}
 	go func() {
 		srv := api.NewServer(mockSyncer{}, mockChainManager{}, mockTxPool{}, n.w, n.hdb, mockRHP{}, n.cs, n.sm, n.os)
-		http.Serve(l, api.AuthMiddleware(srv, "password"))
+		http.Serve(l, jape.AuthMiddleware(srv, "password"))
 	}()
 	c := api.NewClient("http://"+l.Addr().String(), "password")
 	return c, func() { l.Close() }
@@ -201,7 +202,7 @@ func TestObject(t *testing.T) {
 	// upload
 	data := frand.Bytes(12345)
 	key := object.GenerateEncryptionKey()
-	slabs, err := c.UploadSlabs(key.Encrypt(bytes.NewReader(data)), 2, 3, contracts)
+	slabs, err := c.UploadSlabs(key.Encrypt(bytes.NewReader(data)), 2, 3, 0, contracts)
 	if err != nil {
 		t.Fatal(err)
 	}
