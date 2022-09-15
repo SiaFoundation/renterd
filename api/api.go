@@ -2,6 +2,7 @@ package api
 
 import (
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/renterd/slab"
@@ -207,4 +208,10 @@ type SlabsMigrateRequest struct {
 	From          []Contract  `json:"from"`
 	To            []Contract  `json:"to"`
 	CurrentHeight uint64      `json:"currentHeight"`
+}
+
+// ObjectsResponse is the response type for the /objects endpoint.
+type ObjectsResponse struct {
+	Entries []string       `json:"entries,omitempty"`
+	Object  *object.Object `json:"object,omitempty"`
 }

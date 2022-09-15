@@ -298,7 +298,7 @@ func (c *Client) Contract(id types.FileContractID) (contract rhpv2.Contract, err
 
 // AddContract adds the provided contract to the current contract set.
 func (c *Client) AddContract(contract rhpv2.Contract) (err error) {
-	err = c.c.PUT("/contracts/"+contract.ID().String(), &contract)
+	err = c.c.PUT("/contracts/"+contract.ID().String(), contract)
 	return
 }
 
@@ -310,6 +310,8 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 
 // UploadSlabs uploads data to a set of hosts.
 func (c *Client) UploadSlabs(src io.Reader, m, n uint8, height uint64, contracts []Contract) (slabs []slab.Slab, err error) {
+	c.c.Custom("POST", "/slabs/upload", []byte{}, &slabs)
+
 	// apparently, the only way to stream a multipart upload is via io.Pipe :/
 	r, w := io.Pipe()
 	mw := multipart.NewWriter(w)
@@ -352,6 +354,8 @@ func (c *Client) UploadSlabs(src io.Reader, m, n uint8, height uint64, contracts
 
 // DownloadSlabs downloads data from a set of hosts.
 func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.Slice, offset, length int64, contracts []Contract) (err error) {
+	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
+
 	js, _ := json.Marshal(SlabsDownloadRequest{
 		Slabs:     slabs,
 		Offset:    offset,
@@ -378,6 +382,18 @@ func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.Slice, offset, length
 	return
 }
 
+// MigrateSlabs migrates the specified slabs.
+func (c *Client) MigrateSlabs(slabs []slab.Slab, from, to []Contract, currentHeight uint64) (err error) {
+	req := SlabsMigrateRequest{
+		Slabs:         slabs,
+		From:          from,
+		To:            to,
+		CurrentHeight: currentHeight,
+	}
+	err = c.c.POST("/slabs/migrate", req, nil)
+	return
+}
+
 // DeleteSlabs deletes the specified slabs.
 func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error) {
 	req := SlabsDeleteRequest{
@@ -388,15 +404,29 @@ func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error
 	return
 }
 
+func (c *Client) objects(path string) (or ObjectsResponse, err error) {
+	err = c.c.GET("/objects/"+path, &or)
+	return
+}
+
 // Object returns the object with the given name.
 func (c *Client) Object(name string) (o object.Object, err error) {
-	err = c.c.GET("/objects/"+name, &o)
+	or, err := c.objects(name)
+	if err == nil {
+		o = *or.Object
+	}
 	return
+}
+
+// ObjectEntries returns the entries at the given path, which must end in /.
+func (c *Client) ObjectEntries(path string) (entries []string, err error) {
+	or, err := c.objects(path)
+	return or.Entries, err
 }
 
 // AddObject stores the provided object under the given name.
 func (c *Client) AddObject(name string, o object.Object) (err error) {
-	err = c.c.PUT("/objects/"+name, &o)
+	err = c.c.PUT("/objects/"+name, o)
 	return
 }
 

@@ -457,6 +457,8 @@ func (s *server) contractsIDHandlerDELETE(jc jape.Context) {
 }
 
 func (s *server) slabsUploadHandler(jc jape.Context) {
+	jc.Custom((*[]byte)(nil), []slab.Slab{})
+
 	var sur SlabsUploadRequest
 	if err := json.NewDecoder(strings.NewReader(jc.Request.PostFormValue("meta"))).Decode(&sur); err != nil {
 		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
@@ -474,6 +476,8 @@ func (s *server) slabsUploadHandler(jc jape.Context) {
 }
 
 func (s *server) slabsDownloadHandler(jc jape.Context) {
+	jc.Custom(&SlabsDownloadRequest{}, []byte{})
+
 	var sdr SlabsDownloadRequest
 	if jc.Decode(&sdr) != nil {
 		return
@@ -508,12 +512,12 @@ func (s *server) slabsDeleteHandler(jc jape.Context) {
 
 func (s *server) objectsKeyHandlerGET(jc jape.Context) {
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
-		jc.Encode(s.os.List(jc.PathParam("key")))
+		jc.Encode(ObjectsResponse{Entries: s.os.List(jc.PathParam("key"))})
 		return
 	}
 	o, err := s.os.Get(jc.PathParam("key"))
 	if jc.Check("couldn't load object", err) == nil {
-		jc.Encode(o)
+		jc.Encode(ObjectsResponse{Object: &o})
 	}
 }
 
