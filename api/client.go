@@ -292,19 +292,19 @@ func (c *Client) Contracts() (contracts []rhpv2.Contract, err error) {
 
 // Contract returns the contract with the given ID.
 func (c *Client) Contract(id types.FileContractID) (contract rhpv2.Contract, err error) {
-	err = c.c.GET("/contracts/"+id.String(), &contract)
+	err = c.c.GET(fmt.Sprintf("/contracts/%s", id), &contract)
 	return
 }
 
 // AddContract adds the provided contract to the current contract set.
 func (c *Client) AddContract(contract rhpv2.Contract) (err error) {
-	err = c.c.PUT("/contracts/"+contract.ID().String(), contract)
+	err = c.c.PUT(fmt.Sprintf("/contracts/%s", contract.ID()), contract)
 	return
 }
 
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(id types.FileContractID) (err error) {
-	err = c.c.DELETE("/contracts/" + id.String())
+	err = c.c.DELETE(fmt.Sprintf("/contracts/%s", id))
 	return
 }
 
@@ -405,7 +405,7 @@ func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error
 }
 
 func (c *Client) objects(path string) (or ObjectsResponse, err error) {
-	err = c.c.GET("/objects/"+path, &or)
+	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
 	return
 }
 
@@ -426,13 +426,13 @@ func (c *Client) ObjectEntries(path string) (entries []string, err error) {
 
 // AddObject stores the provided object under the given name.
 func (c *Client) AddObject(name string, o object.Object) (err error) {
-	err = c.c.PUT("/objects/"+name, o)
+	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), o)
 	return
 }
 
 // DeleteObject deletes the object with the given name.
 func (c *Client) DeleteObject(name string) (err error) {
-	err = c.c.DELETE("/objects/" + name)
+	err = c.c.DELETE(fmt.Sprintf("/objects/%s", name))
 	return
 }
 
