@@ -78,6 +78,11 @@ linters-settings:
       - hexLiteral
       - underef
       - equalFold
+  revive:
+    ignore-generated-header: true
+    rules:
+      - name: package-comments
+        disabled: true
 
 linters:
   disable-all: true
