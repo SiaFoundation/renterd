@@ -79,6 +79,13 @@ type (
 		RemoveContract(id types.FileContractID) error
 	}
 
+	// A HostSetStore stores host sets.
+	HostSetStore interface {
+		HostSets() []string
+		HostSet(name string) []consensus.PublicKey
+		SetHostSet(name string, hosts []consensus.PublicKey) error
+	}
+
 	// A SlabMover uploads, downloads, and migrates slabs.
 	SlabMover interface {
 		UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) ([]slab.Slab, error)
@@ -104,6 +111,7 @@ type server struct {
 	hdb HostDB
 	rhp RHP
 	cs  ContractStore
+	hss HostSetStore
 	sm  SlabMover
 	os  ObjectStore
 }
@@ -456,6 +464,22 @@ func (s *server) contractsIDHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contract", s.cs.RemoveContract(id))
 }
 
+func (s *server) hostsetsHandler(jc jape.Context) {
+	jc.Encode(s.hss.HostSets())
+}
+
+func (s *server) hostsetsNameHandlerGET(jc jape.Context) {
+	jc.Encode(s.hss.HostSet(jc.PathParam("name")))
+}
+
+func (s *server) hostsetsNameHandlerPUT(jc jape.Context) {
+	var hosts []consensus.PublicKey
+	if jc.Decode(&hosts) != nil {
+		return
+	}
+	jc.Check("couldn't store host set", s.hss.SetHostSet(jc.PathParam("name"), hosts))
+}
+
 func (s *server) slabsUploadHandler(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), []slab.Slab{})
 
@@ -583,6 +607,10 @@ func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb Host
 		"GET    /contracts/:id": srv.contractsIDHandlerGET,
 		"PUT    /contracts/:id": srv.contractsIDHandlerPUT,
 		"DELETE /contracts/:id": srv.contractsIDHandlerDELETE,
+
+		"GET    /hostsets":       srv.hostsetsHandler,
+		"GET    /hostsets/:name": srv.hostsetsNameHandlerGET,
+		"PUT    /hostsets/:name": srv.hostsetsNameHandlerPUT,
 
 		"POST   /slabs/upload":   srv.slabsUploadHandler,
 		"POST   /slabs/download": srv.slabsDownloadHandler,

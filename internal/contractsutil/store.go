@@ -7,14 +7,16 @@ import (
 	"path/filepath"
 	"sync"
 
+	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
 
-// EphemeralStore implements api.ContractStore in memory.
+// EphemeralStore implements api.ContractStore and api.HostSetStore in memory.
 type EphemeralStore struct {
 	mu        sync.Mutex
 	contracts map[types.FileContractID]rhpv2.Contract
+	hostSets  map[string][]consensus.PublicKey
 }
 
 // Contracts implements api.ContractStore.
@@ -55,6 +57,36 @@ func (s *EphemeralStore) RemoveContract(id types.FileContractID) error {
 	return nil
 }
 
+// HostSets implements api.HostSetStore.
+func (s *EphemeralStore) HostSets() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sets := make([]string, 0, len(s.hostSets))
+	for set := range s.hostSets {
+		sets = append(sets, set)
+	}
+	return sets
+}
+
+// HostSet implements api.HostSetStore.
+func (s *EphemeralStore) HostSet(name string) []consensus.PublicKey {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hostSets[name]
+}
+
+// SetHostSet implements api.HostSetStore.
+func (s *EphemeralStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(hosts) == 0 {
+		delete(s.hostSets, name)
+	} else {
+		s.hostSets[name] = append([]consensus.PublicKey(nil), hosts...)
+	}
+	return nil
+}
+
 // NewEphemeralStore returns a new EphemeralStore.
 func NewEphemeralStore() *EphemeralStore {
 	return &EphemeralStore{
@@ -70,6 +102,7 @@ type JSONStore struct {
 
 type jsonPersistData struct {
 	Contracts []rhpv2.Contract
+	HostSets  map[string][]consensus.PublicKey
 }
 
 func (s *JSONStore) save() error {
@@ -79,6 +112,7 @@ func (s *JSONStore) save() error {
 	for _, c := range s.contracts {
 		p.Contracts = append(p.Contracts, c)
 	}
+	p.HostSets = s.hostSets
 	js, _ := json.MarshalIndent(p, "", "  ")
 
 	// atomic save
@@ -112,6 +146,7 @@ func (s *JSONStore) load() error {
 	for _, c := range p.Contracts {
 		s.contracts[c.ID()] = c
 	}
+	s.hostSets = p.HostSets
 	return nil
 }
 
@@ -124,6 +159,12 @@ func (s *JSONStore) AddContract(c rhpv2.Contract) error {
 // RemoveContract implements api.ContractStore.
 func (s *JSONStore) RemoveContract(id types.FileContractID) error {
 	s.EphemeralStore.RemoveContract(id)
+	return s.save()
+}
+
+// SetHostSet implements api.HostSetStore.
+func (s *JSONStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
+	s.EphemeralStore.SetHostSet(name, hosts)
 	return s.save()
 }
 
