@@ -13,6 +13,7 @@ import (
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -305,6 +306,38 @@ func (c *Client) AddContract(contract rhpv2.Contract) (err error) {
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 	err = c.c.DELETE(fmt.Sprintf("/contracts/%s", id))
+	return
+}
+
+// HostSets returns the names of all host sets.
+func (c *Client) HostSets() (sets []string, err error) {
+	err = c.c.GET("/hostsets", &sets)
+	return
+}
+
+// HostSet returns the hosts in the given set.
+func (c *Client) HostSet(name string) (hosts []consensus.PublicKey, err error) {
+	err = c.c.GET(fmt.Sprintf("/hostsets/%s", name), &hosts)
+	return
+}
+
+// SetHostSet assigns a name to the given hosts.
+func (c *Client) SetHostSet(name string, hosts []consensus.PublicKey) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/hostsets/%s", name), hosts)
+	return
+}
+
+// HostSetContracts returns the latest contract for each host in the given set,
+// or nil if no contract exists.
+func (c *Client) HostSetContracts(name string) (contracts []*rhpv2.Contract, err error) {
+	err = c.c.GET(fmt.Sprintf("/hostsets/%s/contracts", name), &contracts)
+	return
+}
+
+// HostSetResolves returns the last announced IP for each host in the given set,
+// or the empty string if no announcement is known.
+func (c *Client) HostSetResolves(name string) (ips []string, err error) {
+	err = c.c.GET(fmt.Sprintf("/hostsets/%s/resolve", name), &ips)
 	return
 }
 

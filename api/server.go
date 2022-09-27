@@ -480,6 +480,37 @@ func (s *server) hostsetsNameHandlerPUT(jc jape.Context) {
 	jc.Check("couldn't store host set", s.hss.SetHostSet(jc.PathParam("name"), hosts))
 }
 
+func (s *server) hostsetsContractsHandler(jc jape.Context) {
+	hosts := s.hss.HostSet(jc.PathParam("name"))
+	latest := make(map[consensus.PublicKey]rhpv2.Contract)
+	all, err := s.cs.Contracts()
+	if jc.Check("couldn't load contracts", err) != nil {
+		return
+	}
+	for _, c := range all {
+		if old, ok := latest[c.HostKey()]; !ok || c.EndHeight() > old.EndHeight() {
+			latest[c.HostKey()] = c
+		}
+	}
+	contracts := make([]*rhpv2.Contract, len(hosts))
+	for i, host := range hosts {
+		if c, ok := latest[host]; ok {
+			contracts[i] = &c
+		}
+	}
+	jc.Encode(contracts)
+}
+
+func (s *server) hostsetsResolveHandler(jc jape.Context) {
+	hosts := s.hss.HostSet(jc.PathParam("name"))
+	ips := make([]string, len(hosts))
+	for i, hostKey := range hosts {
+		hi, _ := s.hdb.Host(hostKey)
+		ips[i] = hi.NetAddress()
+	}
+	jc.Encode(ips)
+}
+
 func (s *server) slabsUploadHandler(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), []slab.Slab{})
 
@@ -608,9 +639,11 @@ func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb Host
 		"PUT    /contracts/:id": srv.contractsIDHandlerPUT,
 		"DELETE /contracts/:id": srv.contractsIDHandlerDELETE,
 
-		"GET    /hostsets":       srv.hostsetsHandler,
-		"GET    /hostsets/:name": srv.hostsetsNameHandlerGET,
-		"PUT    /hostsets/:name": srv.hostsetsNameHandlerPUT,
+		"GET    /hostsets":                 srv.hostsetsHandler,
+		"GET    /hostsets/:name":           srv.hostsetsNameHandlerGET,
+		"PUT    /hostsets/:name":           srv.hostsetsNameHandlerPUT,
+		"GET    /hostsets/:name/contracts": srv.hostsetsContractsHandler,
+		"GET    /hostsets/:name/resolve":   srv.hostsetsResolveHandler,
 
 		"POST   /slabs/upload":   srv.slabsUploadHandler,
 		"POST   /slabs/download": srv.slabsDownloadHandler,
