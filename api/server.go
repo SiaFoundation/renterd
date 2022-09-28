@@ -276,6 +276,32 @@ func (s *server) walletPrepareRenewHandler(jc jape.Context) {
 	})
 }
 
+func (s *server) walletPendingHandler(jc jape.Context) {
+	isRelevant := func(txn types.Transaction) bool {
+		addr := s.w.Address()
+		for _, sci := range txn.SiacoinInputs {
+			if sci.UnlockConditions.UnlockHash() == addr {
+				return true
+			}
+		}
+		for _, sco := range txn.SiacoinOutputs {
+			if sco.UnlockHash == addr {
+				return true
+			}
+		}
+		return false
+	}
+
+	txns := s.tp.Transactions()
+	relevant := txns[:0]
+	for _, txn := range txns {
+		if isRelevant(txn) {
+			relevant = append(relevant, txn)
+		}
+	}
+	jc.Encode(relevant)
+}
+
 func (s *server) hostsHandler(jc jape.Context) {
 	// TODO: support filtering via query params
 	hosts, err := s.hdb.SelectHosts(-1, func(hostdb.Host) bool { return true })
@@ -618,6 +644,7 @@ func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb Host
 		"POST   /wallet/discard":       srv.walletDiscardHandler,
 		"POST   /wallet/prepare/form":  srv.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": srv.walletPrepareRenewHandler,
+		"GET    /wallet/pending":       srv.walletPendingHandler,
 
 		"GET    /hosts":                     srv.hostsHandler,
 		"GET    /hosts/:pubkey":             srv.hostsPubkeyHandler,

@@ -143,6 +143,13 @@ func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterK
 	return resp.TransactionSet, resp.FinalPayment, err
 }
 
+// WalletPending returns the txpool transactions that are relevant to the
+// wallet.
+func (c *Client) WalletPending() (resp []types.Transaction, err error) {
+	err = c.c.GET("/wallet/pending", &resp)
+	return
+}
+
 // Hosts returns all hosts known to the server.
 func (c *Client) Hosts() (hosts []hostdb.Host, err error) {
 	err = c.c.GET("/hosts", &hosts)
