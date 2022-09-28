@@ -1,6 +1,8 @@
 package api
 
 import (
+	"time"
+
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -20,6 +22,12 @@ type (
 	// A PrivateKey is an Ed25519 private key.
 	PrivateKey = consensus.PrivateKey
 )
+
+// for encoding/decoding time.Time values in API params
+type paramTime time.Time
+
+func (t paramTime) String() string                { return (time.Time)(t).Format(time.RFC3339) }
+func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {

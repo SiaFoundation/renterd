@@ -76,7 +76,7 @@ func (c *Client) WalletOutputs() (resp []wallet.SiacoinElement, err error) {
 
 // WalletTransactions returns all transactions relevant to the wallet.
 func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Transaction, err error) {
-	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", since.Format(time.RFC3339), max), &resp)
+	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", paramTime(since), max), &resp)
 	return
 }
 
@@ -158,19 +158,19 @@ func (c *Client) Hosts() (hosts []hostdb.Host, err error) {
 
 // Host returns information about a particular host known to the server.
 func (c *Client) Host(hostKey PublicKey) (h hostdb.Host, err error) {
-	err = c.c.GET("/hosts/"+hostKey.String(), &h)
+	err = c.c.GET(fmt.Sprintf("/hosts/%s", hostKey), &h)
 	return
 }
 
 // SetHostScore sets the score for the supplied host.
 func (c *Client) SetHostScore(hostKey PublicKey, score float64) (err error) {
-	err = c.c.PUT("/hosts/"+hostKey.String()+"/score", score)
+	err = c.c.PUT(fmt.Sprintf("/hosts/%s/score", hostKey), score)
 	return
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
 func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) (err error) {
-	err = c.c.POST("/hosts/"+hostKey.String()+"/interaction", i, nil)
+	err = c.c.POST(fmt.Sprintf("/hosts/%s/interaction", hostKey), i, nil)
 	return
 }
 

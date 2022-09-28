@@ -153,7 +153,7 @@ func (s *server) walletAddressHandler(jc jape.Context) {
 func (s *server) walletTransactionsHandler(jc jape.Context) {
 	var since time.Time
 	max := -1
-	if jc.DecodeForm("since", &since) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
 	txns, err := s.w.Transactions(since, max)
