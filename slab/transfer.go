@@ -17,25 +17,64 @@ type Host interface {
 	DeleteSectors(roots []consensus.Hash256) error
 }
 
-// serialUploadSlab uploads the provided shards one at a time.
-func serialUploadSlab(shards [][]byte, hosts []Host) ([]Sector, error) {
-	var sectors []Sector
-	var errs HostErrorSet
-	for _, h := range hosts {
-		root, err := h.UploadSector((*[rhpv2.SectorSize]byte)(shards[len(sectors)]))
-		if err != nil {
-			errs = append(errs, &HostError{h.PublicKey(), err})
-			continue
-		}
-		sectors = append(sectors, Sector{
-			Host: h.PublicKey(),
-			Root: root,
-		})
-		if len(sectors) == len(shards) {
-			break
+// parallelUploadSlab uploads the provided shards in parallel.
+func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, error) {
+	if len(hosts) < len(shards) {
+		return nil, errors.New("fewer hosts than shards")
+	}
+
+	type req struct {
+		host       Host
+		shardIndex int
+	}
+	type resp struct {
+		req  req
+		root consensus.Hash256
+		err  error
+	}
+	reqChan := make(chan req, len(shards))
+	defer close(reqChan)
+	respChan := make(chan resp, len(shards))
+	worker := func() {
+		for req := range reqChan {
+			root, err := req.host.UploadSector((*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+			respChan <- resp{req, root, err}
 		}
 	}
-	if len(sectors) < len(shards) {
+
+	// spawn workers and send initial requests
+	hostIndex := 0
+	inflight := 0
+	for i := range shards {
+		go worker()
+		reqChan <- req{hosts[hostIndex], i}
+		hostIndex++
+		inflight++
+	}
+	// collect responses
+	sectors := make([]Sector, len(shards))
+	rem := len(shards)
+	var errs HostErrorSet
+	for rem > 0 && inflight > 0 {
+		resp := <-respChan
+		inflight--
+		if resp.err != nil {
+			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
+			// try next host
+			if hostIndex < len(hosts) {
+				reqChan <- req{hosts[hostIndex], resp.req.shardIndex}
+				hostIndex++
+				inflight++
+			}
+		} else {
+			sectors[resp.req.shardIndex] = Sector{
+				Host: resp.req.host.PublicKey(),
+				Root: resp.root,
+			}
+			rem--
+		}
+	}
+	if rem > 0 {
 		return nil, errs
 	}
 	return sectors, nil
@@ -60,7 +99,7 @@ func UploadSlabs(r io.Reader, m, n uint8, hosts []Host) ([]Slab, error) {
 		}
 		s.Encode(buf, shards)
 		s.Encrypt(shards)
-		s.Shards, err = serialUploadSlab(shards, hosts)
+		s.Shards, err = parallelUploadSlab(shards, hosts)
 		if err != nil {
 			return nil, err
 		}
@@ -96,31 +135,76 @@ func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
 	return slabs
 }
 
-// serialDownloadSlab downloads the shards comprising a slab one at a time.
-func serialDownloadSlab(s Slice, hosts []Host) ([][]byte, error) {
-	offset, length := s.SectorRegion()
+// parallelDownloadSlab downloads the shards comprising a slab in parallel.
+func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, error) {
+	if len(hosts) < int(s.MinShards) {
+		return nil, errors.New("not enough hosts to recover shard")
+	}
+
+	type req struct {
+		hostIndex int
+	}
+	type resp struct {
+		req   req
+		shard []byte
+		err   error
+	}
+	reqChan := make(chan req, s.MinShards)
+	defer close(reqChan)
+	respChan := make(chan resp, s.MinShards)
+	worker := func() {
+		for req := range reqChan {
+			h := hosts[req.hostIndex]
+			var shard *Sector
+			for i := range s.Shards {
+				if s.Shards[i].Host == h.PublicKey() {
+					shard = &s.Shards[i]
+					break
+				}
+			}
+			if shard == nil {
+				respChan <- resp{req, nil, errors.New("slab is not stored on this host")}
+				continue
+			}
+			offset, length := s.SectorRegion()
+			var buf bytes.Buffer
+			err := h.DownloadSector(&buf, shard.Root, offset, length)
+			respChan <- resp{req, buf.Bytes(), err}
+		}
+	}
+
+	// spawn workers and send initial requests
+	hostIndex := 0
+	inflight := 0
+	for i := uint8(0); i < s.MinShards; i++ {
+		go worker()
+		reqChan <- req{hostIndex}
+		hostIndex++
+		inflight++
+	}
+	// collect responses
 	shards := make([][]byte, len(s.Shards))
 	rem := s.MinShards
 	var errs HostErrorSet
-	for _, h := range hosts {
-		var i int
-		for i = range s.Shards {
-			if s.Shards[i].Host == h.PublicKey() {
-				break
+	for rem > 0 && inflight > 0 {
+		resp := <-respChan
+		inflight--
+		if resp.err != nil {
+			errs = append(errs, &HostError{hosts[resp.req.hostIndex].PublicKey(), resp.err})
+			// try next host
+			if hostIndex < len(hosts) {
+				reqChan <- req{hostIndex}
+				hostIndex++
+				inflight++
 			}
-		}
-		if i == len(s.Shards) {
-			errs = append(errs, &HostError{h.PublicKey(), errors.New("slab is not stored on this host")})
-			continue
-		}
-		var buf bytes.Buffer
-		if err := h.DownloadSector(&buf, s.Shards[i].Root, offset, length); err != nil {
-			errs = append(errs, &HostError{h.PublicKey(), err})
-			continue
-		}
-		shards[i] = buf.Bytes()
-		if rem--; rem == 0 {
-			break
+		} else {
+			for i := range s.Shards {
+				if s.Shards[i].Host == hosts[resp.req.hostIndex].PublicKey() {
+					shards[i] = resp.shard
+					rem--
+					break
+				}
+			}
 		}
 	}
 	if rem > 0 {
@@ -143,7 +227,7 @@ func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts []Hos
 
 	slabs = slabsForDownload(slabs, offset, length)
 	for _, ss := range slabs {
-		shards, err := serialDownloadSlab(ss, hosts)
+		shards, err := parallelDownloadSlab(ss, hosts)
 		if err != nil {
 			return err
 		}
@@ -163,13 +247,22 @@ func DeleteSlabs(slabs []Slab, hosts []Host) error {
 			rootsByHost[sector.Host] = append(rootsByHost[sector.Host], sector.Root)
 		}
 	}
-	var errs HostErrorSet
+	errChan := make(chan *HostError)
 	for _, h := range hosts {
-		// NOTE: if host is not storing any sectors, the map lookup will return
-		// nil, making this a no-op
-		if err := h.DeleteSectors(rootsByHost[h.PublicKey()]); err != nil {
-			errs = append(errs, &HostError{h.PublicKey(), err})
-			continue
+		go func(h Host) {
+			// NOTE: if host is not storing any sectors, the map lookup will return
+			// nil, making this a no-op
+			if err := h.DeleteSectors(rootsByHost[h.PublicKey()]); err != nil {
+				errChan <- &HostError{h.PublicKey(), err}
+			} else {
+				errChan <- nil
+			}
+		}(h)
+	}
+	var errs HostErrorSet
+	for range hosts {
+		if err := <-errChan; err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
@@ -180,8 +273,26 @@ func DeleteSlabs(slabs []Slab, hosts []Host) error {
 
 // serialMigrateSlab migrates a slab one shard at a time.
 func serialMigrateSlab(s *Slab, from, to []Host) error {
+	// determine which shards need migration
+	var shardIndices []int
+outer:
+	for i, shard := range s.Shards {
+		for _, h := range to {
+			if h.PublicKey() == shard.Host {
+				continue outer
+			}
+		}
+		shardIndices = append(shardIndices, i)
+	}
+	if len(shardIndices) == 0 {
+		return nil
+	} else if len(shardIndices) > len(to) {
+		return errors.New("not enough hosts to migrate shard")
+	}
+
+	// download + reconstruct slab
 	ss := Slice{*s, 0, uint32(s.MinShards) * rhpv2.SectorSize}
-	shards, err := serialDownloadSlab(ss, from)
+	shards, err := parallelDownloadSlab(ss, from)
 	if err != nil {
 		return err
 	}
@@ -191,44 +302,57 @@ func serialMigrateSlab(s *Slab, from, to []Host) error {
 	}
 	s.Encrypt(shards)
 
-	queue := to
-	migrate := func(shard []byte) (Sector, error) {
-		var errs HostErrorSet
-		for len(queue) > 0 {
-			h := queue[0]
-			queue = queue[1:]
-			root, err := h.UploadSector((*[rhpv2.SectorSize]byte)(shard))
-			if err != nil {
-				errs = append(errs, &HostError{h.PublicKey(), err})
-				continue
-			}
-			return Sector{
-				Host: h.PublicKey(),
-				Root: root,
-			}, nil
-		}
-		if len(errs) > 0 {
-			return Sector{}, errs
-		}
-		return Sector{}, errors.New("no hosts available")
+	// spawn workers and send initial requests
+	type req struct {
+		host       Host
+		shardIndex int
 	}
-	alreadyMigrated := func(shard Sector) bool {
-		for _, h := range to {
-			if shard.Host == h.PublicKey() {
-				return true
-			}
-		}
-		return false
+	type resp struct {
+		req  req
+		root consensus.Hash256
+		err  error
 	}
-
-	for i, shard := range shards {
-		if alreadyMigrated(s.Shards[i]) {
-			continue
+	reqChan := make(chan req, len(shardIndices))
+	defer close(reqChan)
+	respChan := make(chan resp, len(shardIndices))
+	worker := func() {
+		for req := range reqChan {
+			root, err := req.host.UploadSector((*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+			respChan <- resp{req, root, err}
 		}
-		s.Shards[i], err = migrate(shard)
-		if err != nil {
-			return err
+	}
+	hostIndex := 0
+	inflight := 0
+	for _, i := range shardIndices {
+		go worker()
+		reqChan <- req{to[hostIndex], i}
+		hostIndex++
+		inflight++
+	}
+	// collect responses
+	rem := len(shardIndices)
+	var errs HostErrorSet
+	for rem > 0 && inflight > 0 {
+		resp := <-respChan
+		inflight--
+		if resp.err != nil {
+			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
+			// try next host
+			if hostIndex < len(to) {
+				reqChan <- req{to[hostIndex], resp.req.shardIndex}
+				hostIndex++
+				inflight++
+			}
+		} else {
+			s.Shards[resp.req.shardIndex] = Sector{
+				Host: resp.req.host.PublicKey(),
+				Root: resp.root,
+			}
+			rem--
 		}
+	}
+	if rem > 0 {
+		return errs
 	}
 	return nil
 }
