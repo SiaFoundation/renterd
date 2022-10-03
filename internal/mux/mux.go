@@ -6,11 +6,9 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -52,10 +50,7 @@ func (m *Mux) setErr(err error) error {
 	}
 
 	// try to detect when the peer closed the connection
-	if errors.Is(err, io.EOF) ||
-		errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, syscall.EPIPE) ||
-		errors.Is(err, syscall.EPROTOTYPE) {
+	if isConnCloseError(err) {
 		err = ErrPeerClosedConn
 	}
 
