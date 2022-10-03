@@ -12,19 +12,26 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-latest , macos-latest, windows-latest ]
-        go-version: [ '1.17', '1.18', '1.19' ]
+        go-version: [ '1.18', '1.19' ]
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
-      - name: golangci-lint
+      - name: Configure git
+        run: git config --global core.autocrlf false # required on Windows
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Go
+        uses: actions/setup-go@v3
+      - name: Lint
         uses: golangci/golangci-lint-action@v3
-      - name: test
+      - name: Test
         if: success() || failure() # run even if lint or japecheck fails
         uses: n8maninger/action-golang-test@v1
         with:
           args: "-race"
-      - name: check endpoints
+      - name: Check Endpoints
         if: success() || failure() # run even if lint or test fails
+        shell: bash
         run: |
           go install go.sia.tech/jape/japecheck@latest
           $(go env GOPATH)/bin/japecheck ./api
+      - name: Build
+        run: go build -o bin/ ./cmd/renterd
