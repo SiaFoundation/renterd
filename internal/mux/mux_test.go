@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"sync"
@@ -309,7 +308,7 @@ func BenchmarkMux(b *testing.B) {
 							return err
 						}
 						go func() {
-							io.Copy(ioutil.Discard, s)
+							io.Copy(io.Discard, s)
 							s.Close()
 						}()
 					}
