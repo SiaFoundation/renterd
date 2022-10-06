@@ -1,4 +1,4 @@
-package walletutil
+package stores
 
 import (
 	"encoding/json"
@@ -14,8 +14,8 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// EphemeralStore implements wallet.SingleAddressStore in memory.
-type EphemeralStore struct {
+// EphemeralWalletStore implements wallet.SingleAddressStore in memory.
+type EphemeralWalletStore struct {
 	mu      sync.Mutex
 	tip     consensus.ChainIndex
 	ccid    modules.ConsensusChangeID
@@ -25,7 +25,7 @@ type EphemeralStore struct {
 }
 
 // Balance implements wallet.SingleAddressStore.
-func (s *EphemeralStore) Balance() (sc types.Currency) {
+func (s *EphemeralWalletStore) Balance() (sc types.Currency) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, sce := range s.scElems {
@@ -37,7 +37,7 @@ func (s *EphemeralStore) Balance() (sc types.Currency) {
 }
 
 // UnspentSiacoinElements implements wallet.SingleAddressStore.
-func (s *EphemeralStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
+func (s *EphemeralWalletStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var elems []wallet.SiacoinElement
@@ -49,7 +49,7 @@ func (s *EphemeralStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, erro
 }
 
 // Transactions implements wallet.SingleAddressStore.
-func (s *EphemeralStore) Transactions(since time.Time, max int) ([]wallet.Transaction, error) {
+func (s *EphemeralWalletStore) Transactions(since time.Time, max int) ([]wallet.Transaction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var txns []wallet.Transaction
@@ -115,7 +115,7 @@ func transactionIsRelevant(txn types.Transaction, addr types.UnlockHash) bool {
 }
 
 // ProcessConsensusChange implements modules.ConsensusSetSubscriber.
-func (s *EphemeralStore) ProcessConsensusChange(cc modules.ConsensusChange) {
+func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -182,31 +182,31 @@ func (s *EphemeralStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	s.ccid = cc.ID
 }
 
-// NewEphemeralStore returns a new EphemeralStore.
-func NewEphemeralStore(addr types.UnlockHash) *EphemeralStore {
-	return &EphemeralStore{
+// NewEphemeralWalletStore returns a new EphemeralWalletStore.
+func NewEphemeralWalletStore(addr types.UnlockHash) *EphemeralWalletStore {
+	return &EphemeralWalletStore{
 		addr: addr,
 	}
 }
 
-// JSONStore implements wallet.SingleAddressStore in memory, backed by a JSON file.
-type JSONStore struct {
-	*EphemeralStore
+// JSONWalletStore implements wallet.SingleAddressStore in memory, backed by a JSON file.
+type JSONWalletStore struct {
+	*EphemeralWalletStore
 	dir      string
 	lastSave time.Time
 }
 
-type jsonPersistData struct {
+type jsonWalletPersistData struct {
 	Tip             consensus.ChainIndex
 	CCID            modules.ConsensusChangeID
 	SiacoinElements []wallet.SiacoinElement
 	Transactions    []wallet.Transaction
 }
 
-func (s *JSONStore) save() error {
+func (s *JSONWalletStore) save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	js, _ := json.MarshalIndent(jsonPersistData{
+	js, _ := json.MarshalIndent(jsonWalletPersistData{
 		Tip:             s.tip,
 		CCID:            s.ccid,
 		SiacoinElements: s.scElems,
@@ -232,8 +232,8 @@ func (s *JSONStore) save() error {
 	return nil
 }
 
-func (s *JSONStore) load() (modules.ConsensusChangeID, error) {
-	var p jsonPersistData
+func (s *JSONWalletStore) load() (modules.ConsensusChangeID, error) {
+	var p jsonWalletPersistData
 	if js, err := os.ReadFile(filepath.Join(s.dir, "wallet.json")); os.IsNotExist(err) {
 		// set defaults
 		s.ccid = modules.ConsensusChangeBeginning
@@ -251,8 +251,8 @@ func (s *JSONStore) load() (modules.ConsensusChangeID, error) {
 }
 
 // ProcessConsensusChange implements chain.Subscriber.
-func (s *JSONStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	s.EphemeralStore.ProcessConsensusChange(cc)
+func (s *JSONWalletStore) ProcessConsensusChange(cc modules.ConsensusChange) {
+	s.EphemeralWalletStore.ProcessConsensusChange(cc)
 	if time.Since(s.lastSave) > 2*time.Minute {
 		if err := s.save(); err != nil {
 			log.Fatal("Couldn't save wallet state:", err)
@@ -261,12 +261,12 @@ func (s *JSONStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 }
 
-// NewJSONStore returns a new JSONStore.
-func NewJSONStore(dir string, addr types.UnlockHash) (*JSONStore, modules.ConsensusChangeID, error) {
-	s := &JSONStore{
-		EphemeralStore: NewEphemeralStore(addr),
-		dir:            dir,
-		lastSave:       time.Now(),
+// NewJSONWalletStore returns a new JSONWalletStore.
+func NewJSONWalletStore(dir string, addr types.UnlockHash) (*JSONWalletStore, modules.ConsensusChangeID, error) {
+	s := &JSONWalletStore{
+		EphemeralWalletStore: NewEphemeralWalletStore(addr),
+		dir:                  dir,
+		lastSave:             time.Now(),
 	}
 	ccid, err := s.load()
 	if err != nil {

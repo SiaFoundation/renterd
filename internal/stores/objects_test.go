@@ -1,4 +1,4 @@
-package objectutil
+package stores
 
 import (
 	"reflect"
@@ -8,7 +8,7 @@ import (
 )
 
 func TestList(t *testing.T) {
-	es := NewEphemeralStore()
+	es := NewEphemeralObjectStore()
 	paths := []string{
 		"/foo/bar",
 		"/foo/bat",

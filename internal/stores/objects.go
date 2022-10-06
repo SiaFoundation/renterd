@@ -1,4 +1,4 @@
-package objectutil
+package stores
 
 import (
 	"encoding/json"
@@ -36,15 +36,15 @@ type refObject struct {
 	slabs []refSlice
 }
 
-// EphemeralStore implements api.ObjectStore in memory.
-type EphemeralStore struct {
+// EphemeralObjectStore implements api.ObjectStore in memory.
+type EphemeralObjectStore struct {
 	hosts   []consensus.PublicKey
 	slabs   map[slab.EncryptionKey]refSlab
 	objects map[string]refObject
 	mu      sync.Mutex
 }
 
-func (es *EphemeralStore) addHost(hostKey consensus.PublicKey) uint32 {
+func (es *EphemeralObjectStore) addHost(hostKey consensus.PublicKey) uint32 {
 	for id, host := range es.hosts {
 		if host == hostKey {
 			return uint32(id)
@@ -55,7 +55,7 @@ func (es *EphemeralStore) addHost(hostKey consensus.PublicKey) uint32 {
 }
 
 // Put implements api.ObjectStore.
-func (es *EphemeralStore) Put(key string, o object.Object) error {
+func (es *EphemeralObjectStore) Put(key string, o object.Object) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	ro := refObject{
@@ -83,7 +83,7 @@ func (es *EphemeralStore) Put(key string, o object.Object) error {
 }
 
 // Get implements api.ObjectStore.
-func (es *EphemeralStore) Get(key string) (object.Object, error) {
+func (es *EphemeralObjectStore) Get(key string) (object.Object, error) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	ro, ok := es.objects[key]
@@ -117,7 +117,7 @@ func (es *EphemeralStore) Get(key string) (object.Object, error) {
 }
 
 // Delete implements api.ObjectStore.
-func (es *EphemeralStore) Delete(key string) error {
+func (es *EphemeralObjectStore) Delete(key string) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	o, ok := es.objects[key]
@@ -142,7 +142,7 @@ func (es *EphemeralStore) Delete(key string) error {
 }
 
 // List implements api.ObjectStore.
-func (es *EphemeralStore) List(path string) []string {
+func (es *EphemeralObjectStore) List(path string) []string {
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
 	}
@@ -165,30 +165,30 @@ func (es *EphemeralStore) List(path string) []string {
 	return keys
 }
 
-// NewEphemeralStore returns a new EphemeralStore.
-func NewEphemeralStore() *EphemeralStore {
-	return &EphemeralStore{
+// NewEphemeralObjectStore returns a new EphemeralObjectStore.
+func NewEphemeralObjectStore() *EphemeralObjectStore {
+	return &EphemeralObjectStore{
 		slabs:   make(map[slab.EncryptionKey]refSlab),
 		objects: make(map[string]refObject),
 	}
 }
 
-// JSONStore implements api.ObjectStore in memory, backed by a JSON file.
-type JSONStore struct {
-	*EphemeralStore
+// JSONObjectStore implements api.ObjectStore in memory, backed by a JSON file.
+type JSONObjectStore struct {
+	*EphemeralObjectStore
 	dir string
 }
 
-type jsonPersistData struct {
+type jsonObjectPersistData struct {
 	Hosts   []consensus.PublicKey
 	Slabs   map[slab.EncryptionKey]refSlab
 	Objects map[string]refObject
 }
 
-func (s *JSONStore) save() error {
+func (s *JSONObjectStore) save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p := jsonPersistData{
+	p := jsonObjectPersistData{
 		Hosts:   s.hosts,
 		Slabs:   s.slabs,
 		Objects: s.objects,
@@ -214,8 +214,8 @@ func (s *JSONStore) save() error {
 	return nil
 }
 
-func (s *JSONStore) load() error {
-	var p jsonPersistData
+func (s *JSONObjectStore) load() error {
+	var p jsonObjectPersistData
 	if js, err := os.ReadFile(filepath.Join(s.dir, "objects.json")); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -223,29 +223,29 @@ func (s *JSONStore) load() error {
 	} else if err := json.Unmarshal(js, &p); err != nil {
 		return err
 	}
-	s.EphemeralStore.hosts = p.Hosts
-	s.EphemeralStore.slabs = p.Slabs
-	s.EphemeralStore.objects = p.Objects
+	s.EphemeralObjectStore.hosts = p.Hosts
+	s.EphemeralObjectStore.slabs = p.Slabs
+	s.EphemeralObjectStore.objects = p.Objects
 	return nil
 }
 
 // Put implements api.ObjectStore.
-func (s *JSONStore) Put(key string, o object.Object) error {
-	s.EphemeralStore.Put(key, o)
+func (s *JSONObjectStore) Put(key string, o object.Object) error {
+	s.EphemeralObjectStore.Put(key, o)
 	return s.save()
 }
 
 // Delete implements api.ObjectStore.
-func (s *JSONStore) Delete(key string) error {
-	s.EphemeralStore.Delete(key)
+func (s *JSONObjectStore) Delete(key string) error {
+	s.EphemeralObjectStore.Delete(key)
 	return s.save()
 }
 
-// NewJSONStore returns a new JSONStore.
-func NewJSONStore(dir string) (*JSONStore, error) {
-	s := &JSONStore{
-		EphemeralStore: NewEphemeralStore(),
-		dir:            dir,
+// NewJSONObjectStore returns a new JSONObjectStore.
+func NewJSONObjectStore(dir string) (*JSONObjectStore, error) {
+	s := &JSONObjectStore{
+		EphemeralObjectStore: NewEphemeralObjectStore(),
+		dir:                  dir,
 	}
 	if err := s.load(); err != nil {
 		return nil, err

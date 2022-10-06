@@ -6,10 +6,7 @@ import (
 	"path/filepath"
 
 	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/renterd/internal/contractsutil"
-	"go.sia.tech/renterd/internal/hostdbutil"
-	"go.sia.tech/renterd/internal/objectutil"
-	"go.sia.tech/renterd/internal/walletutil"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/modules"
 	mconsensus "go.sia.tech/siad/modules/consensus"
@@ -22,9 +19,9 @@ type node struct {
 	cm  modules.ConsensusSet
 	tp  modules.TransactionPool
 	w   *wallet.SingleAddressWallet
-	hdb *hostdbutil.JSONDB
-	cs  *contractsutil.JSONStore
-	os  *objectutil.JSONStore
+	hdb *stores.JSONHostDB
+	cs  *stores.JSONContractStore
+	os  *stores.JSONObjectStore
 }
 
 func (n *node) Close() error {
@@ -81,7 +78,7 @@ func newNode(addr, dir string, bootstrap bool, walletKey consensus.PrivateKey) (
 		return nil, err
 	}
 	walletAddr := wallet.StandardAddress(walletKey.PublicKey())
-	ws, ccid, err := walletutil.NewJSONStore(walletDir, walletAddr)
+	ws, ccid, err := stores.NewJSONWalletStore(walletDir, walletAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +91,7 @@ func newNode(addr, dir string, bootstrap bool, walletKey consensus.PrivateKey) (
 	if err := os.MkdirAll(hostdbDir, 0700); err != nil {
 		return nil, err
 	}
-	hdb, err := hostdbutil.NewJSONDB(hostdbDir)
+	hdb, err := stores.NewJSONHostDB(hostdbDir)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +100,7 @@ func newNode(addr, dir string, bootstrap bool, walletKey consensus.PrivateKey) (
 	if err := os.MkdirAll(contractsDir, 0700); err != nil {
 		return nil, err
 	}
-	cs, err := contractsutil.NewJSONStore(contractsDir)
+	cs, err := stores.NewJSONContractStore(contractsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +109,7 @@ func newNode(addr, dir string, bootstrap bool, walletKey consensus.PrivateKey) (
 	if err := os.MkdirAll(objectsDir, 0700); err != nil {
 		return nil, err
 	}
-	os, err := objectutil.NewJSONStore(objectsDir)
+	os, err := stores.NewJSONObjectStore(objectsDir)
 	if err != nil {
 		return nil, err
 	}

@@ -12,11 +12,8 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/renterd/internal/contractsutil"
-	"go.sia.tech/renterd/internal/hostdbutil"
-	"go.sia.tech/renterd/internal/objectutil"
 	"go.sia.tech/renterd/internal/slabutil"
-	"go.sia.tech/renterd/internal/walletutil"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -116,9 +113,9 @@ func (sm *mockSlabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, cu
 
 type node struct {
 	w   *wallet.SingleAddressWallet
-	hdb *hostdbutil.EphemeralDB
-	cs  *contractsutil.EphemeralStore
-	os  *objectutil.EphemeralStore
+	hdb *stores.EphemeralHostDB
+	cs  *stores.EphemeralContractStore
+	os  *stores.EphemeralObjectStore
 	sm  *mockSlabMover
 
 	walletKey consensus.PrivateKey
@@ -132,10 +129,10 @@ func (n *node) addHost() consensus.PublicKey {
 
 func newTestNode() *node {
 	walletKey := consensus.GeneratePrivateKey()
-	w := wallet.NewSingleAddressWallet(walletKey, walletutil.NewEphemeralStore(wallet.StandardAddress(walletKey.PublicKey())))
-	hdb := hostdbutil.NewEphemeralDB()
-	cs := contractsutil.NewEphemeralStore()
-	os := objectutil.NewEphemeralStore()
+	w := wallet.NewSingleAddressWallet(walletKey, stores.NewEphemeralWalletStore(wallet.StandardAddress(walletKey.PublicKey())))
+	hdb := stores.NewEphemeralHostDB()
+	cs := stores.NewEphemeralContractStore()
+	os := stores.NewEphemeralObjectStore()
 	sm := &mockSlabMover{}
 	return &node{w, hdb, cs, os, sm, walletKey}
 }

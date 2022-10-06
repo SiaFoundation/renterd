@@ -1,4 +1,4 @@
-package contractsutil
+package stores
 
 import (
 	"encoding/json"
@@ -12,15 +12,15 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// EphemeralStore implements api.ContractStore and api.HostSetStore in memory.
-type EphemeralStore struct {
+// EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
+type EphemeralContractStore struct {
 	mu        sync.Mutex
 	contracts map[types.FileContractID]rhpv2.Contract
 	hostSets  map[string][]consensus.PublicKey
 }
 
 // Contracts implements api.ContractStore.
-func (s *EphemeralStore) Contracts() ([]rhpv2.Contract, error) {
+func (s *EphemeralContractStore) Contracts() ([]rhpv2.Contract, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var cs []rhpv2.Contract
@@ -31,7 +31,7 @@ func (s *EphemeralStore) Contracts() ([]rhpv2.Contract, error) {
 }
 
 // Contract implements api.ContractStore.
-func (s *EphemeralStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
+func (s *EphemeralContractStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.contracts[id]
@@ -42,7 +42,7 @@ func (s *EphemeralStore) Contract(id types.FileContractID) (rhpv2.Contract, erro
 }
 
 // AddContract implements api.ContractStore.
-func (s *EphemeralStore) AddContract(c rhpv2.Contract) error {
+func (s *EphemeralContractStore) AddContract(c rhpv2.Contract) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.contracts[c.ID()] = c
@@ -50,7 +50,7 @@ func (s *EphemeralStore) AddContract(c rhpv2.Contract) error {
 }
 
 // RemoveContract implements api.ContractStore.
-func (s *EphemeralStore) RemoveContract(id types.FileContractID) error {
+func (s *EphemeralContractStore) RemoveContract(id types.FileContractID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.contracts, id)
@@ -58,7 +58,7 @@ func (s *EphemeralStore) RemoveContract(id types.FileContractID) error {
 }
 
 // HostSets implements api.HostSetStore.
-func (s *EphemeralStore) HostSets() []string {
+func (s *EphemeralContractStore) HostSets() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sets := make([]string, 0, len(s.hostSets))
@@ -69,14 +69,14 @@ func (s *EphemeralStore) HostSets() []string {
 }
 
 // HostSet implements api.HostSetStore.
-func (s *EphemeralStore) HostSet(name string) []consensus.PublicKey {
+func (s *EphemeralContractStore) HostSet(name string) []consensus.PublicKey {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.hostSets[name]
 }
 
 // SetHostSet implements api.HostSetStore.
-func (s *EphemeralStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
+func (s *EphemeralContractStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(hosts) == 0 {
@@ -87,28 +87,28 @@ func (s *EphemeralStore) SetHostSet(name string, hosts []consensus.PublicKey) er
 	return nil
 }
 
-// NewEphemeralStore returns a new EphemeralStore.
-func NewEphemeralStore() *EphemeralStore {
-	return &EphemeralStore{
+// NewEphemeralContractStore returns a new EphemeralContractStore.
+func NewEphemeralContractStore() *EphemeralContractStore {
+	return &EphemeralContractStore{
 		contracts: make(map[types.FileContractID]rhpv2.Contract),
 	}
 }
 
-// JSONStore implements api.ContractStore in memory, backed by a JSON file.
-type JSONStore struct {
-	*EphemeralStore
+// JSONContractStore implements api.ContractStore in memory, backed by a JSON file.
+type JSONContractStore struct {
+	*EphemeralContractStore
 	dir string
 }
 
-type jsonPersistData struct {
+type jsonContractsPersistData struct {
 	Contracts []rhpv2.Contract
 	HostSets  map[string][]consensus.PublicKey
 }
 
-func (s *JSONStore) save() error {
+func (s *JSONContractStore) save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var p jsonPersistData
+	var p jsonContractsPersistData
 	for _, c := range s.contracts {
 		p.Contracts = append(p.Contracts, c)
 	}
@@ -134,8 +134,8 @@ func (s *JSONStore) save() error {
 	return nil
 }
 
-func (s *JSONStore) load() error {
-	var p jsonPersistData
+func (s *JSONContractStore) load() error {
+	var p jsonContractsPersistData
 	if js, err := os.ReadFile(filepath.Join(s.dir, "contracts.json")); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -151,28 +151,28 @@ func (s *JSONStore) load() error {
 }
 
 // AddContract implements api.ContractStore.
-func (s *JSONStore) AddContract(c rhpv2.Contract) error {
-	s.EphemeralStore.AddContract(c)
+func (s *JSONContractStore) AddContract(c rhpv2.Contract) error {
+	s.EphemeralContractStore.AddContract(c)
 	return s.save()
 }
 
 // RemoveContract implements api.ContractStore.
-func (s *JSONStore) RemoveContract(id types.FileContractID) error {
-	s.EphemeralStore.RemoveContract(id)
+func (s *JSONContractStore) RemoveContract(id types.FileContractID) error {
+	s.EphemeralContractStore.RemoveContract(id)
 	return s.save()
 }
 
 // SetHostSet implements api.HostSetStore.
-func (s *JSONStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
-	s.EphemeralStore.SetHostSet(name, hosts)
+func (s *JSONContractStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
+	s.EphemeralContractStore.SetHostSet(name, hosts)
 	return s.save()
 }
 
-// NewJSONStore returns a new JSONStore.
-func NewJSONStore(dir string) (*JSONStore, error) {
-	s := &JSONStore{
-		EphemeralStore: NewEphemeralStore(),
-		dir:            dir,
+// NewJSONContractStore returns a new JSONContractStore.
+func NewJSONContractStore(dir string) (*JSONContractStore, error) {
+	s := &JSONContractStore{
+		EphemeralContractStore: NewEphemeralContractStore(),
+		dir:                    dir,
 	}
 	if err := s.load(); err != nil {
 		return nil, err
