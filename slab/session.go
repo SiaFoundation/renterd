@@ -269,10 +269,10 @@ func (sp *SessionPool) Session(hostKey consensus.PublicKey, hostIP string, contr
 func (sp *SessionPool) UnlockContract(s *Session) {
 	sp.mu.Lock()
 	ss, ok := s.pool.hosts[s.hostKey]
+	sp.mu.Unlock()
 	if !ok {
 		return
 	}
-	sp.mu.Unlock()
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	if ss.sess != nil && ss.sess.Contract().ID() == s.contractID {
@@ -283,17 +283,17 @@ func (sp *SessionPool) UnlockContract(s *Session) {
 // ForceClose forcibly closes a Session's underlying connection.
 func (sp *SessionPool) ForceClose(s *Session) {
 	sp.mu.Lock()
-	defer sp.mu.Unlock()
 	ss, ok := s.pool.hosts[s.hostKey]
+	sp.mu.Unlock()
 	if !ok {
 		return
 	}
 	ss.mu.Lock()
+	defer ss.mu.Unlock()
 	if ss.conn != nil {
 		ss.conn.Close()
 		ss.sess = nil
 	}
-	ss.mu.Unlock()
 }
 
 // Close gracefully closes all of the sessions in the pool.
