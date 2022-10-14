@@ -81,8 +81,7 @@ func newNode(addr, dir string, bootstrap bool, walletKey consensus.PrivateKey) (
 	ws, ccid, err := stores.NewJSONWalletStore(walletDir, walletAddr)
 	if err != nil {
 		return nil, err
-	}
-	if err := cm.ConsensusSetSubscribe(ws, ccid, nil); err != nil {
+	} else if err := cm.ConsensusSetSubscribe(ws, ccid, nil); err != nil {
 		return nil, err
 	}
 	w := wallet.NewSingleAddressWallet(walletKey, ws)
@@ -91,8 +90,10 @@ func newNode(addr, dir string, bootstrap bool, walletKey consensus.PrivateKey) (
 	if err := os.MkdirAll(hostdbDir, 0700); err != nil {
 		return nil, err
 	}
-	hdb, err := stores.NewJSONHostDB(hostdbDir)
+	hdb, ccid, err := stores.NewJSONHostDB(hostdbDir)
 	if err != nil {
+		return nil, err
+	} else if err := cm.ConsensusSetSubscribe(hdb, ccid, nil); err != nil {
 		return nil, err
 	}
 

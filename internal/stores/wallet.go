@@ -16,12 +16,12 @@ import (
 
 // EphemeralWalletStore implements wallet.SingleAddressStore in memory.
 type EphemeralWalletStore struct {
-	mu      sync.Mutex
 	tip     consensus.ChainIndex
 	ccid    modules.ConsensusChangeID
 	addr    types.UnlockHash
 	scElems []wallet.SiacoinElement
 	txns    []wallet.Transaction
+	mu      sync.Mutex
 }
 
 // Balance implements wallet.SingleAddressStore.
@@ -255,7 +255,7 @@ func (s *JSONWalletStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	s.EphemeralWalletStore.ProcessConsensusChange(cc)
 	if time.Since(s.lastSave) > 2*time.Minute {
 		if err := s.save(); err != nil {
-			log.Fatal("Couldn't save wallet state:", err)
+			log.Fatalln("Couldn't save wallet state:", err)
 		}
 		s.lastSave = time.Now()
 	}

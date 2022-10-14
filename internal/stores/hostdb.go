@@ -2,16 +2,21 @@ package stores
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/siad/modules"
 )
 
 // EphemeralHostDB implements a HostDB in memory.
 type EphemeralHostDB struct {
+	tip   consensus.ChainIndex
+	ccid  modules.ConsensusChangeID
 	hosts map[consensus.PublicKey]hostdb.Host
 	mu    sync.Mutex
 }
@@ -69,6 +74,25 @@ func (db *EphemeralHostDB) SelectHosts(n int, filter func(hostdb.Host) bool) ([]
 	return hosts, nil
 }
 
+// ProcessConsensusChange implements consensus.Subscriber.
+func (db *EphemeralHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
+	height := cc.InitialHeight()
+	for range cc.RevertedBlocks {
+		height--
+	}
+	for _, b := range cc.AppliedBlocks {
+		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
+			db.modifyHost(hostKey, func(h *hostdb.Host) {
+				h.Announcements = append(h.Announcements, ha)
+			})
+		})
+		height++
+	}
+	db.tip.Height = uint64(height)
+	db.tip.ID = consensus.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID())
+	db.ccid = cc.ID
+}
+
 // NewEphemeralHostDB returns a new EphemeralHostDB.
 func NewEphemeralHostDB() *EphemeralHostDB {
 	return &EphemeralHostDB{
@@ -79,17 +103,20 @@ func NewEphemeralHostDB() *EphemeralHostDB {
 // JSONHostDB implements a HostDB in memory, backed by a JSON file.
 type JSONHostDB struct {
 	*EphemeralHostDB
-	dir string
+	dir      string
+	lastSave time.Time
 }
 
 type jsonHostDBPersistData struct {
+	Tip   consensus.ChainIndex
+	CCID  modules.ConsensusChangeID
 	Hosts map[consensus.PublicKey]hostdb.Host
 }
 
 func (db *JSONHostDB) save() error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	p := jsonHostDBPersistData{db.hosts}
+	p := jsonHostDBPersistData{db.tip, db.ccid, db.hosts}
 	js, _ := json.MarshalIndent(p, "", "  ")
 
 	dst := filepath.Join(db.dir, "hostdb.json")
@@ -110,17 +137,21 @@ func (db *JSONHostDB) save() error {
 	return nil
 }
 
-func (db *JSONHostDB) load() error {
+func (db *JSONHostDB) load() (modules.ConsensusChangeID, error) {
 	var p jsonHostDBPersistData
 	if js, err := os.ReadFile(filepath.Join(db.dir, "hostdb.json")); os.IsNotExist(err) {
-		return nil
+		// set defaults
+		db.ccid = modules.ConsensusChangeBeginning
+		return db.ccid, nil
 	} else if err != nil {
-		return err
+		return modules.ConsensusChangeID{}, err
 	} else if err := json.Unmarshal(js, &p); err != nil {
-		return err
+		return modules.ConsensusChangeID{}, err
 	}
-	db.EphemeralHostDB.hosts = p.Hosts
-	return nil
+	db.tip = p.Tip
+	db.ccid = p.CCID
+	db.hosts = p.Hosts
+	return db.ccid, nil
 }
 
 // RecordInteraction records an interaction with a host. If the host is not in
@@ -137,14 +168,27 @@ func (db *JSONHostDB) SetScore(hostKey consensus.PublicKey, score float64) error
 	return db.save()
 }
 
+// ProcessConsensusChange implements chain.Subscriber.
+func (db *JSONHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
+	db.EphemeralHostDB.ProcessConsensusChange(cc)
+	if time.Since(db.lastSave) > 2*time.Minute {
+		if err := db.save(); err != nil {
+			log.Fatalln("Couldn't save hostdb state:", err)
+		}
+		db.lastSave = time.Now()
+	}
+}
+
 // NewJSONHostDB returns a new JSONHostDB.
-func NewJSONHostDB(dir string) (*JSONHostDB, error) {
+func NewJSONHostDB(dir string) (*JSONHostDB, modules.ConsensusChangeID, error) {
 	db := &JSONHostDB{
 		EphemeralHostDB: NewEphemeralHostDB(),
 		dir:             dir,
+		lastSave:        time.Now(),
 	}
-	if err := db.load(); err != nil {
-		return nil, err
+	ccid, err := db.load()
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
 	}
-	return db, nil
+	return db, ccid, nil
 }
