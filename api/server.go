@@ -59,7 +59,6 @@ type (
 	HostDB interface {
 		SelectHosts(n int, filter func(hostdb.Host) bool) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
-		SetScore(hostKey consensus.PublicKey, score float64) error
 		RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	}
 
@@ -338,7 +337,7 @@ func (s *server) hostsHandler(jc jape.Context) {
 	}
 }
 
-func (s *server) hostsPubkeyHandler(jc jape.Context) {
+func (s *server) hostsPubkeyHandlerGET(jc jape.Context) {
 	var pk PublicKey
 	if jc.DecodeParam("pubkey", &pk) != nil {
 		return
@@ -349,15 +348,7 @@ func (s *server) hostsPubkeyHandler(jc jape.Context) {
 	}
 }
 
-func (s *server) hostsScoreHandler(jc jape.Context) {
-	var score float64
-	var pk PublicKey
-	if jc.Decode(&score) == nil && jc.DecodeParam("pubkey", &pk) == nil {
-		jc.Check("couldn't set score", s.hdb.SetScore(pk, score))
-	}
-}
-
-func (s *server) hostsInteractionHandler(jc jape.Context) {
+func (s *server) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var hi hostdb.Interaction
 	var pk PublicKey
 	if jc.Decode(&hi) == nil && jc.DecodeParam("pubkey", &pk) == nil {
@@ -668,10 +659,9 @@ func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb Host
 		"POST   /wallet/prepare/renew": srv.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       srv.walletPendingHandler,
 
-		"GET    /hosts":                     srv.hostsHandler,
-		"GET    /hosts/:pubkey":             srv.hostsPubkeyHandler,
-		"PUT    /hosts/:pubkey/score":       srv.hostsScoreHandler,
-		"POST   /hosts/:pubkey/interaction": srv.hostsInteractionHandler,
+		"GET    /hosts":         srv.hostsHandler,
+		"GET    /hosts/:pubkey": srv.hostsPubkeyHandlerGET,
+		"POST   /hosts/:pubkey": srv.hostsPubkeyHandlerPOST,
 
 		"POST   /rhp/prepare/form":    srv.rhpPrepareFormHandler,
 		"POST   /rhp/prepare/renew":   srv.rhpPrepareRenewHandler,
