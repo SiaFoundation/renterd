@@ -186,24 +186,25 @@ func (sp *SessionPool) acquire(s *Session) (_ *sharedSession, err error) {
 
 	// reuse existing session or transport if possible
 	if ss.sess != nil {
+		t := ss.sess.Transport()
 		if time.Since(ss.lastSeen) >= 2*time.Minute {
 			// use RPCSettings as a generic "ping"
-			ss.settings, err = rhpv2.RPCSettings(ss.sess.Transport())
+			ss.settings, err = rhpv2.RPCSettings(t)
 			if err != nil {
-				ss.sess.Transport().Close()
+				t.Close()
 				goto reconnect
 			}
 		}
 		if ss.sess.Contract().ID() != s.contractID {
 			if ss.sess.Contract().ID() != (types.FileContractID{}) {
 				if err := ss.sess.Unlock(); err != nil {
-					ss.sess.Transport().Close()
+					t.Close()
 					goto reconnect
 				}
 			}
-			ss.sess, err = rhpv2.RPCLock(ss.sess.Transport(), s.contractID, s.renterKey, 10*time.Second)
+			ss.sess, err = rhpv2.RPCLock(t, s.contractID, s.renterKey, 10*time.Second)
 			if err != nil {
-				ss.sess.Transport().Close()
+				t.Close()
 				goto reconnect
 			}
 		}
