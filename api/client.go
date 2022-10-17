@@ -161,15 +161,9 @@ func (c *Client) Host(hostKey PublicKey) (h hostdb.Host, err error) {
 	return
 }
 
-// SetHostScore sets the score for the supplied host.
-func (c *Client) SetHostScore(hostKey PublicKey, score float64) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/hosts/%s/score", hostKey), score)
-	return
-}
-
 // RecordHostInteraction records an interaction for the supplied host.
 func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/%s/interaction", hostKey), i, nil)
+	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), i, nil)
 	return
 }
 
