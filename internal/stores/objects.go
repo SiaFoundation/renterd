@@ -3,6 +3,7 @@ package stores
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,31 +16,31 @@ import (
 )
 
 type refSector struct {
-	hostID uint32
-	root   consensus.Hash256
+	HostID uint32
+	Root   consensus.Hash256
 }
 
 type refSlab struct {
-	minShards uint8
-	shards    []refSector
-	refs      uint32
+	MinShards uint8
+	Shards    []refSector
+	Refs      uint32
 }
 
 type refSlice struct {
-	slabID slab.EncryptionKey
-	offset uint32
-	length uint32
+	SlabID slab.EncryptionKey
+	Offset uint32
+	Length uint32
 }
 
 type refObject struct {
-	key   object.EncryptionKey
-	slabs []refSlice
+	Key   object.EncryptionKey
+	Slabs []refSlice
 }
 
 // EphemeralObjectStore implements api.ObjectStore in memory.
 type EphemeralObjectStore struct {
 	hosts   []consensus.PublicKey
-	slabs   map[slab.EncryptionKey]refSlab
+	slabs   map[string]refSlab
 	objects map[string]refObject
 	mu      sync.Mutex
 }
@@ -59,24 +60,24 @@ func (es *EphemeralObjectStore) Put(key string, o object.Object) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	ro := refObject{
-		key:   o.Key,
-		slabs: make([]refSlice, len(o.Slabs)),
+		Key:   o.Key,
+		Slabs: make([]refSlice, len(o.Slabs)),
 	}
 	for i, ss := range o.Slabs {
-		rs, ok := es.slabs[ss.Key]
+		rs, ok := es.slabs[ss.Key.String()]
 		if !ok {
 			shards := make([]refSector, len(ss.Shards))
 			for i, sector := range ss.Shards {
 				shards[i] = refSector{
-					hostID: es.addHost(sector.Host),
-					root:   sector.Root,
+					HostID: es.addHost(sector.Host),
+					Root:   sector.Root,
 				}
 			}
-			rs = refSlab{ss.MinShards, shards, 1}
+			rs = refSlab{ss.MinShards, shards, 0}
 		}
-		rs.refs++
-		es.slabs[ss.Key] = rs
-		ro.slabs[i] = refSlice{ss.Key, ss.Offset, ss.Length}
+		rs.Refs++
+		es.slabs[ss.Key.String()] = rs
+		ro.Slabs[i] = refSlice{ss.Key, ss.Offset, ss.Length}
 	}
 	es.objects[key] = ro
 	return nil
@@ -90,28 +91,31 @@ func (es *EphemeralObjectStore) Get(key string) (object.Object, error) {
 	if !ok {
 		return object.Object{}, errors.New("not found")
 	}
-	slabs := make([]slab.Slice, len(ro.slabs))
-	for i, rss := range ro.slabs {
-		rs := es.slabs[rss.slabID]
-		shards := make([]slab.Sector, len(rs.shards))
-		for i := range rs.shards {
+	slabs := make([]slab.Slice, len(ro.Slabs))
+	for i, rss := range ro.Slabs {
+		rs, ok := es.slabs[rss.SlabID.String()]
+		if !ok {
+			return object.Object{}, errors.New("slab not found")
+		}
+		shards := make([]slab.Sector, len(rs.Shards))
+		for i := range rs.Shards {
 			shards[i] = slab.Sector{
-				Host: es.hosts[rs.shards[i].hostID],
-				Root: rs.shards[i].root,
+				Host: es.hosts[rs.Shards[i].HostID],
+				Root: rs.Shards[i].Root,
 			}
 		}
 		slabs[i] = slab.Slice{
 			Slab: slab.Slab{
-				Key:       rss.slabID,
-				MinShards: rs.minShards,
+				Key:       rss.SlabID,
+				MinShards: rs.MinShards,
 				Shards:    shards,
 			},
-			Offset: rss.offset,
-			Length: rss.length,
+			Offset: rss.Offset,
+			Length: rss.Length,
 		}
 	}
 	return object.Object{
-		Key:   ro.key,
+		Key:   ro.Key,
 		Slabs: slabs,
 	}, nil
 }
@@ -125,16 +129,16 @@ func (es *EphemeralObjectStore) Delete(key string) error {
 		return nil
 	}
 	// decrement slab refcounts
-	for _, s := range o.slabs {
-		rs, ok := es.slabs[s.slabID]
-		if !ok || rs.refs == 0 {
+	for _, s := range o.Slabs {
+		rs, ok := es.slabs[s.SlabID.String()]
+		if !ok || rs.Refs == 0 {
 			continue // shouldn't happen, but benign
 		}
-		rs.refs--
-		if rs.refs == 0 {
-			delete(es.slabs, s.slabID)
+		rs.Refs--
+		if rs.Refs == 0 {
+			delete(es.slabs, s.SlabID.String())
 		} else {
-			es.slabs[s.slabID] = rs
+			es.slabs[s.SlabID.String()] = rs
 		}
 	}
 	delete(es.objects, key)
@@ -168,7 +172,7 @@ func (es *EphemeralObjectStore) List(path string) []string {
 // NewEphemeralObjectStore returns a new EphemeralObjectStore.
 func NewEphemeralObjectStore() *EphemeralObjectStore {
 	return &EphemeralObjectStore{
-		slabs:   make(map[slab.EncryptionKey]refSlab),
+		slabs:   make(map[string]refSlab),
 		objects: make(map[string]refObject),
 	}
 }
@@ -181,7 +185,7 @@ type JSONObjectStore struct {
 
 type jsonObjectPersistData struct {
 	Hosts   []consensus.PublicKey
-	Slabs   map[slab.EncryptionKey]refSlab
+	Slabs   map[string]refSlab
 	Objects map[string]refObject
 }
 
@@ -193,7 +197,10 @@ func (s *JSONObjectStore) save() error {
 		Slabs:   s.slabs,
 		Objects: s.objects,
 	}
-	js, _ := json.MarshalIndent(p, "", "  ")
+	js, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode JSON: %w", err)
+	}
 
 	// atomic save
 	dst := filepath.Join(s.dir, "objects.json")
@@ -202,11 +209,11 @@ func (s *JSONObjectStore) save() error {
 		return err
 	}
 	defer f.Close()
-	if _, err = f.Write(js); err != nil {
+	if _, err := f.Write(js); err != nil {
 		return err
-	} else if f.Sync(); err != nil {
+	} else if err := f.Sync(); err != nil {
 		return err
-	} else if f.Close(); err != nil {
+	} else if err := f.Close(); err != nil {
 		return err
 	} else if err := os.Rename(dst+"_tmp", dst); err != nil {
 		return err
