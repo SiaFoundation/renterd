@@ -29,6 +29,19 @@ type paramTime time.Time
 func (t paramTime) String() string                { return (time.Time)(t).Format(time.RFC3339) }
 func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
+// WalletSplitRequest is the request type for the /wallet/split operation.
+type WalletSplitRequest struct {
+	Amount  types.Currency `json:"amount"`
+	Outputs int            `json:"outputs"`
+}
+
+// WalletSplitResponse is the response type for the /wallet/split endpoint.
+type WalletSplitResponse struct {
+	Transaction   types.Transaction   `json:"transaction"`
+	ToSign        []types.OutputID    `json:"toSign"`
+	CoveredFields types.CoveredFields `json:"coveredFields"`
+}
+
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`

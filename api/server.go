@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -51,6 +52,7 @@ type (
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
+		Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -202,6 +204,32 @@ func (s *server) walletSignHandler(jc jape.Context) {
 	if jc.Check("couldn't sign transaction", err) == nil {
 		jc.Encode(wsr.Transaction)
 	}
+}
+
+func (s *server) walletSplitHandler(jc jape.Context) {
+	var wfr WalletSplitRequest
+	if jc.Decode(&wfr) != nil {
+		return
+	}
+	if wfr.Amount.Cmp(types.SiacoinPrecision) < 0 {
+		jc.Error(errors.New("'amount' has to be at least 1SC"), http.StatusBadRequest)
+		return
+	}
+	if wfr.Outputs == 0 {
+		jc.Error(errors.New("'outputs' has to be greater than zero"), http.StatusBadRequest)
+		return
+	}
+
+	txn, toSign, err := s.w.Split(s.cm.TipState(), wfr.Outputs, wfr.Amount, s.tp.RecommendedFee(), s.tp.Transactions())
+	if jc.Check("couldn't split the wallet", err) != nil {
+		return
+	}
+
+	jc.Encode(WalletSplitResponse{
+		Transaction:   txn,
+		ToSign:        toSign,
+		CoveredFields: wallet.ExplicitCoveredFields(txn),
+	})
 }
 
 func (s *server) walletDiscardHandler(jc jape.Context) {
@@ -641,6 +669,7 @@ func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb Host
 		"GET    /wallet/outputs":       srv.walletOutputsHandler,
 		"POST   /wallet/fund":          srv.walletFundHandler,
 		"POST   /wallet/sign":          srv.walletSignHandler,
+		"POST   /wallet/split":         srv.walletSplitHandler,
 		"POST   /wallet/discard":       srv.walletDiscardHandler,
 		"POST   /wallet/prepare/form":  srv.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": srv.walletPrepareRenewHandler,
