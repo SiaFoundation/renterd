@@ -15,16 +15,18 @@ type slabMover struct {
 func (sm slabMover) withHosts(ctx context.Context, contracts []api.Contract, fn func([]slab.Host) error) (err error) {
 	var hosts []slab.Host
 	for _, c := range contracts {
-		h := sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey)
-		defer sm.pool.UnlockContract(h)
-		hosts = append(hosts, h)
+		hosts = append(hosts, sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey))
 	}
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-done:
+			for _, h := range hosts {
+				sm.pool.UnlockContract(h.(*slab.Session))
+			}
 		case <-ctx.Done():
 			for _, h := range hosts {
+				sm.pool.UnlockContract(h.(*slab.Session))
 				sm.pool.ForceClose(h.(*slab.Session))
 			}
 		}
