@@ -26,7 +26,6 @@ func (sm slabMover) withHosts(ctx context.Context, contracts []api.Contract, fn 
 			}
 		case <-ctx.Done():
 			for _, h := range hosts {
-				sm.pool.UnlockContract(h.(*slab.Session))
 				sm.pool.ForceClose(h.(*slab.Session))
 			}
 		}
