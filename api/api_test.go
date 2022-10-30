@@ -144,7 +144,7 @@ func runServer(n *node) (*api.Client, func()) {
 	}
 	go func() {
 		srv := api.NewServer(mockSyncer{}, mockChainManager{}, mockTxPool{}, n.w, n.hdb, mockRHP{}, n.cs, n.sm, n.os)
-		http.Serve(l, jape.AuthMiddleware(srv, "password"))
+		http.Serve(l, jape.BasicAuth("password")(srv))
 	}()
 	c := api.NewClient("http://"+l.Addr().String(), "password")
 	return c, func() { l.Close() }
