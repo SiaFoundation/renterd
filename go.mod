@@ -6,7 +6,7 @@ require (
 	github.com/hdevalence/ed25519consensus v0.0.0-20220222234857-c00d1f31bab3
 	github.com/klauspost/reedsolomon v1.9.16
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/jape v0.4.0
+	go.sia.tech/jape v0.5.0
 	go.sia.tech/siad v1.5.7
 	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e
 	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
