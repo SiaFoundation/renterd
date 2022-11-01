@@ -10,6 +10,7 @@ import (
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/autopilot"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
