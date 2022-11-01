@@ -164,9 +164,9 @@ func RPCFundAccount(t *Transport, payment PaymentMethod, account Account, settin
 	var resp rpcFundAccountResponse
 	if _, err := s.Write(rpcFundAccountID[:]); err != nil {
 		return err
-	} else if writeResponse(s, &settingsID); err != nil {
+	} else if err := writeResponse(s, &settingsID); err != nil {
 		return err
-	} else if writeResponse(s, &req); err != nil {
+	} else if err := writeResponse(s, &req); err != nil {
 		return err
 	} else if err := processPayment(s, payment); err != nil {
 		return err
@@ -195,7 +195,7 @@ func RPCReadRegistry(t *Transport, payment PaymentMethod, key RegistryKey) (rv R
 		return RegistryValue{}, err
 	} else if err := processPayment(s, payment); err != nil {
 		return RegistryValue{}, err
-	} else if writeResponse(s, req); err != nil {
+	} else if err := writeResponse(s, req); err != nil {
 		return RegistryValue{}, err
 	}
 
@@ -244,7 +244,7 @@ func RPCUpdateRegistry(t *Transport, payment PaymentMethod, key RegistryKey, val
 		return err
 	} else if err := processPayment(s, payment); err != nil {
 		return err
-	} else if writeResponse(s, req); err != nil {
+	} else if err := writeResponse(s, req); err != nil {
 		return err
 	}
 
