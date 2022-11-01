@@ -161,10 +161,16 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 	return
 }
 
-// Hosts returns all hosts known to the server.
-func (c *Client) Hosts() (hosts []hostdb.Host, err error) {
-	err = c.c.GET("/hosts", &hosts)
+// Hosts returns up to max hosts that have not been interacted with since
+// the specified time.
+func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
+	err = c.c.GET(fmt.Sprintf("/hosts?notSince=%v&max=%d", paramTime(notSince), max), &hosts)
 	return
+}
+
+// AllHosts returns all hosts known to the server.
+func (c *Client) AllHosts() (hosts []hostdb.Host, err error) {
+	return c.Hosts(time.Now(), -1)
 }
 
 // Host returns information about a particular host known to the server.
