@@ -8,8 +8,12 @@ import (
 	"os"
 	"os/signal"
 
+	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/autopilot"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
+	"golang.org/x/crypto/blake2b"
 	"golang.org/x/term"
 )
 
@@ -111,10 +115,24 @@ func main() {
 	}
 	defer l.Close()
 	log.Println("api: Listening on", l.Addr())
-	go startWeb(l, n, apiPassword)
+
+	as, _, err := stores.NewJSONAutopilotStore("autopilot")
+	if err != nil {
+		log.Fatal(err)
+	}
+	autopilotKey := blake2b.Sum256(append([]byte("autopilot"), walletKey...))
+	ap := autopilot.New(as, api.NewClient(l.Addr().String(), apiPassword), autopilotKey)
+	defer ap.Stop()
+	apErrChan := make(chan error)
+	go func() { apErrChan <- ap.Run() }()
+	go startWeb(l, n, ap, apiPassword)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
-	<-signalCh
-	log.Println("Shutting down...")
+	select {
+	case <-signalCh:
+		log.Println("Shutting down...")
+	case err := <-apErrChan:
+		log.Fatalln("Fatal autopilot error:", err)
+	}
 }
