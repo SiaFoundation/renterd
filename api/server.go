@@ -55,7 +55,7 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		SelectHosts(n int, filter func(hostdb.Host) bool) ([]hostdb.Host, error)
+		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 		RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	}
@@ -302,8 +302,12 @@ func (s *server) walletPendingHandler(jc jape.Context) {
 }
 
 func (s *server) hostsHandler(jc jape.Context) {
-	// TODO: support filtering via query params
-	hosts, err := s.hdb.SelectHosts(-1, func(hostdb.Host) bool { return true })
+	var notSince time.Time
+	max := -1
+	if jc.DecodeForm("notSince", (*paramTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
+		return
+	}
+	hosts, err := s.hdb.Hosts(notSince, max)
 	if jc.Check("couldn't load hosts", err) == nil {
 		jc.Encode(hosts)
 	}

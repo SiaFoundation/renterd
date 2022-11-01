@@ -48,15 +48,22 @@ func (db *EphemeralHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hos
 	return nil
 }
 
-// SelectHosts returns up to n hosts for which the supplied filter returns true.
-func (db *EphemeralHostDB) SelectHosts(n int, filter func(hostdb.Host) bool) ([]hostdb.Host, error) {
+// Hosts returns up to max hosts that have not been interacted with since
+// the specified time.
+func (db *EphemeralHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
+	lastInteraction := func(h hostdb.Host) time.Time {
+		if len(h.Interactions) == 0 {
+			return time.Time{}
+		}
+		return h.Interactions[len(h.Interactions)-1].Timestamp
+	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	var hosts []hostdb.Host
 	for _, host := range db.hosts {
-		if len(hosts) == n {
+		if len(hosts) == max {
 			break
-		} else if filter(host) {
+		} else if lastInteraction(host).Before(notSince) {
 			hosts = append(hosts, host)
 		}
 	}
