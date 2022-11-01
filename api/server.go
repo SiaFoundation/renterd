@@ -251,7 +251,7 @@ func (s *server) walletPrepareFormHandler(jc jape.Context) {
 	}
 	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if jc.Check("couldn't fund transaction", err) == nil {
+	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
@@ -284,7 +284,7 @@ func (s *server) walletPrepareRenewHandler(jc jape.Context) {
 	}
 	txn.MinerFees = []types.Currency{s.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := s.w.FundTransaction(s.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), s.tp.Transactions())
-	if jc.Check("couldn't fund transaction", err) == nil {
+	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
