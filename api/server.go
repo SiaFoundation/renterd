@@ -537,23 +537,18 @@ func (s *server) hostsetsContractsHandler(jc jape.Context) {
 			latest[c.HostKey()] = c
 		}
 	}
-	contracts := make([]*rhpv2.Contract, len(hosts))
+	contracts := make([]Contract, len(hosts))
 	for i, host := range hosts {
+		contracts[i].HostKey = host
+		hi, err := s.hdb.Host(host)
+		if err == nil {
+			contracts[i].HostIP = hi.NetAddress()
+		}
 		if c, ok := latest[host]; ok {
-			contracts[i] = &c
+			contracts[i].ID = c.ID()
 		}
 	}
 	jc.Encode(contracts)
-}
-
-func (s *server) hostsetsResolveHandler(jc jape.Context) {
-	hosts := s.hss.HostSet(jc.PathParam("name"))
-	ips := make([]string, len(hosts))
-	for i, hostKey := range hosts {
-		hi, _ := s.hdb.Host(hostKey)
-		ips[i] = hi.NetAddress()
-	}
-	jc.Encode(ips)
 }
 
 func (s *server) slabsUploadHandler(jc jape.Context) {
@@ -682,7 +677,6 @@ func NewServer(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb Host
 		"GET    /hostsets/:name":           srv.hostsetsNameHandlerGET,
 		"PUT    /hostsets/:name":           srv.hostsetsNameHandlerPUT,
 		"GET    /hostsets/:name/contracts": srv.hostsetsContractsHandler,
-		"GET    /hostsets/:name/resolve":   srv.hostsetsResolveHandler,
 
 		"POST   /slabs/upload":   srv.slabsUploadHandler,
 		"POST   /slabs/download": srv.slabsDownloadHandler,
