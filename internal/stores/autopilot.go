@@ -17,7 +17,6 @@ import (
 type EphemeralAutopilotStore struct {
 	mu     sync.Mutex
 	tip    consensus.ChainIndex
-	ccid   modules.ConsensusChangeID
 	config autopilot.Config
 }
 
@@ -61,8 +60,6 @@ type JSONAutopilotStore struct {
 }
 
 type jsonAutopilotPersistData struct {
-	Tip    consensus.ChainIndex
-	CCID   modules.ConsensusChangeID
 	Config autopilot.Config
 }
 
@@ -92,21 +89,17 @@ func (s *JSONAutopilotStore) save() error {
 	return nil
 }
 
-func (s *JSONAutopilotStore) load() (modules.ConsensusChangeID, error) {
+func (s *JSONAutopilotStore) load() error {
 	var p jsonAutopilotPersistData
 	if js, err := os.ReadFile(filepath.Join(s.dir, "autopilot.json")); os.IsNotExist(err) {
-		// set defaults
-		s.ccid = modules.ConsensusChangeBeginning
-		return s.ccid, nil
+		return nil
 	} else if err != nil {
-		return modules.ConsensusChangeID{}, err
+		return err
 	} else if err := json.Unmarshal(js, &p); err != nil {
-		return modules.ConsensusChangeID{}, err
+		return err
 	}
-	s.tip = p.Tip
-	s.ccid = p.CCID
 	s.config = p.Config
-	return s.ccid, nil
+	return nil
 }
 
 // SetConfig implements autopilot.Store.
@@ -127,15 +120,15 @@ func (s *JSONAutopilotStore) ProcessConsensusChange(cc modules.ConsensusChange) 
 }
 
 // NewJSONAutopilotStore returns a new JSONAutopilotStore.
-func NewJSONAutopilotStore(dir string) (*JSONAutopilotStore, modules.ConsensusChangeID, error) {
+func NewJSONAutopilotStore(dir string) (*JSONAutopilotStore, error) {
 	s := &JSONAutopilotStore{
 		EphemeralAutopilotStore: NewEphemeralAutopilotStore(),
 		dir:                     dir,
 		lastSave:                time.Now(),
 	}
-	ccid, err := s.load()
+	err := s.load()
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, err
 	}
-	return s, ccid, nil
+	return s, nil
 }

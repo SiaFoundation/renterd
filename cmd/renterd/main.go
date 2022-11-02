@@ -116,7 +116,7 @@ func main() {
 	defer l.Close()
 	log.Println("api: Listening on", l.Addr())
 
-	as, _, err := stores.NewJSONAutopilotStore("autopilot")
+	as, err := stores.NewJSONAutopilotStore("autopilot")
 	if err != nil {
 		log.Fatal(err)
 	}
