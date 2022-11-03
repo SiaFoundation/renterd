@@ -95,20 +95,20 @@ type mockSlabMover struct {
 	hosts []slab.Host
 }
 
-func (sm *mockSlabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) ([]slab.Slab, error) {
-	return slab.UploadSlabs(r, m, n, sm.hosts)
+func (sm *mockSlabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (slab.Slab, error) {
+	return slab.UploadSlab(r, m, n, sm.hosts)
 }
 
-func (sm *mockSlabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []api.Contract) error {
-	return slab.DownloadSlabs(w, slabs, offset, length, sm.hosts)
+func (sm *mockSlabMover) DownloadSlab(ctx context.Context, w io.Writer, s slab.Slice, contracts []api.Contract) error {
+	return slab.DownloadSlab(w, s, sm.hosts)
 }
 
 func (sm *mockSlabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) error {
 	return slab.DeleteSlabs(slabs, sm.hosts)
 }
 
-func (sm *mockSlabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []api.Contract) error {
-	return slab.MigrateSlabs(slabs, sm.hosts, sm.hosts)
+func (sm *mockSlabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []api.Contract) error {
+	return slab.MigrateSlab(s, sm.hosts, sm.hosts)
 }
 
 type node struct {
@@ -144,7 +144,7 @@ func runServer(n *node) (*api.Client, func()) {
 	}
 	go func() {
 		srv := api.NewServer(mockSyncer{}, mockChainManager{}, mockTxPool{}, n.w, n.hdb, mockRHP{}, n.cs, n.sm, n.os)
-		http.Serve(l, jape.AuthMiddleware(srv, "password"))
+		http.Serve(l, jape.BasicAuth("password")(srv))
 	}()
 	c := api.NewClient("http://"+l.Addr().String(), "password")
 	return c, func() { l.Close() }
@@ -199,20 +199,17 @@ func TestObject(t *testing.T) {
 	// upload
 	data := frand.Bytes(12345)
 	key := object.GenerateEncryptionKey()
-	slabs, err := c.UploadSlabs(key.Encrypt(bytes.NewReader(data)), 2, 3, 0, contracts)
+	s, err := c.UploadSlab(key.Encrypt(bytes.NewReader(data)), 2, 3, 0, contracts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	o := object.Object{
-		Key:   key,
-		Slabs: make([]slab.Slice, len(slabs)),
-	}
-	for i := range slabs {
-		o.Slabs[i] = slab.Slice{
-			Slab:   slabs[i],
+		Key: key,
+		Slabs: []slab.Slice{{
+			Slab:   s,
 			Offset: 0,
 			Length: uint32(len(data)),
-		}
+		}},
 	}
 
 	// store object
@@ -228,17 +225,17 @@ func TestObject(t *testing.T) {
 
 	// download
 	var buf bytes.Buffer
-	if err := c.DownloadSlabs(key.Decrypt(&buf, 0), o.Slabs, 0, o.Size(), contracts); err != nil {
+	if err := c.DownloadSlab(key.Decrypt(&buf, 0), o.Slabs[0], contracts); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatalf("data mismatch:\n%v (%v)\n%v (%v)", buf.Bytes(), len(buf.Bytes()), data, len(data))
 	}
 
 	// delete slabs
-	if err := c.DeleteSlabs(slabs, contracts); err != nil {
+	if err := c.DeleteSlabs([]slab.Slab{s}, contracts); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.DownloadSlabs(ioutil.Discard, o.Slabs, 0, o.Size(), contracts); err == nil {
+	if err := c.DownloadSlab(ioutil.Discard, o.Slabs[0], contracts); err == nil {
 		t.Error("slabs should no longer be retrievable")
 	}
 

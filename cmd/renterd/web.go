@@ -133,20 +133,22 @@ func (t treeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func startWeb(l net.Listener, node *node, password string) error {
 	renter := api.NewServer(&syncer{node.g, node.tp}, &chainManager{node.cm}, txpool{node.tp}, node.w, node.hdb, rhpImpl{}, node.cs, newSlabMover(), node.os)
+	auth := jape.BasicAuth(password)
 	return http.Serve(l, treeMux{
 		h: createUIHandler(),
 		sub: map[string]treeMux{
-			"/api": {h: jape.AuthMiddleware(renter, password)},
+			"/api": {h: auth(renter)},
 		},
 	})
 }
 
 func startStatelessWeb(l net.Listener, password string) error {
 	renter := api.NewStatelessServer(rhpImpl{}, newSlabMover())
+	auth := jape.BasicAuth(password)
 	return http.Serve(l, treeMux{
 		h: createUIHandler(),
 		sub: map[string]treeMux{
-			"/api": {h: jape.AuthMiddleware(renter, password)},
+			"/api": {h: auth(renter)},
 		},
 	})
 }

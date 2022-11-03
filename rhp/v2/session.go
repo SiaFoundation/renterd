@@ -241,10 +241,16 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 func (s *Session) Read(w io.Writer, sections []RPCReadRequestSection, price types.Currency) (err error) {
 	defer wrapErr(&err, "Read")
 
+	empty := true
+	for _, s := range sections {
+		empty = empty && s.Length == 0
+	}
+	if empty || len(sections) == 0 {
+		return nil
+	}
+
 	if !s.isRevisable() {
 		return ErrContractFinalized
-	} else if len(sections) == 0 {
-		return nil
 	} else if !s.sufficientFunds(price) {
 		return ErrInsufficientFunds
 	}
