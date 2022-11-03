@@ -39,18 +39,18 @@ func (sm slabMover) withHosts(ctx context.Context, contracts []api.Contract, fn 
 	return fn(hosts)
 }
 
-func (sm slabMover) UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (slabs []slab.Slab, err error) {
+func (sm slabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (s slab.Slab, err error) {
 	sm.pool.SetCurrentHeight(currentHeight)
 	err = sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		slabs, err = slab.UploadSlabs(r, m, n, hosts)
+		s, err = slab.UploadSlab(r, m, n, hosts)
 		return err
 	})
 	return
 }
 
-func (sm slabMover) DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []api.Contract) error {
+func (sm slabMover) DownloadSlab(ctx context.Context, w io.Writer, s slab.Slice, contracts []api.Contract) error {
 	return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		return slab.DownloadSlabs(w, slabs, offset, length, hosts)
+		return slab.DownloadSlab(w, s, hosts)
 	})
 }
 
@@ -60,7 +60,7 @@ func (sm slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contract
 	})
 }
 
-func (sm slabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []api.Contract) (err error) {
+func (sm slabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []api.Contract) (err error) {
 	sm.pool.SetCurrentHeight(currentHeight)
 	var fromHosts []slab.Host
 	for _, c := range from {
@@ -93,7 +93,7 @@ func (sm slabMover) MigrateSlabs(ctx context.Context, slabs []slab.Slab, current
 			err = ctx.Err()
 		}
 	}()
-	return slab.MigrateSlabs(slabs, fromHosts, toHosts)
+	return slab.MigrateSlab(s, fromHosts, toHosts)
 }
 
 func newSlabMover() slabMover {

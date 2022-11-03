@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"mime/multipart"
 	"net/http"
 	"time"
 
@@ -348,58 +347,43 @@ func (c *Client) HostSetResolves(name string) (ips []string, err error) {
 	return
 }
 
-// UploadSlabs uploads data to a set of hosts.
-func (c *Client) UploadSlabs(src io.Reader, m, n uint8, height uint64, contracts []Contract) (slabs []slab.Slab, err error) {
-	c.c.Custom("POST", "/slabs/upload", []byte{}, &slabs)
+// UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
+// read from src.
+func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, err error) {
+	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
 
-	// apparently, the only way to stream a multipart upload is via io.Pipe :/
-	r, w := io.Pipe()
-	mw := multipart.NewWriter(w)
-	errChan := make(chan error, 1)
-	go func() {
-		defer w.Close()
-		defer mw.Close()
-		js, _ := json.Marshal(SlabsUploadRequest{
-			MinShards:     m,
-			TotalShards:   n,
-			Contracts:     contracts,
-			CurrentHeight: height,
-		})
-		mw.WriteField("meta", string(js))
-		part, _ := mw.CreateFormFile("data", "data")
-		_, err := io.Copy(part, src)
-		errChan <- err
-	}()
-	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/upload"), r)
+	js, _ := json.Marshal(SlabsUploadRequest{
+		MinShards:     m,
+		TotalShards:   n,
+		Contracts:     contracts,
+		CurrentHeight: height,
+	})
+	body := io.MultiReader(bytes.NewReader(js), io.LimitReader(src, int64(m)*rhpv2.SectorSize))
+	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/upload"), body)
 	if err != nil {
 		panic(err)
 	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
-	} else if err := <-errChan; err != nil {
-		return nil, err
+		return slab.Slab{}, err
 	}
 	defer io.Copy(ioutil.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := ioutil.ReadAll(resp.Body)
-		return nil, errors.New(string(err))
+		return slab.Slab{}, errors.New(string(err))
 	}
-	err = json.NewDecoder(resp.Body).Decode(&slabs)
+	err = json.NewDecoder(resp.Body).Decode(&s)
 	return
 }
 
-// DownloadSlabs downloads data from a set of hosts.
-func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.Slice, offset, length int64, contracts []Contract) (err error) {
+// DownloadSlab downloads data from a set of hosts.
+func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) (err error) {
 	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
 
 	js, _ := json.Marshal(SlabsDownloadRequest{
-		Slabs:     slabs,
-		Offset:    offset,
-		Length:    length,
+		Slab:      s,
 		Contracts: contracts,
 	})
 	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/download"), bytes.NewReader(js))
@@ -422,15 +406,15 @@ func (c *Client) DownloadSlabs(dst io.Writer, slabs []slab.Slice, offset, length
 	return
 }
 
-// MigrateSlabs migrates the specified slabs.
-func (c *Client) MigrateSlabs(slabs []slab.Slab, from, to []Contract, currentHeight uint64) (err error) {
+// MigrateSlab migrates the specified slab.
+func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) (err error) {
 	req := SlabsMigrateRequest{
-		Slabs:         slabs,
+		Slab:          *s,
 		From:          from,
 		To:            to,
 		CurrentHeight: currentHeight,
 	}
-	err = c.c.POST("/slabs/migrate", req, nil)
+	err = c.c.POST("/slabs/migrate", req, s)
 	return
 }
 

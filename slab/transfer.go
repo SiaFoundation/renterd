@@ -80,59 +80,25 @@ func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, error) {
 	return sectors, nil
 }
 
-// UploadSlabs uploads slabs read from the provided Reader.
-func UploadSlabs(r io.Reader, m, n uint8, hosts []Host) ([]Slab, error) {
+// UploadSlab uploads a slab.
+func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
-	var slabs []Slab
-	for {
-		// read slab data, encode, and encrypt
-		_, err := io.ReadFull(r, buf)
-		if err == io.EOF {
-			break
-		} else if err != nil && err != io.ErrUnexpectedEOF {
-			return nil, err
-		}
-		s := Slab{
-			Key:       GenerateEncryptionKey(),
-			MinShards: m,
-		}
-		s.Encode(buf, shards)
-		s.Encrypt(shards)
-		s.Shards, err = parallelUploadSlab(shards, hosts)
-		if err != nil {
-			return nil, err
-		}
-		slabs = append(slabs, s)
+	_, err := io.ReadFull(r, buf)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return Slab{}, err
 	}
-	return slabs, nil
-}
-
-func slabsForDownload(slabs []Slice, offset, length int64) []Slice {
-	// mutate a copy
-	slabs = append([]Slice(nil), slabs...)
-
-	firstOffset := offset
-	for i, ss := range slabs {
-		if firstOffset <= int64(ss.Length) {
-			slabs = slabs[i:]
-			break
-		}
-		firstOffset -= int64(ss.Length)
+	s := Slab{
+		Key:       GenerateEncryptionKey(),
+		MinShards: m,
 	}
-	slabs[0].Offset += uint32(firstOffset)
-	slabs[0].Length -= uint32(firstOffset)
-
-	lastLength := length
-	for i, ss := range slabs {
-		if lastLength <= int64(ss.Length) {
-			slabs = slabs[:i+1]
-			break
-		}
-		lastLength -= int64(ss.Length)
+	s.Encode(buf, shards)
+	s.Encrypt(shards)
+	s.Shards, err = parallelUploadSlab(shards, hosts)
+	if err != nil {
+		return Slab{}, err
 	}
-	slabs[len(slabs)-1].Length = uint32(lastLength)
-	return slabs
+	return s, nil
 }
 
 // parallelDownloadSlab downloads the shards comprising a slab in parallel.
@@ -213,30 +179,46 @@ func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, error) {
 	return shards, nil
 }
 
-// DownloadSlabs downloads data from the supplied slabs.
-func DownloadSlabs(w io.Writer, slabs []Slice, offset, length int64, hosts []Host) error {
-	var slabsSize int64
-	for _, ss := range slabs {
-		slabsSize += int64(ss.Length)
+// DownloadSlab downloads slab data.
+func DownloadSlab(w io.Writer, s Slice, hosts []Host) error {
+	shards, err := parallelDownloadSlab(s, hosts)
+	if err != nil {
+		return err
 	}
-	if offset < 0 || length < 0 || offset+length > slabsSize {
-		return errors.New("requested range is out of bounds")
-	} else if length == 0 {
-		return nil
-	}
-
-	slabs = slabsForDownload(slabs, offset, length)
-	for _, ss := range slabs {
-		shards, err := parallelDownloadSlab(ss, hosts)
-		if err != nil {
-			return err
-		}
-		ss.Decrypt(shards)
-		if err := ss.Recover(w, shards); err != nil {
-			return err
-		}
+	s.Decrypt(shards)
+	if err := s.Recover(w, shards); err != nil {
+		return err
 	}
 	return nil
+}
+
+// SlabsForDownload returns the slices that comprise the specified offset-length
+// span within slabs.
+func SlabsForDownload(slabs []Slice, offset, length int64) []Slice {
+	// mutate a copy
+	slabs = append([]Slice(nil), slabs...)
+
+	firstOffset := offset
+	for i, ss := range slabs {
+		if firstOffset <= int64(ss.Length) {
+			slabs = slabs[i:]
+			break
+		}
+		firstOffset -= int64(ss.Length)
+	}
+	slabs[0].Offset += uint32(firstOffset)
+	slabs[0].Length -= uint32(firstOffset)
+
+	lastLength := length
+	for i, ss := range slabs {
+		if lastLength <= int64(ss.Length) {
+			slabs = slabs[:i+1]
+			break
+		}
+		lastLength -= int64(ss.Length)
+	}
+	slabs[len(slabs)-1].Length = uint32(lastLength)
+	return slabs
 }
 
 // DeleteSlabs deletes a set of slabs from the provided hosts.
@@ -271,8 +253,8 @@ func DeleteSlabs(slabs []Slab, hosts []Host) error {
 	return nil
 }
 
-// serialMigrateSlab migrates a slab one shard at a time.
-func serialMigrateSlab(s *Slab, from, to []Host) error {
+// MigrateSlab migrates a slab.
+func MigrateSlab(s *Slab, from, to []Host) error {
 	// determine which shards need migration
 	var shardIndices []int
 outer:
@@ -353,16 +335,6 @@ outer:
 	}
 	if rem > 0 {
 		return errs
-	}
-	return nil
-}
-
-// MigrateSlabs migrates the provided slabs.
-func MigrateSlabs(slabs []Slab, from, to []Host) error {
-	for i := range slabs {
-		if err := serialMigrateSlab(&slabs[i], from, to); err != nil {
-			return err
-		}
 	}
 	return nil
 }

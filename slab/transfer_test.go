@@ -3,6 +3,7 @@ package slab_test
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"testing"
 
 	"go.sia.tech/renterd/internal/slabutil"
@@ -20,23 +21,17 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, slabutil.NewMockHost())
 	}
-	slabs, err := slab.UploadSlabs(bytes.NewReader(data), 3, 10, hosts)
+	s, err := slab.UploadSlab(bytes.NewReader(data), 3, 10, hosts)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(slabs) != 1 {
-		t.Fatal(len(slabs))
 	}
-	ss := []slab.Slice{{
-		Slab:   slabs[0],
-		Offset: 0,
-		Length: uint32(len(data)),
-	}}
 
 	// download various ranges
-	checkDownload := func(offset, length int) {
+	checkDownload := func(offset, length uint32) {
 		t.Helper()
 		var buf bytes.Buffer
-		if err := slab.DownloadSlabs(&buf, ss, int64(offset), int64(length), hosts); err != nil {
+
+		if err := slab.DownloadSlab(&buf, slab.Slice{s, offset, length}, hosts); err != nil {
 			t.Error(err)
 			return
 		}
@@ -57,22 +52,20 @@ func TestSlabs(t *testing.T) {
 	checkDownload(0, 0)
 	checkDownload(0, 1)
 	checkDownload(rhpv2.LeafSize*10, rhpv2.LeafSize*20)
-	checkDownload(0, len(data)/2)
-	checkDownload(0, len(data))
-	checkDownload(len(data)/2, len(data)/2)
-	checkDownload(84923, len(data[84923:])-53219)
+	checkDownload(0, uint32(len(data)/2))
+	checkDownload(0, uint32(len(data)))
+	checkDownload(uint32(len(data)/2), uint32(len(data)/2))
+	checkDownload(84923, uint32(len(data[84923:])-53219))
 
-	checkDownloadFail := func(offset, length int) {
+	checkDownloadFail := func(offset, length uint32) {
 		t.Helper()
 		var buf bytes.Buffer
-		if err := slab.DownloadSlabs(&buf, ss, int64(offset), int64(length), hosts); err == nil {
+		if err := slab.DownloadSlab(&buf, slab.Slice{s, offset, length}, hosts); err == nil {
 			t.Error("expected error, got nil")
 		}
 	}
-	checkDownloadFail(0, -1)
-	checkDownloadFail(-1, 0)
-	checkDownloadFail(0, len(data)+1)
-	checkDownloadFail(len(data), 1)
+	checkDownloadFail(0, math.MaxUint32)
+	checkDownloadFail(math.MaxUint32, 1)
 
 	// migrate to 5 new hosts
 	from := hosts[5:]
@@ -80,27 +73,27 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		to = append(to, slabutil.NewMockHost())
 	}
-	old := fmt.Sprint(slabs)
-	if err := slab.MigrateSlabs(slabs, from, to); err != nil {
+	old := fmt.Sprint(s)
+	if err := slab.MigrateSlab(&s, from, to); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(slabs) == old {
-		t.Error("no change to slabs after migration")
+	if fmt.Sprint(s) == old {
+		t.Error("no change to s after migration")
 	}
 	checkDownload(0, 0)
 	checkDownload(0, 1)
 	checkDownload(rhpv2.LeafSize*10, rhpv2.LeafSize*20)
-	checkDownload(0, len(data)/2)
-	checkDownload(0, len(data))
-	checkDownload(len(data)/2, len(data)/2)
-	checkDownload(84923, len(data[84923:])-53219)
+	checkDownload(0, uint32(len(data)/2))
+	checkDownload(0, uint32(len(data)))
+	checkDownload(uint32(len(data)/2), uint32(len(data)/2))
+	checkDownload(84923, uint32(len(data[84923:])-53219))
 
 	// delete
-	if err := slab.DeleteSlabs(slabs, to); err != nil {
+	if err := slab.DeleteSlabs([]slab.Slab{s}, to); err != nil {
 		t.Fatal(err)
 	}
 
 	// downloads should now fail
-	checkDownloadFail(0, len(data))
+	checkDownloadFail(0, uint32(len(data)))
 	checkDownloadFail(0, 1)
 }

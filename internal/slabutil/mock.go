@@ -31,6 +31,8 @@ func (h *MockHost) DownloadSector(w io.Writer, root consensus.Hash256, offset, l
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")
+	} else if uint64(offset)+uint64(length) > rhpv2.SectorSize {
+		return errors.New("offset+length out of bounds")
 	}
 	_, err := w.Write(sector[offset:][:length])
 	return err
