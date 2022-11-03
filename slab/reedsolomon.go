@@ -90,6 +90,13 @@ func (s Slab) Reconstruct(shards [][]byte) error {
 
 // Recover recovers a slice of slab data from the supplied shards.
 func (s Slice) Recover(w io.Writer, shards [][]byte) error {
+	empty := true
+	for _, s := range shards {
+		empty = empty && len(s) == 0
+	}
+	if empty || len(shards) == 0 {
+		return nil
+	}
 	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
 	if err := rsc.ReconstructData(shards); err != nil {
 		return err

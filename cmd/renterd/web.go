@@ -131,14 +131,13 @@ func (t treeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	t.h.ServeHTTP(w, req)
 }
 
-func startWeb(l net.Listener, node *node, ap *autopilot.Autopilot, password string) error {
+func startWeb(l net.Listener, node *node, password string) error {
 	renter := api.NewServer(&syncer{node.g, node.tp}, &chainManager{node.cm}, txpool{node.tp}, node.w, node.hdb, rhpImpl{}, node.cs, newSlabMover(), node.os)
 	auth := jape.BasicAuth(password)
 	return http.Serve(l, treeMux{
 		h: createUIHandler(),
 		sub: map[string]treeMux{
-			"/api":       {h: auth(renter)},
-			"/autopilot": {h: auth(autopilot.NewServer(ap))},
+			"/api": {h: auth(renter)},
 		},
 	})
 }

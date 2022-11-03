@@ -211,10 +211,8 @@ type SlabsUploadRequest struct {
 
 // SlabsDownloadRequest is the request type for the /slabs/download endpoint.
 type SlabsDownloadRequest struct {
-	Slabs     []slab.Slice `json:"slabs"`
-	Offset    int64        `json:"offset"`
-	Length    int64        `json:"length"`
-	Contracts []Contract   `json:"contracts"`
+	Slab      slab.Slice `json:"slab"`
+	Contracts []Contract `json:"contracts"`
 }
 
 // SlabsDeleteRequest is the request type for the /slabs/delete endpoint.
@@ -225,10 +223,10 @@ type SlabsDeleteRequest struct {
 
 // SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
 type SlabsMigrateRequest struct {
-	Slabs         []slab.Slab `json:"slabs"`
-	From          []Contract  `json:"from"`
-	To            []Contract  `json:"to"`
-	CurrentHeight uint64      `json:"currentHeight"`
+	Slab          slab.Slab  `json:"slab"`
+	From          []Contract `json:"from"`
+	To            []Contract `json:"to"`
+	CurrentHeight uint64     `json:"currentHeight"`
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.

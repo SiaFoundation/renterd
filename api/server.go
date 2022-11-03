@@ -90,10 +90,10 @@ type (
 
 	// A SlabMover uploads, downloads, and migrates slabs.
 	SlabMover interface {
-		UploadSlabs(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) ([]slab.Slab, error)
-		DownloadSlabs(ctx context.Context, w io.Writer, slabs []slab.Slice, offset, length int64, contracts []Contract) error
+		UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (slab.Slab, error)
+		DownloadSlab(ctx context.Context, w io.Writer, slab slab.Slice, contracts []Contract) error
 		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) error
-		MigrateSlabs(ctx context.Context, slabs []slab.Slab, currentHeight uint64, from, to []Contract) error
+		MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) error
 	}
 
 	// An ObjectStore stores objects.
@@ -566,21 +566,18 @@ func (s *server) hostsetsResolveHandler(jc jape.Context) {
 }
 
 func (s *server) slabsUploadHandler(jc jape.Context) {
-	jc.Custom((*[]byte)(nil), []slab.Slab{})
+	jc.Custom((*[]byte)(nil), slab.Slab{})
 
 	var sur SlabsUploadRequest
-	if err := json.NewDecoder(strings.NewReader(jc.Request.PostFormValue("meta"))).Decode(&sur); err != nil {
+	dec := json.NewDecoder(jc.Request.Body)
+	if err := dec.Decode(&sur); err != nil {
 		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return
 	}
-	f, _, err := jc.Request.FormFile("data")
-	if err != nil {
-		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
-		return
-	}
-	slabs, err := s.sm.UploadSlabs(jc.Request.Context(), f, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
-	if jc.Check("couldn't upload slabs", err) == nil {
-		jc.Encode(slabs)
+	data := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
+	slab, err := s.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
+	if jc.Check("couldn't upload slab", err) == nil {
+		jc.Encode(slab)
 	}
 }
 
@@ -591,24 +588,20 @@ func (s *server) slabsDownloadHandler(jc jape.Context) {
 	if jc.Decode(&sdr) != nil {
 		return
 	}
-	if sdr.Length == 0 {
-		for _, ss := range sdr.Slabs {
-			sdr.Length += int64(ss.Length)
-		}
-	}
-	// TODO: if we encounter an error halfway through the download, it's too
-	// late to change the response code and send an error message. Not sure how
-	// best to handle this.
-	err := s.sm.DownloadSlabs(jc.Request.Context(), jc.ResponseWriter, sdr.Slabs, sdr.Offset, sdr.Length, sdr.Contracts)
+	err := s.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
 	jc.Check("couldn't download slabs", err)
 }
 
 func (s *server) slabsMigrateHandler(jc jape.Context) {
 	var smr SlabsMigrateRequest
-	if jc.Decode(&smr) == nil {
-		err := s.sm.MigrateSlabs(jc.Request.Context(), smr.Slabs, smr.CurrentHeight, smr.From, smr.To)
-		jc.Check("couldn't migrate slabs", err)
+	if jc.Decode(&smr) != nil {
+		return
 	}
+	err := s.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
+	if jc.Check("couldn't migrate slabs", err) != nil {
+		return
+	}
+	jc.Encode(smr.Slab)
 }
 
 func (s *server) slabsDeleteHandler(jc jape.Context) {
