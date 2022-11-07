@@ -556,7 +556,6 @@ func (s *server) slabsUploadHandler(jc jape.Context) {
 		Slab:     slab,
 		Metadata: toHostInteractions(his),
 	})
-
 }
 
 func (s *server) slabsDownloadHandler(jc jape.Context) {
