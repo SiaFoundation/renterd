@@ -349,7 +349,7 @@ func (c *Client) HostSetResolves(name string) (ips []string, err error) {
 
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
-func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, his []HostInteraction, err error) {
+func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (slab.Slab, []HostInteraction, error) {
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
 		TotalShards:   n,
@@ -383,7 +383,7 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 }
 
 // DownloadSlab downloads data from a set of hosts.
-func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) (his []HostInteraction, err error) {
+func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) ([]HostInteraction, error) {
 	js, _ := json.Marshal(SlabsDownloadRequest{
 		Slab:      s,
 		Contracts: contracts,
@@ -416,7 +416,7 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) (his []HostInteraction, err error) {
+func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) ([]HostInteraction, error) {
 	req := SlabsMigrateRequest{
 		Slab:          *s,
 		From:          from,
@@ -425,7 +425,7 @@ func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight ui
 	}
 
 	var resp SlabsMigrateResponse
-	err = c.c.POST("/slabs/migrate", req, &resp)
+	err := c.c.POST("/slabs/migrate", req, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -435,13 +435,13 @@ func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight ui
 }
 
 // DeleteSlabs deletes the specified slabs.
-func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (his []HostInteraction, err error) {
+func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) ([]HostInteraction, error) {
 	req := SlabsDeleteRequest{
 		Slabs:     slabs,
 		Contracts: contracts,
 	}
 	var resp SlabsDeleteResponse
-	err = c.c.POST("/slabs/delete", req, &resp)
+	err := c.c.POST("/slabs/delete", req, &resp)
 	if err != nil {
 		return nil, err
 	}
