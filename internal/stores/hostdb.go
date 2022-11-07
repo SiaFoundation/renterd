@@ -2,7 +2,9 @@ package stores
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,7 +13,11 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
+	"gorm.io/gorm"
 )
+
+// ErrHostNotFound is returned if a specific host can't be retrieved from the hostdb.
+var ErrHostNotFound = errors.New("host doesn't exist in hostdb")
 
 // EphemeralHostDB implements a HostDB in memory.
 type EphemeralHostDB struct {
@@ -34,7 +40,11 @@ func (db *EphemeralHostDB) modifyHost(hostKey consensus.PublicKey, fn func(*host
 func (db *EphemeralHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	return db.hosts[hostKey], nil
+	h, exists := db.hosts[hostKey]
+	if !exists {
+		return hostdb.Host{}, ErrHostNotFound
+	}
+	return h, nil
 }
 
 // RecordInteraction records an interaction with a host. If the host is not in
@@ -77,11 +87,15 @@ func (db *EphemeralHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height--
 	}
 	for _, b := range cc.AppliedBlocks {
-		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
+		err := hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) error {
 			db.modifyHost(hostKey, func(h *hostdb.Host) {
 				h.Announcements = append(h.Announcements, ha)
 			})
+			return nil
 		})
+		if err != nil {
+			log.Fatalln("Couldn't save hostdb state:", err)
+		}
 		height++
 	}
 	db.tip.Height = uint64(height)
@@ -180,4 +194,246 @@ func NewJSONHostDB(dir string) (*JSONHostDB, modules.ConsensusChangeID, error) {
 		return nil, modules.ConsensusChangeID{}, err
 	}
 	return db, ccid, nil
+}
+
+// consensusInfoID defines the primary key of the entry in the consensusInfo
+// table.
+const consensusInfoID = 1
+
+type (
+	// SQLHostDB is a helper type for interacting with an SQL-based HostDB.
+	SQLHostDB struct {
+		staticDB *gorm.DB
+	}
+
+	// host defines a hostdb.Interaction as persisted in the DB.
+	host struct {
+		PublicKey     []byte `gorm:"primaryKey"`
+		Score         float64
+		Announcements []announcement `gorm:"foreignKey:Host;references:PublicKey"`
+		Interactions  []interaction  `gorm:"foreignKey:Host;references:PublicKey"`
+	}
+
+	announcement struct {
+		ID          uint64 `gorm:"primaryKey"`
+		Host        []byte
+		BlockHeight uint64
+		BlockID     []byte
+		Timestamp   time.Time
+		NetAddress  string
+	}
+
+	// interaction defines a hostdb.Interaction as persisted in the DB.
+	interaction struct {
+		ID     uint64 `gorm:"primaryKey"`
+		Type   string
+		Result json.RawMessage
+
+		// Host and Timestamp form a composite index where Hosts has the
+		// higher priority.
+		Host      []byte    `gorm:"index:idx_host:2"`
+		Timestamp time.Time `gorm:"index:idx_host:1"`
+	}
+
+	// consensusInfo defines table which stores the latest consensus info
+	// known to the hostdb. It should only ever contain a single entry with
+	// the consensusInfoID primary key.
+	consensusInfo struct {
+		ID   uint8 `gorm:"primaryKey"`
+		CCID []byte
+	}
+)
+
+// Host converts a host into a hostdb.Host.
+func (h host) Host() hostdb.Host {
+	hdbHost := hostdb.Host{
+		Score: h.Score,
+	}
+	copy(hdbHost.PublicKey[:], h.PublicKey)
+	for _, a := range h.Announcements {
+		hdbHost.Announcements = append(hdbHost.Announcements, a.Announcement())
+	}
+	for _, i := range h.Interactions {
+		hdbHost.Interactions = append(hdbHost.Interactions, i.Interaction())
+	}
+	return hdbHost
+}
+
+// Announcement converts a host into a hostdb.Announcement.
+func (a announcement) Announcement() hostdb.Announcement {
+	hostdbAnnouncement := hostdb.Announcement{
+		Index: consensus.ChainIndex{
+			Height: a.BlockHeight,
+		},
+		Timestamp:  a.Timestamp,
+		NetAddress: a.NetAddress,
+	}
+	copy(hostdbAnnouncement.Index.ID[:], a.BlockID)
+	return hostdbAnnouncement
+}
+
+// Interaction converts an interaction into a hostdb.Interaction.
+func (i interaction) Interaction() hostdb.Interaction {
+	return hostdb.Interaction{
+		Timestamp: i.Timestamp,
+		Type:      i.Type,
+		Result:    i.Result,
+	}
+}
+
+// NewSQLHostDB uses a given Dialector to connect to a SQL database.  NOTE: Only
+// pass migrate=true for the first instance of SQLHostDB if you connect via the
+// same Dialector multiple times.
+func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.ConsensusChangeID, error) {
+	db, err := gorm.Open(conn, &gorm.Config{})
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+
+	if migrate {
+		// Create the tables.
+		if err := db.AutoMigrate(&host{}); err != nil {
+			return nil, modules.ConsensusChangeID{}, err
+		}
+		if err := db.AutoMigrate(&interaction{}); err != nil {
+			return nil, modules.ConsensusChangeID{}, err
+		}
+		if err := db.AutoMigrate(&announcement{}); err != nil {
+			return nil, modules.ConsensusChangeID{}, err
+		}
+		if err := db.AutoMigrate(&consensusInfo{}); err != nil {
+			return nil, modules.ConsensusChangeID{}, err
+		}
+	}
+
+	// Get latest consensus change ID or init db.
+	var ci consensusInfo
+	err = db.Where(&consensusInfo{ID: consensusInfoID}).
+		Attrs(consensusInfo{
+			ID:   consensusInfoID,
+			CCID: modules.ConsensusChangeBeginning[:],
+		}).
+		FirstOrCreate(&ci).Error
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	var ccid modules.ConsensusChangeID
+	copy(ccid[:], ci.CCID)
+
+	return &SQLHostDB{
+		staticDB: db,
+	}, ccid, nil
+}
+
+// Host returns information about a host.
+func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
+	var h host
+	tx := db.staticDB.Where(&host{PublicKey: hostKey[:]}).
+		Preload("Interactions").
+		Preload("Announcements").
+		Find(&h)
+	if tx.Error == nil && tx.RowsAffected == 0 {
+		return hostdb.Host{}, ErrHostNotFound
+	}
+	return h.Host(), tx.Error
+}
+
+// Hosts returns up to max hosts that have not been interacted with since
+// the specified time.
+func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
+	lastInteraction := func(h hostdb.Host) time.Time {
+		if len(h.Interactions) == 0 {
+			return time.Time{}
+		}
+		return h.Interactions[len(h.Interactions)-1].Timestamp
+	}
+	hosts, err := db.SelectHosts(math.MaxInt, func(h hostdb.Host) bool { return true })
+	if err != nil {
+		return nil, err
+	}
+	for _, host := range hosts {
+		if len(hosts) == max {
+			break
+		} else if lastInteraction(host).Before(notSince) {
+			hosts = append(hosts, host)
+		}
+	}
+	return hosts, nil
+}
+
+// RecordInteraction records an interaction with a host. If the host is not in
+// the store, a new entry is created for it.
+func (db *SQLHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
+	return db.staticDB.Transaction(func(tx *gorm.DB) error {
+		// Create a host if it doesn't exist yet.
+		if err := tx.FirstOrCreate(&host{}, &host{PublicKey: hostKey[:]}).Error; err != nil {
+			return err
+		}
+
+		// Create an interaction.
+		return tx.Create(&interaction{
+			Host:      hostKey[:],
+			Timestamp: hi.Timestamp.UTC(), // use UTC in DB
+			Type:      hi.Type,
+			Result:    hi.Result,
+		}).Error
+	})
+}
+
+// SelectHosts returns up to n hosts for which the supplied filter returns true.
+func (db *SQLHostDB) SelectHosts(n int, filter func(hostdb.Host) bool) ([]hostdb.Host, error) {
+	var hosts []host
+	tx := db.staticDB.Preload("Interactions").
+		Preload("Announcements").
+		Find(&hosts)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+
+	var drawnHosts []hostdb.Host
+	for i := 0; i < len(hosts) && len(drawnHosts) < n; i++ {
+		h := hosts[i].Host()
+		if filter(h) {
+			drawnHosts = append(drawnHosts, hosts[i].Host())
+		}
+	}
+	return drawnHosts, nil
+}
+
+// SetScore sets the score associated with the specified host. If the host is
+// not in the store, a new entry is created for it.
+func (db *SQLHostDB) SetScore(hostKey consensus.PublicKey, score float64) error {
+	return db.staticDB.Where(&host{PublicKey: hostKey[:]}).Update("Score", score).Error
+}
+
+// ProcessConsensusChange implements consensus.Subscriber.
+func (db *SQLHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
+	height := cc.InitialHeight()
+	for range cc.RevertedBlocks {
+		height--
+	}
+
+	// Atomically apply ConsensusChange.
+	err := db.staticDB.Transaction(func(tx *gorm.DB) error {
+		for _, b := range cc.AppliedBlocks {
+			hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) error {
+				return insertAnnouncement(tx, hostKey, ha)
+			})
+			height++
+		}
+		return tx.Model(&consensusInfo{}).Where(&consensusInfo{ID: consensusInfoID}).Update("CCID", cc.ID[:]).Error
+	})
+	if err != nil {
+		log.Fatalln("Failed to apply consensus change to hostdb", err)
+	}
+}
+
+func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
+	return tx.Create(&announcement{
+		Host:        hostKey[:],
+		BlockHeight: a.Index.Height,
+		BlockID:     a.Index.ID[:],
+		Timestamp:   a.Timestamp.UTC(), // use UTC in DB
+		NetAddress:  a.NetAddress,
+	}).Error
 }

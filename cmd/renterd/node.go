@@ -162,11 +162,17 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	}
 	w := wallet.NewSingleAddressWallet(walletKey, ws)
 
+	dbDir := filepath.Join(dir, "db")
+	if err := os.MkdirAll(dbDir, 0700); err != nil {
+		return nil, nil, err
+	}
+	dbConn := stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
+
 	hostdbDir := filepath.Join(dir, "hostdb")
 	if err := os.MkdirAll(hostdbDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	hdb, ccid, err := stores.NewJSONHostDB(hostdbDir)
+	hdb, ccid, err := stores.NewSQLHostDB(dbConn, true)
 	if err != nil {
 		return nil, nil, err
 	} else if err := cm.ConsensusSetSubscribe(hdb, ccid, nil); err != nil {
