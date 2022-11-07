@@ -7,6 +7,9 @@ import (
 	"go.sia.tech/renterd/slab"
 )
 
+// toHostInteractions receives an input of any kind and tries to transform it
+// into a list of host interactions. If the input type is not recognized a panic
+// is thrown as it indicates a developer error.
 func toHostInteractions(in interface{}) []HostInteraction {
 	switch t := in.(type) {
 	case []slab.HostInteraction:
@@ -20,6 +23,8 @@ func toHostInteractions(in interface{}) []HostInteraction {
 	}
 }
 
+// transformSlabHostInteraction transforms a HostInteraction from the slab
+// package to a HostInteraction from the api package.
 func transformSlabHostInteraction(shi slab.HostInteraction) HostInteraction {
 	hi := HostInteraction{
 		Timestamp: shi.Timestamp.Unix(),

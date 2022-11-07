@@ -115,6 +115,9 @@ func (sm *mockSlabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentH
 	return slab.MigrateSlab(s, sm.hostsForContracts(from), sm.hostsForContracts(to))
 }
 
+// hostsForContracts returns a list of hosts that correspond to the given
+// contracts. This method panics if the corresponding host can not be found as
+// it should never happen and indicates a developer error.
 func (sm *mockSlabMover) hostsForContracts(contracts []api.Contract) []slab.Host {
 	hosts := make([]slab.Host, len(contracts))
 	for i, c := range contracts {
@@ -401,6 +404,7 @@ func TestHostInteractions(t *testing.T) {
 	}
 }
 
+// formTestContracts forms a contract with the given hosts.
 func formTestContracts(c *api.Client, hosts []consensus.PublicKey) ([]api.Contract, error) {
 	var contracts []api.Contract
 	for _, hostKey := range hosts {
