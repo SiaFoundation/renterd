@@ -99,19 +99,19 @@ type mockSlabMover struct {
 	hosts []slab.Host
 }
 
-func (sm *mockSlabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (slab.Slab, []*slab.HostInteraction, error) {
+func (sm *mockSlabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (slab.Slab, []slab.HostInteraction, error) {
 	return slab.UploadSlab(r, m, n, sm.hostsForContracts(contracts))
 }
 
-func (sm *mockSlabMover) DownloadSlab(ctx context.Context, w io.Writer, s slab.Slice, contracts []api.Contract) ([]*slab.HostInteraction, error) {
+func (sm *mockSlabMover) DownloadSlab(ctx context.Context, w io.Writer, s slab.Slice, contracts []api.Contract) ([]slab.HostInteraction, error) {
 	return slab.DownloadSlab(w, s, sm.hostsForContracts(contracts))
 }
 
-func (sm *mockSlabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) ([]*slab.HostInteraction, error) {
+func (sm *mockSlabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) ([]slab.HostInteraction, error) {
 	return slab.DeleteSlabs(slabs, sm.hostsForContracts(contracts))
 }
 
-func (sm *mockSlabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []api.Contract) ([]*slab.HostInteraction, error) {
+func (sm *mockSlabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []api.Contract) ([]slab.HostInteraction, error) {
 	return slab.MigrateSlab(s, sm.hostsForContracts(from), sm.hostsForContracts(to))
 }
 
@@ -239,7 +239,8 @@ func TestObject(t *testing.T) {
 }
 
 // TestHostInteractions verifies slab endpoints return a set of host
-// interactions that are populated with all of the expected fields and metadata about.
+// interactions that are populated with all of the expected fields and metadata
+// about that particular host interaction.
 func TestHostInteractions(t *testing.T) {
 	isInitialized := func(hi api.HostInteraction) (bool, string) {
 		if hi.HostKey.String() == "" {

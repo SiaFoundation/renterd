@@ -9,9 +9,9 @@ import (
 
 func toHostInteractions(in interface{}) []HostInteraction {
 	switch t := in.(type) {
-	case []*slab.HostInteraction:
-		his := make([]HostInteraction, len(in.([]*slab.HostInteraction)))
-		for i, shi := range in.([]*slab.HostInteraction) {
+	case []slab.HostInteraction:
+		his := make([]HostInteraction, len(in.([]slab.HostInteraction)))
+		for i, shi := range in.([]slab.HostInteraction) {
 			his[i] = transformSlabHostInteraction(shi)
 		}
 		return his
@@ -20,7 +20,7 @@ func toHostInteractions(in interface{}) []HostInteraction {
 	}
 }
 
-func transformSlabHostInteraction(shi *slab.HostInteraction) HostInteraction {
+func transformSlabHostInteraction(shi slab.HostInteraction) HostInteraction {
 	hi := HostInteraction{
 		Timestamp: shi.Timestamp.Unix(),
 		HostKey:   shi.HostKey,

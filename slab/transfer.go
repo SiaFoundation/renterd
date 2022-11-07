@@ -21,7 +21,7 @@ type Host interface {
 }
 type (
 	// A HostInteractionSet groups host interactions in the order they occurred.
-	HostInteractionSet []*HostInteraction
+	HostInteractionSet []HostInteraction
 
 	// A HostInteraction contains relevant information about an interaction with
 	// a host involving slabs.
@@ -69,7 +69,7 @@ func (his HostInteractionSet) HasError() bool {
 }
 
 // parallelUploadSlab uploads the provided shards in parallel.
-func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, []*HostInteraction, error) {
+func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, []HostInteraction, error) {
 	if len(hosts) < len(shards) {
 		return nil, nil, errors.New("fewer hosts than shards")
 	}
@@ -112,7 +112,7 @@ func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, []*HostInterac
 		resp := <-respChan
 		inflight--
 
-		interactions = append(interactions, &HostInteraction{
+		interactions = append(interactions, HostInteraction{
 			Timestamp: time.Now(),
 			Duration:  resp.duration,
 			Err:       resp.err,
@@ -142,7 +142,7 @@ func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, []*HostInterac
 }
 
 // UploadSlab uploads a slab.
-func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, []*HostInteraction, error) {
+func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, []HostInteraction, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	_, err := io.ReadFull(r, buf)
@@ -156,7 +156,7 @@ func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, []*HostInteraction
 	s.Encode(buf, shards)
 	s.Encrypt(shards)
 
-	var interactions []*HostInteraction
+	var interactions []HostInteraction
 	s.Shards, interactions, err = parallelUploadSlab(shards, hosts)
 	if err != nil {
 		return Slab{}, interactions, err
@@ -165,7 +165,7 @@ func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, []*HostInteraction
 }
 
 // parallelDownloadSlab downloads the shards comprising a slab in parallel.
-func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, []*HostInteraction, error) {
+func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, []HostInteraction, error) {
 	if len(hosts) < int(s.MinShards) {
 		return nil, nil, errors.New("not enough hosts to recover shard")
 	}
@@ -221,7 +221,7 @@ func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, []*HostInteraction, 
 		resp := <-respChan
 		inflight--
 
-		interactions = append(interactions, &HostInteraction{
+		interactions = append(interactions, HostInteraction{
 			Timestamp: time.Now(),
 			Duration:  resp.duration,
 			Err:       resp.err,
@@ -253,7 +253,7 @@ func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, []*HostInteraction, 
 }
 
 // DownloadSlab downloads slab data.
-func DownloadSlab(w io.Writer, s Slice, hosts []Host) ([]*HostInteraction, error) {
+func DownloadSlab(w io.Writer, s Slice, hosts []Host) ([]HostInteraction, error) {
 	shards, interactions, err := parallelDownloadSlab(s, hosts)
 	if err != nil {
 		return interactions, err
@@ -295,7 +295,7 @@ func SlabsForDownload(slabs []Slice, offset, length int64) []Slice {
 }
 
 // DeleteSlabs deletes a set of slabs from the provided hosts.
-func DeleteSlabs(slabs []Slab, hosts []Host) ([]*HostInteraction, error) {
+func DeleteSlabs(slabs []Slab, hosts []Host) ([]HostInteraction, error) {
 	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
@@ -303,14 +303,14 @@ func DeleteSlabs(slabs []Slab, hosts []Host) ([]*HostInteraction, error) {
 		}
 	}
 
-	interactionChan := make(chan *HostInteraction)
+	interactionChan := make(chan HostInteraction)
 	for _, h := range hosts {
 		go func(h Host) {
 			// NOTE: if host is not storing any sectors, the map lookup will return
 			// nil, making this a no-op
 			start := time.Now()
 			err := h.DeleteSectors(rootsByHost[h.PublicKey()])
-			interactionChan <- &HostInteraction{
+			interactionChan <- HostInteraction{
 				Timestamp: time.Now(),
 				HostKey:   h.PublicKey(),
 				Err:       err,
@@ -321,7 +321,7 @@ func DeleteSlabs(slabs []Slab, hosts []Host) ([]*HostInteraction, error) {
 		}(h)
 	}
 
-	interactions := make([]*HostInteraction, len(hosts))
+	interactions := make([]HostInteraction, len(hosts))
 	for i := range hosts {
 		interactions[i] = <-interactionChan
 	}
@@ -333,7 +333,7 @@ func DeleteSlabs(slabs []Slab, hosts []Host) ([]*HostInteraction, error) {
 }
 
 // MigrateSlab migrates a slab.
-func MigrateSlab(s *Slab, from, to []Host) ([]*HostInteraction, error) {
+func MigrateSlab(s *Slab, from, to []Host) ([]HostInteraction, error) {
 	// determine which shards need migration
 	var shardIndices []int
 outer:
