@@ -39,28 +39,32 @@ func (sm slabMover) withHosts(ctx context.Context, contracts []api.Contract, fn 
 	return fn(hosts)
 }
 
-func (sm slabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (s slab.Slab, err error) {
+func (sm slabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []api.Contract) (s slab.Slab, his []*slab.HostInteraction, err error) {
 	sm.pool.SetCurrentHeight(currentHeight)
 	err = sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		s, err = slab.UploadSlab(r, m, n, hosts)
+		s, his, err = slab.UploadSlab(r, m, n, hosts)
 		return err
 	})
 	return
 }
 
-func (sm slabMover) DownloadSlab(ctx context.Context, w io.Writer, s slab.Slice, contracts []api.Contract) error {
-	return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		return slab.DownloadSlab(w, s, hosts)
+func (sm slabMover) DownloadSlab(ctx context.Context, w io.Writer, s slab.Slice, contracts []api.Contract) (his []*slab.HostInteraction, err error) {
+	err = sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+		his, err = slab.DownloadSlab(w, s, hosts)
+		return err
 	})
+	return
 }
 
-func (sm slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) error {
-	return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		return slab.DeleteSlabs(slabs, hosts)
+func (sm slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []api.Contract) (his []*slab.HostInteraction, err error) {
+	err = sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+		his, err = slab.DeleteSlabs(slabs, hosts)
+		return err
 	})
+	return
 }
 
-func (sm slabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []api.Contract) (err error) {
+func (sm slabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []api.Contract) (his []*slab.HostInteraction, err error) {
 	sm.pool.SetCurrentHeight(currentHeight)
 	var fromHosts []slab.Host
 	for _, c := range from {

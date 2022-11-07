@@ -349,9 +349,7 @@ func (c *Client) HostSetResolves(name string) (ips []string, err error) {
 
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
-func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, err error) {
-	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
-
+func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, his []HostInteraction, err error) {
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
 		TotalShards:   n,
@@ -366,22 +364,26 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return slab.Slab{}, err
+		return slab.Slab{}, nil, err
 	}
 	defer io.Copy(ioutil.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := ioutil.ReadAll(resp.Body)
-		return slab.Slab{}, errors.New(string(err))
+		return slab.Slab{}, nil, errors.New(string(err))
 	}
-	err = json.NewDecoder(resp.Body).Decode(&s)
-	return
+
+	var sur SlabsUploadResponse
+	err = json.NewDecoder(resp.Body).Decode(&sur)
+	if err != nil {
+		return slab.Slab{}, nil, err
+	}
+
+	return sur.Slab, sur.Metadata, nil
 }
 
 // DownloadSlab downloads data from a set of hosts.
-func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) (err error) {
-	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
-
+func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) (his []HostInteraction, err error) {
 	js, _ := json.Marshal(SlabsDownloadRequest{
 		Slab:      s,
 		Contracts: contracts,
@@ -394,38 +396,57 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer io.Copy(ioutil.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := ioutil.ReadAll(resp.Body)
-		return errors.New(string(err))
+		return nil, errors.New(string(err))
 	}
-	_, err = io.Copy(dst, resp.Body)
-	return
+
+	var sdr SlabsDownloadResponse
+	err = json.NewDecoder(resp.Body).Decode(&sdr)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = io.Copy(dst, bytes.NewReader(sdr.Data))
+	return sdr.Metadata, nil
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) (err error) {
+func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) (his []HostInteraction, err error) {
 	req := SlabsMigrateRequest{
 		Slab:          *s,
 		From:          from,
 		To:            to,
 		CurrentHeight: currentHeight,
 	}
-	err = c.c.POST("/slabs/migrate", req, s)
-	return
+
+	var resp SlabsMigrateResponse
+	err = c.c.POST("/slabs/migrate", req, &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	*s = resp.Slab
+	return resp.Metadata, nil
 }
 
 // DeleteSlabs deletes the specified slabs.
-func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error) {
+func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (his []HostInteraction, err error) {
 	req := SlabsDeleteRequest{
 		Slabs:     slabs,
 		Contracts: contracts,
 	}
-	err = c.c.POST("/slabs/delete", req, nil)
-	return
+	var resp SlabsDeleteResponse
+	err = c.c.POST("/slabs/delete", req, &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Metadata, nil
 }
 
 func (c *Client) objects(path string) (or ObjectsResponse, err error) {

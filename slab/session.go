@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -13,36 +12,6 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
-
-// A HostError associates an error with a given host.
-type HostError struct {
-	HostKey consensus.PublicKey
-	Err     error
-}
-
-// Error implements error.
-func (he HostError) Error() string {
-	return fmt.Sprintf("%x: %v", he.HostKey[:4], he.Err.Error())
-}
-
-// Unwrap returns the underlying error.
-func (he HostError) Unwrap() error {
-	return he.Err
-}
-
-// A HostErrorSet is a collection of errors from various hosts.
-type HostErrorSet []*HostError
-
-// Error implements error.
-func (hes HostErrorSet) Error() string {
-	strs := make([]string, len(hes))
-	for i := range strs {
-		strs[i] = hes[i].Error()
-	}
-	// include a leading newline so that the first error isn't printed on the
-	// same line as the error context
-	return "\n" + strings.Join(strs, "\n")
-}
 
 // A sharedSession wraps a RHPv2 session with useful metadata and methods.
 type sharedSession struct {

@@ -73,6 +73,16 @@ func (s Slab) Encrypt(shards [][]byte) {
 	}
 }
 
+// Sector returns the sector corresponding to the given host.
+func (s Slab) Sector(host consensus.PublicKey) *Sector {
+	for _, sector := range s.Shards {
+		if sector.Host == host {
+			return &sector
+		}
+	}
+	return nil
+}
+
 // A Slice is a contiguous region within a Slab. Note that the offset and length
 // always refer to the reconstructed data, and therefore may not necessarily be
 // aligned to a leaf or chunk boundary. Use the SectorRegion method to compute

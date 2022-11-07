@@ -38,7 +38,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 	var slabs []slab.Slab
 	for {
-		s, err := slab.UploadSlab(r, 3, 10, hosts)
+		s, _, err := slab.UploadSlab(r, 3, 10, hosts)
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -68,7 +68,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slab.SlabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if err := slab.DownloadSlab(dst, s, hosts); err != nil {
+			if _, err := slab.DownloadSlab(dst, s, hosts); err != nil {
 				t.Error(err)
 				return
 			}

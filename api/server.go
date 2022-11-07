@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -88,10 +89,10 @@ type (
 
 	// A SlabMover uploads, downloads, and migrates slabs.
 	SlabMover interface {
-		UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (slab.Slab, error)
-		DownloadSlab(ctx context.Context, w io.Writer, slab slab.Slice, contracts []Contract) error
-		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) error
-		MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) error
+		UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (slab.Slab, []*slab.HostInteraction, error)
+		DownloadSlab(ctx context.Context, w io.Writer, slab slab.Slice, contracts []Contract) ([]*slab.HostInteraction, error)
+		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) ([]*slab.HostInteraction, error)
+		MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) ([]*slab.HostInteraction, error)
 	}
 
 	// An ObjectStore stores objects.
@@ -538,30 +539,42 @@ func (s *server) hostsetsResolveHandler(jc jape.Context) {
 }
 
 func (s *server) slabsUploadHandler(jc jape.Context) {
-	jc.Custom((*[]byte)(nil), slab.Slab{})
-
 	var sur SlabsUploadRequest
 	dec := json.NewDecoder(jc.Request.Body)
 	if err := dec.Decode(&sur); err != nil {
 		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	data := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
-	slab, err := s.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
-	if jc.Check("couldn't upload slab", err) == nil {
-		jc.Encode(slab)
+	slab, his, err := s.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
+	if jc.Check("couldn't upload slab", err) != nil {
+		return
 	}
+
+	jc.Encode(SlabsUploadResponse{
+		Slab:     slab,
+		Metadata: toHostInteractions(his),
+	})
+
 }
 
 func (s *server) slabsDownloadHandler(jc jape.Context) {
-	jc.Custom(&SlabsDownloadRequest{}, []byte{})
-
 	var sdr SlabsDownloadRequest
 	if jc.Decode(&sdr) != nil {
 		return
 	}
-	err := s.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
-	jc.Check("couldn't download slabs", err)
+
+	var buf bytes.Buffer
+	his, err := s.sm.DownloadSlab(jc.Request.Context(), &buf, sdr.Slab, sdr.Contracts)
+	if jc.Check("couldn't download slabs", err) != nil {
+		return
+	}
+
+	jc.Encode(SlabsDownloadResponse{
+		Data:     buf.Bytes(),
+		Metadata: toHostInteractions(his),
+	})
 }
 
 func (s *server) slabsMigrateHandler(jc jape.Context) {
@@ -569,19 +582,32 @@ func (s *server) slabsMigrateHandler(jc jape.Context) {
 	if jc.Decode(&smr) != nil {
 		return
 	}
-	err := s.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
+
+	his, err := s.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
-	jc.Encode(smr.Slab)
+
+	jc.Encode(SlabsMigrateResponse{
+		Slab:     smr.Slab,
+		Metadata: toHostInteractions(his),
+	})
 }
 
 func (s *server) slabsDeleteHandler(jc jape.Context) {
 	var sdr SlabsDeleteRequest
-	if jc.Decode(&sdr) == nil {
-		err := s.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
-		jc.Check("couldn't delete slabs", err)
+	if jc.Decode(&sdr) != nil {
+		return
 	}
+
+	his, err := s.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
+	if jc.Check("couldn't delete slabs", err) != nil {
+		return
+	}
+
+	jc.Encode(SlabsDeleteResponse{
+		Metadata: toHostInteractions(his),
+	})
 }
 
 func (s *server) objectsKeyHandlerGET(jc jape.Context) {
