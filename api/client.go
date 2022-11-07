@@ -350,6 +350,8 @@ func (c *Client) HostSetResolves(name string) (ips []string, err error) {
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
 func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (slab.Slab, []HostInteraction, error) {
+	c.c.Custom("POST", "/slabs/upload", nil, &SlabsUploadResponse{})
+
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
 		TotalShards:   n,
@@ -384,6 +386,8 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 
 // DownloadSlab downloads data from a set of hosts.
 func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) ([]HostInteraction, error) {
+	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, &SlabsDownloadResponse{})
+
 	js, _ := json.Marshal(SlabsDownloadRequest{
 		Slab:      s,
 		Contracts: contracts,
