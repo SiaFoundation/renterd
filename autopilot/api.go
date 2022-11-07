@@ -34,8 +34,8 @@ func DefaultConfig() (c Config) {
 	c.Contracts.Allowance = types.SiacoinPrecision.Mul64(1000)
 	c.Contracts.Hosts = 50
 	c.Contracts.Period = 144 * 7 * 6 // 6 weeks
-	c.Objects.MinShards = 30
-	c.Objects.TotalShards = 40
+	c.Objects.MinShards = 10
+	c.Objects.TotalShards = 30
 	return
 }
 

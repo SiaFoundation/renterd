@@ -17,13 +17,14 @@ import (
 )
 
 func (ap *Autopilot) hostScanLoop() {
+	// TODO: initial scan with much shorter
 	for {
 		select {
 		case <-ap.stopChan:
 			return
 		case <-time.After(time.Minute):
 			// scan up to 10 hosts that we haven't interacted with in at least 1 week
-			hosts, err := ap.renter.Hosts(time.Now().Add(-7*24*time.Hour), 10)
+			hosts, err := ap.bus.Hosts(time.Now().Add(-7*24*time.Hour), 10)
 			if err != nil {
 				return
 			}
@@ -35,14 +36,14 @@ func (ap *Autopilot) hostScanLoop() {
 			resChan := make(chan res)
 			for _, h := range hosts {
 				go func(h hostdb.Host) {
-					settings, err := ap.renter.RHPScan(h.PublicKey, h.NetAddress())
+					settings, err := ap.worker.RHPScan(h.PublicKey, h.NetAddress())
 					resChan <- res{h.PublicKey, settings, err}
 				}(h)
 			}
 			for range hosts {
 				r := <-resChan
 				if r.err != nil {
-					err := ap.renter.RecordHostInteraction(r.hostKey, hostdb.Interaction{
+					err := ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
 						Timestamp: time.Now(),
 						Type:      "scan",
 						Success:   false,
@@ -51,7 +52,7 @@ func (ap *Autopilot) hostScanLoop() {
 					_ = err // TODO
 				} else {
 					js, _ := json.Marshal(r.settings)
-					err := ap.renter.RecordHostInteraction(r.hostKey, hostdb.Interaction{
+					err := ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
 						Timestamp: time.Now(),
 						Type:      "scan",
 						Success:   true,
@@ -68,7 +69,7 @@ func (ap *Autopilot) hostsForContracts(n int) ([]consensus.PublicKey, error) {
 	// select randomly using score as weights, excluding existing contracts
 
 	config := ap.Config()
-	contracts, err := ap.renter.HostSetContracts("autopilot")
+	contracts, err := ap.bus.HostSetContracts("autopilot")
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +119,7 @@ func (ap *Autopilot) hostsForContracts(n int) ([]consensus.PublicKey, error) {
 		return false
 	}
 
-	hosts, err := ap.renter.AllHosts()
+	hosts, err := ap.bus.AllHosts()
 	if err != nil {
 		return nil, err
 	}
