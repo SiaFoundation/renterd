@@ -98,3 +98,9 @@ func SplitSlabs(slabs []slab.Slab, lengths []int) [][]slab.Slice {
 	}
 	return objects
 }
+
+// SingleSlabs converts a set of slabs into slices comprising a single object
+// with the specified length.
+func SingleSlabs(slabs []slab.Slab, length int) []slab.Slice {
+	return SplitSlabs(slabs, []int{length})[0]
+}

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/renterd/internal/autopilot"
+	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
 )

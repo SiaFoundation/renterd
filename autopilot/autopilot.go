@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
 
 type Store interface {
@@ -15,9 +17,21 @@ type Store interface {
 	SetConfig(c Config) error
 }
 
+type Bus interface {
+	AllHosts() ([]hostdb.Host, error)
+	Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
+	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+	HostSetContracts(name string) ([]bus.Contract, error)
+}
+
+type Worker interface {
+	RHPScan(hostKey consensus.PublicKey, hostIP string) (resp rhpv2.HostSettings, err error)
+}
+
 type Autopilot struct {
 	store     Store
-	renter    *api.Client
+	bus       Bus
+	worker    Worker
 	masterKey [32]byte
 
 	stopChan chan struct{}
@@ -49,54 +63,39 @@ func (ap *Autopilot) Stop() {
 }
 
 // New initializes an Autopilot.
-func New(store Store, renter *api.Client, masterKey [32]byte) *Autopilot {
+func New(store Store, bus Bus, worker Worker) (*Autopilot, error) {
 	return &Autopilot{
-		store:     store,
-		renter:    renter,
-		masterKey: masterKey,
-	}
+		store:  store,
+		bus:    bus,
+		worker: worker,
+	}, nil
 }
 
-type server struct {
-	ap *Autopilot
+func (ap *Autopilot) configHandlerGET(jc jape.Context) {
+	jc.Encode(ap.Config())
 }
 
-func (s *server) configHandlerGET(jc jape.Context) {
-	jc.Encode(s.ap.Config())
-}
-
-func (s *server) configHandlerPUT(jc jape.Context) {
+func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	var c Config
 	if jc.Decode(&c) == nil {
-		s.ap.SetConfig(c)
+		ap.SetConfig(c)
 	}
 }
 
-func (s *server) actionsHandler(jc jape.Context) {
+func (ap *Autopilot) actionsHandler(jc jape.Context) {
 	var since time.Time
 	max := -1
 	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
-	jc.Encode(s.ap.Actions(since, max))
+	jc.Encode(ap.Actions(since, max))
 }
 
-func (s *server) objectsHandlerGET(jc jape.Context) {
-	panic("unimplemented")
-}
-
-func (s *server) objectsHandlerPUT(jc jape.Context) {
-	panic("unimplemented")
-}
-
-// NewServer returns an HTTP handler that serves the autopilot API.
+// NewServer returns an HTTP handler that serves the renterd autopilot API.
 func NewServer(ap *Autopilot) http.Handler {
-	srv := server{ap}
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /config":       srv.configHandlerGET,
-		"PUT    /config":       srv.configHandlerPUT,
-		"GET    /actions":      srv.actionsHandler,
-		"GET    /objects/*key": srv.objectsHandlerGET,
-		"PUT    /objects/*key": srv.objectsHandlerPUT,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+		"GET    /actions": ap.actionsHandler,
 	})
 }
