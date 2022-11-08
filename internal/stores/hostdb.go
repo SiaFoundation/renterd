@@ -208,8 +208,7 @@ type (
 
 	// host defines a hostdb.Interaction as persisted in the DB.
 	host struct {
-		PublicKey     []byte `gorm:"primaryKey"`
-		Score         float64
+		PublicKey     []byte         `gorm:"primaryKey"`
 		Announcements []announcement `gorm:"foreignKey:Host;references:PublicKey"`
 		Interactions  []interaction  `gorm:"foreignKey:Host;references:PublicKey"`
 	}
@@ -246,9 +245,7 @@ type (
 
 // Host converts a host into a hostdb.Host.
 func (h host) Host() hostdb.Host {
-	hdbHost := hostdb.Host{
-		Score: h.Score,
-	}
+	hdbHost := hostdb.Host{}
 	copy(hdbHost.PublicKey[:], h.PublicKey)
 	for _, a := range h.Announcements {
 		hdbHost.Announcements = append(hdbHost.Announcements, a.Announcement())
@@ -398,12 +395,6 @@ func (db *SQLHostDB) SelectHosts(n int, filter func(hostdb.Host) bool) ([]hostdb
 		}
 	}
 	return drawnHosts, nil
-}
-
-// SetScore sets the score associated with the specified host. If the host is
-// not in the store, a new entry is created for it.
-func (db *SQLHostDB) SetScore(hostKey consensus.PublicKey, score float64) error {
-	return db.staticDB.Where(&host{PublicKey: hostKey[:]}).Update("Score", score).Error
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.
