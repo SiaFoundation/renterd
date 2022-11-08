@@ -34,6 +34,7 @@ jobs:
         shell: bash
         run: |
           go install go.sia.tech/jape/japecheck@latest
-          $(go env GOPATH)/bin/japecheck ./api
+          $(go env GOPATH)/bin/japecheck ./bus
+          $(go env GOPATH)/bin/japecheck ./worker
       - name: Build
         run: go build -o bin/ ./cmd/renterd

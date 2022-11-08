@@ -48,26 +48,22 @@ func (db *EphemeralHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hos
 	return nil
 }
 
-// SetScore sets the score associated with the specified host. If the host is
-// not in the store, a new entry is created for it.
-func (db *EphemeralHostDB) SetScore(hostKey consensus.PublicKey, score float64) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	db.modifyHost(hostKey, func(h *hostdb.Host) {
-		h.Score = score
-	})
-	return nil
-}
-
-// SelectHosts returns up to n hosts for which the supplied filter returns true.
-func (db *EphemeralHostDB) SelectHosts(n int, filter func(hostdb.Host) bool) ([]hostdb.Host, error) {
+// Hosts returns up to max hosts that have not been interacted with since
+// the specified time.
+func (db *EphemeralHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
+	lastInteraction := func(h hostdb.Host) time.Time {
+		if len(h.Interactions) == 0 {
+			return time.Time{}
+		}
+		return h.Interactions[len(h.Interactions)-1].Timestamp
+	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	var hosts []hostdb.Host
 	for _, host := range db.hosts {
-		if len(hosts) == n {
+		if len(hosts) == max {
 			break
-		} else if filter(host) {
+		} else if lastInteraction(host).Before(notSince) {
 			hosts = append(hosts, host)
 		}
 	}
@@ -158,13 +154,6 @@ func (db *JSONHostDB) load() (modules.ConsensusChangeID, error) {
 // the store, a new entry is created for it.
 func (db *JSONHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
 	db.EphemeralHostDB.RecordInteraction(hostKey, hi)
-	return db.save()
-}
-
-// SetScore sets the score associated with the specified host. If the host is
-// not in the store, a new entry is created for it.
-func (db *JSONHostDB) SetScore(hostKey consensus.PublicKey, score float64) error {
-	db.EphemeralHostDB.SetScore(hostKey, score)
 	return db.save()
 }
 

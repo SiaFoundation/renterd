@@ -58,13 +58,13 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 type Interaction struct {
 	Timestamp time.Time
 	Type      string
+	Success   bool
 	Result    json.RawMessage
 }
 
-// A Host pairs a host's public key with a score and a set of interactions.
+// A Host pairs a host's public key with a set of interactions.
 type Host struct {
 	PublicKey     consensus.PublicKey
-	Score         float64
 	Announcements []Announcement
 	Interactions  []Interaction
 }
