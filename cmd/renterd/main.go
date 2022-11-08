@@ -1,15 +1,21 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 
+	"go.sia.tech/jape"
+	"go.sia.tech/renterd/autopilot"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/worker"
 	"golang.org/x/term"
 )
 
@@ -61,11 +67,18 @@ func getWalletKey() consensus.PrivateKey {
 
 func main() {
 	log.SetFlags(0)
-	gatewayAddr := flag.String("addr", ":0", "address to listen on for peer connections")
+
+	var workerCfg workerConfig
+	var busCfg busConfig
+	var autopilotCfg autopilotConfig
+
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
-	stateless := flag.Bool("stateless", false, "run in stateless mode")
-	bootstrap := flag.Bool("bootstrap", true, "bootstrap the gateway and consensus modules")
+	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable the worker API")
+	flag.BoolVar(&busCfg.enabled, "bus.enabled", true, "enable the bus API")
+	flag.BoolVar(&busCfg.bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
+	flag.StringVar(&busCfg.gatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
+	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot API")
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")
@@ -75,46 +88,65 @@ func main() {
 		return
 	}
 
-	if *stateless {
-		apiPassword := getAPIPassword()
-		l, err := net.Listen("tcp", *apiAddr)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer l.Close()
-		log.Println("api: Listening on", l.Addr())
-		go startStatelessWeb(l, apiPassword)
-
-		signalCh := make(chan os.Signal, 1)
-		signal.Notify(signalCh, os.Interrupt)
-		<-signalCh
-		log.Println("Shutting down...")
-		return
-	}
-
-	apiPassword := getAPIPassword()
-	walletKey := getWalletKey()
-	n, err := newNode(*gatewayAddr, *dir, *bootstrap, walletKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		if err := n.Close(); err != nil {
-			log.Println("WARN: error shutting down:", err)
-		}
-	}()
-	log.Println("p2p: Listening on", n.g.Address())
-
+	// create listener first, so that we know the actual apiAddr if the user
+	// specifies port :0
 	l, err := net.Listen("tcp", *apiAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer l.Close()
+	*apiAddr = "http://" + l.Addr().String()
+
+	apiPassword := getAPIPassword()
+	auth := jape.BasicAuth(apiPassword)
+	mux := treeMux{
+		h:   createUIHandler(),
+		sub: make(map[string]treeMux),
+	}
+	if busCfg.enabled {
+		b, cleanup, err := newBus(busCfg, *dir, getWalletKey())
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer cleanup()
+		log.Println("bus: Listening on", b.GatewayAddress())
+		mux.sub["/api/store"] = treeMux{h: auth(bus.NewServer(b))}
+		autopilotCfg.busAddr = *apiAddr + "/bus/"
+		autopilotCfg.busPassword = apiPassword
+	}
+	if workerCfg.enabled {
+		w, cleanup, err := newWorker(workerCfg, getWalletKey())
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer cleanup()
+		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
+		autopilotCfg.busAddr = *apiAddr + "/worker/"
+		autopilotCfg.busPassword = apiPassword
+	}
+	if autopilotCfg.enabled {
+		a, cleanup, err := newAutopilot(autopilotCfg, *dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer cleanup()
+		go func() {
+			err := a.Run()
+			if err != nil {
+				log.Fatalln("Fatal autopilot error:", err)
+			}
+		}()
+
+		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(a))}
+	}
+
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(l)
 	log.Println("api: Listening on", l.Addr())
-	go startWeb(l, n, apiPassword)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
 	<-signalCh
 	log.Println("Shutting down...")
+	srv.Shutdown(context.Background())
 }

@@ -1,8 +1,7 @@
-package api
+package worker
 
 import (
 	"encoding/json"
-	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -23,47 +22,6 @@ type (
 	// A PrivateKey is an Ed25519 private key.
 	PrivateKey = consensus.PrivateKey
 )
-
-// for encoding/decoding time.Time values in API params
-type paramTime time.Time
-
-func (t paramTime) String() string                { return (time.Time)(t).Format(time.RFC3339) }
-func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
-
-// WalletFundRequest is the request type for the /wallet/fund endpoint.
-type WalletFundRequest struct {
-	Transaction types.Transaction `json:"transaction"`
-	Amount      types.Currency    `json:"amount"`
-}
-
-// WalletFundResponse is the response type for the /wallet/fund endpoint.
-type WalletFundResponse struct {
-	Transaction types.Transaction   `json:"transaction"`
-	ToSign      []types.OutputID    `json:"toSign"`
-	DependsOn   []types.Transaction `json:"dependsOn"`
-}
-
-// WalletSignRequest is the request type for the /wallet/sign endpoint.
-type WalletSignRequest struct {
-	Transaction   types.Transaction   `json:"transaction"`
-	ToSign        []types.OutputID    `json:"toSign"`
-	CoveredFields types.CoveredFields `json:"coveredFields"`
-}
-
-// WalletPrepareFormRequest is the request type for the /wallet/prepare/form
-// endpoint.
-type WalletPrepareFormRequest RHPPrepareFormRequest
-
-// WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
-// endpoint.
-type WalletPrepareRenewRequest RHPPrepareRenewRequest
-
-// WalletPrepareRenewResponse is the response type for the /wallet/prepare/renew
-// endpoint.
-type WalletPrepareRenewResponse struct {
-	TransactionSet []types.Transaction `json:"transactionSet"`
-	FinalPayment   types.Currency      `json:"finalPayment"`
-}
 
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
@@ -221,23 +179,12 @@ type SlabsDeleteRequest struct {
 	Contracts []Contract  `json:"contracts"`
 }
 
-// SlabsDeleteResponse is the response type for the /slabs/delete endpoint.
-type SlabsDeleteResponse struct {
-	Metadata []HostInteraction `json:"metadata"`
-}
-
 // SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
 type SlabsMigrateRequest struct {
 	Slab          slab.Slab  `json:"slab"`
 	From          []Contract `json:"from"`
 	To            []Contract `json:"to"`
 	CurrentHeight uint64     `json:"currentHeight"`
-}
-
-// SlabsMigrateResponse is the response type for the /slabs/migrate endpoint.
-type SlabsMigrateResponse struct {
-	Slab     slab.Slab         `json:"slab"`
-	Metadata []HostInteraction `json:"metadata"`
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.

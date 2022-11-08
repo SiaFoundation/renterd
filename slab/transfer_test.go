@@ -2,10 +2,12 @@ package slab_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"testing"
 
+	"go.sia.tech/renterd/internal/observability"
 	"go.sia.tech/renterd/internal/slabutil"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/slab"
@@ -13,6 +15,8 @@ import (
 )
 
 func TestSlabs(t *testing.T) {
+	ctx := testCtx()
+
 	// generate data
 	data := frand.Bytes(1000000)
 
@@ -21,7 +25,7 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, slabutil.NewMockHost())
 	}
-	s, _, err := slab.UploadSlab(bytes.NewReader(data), 3, 10, hosts)
+	s, err := slab.UploadSlab(ctx, bytes.NewReader(data), 3, 10, hosts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,14 +33,12 @@ func TestSlabs(t *testing.T) {
 	// download various ranges
 	checkDownload := func(offset, length uint32) {
 		t.Helper()
-		var buf bytes.Buffer
-
-		if _, err := slab.DownloadSlab(&buf, slab.Slice{s, offset, length}, hosts); err != nil {
+		got, err := slab.DownloadSlab(ctx, slab.Slice{s, offset, length}, hosts)
+		if err != nil {
 			t.Error(err)
 			return
 		}
 		exp := data[offset:][:length]
-		got := buf.Bytes()
 		if !bytes.Equal(got, exp) {
 			if len(got) > 20 {
 				t.Errorf("download(%v, %v):\nexpected: %x...%x (%v)\ngot:      %x...%x (%v)",
@@ -59,8 +61,7 @@ func TestSlabs(t *testing.T) {
 
 	checkDownloadFail := func(offset, length uint32) {
 		t.Helper()
-		var buf bytes.Buffer
-		if _, err := slab.DownloadSlab(&buf, slab.Slice{s, offset, length}, hosts); err == nil {
+		if _, err := slab.DownloadSlab(ctx, slab.Slice{s, offset, length}, hosts); err == nil {
 			t.Error("expected error, got nil")
 		}
 	}
@@ -74,7 +75,7 @@ func TestSlabs(t *testing.T) {
 		to = append(to, slabutil.NewMockHost())
 	}
 	old := fmt.Sprint(s)
-	if _, err := slab.MigrateSlab(&s, from, to); err != nil {
+	if err := slab.MigrateSlab(ctx, &s, from, to); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(s) == old {
@@ -89,11 +90,15 @@ func TestSlabs(t *testing.T) {
 	checkDownload(84923, uint32(len(data[84923:])-53219))
 
 	// delete
-	if _, err := slab.DeleteSlabs([]slab.Slab{s}, to); err != nil {
+	if err := slab.DeleteSlabs(ctx, []slab.Slab{s}, to); err != nil {
 		t.Fatal(err)
 	}
 
 	// downloads should now fail
 	checkDownloadFail(0, uint32(len(data)))
 	checkDownloadFail(0, 1)
+}
+
+func testCtx() context.Context {
+	return observability.ContextWithMetricsRecorder(context.Background())
 }

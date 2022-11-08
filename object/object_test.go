@@ -2,9 +2,11 @@ package object_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"testing"
 
+	"go.sia.tech/renterd/internal/observability"
 	"go.sia.tech/renterd/internal/slabutil"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -13,6 +15,8 @@ import (
 )
 
 func TestMultipleObjects(t *testing.T) {
+	ctx := testCtx()
+
 	// generate object data
 	data := [][]byte{
 		frand.Bytes(111),
@@ -38,7 +42,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 	var slabs []slab.Slab
 	for {
-		s, _, err := slab.UploadSlab(r, 3, 10, hosts)
+		s, err := slab.UploadSlab(ctx, r, 3, 10, hosts)
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -68,10 +72,12 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slab.SlabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := slab.DownloadSlab(dst, s, hosts); err != nil {
+			bytes, err := slab.DownloadSlab(ctx, s, hosts)
+			if err != nil {
 				t.Error(err)
 				return
 			}
+			dst.Write(bytes)
 		}
 		exp := data[offset:][:length]
 		got := buf.Bytes()
@@ -101,4 +107,8 @@ func TestMultipleObjects(t *testing.T) {
 			checkDownload(data[i], o, r.offset, r.length)
 		}
 	}
+}
+
+func testCtx() context.Context {
+	return observability.ContextWithMetricsRecorder(context.Background())
 }
