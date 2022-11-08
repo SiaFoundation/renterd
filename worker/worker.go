@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/internal/observability"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -52,7 +54,7 @@ type (
 	// A SlabMover uploads, downloads, and migrates slabs.
 	SlabMover interface {
 		UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (slab.Slab, error)
-		DownloadSlab(ctx context.Context, w io.Writer, slab slab.Slice, contracts []Contract) error
+		DownloadSlab(ctx context.Context, slab slab.Slice, contracts []Contract) ([]byte, error)
 		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) error
 		MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) error
 	}
@@ -186,7 +188,7 @@ func (w *Worker) rhpRegistryUpdateHandler(jc jape.Context) {
 }
 
 func (w *Worker) slabsUploadHandler(jc jape.Context) {
-	jc.Custom((*[]byte)(nil), slab.Slab{})
+	jc.Custom((*[]byte)(nil), SlabsUploadResponse{})
 
 	var sur SlabsUploadRequest
 	dec := json.NewDecoder(jc.Request.Body)
@@ -194,11 +196,18 @@ func (w *Worker) slabsUploadHandler(jc jape.Context) {
 		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	data := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
-	slab, err := w.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
-	if jc.Check("couldn't upload slab", err) == nil {
-		jc.Encode(slab)
+	ctx := observability.ContextWithMetricsRecorder(jc.Request.Context())
+	slab, err := w.sm.UploadSlab(ctx, data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
+	if jc.Check("couldn't upload slab", err) != nil {
+		return
 	}
+
+	jc.Encode(SlabsUploadResponse{
+		Slab:     slab,
+		Metadata: toHostInteractions(observability.RecorderFromContext(ctx).Metrics()),
+	})
 }
 
 func (w *Worker) slabsDownloadHandler(jc jape.Context) {
@@ -208,8 +217,19 @@ func (w *Worker) slabsDownloadHandler(jc jape.Context) {
 	if jc.Decode(&sdr) != nil {
 		return
 	}
-	err := w.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
-	jc.Check("couldn't download slabs", err)
+
+	ctx := observability.ContextWithMetricsRecorder(jc.Request.Context())
+	data, err := w.sm.DownloadSlab(ctx, sdr.Slab, sdr.Contracts)
+	if jc.Check("couldn't download slabs", err) != nil {
+		return
+	}
+
+	rw := jc.ResponseWriter
+	binary.Write(rw, binary.LittleEndian, uint64(len(data)))
+	rw.Write(data)
+	metadata := toHostInteractions(observability.RecorderFromContext(ctx).Metrics())
+	jc.Check("couldn't encode metadata", json.NewEncoder(rw).Encode(metadata))
+
 }
 
 func (w *Worker) slabsMigrateHandler(jc jape.Context) {
@@ -244,10 +264,12 @@ func (w *Worker) objectsKeyHandlerGET(jc jape.Context) {
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
 	for _, ss := range slab.SlabsForDownload(o.Slabs, offset, length) {
 		var contracts []Contract = nil // TODO: ask bus, using ss.Slab.Shards
-		if err := w.sm.DownloadSlab(jc.Request.Context(), cw, ss, contracts); err != nil {
+		data, err := w.sm.DownloadSlab(jc.Request.Context(), ss, contracts)
+		if err != nil {
 			// TODO: handle error
 			return
 		}
+		cw.Write(data)
 	}
 }
 

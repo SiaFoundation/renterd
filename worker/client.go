@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -142,7 +143,7 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
 func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, err error) {
-	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
+	c.c.Custom("POST", "/slabs/upload", []byte{}, &SlabsUploadResponse{})
 
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
@@ -171,7 +172,7 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 }
 
 // DownloadSlab downloads data from a set of hosts.
-func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) (err error) {
+func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) ([]HostInteraction, error) {
 	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
 
 	js, _ := json.Marshal(SlabsDownloadRequest{
@@ -186,16 +187,35 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer io.Copy(ioutil.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := ioutil.ReadAll(resp.Body)
-		return errors.New(string(err))
+		return nil, errors.New(string(err))
 	}
-	_, err = io.Copy(dst, resp.Body)
-	return
+
+	// read response data
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// write slab data
+	dataLen := binary.LittleEndian.Uint64(b[:8])
+	_, err = dst.Write(b[8 : dataLen+8])
+	if err != nil {
+		return nil, err
+	}
+
+	// read metadata
+	var metadata []HostInteraction
+	err = json.NewDecoder(bytes.NewReader(b[dataLen+8:])).Decode(&metadata)
+	if err != nil {
+		return nil, err
+	}
+	return metadata, nil
 }
 
 // MigrateSlab migrates the specified slab.
