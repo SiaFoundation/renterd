@@ -248,18 +248,17 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 }
 
 // DownloadSlab downloads slab data.
-func DownloadSlab(ctx context.Context, s Slice, hosts []Host) ([]byte, error) {
+func DownloadSlab(ctx context.Context, w io.Writer, s Slice, hosts []Host) error {
 	shards, err := parallelDownloadSlab(ctx, s, hosts)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	s.Decrypt(shards)
-
-	var buf bytes.Buffer
-	if err := s.Recover(&buf, shards); err != nil {
-		return nil, err
+	err = s.Recover(w, shards)
+	if err != nil {
+		return err
 	}
-	return buf.Bytes(), nil
+	return nil
 }
 
 // SlabsForDownload returns the slices that comprise the specified offset-length

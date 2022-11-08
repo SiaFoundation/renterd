@@ -15,7 +15,7 @@ import (
 )
 
 func TestMultipleObjects(t *testing.T) {
-	ctx := testCtx()
+	ctx := observability.ContextWithMetricsRecorder(context.Background())
 
 	// generate object data
 	data := [][]byte{
@@ -72,12 +72,10 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slab.SlabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			bytes, err := slab.DownloadSlab(ctx, s, hosts)
-			if err != nil {
+			if err := slab.DownloadSlab(ctx, dst, s, hosts); err != nil {
 				t.Error(err)
 				return
 			}
-			dst.Write(bytes)
 		}
 		exp := data[offset:][:length]
 		got := buf.Bytes()
@@ -107,8 +105,4 @@ func TestMultipleObjects(t *testing.T) {
 			checkDownload(data[i], o, r.offset, r.length)
 		}
 	}
-}
-
-func testCtx() context.Context {
-	return observability.ContextWithMetricsRecorder(context.Background())
 }

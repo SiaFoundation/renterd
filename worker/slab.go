@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"go.sia.tech/renterd/internal/observability"
 	"go.sia.tech/renterd/slab"
 )
 
@@ -38,63 +39,47 @@ func (sm slabMover) withHosts(ctx context.Context, contracts []Contract, fn func
 	return fn(hosts)
 }
 
-func (sm slabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (s slab.Slab, err error) {
+func (sm slabMover) withMetrics(ctx context.Context, fn func(context.Context) error) (his []HostInteraction, err error) {
+	err = fn(observability.ContextWithMetricsRecorder(ctx))
+	return toHostInteractions(observability.RecorderFromContext(ctx).Metrics()), err
+}
+
+func (sm slabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (s slab.Slab, his []HostInteraction, err error) {
 	sm.pool.SetCurrentHeight(currentHeight)
-	err = sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		s, err = slab.UploadSlab(ctx, r, m, n, hosts)
-		return err
+	his, err = sm.withMetrics(ctx, func(ctx context.Context) error {
+		return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+			s, err = slab.UploadSlab(ctx, r, m, n, hosts)
+			return err
+		})
 	})
 	return
 }
 
-func (sm slabMover) DownloadSlab(ctx context.Context, s slab.Slice, contracts []Contract) (b []byte, err error) {
-	err = sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		b, err = slab.DownloadSlab(ctx, s, hosts)
-		return err
-	})
-	return
-}
-
-func (sm slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) error {
-	return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
-		return slab.DeleteSlabs(ctx, slabs, hosts)
+func (sm slabMover) DownloadSlab(ctx context.Context, w io.Writer, s slab.Slice, contracts []Contract) (his []HostInteraction, err error) {
+	return sm.withMetrics(ctx, func(ctx context.Context) error {
+		return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+			return slab.DownloadSlab(ctx, w, s, hosts)
+		})
 	})
 }
 
-func (sm slabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) (err error) {
+func (sm slabMover) DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) (his []HostInteraction, err error) {
+	return sm.withMetrics(ctx, func(ctx context.Context) error {
+		return sm.withHosts(ctx, contracts, func(hosts []slab.Host) error {
+			return slab.DeleteSlabs(ctx, slabs, hosts)
+		})
+	})
+}
+
+func (sm slabMover) MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) (his []HostInteraction, err error) {
 	sm.pool.SetCurrentHeight(currentHeight)
-	var fromHosts []slab.Host
-	for _, c := range from {
-		h := sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey)
-		defer sm.pool.UnlockContract(h)
-		fromHosts = append(fromHosts, h)
-	}
-	var toHosts []slab.Host
-	for _, c := range to {
-		h := sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey)
-		defer sm.pool.UnlockContract(h)
-		toHosts = append(toHosts, h)
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			for _, h := range fromHosts {
-				sm.pool.ForceClose(h.(*slab.Session))
-			}
-			for _, h := range toHosts {
-				sm.pool.ForceClose(h.(*slab.Session))
-			}
-		}
-	}()
-	defer func() {
-		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-	}()
-	return slab.MigrateSlab(ctx, s, fromHosts, toHosts)
+	return sm.withMetrics(ctx, func(ctx context.Context) error {
+		return sm.withHosts(ctx, from, func(fromHosts []slab.Host) error {
+			return sm.withHosts(ctx, to, func(toHosts []slab.Host) error {
+				return slab.MigrateSlab(ctx, s, fromHosts, toHosts)
+			})
+		})
+	})
 }
 
 func newSlabMover() slabMover {

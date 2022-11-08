@@ -2,7 +2,6 @@ package worker
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -202,22 +201,13 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 		return nil, errors.New(string(err))
 	}
 
-	// read response data
-	b, err := ioutil.ReadAll(resp.Body)
+	_, err = io.CopyN(dst, resp.Body, int64(s.Length))
 	if err != nil {
 		return nil, err
 	}
 
-	// write slab data
-	dataLen := binary.LittleEndian.Uint64(b[:8])
-	_, err = dst.Write(b[8 : dataLen+8])
-	if err != nil {
-		return nil, err
-	}
-
-	// read metadata
 	var metadata []HostInteraction
-	err = json.NewDecoder(bytes.NewReader(b[dataLen+8:])).Decode(&metadata)
+	err = json.NewDecoder(resp.Body).Decode(&metadata)
 	if err != nil {
 		return nil, err
 	}

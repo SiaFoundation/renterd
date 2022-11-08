@@ -231,6 +231,6 @@ type HostInteraction struct {
 	Timestamp int64           `json:"timestamp"`
 	Type      string          `json:"type"`
 	HostKey   PublicKey       `json:"hostKey"`
-	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
 	Error     string          `json:"error,omitempty"`
 }

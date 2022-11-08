@@ -30,7 +30,7 @@ func toHostInteractions(ins []observability.Metric) []HostInteraction {
 func transformMetricSlabTransfer(st slab.MetricSlabTransfer) (hi HostInteraction) {
 	decorateMetricsCommon(&hi, st.MetricSlabCommon)
 
-	hi.Metadata, _ = json.Marshal(struct {
+	hi.Result, _ = json.Marshal(struct {
 		Duration int64 `json:"dur"`
 	}{
 		Duration: st.Duration.Milliseconds(),
@@ -43,7 +43,7 @@ func transformMetricSlabTransfer(st slab.MetricSlabTransfer) (hi HostInteraction
 func transformMetricSlabDeletion(st slab.MetricSlabDeletion) (hi HostInteraction) {
 	decorateMetricsCommon(&hi, st.MetricSlabCommon)
 
-	hi.Metadata, _ = json.Marshal(struct {
+	hi.Result, _ = json.Marshal(struct {
 		Duration int64  `json:"dur"`
 		NumRoots uint64 `json:"roots"`
 	}{
@@ -60,5 +60,8 @@ func decorateMetricsCommon(hi *HostInteraction, sc slab.MetricSlabCommon) {
 	hi.Timestamp = sc.Timestamp.Unix()
 	hi.HostKey = sc.HostKey
 	hi.Type = sc.Type
-	hi.Error = sc.Error()
+
+	if sc.Err != nil {
+		hi.Error = sc.Err.Error()
+	}
 }

@@ -15,7 +15,7 @@ import (
 )
 
 func TestSlabs(t *testing.T) {
-	ctx := testCtx()
+	ctx := observability.ContextWithMetricsRecorder(context.Background())
 
 	// generate data
 	data := frand.Bytes(1000000)
@@ -33,12 +33,14 @@ func TestSlabs(t *testing.T) {
 	// download various ranges
 	checkDownload := func(offset, length uint32) {
 		t.Helper()
-		got, err := slab.DownloadSlab(ctx, slab.Slice{s, offset, length}, hosts)
+		var buf bytes.Buffer
+		err := slab.DownloadSlab(ctx, &buf, slab.Slice{s, offset, length}, hosts)
 		if err != nil {
 			t.Error(err)
 			return
 		}
 		exp := data[offset:][:length]
+		got := buf.Bytes()
 		if !bytes.Equal(got, exp) {
 			if len(got) > 20 {
 				t.Errorf("download(%v, %v):\nexpected: %x...%x (%v)\ngot:      %x...%x (%v)",
@@ -61,7 +63,8 @@ func TestSlabs(t *testing.T) {
 
 	checkDownloadFail := func(offset, length uint32) {
 		t.Helper()
-		if _, err := slab.DownloadSlab(ctx, slab.Slice{s, offset, length}, hosts); err == nil {
+		var buf bytes.Buffer
+		if err := slab.DownloadSlab(ctx, &buf, slab.Slice{s, offset, length}, hosts); err == nil {
 			t.Error("expected error, got nil")
 		}
 	}
@@ -97,8 +100,4 @@ func TestSlabs(t *testing.T) {
 	// downloads should now fail
 	checkDownloadFail(0, uint32(len(data)))
 	checkDownloadFail(0, 1)
-}
-
-func testCtx() context.Context {
-	return observability.ContextWithMetricsRecorder(context.Background())
 }

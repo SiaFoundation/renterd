@@ -9,38 +9,39 @@ type contextKey string
 
 const keyMetricsRecorder contextKey = "metricsRecorder"
 
-type Metric interface {
-	IsMetric()
-}
-
-type MetricsRecorder interface {
-	Metrics() []Metric
-	RecordMetric(m Metric)
-}
-
-type recorder struct {
-	m  []Metric
-	mu sync.Mutex
-}
-
-func NewRecorder() MetricsRecorder {
-	return &recorder{
-		m: make([]Metric, 0),
+type (
+	Metric interface {
+		IsMetric()
 	}
-}
+
+	MetricsRecorder interface {
+		Metrics() []Metric
+		RecordMetric(m Metric)
+	}
+)
+
+type (
+	recorder struct {
+		m  []Metric
+		mu sync.Mutex
+	}
+
+	noopRecorder struct{}
+)
 
 func RecorderFromContext(ctx context.Context) MetricsRecorder {
-	r := ctx.Value(keyMetricsRecorder)
-	mr, ok := r.(MetricsRecorder)
-	if !ok {
-		return nil
+	if mr, ok := ctx.Value(keyMetricsRecorder).(MetricsRecorder); ok {
+		return mr
 	}
-	return mr
+	return &noopRecorder{}
 }
 
 func ContextWithMetricsRecorder(ctx context.Context) context.Context {
-	return context.WithValue(ctx, keyMetricsRecorder, NewRecorder())
+	return context.WithValue(ctx, keyMetricsRecorder, &recorder{})
 }
+
+func (nr *noopRecorder) Metrics() []Metric     { return nil }
+func (nr *noopRecorder) RecordMetric(m Metric) {}
 
 func (r *recorder) Metrics() []Metric {
 	r.mu.Lock()
