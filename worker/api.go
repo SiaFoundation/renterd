@@ -205,12 +205,23 @@ type SlabsDeleteRequest struct {
 	Contracts []Contract  `json:"contracts"`
 }
 
+// SlabsDeleteResponse is the response type for the /slabs/delete endpoint.
+type SlabsDeleteResponse struct {
+	Metadata []HostInteraction `json:"metadata"`
+}
+
 // SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
 type SlabsMigrateRequest struct {
 	Slab          slab.Slab  `json:"slab"`
 	From          []Contract `json:"from"`
 	To            []Contract `json:"to"`
 	CurrentHeight uint64     `json:"currentHeight"`
+}
+
+// SlabsMigrateResponse is the response type for the /slabs/migrate endpoint.
+type SlabsMigrateResponse struct {
+	Slab     slab.Slab         `json:"slab"`
+	Metadata []HostInteraction `json:"metadata"`
 }
 
 // A HostInteraction contains information about an interaction with a host.

@@ -225,11 +225,18 @@ func (w *Worker) slabsDownloadHandler(jc jape.Context) {
 	}
 
 	rw := jc.ResponseWriter
-	binary.Write(rw, binary.LittleEndian, uint64(len(data)))
-	rw.Write(data)
+	err = binary.Write(rw, binary.LittleEndian, uint64(len(data)))
+	if jc.Check("couldn't write response", err) != nil {
+		return
+	}
+
+	_, err = rw.Write(data)
+	if jc.Check("couldn't write data", err) != nil {
+		return
+	}
+
 	metadata := toHostInteractions(observability.RecorderFromContext(ctx).Metrics())
 	jc.Check("couldn't encode metadata", json.NewEncoder(rw).Encode(metadata))
-
 }
 
 func (w *Worker) slabsMigrateHandler(jc jape.Context) {
@@ -237,19 +244,34 @@ func (w *Worker) slabsMigrateHandler(jc jape.Context) {
 	if jc.Decode(&smr) != nil {
 		return
 	}
-	err := w.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
+
+	ctx := observability.ContextWithMetricsRecorder(jc.Request.Context())
+	err := w.sm.MigrateSlab(ctx, &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
-	jc.Encode(smr.Slab)
+
+	jc.Encode(SlabsMigrateResponse{
+		smr.Slab,
+		toHostInteractions(observability.RecorderFromContext(ctx).Metrics()),
+	})
 }
 
 func (w *Worker) slabsDeleteHandler(jc jape.Context) {
 	var sdr SlabsDeleteRequest
-	if jc.Decode(&sdr) == nil {
-		err := w.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
-		jc.Check("couldn't delete slabs", err)
+	if jc.Decode(&sdr) != nil {
+		return
 	}
+
+	ctx := observability.ContextWithMetricsRecorder(jc.Request.Context())
+	err := w.sm.DeleteSlabs(ctx, sdr.Slabs, sdr.Contracts)
+	if jc.Check("couldn't delete slabs", err) != nil {
+		return
+	}
+
+	jc.Encode(SlabsDeleteResponse{
+		toHostInteractions(observability.RecorderFromContext(ctx).Metrics()),
+	})
 }
 
 func (w *Worker) objectsKeyHandlerGET(jc jape.Context) {

@@ -142,7 +142,7 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
-func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, err error) {
+func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (slab.Slab, []HostInteraction, error) {
 	c.c.Custom("POST", "/slabs/upload", []byte{}, &SlabsUploadResponse{})
 
 	js, _ := json.Marshal(SlabsUploadRequest{
@@ -159,16 +159,22 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return slab.Slab{}, err
+		return slab.Slab{}, nil, err
 	}
 	defer io.Copy(ioutil.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := ioutil.ReadAll(resp.Body)
-		return slab.Slab{}, errors.New(string(err))
+		return slab.Slab{}, nil, errors.New(string(err))
 	}
-	err = json.NewDecoder(resp.Body).Decode(&s)
-	return
+
+	var sur SlabsUploadResponse
+	err = json.NewDecoder(resp.Body).Decode(&sur)
+	if err != nil {
+		return slab.Slab{}, nil, err
+	}
+
+	return sur.Slab, sur.Metadata, nil
 }
 
 // DownloadSlab downloads data from a set of hosts.
@@ -219,25 +225,38 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) (err error) {
+func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) ([]HostInteraction, error) {
 	req := SlabsMigrateRequest{
 		Slab:          *s,
 		From:          from,
 		To:            to,
 		CurrentHeight: currentHeight,
 	}
-	err = c.c.POST("/slabs/migrate", req, s)
-	return
+
+	var resp SlabsMigrateResponse
+	err := c.c.POST("/slabs/migrate", req, &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	*s = resp.Slab
+	return resp.Metadata, nil
 }
 
 // DeleteSlabs deletes the specified slabs.
-func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error) {
+func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) ([]HostInteraction, error) {
 	req := SlabsDeleteRequest{
 		Slabs:     slabs,
 		Contracts: contracts,
 	}
-	err = c.c.POST("/slabs/delete", req, nil)
-	return
+
+	var resp SlabsDeleteResponse
+	err := c.c.POST("/slabs/delete", req, &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Metadata, nil
 }
 
 // UploadObject uploads the data in r, creating an object with the given name.
