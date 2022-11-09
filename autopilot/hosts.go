@@ -36,8 +36,8 @@ func (ap *Autopilot) hostScanLoop() {
 			resChan := make(chan res)
 			for _, h := range hosts {
 				go func(h hostdb.Host) {
-					settings, err := ap.worker.RHPScan(h.PublicKey, h.NetAddress())
-					resChan <- res{h.PublicKey, settings, err}
+					scan, err := ap.worker.RHPScan(h.PublicKey, h.NetAddress())
+					resChan <- res{h.PublicKey, scan.HostSettings, err}
 				}(h)
 			}
 			for range hosts {

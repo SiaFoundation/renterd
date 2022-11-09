@@ -26,6 +26,12 @@ type RHPScanRequest struct {
 	HostIP  string    `json:"hostIP"`
 }
 
+// RHPScanResponse is the response type for the /rhp/scan endpoint.
+type RHPScanResponse struct {
+	HostSettings rhpv2.HostSettings `json:"hostSettings"`
+	Ping         int64              `json:"ping"`
+}
+
 // RHPPrepareFormRequest is the request type for the /rhp/prepare/form endpoint.
 type RHPPrepareFormRequest struct {
 	RenterKey      PrivateKey         `json:"renterKey"`
