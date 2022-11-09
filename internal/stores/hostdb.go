@@ -219,14 +219,11 @@ type (
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
-		ID     uint64 `gorm:"primaryKey"`
-		Type   string
-		Result json.RawMessage
-
-		// Host and Timestamp form a composite index where Hosts has the
-		// higher priority.
-		Host      []byte    `gorm:"index"`
+		Host      []byte `gorm:"index"`
+		ID        uint64 `gorm:"primaryKey"`
+		Result    json.RawMessage
 		Timestamp time.Time `gorm:"index"`
+		Type      string
 	}
 
 	// dbConsensusInfo defines table which stores the latest consensus info
