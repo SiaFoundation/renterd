@@ -257,16 +257,17 @@ func (dbConsensusInfo) TableName() string {
 
 // Host converts a host into a hostdb.Host.
 func (h dbHost) Host() hostdb.Host {
-	var hdbHost hostdb.Host
+	hdbHost := hostdb.Host{
+		Announcements: make([]hostdb.Announcement, len(h.Announcements)),
+		Interactions:  make([]hostdb.Interaction, len(h.Interactions)),
+	}
+	for i, announcement := range h.Announcements {
+		hdbHost.Announcements[i] = announcement.Announcement()
+	}
+	for i, interaction := range h.Interactions {
+		hdbHost.Interactions[i] = interaction.Interaction()
+	}
 	copy(hdbHost.PublicKey[:], h.PublicKey)
-	hdbHost.Announcements = make([]hostdb.Announcement, 0, len(h.Announcements))
-	for _, a := range h.Announcements {
-		hdbHost.Announcements = append(hdbHost.Announcements, a.Announcement())
-	}
-	hdbHost.Interactions = make([]hostdb.Interaction, 0, len(h.Interactions))
-	for _, i := range h.Interactions {
-		hdbHost.Interactions = append(hdbHost.Interactions, i.Interaction())
-	}
 	return hdbHost
 }
 
