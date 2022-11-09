@@ -11,12 +11,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest , macos-latest, windows-latest ]
+        os: [ ubuntu-latest , macos-latest ]
         go-version: [ '1.18', '1.19' ]
     steps:
-      - name: Configure Windows
-        if: matrix.os == 'windows-latest'
-        run: git config --global core.autocrlf false # fixes go lint fmt error
       - name: Checkout
         uses: actions/checkout@v3
       - name: Setup Go
@@ -25,11 +22,7 @@ jobs:
           go-version: ${{ matrix.go-version }}
       - name: Lint
         uses: golangci/golangci-lint-action@v3
-      - name: Test Windows 1.18 # can't run race detector on windows with go 1.18 or lower due to a bug (https://github.com/golang/go/issues/46099)
-        if: matrix.os == 'windows-latest' && matrix.go-version == '1.18'
-        uses: n8maninger/action-golang-test@v1
       - name: Test
-        if: matrix.os != 'windows-latest' || matrix.go-version != '1.18'
         uses: n8maninger/action-golang-test@v1
         with:
           args: "-race"
