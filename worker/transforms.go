@@ -4,14 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"go.sia.tech/renterd/internal/observability"
 	"go.sia.tech/renterd/slab"
 )
 
 // toHostInteractions receives an input of any kind and tries to transform it
 // into a list of host interactions. If the input type is not recognized a panic
 // is thrown as it indicates a developer error.
-func toHostInteractions(ins []observability.Metric) []HostInteraction {
+func toHostInteractions(ins []slab.TransferMetric) []HostInteraction {
 	his := make([]HostInteraction, len(ins))
 	for i, in := range ins {
 		switch t := in.(type) {
@@ -27,8 +26,16 @@ func toHostInteractions(ins []observability.Metric) []HostInteraction {
 }
 
 // transformSlabHostInteraction transforms the given metric to a host interaction.
-func transformMetricSlabTransfer(st slab.MetricSlabTransfer) (hi HostInteraction) {
-	decorateMetricsCommon(&hi, st.MetricSlabCommon)
+func transformMetricSlabTransfer(st slab.MetricSlabTransfer) HostInteraction {
+	hi := HostInteraction{
+		Timestamp: st.Timestamp.Unix(),
+		HostKey:   st.HostKey,
+		Type:      st.Type,
+	}
+
+	if st.Err != nil {
+		hi.Error = st.Err.Error()
+	}
 
 	hi.Result, _ = json.Marshal(struct {
 		Duration int64 `json:"dur"`
@@ -40,28 +47,24 @@ func transformMetricSlabTransfer(st slab.MetricSlabTransfer) (hi HostInteraction
 }
 
 // transformMetricSlabDeletion transforms the given metric to a host interaction.
-func transformMetricSlabDeletion(st slab.MetricSlabDeletion) (hi HostInteraction) {
-	decorateMetricsCommon(&hi, st.MetricSlabCommon)
+func transformMetricSlabDeletion(sd slab.MetricSlabDeletion) HostInteraction {
+	hi := HostInteraction{
+		Timestamp: sd.Timestamp.Unix(),
+		HostKey:   sd.HostKey,
+		Type:      sd.Type,
+	}
+
+	if sd.Err != nil {
+		hi.Error = sd.Err.Error()
+	}
 
 	hi.Result, _ = json.Marshal(struct {
 		Duration int64  `json:"dur"`
 		NumRoots uint64 `json:"roots"`
 	}{
-		Duration: st.Duration.Milliseconds(),
-		NumRoots: st.NumRoots,
+		Duration: sd.Duration.Milliseconds(),
+		NumRoots: sd.NumRoots,
 	})
 
 	return hi
-}
-
-// decorateMetricsCommon decorates the given host interface with all common
-// metrics.
-func decorateMetricsCommon(hi *HostInteraction, sc slab.MetricSlabCommon) {
-	hi.Timestamp = sc.Timestamp.Unix()
-	hi.HostKey = sc.HostKey
-	hi.Type = sc.Type
-
-	if sc.Err != nil {
-		hi.Error = sc.Err.Error()
-	}
 }

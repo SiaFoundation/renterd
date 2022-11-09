@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/renterd/internal/observability"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
 
@@ -20,48 +19,12 @@ type Host interface {
 	DeleteSectors(roots []consensus.Hash256) error
 }
 
-type (
-	// A MetricSlabTransfer contains relevant information about an interaction with
-	// a host involving uploading and/or downloading slabs.
-	MetricSlabTransfer struct {
-		MetricSlabCommon
-		Size uint64
-	}
-
-	// A MetricSlabDeletion contains relevant information about an interaction with
-	// a host involving the deletion of slabs.
-	MetricSlabDeletion struct {
-		MetricSlabCommon
-		NumRoots uint64
-	}
-
-	// MetricSlabCommon contains the common fields for all slab metrics types
-	MetricSlabCommon struct {
-		Type      string
-		Timestamp time.Time
-		HostKey   consensus.PublicKey
-		Duration  time.Duration
-		Err       error
-	}
-)
-
-// Error implements the error interface
-func (sc MetricSlabCommon) Error() string {
-	if sc.Err == nil {
-		return ""
-	}
-	return sc.Err.Error()
-}
-
-// IsMetric implements the observability.Metric interface
-func (sc MetricSlabCommon) IsMetric() {}
-
 // parallelUploadSlab uploads the provided shards in parallel.
 func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]Sector, error) {
 	if len(hosts) < len(shards) {
 		return nil, errors.New("fewer hosts than shards")
 	}
-	mr := observability.RecorderFromContext(ctx)
+	mr := RecorderFromContext(ctx)
 
 	type req struct {
 		host       Host
@@ -102,13 +65,12 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]S
 		inflight--
 
 		mr.RecordMetric(MetricSlabTransfer{
-			MetricSlabCommon{
-				Type:      "UploadSector",
-				Timestamp: time.Now(),
-				HostKey:   resp.req.host.PublicKey(),
-				Duration:  resp.duration,
-				Err:       resp.err,
-			}, rhpv2.SectorSize,
+			Type:      "UploadSector",
+			Timestamp: time.Now(),
+			HostKey:   resp.req.host.PublicKey(),
+			Duration:  resp.duration,
+			Err:       resp.err,
+			Size:      rhpv2.SectorSize,
 		})
 
 		if resp.err != nil {
@@ -160,7 +122,7 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 	if len(hosts) < int(s.MinShards) {
 		return nil, errors.New("not enough hosts to recover shard")
 	}
-	mr := observability.RecorderFromContext(ctx)
+	mr := RecorderFromContext(ctx)
 
 	type req struct {
 		hostIndex int
@@ -214,13 +176,12 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 		inflight--
 
 		mr.RecordMetric(MetricSlabTransfer{
-			MetricSlabCommon{
-				Type:      "DownloadSector",
-				Timestamp: time.Now(),
-				HostKey:   hosts[resp.req.hostIndex].PublicKey(),
-				Duration:  resp.duration,
-				Err:       resp.err,
-			}, uint64(len(resp.shard)),
+			Type:      "DownloadSector",
+			Timestamp: time.Now(),
+			HostKey:   hosts[resp.req.hostIndex].PublicKey(),
+			Duration:  resp.duration,
+			Err:       resp.err,
+			Size:      uint64(len(resp.shard)),
 		})
 
 		if resp.err != nil {
@@ -292,7 +253,7 @@ func SlabsForDownload(slabs []Slice, offset, length int64) []Slice {
 
 // DeleteSlabs deletes a set of slabs from the provided hosts.
 func DeleteSlabs(ctx context.Context, slabs []Slab, hosts []Host) error {
-	mr := observability.RecorderFromContext(ctx)
+	mr := RecorderFromContext(ctx)
 
 	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
@@ -315,14 +276,12 @@ func DeleteSlabs(ctx context.Context, slabs []Slab, hosts []Host) error {
 			}
 
 			mr.RecordMetric(MetricSlabDeletion{
-				MetricSlabCommon{
-					Type:      "DeleteSectors",
-					Timestamp: time.Now(),
-					HostKey:   h.PublicKey(),
-					Duration:  time.Since(start),
-					Err:       err,
-				},
-				uint64(len(rootsByHost[h.PublicKey()])),
+				Type:      "DeleteSectors",
+				Timestamp: time.Now(),
+				HostKey:   h.PublicKey(),
+				Duration:  time.Since(start),
+				Err:       err,
+				NumRoots:  uint64(len(rootsByHost[h.PublicKey()])),
 			})
 		}(h)
 	}

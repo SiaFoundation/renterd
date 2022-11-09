@@ -216,7 +216,9 @@ func (w *Worker) slabsDownloadHandler(jc jape.Context) {
 	}
 
 	his, err := w.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
-	jc.Check("couldn't download slabs", err)
+	if jc.Check("couldn't download slabs", err) != nil {
+		return
+	}
 	json.NewEncoder(jc.ResponseWriter).Encode(his)
 }
 

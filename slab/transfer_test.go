@@ -7,7 +7,6 @@ import (
 	"math"
 	"testing"
 
-	"go.sia.tech/renterd/internal/observability"
 	"go.sia.tech/renterd/internal/slabutil"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/slab"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestSlabs(t *testing.T) {
-	ctx := observability.ContextWithMetricsRecorder(context.Background())
+	ctx := slab.ContextWithMetricsRecorder(context.Background())
 
 	// generate data
 	data := frand.Bytes(1000000)

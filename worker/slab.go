@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 
-	"go.sia.tech/renterd/internal/observability"
 	"go.sia.tech/renterd/slab"
 )
 
@@ -40,8 +39,8 @@ func (sm slabMover) withHosts(ctx context.Context, contracts []Contract, fn func
 }
 
 func (sm slabMover) withMetrics(ctx context.Context, fn func(context.Context) error) (his []HostInteraction, err error) {
-	err = fn(observability.ContextWithMetricsRecorder(ctx))
-	return toHostInteractions(observability.RecorderFromContext(ctx).Metrics()), err
+	err = fn(slab.ContextWithMetricsRecorder(ctx))
+	return toHostInteractions(slab.RecorderFromContext(ctx).Metrics()), err
 }
 
 func (sm slabMover) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (s slab.Slab, his []HostInteraction, err error) {
