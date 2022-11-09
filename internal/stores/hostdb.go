@@ -196,7 +196,7 @@ func NewJSONHostDB(dir string) (*JSONHostDB, modules.ConsensusChangeID, error) {
 const consensusInfoID = 1
 
 type (
-	// SQLHostDB is a helper type for interacting with an SQL-based HostDB.
+	// SQLHostDB is a helper type for interacting with a SQL-based HostDB.
 	SQLHostDB struct {
 		db *gorm.DB
 	}
@@ -225,8 +225,8 @@ type (
 
 		// Host and Timestamp form a composite index where Hosts has the
 		// higher priority.
-		Host      []byte    `gorm:"index:idx_host:2"`
-		Timestamp time.Time `gorm:"index:idx_host:1"`
+		Host      []byte    `gorm:"index"`
+		Timestamp time.Time `gorm:"index"`
 	}
 
 	// dbConsensusInfo defines table which stores the latest consensus info
@@ -260,11 +260,13 @@ func (dbConsensusInfo) TableName() string {
 
 // Host converts a host into a hostdb.Host.
 func (h dbHost) Host() hostdb.Host {
-	hdbHost := hostdb.Host{}
+	var hdbHost hostdb.Host
 	copy(hdbHost.PublicKey[:], h.PublicKey)
+	hdbHost.Announcements = make([]hostdb.Announcement, 0, len(h.Announcements))
 	for _, a := range h.Announcements {
 		hdbHost.Announcements = append(hdbHost.Announcements, a.Announcement())
 	}
+	hdbHost.Interactions = make([]hostdb.Interaction, 0, len(h.Interactions))
 	for _, i := range h.Interactions {
 		hdbHost.Interactions = append(hdbHost.Interactions, i.Interaction())
 	}
