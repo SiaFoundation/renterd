@@ -193,12 +193,6 @@ type SlabsDownloadRequest struct {
 	Contracts []Contract `json:"contracts"`
 }
 
-// SlabsDownloadResponse is the response type for the /slabs/download endpoint.
-type SlabsDownloadResponse struct {
-	Data     []byte            `json:"data"`
-	Metadata []HostInteraction `json:"metadata"`
-}
-
 // SlabsDeleteRequest is the request type for the /slabs/delete endpoint.
 type SlabsDeleteRequest struct {
 	Slabs     []slab.Slab `json:"slabs"`
