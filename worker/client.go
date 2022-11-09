@@ -22,7 +22,7 @@ type Client struct {
 }
 
 // RHPScan scans a host, returning its current settings.
-func (c *Client) RHPScan(hostKey PublicKey, hostIP string) (resp rhpv2.HostSettings, err error) {
+func (c *Client) RHPScan(hostKey PublicKey, hostIP string) (resp RHPScanResponse, err error) {
 	err = c.c.POST("/rhp/scan", RHPScanRequest{hostKey, hostIP}, &resp)
 	return
 }

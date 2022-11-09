@@ -8,7 +8,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/worker"
 )
 
 type Store interface {
@@ -25,7 +25,7 @@ type Bus interface {
 }
 
 type Worker interface {
-	RHPScan(hostKey consensus.PublicKey, hostIP string) (resp rhpv2.HostSettings, err error)
+	RHPScan(hostKey consensus.PublicKey, hostIP string) (worker.RHPScanResponse, error)
 }
 
 type Autopilot struct {
