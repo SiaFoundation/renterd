@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -87,15 +86,11 @@ func (db *EphemeralHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height--
 	}
 	for _, b := range cc.AppliedBlocks {
-		err := hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) error {
+		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
 			db.modifyHost(hostKey, func(h *hostdb.Host) {
 				h.Announcements = append(h.Announcements, ha)
 			})
-			return nil
 		})
-		if err != nil {
-			log.Fatalln("Couldn't save hostdb state:", err)
-		}
 		height++
 	}
 	db.tip.Height = uint64(height)
@@ -203,17 +198,17 @@ const consensusInfoID = 1
 type (
 	// SQLHostDB is a helper type for interacting with an SQL-based HostDB.
 	SQLHostDB struct {
-		staticDB *gorm.DB
+		db *gorm.DB
 	}
 
-	// host defines a hostdb.Interaction as persisted in the DB.
-	host struct {
-		PublicKey     []byte         `gorm:"primaryKey"`
-		Announcements []announcement `gorm:"foreignKey:Host;references:PublicKey"`
-		Interactions  []interaction  `gorm:"foreignKey:Host;references:PublicKey"`
+	// dbHost defines a hostdb.Interaction as persisted in the DB.
+	dbHost struct {
+		PublicKey     []byte           `gorm:"primaryKey"`
+		Announcements []dbAnnouncement `gorm:"foreignKey:Host;references:PublicKey"`
+		Interactions  []dbInteraction  `gorm:"foreignKey:Host;references:PublicKey"`
 	}
 
-	announcement struct {
+	dbAnnouncement struct {
 		ID          uint64 `gorm:"primaryKey"`
 		Host        []byte
 		BlockHeight uint64
@@ -222,8 +217,8 @@ type (
 		NetAddress  string
 	}
 
-	// interaction defines a hostdb.Interaction as persisted in the DB.
-	interaction struct {
+	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
+	dbInteraction struct {
 		ID     uint64 `gorm:"primaryKey"`
 		Type   string
 		Result json.RawMessage
@@ -234,17 +229,37 @@ type (
 		Timestamp time.Time `gorm:"index:idx_host:1"`
 	}
 
-	// consensusInfo defines table which stores the latest consensus info
+	// dbConsensusInfo defines table which stores the latest consensus info
 	// known to the hostdb. It should only ever contain a single entry with
 	// the consensusInfoID primary key.
-	consensusInfo struct {
+	dbConsensusInfo struct {
 		ID   uint8 `gorm:"primaryKey"`
 		CCID []byte
 	}
 )
 
+// TableName implements the gorm.Tabler interface.
+func (dbHost) TableName() string {
+	return "hosts"
+}
+
+// TableName implements the gorm.Tabler interface.
+func (dbAnnouncement) TableName() string {
+	return "announcements"
+}
+
+// TableName implements the gorm.Tabler interface.
+func (dbInteraction) TableName() string {
+	return "host_interactions"
+}
+
+// TableName implements the gorm.Tabler interface.
+func (dbConsensusInfo) TableName() string {
+	return "consensus_infos"
+}
+
 // Host converts a host into a hostdb.Host.
-func (h host) Host() hostdb.Host {
+func (h dbHost) Host() hostdb.Host {
 	hdbHost := hostdb.Host{}
 	copy(hdbHost.PublicKey[:], h.PublicKey)
 	for _, a := range h.Announcements {
@@ -257,7 +272,7 @@ func (h host) Host() hostdb.Host {
 }
 
 // Announcement converts a host into a hostdb.Announcement.
-func (a announcement) Announcement() hostdb.Announcement {
+func (a dbAnnouncement) Announcement() hostdb.Announcement {
 	hostdbAnnouncement := hostdb.Announcement{
 		Index: consensus.ChainIndex{
 			Height: a.BlockHeight,
@@ -270,7 +285,7 @@ func (a announcement) Announcement() hostdb.Announcement {
 }
 
 // Interaction converts an interaction into a hostdb.Interaction.
-func (i interaction) Interaction() hostdb.Interaction {
+func (i dbInteraction) Interaction() hostdb.Interaction {
 	return hostdb.Interaction{
 		Timestamp: i.Timestamp,
 		Type:      i.Type,
@@ -289,24 +304,22 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 
 	if migrate {
 		// Create the tables.
-		if err := db.AutoMigrate(&host{}); err != nil {
-			return nil, modules.ConsensusChangeID{}, err
+		tables := []interface {
+		}{
+			&dbHost{},
+			&dbInteraction{},
+			&dbAnnouncement{},
+			&dbConsensusInfo{},
 		}
-		if err := db.AutoMigrate(&interaction{}); err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-		if err := db.AutoMigrate(&announcement{}); err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-		if err := db.AutoMigrate(&consensusInfo{}); err != nil {
+		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
 	}
 
 	// Get latest consensus change ID or init db.
-	var ci consensusInfo
-	err = db.Where(&consensusInfo{ID: consensusInfoID}).
-		Attrs(consensusInfo{
+	var ci dbConsensusInfo
+	err = db.Where(&dbConsensusInfo{ID: consensusInfoID}).
+		Attrs(dbConsensusInfo{
 			ID:   consensusInfoID,
 			CCID: modules.ConsensusChangeBeginning[:],
 		}).
@@ -318,18 +331,18 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 	copy(ccid[:], ci.CCID)
 
 	return &SQLHostDB{
-		staticDB: db,
+		db: db,
 	}, ccid, nil
 }
 
 // Host returns information about a host.
 func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
-	var h host
-	tx := db.staticDB.Where(&host{PublicKey: hostKey[:]}).
+	var h dbHost
+	tx := db.db.Where(&dbHost{PublicKey: hostKey[:]}).
 		Preload("Interactions").
 		Preload("Announcements").
-		Find(&h)
-	if tx.Error == nil && tx.RowsAffected == 0 {
+		Take(&h)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound
 	}
 	return h.Host(), tx.Error
@@ -338,63 +351,65 @@ func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
 func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
-	lastInteraction := func(h hostdb.Host) time.Time {
-		if len(h.Interactions) == 0 {
-			return time.Time{}
-		}
-		return h.Interactions[len(h.Interactions)-1].Timestamp
-	}
-	hosts, err := db.SelectHosts(math.MaxInt, func(h hostdb.Host) bool { return true })
+	// Filter all hosts for the ones that have not been updated since a
+	// given time.
+	var foundHosts [][]byte
+	err := db.db.Table("hosts").
+		Joins("JOIN host_interactions ON host_interactions.Host = hosts.Public_Key").
+		Select("Public_key").
+		Group("Public_Key").
+		Having("MAX(Timestamp) < ?", notSince).
+		Limit(max).
+		Find(&foundHosts).
+		Error
 	if err != nil {
 		return nil, err
 	}
-	for _, host := range hosts {
-		if len(hosts) == max {
-			break
-		} else if lastInteraction(host).Before(notSince) {
-			hosts = append(hosts, host)
-		}
+	// Fetch the full host information for all the keys.
+	var fullHosts []dbHost
+	err = db.db.Where("public_key IN ?", foundHosts).
+		Preload("Interactions").
+		Preload("Announcements").
+		Find(&fullHosts).Error
+	if err != nil {
+		return nil, err
 	}
-	return hosts, nil
+	var hosts []hostdb.Host
+	for _, fh := range fullHosts {
+		hosts = append(hosts, fh.Host())
+	}
+	return hosts, err
 }
 
 // RecordInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
 func (db *SQLHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
-	return db.staticDB.Transaction(func(tx *gorm.DB) error {
+	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Create a host if it doesn't exist yet.
-		if err := tx.FirstOrCreate(&host{}, &host{PublicKey: hostKey[:]}).Error; err != nil {
+		if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey[:]}).Error; err != nil {
 			return err
 		}
 
 		// Create an interaction.
-		return tx.Create(&interaction{
+		return tx.Create(&dbInteraction{
 			Host:      hostKey[:],
-			Timestamp: hi.Timestamp.UTC(), // use UTC in DB
+			Timestamp: hi.Timestamp,
 			Type:      hi.Type,
 			Result:    hi.Result,
 		}).Error
 	})
 }
 
-// SelectHosts returns up to n hosts for which the supplied filter returns true.
-func (db *SQLHostDB) SelectHosts(n int, filter func(hostdb.Host) bool) ([]hostdb.Host, error) {
-	var hosts []host
-	tx := db.staticDB.Preload("Interactions").
+// hosts returns all hosts int he db.
+func (db *SQLHostDB) hosts() ([]dbHost, error) {
+	var hosts []dbHost
+	tx := db.db.Preload("Interactions").
 		Preload("Announcements").
 		Find(&hosts)
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
-
-	var drawnHosts []hostdb.Host
-	for i := 0; i < len(hosts) && len(drawnHosts) < n; i++ {
-		h := hosts[i].Host()
-		if filter(h) {
-			drawnHosts = append(drawnHosts, hosts[i].Host())
-		}
-	}
-	return drawnHosts, nil
+	return hosts, nil
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.
@@ -405,14 +420,20 @@ func (db *SQLHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 
 	// Atomically apply ConsensusChange.
-	err := db.staticDB.Transaction(func(tx *gorm.DB) error {
+	err := db.db.Transaction(func(tx *gorm.DB) error {
+		var err error
 		for _, b := range cc.AppliedBlocks {
-			hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) error {
-				return insertAnnouncement(tx, hostKey, ha)
+			hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
+				if err == nil {
+					err = insertAnnouncement(tx, hostKey, ha)
+				}
 			})
 			height++
 		}
-		return tx.Model(&consensusInfo{}).Where(&consensusInfo{ID: consensusInfoID}).Update("CCID", cc.ID[:]).Error
+		if err != nil {
+			return err
+		}
+		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{ID: consensusInfoID}).Update("CCID", cc.ID[:]).Error
 	})
 	if err != nil {
 		log.Fatalln("Failed to apply consensus change to hostdb", err)
@@ -420,11 +441,11 @@ func (db *SQLHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
-	return tx.Create(&announcement{
+	return tx.Create(&dbAnnouncement{
 		Host:        hostKey[:],
 		BlockHeight: a.Index.Height,
 		BlockID:     a.Index.ID[:],
-		Timestamp:   a.Timestamp.UTC(), // use UTC in DB
+		Timestamp:   a.Timestamp,
 		NetAddress:  a.NetAddress,
 	}).Error
 }

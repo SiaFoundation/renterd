@@ -24,7 +24,7 @@ type hostAnnouncement struct {
 }
 
 // ForEachAnnouncement calls fn on each host announcement in a block.
-func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consensus.PublicKey, Announcement) error) error {
+func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consensus.PublicKey, Announcement)) {
 	for _, txn := range b.Transactions {
 		for _, arb := range txn.ArbitraryData {
 			// decode announcement
@@ -42,7 +42,7 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 				continue
 			}
 
-			err := fn(hostKey, Announcement{
+			fn(hostKey, Announcement{
 				Index: consensus.ChainIndex{
 					Height: uint64(height),
 					ID:     consensus.BlockID(b.ID()),
@@ -50,12 +50,8 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 				Timestamp:  time.Unix(int64(b.Timestamp), 0),
 				NetAddress: string(ha.NetAddress),
 			})
-			if err != nil {
-				return err
-			}
 		}
 	}
-	return nil
 }
 
 // Interaction represents an interaction with a host at a given time.
