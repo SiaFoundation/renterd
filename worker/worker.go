@@ -115,8 +115,8 @@ func (w *Worker) rhpScanHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(RHPScanResponse{
-		HostSettings: settings,
-		Ping:         time.Since(start).Milliseconds(),
+		Settings: settings,
+		Ping:     Duration(time.Since(start)),
 	})
 }
 

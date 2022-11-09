@@ -1,6 +1,9 @@
 package worker
 
 import (
+	"strconv"
+	"time"
+
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -20,6 +23,25 @@ type (
 	PrivateKey = consensus.PrivateKey
 )
 
+// A Duration is the elapsed time between two instants. Durations are encoded as
+// an integer number of milliseconds.
+type Duration time.Duration
+
+// MarshalText implements encoding.TextMarshaler.
+func (d Duration) MarshalText() ([]byte, error) {
+	return []byte(strconv.FormatInt(time.Duration(d).Milliseconds(), 10)), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (d *Duration) UnmarshalText(b []byte) error {
+	ms, err := strconv.ParseInt(string(b), 10, 64)
+	if err != nil {
+		return err
+	}
+	*d = Duration(time.Duration(ms) * time.Millisecond)
+	return nil
+}
+
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
 	HostKey PublicKey `json:"hostKey"`
@@ -28,8 +50,8 @@ type RHPScanRequest struct {
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
 type RHPScanResponse struct {
-	HostSettings rhpv2.HostSettings `json:"hostSettings"`
-	Ping         int64              `json:"ping"`
+	Settings rhpv2.HostSettings `json:"settings"`
+	Ping     Duration           `json:"ping"`
 }
 
 // RHPPrepareFormRequest is the request type for the /rhp/prepare/form endpoint.
