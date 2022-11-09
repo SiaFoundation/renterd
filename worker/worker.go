@@ -109,10 +109,15 @@ func (w *Worker) rhpScanHandler(jc jape.Context) {
 	if jc.Decode(&rsr) != nil {
 		return
 	}
+	start := time.Now()
 	settings, err := w.rhp.Settings(jc.Request.Context(), rsr.HostIP, rsr.HostKey)
-	if jc.Check("couldn't scan host", err) == nil {
-		jc.Encode(settings)
+	if jc.Check("couldn't scan host", err) != nil {
+		return
 	}
+	jc.Encode(RHPScanResponse{
+		Settings: settings,
+		Ping:     Duration(time.Since(start)),
+	})
 }
 
 func (w *Worker) rhpFormHandler(jc jape.Context) {
