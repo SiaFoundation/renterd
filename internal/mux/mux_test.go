@@ -65,6 +65,8 @@ func TestMux(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
+	} else if err := m.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := <-serverCh; err != nil && err != ErrPeerClosedStream {
