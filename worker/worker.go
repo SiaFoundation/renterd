@@ -51,10 +51,10 @@ type (
 
 	// A SlabMover uploads, downloads, and migrates slabs.
 	SlabMover interface {
-		UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (slab.Slab, []HostInteraction, error)
-		DownloadSlab(ctx context.Context, w io.Writer, slab slab.Slice, contracts []Contract) ([]HostInteraction, error)
-		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) ([]HostInteraction, error)
-		MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) ([]HostInteraction, error)
+		UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (slab.Slab, error)
+		DownloadSlab(ctx context.Context, w io.Writer, slab slab.Slice, contracts []Contract) error
+		DeleteSlabs(ctx context.Context, slabs []slab.Slab, contracts []Contract) error
+		MigrateSlab(ctx context.Context, s *slab.Slab, currentHeight uint64, from, to []Contract) error
 	}
 )
 
@@ -186,7 +186,7 @@ func (w *Worker) rhpRegistryUpdateHandler(jc jape.Context) {
 }
 
 func (w *Worker) slabsUploadHandler(jc jape.Context) {
-	jc.Custom((*[]byte)(nil), SlabsUploadResponse{})
+	jc.Custom((*[]byte)(nil), slab.Slab{})
 
 	var sur SlabsUploadRequest
 	dec := json.NewDecoder(jc.Request.Body)
@@ -196,15 +196,11 @@ func (w *Worker) slabsUploadHandler(jc jape.Context) {
 	}
 
 	data := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
-	slab, his, err := w.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
+	slab, err := w.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
 	if jc.Check("couldn't upload slab", err) != nil {
 		return
 	}
-
-	jc.Encode(SlabsUploadResponse{
-		Slab:     slab,
-		Metadata: his,
-	})
+	jc.Encode(slab)
 }
 
 func (w *Worker) slabsDownloadHandler(jc jape.Context) {
@@ -215,11 +211,10 @@ func (w *Worker) slabsDownloadHandler(jc jape.Context) {
 		return
 	}
 
-	his, err := w.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
+	err := w.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
 	if jc.Check("couldn't download slabs", err) != nil {
 		return
 	}
-	json.NewEncoder(jc.ResponseWriter).Encode(his)
 }
 
 func (w *Worker) slabsMigrateHandler(jc jape.Context) {
@@ -228,15 +223,11 @@ func (w *Worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	his, err := w.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
+	err := w.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
-
-	jc.Encode(SlabsMigrateResponse{
-		Slab:     smr.Slab,
-		Metadata: his,
-	})
+	jc.Encode(smr.Slab)
 }
 
 func (w *Worker) slabsDeleteHandler(jc jape.Context) {
@@ -244,13 +235,10 @@ func (w *Worker) slabsDeleteHandler(jc jape.Context) {
 	if jc.Decode(&sdr) != nil {
 		return
 	}
-
-	his, err := w.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
+	err := w.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
 	if jc.Check("couldn't delete slabs", err) != nil {
 		return
 	}
-
-	jc.Encode(SlabsDeleteResponse{Metadata: his})
 }
 
 func (w *Worker) objectsKeyHandlerGET(jc jape.Context) {
@@ -265,7 +253,7 @@ func (w *Worker) objectsKeyHandlerGET(jc jape.Context) {
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
 	for _, ss := range slab.SlabsForDownload(o.Slabs, offset, length) {
 		var contracts []Contract = nil // TODO: ask bus, using ss.Slab.Shards
-		if _, err := w.sm.DownloadSlab(jc.Request.Context(), cw, ss, contracts); err != nil {
+		if err := w.sm.DownloadSlab(jc.Request.Context(), cw, ss, contracts); err != nil {
 			// TODO: handle error
 			return
 		}
@@ -282,7 +270,7 @@ func (w *Worker) objectsKeyHandlerPUT(jc jape.Context) {
 	var totalShards uint8 = 0      // TODO
 	var currentHeight uint64 = 0   // TODO
 	for {
-		s, _, err := w.sm.UploadSlab(jc.Request.Context(), jc.Request.Body, minShards, totalShards, currentHeight, contracts)
+		s, err := w.sm.UploadSlab(jc.Request.Context(), jc.Request.Body, minShards, totalShards, currentHeight, contracts)
 		if err == io.EOF {
 			break
 		} else if jc.Check("couldn't upload slab", err) != nil {

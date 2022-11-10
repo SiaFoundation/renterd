@@ -14,7 +14,7 @@ import (
 )
 
 func TestSlabs(t *testing.T) {
-	ctx := slab.ContextWithMetricsRecorder(context.Background())
+	ctx := context.Background()
 
 	// generate data
 	data := frand.Bytes(1000000)

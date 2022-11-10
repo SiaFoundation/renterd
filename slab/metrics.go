@@ -1,84 +1,53 @@
 package slab
 
 import (
-	"context"
-	"sync"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/siad/types"
 )
 
-type contextKey string
-
-const keyMetricsRecorder contextKey = "metricsRecorder"
-
-type (
-	TransferMetric interface {
-		IsMetric()
-	}
-
-	MetricsRecorder interface {
-		Metrics() []TransferMetric
-		RecordMetric(m TransferMetric)
-	}
-
-	// A MetricSlabTransfer contains relevant information about an interaction with
-	// a host involving uploading and/or downloading slabs.
-	MetricSlabTransfer struct {
-		Type      string
-		Timestamp time.Time
-		HostKey   consensus.PublicKey
-		Duration  time.Duration
-		Err       error
-
-		Size uint64
-	}
-
-	// A MetricSlabDeletion contains relevant information about an interaction with
-	// a host involving the deletion of slabs.
-	MetricSlabDeletion struct {
-		Type      string
-		Timestamp time.Time
-		HostKey   consensus.PublicKey
-		Duration  time.Duration
-		Err       error
-
-		NumRoots uint64
-	}
-
-	recorder struct {
-		m  []TransferMetric
-		mu sync.Mutex
-	}
-
-	noopRecorder struct{}
-)
-
-func (sc MetricSlabTransfer) IsMetric() {}
-func (sc MetricSlabDeletion) IsMetric() {}
-
-func RecorderFromContext(ctx context.Context) MetricsRecorder {
-	if mr, ok := ctx.Value(keyMetricsRecorder).(MetricsRecorder); ok {
-		return mr
-	}
-	return &noopRecorder{}
+type Metric interface {
+	isMetric()
 }
 
-func ContextWithMetricsRecorder(ctx context.Context) context.Context {
-	return context.WithValue(ctx, keyMetricsRecorder, &recorder{})
+type MetricsRecorder interface {
+	RecordMetric(m Metric)
 }
 
-func (nr *noopRecorder) Metrics() []TransferMetric     { return nil }
-func (nr *noopRecorder) RecordMetric(m TransferMetric) {}
-
-func (r *recorder) Metrics() []TransferMetric {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.m
+// A MetricSectorUpload contains metrics resulting from a sector upload.
+type MetricSectorUpload struct {
+	HostKey    consensus.PublicKey
+	Contract   types.FileContractID
+	Timestamp  time.Time
+	Elapsed    time.Duration
+	Err        error
+	Cost       types.Currency
+	Collateral types.Currency
 }
 
-func (r *recorder) RecordMetric(m TransferMetric) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.m = append(r.m, m)
+// A MetricSectorDownload contains metrics resulting from a sector download.
+type MetricSectorDownload struct {
+	HostKey    consensus.PublicKey
+	Contract   types.FileContractID
+	Timestamp  time.Time
+	Elapsed    time.Duration
+	Err        error
+	Downloaded uint64
+	Cost       types.Currency
 }
+
+// A MetricSectorDeletion contains metrics resulting from a sector deletion.
+type MetricSectorDeletion struct {
+	HostKey   consensus.PublicKey
+	Contract  types.FileContractID
+	Timestamp time.Time
+	Elapsed   time.Duration
+	Err       error
+	Cost      types.Currency
+	NumRoots  uint64
+}
+
+func (MetricSectorUpload) isMetric()   {}
+func (MetricSectorDownload) isMetric() {}
+func (MetricSectorDeletion) isMetric() {}

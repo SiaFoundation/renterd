@@ -3,7 +3,6 @@ package worker
 import (
 	"strconv"
 	"time"
-	"encoding/json"
 
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -181,12 +180,6 @@ type SlabsUploadRequest struct {
 	CurrentHeight uint64     `json:"currentHeight"`
 }
 
-// SlabsUploadResponse is the response type for the /slabs/upload endpoint.
-type SlabsUploadResponse struct {
-	Slab     slab.Slab         `json:"slab"`
-	Metadata []HostInteraction `json:"metadata"`
-}
-
 // SlabsDownloadRequest is the request type for the /slabs/download endpoint.
 type SlabsDownloadRequest struct {
 	Slab      slab.Slice `json:"slab"`
@@ -199,32 +192,10 @@ type SlabsDeleteRequest struct {
 	Contracts []Contract  `json:"contracts"`
 }
 
-// SlabsDeleteResponse is the response type for the /slabs/delete endpoint.
-type SlabsDeleteResponse struct {
-	Metadata []HostInteraction `json:"metadata"`
-}
-
 // SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
 type SlabsMigrateRequest struct {
 	Slab          slab.Slab  `json:"slab"`
 	From          []Contract `json:"from"`
 	To            []Contract `json:"to"`
 	CurrentHeight uint64     `json:"currentHeight"`
-}
-
-// SlabsMigrateResponse is the response type for the /slabs/migrate endpoint.
-type SlabsMigrateResponse struct {
-	Slab     slab.Slab         `json:"slab"`
-	Metadata []HostInteraction `json:"metadata"`
-}
-
-// A HostInteraction contains information about an interaction with a host.
-// These objects eventually end up as host interactions in the host
-// database.
-type HostInteraction struct {
-	Timestamp int64           `json:"timestamp"`
-	Type      string          `json:"type"`
-	HostKey   PublicKey       `json:"hostKey"`
-	Result    json.RawMessage `json:"result,omitempty"`
-	Error     string          `json:"error,omitempty"`
 }

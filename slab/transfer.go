@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -24,26 +23,23 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]S
 	if len(hosts) < len(shards) {
 		return nil, errors.New("fewer hosts than shards")
 	}
-	mr := RecorderFromContext(ctx)
 
 	type req struct {
 		host       Host
 		shardIndex int
 	}
 	type resp struct {
-		req      req
-		root     consensus.Hash256
-		duration time.Duration
-		err      error
+		req  req
+		root consensus.Hash256
+		err  error
 	}
 	reqChan := make(chan req, len(shards))
 	defer close(reqChan)
 	respChan := make(chan resp, len(shards))
 	worker := func() {
 		for req := range reqChan {
-			start := time.Now()
 			root, err := req.host.UploadSector((*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
-			respChan <- resp{req, root, time.Since(start), err}
+			respChan <- resp{req, root, err}
 		}
 	}
 
@@ -63,15 +59,6 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]S
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
 		inflight--
-
-		mr.RecordMetric(MetricSlabTransfer{
-			Type:      "UploadSector",
-			Timestamp: time.Now(),
-			HostKey:   resp.req.host.PublicKey(),
-			Duration:  resp.duration,
-			Err:       resp.err,
-			Size:      rhpv2.SectorSize,
-		})
 
 		if resp.err != nil {
 			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
@@ -122,16 +109,14 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 	if len(hosts) < int(s.MinShards) {
 		return nil, errors.New("not enough hosts to recover shard")
 	}
-	mr := RecorderFromContext(ctx)
 
 	type req struct {
 		hostIndex int
 	}
 	type resp struct {
-		req      req
-		shard    []byte
-		duration time.Duration
-		err      error
+		req   req
+		shard []byte
+		err   error
 	}
 	reqChan := make(chan req, s.MinShards)
 	defer close(reqChan)
@@ -147,14 +132,13 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 				}
 			}
 			if shard == nil {
-				respChan <- resp{req, nil, 0, errors.New("slab is not stored on this host")}
+				respChan <- resp{req, nil, errors.New("slab is not stored on this host")}
 				continue
 			}
 			offset, length := s.SectorRegion()
 			var buf bytes.Buffer
-			start := time.Now()
 			err := h.DownloadSector(&buf, shard.Root, offset, length)
-			respChan <- resp{req, buf.Bytes(), time.Since(start), err}
+			respChan <- resp{req, buf.Bytes(), err}
 		}
 	}
 
@@ -174,15 +158,6 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
 		inflight--
-
-		mr.RecordMetric(MetricSlabTransfer{
-			Type:      "DownloadSector",
-			Timestamp: time.Now(),
-			HostKey:   hosts[resp.req.hostIndex].PublicKey(),
-			Duration:  resp.duration,
-			Err:       resp.err,
-			Size:      uint64(len(resp.shard)),
-		})
 
 		if resp.err != nil {
 			errs = append(errs, &HostError{hosts[resp.req.hostIndex].PublicKey(), resp.err})
@@ -253,8 +228,6 @@ func SlabsForDownload(slabs []Slice, offset, length int64) []Slice {
 
 // DeleteSlabs deletes a set of slabs from the provided hosts.
 func DeleteSlabs(ctx context.Context, slabs []Slab, hosts []Host) error {
-	mr := RecorderFromContext(ctx)
-
 	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
@@ -267,22 +240,12 @@ func DeleteSlabs(ctx context.Context, slabs []Slab, hosts []Host) error {
 		go func(h Host) {
 			// NOTE: if host is not storing any sectors, the map lookup will return
 			// nil, making this a no-op
-			start := time.Now()
 			err := h.DeleteSectors(rootsByHost[h.PublicKey()])
 			if err != nil {
 				errChan <- &HostError{h.PublicKey(), err}
 			} else {
 				errChan <- nil
 			}
-
-			mr.RecordMetric(MetricSlabDeletion{
-				Type:      "DeleteSectors",
-				Timestamp: time.Now(),
-				HostKey:   h.PublicKey(),
-				Duration:  time.Since(start),
-				Err:       err,
-				NumRoots:  uint64(len(rootsByHost[h.PublicKey()])),
-			})
 		}(h)
 	}
 
@@ -329,22 +292,57 @@ outer:
 	}
 	s.Encrypt(shards)
 
-	// reupload + overwrite migrated shards
-	var m int
-	migrations := make([][]byte, len(shardIndices))
-	for _, i := range shardIndices {
-		migrations[m] = shards[i]
-		m++
+	// spawn workers and send initial requests
+	type req struct {
+		host       Host
+		shardIndex int
 	}
-
-	migrated, err := parallelUploadSlab(ctx, migrations, to)
-	if err != nil {
-		return err
+	type resp struct {
+		req  req
+		root consensus.Hash256
+		err  error
 	}
-	m = 0
+	reqChan := make(chan req, len(shardIndices))
+	defer close(reqChan)
+	respChan := make(chan resp, len(shardIndices))
+	worker := func() {
+		for req := range reqChan {
+			root, err := req.host.UploadSector((*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+			respChan <- resp{req, root, err}
+		}
+	}
+	hostIndex := 0
+	inflight := 0
 	for _, i := range shardIndices {
-		s.Shards[i] = migrated[m]
-		m++
+		go worker()
+		reqChan <- req{to[hostIndex], i}
+		hostIndex++
+		inflight++
+	}
+	// collect responses
+	rem := len(shardIndices)
+	var errs HostErrorSet
+	for rem > 0 && inflight > 0 {
+		resp := <-respChan
+		inflight--
+		if resp.err != nil {
+			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
+			// try next host
+			if hostIndex < len(to) {
+				reqChan <- req{to[hostIndex], resp.req.shardIndex}
+				hostIndex++
+				inflight++
+			}
+		} else {
+			s.Shards[resp.req.shardIndex] = Sector{
+				Host: resp.req.host.PublicKey(),
+				Root: resp.root,
+			}
+			rem--
+		}
+	}
+	if rem > 0 {
+		return errs
 	}
 	return nil
 }
