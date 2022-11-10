@@ -393,7 +393,7 @@ func (db *SQLHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.In
 		// Create an interaction.
 		return tx.Create(&dbInteraction{
 			Host:      hostKey[:],
-			Timestamp: hi.Timestamp,
+			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
 			Type:      hi.Type,
 			Result:    hi.Result,
 		}).Error
@@ -445,7 +445,7 @@ func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Annou
 		Host:        hostKey[:],
 		BlockHeight: a.Index.Height,
 		BlockID:     a.Index.ID[:],
-		Timestamp:   a.Timestamp,
+		Timestamp:   a.Timestamp.UTC(), // explicitly store timestamp as UTC
 		NetAddress:  a.NetAddress,
 	}).Error
 }
