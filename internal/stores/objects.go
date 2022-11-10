@@ -274,8 +274,8 @@ type (
 		ID string `gorm:"primaryKey"`
 
 		// Object related fields.
-		Key   []byte
-		Slabs []dbSlice `gorm:"foreignKey:ObjectID;OnDelete:CASCADE"` // CASCADE to delete slices too
+		Key   string    // json string
+		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ID"` // CASCADE to delete slices too
 	}
 
 	// dbObject describes a reference to a slab.Slab in the database.
@@ -285,32 +285,71 @@ type (
 
 		// ObjectID identifies the object the slice belongs to. It is
 		// the foreign key of the object table.
-		ObjectID string `gorm:"index"`
+		ObjectID string `gorm:"index;NOT NULL"`
 
 		// Slice related fields.
-		Slab   dbSlab `gorm:"foreignKey:ID"` // No CASCADE to keep slabs
+		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE;foreignKey:ID"` // CASCADE to delete slabs too
 		Offset uint32
 		Length uint32
 	}
 
 	// dbObject describes a slab.Slab in the database.
+	// NOTE: A Slab is uniquely identified by its key.
+	// NOTE TO REVIEWERS: Is this ok? What if there is no key or we want 2
+	// slabs with the same shared key but different sharding?
 	dbSlab struct {
-		// ID uniquely identifies a slab in the database.
-		ID uint64 `gorm:"primaryKey"`
-
-		// Slab related fields.
-		Key       []byte
+		ID        uint64 `gorm:"primaryKey"`
+		Key       string `gorm:"unique"` // json string
 		MinShards uint8
-		Shards    []dbSector `gorm:"foreignKey:Root"` // No CASCADE to keep sectors
+		Shards    []dbShard `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
+	}
+
+	dbShard struct {
+		ID     uint64 `gorm:"primaryKey"`
+		SlabID uint64 `gorm:"index;NOT NULL"`
+
+		SectorID []byte `gorm:"index;NOT NULL"` // No CASCADE to not delete sectors
+		Sector   dbSector
 	}
 
 	// dbSector describes a slab.Sector in the database.
 	dbSector struct {
 		// Root uniquely identifies a sector and is therefore the primary key.
 		Root []byte `gorm:"primaryKey"`
-		Host []byte
+
+		// Host is the key of the host that stores the sector.
+		// TODO: once we migrate the contract store over to a relational
+		// db as well, we might want to put the contract ID here and
+		// have a contract table with a mapping of contract ID to host.
+		// That makes for better migrations.
+		Host []byte `gorm:"index; NOT NULL"`
 	}
 )
+
+// TableName implements the gorm.Tabler interface.
+func (dbObject) TableName() string {
+	return "objects"
+}
+
+// TableName implements the gorm.Tabler interface.
+func (dbSlice) TableName() string {
+	return "slices"
+}
+
+// TableName implements the gorm.Tabler interface.
+func (dbSlab) TableName() string {
+	return "slabs"
+}
+
+// TableName implements the gorm.Tabler interface.
+func (dbShard) TableName() string {
+	return "shards"
+}
+
+// TableName implements the gorm.Tabler interface.
+func (dbSector) TableName() string {
+	return "sectors"
+}
 
 // NewSQLObjectStore creates a new SQLObjectStore connected to a DB through
 // conn.
@@ -327,10 +366,14 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 			&dbObject{},
 			&dbSlice{},
 			&dbSlab{},
+			&dbShard{},
 			&dbSector{},
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, err
+		}
+		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
+			return nil, res.Error
 		}
 	}
 
@@ -350,8 +393,72 @@ func (s *SQLObjectStore) Get(key string) (object.Object, error) {
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLObjectStore) Put(key string, o object.Object) error {
-	panic("not implemented yet")
+func (s *SQLObjectStore) Put(key string, o object.Object, skip bool) error {
+	// Put is ACID.
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Try to delete first. We want to get rid of the object and its
+		// slabs if it exists.
+		err := tx.Delete(&dbObject{ID: key}).Error
+		if err != nil {
+			return err
+		}
+
+		if skip {
+			return nil
+		}
+
+		// Insert a new object.
+		err = tx.Create(&dbObject{
+			ID:  key,
+			Key: o.Key.String(),
+		}).Error
+		if err != nil {
+			return err
+		}
+
+		for _, ss := range o.Slabs {
+			// Create Slice.
+			err = tx.Create(&dbSlice{
+				ObjectID: key,
+				Offset:   ss.Offset,
+				Length:   ss.Length,
+			}).Error
+			if err != nil {
+				return err
+			}
+
+			// Create Slab.
+			var slab dbSlab
+			err = tx.FirstOrCreate(&slab, &dbSlab{
+				Key:       ss.Key.String(),
+				MinShards: ss.MinShards,
+			}).Error
+			if err != nil {
+				return err
+			}
+
+			for _, shard := range ss.Shards {
+				// Create sector. Might exist already.
+				var sector dbSector
+				err = tx.FirstOrCreate(&sector, &dbSector{
+					Host: shard.Host[:],
+					Root: shard.Root[:],
+				}).Error
+				if err != nil {
+					return err
+				}
+				// Create shard.
+				err = tx.Create(&dbShard{
+					SlabID:   slab.ID,
+					SectorID: sector.Root,
+				}).Error
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // Delete implements the bus.ObjectStore interface.

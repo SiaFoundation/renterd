@@ -206,25 +206,25 @@ type (
 	// the corresponding announcements and interactions with that host.
 	dbHost struct {
 		PublicKey     []byte           `gorm:"primaryKey"`
-		Announcements []dbAnnouncement `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
-		Interactions  []dbInteraction  `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
+		Announcements []dbAnnouncement `gorm:"foreignKey:Host;OnDelete:CASCADE"`
+		Interactions  []dbInteraction  `gorm:"foreignKey:Host;OnDelete:CASCADE"`
 	}
 
 	dbAnnouncement struct {
-		ID          uint64 `gorm:"primaryKey"`
-		Host        []byte
-		BlockHeight uint64
-		BlockID     []byte
-		Timestamp   time.Time
-		NetAddress  string
+		ID          uint64    `gorm:"primaryKey"`
+		Host        []byte    `gorm:"NOT NULL"`
+		BlockHeight uint64    `gorm:"NOT NULL"`
+		BlockID     []byte    `gorm:"NOT NULL"`
+		Timestamp   time.Time `gorm:"NOT NULL"`
+		NetAddress  string    `gorm:"NOT NULL"`
 	}
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
-		Host      []byte `gorm:"index"`
 		ID        uint64 `gorm:"primaryKey"`
+		Host      []byte `gorm:"index; NOT NULL"`
 		Result    json.RawMessage
-		Timestamp time.Time `gorm:"index"`
+		Timestamp time.Time `gorm:"index; NOT NULL"`
 		Type      string
 	}
 
@@ -316,6 +316,9 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
+		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
+			return nil, modules.ConsensusChangeID{}, res.Error
+		}
 	}
 
 	// Get latest consensus change ID or init db.
@@ -360,7 +363,7 @@ func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 		Joins("JOIN host_interactions ON host_interactions.Host = hosts.Public_Key").
 		Select("Public_key").
 		Group("Public_Key").
-		Having("MAX(Timestamp) < ?", notSince).
+		Having("MAX(Timestamp) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
 		Limit(max).
 		Find(&foundHosts).
 		Error

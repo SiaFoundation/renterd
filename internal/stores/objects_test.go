@@ -1,10 +1,11 @@
 package stores
 
 import (
-	"encoding/hex"
+	"os"
 	"reflect"
 	"testing"
 
+	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/slab"
 	"lukechampine.com/frand"
@@ -102,11 +103,114 @@ func TestJSONObjectStore(t *testing.T) {
 
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
-	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
+	//dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
+	dbName := "test.db"
 
-	conn := NewEphemeralSQLiteConnection(dbName)
-	_, err := NewSQLObjectStore(conn, true)
+	//conn := NewEphemeralSQLiteConnection(dbName)
+	os.RemoveAll(dbName)
+	conn := NewSQLiteConnection(dbName)
+	os, err := NewSQLObjectStore(conn, true)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create some sectors.
+	sector1 := dbSector{
+		Root: []byte{1, 2},
+	}
+	sector2 := dbSector{
+		Root: []byte{2, 1},
+	}
+
+	err = os.db.Create(&dbSlab{
+		Key:       "foo1",
+		MinShards: 10,
+		Shards: []dbShard{
+			{
+				Sector: sector1,
+			},
+			{
+				Sector: sector2,
+			},
+		},
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = os.db.Create(&dbSlab{
+		Key:       "foo2",
+		MinShards: 10,
+		Shards: []dbShard{
+			{
+				Sector: sector1,
+			},
+			{
+				Sector: sector2,
+			},
+		},
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+
+// TestSQLPut verifies the functionality of (*SQLObjectStore).Put.
+func TestSQLObjectStorePut(t *testing.T) {
+	//dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
+	dbName := "/Users/cschinnerl/Desktop/db2.sqlite"
+
+	//conn := NewEphemeralSQLiteConnection(dbName)
+	os.RemoveAll(dbName)
+	conn := NewSQLiteConnection(dbName)
+	os, err := NewSQLObjectStore(conn, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an object with 2 slabs pointing to 2 different sectors.
+	obj1 := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []slab.Slice{
+			{
+				Slab: slab.Slab{
+					Key:       slab.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []slab.Sector{
+						{
+							Host: consensus.GeneratePrivateKey().PublicKey(),
+							Root: consensus.Hash256{1},
+						},
+					},
+				},
+				Offset: 10,
+				Length: 100,
+			},
+			{
+				Slab: slab.Slab{
+					Key:       slab.GenerateEncryptionKey(),
+					MinShards: 2,
+					Shards: []slab.Sector{
+						{
+							Host: consensus.GeneratePrivateKey().PublicKey(),
+							Root: consensus.Hash256{2},
+						},
+					},
+				},
+				Offset: 20,
+				Length: 200,
+			},
+		},
+	}
+
+	// Store it.
+	if err := os.Put("key1", obj1, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to store it again. Should work.
+	if err := os.Put("key1", obj1, true); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -17,9 +17,14 @@ type EncryptionKey struct {
 	entropy *[32]byte
 }
 
+// String returns a hex-encoded representation of the key.
+func (k EncryptionKey) String() (s string) {
+	return "key:" + hex.EncodeToString(k.entropy[:])
+}
+
 // MarshalJSON implements the json.Marshaler interface.
 func (k EncryptionKey) MarshalJSON() ([]byte, error) {
-	return []byte(`"key:` + hex.EncodeToString(k.entropy[:]) + `"`), nil
+	return []byte(`"` + k.String() + `"`), nil
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
