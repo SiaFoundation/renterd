@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"encoding/hex"
 	"reflect"
 	"testing"
 
@@ -96,5 +97,16 @@ func TestJSONObjectStore(t *testing.T) {
 		t.Fatal("object not found")
 	} else if !reflect.DeepEqual(got, obj) {
 		t.Fatal("objects are not equal")
+	}
+}
+
+// TestSQLObjectStore tests basic SQLObjectStore functionality.
+func TestSQLObjectStore(t *testing.T) {
+	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
+
+	conn := NewEphemeralSQLiteConnection(dbName)
+	_, err := NewSQLObjectStore(conn, true)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

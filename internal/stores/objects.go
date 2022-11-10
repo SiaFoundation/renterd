@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/slab"
+	"gorm.io/gorm"
 )
 
 type refSector struct {
@@ -258,4 +259,102 @@ func NewJSONObjectStore(dir string) (*JSONObjectStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+type (
+	SQLObjectStore struct {
+		db *gorm.DB
+	}
+
+	// dbObject describes an object.Object in the database.
+	dbObject struct {
+		// ID uniquely identifies an Object within the database. Since
+		// this ID is also exposed via the API it's a string for
+		// convenience.
+		ID string `gorm:"primaryKey"`
+
+		// Object related fields.
+		Key   []byte
+		Slabs []dbSlice `gorm:"foreignKey:ObjectID;OnDelete:CASCADE"` // CASCADE to delete slices too
+	}
+
+	// dbObject describes a reference to a slab.Slab in the database.
+	dbSlice struct {
+		// ID uniquely identifies a slice in the db.
+		ID uint64 `gorm:"primaryKey"`
+
+		// ObjectID identifies the object the slice belongs to. It is
+		// the foreign key of the object table.
+		ObjectID string `gorm:"index"`
+
+		// Slice related fields.
+		Slab   dbSlab `gorm:"foreignKey:ID"` // No CASCADE to keep slabs
+		Offset uint32
+		Length uint32
+	}
+
+	// dbObject describes a slab.Slab in the database.
+	dbSlab struct {
+		// ID uniquely identifies a slab in the database.
+		ID uint64 `gorm:"primaryKey"`
+
+		// Slab related fields.
+		Key       []byte
+		MinShards uint8
+		Shards    []dbSector `gorm:"foreignKey:Root"` // No CASCADE to keep sectors
+	}
+
+	// dbSector describes a slab.Sector in the database.
+	dbSector struct {
+		// Root uniquely identifies a sector and is therefore the primary key.
+		Root []byte `gorm:"primaryKey"`
+		Host []byte
+	}
+)
+
+// NewSQLObjectStore creates a new SQLObjectStore connected to a DB through
+// conn.
+func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, error) {
+	db, err := gorm.Open(conn, &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+
+	if migrate {
+		// Create the tables.
+		tables := []interface {
+		}{
+			&dbObject{},
+			&dbSlice{},
+			&dbSlab{},
+			&dbSector{},
+		}
+		if err := db.AutoMigrate(tables...); err != nil {
+			return nil, err
+		}
+	}
+
+	return &SQLObjectStore{
+		db: db,
+	}, nil
+}
+
+// List implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) List(key string) []string {
+	panic("not implemented yet")
+}
+
+// Get implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) Get(key string) (object.Object, error) {
+	panic("not implemented yet")
+}
+
+// Put implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) Put(key string, o object.Object) error {
+	panic("not implemented yet")
+}
+
+// Delete implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) Delete(key string) error {
+	panic("not implemented yet")
 }

@@ -202,10 +202,12 @@ type (
 	}
 
 	// dbHost defines a hostdb.Interaction as persisted in the DB.
+	// Deleting a host from the db will cascade the deletion and also delete
+	// the corresponding announcements and interactions with that host.
 	dbHost struct {
 		PublicKey     []byte           `gorm:"primaryKey"`
-		Announcements []dbAnnouncement `gorm:"foreignKey:Host;references:PublicKey"`
-		Interactions  []dbInteraction  `gorm:"foreignKey:Host;references:PublicKey"`
+		Announcements []dbAnnouncement `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
+		Interactions  []dbInteraction  `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
 	}
 
 	dbAnnouncement struct {
