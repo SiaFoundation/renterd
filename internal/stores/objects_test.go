@@ -156,7 +156,6 @@ func TestSQLObjectStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 }
 
 // TestSQLPut verifies the functionality of (*SQLObjectStore).Put and Get.

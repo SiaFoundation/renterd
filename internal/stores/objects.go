@@ -278,7 +278,7 @@ type (
 		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ID"` // CASCADE to delete slices too
 	}
 
-	// dbObject describes a reference to a slab.Slab in the database.
+	// dbSlice describes a reference to a slab.Slab in the database.
 	dbSlice struct {
 		// ID uniquely identifies a slice in the db.
 		ID uint64 `gorm:"primaryKey"`
@@ -293,7 +293,7 @@ type (
 		Length uint32
 	}
 
-	// dbObject describes a slab.Slab in the database.
+	// dbSlab describes a slab.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
 	// NOTE TO REVIEWERS: Is this ok? What if there is no key or we want 2
 	// slabs with the same shared key but different sharding?
