@@ -18,9 +18,12 @@ type Config struct {
 		ScoreOverrides map[consensus.PublicKey]float64
 	}
 	Contracts struct {
-		Allowance types.Currency
-		Hosts     uint64
-		Period    uint64
+		Allowance   types.Currency
+		Hosts       uint64
+		Period      uint64
+		RenewWindow uint64
+		Download    uint64
+		Upload      uint64
 	}
 	Objects struct {
 		MinShards   uint8
@@ -33,7 +36,10 @@ func DefaultConfig() (c Config) {
 	c.Hosts.ScoreOverrides = make(map[consensus.PublicKey]float64)
 	c.Contracts.Allowance = types.SiacoinPrecision.Mul64(1000)
 	c.Contracts.Hosts = 50
-	c.Contracts.Period = 144 * 7 * 6 // 6 weeks
+	c.Contracts.Period = 144 * 7 * 6      // 6 weeks
+	c.Contracts.RenewWindow = 144 * 7 * 2 // 2 weeks
+	c.Contracts.Upload = 1 << 30          // 1 GiB
+	c.Contracts.Download = 1 << 33        // 8 GiB
 	c.Objects.MinShards = 10
 	c.Objects.TotalShards = 30
 	return

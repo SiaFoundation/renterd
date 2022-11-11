@@ -215,6 +215,15 @@ func (c *Client) HostSetContracts(name string) (contracts []Contract, err error)
 	return
 }
 
+// TODO
+func (c *Client) AcquireContractLock(types.FileContractID) (types.FileContractRevision, error) {
+	panic("unimplemented")
+}
+func (c *Client) ReleaseContractLock(types.FileContractID) error { panic("unimplemented") }
+func (c *Client) RenewableContracts(renewWindow uint64) ([]Contract, error) {
+	panic("unimplemented")
+}
+
 func (c *Client) objects(path string) (or ObjectsResponse, err error) {
 	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
 	return

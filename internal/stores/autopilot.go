@@ -47,6 +47,11 @@ func (s *EphemeralAutopilotStore) ProcessConsensusChange(cc modules.ConsensusCha
 	panic("unimplemented")
 }
 
+// Synced implements autopilot.Store.
+func (s *EphemeralAutopilotStore) Synced() bool {
+	panic("unimplemented")
+}
+
 // NewEphemeralAutopilotStore returns a new EphemeralAutopilotStore.
 func NewEphemeralAutopilotStore() *EphemeralAutopilotStore {
 	return &EphemeralAutopilotStore{}
