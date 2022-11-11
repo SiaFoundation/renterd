@@ -304,6 +304,11 @@ type (
 		Shards    []dbShard `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
 	}
 
+	// dbShard describes a mapping between a slab and a sector in the
+	// database.  A sector should only exist once in the database but it can
+	// be pointed to by multiple shards. For garbage collection we are able
+	// to count the number of shards pointing to a sector to see whether we
+	// still need that sector.
 	dbShard struct {
 		ID     uint64 `gorm:"primaryKey"`
 		SlabID uint64 `gorm:"index;NOT NULL"`
@@ -382,29 +387,65 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 	}, nil
 }
 
+// Object turn a dbObject into a object.Object.
+func (o dbObject) Object() (object.Object, error) {
+	var objKey object.EncryptionKey
+	if err := objKey.LoadString(o.Key); err != nil {
+		return object.Object{}, err
+	}
+	obj := object.Object{
+		Key:   objKey,
+		Slabs: make([]slab.Slice, len(o.Slabs)),
+	}
+	for i, sl := range o.Slabs {
+		var slabKey slab.EncryptionKey
+		if err := slabKey.LoadString(sl.Slab.Key); err != nil {
+			return object.Object{}, err
+		}
+		obj.Slabs[i] = slab.Slice{
+			Slab: slab.Slab{
+				Key:       slabKey,
+				MinShards: sl.Slab.MinShards,
+				Shards:    make([]slab.Sector, len(sl.Slab.Shards)),
+			},
+			Offset: sl.Offset,
+			Length: sl.Length,
+		}
+		for j, sh := range sl.Slab.Shards {
+			copy(obj.Slabs[i].Shards[j].Host[:], sh.Sector.Host)
+			copy(obj.Slabs[i].Shards[j].Root[:], sh.Sector.Root)
+		}
+	}
+	return obj, nil
+}
+
 // List implements the bus.ObjectStore interface.
 func (s *SQLObjectStore) List(key string) []string {
 	panic("not implemented yet")
 }
 
+// ErrOBjectNotFound is returned if get is unable to retrieve an object from the
+// database.
+var ErrObjectNotFound = errors.New("object not found in database")
+
 // Get implements the bus.ObjectStore interface.
 func (s *SQLObjectStore) Get(key string) (object.Object, error) {
-	panic("not implemented yet")
+	obj, err := s.get(key)
+	if err != nil {
+		return object.Object{}, err
+	}
+	return obj.Object()
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLObjectStore) Put(key string, o object.Object, skip bool) error {
+func (s *SQLObjectStore) Put(key string, o object.Object) error {
 	// Put is ACID.
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
 		// slabs if it exists.
-		err := tx.Delete(&dbObject{ID: key}).Error
+		err := deleteObject(tx, key)
 		if err != nil {
 			return err
-		}
-
-		if skip {
-			return nil
 		}
 
 		// Insert a new object.
@@ -463,5 +504,24 @@ func (s *SQLObjectStore) Put(key string, o object.Object, skip bool) error {
 
 // Delete implements the bus.ObjectStore interface.
 func (s *SQLObjectStore) Delete(key string) error {
-	panic("not implemented yet")
+	return deleteObject(s.db, key)
+}
+
+// deleteObject deletes an object from the store.
+func deleteObject(tx *gorm.DB, key string) error {
+	return tx.Delete(&dbObject{ID: key}).Error
+}
+
+// get retrieves an object from the database.
+func (s *SQLObjectStore) get(key string) (dbObject, error) {
+	var obj dbObject
+	tx := s.db.Where(&dbObject{ID: key}).
+		Preload("Slabs").
+		Preload("Slabs.Slab.Shards").
+		Preload("Slabs.Slab.Shards.Sector").
+		Take(&obj)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return dbObject{}, ErrObjectNotFound
+	}
+	return obj, nil
 }

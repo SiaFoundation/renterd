@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"strings"
 
 	"go.sia.tech/renterd/slab"
 	"golang.org/x/crypto/chacha20"
@@ -22,6 +23,17 @@ func (k EncryptionKey) String() (s string) {
 	return "key:" + hex.EncodeToString(k.entropy[:])
 }
 
+// LoadString loads an EncryptionKey from a string.
+func (k *EncryptionKey) LoadString(s string) error {
+	k.entropy = new([32]byte)
+	if n, err := hex.Decode(k.entropy[:], []byte(strings.TrimPrefix(s, "key:"))); err != nil {
+		return err
+	} else if n != len(k.entropy) {
+		return errors.New("wrong seed length")
+	}
+	return nil
+}
+
 // MarshalJSON implements the json.Marshaler interface.
 func (k EncryptionKey) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + k.String() + `"`), nil
@@ -29,13 +41,7 @@ func (k EncryptionKey) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
 func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
-	k.entropy = new([32]byte)
-	if n, err := hex.Decode(k.entropy[:], bytes.TrimPrefix(bytes.Trim(b, `"`), []byte("key:"))); err != nil {
-		return err
-	} else if n != len(k.entropy) {
-		return errors.New("wrong seed length")
-	}
-	return nil
+	return k.LoadString(string(bytes.Trim(b, `"`)))
 }
 
 // Encrypt returns a cipher.StreamReader that encrypts r with k.
