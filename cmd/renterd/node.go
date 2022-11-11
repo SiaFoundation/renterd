@@ -192,7 +192,7 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	if err := os.MkdirAll(objectsDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	os, err := stores.NewJSONObjectStore(objectsDir)
+	os, err := stores.NewSQLObjectStore(dbConn, true)
 	if err != nil {
 		return nil, nil, err
 	}
