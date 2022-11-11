@@ -26,7 +26,7 @@ type (
 
 	// An ObjectStore stores objects.
 	ObjectStore interface {
-		List(key string) []string
+		List(key string) ([]string, error)
 		Get(key string) (object.Object, error)
 		Put(key string, o object.Object) error
 		Delete(key string) error
