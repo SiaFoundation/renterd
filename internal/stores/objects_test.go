@@ -3,7 +3,6 @@ package stores
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 
@@ -106,60 +105,6 @@ func TestJSONObjectStore(t *testing.T) {
 
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
-	//dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
-	dbName := "test.db"
-
-	//conn := NewEphemeralSQLiteConnection(dbName)
-	os.RemoveAll(dbName)
-	conn := NewSQLiteConnection(dbName)
-	os, err := NewSQLObjectStore(conn, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create some sectors.
-	sector1 := dbSector{
-		Root: []byte{1, 2},
-	}
-	sector2 := dbSector{
-		Root: []byte{2, 1},
-	}
-
-	err = os.db.Create(&dbSlab{
-		Key:       "foo1",
-		MinShards: 10,
-		Shards: []dbShard{
-			{
-				Sector: sector1,
-			},
-			{
-				Sector: sector2,
-			},
-		},
-	}).Error
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = os.db.Create(&dbSlab{
-		Key:       "foo2",
-		MinShards: 10,
-		Shards: []dbShard{
-			{
-				Sector: sector1,
-			},
-			{
-				Sector: sector2,
-			},
-		},
-	}).Error
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestSQLPut verifies the functionality of (*SQLObjectStore).Put and Get.
-func TestSQLObjectStorePut(t *testing.T) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 
 	conn := NewEphemeralSQLiteConnection(dbName)
@@ -350,10 +295,9 @@ func TestSQLObjectStorePut(t *testing.T) {
 
 // TestSQLList is a test for (*SQLObjectStore).List.
 func TestSQLList(t *testing.T) {
-	//dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
-	dbName := "/Users/cschinnerl/Desktop/test.sqlite"
+	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	//conn := NewEphemeralSQLiteConnection(dbName)
-	conn := NewSQLiteConnection(dbName)
+	conn := NewEphemeralSQLiteConnection(dbName)
 	os, err := NewSQLObjectStore(conn, true)
 	if err != nil {
 		t.Fatal(err)
