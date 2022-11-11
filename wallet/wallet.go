@@ -237,13 +237,13 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 	return nil
 }
 
-// Split returns a transaction that splits the wallet in the given number of
-// outputs with given amount. The transaction is funded but not signed.
+// Split returns a signed transaction that splits the wallet in the given number
+// of outputs with given amount.
 //
 // NOTE: split needs to use a minimal set of inputs and therefore does not reuse
 // the fund logic which randomizes the unspent transaction outputs used to fund
 // the transaction
-func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error) {
+func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, error) {
 	// prepare all outputs
 	var txn types.Transaction
 	for i := 0; i < int(outputs); i++ {
@@ -256,7 +256,7 @@ func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, fee
 	// fetch unspent transaction outputs
 	utxos, err := w.store.UnspentSiacoinElements()
 	if err != nil {
-		return types.Transaction{}, nil, err
+		return types.Transaction{}, err
 	}
 
 	// desc sort
@@ -272,38 +272,35 @@ func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, fee
 		}
 	}
 
-	// filter outputs that are in use
-	var u int
-	for _, sce := range utxos {
-		inUse := w.used[sce.ID] || inPool[sce.ID]
-		matured := cs.Index.Height >= sce.MaturityHeight
-		sameValue := sce.Value.Equals(amount)
-		if !inUse && !sameValue && matured {
-			utxos[u] = sce
-			u++
-		}
-	}
-	utxos = utxos[:u]
-
 	// estimate the fees
 	outputFees := feePerByte.Mul64(uint64(len(encoding.Marshal(txn.SiacoinOutputs))))
 	feePerInput := feePerByte.Mul64(BytesPerInput)
 
-	// search for minimal set
+	// collect outputs that cover the total amount
+	var inputs []SiacoinElement
 	want := amount.Mul64(uint64(outputs))
-	i := sort.Search(len(utxos)+1, func(i int) bool {
-		fee := feePerInput.Mul64(uint64(i)).Add(outputFees)
-		return SumOutputs(utxos[:i]).Cmp(want.Add(fee)) >= 0
-	})
+	for _, sce := range utxos {
+		inUse := w.used[sce.ID] || inPool[sce.ID]
+		matured := cs.Index.Height >= sce.MaturityHeight
+		sameValue := sce.Value.Equals(amount)
+		if inUse || sameValue || !matured {
+			continue
+		}
 
-	// no set found
-	if i == len(utxos)+1 {
-		return types.Transaction{}, nil, errors.New("insufficient balance")
+		inputs = append(inputs, sce)
+		fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
+		if SumOutputs(inputs).Cmp(want.Add(fee)) > 0 {
+			break
+		}
 	}
-	utxos = utxos[:i]
+
+	// not enough outputs found
+	fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
+	if SumOutputs(inputs).Cmp(want.Add(fee)) < 0 {
+		return types.Transaction{}, errors.New("insufficient balance")
+	}
 
 	// set the miner fee
-	fee := feePerInput.Mul64(uint64(len(utxos))).Add(outputFees)
 	txn.MinerFees = []types.Currency{fee}
 
 	// add the change output
@@ -326,7 +323,11 @@ func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, fee
 		w.used[sce.ID] = true
 	}
 
-	return txn, toSign, nil
+	err = w.SignTransaction(cs, &txn, toSign, ExplicitCoveredFields(txn))
+	if err != nil {
+		return types.Transaction{}, err
+	}
+	return txn, nil
 }
 
 // SumOutputs returns the total value of the supplied outputs.

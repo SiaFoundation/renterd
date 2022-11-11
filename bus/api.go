@@ -53,13 +53,6 @@ type WalletSplitRequest struct {
 	Outputs int            `json:"outputs"`
 }
 
-// WalletSplitResponse is the response type for the /wallet/split endpoint.
-type WalletSplitResponse struct {
-	Transaction   types.Transaction   `json:"transaction"`
-	ToSign        []types.OutputID    `json:"toSign"`
-	CoveredFields types.CoveredFields `json:"coveredFields"`
-}
-
 // WalletPrepareFormRequest is the request type for the /wallet/prepare/form
 // endpoint.
 type WalletPrepareFormRequest struct {
