@@ -420,8 +420,26 @@ func (o dbObject) Object() (object.Object, error) {
 }
 
 // List implements the bus.ObjectStore interface.
-func (s *SQLObjectStore) List(key string) []string {
-	panic("not implemented yet")
+func (s *SQLObjectStore) List(path string) ([]string, error) {
+	if !strings.HasSuffix(path, "/") {
+		panic("path must end in /")
+	}
+
+	inner := s.db.Model(&dbObject{}).Select("SUBSTR(id, ?) AS trimmed", len(path)+1).
+		Where("id LIKE ?", fmt.Sprintf("%v%%", path))
+	middle := s.db.Table("(?)", inner).
+		Select("trimmed, INSTR(trimmed, ?) AS slashindex", "/")
+	outer := s.db.Table("(?)", middle).
+		Select("CASE slashindex WHEN 0 THEN ? || trimmed ELSE ? || substr(trimmed, 0, slashindex+1) END AS result", path, path).
+		Group("result")
+
+	// NOTE: SQLite doesn't
+	var ids []string
+	err := outer.Find(&ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // ErrOBjectNotFound is returned if get is unable to retrieve an object from the

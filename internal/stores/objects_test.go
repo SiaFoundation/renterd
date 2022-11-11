@@ -163,8 +163,7 @@ func TestSQLObjectStore(t *testing.T) {
 func TestSQLObjectStorePut(t *testing.T) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 
-	//conn := NewEphemeralSQLiteConnection(dbName)
-	conn := NewSQLiteConnection(dbName)
+	conn := NewEphemeralSQLiteConnection(dbName)
 	os, err := NewSQLObjectStore(conn, true)
 	if err != nil {
 		t.Fatal(err)
@@ -347,5 +346,47 @@ func TestSQLObjectStorePut(t *testing.T) {
 	}
 	if err := countCheck(0, 0, 0, 0, 2); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestSQLList is a test for (*SQLObjectStore).List.
+func TestSQLList(t *testing.T) {
+	//dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
+	dbName := "/Users/cschinnerl/Desktop/test.sqlite"
+	//conn := NewEphemeralSQLiteConnection(dbName)
+	conn := NewSQLiteConnection(dbName)
+	os, err := NewSQLObjectStore(conn, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		"/foo/bar",
+		"/foo/bat",
+		"/foo/baz/quux",
+		"/foo/baz/quuz",
+		"/gab/guub",
+	}
+	for _, path := range paths {
+		os.Put(path, object.Object{
+			Key: object.GenerateEncryptionKey(),
+		})
+	}
+	tests := []struct {
+		prefix string
+		want   []string
+	}{
+		{"/", []string{"/foo/", "/gab/"}},
+		{"/foo/", []string{"/foo/bar", "/foo/bat", "/foo/baz/"}},
+		{"/foo/baz/", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
+		{"/gab/", []string{"/gab/guub"}},
+	}
+	for _, test := range tests {
+		got, err := os.List(test.prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, test.want) {
+			t.Errorf("\nlist: %v\ngot:  %v\nwant: %v", test.prefix, got, test.want)
+		}
 	}
 }
