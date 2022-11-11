@@ -194,11 +194,13 @@ func (w *Worker) slabsUploadHandler(jc jape.Context) {
 		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	data := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
 	slab, err := w.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
-	if jc.Check("couldn't upload slab", err) == nil {
-		jc.Encode(slab)
+	if jc.Check("couldn't upload slab", err) != nil {
+		return
 	}
+	jc.Encode(slab)
 }
 
 func (w *Worker) slabsDownloadHandler(jc jape.Context) {
@@ -208,8 +210,11 @@ func (w *Worker) slabsDownloadHandler(jc jape.Context) {
 	if jc.Decode(&sdr) != nil {
 		return
 	}
+
 	err := w.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
-	jc.Check("couldn't download slabs", err)
+	if jc.Check("couldn't download slabs", err) != nil {
+		return
+	}
 }
 
 func (w *Worker) slabsMigrateHandler(jc jape.Context) {
@@ -217,6 +222,7 @@ func (w *Worker) slabsMigrateHandler(jc jape.Context) {
 	if jc.Decode(&smr) != nil {
 		return
 	}
+
 	err := w.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -226,9 +232,12 @@ func (w *Worker) slabsMigrateHandler(jc jape.Context) {
 
 func (w *Worker) slabsDeleteHandler(jc jape.Context) {
 	var sdr SlabsDeleteRequest
-	if jc.Decode(&sdr) == nil {
-		err := w.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
-		jc.Check("couldn't delete slabs", err)
+	if jc.Decode(&sdr) != nil {
+		return
+	}
+	err := w.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
+	if jc.Check("couldn't delete slabs", err) != nil {
+		return
 	}
 }
 

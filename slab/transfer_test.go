@@ -2,6 +2,7 @@ package slab_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"testing"
@@ -13,6 +14,8 @@ import (
 )
 
 func TestSlabs(t *testing.T) {
+	ctx := context.Background()
+
 	// generate data
 	data := frand.Bytes(1000000)
 
@@ -21,7 +24,7 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, slabutil.NewMockHost())
 	}
-	s, err := slab.UploadSlab(bytes.NewReader(data), 3, 10, hosts)
+	s, err := slab.UploadSlab(ctx, bytes.NewReader(data), 3, 10, hosts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +33,8 @@ func TestSlabs(t *testing.T) {
 	checkDownload := func(offset, length uint32) {
 		t.Helper()
 		var buf bytes.Buffer
-
-		if err := slab.DownloadSlab(&buf, slab.Slice{s, offset, length}, hosts); err != nil {
+		err := slab.DownloadSlab(ctx, &buf, slab.Slice{s, offset, length}, hosts)
+		if err != nil {
 			t.Error(err)
 			return
 		}
@@ -60,7 +63,7 @@ func TestSlabs(t *testing.T) {
 	checkDownloadFail := func(offset, length uint32) {
 		t.Helper()
 		var buf bytes.Buffer
-		if err := slab.DownloadSlab(&buf, slab.Slice{s, offset, length}, hosts); err == nil {
+		if err := slab.DownloadSlab(ctx, &buf, slab.Slice{s, offset, length}, hosts); err == nil {
 			t.Error("expected error, got nil")
 		}
 	}
@@ -74,7 +77,7 @@ func TestSlabs(t *testing.T) {
 		to = append(to, slabutil.NewMockHost())
 	}
 	old := fmt.Sprint(s)
-	if err := slab.MigrateSlab(&s, from, to); err != nil {
+	if err := slab.MigrateSlab(ctx, &s, from, to); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(s) == old {
@@ -89,7 +92,7 @@ func TestSlabs(t *testing.T) {
 	checkDownload(84923, uint32(len(data[84923:])-53219))
 
 	// delete
-	if err := slab.DeleteSlabs([]slab.Slab{s}, to); err != nil {
+	if err := slab.DeleteSlabs(ctx, []slab.Slab{s}, to); err != nil {
 		t.Fatal(err)
 	}
 
