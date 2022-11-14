@@ -238,24 +238,16 @@ type (
 )
 
 // TableName implements the gorm.Tabler interface.
-func (dbHost) TableName() string {
-	return "hosts"
-}
+func (dbHost) TableName() string { return "hosts" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbAnnouncement) TableName() string {
-	return "announcements"
-}
+func (dbAnnouncement) TableName() string { return "announcements" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbInteraction) TableName() string {
-	return "host_interactions"
-}
+func (dbInteraction) TableName() string { return "host_interactions" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbConsensusInfo) TableName() string {
-	return "consensus_infos"
-}
+func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
 // Host converts a host into a hostdb.Host.
 func (h dbHost) Host() hostdb.Host {
@@ -306,8 +298,7 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 
 	if migrate {
 		// Create the tables.
-		tables := []interface {
-		}{
+		tables := []interface{}{
 			&dbHost{},
 			&dbInteraction{},
 			&dbAnnouncement{},

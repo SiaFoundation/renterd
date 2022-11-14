@@ -165,16 +165,29 @@ func TestSQLObjectStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	obj1Key, err := obj1.Key.MarshalText()
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj1Slab0Key, err := obj1.Slabs[0].Key.MarshalText()
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj1Slab1Key, err := obj1.Slabs[1].Key.MarshalText()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	expectedObj := dbObject{
 		ID:  objID,
-		Key: obj1.Key.String(),
+		Key: string(obj1Key),
 		Slabs: []dbSlice{
 			{
 				ID:       1,
 				ObjectID: objID,
 				Slab: dbSlab{
 					ID:        1,
-					Key:       obj1.Slabs[0].Key.String(),
+					Key:       string(obj1Slab0Key),
 					MinShards: 1,
 					Shards: []dbShard{
 						{
@@ -196,7 +209,7 @@ func TestSQLObjectStore(t *testing.T) {
 				ObjectID: objID,
 				Slab: dbSlab{
 					ID:        2,
-					Key:       obj1.Slabs[1].Key.String(),
+					Key:       string(obj1Slab1Key),
 					MinShards: 2,
 					Shards: []dbShard{
 						{
@@ -240,8 +253,6 @@ func TestSQLObjectStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(fullObj, obj1) {
-		fmt.Println(fullObj)
-		fmt.Println(obj1)
 		t.Fatal("object mismatch")
 	}
 

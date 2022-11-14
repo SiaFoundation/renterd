@@ -65,7 +65,11 @@ func (es *EphemeralObjectStore) Put(key string, o object.Object) error {
 		Slabs: make([]refSlice, len(o.Slabs)),
 	}
 	for i, ss := range o.Slabs {
-		rs, ok := es.slabs[ss.Key.String()]
+		slabKey, err := ss.Key.MarshalText()
+		if err != nil {
+			return err
+		}
+		rs, ok := es.slabs[string(slabKey)]
 		if !ok {
 			shards := make([]refSector, len(ss.Shards))
 			for i, sector := range ss.Shards {
@@ -77,7 +81,7 @@ func (es *EphemeralObjectStore) Put(key string, o object.Object) error {
 			rs = refSlab{ss.MinShards, shards, 0}
 		}
 		rs.Refs++
-		es.slabs[ss.Key.String()] = rs
+		es.slabs[string(slabKey)] = rs
 		ro.Slabs[i] = refSlice{ss.Key, ss.Offset, ss.Length}
 	}
 	es.objects[key] = ro
@@ -94,7 +98,11 @@ func (es *EphemeralObjectStore) Get(key string) (object.Object, error) {
 	}
 	slabs := make([]slab.Slice, len(ro.Slabs))
 	for i, rss := range ro.Slabs {
-		rs, ok := es.slabs[rss.SlabID.String()]
+		slabKey, err := rss.SlabID.MarshalText()
+		if err != nil {
+			return object.Object{}, err
+		}
+		rs, ok := es.slabs[string(slabKey)]
 		if !ok {
 			return object.Object{}, errors.New("slab not found")
 		}
@@ -131,15 +139,19 @@ func (es *EphemeralObjectStore) Delete(key string) error {
 	}
 	// decrement slab refcounts
 	for _, s := range o.Slabs {
-		rs, ok := es.slabs[s.SlabID.String()]
+		slabKey, err := s.SlabID.MarshalText()
+		if err != nil {
+			return err
+		}
+		rs, ok := es.slabs[string(slabKey)]
 		if !ok || rs.Refs == 0 {
 			continue // shouldn't happen, but benign
 		}
 		rs.Refs--
 		if rs.Refs == 0 {
-			delete(es.slabs, s.SlabID.String())
+			delete(es.slabs, string(slabKey))
 		} else {
-			es.slabs[s.SlabID.String()] = rs
+			es.slabs[string(slabKey)] = rs
 		}
 	}
 	delete(es.objects, key)
@@ -332,29 +344,19 @@ type (
 )
 
 // TableName implements the gorm.Tabler interface.
-func (dbObject) TableName() string {
-	return "objects"
-}
+func (dbObject) TableName() string { return "objects" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbSlice) TableName() string {
-	return "slices"
-}
+func (dbSlice) TableName() string { return "slices" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbSlab) TableName() string {
-	return "slabs"
-}
+func (dbSlab) TableName() string { return "slabs" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbShard) TableName() string {
-	return "shards"
-}
+func (dbShard) TableName() string { return "shards" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbSector) TableName() string {
-	return "sectors"
-}
+func (dbSector) TableName() string { return "sectors" }
 
 // NewSQLObjectStore creates a new SQLObjectStore connected to a DB through
 // conn.
@@ -366,8 +368,7 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 
 	if migrate {
 		// Create the tables.
-		tables := []interface {
-		}{
+		tables := []interface{}{
 			&dbObject{},
 			&dbSlice{},
 			&dbSlab{},
@@ -390,7 +391,7 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 // Object turn a dbObject into a object.Object.
 func (o dbObject) Object() (object.Object, error) {
 	var objKey object.EncryptionKey
-	if err := objKey.LoadString(o.Key); err != nil {
+	if err := objKey.UnmarshalText([]byte(o.Key)); err != nil {
 		return object.Object{}, err
 	}
 	obj := object.Object{
@@ -399,7 +400,7 @@ func (o dbObject) Object() (object.Object, error) {
 	}
 	for i, sl := range o.Slabs {
 		var slabKey slab.EncryptionKey
-		if err := slabKey.LoadString(sl.Slab.Key); err != nil {
+		if err := slabKey.UnmarshalText([]byte(sl.Slab.Key)); err != nil {
 			return object.Object{}, err
 		}
 		obj.Slabs[i] = slab.Slice{
@@ -426,14 +427,13 @@ func (s *SQLObjectStore) List(path string) ([]string, error) {
 	}
 
 	inner := s.db.Model(&dbObject{}).Select("SUBSTR(id, ?) AS trimmed", len(path)+1).
-		Where("id LIKE ?", fmt.Sprintf("%v%%", path))
+		Where("id LIKE ?", path+"%")
 	middle := s.db.Table("(?)", inner).
 		Select("trimmed, INSTR(trimmed, ?) AS slashindex", "/")
 	outer := s.db.Table("(?)", middle).
 		Select("CASE slashindex WHEN 0 THEN ? || trimmed ELSE ? || substr(trimmed, 0, slashindex+1) END AS result", path, path).
 		Group("result")
 
-	// NOTE: SQLite doesn't
 	var ids []string
 	err := outer.Find(&ids).Error
 	if err != nil {
@@ -467,9 +467,13 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 		}
 
 		// Insert a new object.
+		objKey, err := o.Key.MarshalText()
+		if err != nil {
+			return err
+		}
 		err = tx.Create(&dbObject{
 			ID:  key,
-			Key: o.Key.String(),
+			Key: string(objKey),
 		}).Error
 		if err != nil {
 			return err
@@ -488,8 +492,12 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 
 			// Create Slab.
 			var slab dbSlab
+			ssKey, err := ss.Key.MarshalText()
+			if err != nil {
+				return err
+			}
 			err = tx.FirstOrCreate(&slab, &dbSlab{
-				Key:       ss.Key.String(),
+				Key:       string(ssKey),
 				MinShards: ss.MinShards,
 			}).Error
 			if err != nil {
