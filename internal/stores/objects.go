@@ -16,6 +16,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrOBjectNotFound is returned if get is unable to retrieve an object from the
+// database.
+var ErrObjectNotFound = errors.New("object not found in database")
+
 type refSector struct {
 	HostID uint32
 	Root   consensus.Hash256
@@ -307,11 +311,9 @@ type (
 
 	// dbSlab describes a slab.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
-	// NOTE TO REVIEWERS: Is this ok? What if there is no key or we want 2
-	// slabs with the same shared key but different sharding?
 	dbSlab struct {
 		ID        uint64 `gorm:"primaryKey"`
-		Key       string `gorm:"unique"` // json string
+		Key       string `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
 		Shards    []dbShard `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
 	}
@@ -388,7 +390,7 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 	}, nil
 }
 
-// Object turn a dbObject into a object.Object.
+// Object turns a dbObject into a object.Object.
 func (o dbObject) Object() (object.Object, error) {
 	var objKey object.EncryptionKey
 	if err := objKey.UnmarshalText([]byte(o.Key)); err != nil {
@@ -441,10 +443,6 @@ func (s *SQLObjectStore) List(path string) ([]string, error) {
 	}
 	return ids, nil
 }
-
-// ErrOBjectNotFound is returned if get is unable to retrieve an object from the
-// database.
-var ErrObjectNotFound = errors.New("object not found in database")
 
 // Get implements the bus.ObjectStore interface.
 func (s *SQLObjectStore) Get(key string) (object.Object, error) {
