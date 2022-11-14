@@ -3,9 +3,12 @@ package stores
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"go.sia.tech/siad/crypto"
 
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -13,6 +16,10 @@ import (
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
+
+// ErrContractNotFound is returned when a contract can't be retrieved from the
+// database.
+var ErrContractNotFound = errors.New("couldn't find contract with specified id")
 
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
 type EphemeralContractStore struct {
@@ -38,7 +45,7 @@ func (s *EphemeralContractStore) Contract(id types.FileContractID) (rhpv2.Contra
 	defer s.mu.Unlock()
 	c, ok := s.contracts[id]
 	if !ok {
-		return rhpv2.Contract{}, errors.New("no contract with that ID")
+		return rhpv2.Contract{}, ErrContractNotFound
 	}
 	return c, nil
 }
@@ -190,52 +197,52 @@ type (
 	}
 
 	dbContractRHPv2 struct {
-		ID         []byte                   `gorm:"primaryKey"`
+		ID         types.FileContractID     `gorm:"primaryKey,type:bytes;serializer:gob"`
 		Revision   dbFileContractRevision   `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID"` //CASCADE to delete revision too
 		Signatures []dbTransactionSignature `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID"` // CASCADE to delete signatures too
 	}
 
 	dbFileContractRevision struct {
-		ParentID              []byte             `gorm:"primaryKey"` // only one revision for a given parent
-		UnlockConditions      dbUnlockConditions `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ParentID"`
-		NewRevisionNumber     uint64
+		ParentID              types.FileContractID `gorm:"primaryKey"` // only one revision for a given parent
+		UnlockConditions      dbUnlockConditions   `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ParentID"`
+		NewRevisionNumber     uint64               `gorm:"index"`
 		NewFileSize           uint64
-		NewFileMerkleRoot     []byte
-		NewWindowStart        types.BlockHeight
-		NewWindowEnd          types.BlockHeight
+		NewFileMerkleRoot     crypto.Hash       `gorm:"type:bytes;serializer:gob"`
+		NewWindowStart        types.BlockHeight `gorm:"index"`
+		NewWindowEnd          types.BlockHeight `gorm:"index"`
 		NewValidProofOutputs  []dbSiacoinOutput `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID"` // CASCADE to delete output
 		NewMissedProofOutputs []dbSiacoinOutput `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID"` // CASCADE to delete output
-		NewUnlockHash         []byte
+		NewUnlockHash         types.UnlockHash  `gorm:"index,type:bytes;serializer:gob"`
 	}
 
 	dbTransactionSignature struct {
-		ID             uint64 `gorm:"primaryKey"`
-		ParentID       []byte `gorm:"index"`
+		ID             uint64      `gorm:"primaryKey"`
+		ParentID       crypto.Hash `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
 		PublicKeyIndex uint64
 		Timelock       types.BlockHeight
-		CoveredFields  []byte
+		CoveredFields  types.CoveredFields `gorm:"type:bytes;serializer:gob"`
 		Signature      []byte
 	}
 
 	dbUnlockConditions struct {
-		ParentID           []byte `gorm:"primaryKey"` // only one set of UnlockConditions for a given parent
+		ParentID           types.FileContractID `gorm:"primaryKey;type:bytes;serializer:gob"` // only one set of UnlockConditions for a given parent
 		Timelock           types.BlockHeight
 		PublicKeys         []dbSiaPublicKey `gorm:"constraint:OnDelete:CASCADE;foreignKey:UnlockConditionID;references:ParentID"` // CASCADE to delete pubkeys
 		SignaturesRequired uint64
 	}
 
 	dbSiaPublicKey struct {
-		ID                uint64 `gorm:"primaryKey"`
-		Algorithm         []byte
+		ID                uint64          `gorm:"primaryKey"`
+		Algorithm         types.Specifier `gorm:"type:bytes;serializer:gob"`
 		Key               []byte
-		UnlockConditionID []byte `gorm:"index"`
+		UnlockConditionID types.FileContractID `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
 	}
 
 	dbSiacoinOutput struct {
-		ID         uint64 `gorm:"primaryKey"`
-		ParentID   []byte `gorm:"index"`
-		UnlockHash []byte
-		Value      string
+		ID         uint64               `gorm:"primaryKey"`
+		ParentID   types.FileContractID `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
+		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
+		Value      types.Currency       `gorm:"type:bytes;serializer:gob"`
 	}
 )
 
@@ -256,6 +263,72 @@ func (dbSiaPublicKey) TableName() string { return "public_keys" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSiacoinOutput) TableName() string { return "siacoin_outputs" }
+
+// Contract converts a dbContractRHPv2 to a rhpv2.Contract type.
+func (c dbContractRHPv2) Contract() (rhpv2.Contract, error) {
+	// Prepare valid and missed outputs.
+	newValidOutputs := make([]types.SiacoinOutput, 0, len(c.Revision.NewValidProofOutputs))
+	for _, sco := range c.Revision.NewValidProofOutputs {
+		newValidOutputs = append(newValidOutputs, types.SiacoinOutput{
+			Value:      sco.Value,
+			UnlockHash: sco.UnlockHash,
+		})
+	}
+	newMissedOutputs := make([]types.SiacoinOutput, 0, len(c.Revision.NewMissedProofOutputs))
+	for _, sco := range c.Revision.NewMissedProofOutputs {
+		newMissedOutputs = append(newMissedOutputs, types.SiacoinOutput{
+			Value:      sco.Value,
+			UnlockHash: sco.UnlockHash,
+		})
+	}
+
+	// Prepare pubkeys.
+	publickeys := make([]types.SiaPublicKey, 0, len(c.Revision.UnlockConditions.PublicKeys))
+	for _, pk := range c.Revision.UnlockConditions.PublicKeys {
+		publickeys = append(publickeys, types.SiaPublicKey{
+			Algorithm: pk.Algorithm,
+			Key:       pk.Key,
+		})
+	}
+
+	// Prepare revision.
+	revision := types.FileContractRevision{
+		ParentID: c.Revision.ParentID,
+		UnlockConditions: types.UnlockConditions{
+			Timelock:           c.Revision.UnlockConditions.Timelock,
+			PublicKeys:         publickeys,
+			SignaturesRequired: c.Revision.UnlockConditions.SignaturesRequired,
+		},
+		NewRevisionNumber:     c.Revision.NewRevisionNumber,
+		NewFileSize:           c.Revision.NewFileSize,
+		NewFileMerkleRoot:     c.Revision.NewFileMerkleRoot,
+		NewWindowStart:        c.Revision.NewWindowStart,
+		NewWindowEnd:          c.Revision.NewWindowEnd,
+		NewValidProofOutputs:  newValidOutputs,
+		NewMissedProofOutputs: newMissedOutputs,
+		NewUnlockHash:         c.Revision.NewUnlockHash,
+	}
+
+	// Prepare signatures.
+	var signatures [2]types.TransactionSignature
+	if len(c.Signatures) != len(signatures) {
+		return rhpv2.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Signatures), len(signatures))
+	}
+	for i, sig := range c.Signatures {
+		signatures[i] = types.TransactionSignature{
+			ParentID:       sig.ParentID,
+			PublicKeyIndex: sig.PublicKeyIndex,
+			Timelock:       sig.Timelock,
+			CoveredFields:  sig.CoveredFields,
+			Signature:      sig.Signature,
+		}
+	}
+
+	return rhpv2.Contract{
+		Revision:   revision,
+		Signatures: signatures,
+	}, nil
+}
 
 // NewSQLContractStore creates a new SQLContractStore from a given gorm
 // Dialector.
@@ -290,16 +363,94 @@ func NewSQLContractStore(conn gorm.Dialector, migrate bool) (*SQLContractStore, 
 
 // AddContract implements the bus.ContractStore interface.
 func (s *SQLContractStore) AddContract(c rhpv2.Contract) error {
-	panic("not implemented")
-}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		fcid := c.ID()
 
-// Contracts implements the bus.ContractStore interface.
-func (s *SQLContractStore) Contracts() ([]rhpv2.Contract, error) {
-	panic("not implemented")
+		// Prepare valid and missed outputs.
+		newValidOutputs := make([]dbSiacoinOutput, 0, len(c.Revision.NewValidProofOutputs))
+		for _, sco := range c.Revision.NewValidProofOutputs {
+			newValidOutputs = append(newValidOutputs, dbSiacoinOutput{
+				ParentID:   fcid,
+				UnlockHash: sco.UnlockHash,
+				Value:      sco.Value,
+			})
+		}
+		newMissedOutputs := make([]dbSiacoinOutput, 0, len(c.Revision.NewMissedProofOutputs))
+		for _, sco := range c.Revision.NewMissedProofOutputs {
+			newMissedOutputs = append(newMissedOutputs, dbSiacoinOutput{
+				ParentID:   fcid,
+				UnlockHash: sco.UnlockHash,
+				Value:      sco.Value,
+			})
+		}
+
+		// Prepare pubkeys for unlock conditions.
+		pubkeys := make([]dbSiaPublicKey, 0, len(c.Revision.UnlockConditions.PublicKeys))
+		for _, pk := range c.Revision.UnlockConditions.PublicKeys {
+			pubkeys = append(pubkeys, dbSiaPublicKey{
+				Algorithm:         pk.Algorithm,
+				Key:               pk.Key,
+				UnlockConditionID: fcid,
+			})
+		}
+
+		// Prepare unlock conditions.
+		unlockConditions := dbUnlockConditions{
+			ParentID:           fcid,
+			Timelock:           c.Revision.UnlockConditions.Timelock,
+			PublicKeys:         pubkeys,
+			SignaturesRequired: c.Revision.UnlockConditions.SignaturesRequired,
+		}
+
+		// Prepare contract revision.
+		revision := dbFileContractRevision{
+			ParentID:              fcid,
+			UnlockConditions:      unlockConditions,
+			NewRevisionNumber:     c.Revision.NewRevisionNumber,
+			NewFileSize:           c.Revision.NewFileSize,
+			NewFileMerkleRoot:     c.Revision.NewFileMerkleRoot,
+			NewWindowStart:        c.Revision.NewWindowEnd,
+			NewWindowEnd:          c.Revision.NewWindowEnd,
+			NewValidProofOutputs:  newValidOutputs,
+			NewMissedProofOutputs: newMissedOutputs,
+			NewUnlockHash:         c.Revision.NewUnlockHash,
+		}
+
+		// Prepare signatures. The covered fields are stored as a blob
+		// to avoid more tables which are probably not going to be
+		// useful anyway.
+		signatures := make([]dbTransactionSignature, 0, len(c.Signatures))
+		for _, sig := range c.Signatures {
+			signatures = append(signatures, dbTransactionSignature{
+				ParentID:       crypto.Hash(fcid),
+				PublicKeyIndex: sig.PublicKeyIndex,
+				Timelock:       sig.Timelock,
+				CoveredFields:  sig.CoveredFields,
+				Signature:      sig.Signature,
+			})
+		}
+
+		// Insert contract.
+		return tx.Create(&dbContractRHPv2{
+			ID:         fcid,
+			Revision:   revision,
+			Signatures: signatures,
+		}).Error
+	})
 }
 
 // Contract implements the bus.ContractStore interface.
 func (s *SQLContractStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
+	// Fetch contract.
+	contract, err := s.contract(id)
+	if err != nil {
+		return rhpv2.Contract{}, err
+	}
+	return contract.Contract()
+}
+
+// Contracts implements the bus.ContractStore interface.
+func (s *SQLContractStore) Contracts() ([]rhpv2.Contract, error) {
 	panic("not implemented")
 }
 
@@ -316,4 +467,14 @@ func (s *SQLContractStore) ContractsForDownload(slab slab.Slab) ([]rhpv2.Contrac
 // ContractsForUpload implements the worker.ContractStore interface.
 func (s *SQLContractStore) ContractsForUpload() ([]rhpv2.Contract, error) {
 	panic("not implemented")
+}
+
+func (s *SQLContractStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
+	var contract dbContractRHPv2
+	err := s.db.Where(&dbContractRHPv2{ID: id}).
+		Take(&contract).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return contract, ErrContractNotFound
+	}
+	return contract, err
 }
