@@ -7,16 +7,42 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/metrics"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
 )
 
+// MetricHostDial contains metrics relating to a host dial.
+type MetricHostDial struct {
+	HostKey   consensus.PublicKey
+	HostIP    string
+	Timestamp time.Time
+	Elapsed   time.Duration
+	Err       error
+}
+
+// IsMetric implements metrics.Metric.
+func (MetricHostDial) IsMetric() {}
+
+func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.Conn, error) {
+	start := time.Now()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	metrics.Record(ctx, MetricHostDial{
+		HostKey:   hostKey,
+		HostIP:    hostIP,
+		Timestamp: start,
+		Elapsed:   time.Since(start),
+		Err:       err,
+	})
+	return conn, err
+}
+
 type rhpImpl struct{}
 
 func (rhpImpl) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	conn, err := dial(ctx, hostIP, hostKey)
 	if err != nil {
 		return err
 	}
@@ -43,7 +69,7 @@ func (rhpImpl) withTransportV2(ctx context.Context, hostIP string, hostKey conse
 }
 
 func (rhpImpl) withTransportV3(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	conn, err := dial(ctx, hostIP, hostKey)
 	if err != nil {
 		return err
 	}
@@ -69,14 +95,12 @@ func (rhpImpl) withTransportV3(ctx context.Context, hostIP string, hostKey conse
 	return fn(t)
 }
 
-func (r rhpImpl) Settings(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (rhpv2.HostSettings, error) {
-	var settings rhpv2.HostSettings
-	err := r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		var err error
-		settings, err = rhpv2.RPCSettings(t)
+func (r rhpImpl) Settings(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (settings rhpv2.HostSettings, err error) {
+	err = r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
+		settings, err = rhpv2.RPCSettings(ctx, t)
 		return err
 	})
-	return settings, err
+	return
 }
 
 func (r rhpImpl) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
@@ -94,7 +118,7 @@ func (r rhpImpl) RenewContract(ctx context.Context, cs consensus.State, hostIP s
 	var contract rhpv2.Contract
 	var txnSet []types.Transaction
 	err := r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		session, err := rhpv2.RPCLock(t, contractID, renterKey, 5*time.Second)
+		session, err := rhpv2.RPCLock(ctx, t, contractID, renterKey, 5*time.Second)
 		if err != nil {
 			return err
 		}
