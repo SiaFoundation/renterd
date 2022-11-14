@@ -2,68 +2,19 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
-	"time"
 
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/slab"
-	"go.sia.tech/siad/types"
 )
-
-type noopMetricsRecorder struct{}
-
-func (noopMetricsRecorder) RecordMetric(slab.Metric) {}
-
-func toHostInteraction(m slab.Metric) hostdb.Interaction {
-	transform := func(timestamp time.Time, typ string, err error, res interface{}) hostdb.Interaction {
-		hi := hostdb.Interaction{
-			Timestamp: timestamp,
-			Type:      typ,
-			Success:   err == nil,
-		}
-		if err == nil {
-			hi.Result, _ = json.Marshal(res)
-		} else {
-			hi.Result = []byte(`"` + err.Error() + `"`)
-		}
-		return hi
-	}
-
-	switch m := m.(type) {
-	case slab.MetricSectorUpload:
-		return transform(m.Timestamp, "sector upload", m.Err, struct {
-			Elapsed time.Duration  `json:"elapsed"`
-			Cost    types.Currency `json:"cost"`
-		}{m.Elapsed, m.Cost})
-	case slab.MetricSectorDownload:
-		return transform(m.Timestamp, "sector download", m.Err, struct {
-			Elapsed    time.Duration  `json:"elapsed"`
-			Downloaded uint64         `json:"downloaded"`
-			Cost       types.Currency `json:"cost"`
-		}{m.Elapsed, m.Downloaded, m.Cost})
-	case slab.MetricSectorDeletion:
-		return transform(m.Timestamp, "sector delete", m.Err, struct {
-			Elapsed  time.Duration  `json:"elapsed"`
-			Cost     types.Currency `json:"cost"`
-			NumRoots uint64         `json:"numRoots"`
-		}{m.Elapsed, m.Cost, m.NumRoots})
-	default:
-		panic(fmt.Sprintf("unhandled type %T", m))
-	}
-}
 
 type slabMover struct {
 	pool *slab.SessionPool
 }
 
 func (sm slabMover) withHosts(ctx context.Context, contracts []Contract, fn func([]slab.Host) error) (err error) {
-	// TODO: send metrics to bus, rather than throwing them away
-	var mr noopMetricsRecorder
 	var hosts []slab.Host
 	for _, c := range contracts {
-		hosts = append(hosts, sm.pool.Session(c.HostKey, c.HostIP, c.ID, c.RenterKey, &mr))
+		hosts = append(hosts, sm.pool.Session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
 	}
 	done := make(chan struct{})
 	go func() {

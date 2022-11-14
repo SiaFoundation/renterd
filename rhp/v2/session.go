@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/siad/types"
 )
 
@@ -154,10 +155,44 @@ func (s *Session) sufficientCollateral(collateral types.Currency) bool {
 	return s.contract.Revision.NewMissedProofOutputs[1].Value.Cmp(collateral) >= 0
 }
 
+func recordRPC(ctx context.Context, t *Transport, c Contract, id Specifier, err *error) func() {
+	startTime := time.Now()
+	contractID := c.ID()
+	var startFunds types.Currency
+	if len(c.Revision.NewValidProofOutputs) > 0 {
+		startFunds = c.Revision.NewValidProofOutputs[0].Value
+	}
+	var startCollateral types.Currency
+	if len(c.Revision.NewMissedProofOutputs) > 1 {
+		startCollateral = c.Revision.NewMissedProofOutputs[1].Value
+	}
+	startW, startR := t.BytesWritten(), t.BytesRead()
+	return func() {
+		m := MetricRPC{
+			HostKey:    t.HostKey(),
+			RPC:        id,
+			Timestamp:  startTime,
+			Elapsed:    time.Since(startTime),
+			Contract:   contractID,
+			Uploaded:   t.BytesWritten() - startW,
+			Downloaded: t.BytesRead() - startR,
+			Err:        *err,
+		}
+		if len(c.Revision.NewValidProofOutputs) > 0 && startFunds.Cmp(c.Revision.NewValidProofOutputs[0].Value) > 0 {
+			m.Cost = startFunds.Sub(c.Revision.NewValidProofOutputs[0].Value)
+		}
+		if len(c.Revision.NewMissedProofOutputs) > 1 && startCollateral.Cmp(c.Revision.NewMissedProofOutputs[1].Value) > 0 {
+			m.Collateral = startCollateral.Sub(c.Revision.NewMissedProofOutputs[1].Value)
+		}
+		metrics.Record(ctx, m)
+	}
+}
+
 // SectorRoots calls the SectorRoots RPC, returning the requested range of
 // sector Merkle roots of the currently-locked contract.
-func (s *Session) SectorRoots(offset, n uint64, price types.Currency) (_ []consensus.Hash256, err error) {
+func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []consensus.Hash256, err error) {
 	defer wrapErr(&err, "SectorRoots")
+	defer recordRPC(ctx, s.transport, s.contract, RPCSectorRootsID, &err)()
 
 	if !s.isRevisable() {
 		return nil, ErrContractFinalized
@@ -238,8 +273,9 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 // Note that sector data is streamed to w before it has been validated. Callers
 // MUST check the returned error, and discard any data written to w if the error
 // is non-nil. Failure to do so may allow an attacker to inject malicious data.
-func (s *Session) Read(w io.Writer, sections []RPCReadRequestSection, price types.Currency) (err error) {
+func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadRequestSection, price types.Currency) (err error) {
 	defer wrapErr(&err, "Read")
+	defer recordRPC(ctx, s.transport, s.contract, RPCReadID, &err)()
 
 	empty := true
 	for _, s := range sections {
@@ -367,8 +403,9 @@ func (s *Session) Read(w io.Writer, sections []RPCReadRequestSection, price type
 
 // Write implements the Write RPC, except for ActionUpdate. A Merkle proof is
 // always requested.
-func (s *Session) Write(actions []RPCWriteAction, price, collateral types.Currency) (err error) {
+func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, collateral types.Currency) (err error) {
 	defer wrapErr(&err, "Write")
+	defer recordRPC(ctx, s.transport, s.contract, RPCWriteID, &err)()
 
 	if !s.isRevisable() {
 		return ErrContractFinalized
@@ -460,8 +497,8 @@ func (s *Session) Write(actions []RPCWriteAction, price, collateral types.Curren
 
 // Append calls the Write RPC with a single action, appending the provided
 // sector. It returns the Merkle root of the sector.
-func (s *Session) Append(sector *[SectorSize]byte, price, collateral types.Currency) (consensus.Hash256, error) {
-	err := s.Write([]RPCWriteAction{{
+func (s *Session) Append(ctx context.Context, sector *[SectorSize]byte, price, collateral types.Currency) (consensus.Hash256, error) {
+	err := s.Write(ctx, []RPCWriteAction{{
 		Type: RPCWriteActionAppend,
 		Data: sector[:],
 	}}, price, collateral)
@@ -473,7 +510,7 @@ func (s *Session) Append(sector *[SectorSize]byte, price, collateral types.Curre
 
 // Delete calls the Write RPC with a set of Swap and Trim actions that delete
 // the specified sectors.
-func (s *Session) Delete(sectorIndices []uint64, price types.Currency) error {
+func (s *Session) Delete(ctx context.Context, sectorIndices []uint64, price types.Currency) error {
 	if len(sectorIndices) == 0 {
 		return nil
 	}
@@ -509,7 +546,7 @@ func (s *Session) Delete(sectorIndices []uint64, price types.Currency) error {
 	// NOTE: siad hosts will accept up to 20 MiB of data in the request,
 	// which should be sufficient to delete up to 2.5 TiB of sector data
 	// at a time.
-	return s.Write(actions, price, types.ZeroCurrency)
+	return s.Write(ctx, actions, price, types.ZeroCurrency)
 }
 
 // Unlock calls the Unlock RPC, unlocking the currently-locked contract and
@@ -531,8 +568,9 @@ func (s *Session) Close() (err error) {
 }
 
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
-func RPCSettings(t *Transport) (settings HostSettings, err error) {
+func RPCSettings(ctx context.Context, t *Transport) (settings HostSettings, err error) {
 	defer wrapErr(&err, "Settings")
+	defer recordRPC(ctx, t, Contract{}, RPCSettingsID, &err)()
 	var resp RPCSettingsResponse
 	if err := t.Call(RPCSettingsID, nil, &resp); err != nil {
 		return HostSettings{}, err
@@ -548,8 +586,9 @@ func RPCSettings(t *Transport) (settings HostSettings, err error) {
 // milliseconds, so a timeout of less than 1ms will be rounded down to 0. (A
 // timeout of 0 is valid: it means that the lock will only be acquired if the
 // contract is unlocked at the moment the host receives the RPC.)
-func RPCLock(t *Transport, id types.FileContractID, key consensus.PrivateKey, timeout time.Duration) (_ *Session, err error) {
+func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key consensus.PrivateKey, timeout time.Duration) (_ *Session, err error) {
 	defer wrapErr(&err, "Lock")
+	defer recordRPC(ctx, t, Contract{}, RPCLockID, &err)()
 	req := &RPCLockRequest{
 		ContractID: id,
 		Signature:  t.SignChallenge(key),
@@ -587,7 +626,6 @@ func RPCLock(t *Transport, id types.FileContractID, key consensus.PrivateKey, ti
 // DialSession is a convenience function that connects to the specified host and
 // locks the specified contract.
 func DialSession(ctx context.Context, hostIP string, hostKey consensus.PublicKey, id types.FileContractID, renterKey consensus.PrivateKey) (_ *Session, err error) {
-	defer wrapErr(&err, "Lock")
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	if err != nil {
 		return nil, err
@@ -616,7 +654,7 @@ func DialSession(ctx context.Context, hostIP string, hostKey consensus.PublicKey
 	if d, ok := ctx.Deadline(); ok {
 		timeout = time.Until(d)
 	}
-	s, err := RPCLock(t, id, renterKey, timeout)
+	s, err := RPCLock(ctx, t, id, renterKey, timeout)
 	if err != nil {
 		t.Close()
 		return nil, err

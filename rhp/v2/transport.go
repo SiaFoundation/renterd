@@ -11,6 +11,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
@@ -74,8 +75,10 @@ type Transport struct {
 	outbuf    objBuffer
 	challenge [16]byte
 	isRenter  bool
+	hostKey   consensus.PublicKey
 
 	mu     sync.Mutex
+	r, w   uint64
 	err    error // set when Transport is prematurely closed
 	closed bool
 }
@@ -90,6 +93,15 @@ func (t *Transport) setErr(err error) {
 		}
 	}
 }
+
+// HostKey returns the host's public key.
+func (t *Transport) HostKey() consensus.PublicKey { return t.hostKey }
+
+// BytesRead returns the number of bytes read from the underlying connection.
+func (t *Transport) BytesRead() uint64 { return atomic.LoadUint64(&t.r) }
+
+// BytesWritten returns the number of bytes written to the underlying connection.
+func (t *Transport) BytesWritten() uint64 { return atomic.LoadUint64(&t.w) }
 
 // PrematureCloseErr returns the error that resulted in the Transport being closed
 // prematurely.
@@ -151,7 +163,8 @@ func (t *Transport) writeMessage(obj ProtocolObject) error {
 	payload := msg[8+len(nonce) : msgSize-t.aead.Overhead()]
 	t.aead.Seal(payload[:0], msgNonce, payload, nil)
 
-	_, err := t.conn.Write(msg)
+	n, err := t.conn.Write(msg)
+	atomic.AddUint64(&t.w, uint64(n))
 	t.setErr(err)
 	return err
 }
@@ -181,6 +194,7 @@ func (t *Transport) readMessage(obj ProtocolObject, maxLen uint64) error {
 		t.setErr(err)
 		return err
 	}
+	atomic.AddUint64(&t.r, uint64(8+msgSize))
 
 	nonce := t.inbuf.next(t.aead.NonceSize())
 	paddedPayload := t.inbuf.bytes()
@@ -437,6 +451,7 @@ func NewHostTransport(conn net.Conn, priv consensus.PrivateKey) (_ *Transport, e
 		key:       cipherKey[:],
 		challenge: frand.Entropy128(),
 		isRenter:  false,
+		hostKey:   priv.PublicKey(),
 	}
 	// hack: cast challenge to Specifier to make it a ProtocolObject
 	if err := t.writeMessage((*Specifier)(&t.challenge)); err != nil {
@@ -480,6 +495,7 @@ func NewRenterTransport(conn net.Conn, pub consensus.PublicKey) (_ *Transport, e
 		aead:     aead,
 		key:      cipherKey[:],
 		isRenter: true,
+		hostKey:  pub,
 	}
 	// hack: cast challenge to Specifier to make it a ProtocolObject
 	if err := t.readMessage((*Specifier)(&t.challenge), minMessageSize); err != nil {
