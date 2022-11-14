@@ -54,7 +54,7 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 	}
 }
 
-// Interaction represents an interaction with a host at a given time.
+// An Interaction represents a generic interaction with a host.
 type Interaction struct {
 	Timestamp time.Time
 	Type      string

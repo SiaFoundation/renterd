@@ -437,7 +437,7 @@ func (s *Stream) Close() error {
 		flags: flagFinal,
 	}
 	err := s.m.bufferFrame(h, nil, s.wd)
-	if err == ErrPeerClosedStream {
+	if err == ErrPeerClosedStream || err == ErrPeerClosedConn {
 		err = nil
 	}
 

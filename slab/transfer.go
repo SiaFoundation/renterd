@@ -2,6 +2,7 @@ package slab
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 
@@ -18,7 +19,7 @@ type Host interface {
 }
 
 // parallelUploadSlab uploads the provided shards in parallel.
-func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, error) {
+func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]Sector, error) {
 	if len(hosts) < len(shards) {
 		return nil, errors.New("fewer hosts than shards")
 	}
@@ -52,12 +53,13 @@ func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, error) {
 		inflight++
 	}
 	// collect responses
+	var errs HostErrorSet
 	sectors := make([]Sector, len(shards))
 	rem := len(shards)
-	var errs HostErrorSet
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
 		inflight--
+
 		if resp.err != nil {
 			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
 			// try next host
@@ -81,7 +83,7 @@ func parallelUploadSlab(shards [][]byte, hosts []Host) ([]Sector, error) {
 }
 
 // UploadSlab uploads a slab.
-func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, error) {
+func UploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []Host) (Slab, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	_, err := io.ReadFull(r, buf)
@@ -94,7 +96,8 @@ func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, error) {
 	}
 	s.Encode(buf, shards)
 	s.Encrypt(shards)
-	s.Shards, err = parallelUploadSlab(shards, hosts)
+
+	s.Shards, err = parallelUploadSlab(ctx, shards, hosts)
 	if err != nil {
 		return Slab{}, err
 	}
@@ -102,7 +105,7 @@ func UploadSlab(r io.Reader, m, n uint8, hosts []Host) (Slab, error) {
 }
 
 // parallelDownloadSlab downloads the shards comprising a slab in parallel.
-func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, error) {
+func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte, error) {
 	if len(hosts) < int(s.MinShards) {
 		return nil, errors.New("not enough hosts to recover shard")
 	}
@@ -149,12 +152,13 @@ func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, error) {
 		inflight++
 	}
 	// collect responses
+	var errs HostErrorSet
 	shards := make([][]byte, len(s.Shards))
 	rem := s.MinShards
-	var errs HostErrorSet
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
 		inflight--
+
 		if resp.err != nil {
 			errs = append(errs, &HostError{hosts[resp.req.hostIndex].PublicKey(), resp.err})
 			// try next host
@@ -180,13 +184,14 @@ func parallelDownloadSlab(s Slice, hosts []Host) ([][]byte, error) {
 }
 
 // DownloadSlab downloads slab data.
-func DownloadSlab(w io.Writer, s Slice, hosts []Host) error {
-	shards, err := parallelDownloadSlab(s, hosts)
+func DownloadSlab(ctx context.Context, w io.Writer, s Slice, hosts []Host) error {
+	shards, err := parallelDownloadSlab(ctx, s, hosts)
 	if err != nil {
 		return err
 	}
 	s.Decrypt(shards)
-	if err := s.Recover(w, shards); err != nil {
+	err = s.Recover(w, shards)
+	if err != nil {
 		return err
 	}
 	return nil
@@ -222,25 +227,28 @@ func SlabsForDownload(slabs []Slice, offset, length int64) []Slice {
 }
 
 // DeleteSlabs deletes a set of slabs from the provided hosts.
-func DeleteSlabs(slabs []Slab, hosts []Host) error {
+func DeleteSlabs(ctx context.Context, slabs []Slab, hosts []Host) error {
 	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
 			rootsByHost[sector.Host] = append(rootsByHost[sector.Host], sector.Root)
 		}
 	}
+
 	errChan := make(chan *HostError)
 	for _, h := range hosts {
 		go func(h Host) {
 			// NOTE: if host is not storing any sectors, the map lookup will return
 			// nil, making this a no-op
-			if err := h.DeleteSectors(rootsByHost[h.PublicKey()]); err != nil {
+			err := h.DeleteSectors(rootsByHost[h.PublicKey()])
+			if err != nil {
 				errChan <- &HostError{h.PublicKey(), err}
 			} else {
 				errChan <- nil
 			}
 		}(h)
 	}
+
 	var errs HostErrorSet
 	for range hosts {
 		if err := <-errChan; err != nil {
@@ -254,7 +262,7 @@ func DeleteSlabs(slabs []Slab, hosts []Host) error {
 }
 
 // MigrateSlab migrates a slab.
-func MigrateSlab(s *Slab, from, to []Host) error {
+func MigrateSlab(ctx context.Context, s *Slab, from, to []Host) error {
 	// determine which shards need migration
 	var shardIndices []int
 outer:
@@ -274,7 +282,7 @@ outer:
 
 	// download + reconstruct slab
 	ss := Slice{*s, 0, uint32(s.MinShards) * rhpv2.SectorSize}
-	shards, err := parallelDownloadSlab(ss, from)
+	shards, err := parallelDownloadSlab(ctx, ss, from)
 	if err != nil {
 		return err
 	}

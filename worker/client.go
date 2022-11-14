@@ -142,7 +142,7 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
 func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, err error) {
-	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
+	c.c.Custom("POST", "/slabs/upload", []byte{}, &slab.Slab{})
 
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
@@ -166,6 +166,7 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 		err, _ := ioutil.ReadAll(resp.Body)
 		return slab.Slab{}, errors.New(string(err))
 	}
+
 	err = json.NewDecoder(resp.Body).Decode(&s)
 	return
 }
@@ -194,20 +195,20 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 		err, _ := ioutil.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
+
 	_, err = io.Copy(dst, resp.Body)
 	return
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) (err error) {
+func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) error {
 	req := SlabsMigrateRequest{
 		Slab:          *s,
 		From:          from,
 		To:            to,
 		CurrentHeight: currentHeight,
 	}
-	err = c.c.POST("/slabs/migrate", req, s)
-	return
+	return c.c.POST("/slabs/migrate", req, s)
 }
 
 // DeleteSlabs deletes the specified slabs.

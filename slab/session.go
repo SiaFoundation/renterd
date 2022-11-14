@@ -53,27 +53,49 @@ type sharedSession struct {
 	mu       sync.Mutex
 }
 
-func (s *sharedSession) appendSector(sector *[rhpv2.SectorSize]byte, currentHeight uint64) (consensus.Hash256, error) {
+func (s *sharedSession) appendSector(sector *[rhpv2.SectorSize]byte, currentHeight uint64, mr MetricsRecorder) (consensus.Hash256, error) {
 	if currentHeight > uint64(s.sess.Contract().Revision.NewWindowStart) {
 		return consensus.Hash256{}, fmt.Errorf("contract has expired")
 	}
 	storageDuration := uint64(s.sess.Contract().Revision.NewWindowStart) - currentHeight
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
-	return s.sess.Append(sector, price, collateral)
+	start := time.Now()
+	root, err := s.sess.Append(sector, price, collateral)
+	mr.RecordMetric(MetricSectorUpload{
+		HostKey:    s.sess.HostKey(),
+		Contract:   s.sess.Contract().ID(),
+		Timestamp:  start,
+		Elapsed:    time.Since(start),
+		Err:        err,
+		Cost:       price,
+		Collateral: collateral,
+	})
+	return root, err
 }
 
-func (s *sharedSession) readSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (s *sharedSession) readSector(w io.Writer, root consensus.Hash256, offset, length uint32, mr MetricsRecorder) error {
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
 		Offset:     uint64(offset),
 		Length:     uint64(length),
 	}}
 	price := rhpv2.RPCReadCost(s.settings, sections)
-	return s.sess.Read(w, sections, price)
+	start := time.Now()
+	err := s.sess.Read(w, sections, price)
+	mr.RecordMetric(MetricSectorDownload{
+		HostKey:   s.sess.HostKey(),
+		Contract:  s.sess.Contract().ID(),
+		Timestamp: start,
+		Elapsed:   time.Since(start),
+		Err:       err,
+		Cost:      price,
+	})
+	return err
 }
 
-func (s *sharedSession) deleteSectors(roots []consensus.Hash256) error {
+func (s *sharedSession) deleteSectors(roots []consensus.Hash256, mr MetricsRecorder) error {
 	// download the full set of SectorRoots
+	start := time.Now()
 	contractSectors := s.sess.Contract().NumSectors()
 	rootIndices := make(map[consensus.Hash256]uint64, contractSectors)
 	for offset := uint64(0); offset < contractSectors; {
@@ -102,7 +124,17 @@ func (s *sharedSession) deleteSectors(roots []consensus.Hash256) error {
 	}
 
 	price := rhpv2.RPCDeleteCost(s.settings, len(badIndices))
-	return s.sess.Delete(badIndices, price)
+	err := s.sess.Delete(badIndices, price)
+	mr.RecordMetric(MetricSectorDeletion{
+		HostKey:   s.sess.HostKey(),
+		Contract:  s.sess.Contract().ID(),
+		Timestamp: start,
+		Elapsed:   time.Since(start),
+		Err:       err,
+		Cost:      price,
+		NumRoots:  uint64(len(badIndices)),
+	})
+	return err
 }
 
 // Close gracefully closes the Session.
@@ -119,6 +151,7 @@ type Session struct {
 	hostIP     string
 	contractID types.FileContractID
 	renterKey  consensus.PrivateKey
+	mr         MetricsRecorder
 	pool       *SessionPool
 }
 
@@ -138,7 +171,7 @@ func (s *Session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash25
 		return consensus.Hash256{}, err
 	}
 	defer s.pool.release(ss)
-	return ss.appendSector(sector, currentHeight)
+	return ss.appendSector(sector, currentHeight, s.mr)
 }
 
 // DownloadSector implements Host.
@@ -148,7 +181,7 @@ func (s *Session) DownloadSector(w io.Writer, root consensus.Hash256, offset, le
 		return err
 	}
 	defer s.pool.release(ss)
-	return ss.readSector(w, root, offset, length)
+	return ss.readSector(w, root, offset, length, s.mr)
 }
 
 // DeleteSectors implements Host.
@@ -158,7 +191,7 @@ func (s *Session) DeleteSectors(roots []consensus.Hash256) error {
 		return err
 	}
 	defer s.pool.release(ss)
-	return ss.deleteSectors(roots)
+	return ss.deleteSectors(roots, s.mr)
 }
 
 // A SessionPool is a set of sessions that can be used for uploading and
@@ -256,12 +289,13 @@ func (sp *SessionPool) currentHeight() uint64 {
 
 // Session adds a RHPv2 session to the pool. The session is initiated lazily; no
 // I/O is performed until the first RPC call is made.
-func (sp *SessionPool) Session(hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey) *Session {
+func (sp *SessionPool) Session(hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey, mr MetricsRecorder) *Session {
 	return &Session{
 		hostKey:    hostKey,
 		hostIP:     hostIP,
 		contractID: contractID,
 		renterKey:  renterKey,
+		mr:         mr,
 		pool:       sp,
 	}
 }
