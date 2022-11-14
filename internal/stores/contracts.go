@@ -9,7 +9,9 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/slab"
 	"go.sia.tech/siad/types"
+	"gorm.io/gorm"
 )
 
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
@@ -178,4 +180,140 @@ func NewJSONContractStore(dir string) (*JSONContractStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+type (
+	// SQLContractStore implements the bus.ContractStore interface using SQL as the
+	// persistence backend.
+	SQLContractStore struct {
+		db *gorm.DB
+	}
+
+	dbContractRHPv2 struct {
+		ID         []byte                   `gorm:"primaryKey"`
+		Revision   dbFileContractRevision   `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID"` //CASCADE to delete revision too
+		Signatures []dbTransactionSignature `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID"` // CASCADE to delete signatures too
+	}
+
+	dbFileContractRevision struct {
+		ParentID              []byte             `gorm:"primaryKey"` // only one revision for a given parent
+		UnlockConditions      dbUnlockConditions `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ParentID"`
+		NewRevisionNumber     uint64
+		NewFileSize           uint64
+		NewFileMerkleRoot     []byte
+		NewWindowStart        types.BlockHeight
+		NewWindowEnd          types.BlockHeight
+		NewValidProofOutputs  []dbSiacoinOutput `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID"` // CASCADE to delete output
+		NewMissedProofOutputs []dbSiacoinOutput `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID"` // CASCADE to delete output
+		NewUnlockHash         []byte
+	}
+
+	dbTransactionSignature struct {
+		ID             uint64 `gorm:"primaryKey"`
+		ParentID       []byte `gorm:"index"`
+		PublicKeyIndex uint64
+		Timelock       types.BlockHeight
+		CoveredFields  []byte
+		Signature      []byte
+	}
+
+	dbUnlockConditions struct {
+		ParentID           []byte `gorm:"primaryKey"` // only one set of UnlockConditions for a given parent
+		Timelock           types.BlockHeight
+		PublicKeys         []dbSiaPublicKey `gorm:"constraint:OnDelete:CASCADE;foreignKey:UnlockConditionID;references:ParentID"` // CASCADE to delete pubkeys
+		SignaturesRequired uint64
+	}
+
+	dbSiaPublicKey struct {
+		ID                uint64 `gorm:"primaryKey"`
+		Algorithm         []byte
+		Key               []byte
+		UnlockConditionID []byte `gorm:"index"`
+	}
+
+	dbSiacoinOutput struct {
+		ID         uint64 `gorm:"primaryKey"`
+		ParentID   []byte `gorm:"index"`
+		UnlockHash []byte
+		Value      string
+	}
+)
+
+// TableName implements the gorm.Tabler interface.
+func (dbContractRHPv2) TableName() string { return "contracts_v2" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbFileContractRevision) TableName() string { return "file_contract_revisions" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbTransactionSignature) TableName() string { return "transaction_signatures" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbUnlockConditions) TableName() string { return "unlock_conditions" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbSiaPublicKey) TableName() string { return "public_keys" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbSiacoinOutput) TableName() string { return "siacoin_outputs" }
+
+// NewSQLContractStore creates a new SQLContractStore from a given gorm
+// Dialector.
+func NewSQLContractStore(conn gorm.Dialector, migrate bool) (*SQLContractStore, error) {
+	db, err := gorm.Open(conn, &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+
+	if migrate {
+		// Create the tables.
+		tables := []interface{}{
+			&dbContractRHPv2{},
+			&dbFileContractRevision{},
+			&dbTransactionSignature{},
+			&dbUnlockConditions{},
+			&dbSiaPublicKey{},
+			&dbSiacoinOutput{},
+		}
+		if err := db.AutoMigrate(tables...); err != nil {
+			return nil, err
+		}
+		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
+			return nil, res.Error
+		}
+	}
+
+	return &SQLContractStore{
+		db: db,
+	}, nil
+}
+
+// AddContract implements the bus.ContractStore interface.
+func (s *SQLContractStore) AddContract(c rhpv2.Contract) error {
+	panic("not implemented")
+}
+
+// Contracts implements the bus.ContractStore interface.
+func (s *SQLContractStore) Contracts() ([]rhpv2.Contract, error) {
+	panic("not implemented")
+}
+
+// Contract implements the bus.ContractStore interface.
+func (s *SQLContractStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
+	panic("not implemented")
+}
+
+// RemoveContract implements the bus.ContractStore interface.
+func (s *SQLContractStore) RemoveContract(id types.FileContractID) error {
+	panic("not implemented")
+}
+
+// ContractsForDownload implements the worker.ContractStore interface.
+func (s *SQLContractStore) ContractsForDownload(slab slab.Slab) ([]rhpv2.Contract, error) {
+	panic("not implemented")
+}
+
+// ContractsForUpload implements the worker.ContractStore interface.
+func (s *SQLContractStore) ContractsForUpload() ([]rhpv2.Contract, error) {
+	panic("not implemented")
 }
