@@ -13,7 +13,12 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/slab"
+	"gorm.io/gorm"
 )
+
+// ErrOBjectNotFound is returned if get is unable to retrieve an object from the
+// database.
+var ErrObjectNotFound = errors.New("object not found in database")
 
 type refSector struct {
 	HostID uint32
@@ -64,7 +69,11 @@ func (es *EphemeralObjectStore) Put(key string, o object.Object) error {
 		Slabs: make([]refSlice, len(o.Slabs)),
 	}
 	for i, ss := range o.Slabs {
-		rs, ok := es.slabs[ss.Key.String()]
+		slabKey, err := ss.Key.MarshalText()
+		if err != nil {
+			return err
+		}
+		rs, ok := es.slabs[string(slabKey)]
 		if !ok {
 			shards := make([]refSector, len(ss.Shards))
 			for i, sector := range ss.Shards {
@@ -76,7 +85,7 @@ func (es *EphemeralObjectStore) Put(key string, o object.Object) error {
 			rs = refSlab{ss.MinShards, shards, 0}
 		}
 		rs.Refs++
-		es.slabs[ss.Key.String()] = rs
+		es.slabs[string(slabKey)] = rs
 		ro.Slabs[i] = refSlice{ss.Key, ss.Offset, ss.Length}
 	}
 	es.objects[key] = ro
@@ -93,7 +102,11 @@ func (es *EphemeralObjectStore) Get(key string) (object.Object, error) {
 	}
 	slabs := make([]slab.Slice, len(ro.Slabs))
 	for i, rss := range ro.Slabs {
-		rs, ok := es.slabs[rss.SlabID.String()]
+		slabKey, err := rss.SlabID.MarshalText()
+		if err != nil {
+			return object.Object{}, err
+		}
+		rs, ok := es.slabs[string(slabKey)]
 		if !ok {
 			return object.Object{}, errors.New("slab not found")
 		}
@@ -130,15 +143,19 @@ func (es *EphemeralObjectStore) Delete(key string) error {
 	}
 	// decrement slab refcounts
 	for _, s := range o.Slabs {
-		rs, ok := es.slabs[s.SlabID.String()]
+		slabKey, err := s.SlabID.MarshalText()
+		if err != nil {
+			return err
+		}
+		rs, ok := es.slabs[string(slabKey)]
 		if !ok || rs.Refs == 0 {
 			continue // shouldn't happen, but benign
 		}
 		rs.Refs--
 		if rs.Refs == 0 {
-			delete(es.slabs, s.SlabID.String())
+			delete(es.slabs, string(slabKey))
 		} else {
-			es.slabs[s.SlabID.String()] = rs
+			es.slabs[string(slabKey)] = rs
 		}
 	}
 	delete(es.objects, key)
@@ -258,4 +275,277 @@ func NewJSONObjectStore(dir string) (*JSONObjectStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+type (
+	SQLObjectStore struct {
+		db *gorm.DB
+	}
+
+	// dbObject describes an object.Object in the database.
+	dbObject struct {
+		// ID uniquely identifies an Object within the database. Since
+		// this ID is also exposed via the API it's a string for
+		// convenience.
+		ID string `gorm:"primaryKey"`
+
+		// Object related fields.
+		Key   string    // json string
+		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ID"` // CASCADE to delete slices too
+	}
+
+	// dbSlice describes a reference to a slab.Slab in the database.
+	dbSlice struct {
+		// ID uniquely identifies a slice in the db.
+		ID uint64 `gorm:"primaryKey"`
+
+		// ObjectID identifies the object the slice belongs to. It is
+		// the foreign key of the object table.
+		ObjectID string `gorm:"index;NOT NULL"`
+
+		// Slice related fields.
+		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE;foreignKey:ID"` // CASCADE to delete slabs too
+		Offset uint32
+		Length uint32
+	}
+
+	// dbSlab describes a slab.Slab in the database.
+	// NOTE: A Slab is uniquely identified by its key.
+	dbSlab struct {
+		ID        uint64 `gorm:"primaryKey"`
+		Key       string `gorm:"unique;NOT NULL"` // json string
+		MinShards uint8
+		Shards    []dbShard `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
+	}
+
+	// dbShard describes a mapping between a slab and a sector in the
+	// database.  A sector should only exist once in the database but it can
+	// be pointed to by multiple shards. For garbage collection we are able
+	// to count the number of shards pointing to a sector to see whether we
+	// still need that sector.
+	dbShard struct {
+		ID     uint64 `gorm:"primaryKey"`
+		SlabID uint64 `gorm:"index;NOT NULL"`
+
+		SectorID []byte `gorm:"index;NOT NULL"` // No CASCADE to not delete sectors
+		Sector   dbSector
+	}
+
+	// dbSector describes a slab.Sector in the database.
+	dbSector struct {
+		// Root uniquely identifies a sector and is therefore the primary key.
+		Root []byte `gorm:"primaryKey"`
+
+		// Host is the key of the host that stores the sector.
+		// TODO: once we migrate the contract store over to a relational
+		// db as well, we might want to put the contract ID here and
+		// have a contract table with a mapping of contract ID to host.
+		// That makes for better migrations.
+		Host []byte `gorm:"index; NOT NULL"`
+	}
+)
+
+// TableName implements the gorm.Tabler interface.
+func (dbObject) TableName() string { return "objects" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbSlice) TableName() string { return "slices" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbSlab) TableName() string { return "slabs" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbShard) TableName() string { return "shards" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbSector) TableName() string { return "sectors" }
+
+// NewSQLObjectStore creates a new SQLObjectStore connected to a DB through
+// conn.
+func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, error) {
+	db, err := gorm.Open(conn, &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+
+	if migrate {
+		// Create the tables.
+		tables := []interface{}{
+			&dbObject{},
+			&dbSlice{},
+			&dbSlab{},
+			&dbShard{},
+			&dbSector{},
+		}
+		if err := db.AutoMigrate(tables...); err != nil {
+			return nil, err
+		}
+		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
+			return nil, res.Error
+		}
+	}
+
+	return &SQLObjectStore{
+		db: db,
+	}, nil
+}
+
+// Object turns a dbObject into a object.Object.
+func (o dbObject) Object() (object.Object, error) {
+	var objKey object.EncryptionKey
+	if err := objKey.UnmarshalText([]byte(o.Key)); err != nil {
+		return object.Object{}, err
+	}
+	obj := object.Object{
+		Key:   objKey,
+		Slabs: make([]slab.Slice, len(o.Slabs)),
+	}
+	for i, sl := range o.Slabs {
+		var slabKey slab.EncryptionKey
+		if err := slabKey.UnmarshalText([]byte(sl.Slab.Key)); err != nil {
+			return object.Object{}, err
+		}
+		obj.Slabs[i] = slab.Slice{
+			Slab: slab.Slab{
+				Key:       slabKey,
+				MinShards: sl.Slab.MinShards,
+				Shards:    make([]slab.Sector, len(sl.Slab.Shards)),
+			},
+			Offset: sl.Offset,
+			Length: sl.Length,
+		}
+		for j, sh := range sl.Slab.Shards {
+			copy(obj.Slabs[i].Shards[j].Host[:], sh.Sector.Host)
+			copy(obj.Slabs[i].Shards[j].Root[:], sh.Sector.Root)
+		}
+	}
+	return obj, nil
+}
+
+// List implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) List(path string) ([]string, error) {
+	if !strings.HasSuffix(path, "/") {
+		panic("path must end in /")
+	}
+
+	inner := s.db.Model(&dbObject{}).Select("SUBSTR(id, ?) AS trimmed", len(path)+1).
+		Where("id LIKE ?", path+"%")
+	middle := s.db.Table("(?)", inner).
+		Select("trimmed, INSTR(trimmed, ?) AS slashindex", "/")
+	outer := s.db.Table("(?)", middle).
+		Select("CASE slashindex WHEN 0 THEN ? || trimmed ELSE ? || substr(trimmed, 0, slashindex+1) END AS result", path, path).
+		Group("result")
+
+	var ids []string
+	err := outer.Find(&ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// Get implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) Get(key string) (object.Object, error) {
+	obj, err := s.get(key)
+	if err != nil {
+		return object.Object{}, err
+	}
+	return obj.Object()
+}
+
+// Put implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) Put(key string, o object.Object) error {
+	// Put is ACID.
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Try to delete first. We want to get rid of the object and its
+		// slabs if it exists.
+		err := deleteObject(tx, key)
+		if err != nil {
+			return err
+		}
+
+		// Insert a new object.
+		objKey, err := o.Key.MarshalText()
+		if err != nil {
+			return err
+		}
+		err = tx.Create(&dbObject{
+			ID:  key,
+			Key: string(objKey),
+		}).Error
+		if err != nil {
+			return err
+		}
+
+		for _, ss := range o.Slabs {
+			// Create Slice.
+			err = tx.Create(&dbSlice{
+				ObjectID: key,
+				Offset:   ss.Offset,
+				Length:   ss.Length,
+			}).Error
+			if err != nil {
+				return err
+			}
+
+			// Create Slab.
+			var slab dbSlab
+			ssKey, err := ss.Key.MarshalText()
+			if err != nil {
+				return err
+			}
+			err = tx.FirstOrCreate(&slab, &dbSlab{
+				Key:       string(ssKey),
+				MinShards: ss.MinShards,
+			}).Error
+			if err != nil {
+				return err
+			}
+
+			for _, shard := range ss.Shards {
+				// Create sector. Might exist already.
+				var sector dbSector
+				err = tx.FirstOrCreate(&sector, &dbSector{
+					Host: shard.Host[:],
+					Root: shard.Root[:],
+				}).Error
+				if err != nil {
+					return err
+				}
+				// Create shard.
+				err = tx.Create(&dbShard{
+					SlabID:   slab.ID,
+					SectorID: sector.Root,
+				}).Error
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// Delete implements the bus.ObjectStore interface.
+func (s *SQLObjectStore) Delete(key string) error {
+	return deleteObject(s.db, key)
+}
+
+// deleteObject deletes an object from the store.
+func deleteObject(tx *gorm.DB, key string) error {
+	return tx.Delete(&dbObject{ID: key}).Error
+}
+
+// get retrieves an object from the database.
+func (s *SQLObjectStore) get(key string) (dbObject, error) {
+	var obj dbObject
+	tx := s.db.Where(&dbObject{ID: key}).
+		Preload("Slabs").
+		Preload("Slabs.Slab.Shards").
+		Preload("Slabs.Slab.Shards.Sector").
+		Take(&obj)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return dbObject{}, ErrObjectNotFound
+	}
+	return obj, nil
 }
