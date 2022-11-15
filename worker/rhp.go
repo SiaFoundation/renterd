@@ -2,21 +2,136 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
+	"sync"
 	"time"
 
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/metrics"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
 )
 
-type rhpImpl struct{}
+type ephemeralMetricsRecorder struct {
+	ms []metrics.Metric
+	mu sync.Mutex
+}
 
-func (rhpImpl) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
+func (mr *ephemeralMetricsRecorder) RecordMetric(m metrics.Metric) {
+	mr.mu.Lock()
+	defer mr.mu.Unlock()
+	mr.ms = append(mr.ms, m)
+}
+
+func (mr *ephemeralMetricsRecorder) interactions() []hostdb.Interaction {
+	// TODO: merge/filter metrics?
+	var his []hostdb.Interaction
+	for _, m := range mr.ms {
+		if hi, ok := toHostInteraction(m); ok {
+			his = append(his, hi)
+		}
+	}
+	return his
+}
+
+// MetricHostDial contains metrics relating to a host dial.
+type MetricHostDial struct {
+	HostKey   consensus.PublicKey
+	HostIP    string
+	Timestamp time.Time
+	Elapsed   time.Duration
+	Err       error
+}
+
+// IsMetric implements metrics.Metric.
+func (MetricHostDial) IsMetric() {}
+
+func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.Conn, error) {
+	start := time.Now()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	metrics.Record(ctx, MetricHostDial{
+		HostKey:   hostKey,
+		HostIP:    hostIP,
+		Timestamp: start,
+		Elapsed:   time.Since(start),
+		Err:       err,
+	})
+	return conn, err
+}
+
+func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
+	transform := func(timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
+		hi := hostdb.Interaction{
+			Timestamp: timestamp,
+			Type:      typ,
+			Success:   err == nil,
+		}
+		if err == nil {
+			hi.Result, _ = json.Marshal(res)
+		} else {
+			hi.Result = []byte(`"` + err.Error() + `"`)
+		}
+		return hi, true
+	}
+
+	switch m := m.(type) {
+	case MetricHostDial:
+		return transform(m.Timestamp, "dial", m.Err, struct {
+			HostIP    string        `json:"hostIP"`
+			Timestamp time.Time     `json:"timestamp"`
+			Elapsed   time.Duration `json:"elapsed"`
+		}{m.HostIP, m.Timestamp, m.Elapsed})
+	case rhpv2.MetricRPC:
+		return transform(m.Timestamp, "rhpv2 rpc", m.Err, struct {
+			RPC        string         `json:"RPC"`
+			Timestamp  time.Time      `json:"timestamp"`
+			Elapsed    time.Duration  `json:"elapsed"`
+			Contract   string         `json:"contract"`
+			Uploaded   uint64         `json:"uploaded"`
+			Downloaded uint64         `json:"downloaded"`
+			Cost       types.Currency `json:"cost"`
+			Collateral types.Currency `json:"collateral"`
+		}{m.RPC.String(), m.Timestamp, m.Elapsed, m.Contract.String(), m.Uploaded, m.Downloaded, m.Cost, m.Collateral})
+	default:
+		return hostdb.Interaction{}, false
+	}
+}
+
+type rhpImpl struct {
+	bus Bus
+}
+
+func (r rhpImpl) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) {
+	hi := hostdb.Interaction{
+		Timestamp: time.Now(),
+		Type:      "scan",
+		Success:   err == nil,
+	}
+	if err == nil {
+		hi.Result, _ = json.Marshal(settings)
+	} else {
+		hi.Result = []byte(`"` + err.Error() + `"`)
+	}
+	// TODO: handle error
+	_ = r.bus.RecordHostInteraction(hostKey, hi)
+}
+
+func (r rhpImpl) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
+	var mr ephemeralMetricsRecorder
+	defer func() {
+		// TODO: send all interactions in one request
+		for _, hi := range mr.interactions() {
+			// TODO: handle error
+			_ = r.bus.RecordHostInteraction(hostKey, hi)
+		}
+	}()
+	ctx = metrics.WithRecorder(ctx, &mr)
+	conn, err := dial(ctx, hostIP, hostKey)
 	if err != nil {
 		return err
 	}
@@ -43,7 +158,7 @@ func (rhpImpl) withTransportV2(ctx context.Context, hostIP string, hostKey conse
 }
 
 func (rhpImpl) withTransportV3(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	conn, err := dial(ctx, hostIP, hostKey)
 	if err != nil {
 		return err
 	}
@@ -69,14 +184,13 @@ func (rhpImpl) withTransportV3(ctx context.Context, hostIP string, hostKey conse
 	return fn(t)
 }
 
-func (r rhpImpl) Settings(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (rhpv2.HostSettings, error) {
-	var settings rhpv2.HostSettings
-	err := r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		var err error
-		settings, err = rhpv2.RPCSettings(t)
+func (r rhpImpl) Settings(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (settings rhpv2.HostSettings, err error) {
+	err = r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
+		settings, err = rhpv2.RPCSettings(ctx, t)
 		return err
 	})
-	return settings, err
+	r.recordScan(hostKey, settings, err)
+	return
 }
 
 func (r rhpImpl) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
@@ -94,7 +208,7 @@ func (r rhpImpl) RenewContract(ctx context.Context, cs consensus.State, hostIP s
 	var contract rhpv2.Contract
 	var txnSet []types.Transaction
 	err := r.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		session, err := rhpv2.RPCLock(t, contractID, renterKey, 5*time.Second)
+		session, err := rhpv2.RPCLock(ctx, t, contractID, renterKey, 5*time.Second)
 		if err != nil {
 			return err
 		}

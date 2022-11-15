@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.sia.tech/jape"
@@ -18,25 +19,14 @@ import (
 )
 
 type (
-	// A ContractStore stores contracts.
-	ContractStore interface {
-		ContractsForUpload() ([]rhpv2.Contract, error)
-		ContractsForDownload(s slab.Slab) ([]rhpv2.Contract, error)
-	}
+	// A Bus is the source of truth within a renterd system.
+	Bus interface {
+		RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
-	// An ObjectStore stores objects.
-	ObjectStore interface {
-		List(key string) ([]string, error)
-		Get(key string) (object.Object, error)
-		Put(key string, o object.Object) error
-		Delete(key string) error
-	}
-
-	// A HostDB stores information about hosts.
-	HostDB interface {
-		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
-		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
-		RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+		Object(key string) (object.Object, error)
+		ObjectEntries(key string) ([]string, error)
+		AddObject(key string, o object.Object) error
+		DeleteObject(key string) error
 	}
 
 	// An RHP implements the renter-host protocol.
@@ -59,9 +49,7 @@ type (
 )
 
 type Worker struct {
-	cs  ContractStore
-	os  ObjectStore
-	hdb HostDB
+	bus Bus
 	rhp RHP
 	sm  SlabMover
 }
@@ -194,11 +182,13 @@ func (w *Worker) slabsUploadHandler(jc jape.Context) {
 		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	data := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
 	slab, err := w.sm.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
-	if jc.Check("couldn't upload slab", err) == nil {
-		jc.Encode(slab)
+	if jc.Check("couldn't upload slab", err) != nil {
+		return
 	}
+	jc.Encode(slab)
 }
 
 func (w *Worker) slabsDownloadHandler(jc jape.Context) {
@@ -208,8 +198,11 @@ func (w *Worker) slabsDownloadHandler(jc jape.Context) {
 	if jc.Decode(&sdr) != nil {
 		return
 	}
+
 	err := w.sm.DownloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, sdr.Contracts)
-	jc.Check("couldn't download slabs", err)
+	if jc.Check("couldn't download slabs", err) != nil {
+		return
+	}
 }
 
 func (w *Worker) slabsMigrateHandler(jc jape.Context) {
@@ -217,6 +210,7 @@ func (w *Worker) slabsMigrateHandler(jc jape.Context) {
 	if jc.Decode(&smr) != nil {
 		return
 	}
+
 	err := w.sm.MigrateSlab(jc.Request.Context(), &smr.Slab, smr.CurrentHeight, smr.From, smr.To)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -226,16 +220,28 @@ func (w *Worker) slabsMigrateHandler(jc jape.Context) {
 
 func (w *Worker) slabsDeleteHandler(jc jape.Context) {
 	var sdr SlabsDeleteRequest
-	if jc.Decode(&sdr) == nil {
-		err := w.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
-		jc.Check("couldn't delete slabs", err)
+	if jc.Decode(&sdr) != nil {
+		return
+	}
+	err := w.sm.DeleteSlabs(jc.Request.Context(), sdr.Slabs, sdr.Contracts)
+	if jc.Check("couldn't delete slabs", err) != nil {
+		return
 	}
 }
 
 func (w *Worker) objectsKeyHandlerGET(jc jape.Context) {
-	jc.Custom(nil, []byte{})
+	jc.Custom(nil, []string{})
 
-	o, err := w.os.Get(jc.PathParam("key"))
+	key := jc.PathParam("key")
+	if strings.HasSuffix(key, "/") {
+		es, err := w.bus.ObjectEntries(key)
+		if jc.Check("couldn't get object entries", err) != nil {
+			return
+		}
+		jc.Encode(es)
+		return
+	}
+	o, err := w.bus.Object(key)
 	if jc.Check("couldn't load object", err) != nil {
 		return
 	}
@@ -275,17 +281,18 @@ func (w *Worker) objectsKeyHandlerPUT(jc jape.Context) {
 		Key:   key,
 		Slabs: object.SingleSlabs(slabs, length),
 	}
-	jc.Check("couldn't store object", w.os.Put(jc.PathParam("key"), o))
+	jc.Check("couldn't store object", w.bus.AddObject(jc.PathParam("key"), o))
 }
 
 func (w *Worker) objectsKeyHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", w.os.Delete(jc.PathParam("key")))
+	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
 // New returns a new Worker.
-func New(masterKey [32]byte) *Worker {
+func New(masterKey [32]byte, b Bus) *Worker {
 	return &Worker{
-		rhp: rhpImpl{},
+		bus: b,
+		rhp: rhpImpl{bus: b},
 		sm:  newSlabMover(),
 	}
 }

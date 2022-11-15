@@ -253,3 +253,20 @@ type (
 		Signature consensus.Signature
 	}
 )
+
+// MetricRPC contains metrics relating to a single RPC.
+type MetricRPC struct {
+	HostKey    consensus.PublicKey
+	RPC        Specifier
+	Timestamp  time.Time
+	Elapsed    time.Duration
+	Contract   types.FileContractID // possibly empty
+	Uploaded   uint64
+	Downloaded uint64
+	Cost       types.Currency
+	Collateral types.Currency
+	Err        error
+}
+
+// IsMetric implements metrics.Metric.
+func (MetricRPC) IsMetric() {}

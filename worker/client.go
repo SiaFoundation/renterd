@@ -142,7 +142,7 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
 func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, err error) {
-	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
+	c.c.Custom("POST", "/slabs/upload", []byte{}, &slab.Slab{})
 
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
@@ -166,6 +166,7 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 		err, _ := ioutil.ReadAll(resp.Body)
 		return slab.Slab{}, errors.New(string(err))
 	}
+
 	err = json.NewDecoder(resp.Body).Decode(&s)
 	return
 }
@@ -194,20 +195,20 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 		err, _ := ioutil.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
+
 	_, err = io.Copy(dst, resp.Body)
 	return
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) (err error) {
+func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) error {
 	req := SlabsMigrateRequest{
 		Slab:          *s,
 		From:          from,
 		To:            to,
 		CurrentHeight: currentHeight,
 	}
-	err = c.c.POST("/slabs/migrate", req, s)
-	return
+	return c.c.POST("/slabs/migrate", req, s)
 }
 
 // DeleteSlabs deletes the specified slabs.
@@ -242,12 +243,10 @@ func (c *Client) UploadObject(r io.Reader, name string) (err error) {
 	return
 }
 
-// DownloadObject downloads the object with the given name, writing its data to
-// w.
-func (c *Client) DownloadObject(w io.Writer, name string) (err error) {
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s", name), nil, (*[]byte)(nil))
+func (c *Client) object(path string, w io.Writer, entries *[]string) (err error) {
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]string)(nil))
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, name), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -262,7 +261,24 @@ func (c *Client) DownloadObject(w io.Writer, name string) (err error) {
 		err, _ := ioutil.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
-	_, err = io.Copy(w, resp.Body)
+	if w != nil {
+		_, err = io.Copy(w, resp.Body)
+	} else {
+		err = json.NewDecoder(resp.Body).Decode(entries)
+	}
+	return
+}
+
+// ObjectEntries returns the entries at the given path, which must end in /.
+func (c *Client) ObjectEntries(path string) (entries []string, err error) {
+	err = c.object(path, nil, &entries)
+	return
+}
+
+// DownloadObject downloads the object at the given path, writing its data to
+// w.
+func (c *Client) DownloadObject(w io.Writer, path string) (err error) {
+	err = c.object(path, w, nil)
 	return
 }
 
