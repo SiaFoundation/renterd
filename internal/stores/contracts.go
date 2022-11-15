@@ -20,11 +20,11 @@ import (
 var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from the
 	// database.
-	ErrContractNotFound = errors.New("couldn't find contract with specified id")
+	ErrContractNotFound = errors.New("couldn't find contract")
 
 	// ErrHostSetNotFound is returned when a contract can't be retrieved from the
 	// database.
-	ErrHostSetNotFound = errors.New("couldn't find host set with specified name")
+	ErrHostSetNotFound = errors.New("couldn't find host set")
 )
 
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
@@ -440,7 +440,7 @@ func (s *SQLContractStore) AddContract(c rhpv2.Contract) error {
 
 		// Prepare contract revision.
 		revision := dbFileContractRevision{
-			//ParentID: fcid,
+			ParentID:              fcid,
 			UnlockConditions:      unlockConditions,
 			NewRevisionNumber:     c.Revision.NewRevisionNumber,
 			NewFileSize:           c.Revision.NewFileSize,
@@ -523,7 +523,7 @@ func (s *SQLContractStore) HostSet(name string) ([]consensus.PublicKey, error) {
 		Preload("Hosts").
 		Take(&hostSet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrHostSetNotFound
+		return nil, fmt.Errorf("name: %v; %w", name, ErrHostNotFound)
 	} else if err != nil {
 		return nil, err
 	}

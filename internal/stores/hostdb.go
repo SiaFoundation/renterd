@@ -3,6 +3,7 @@ package stores
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -339,7 +340,7 @@ func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 		Preload("Announcements").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.Host{}, ErrHostNotFound
+		return hostdb.Host{}, fmt.Errorf("host: %v; %w", hostKey, ErrHostNotFound)
 	}
 	return h.Host(), tx.Error
 }
