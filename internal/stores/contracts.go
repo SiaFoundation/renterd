@@ -13,14 +13,19 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/slab"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
-// ErrContractNotFound is returned when a contract can't be retrieved from the
-// database.
-var ErrContractNotFound = errors.New("couldn't find contract with specified id")
+var (
+	// ErrContractNotFound is returned when a contract can't be retrieved from the
+	// database.
+	ErrContractNotFound = errors.New("couldn't find contract with specified id")
+
+	// ErrHostSetNotFound is returned when a contract can't be retrieved from the
+	// database.
+	ErrHostSetNotFound = errors.New("couldn't find host set with specified name")
+)
 
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
 type EphemeralContractStore struct {
@@ -252,6 +257,17 @@ type (
 		CoveredFields  types.CoveredFields `gorm:"type:bytes;serializer:gob"`
 		Signature      []byte
 	}
+
+	dbHostSet struct {
+		Name  string           `gorm:"primaryKey"`
+		Hosts []dbHostSetEntry `gorm:"constraing:OnDelete:CASCADE;foreignKey:HostSetName;references:Name"`
+	}
+
+	dbHostSetEntry struct {
+		ID          uint64              `gorm:"primaryKey"`
+		HostSetName string              `gorm:"index;NOT NULL"`
+		PublicKey   consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+	}
 )
 
 // TableName implements the gorm.Tabler interface.
@@ -274,6 +290,12 @@ func (dbValidSiacoinOutput) TableName() string { return "siacoin_valid_outputs" 
 
 // TableName implements the gorm.Tabler interface.
 func (dbMissedSiacoinOutput) TableName() string { return "siacoin_missed_outputs" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbHostSet) TableName() string { return "host_sets" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbHostSetEntry) TableName() string { return "host_set_entries" }
 
 // Contract converts a dbContractRHPv2 to a rhpv2.Contract type.
 func (c dbContractRHPv2) Contract() (rhpv2.Contract, error) {
@@ -359,6 +381,8 @@ func NewSQLContractStore(conn gorm.Dialector, migrate bool) (*SQLContractStore, 
 			&dbSiaPublicKey{},
 			&dbValidSiacoinOutput{},
 			&dbMissedSiacoinOutput{},
+			&dbHostSet{},
+			&dbHostSetEntry{},
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, err
@@ -483,14 +507,46 @@ func (s *SQLContractStore) RemoveContract(id types.FileContractID) error {
 	return s.db.Delete(&dbContractRHPv2{ID: id}).Error
 }
 
-// ContractsForDownload implements the worker.ContractStore interface.
-func (s *SQLContractStore) ContractsForDownload(slab slab.Slab) ([]rhpv2.Contract, error) {
-	panic("not implemented")
+// HostSets implements the bus.HostSetStore interface.
+func (s *SQLContractStore) HostSets() ([]string, error) {
+	var setNames []string
+	tx := s.db.Model(&dbHostSet{}).
+		Select("Name").
+		Find(&setNames)
+	return setNames, tx.Error
 }
 
-// ContractsForUpload implements the worker.ContractStore interface.
-func (s *SQLContractStore) ContractsForUpload() ([]rhpv2.Contract, error) {
-	panic("not implemented")
+// HostSet implements the bus.HostSetStore interface.
+func (s *SQLContractStore) HostSet(name string) ([]consensus.PublicKey, error) {
+	var hostSet dbHostSet
+	err := s.db.Where(&dbHostSet{Name: name}).
+		Preload("Hosts").
+		Take(&hostSet).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrHostSetNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	pks := make([]consensus.PublicKey, 0, len(hostSet.Hosts))
+	for _, entry := range hostSet.Hosts {
+		pks = append(pks, entry.PublicKey)
+	}
+	return pks, nil
+}
+
+// SetHostSet implements the bus.HostSetStore interface.
+func (s *SQLContractStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
+	hostSetEntries := make([]dbHostSetEntry, 0, len(hosts))
+	for _, pk := range hosts {
+		hostSetEntries = append(hostSetEntries, dbHostSetEntry{
+			HostSetName: name,
+			PublicKey:   pk,
+		})
+	}
+	return s.db.Create(&dbHostSet{
+		Name:  name,
+		Hosts: hostSetEntries,
+	}).Error
 }
 
 func (s *SQLContractStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
