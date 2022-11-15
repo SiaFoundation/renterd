@@ -10,6 +10,7 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
+	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
 
@@ -75,6 +76,13 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
+	contracts, err := cs.Contracts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 0 {
+		t.Fatalf("should have 0 contracts but got %v", len(contracts))
+	}
 
 	// Insert it.
 	if err := cs.AddContract(c); err != nil {
@@ -87,10 +95,64 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(fetched, c) {
-		fmt.Println(fetched.Revision)
-		fmt.Println(c.Revision)
+		t.Fatal("contract mismatch")
+	}
+	contracts, err = cs.Contracts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 1 {
+		t.Fatalf("should have 1 contracts but got %v", len(contracts))
+	}
+	if !reflect.DeepEqual(contracts[0], c) {
 		t.Fatal("contract mismatch")
 	}
 
-	// TODO: delete it
+	// Delete the contract.
+	if err := cs.RemoveContract(c.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Look it up. Should fail.
+	_, err = cs.Contract(c.ID())
+	if !errors.Is(err, ErrContractNotFound) {
+		t.Fatal(err)
+	}
+	contracts, err = cs.Contracts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 0 {
+		t.Fatalf("should have 0 contracts but got %v", len(contracts))
+	}
+
+	// Make sure the db was cleaned up properly through the CASCADE delete.
+	tableCountCheck := func(table interface{}, tblCount int64) error {
+		var count int64
+		if err := cs.db.Model(table).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != tblCount {
+			return fmt.Errorf("expected %v objects in table %v but got %v", tblCount, table.(schema.Tabler).TableName(), count)
+		}
+		return nil
+	}
+	if err := tableCountCheck(&dbContractRHPv2{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tableCountCheck(&dbFileContractRevision{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tableCountCheck(&dbUnlockConditions{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tableCountCheck(&dbSiaPublicKey{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tableCountCheck(&dbValidSiacoinOutput{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tableCountCheck(&dbTransactionSignature{}, 0); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -205,24 +205,15 @@ type (
 
 	dbFileContractRevision struct {
 		ParentID              types.FileContractID `gorm:"primaryKey;type:bytes;serializer:gob;NOT NULL"` // only one revision for a given parent
-		UnlockConditions      dbUnlockConditions   `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ParentID"`
+		UnlockConditions      dbUnlockConditions   `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ParentID;NOT NULL"`
 		NewRevisionNumber     uint64               `gorm:"index"`
 		NewFileSize           uint64
 		NewFileMerkleRoot     crypto.Hash             `gorm:"type:bytes;serializer:gob"`
 		NewWindowStart        types.BlockHeight       `gorm:"index"`
 		NewWindowEnd          types.BlockHeight       `gorm:"index"`
-		NewValidProofOutputs  []dbValidSiacoinOutput  `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID"` // CASCADE to delete output
-		NewMissedProofOutputs []dbMissedSiacoinOutput `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID"` // CASCADE to delete output
+		NewValidProofOutputs  []dbValidSiacoinOutput  `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID;NOT NULL"` // CASCADE to delete output
+		NewMissedProofOutputs []dbMissedSiacoinOutput `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID;NOT NULL"` // CASCADE to delete output
 		NewUnlockHash         types.UnlockHash        `gorm:"index,type:bytes;serializer:gob"`
-	}
-
-	dbTransactionSignature struct {
-		ID             uint64               `gorm:"primaryKey"`
-		ParentID       types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		PublicKeyIndex uint64
-		Timelock       types.BlockHeight
-		CoveredFields  types.CoveredFields `gorm:"type:bytes;serializer:gob"`
-		Signature      []byte
 	}
 
 	dbUnlockConditions struct {
@@ -251,6 +242,15 @@ type (
 		ParentID   types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
 		Value      *big.Int             `gorm:"type:bytes;serializer:gob"`
+	}
+
+	dbTransactionSignature struct {
+		ID             uint64               `gorm:"primaryKey"`
+		ParentID       types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
+		PublicKeyIndex uint64
+		Timelock       types.BlockHeight
+		CoveredFields  types.CoveredFields `gorm:"type:bytes;serializer:gob"`
+		Signature      []byte
 	}
 )
 
@@ -463,12 +463,24 @@ func (s *SQLContractStore) Contract(id types.FileContractID) (rhpv2.Contract, er
 
 // Contracts implements the bus.ContractStore interface.
 func (s *SQLContractStore) Contracts() ([]rhpv2.Contract, error) {
-	panic("not implemented")
+	dbContracts, err := s.contracts()
+	if err != nil {
+		return nil, err
+	}
+	contracts := make([]rhpv2.Contract, 0, len(dbContracts))
+	for _, c := range dbContracts {
+		contract, err := c.Contract()
+		if err != nil {
+			return nil, err
+		}
+		contracts = append(contracts, contract)
+	}
+	return contracts, nil
 }
 
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLContractStore) RemoveContract(id types.FileContractID) error {
-	panic("not implemented")
+	return s.db.Delete(&dbContractRHPv2{ID: id}).Error
 }
 
 // ContractsForDownload implements the worker.ContractStore interface.
@@ -493,4 +505,15 @@ func (s *SQLContractStore) contract(id types.FileContractID) (dbContractRHPv2, e
 		return contract, ErrContractNotFound
 	}
 	return contract, err
+}
+
+func (s *SQLContractStore) contracts() ([]dbContractRHPv2, error) {
+	var contracts []dbContractRHPv2
+	err := s.db.Model(&dbContractRHPv2{}).
+		Preload("Signatures").
+		Preload("Revision.NewValidProofOutputs").
+		Preload("Revision.NewMissedProofOutputs").
+		Preload("Revision.UnlockConditions.PublicKeys").
+		Find(&contracts).Error
+	return contracts, err
 }
