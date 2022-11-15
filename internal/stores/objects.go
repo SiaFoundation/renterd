@@ -315,26 +315,18 @@ type (
 		ID        uint64 `gorm:"primaryKey"`
 		Key       string `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
-		Shards    []dbShard `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
+		Shards    []dbSector `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
 	}
 
-	// dbShard describes a mapping between a slab and a sector in the
-	// database.  A sector should only exist once in the database but it can
-	// be pointed to by multiple shards. For garbage collection we are able
-	// to count the number of shards pointing to a sector to see whether we
-	// still need that sector.
-	dbShard struct {
+	// dbSector describes a sector in the database. A sector can exist
+	// multiple times in the sectors table since it can belong to multiple
+	// slabs.
+	dbSector struct {
 		ID     uint64 `gorm:"primaryKey"`
 		SlabID uint64 `gorm:"index;NOT NULL"`
 
-		SectorID []byte `gorm:"index;NOT NULL"` // No CASCADE to not delete sectors
-		Sector   dbSector
-	}
-
-	// dbSector describes a slab.Sector in the database.
-	dbSector struct {
 		// Root uniquely identifies a sector and is therefore the primary key.
-		Root []byte `gorm:"primaryKey"`
+		Root []byte `gorm:"index;NOT NULL"`
 
 		// Host is the key of the host that stores the sector.
 		// TODO: once we migrate the contract store over to a relational
@@ -355,9 +347,6 @@ func (dbSlice) TableName() string { return "slices" }
 func (dbSlab) TableName() string { return "slabs" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbShard) TableName() string { return "shards" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
 
 // NewSQLObjectStore creates a new SQLObjectStore connected to a DB through
@@ -374,7 +363,6 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 			&dbObject{},
 			&dbSlice{},
 			&dbSlab{},
-			&dbShard{},
 			&dbSector{},
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
@@ -415,8 +403,8 @@ func (o dbObject) Object() (object.Object, error) {
 			Length: sl.Length,
 		}
 		for j, sh := range sl.Slab.Shards {
-			copy(obj.Slabs[i].Shards[j].Host[:], sh.Sector.Host)
-			copy(obj.Slabs[i].Shards[j].Root[:], sh.Sector.Root)
+			copy(obj.Slabs[i].Shards[j].Host[:], sh.Host)
+			copy(obj.Slabs[i].Shards[j].Root[:], sh.Root)
 		}
 	}
 	return obj, nil
@@ -503,19 +491,11 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 			}
 
 			for _, shard := range ss.Shards {
-				// Create sector. Might exist already.
-				var sector dbSector
-				err = tx.FirstOrCreate(&sector, &dbSector{
-					Host: shard.Host[:],
-					Root: shard.Root[:],
-				}).Error
-				if err != nil {
-					return err
-				}
 				// Create shard.
-				err = tx.Create(&dbShard{
-					SlabID:   slab.ID,
-					SectorID: sector.Root,
+				err = tx.Create(&dbSector{
+					SlabID: slab.ID,
+					Host:   shard.Host[:],
+					Root:   shard.Root[:],
 				}).Error
 				if err != nil {
 					return err
@@ -542,7 +522,6 @@ func (s *SQLObjectStore) get(key string) (dbObject, error) {
 	tx := s.db.Where(&dbObject{ID: key}).
 		Preload("Slabs").
 		Preload("Slabs.Slab.Shards").
-		Preload("Slabs.Slab.Shards.Sector").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound

@@ -189,15 +189,12 @@ func TestSQLObjectStore(t *testing.T) {
 					ID:        1,
 					Key:       string(obj1Slab0Key),
 					MinShards: 1,
-					Shards: []dbShard{
+					Shards: []dbSector{
 						{
-							ID:       1,
-							SlabID:   1,
-							SectorID: obj1.Slabs[0].Shards[0].Root[:],
-							Sector: dbSector{
-								Root: obj1.Slabs[0].Shards[0].Root[:],
-								Host: obj1.Slabs[0].Shards[0].Host[:],
-							},
+							ID:     1,
+							SlabID: 1,
+							Root:   obj1.Slabs[0].Shards[0].Root[:],
+							Host:   obj1.Slabs[0].Shards[0].Host[:],
 						},
 					},
 				},
@@ -211,15 +208,12 @@ func TestSQLObjectStore(t *testing.T) {
 					ID:        2,
 					Key:       string(obj1Slab1Key),
 					MinShards: 2,
-					Shards: []dbShard{
+					Shards: []dbSector{
 						{
-							ID:       2,
-							SlabID:   2,
-							SectorID: obj1.Slabs[1].Shards[0].Root[:],
-							Sector: dbSector{
-								Root: obj1.Slabs[1].Shards[0].Root[:],
-								Host: obj1.Slabs[1].Shards[0].Host[:],
-							},
+							ID:     2,
+							SlabID: 2,
+							Root:   obj1.Slabs[1].Shards[0].Root[:],
+							Host:   obj1.Slabs[1].Shards[0].Host[:],
 						},
 					},
 				},
@@ -282,15 +276,12 @@ func TestSQLObjectStore(t *testing.T) {
 		if err := tableCountCheck(&dbSlab{}, slabCount); err != nil {
 			return err
 		}
-		if err := tableCountCheck(&dbShard{}, shardCount); err != nil {
-			return err
-		}
 		if err := tableCountCheck(&dbSector{}, sectorCount); err != nil {
 			return err
 		}
 		return nil
 	}
-	if err := countCheck(1, 1, 1, 1, 2); err != nil {
+	if err := countCheck(1, 1, 1, 1, 1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -299,7 +290,7 @@ func TestSQLObjectStore(t *testing.T) {
 	if err := os.Delete(objID); err != nil {
 		t.Fatal(err)
 	}
-	if err := countCheck(0, 0, 0, 0, 2); err != nil {
+	if err := countCheck(0, 0, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 }
