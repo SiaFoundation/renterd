@@ -32,8 +32,8 @@ type Config struct {
 }
 
 // State contains all autopilot state variables.
-// TODO: could be defined on the autopilot directly
-// TODO: synced could be a channel
+//
+// TODO: get rid of consensus state
 type State struct {
 	BlockHeight   uint64
 	CurrentPeriod uint64

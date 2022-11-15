@@ -16,55 +16,6 @@ import (
 	"lukechampine.com/frand"
 )
 
-func (ap *Autopilot) hostScanLoop() {
-	// TODO: initial scan with much shorter
-	for {
-		select {
-		case <-ap.stopChan:
-			return
-		case <-time.After(time.Minute):
-			// scan up to 10 hosts that we haven't interacted with in at least 1 week
-			hosts, err := ap.bus.Hosts(time.Now().Add(-7*24*time.Hour), 10)
-			if err != nil {
-				return
-			}
-			type res struct {
-				hostKey  consensus.PublicKey
-				settings rhpv2.HostSettings
-				err      error
-			}
-			resChan := make(chan res)
-			for _, h := range hosts {
-				go func(h hostdb.Host) {
-					scan, err := ap.worker.RHPScan(h.PublicKey, h.NetAddress())
-					resChan <- res{h.PublicKey, scan.Settings, err}
-				}(h)
-			}
-			for range hosts {
-				r := <-resChan
-				if r.err != nil {
-					err := ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
-						Timestamp: time.Now(),
-						Type:      "scan",
-						Success:   false,
-						Result:    json.RawMessage(`{"error": "` + r.err.Error() + `"}`),
-					})
-					_ = err // TODO
-				} else {
-					js, _ := json.Marshal(r.settings)
-					err := ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
-						Timestamp: time.Now(),
-						Type:      "scan",
-						Success:   true,
-						Result:    json.RawMessage(js),
-					})
-					_ = err // TODO
-				}
-			}
-		}
-	}
-}
-
 func (ap *Autopilot) hostsForContracts(n int) ([]consensus.PublicKey, error) {
 	// select randomly using score as weights, excluding existing contracts
 

@@ -12,6 +12,12 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
+	"golang.org/x/crypto/blake2b"
+)
+
+const (
+	defaultContractLoopInterval = 15 * time.Minute
+	defaultScanLoopInterval     = time.Minute
 )
 
 type Store interface {
@@ -71,6 +77,9 @@ type Autopilot struct {
 	worker    Worker
 	masterKey [32]byte
 
+	c *contractor
+	s *scanner
+
 	stopChan chan struct{}
 }
 
@@ -94,25 +103,31 @@ func (ap *Autopilot) Run() error {
 		return err
 	}
 
-	go ap.contractLoop()
-	go ap.hostScanLoop()
+	ap.c.run()
+	ap.s.run()
 	<-ap.stopChan
 	return nil // TODO
 }
 
-func (ap *Autopilot) Stop() {
+func (ap *Autopilot) Stop() error {
+	_ = ap.c.stop()
+	_ = ap.s.stop()
 	close(ap.stopChan)
+	return nil // TODO: maybe use https://github.com/hashicorp/go-multierror (?)
 }
 
 // New initializes an Autopilot.
 func New(store Store, bus Bus, worker Worker) (*Autopilot, error) {
-	return &Autopilot{
+	ap := &Autopilot{
 		store:  store,
 		bus:    bus,
 		worker: worker,
 
 		stopChan: make(chan struct{}),
-	}, nil
+	}
+	ap.c = newContractor(ap, defaultContractLoopInterval)
+	ap.s = newScanner(ap, defaultScanLoopInterval)
+	return ap, nil
 }
 
 func (ap *Autopilot) configHandlerGET(jc jape.Context) {
@@ -133,6 +148,22 @@ func (ap *Autopilot) actionsHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(ap.Actions(since, max))
+}
+
+// TODO: deriving the renter key from the host key using the master key only
+// works if we persist a hash of the renter's master key in the database and
+// compare it on startup, otherwise there's no way of knowing the derived key is
+// usuable
+//
+// TODO: instead of deriving a renter key use a randomly generated salt so we're
+// not limited to one key per host
+func (ap *Autopilot) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(ap.masterKey[:], hostKey[:]...))
+	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }
 
 func (ap *Autopilot) load() error {
