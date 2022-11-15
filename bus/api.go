@@ -88,8 +88,23 @@ type ObjectsResponse struct {
 // A Contract uniquely identifies a Sia file contract on a host, along with the
 // host's IP.
 type Contract struct {
-	HostKey   PublicKey            `json:"hostKey"`
-	HostIP    string               `json:"hostIP"`
-	ID        types.FileContractID `json:"id"`
-	EndHeight uint64               `json:"endHeight"`
+	HostKey     PublicKey            `json:"hostKey"`
+	HostIP      string               `json:"hostIP"`
+	ID          types.FileContractID `json:"id"`
+	StartHeight uint64               `json:"startHeight"`
+	EndHeight   uint64               `json:"endHeight"`
+	Metadata    ContractMetadata     `json:"metadata"`
+}
+
+// ContractMetadata contains all metadata for a contract.
+type ContractMetadata struct {
+	RenewedFrom types.FileContractID `json:"renewedFrom"`
+	Spending    ContractSpending     `json:"spending"`
+}
+
+// ContractSpending contains all spending details for a contract.
+type ContractSpending struct {
+	Uploads     types.Currency `json:"uploads"`
+	Downloads   types.Currency `json:"downloads"`
+	FundAccount types.Currency `json:"fundAccount"`
 }

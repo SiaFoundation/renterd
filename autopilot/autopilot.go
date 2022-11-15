@@ -15,14 +15,13 @@ import (
 )
 
 type Store interface {
-	Tip() consensus.ChainIndex
-	Synced() bool // TODO: should be added to `Tip` | should be moved over to Bus
-
 	Config() Config
 	SetConfig(c Config) error
+
+	State() State
+	SetState(s State) error
 }
 
-// TODO: should be defined in bus package, should be the interface of the client
 type Bus interface {
 	// wallet
 	WalletBalance() (types.Currency, error)
@@ -40,13 +39,22 @@ type Bus interface {
 
 	// contracts
 	AddContract(c rhpv2.Contract) error
-	RenewableContracts(renewWindow uint64) ([]bus.Contract, error)
-	AcquireContractLock(types.FileContractID) (types.FileContractRevision, error)
-	ReleaseContractLock(types.FileContractID) error
+	AllContracts(currentPeriod uint64) ([]bus.Contract, error)
+	ActiveContracts(maxEndHeight uint64) ([]bus.Contract, error)
+
+	ContractData(cID types.FileContractID) (rhpv2.Contract, error)
+	ContractHistory(cID types.FileContractID, currentPeriod uint64) ([]bus.Contract, error)
+	UpdateContractMetadata(cID types.FileContractID, metadata bus.ContractMetadata) error
+
+	AcquireContractLock(cID types.FileContractID) (types.FileContractRevision, error)
+	ReleaseContractLock(cID types.FileContractID) error
 
 	// contractsets
 	SetHostSet(name string, hosts []consensus.PublicKey) error
 	HostSetContracts(name string) ([]bus.Contract, error)
+
+	// txpool
+	RecommendedFee() (types.Currency, error)
 }
 
 type Worker interface {
@@ -82,6 +90,10 @@ func (ap *Autopilot) Actions(since time.Time, max int) []Action {
 }
 
 func (ap *Autopilot) Run() error {
+	if err := ap.load(); err != nil {
+		return err
+	}
+
 	go ap.contractLoop()
 	go ap.hostScanLoop()
 	<-ap.stopChan
@@ -121,6 +133,24 @@ func (ap *Autopilot) actionsHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(ap.Actions(since, max))
+}
+
+func (ap *Autopilot) load() error {
+	// set the current period
+	state := ap.store.State()
+	if state.CurrentPeriod == 0 {
+		contracts := ap.store.Config().Contracts
+		state.CurrentPeriod = state.BlockHeight
+		if contracts.Period > contracts.RenewWindow {
+			state.CurrentPeriod -= contracts.RenewWindow
+		}
+
+		if err := ap.store.SetState(state); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // NewServer returns an HTTP handler that serves the renterd autopilot API.

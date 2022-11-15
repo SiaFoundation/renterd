@@ -215,12 +215,28 @@ func (c *Client) HostSetContracts(name string) (contracts []Contract, err error)
 	return
 }
 
-// TODO
 func (c *Client) AcquireContractLock(types.FileContractID) (types.FileContractRevision, error) {
 	panic("unimplemented")
 }
-func (c *Client) ReleaseContractLock(types.FileContractID) error { panic("unimplemented") }
-func (c *Client) RenewableContracts(renewWindow uint64) ([]Contract, error) {
+func (c *Client) ReleaseContractLock(types.FileContractID) error {
+	panic("unimplemented")
+}
+func (c *Client) ActiveContracts(maxEndHeight uint64) ([]Contract, error) {
+	panic("unimplemented")
+}
+func (c *Client) AllContracts(currentPeriod uint64) ([]Contract, error) {
+	panic("unimplemented")
+}
+func (c *Client) ContractData(types.FileContractID) (rhpv2.Contract, error) {
+	panic("unimplemented")
+}
+func (c *Client) ContractHistory(types.FileContractID, uint64) ([]Contract, error) {
+	panic("unimplemented")
+}
+func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
+	panic("unimplemented")
+}
+func (c *Client) RecommendedFee() (types.Currency, error) {
 	panic("unimplemented")
 }
 

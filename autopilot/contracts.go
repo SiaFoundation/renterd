@@ -1,9 +1,10 @@
 package autopilot
 
 import (
+	"math"
 	"time"
 
-	"gitlab.com/NebulousLabs/errors"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
@@ -11,31 +12,402 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-const contractSetName = "autopilot"
+const (
+	// contractSetName defines the name of the default contract set
+	contractSetName = "autopilot"
+
+	// contractLoopInterval defines the interval with which we run the contract loop
+	contractLoopInterval = 15 * time.Minute
+
+	// estimatedFileContractTransactionSetSize is the estimated blockchain size
+	// of a transaction set between a renter and a host that contains a file
+	// contract.
+	estimatedFileContractTransactionSetSize = 2048
+)
 
 func logErr(err error) {} // TODO
 
-func (ap *Autopilot) currentHeight() uint64 {
-	return ap.store.Tip().Height
-}
+func (ap *Autopilot) contractLoop() {
+	ticker := time.NewTicker(contractLoopInterval)
 
-func (ap *Autopilot) currentPeriod() uint64 {
-	c := ap.store.Config()
-	h := ap.store.Tip().Height
-	return h + c.Contracts.Period
-}
+	for {
+		// TODO: add wakeChan
+		// TODO: use triggerChan
+		select {
+		case <-ap.stopChan:
+			return
+		case <-ticker.C:
+		}
 
-// TODO: deriving the renter key from the host key using the master key only
-// works if we persist a hash of the renter's master key in the database and
-// compare it on startup, otherwise there's no way of knowing the derived key is
-// usuable
-func (ap *Autopilot) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
-	seed := blake2b.Sum256(append(ap.masterKey[:], hostKey[:]...))
-	pk := consensus.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
+		// re-use same state and config in every iteration
+		config := ap.store.Config()
+		state := ap.store.State()
+
+		// don't run the contract loop if we are not synced
+		// TODO: use a channel
+		if !state.Synced {
+			continue
+		}
+
+		// return early if no hosts are requested
+		if config.Contracts.Hosts == 0 {
+			return
+		}
+
+		// fetch our wallet address
+		address, err := ap.bus.WalletAddress()
+		if err != nil {
+			logErr(err)
+			continue
+		}
+
+		// run checks
+		err = ap.runContractChecks()
+		if err != nil {
+			logErr(err)
+			continue
+		}
+
+		// figure out remaining funds
+		spent, err := ap.periodSpending()
+		if err != nil {
+			logErr(err)
+			continue
+		}
+		var remaining types.Currency
+		if config.Contracts.Allowance.Cmp(spent) > 0 {
+			remaining = config.Contracts.Allowance.Sub(spent)
+		}
+
+		// run renewals
+		renewed, err := ap.runContractRenewals(config, state, &remaining, address)
+		if err != nil {
+			logErr(err)
+			continue
+		}
+
+		// run formations
+		formed, err := ap.runContractFormations(config, state, &remaining, address)
+		if err != nil {
+			logErr(err)
+			continue
+		}
+
+		// update contract set
+		err = ap.updateDefaultContractSet(renewed, formed)
+		if err != nil {
+			logErr(err)
+			continue
+		}
 	}
-	return pk
+}
+
+func (ap *Autopilot) updateDefaultContractSet(renewed, formed []worker.Contract) error {
+	// fetch current set
+	cs, err := ap.defaultContracts()
+	if err != nil {
+		return err
+	}
+
+	// build hostkey -> index map
+	csMap := make(map[string]int)
+	for i, contract := range cs {
+		csMap[contract.HostKey.String()] = i
+	}
+
+	// swap renewed contracts
+	for _, contract := range renewed {
+		index, exists := csMap[contract.HostKey.String()]
+		if !exists {
+			// TODO: panic/log? shouldn't happen
+			csMap[contract.HostKey.String()] = len(cs)
+			cs = append(cs, contract)
+			continue
+		}
+		cs[index] = contract
+	}
+
+	// append formations
+	for _, contract := range formed {
+		_, exists := csMap[contract.HostKey.String()]
+		if exists {
+			// TODO: panic/log? shouldn't happen
+			continue
+		}
+		cs = append(cs, contract)
+	}
+
+	// update contract set
+	contracts := make([]consensus.PublicKey, len(cs))
+	for i, c := range cs {
+		contracts[i] = c.HostKey
+	}
+	err = ap.bus.SetHostSet(contractSetName, contracts)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ap *Autopilot) runContractChecks() error {
+	// fetch all active contracts
+	active, err := ap.bus.ActiveContracts(math.MaxUint64)
+	if err != nil {
+		return err
+	}
+
+	// TODO: check for IP range violations
+
+	// run checks on the contracts individually
+	for _, contract := range active {
+		// grab contract metadata
+		metadata := contract.Metadata
+
+		// update metadata:
+		// TODO: is host in host DB
+		// TODO: is max revision
+		// TODO: is offline
+		// TODO: is gouging
+		// TODO: is low score
+		// TODO: is out of funds
+
+		// TODO: is up for renewal
+		// TODO: is GFU limited (allowance # hsots)
+
+		// update contract metadata
+		err = ap.bus.UpdateContractMetadata(contract.ID, metadata)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (ap *Autopilot) runContractRenewals(cfg Config, s State, budget *types.Currency, renterAddress types.UnlockHash) ([]worker.Contract, error) {
+	// fetch all contracts that are up for renew
+	toRenew, err := ap.renewableContracts(s.BlockHeight + cfg.Contracts.RenewWindow)
+	if err != nil {
+		return nil, err
+	}
+
+	// perform the renewals
+	var renewed []worker.Contract
+	for _, renew := range toRenew {
+		// check our budget
+		renterFunds, err := ap.renewFundingEstimate(cfg, s, renew.ID)
+		if budget.Cmp(renterFunds) < 0 {
+			break
+		}
+
+		// derive the renter key
+		renterKey := ap.deriveRenterKey(renew.HostKey)
+		if err != nil {
+			return nil, err
+		}
+
+		var hostCollateral types.Currency // TODO
+		contract, err := ap.renewContract(cfg, s, renew, renterKey, renterAddress, renterFunds, hostCollateral)
+		if err != nil {
+			// TODO: handle error properly, if the wallet ran out of outputs
+			// here there's no point in renewing more contracts until a
+			// block is mined, maybe we could/should wait for pending transactions?
+			return nil, err
+		}
+
+		// update the budget
+		*budget = budget.Sub(renterFunds)
+
+		// persist the contract
+		err = ap.bus.AddContract(contract)
+		if err != nil {
+			return nil, err
+		}
+
+		// persist the metadata
+		err = ap.bus.UpdateContractMetadata(contract.ID(), bus.ContractMetadata{
+			RenewedFrom: renew.ID,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		// add to set
+		renewed = append(renewed, worker.Contract{
+			HostKey:   renew.HostKey,
+			HostIP:    renew.HostIP,
+			ID:        contract.ID(),
+			RenterKey: renterKey,
+		})
+	}
+
+	return renewed, nil
+}
+
+func (ap *Autopilot) runContractFormations(cfg Config, s State, budget *types.Currency, renterAddress types.UnlockHash) ([]worker.Contract, error) {
+	// fetch all active contracts
+	active, err := ap.bus.ActiveContracts(math.MaxUint64)
+	if err != nil {
+		return nil, err
+	}
+
+	// fetch recommended txn fee
+	fee, err := ap.bus.RecommendedFee()
+	if err != nil {
+		return nil, err
+	}
+
+	// calculate min/max contract funds
+	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	maxInitialContractFunds := allowance.Div64(10) // TODO: arbitrary divisor
+	minInitialContractFunds := allowance.Div64(20) // TODO: arbitrary divisor
+
+	// form missing contracts
+	var formed []worker.Contract
+	missing := int(cfg.Contracts.Hosts) - len(active) // TODO: add leeway so we don't form hosts if we dip slightly under `needed` (?)
+	canidates, _ := ap.hostsForContracts(missing)     // TODO: add leeway so we have more than enough canidates
+	for h := 0; missing > 0 && h < len(canidates); h++ {
+		// fetch host IP
+		candidate := canidates[h]
+		host, err := ap.bus.Host(candidate)
+		if err != nil {
+			logErr(err)
+			continue
+		}
+		hostIP := host.NetAddress()
+
+		// fetch host settings
+		scan, err := ap.worker.RHPScan(host.PublicKey, hostIP)
+		if err != nil {
+			logErr(err)
+			continue
+		}
+		hostSettings := scan.Settings
+
+		// check our budget
+		txnFee := fee.Mul64(estimatedFileContractTransactionSetSize)
+		renterFunds := ap.initialContractFunding(hostSettings, txnFee, minInitialContractFunds, maxInitialContractFunds)
+		if budget.Cmp(renterFunds) < 0 {
+			break
+		}
+
+		// form contract
+		renterKey := ap.deriveRenterKey(candidate)
+		var hostCollateral types.Currency // TODO
+		contract, err := ap.formContract(cfg, s, candidate, hostIP, hostSettings, renterKey, renterAddress, renterFunds, hostCollateral)
+		if err != nil {
+			// TODO: handle error properly, if the wallet ran out of outputs
+			// here there's no point in forming more contracts until a block
+			// is mined, maybe we could/should wait for pending transactions?
+			logErr(err)
+			continue
+		}
+
+		// update the budget
+		*budget = budget.Sub(renterFunds)
+
+		// persist contract in store
+		err = ap.bus.AddContract(contract)
+		if err != nil {
+			logErr(err)
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		// add contract to contract set
+		formed = append(formed, worker.Contract{
+			HostKey:   candidate,
+			HostIP:    hostIP,
+			ID:        contract.ID(),
+			RenterKey: renterKey,
+		})
+
+		missing--
+	}
+
+	return formed, nil
+}
+
+func (ap *Autopilot) renewContract(cfg Config, s State, toRenew worker.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.Contract, error) {
+	// handle contract locking
+	revision, err := ap.bus.AcquireContractLock(toRenew.ID)
+	if err != nil {
+		return rhpv2.Contract{}, nil
+	}
+	defer ap.bus.ReleaseContractLock(toRenew.ID)
+
+	// fetch host settings
+	scan, err := ap.worker.RHPScan(toRenew.HostKey, toRenew.HostIP)
+	if err != nil {
+		return rhpv2.Contract{}, nil
+	}
+
+	// prepare the renewal
+	endHeight := s.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+	fc, cost, finalPayment, err := ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey, renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	if err != nil {
+		return rhpv2.Contract{}, nil
+	}
+
+	// fund the transaction
+	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
+	toSign, parents, err := ap.bus.WalletFund(&txn, cost)
+	if err != nil {
+		_ = ap.bus.WalletDiscard(txn) // ignore error
+		return rhpv2.Contract{}, err
+	}
+
+	// sign the transaction
+	err = ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
+	if err != nil {
+		_ = ap.bus.WalletDiscard(txn) // ignore error
+		return rhpv2.Contract{}, err
+	}
+
+	// renew the contract
+	txnSet := append(parents, txn)
+	renewed, _, err := ap.worker.RHPRenew(renterKey, toRenew.HostKey, toRenew.HostIP, toRenew.ID, txnSet, finalPayment)
+	if err != nil {
+		_ = ap.bus.WalletDiscard(txn) // ignore error
+		return rhpv2.Contract{}, err
+	}
+	return renewed, nil
+}
+
+func (ap *Autopilot) formContract(cfg Config, s State, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.Contract, error) {
+	// prepare contract formation
+	endHeight := s.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+	fc, cost, err := ap.worker.RHPPrepareForm(renterKey, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
+	if err != nil {
+		return rhpv2.Contract{}, err
+	}
+
+	// fund the transaction
+	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
+	toSign, parents, err := ap.bus.WalletFund(&txn, cost)
+	if err != nil {
+		_ = ap.bus.WalletDiscard(txn) // ignore error
+		return rhpv2.Contract{}, err
+	}
+
+	// sign the transaction
+	err = ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
+	if err != nil {
+		_ = ap.bus.WalletDiscard(txn) // ignore error
+		return rhpv2.Contract{}, err
+	}
+
+	// form the contract
+	contract, _, err := ap.worker.RHPForm(renterKey, hostKey, hostIP, append(parents, txn))
+	if err != nil {
+		_ = ap.bus.WalletDiscard(txn) // ignore error
+		return rhpv2.Contract{}, err
+	}
+
+	return contract, nil
 }
 
 func (ap *Autopilot) defaultContracts() ([]worker.Contract, error) {
@@ -58,8 +430,8 @@ func (ap *Autopilot) defaultContracts() ([]worker.Contract, error) {
 	return contracts, nil
 }
 
-func (ap *Autopilot) renewableContracts(renewWindow uint64) ([]worker.Contract, error) {
-	cs, err := ap.bus.RenewableContracts(renewWindow)
+func (ap *Autopilot) renewableContracts(endHeight uint64) ([]worker.Contract, error) {
+	cs, err := ap.bus.ActiveContracts(endHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -78,243 +450,128 @@ func (ap *Autopilot) renewableContracts(renewWindow uint64) ([]worker.Contract, 
 	return contracts, nil
 }
 
-func (ap *Autopilot) contractLoop() {
-	for {
-		select {
-		// TODO: use build var for loop interval
-		// TODO: add wakeChan (to trigger loop)
-		// TODO: run loop immediately
-		// TODO: logging
-		case <-ap.stopChan:
-			return
-		case <-time.After(time.Hour):
-		}
-
-		// don't run the contract loop if we are not synced
-		if !ap.store.Synced() {
-			continue
-		}
-
-		// fetch all contracts
-		cs, err := ap.defaultContracts()
-		if err != nil {
-			logErr(err)
-			continue
-		}
-
-		// run checks on the contract set
-		// TODO: dedupe existing contracts (?)
-		// TODO: check for IP range violations (?)
-
-		// run checks on the contracts individually
-		// TODO: separate loop (?)
-		csMap := make(map[string]int)
-		for i, c := range cs {
-			csMap[c.ID.String()] = i
-			// TODO: is host in host DB
-			// TODO: is max revision
-			// TODO: is offline
-			// TODO: is gouging
-			// TODO: is low score
-			// TODO: is out of funds
-			// TODO: update some contract metadata entity to reflect these checks
-		}
-
-		// gather some basic info
-		config := ap.store.Config()
-		needed := config.Contracts.Hosts
-		renewW := config.Contracts.RenewWindow
-		period := ap.currentPeriod()
-		renterAddress, err := ap.bus.WalletAddress()
-		if err != nil {
-			logErr(err)
-			continue
-		}
-
-		// TODO: check remaining funds before renew | form
-
-		// renew all renewable contracts
-		toRenew, err := ap.renewableContracts(renewW)
-		if err != nil {
-			logErr(err)
-			continue
-		}
-		for _, renew := range toRenew {
-			// renew contract
-			renterKey := ap.deriveRenterKey(renew.HostKey)
-			renewed, err := ap.renewContract(renew, renterKey, renterAddress, period)
-			if err != nil {
-				// TODO: handle error properly, if the wallet ran out of outputs
-				// here there's no point in renewing more contracts until a
-				// block is mined, maybe we could/should wait for pending transactions?
-				logErr(err)
-				continue
-			}
-
-			// swap contract in contract set
-			cs[csMap[renew.ID.String()]] = worker.Contract{
-				HostKey:   renew.HostKey,
-				HostIP:    renew.HostIP,
-				ID:        renewed.ID(),
-				RenterKey: renterKey,
-			}
-
-			// persist the contract
-			err = ap.bus.AddContract(renewed)
-			if err != nil {
-				logErr(err)
-				continue
-			}
-		}
-
-		// form missing contracts
-		missing := int(needed) - len(cs)              // TODO: add leeway so we don't form hosts if we dip slightly under `needed` (?)
-		canidates, _ := ap.hostsForContracts(missing) // TODO: add leeway so we have more than enough canidates
-		for h := 0; missing > 0 && h < len(canidates); h++ {
-			// fetch host IP
-			candidate := canidates[h]
-			host, err := ap.bus.Host(candidate)
-			if err != nil {
-				logErr(err)
-				continue
-			}
-			hostIP := host.NetAddress()
-
-			// form contract
-			renterKey := ap.deriveRenterKey(candidate)
-			formed, err := ap.formContract(candidate, hostIP, renterKey, renterAddress, period)
-			if err != nil {
-				// TODO: handle error properly, if the wallet ran out of outputs
-				// here there's no point in forming more contracts until a block
-				// is mined, maybe we could/should wait for pending transactions?
-				logErr(err)
-				continue
-			}
-
-			// add contract to contract set
-			cs = append(cs, worker.Contract{
-				HostKey:   candidate,
-				HostIP:    hostIP,
-				ID:        formed.ID(),
-				RenterKey: renterKey,
-			})
-
-			// persist contract in store
-			err = ap.bus.AddContract(formed)
-			if err != nil {
-				logErr(err)
-				continue
-			}
-
-			missing--
-		}
-
-		// TODO update contract set
-		contracts := make([]consensus.PublicKey, len(cs))
-		for i, c := range cs {
-			contracts[i] = c.HostKey
-		}
-		err = ap.bus.SetHostSet(contractSetName, contracts)
-		if err != nil {
-			logErr(err)
-		}
+func (ap *Autopilot) initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
+	if !max.IsZero() && min.Cmp(max) > 0 {
+		panic("given min is larger than max") // developer error
 	}
+
+	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
+	if !min.IsZero() && funding.Cmp(min) < 0 {
+		return min
+	}
+	if !max.IsZero() && funding.Cmp(max) > 0 {
+		return max
+	}
+	return funding
 }
 
-func (ap *Autopilot) formContract(hostKey consensus.PublicKey, hostIP string, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, period uint64) (rhpv2.Contract, error) {
-	// fetch host settings
-	scan, err := ap.worker.RHPScan(hostKey, hostIP)
+func (ap *Autopilot) renewFundingEstimate(cfg Config, s State, cID types.FileContractID) (types.Currency, error) {
+	// fetch contract
+	c, err := ap.bus.ContractData(cID)
 	if err != nil {
-		return rhpv2.Contract{}, err
+		return types.ZeroCurrency, err
 	}
 
-	// prepare contract formation
-	endHeight := ap.currentHeight() + period
-	renterFunds, hostCollateral := ap.calculateFundsAndCollateral(scan.Settings)
-	fc, cost, err := ap.worker.RHPPrepareForm(renterKey, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	// fetch host
+	host, err := ap.bus.Host(c.HostKey())
 	if err != nil {
-		return rhpv2.Contract{}, err
+		return types.ZeroCurrency, err
 	}
-
-	// fund the transaction
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-	toSign, parents, err := ap.bus.WalletFund(&txn, cost)
-	if err != nil {
-		return rhpv2.Contract{}, errors.Compose(err, ap.bus.WalletDiscard(txn))
-	}
-
-	// sign the transaction
-	err = ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
-	if err != nil {
-		return rhpv2.Contract{}, errors.Compose(err, ap.bus.WalletDiscard(txn))
-	}
-
-	// form the contract
-	contract, _, err := ap.worker.RHPForm(renterKey, hostKey, hostIP, append(parents, txn))
-	if err != nil {
-		return rhpv2.Contract{}, errors.Compose(err, ap.bus.WalletDiscard(txn))
-	}
-
-	return contract, nil
-}
-
-func (ap *Autopilot) renewContract(c worker.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, period uint64) (contract rhpv2.Contract, err error) {
-	// handle contract locking
-	revision, err := ap.bus.AcquireContractLock(c.ID)
-	if err != nil {
-		return rhpv2.Contract{}, nil
-	}
-	defer func() {
-		err = errors.Compose(err, ap.bus.ReleaseContractLock(c.ID))
-	}()
 
 	// fetch host settings
-	scan, err := ap.worker.RHPScan(c.HostKey, c.HostIP)
+	scan, err := ap.worker.RHPScan(c.HostKey(), host.NetAddress())
 	if err != nil {
-		return rhpv2.Contract{}, err
+		return types.ZeroCurrency, err
 	}
 
-	// prepare the renewal
-	endHeight := ap.currentHeight() + period
-	renterFunds, hostCollateral := ap.calculateFundsAndCollateral(scan.Settings)
-	fc, cost, finalPayment, err := ap.worker.RHPPrepareRenew(revision, renterKey, c.HostKey, renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	// estimate the cost of the current data stored
+	dataStored := c.Revision.ToTransaction().FileContractRevisions[0].NewFileSize
+	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice)
+
+	// loop over the contract history to figure out the amount of money spent
+	var prevUploadSpending types.Currency
+	var prevDownloadSpending types.Currency
+	var prevFundAccountSpending types.Currency
+	hierarchy, err := ap.bus.ContractHistory(cID, s.CurrentPeriod)
 	if err != nil {
-		return rhpv2.Contract{}, err
+		return types.ZeroCurrency, err
+	}
+	for _, contract := range hierarchy {
+		spending := contract.Metadata.Spending
+		prevUploadSpending = prevUploadSpending.Add(spending.Uploads)
+		prevDownloadSpending = prevUploadSpending.Add(spending.Downloads)
+		prevFundAccountSpending = prevUploadSpending.Add(spending.FundAccount)
 	}
 
-	// fund the transaction
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-	toSign, parents, err := ap.bus.WalletFund(&txn, cost)
-	if err != nil {
-		return rhpv2.Contract{}, errors.Compose(err, ap.bus.WalletDiscard(txn))
+	// estimate the amount of data uploaded, sanity check with data stored
+	//
+	// TODO: estimate is not ideal because price can change, better would be to
+	// look at the amount of data stored in the contract from the previous cycle
+	prevUploadDataEstimate := prevUploadSpending
+	if !scan.Settings.UploadBandwidthPrice.IsZero() {
+		prevUploadDataEstimate = prevUploadDataEstimate.Div(scan.Settings.UploadBandwidthPrice)
+	}
+	if prevUploadDataEstimate.Cmp(types.NewCurrency64(dataStored)) > 0 {
+		prevUploadDataEstimate = types.NewCurrency64(dataStored)
 	}
 
-	// sign the transaction
-	err = ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
-	if err != nil {
-		return rhpv2.Contract{}, errors.Compose(err, ap.bus.WalletDiscard(txn))
-	}
+	// estimate the
+	// - upload cost: previous uploads + prev storage
+	// - download cost: assumed to be the same
+	// - fund acount cost: assumed to be the same
+	newUploadsCost := prevUploadSpending.Add(prevUploadDataEstimate.Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice))
+	newDownloadsCost := prevDownloadSpending
+	newFundAccountCost := prevFundAccountSpending
 
-	// renew the contract
-	txnSet := append(parents, txn)
-	renewed, _, err := ap.worker.RHPRenew(renterKey, c.HostKey, c.HostIP, c.ID, txnSet, finalPayment)
+	// estimate the siafund fees
+	//
+	// NOTE: the transaction fees are not included in the siafunds estimate
+	// because users are not charged siafund fees on money that doesn't go into
+	// the file contract (and the transaction fee goes to the miners, not the
+	// file contract).
+	subTtotal := storageCost.Add(newUploadsCost).Add(newDownloadsCost).Add(newFundAccountCost).Add(scan.Settings.ContractPrice)
+	siaFundFeeEstimate := types.Tax(types.BlockHeight(s.BlockHeight), subTtotal)
+
+	// estimate the txn fee
+	txnFee, err := ap.bus.RecommendedFee()
 	if err != nil {
-		return rhpv2.Contract{}, errors.Compose(err, ap.bus.WalletDiscard(txn))
+		return types.ZeroCurrency, err
 	}
-	return renewed, nil
+	txnFeeEstimate := txnFee.Mul64(estimatedFileContractTransactionSetSize)
+
+	// add them all up and then return the estimate plus 33% for error margin
+	// and just general volatility of usage pattern.
+	estimatedCost := subTtotal.Add(siaFundFeeEstimate).Add(txnFeeEstimate)
+	estimatedCost = estimatedCost.Add(estimatedCost.Div64(3)) // TODO: arbitrary divisor
+
+	// check for a sane minimum that is equal to the initial contract funding
+	// but without an upper cap.
+	initialContractFunds := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	minInitialContractFunds := initialContractFunds.Div64(20) // TODO: arbitrary divisor
+	minimum := ap.initialContractFunding(scan.Settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
+	if estimatedCost.Cmp(minimum) < 0 {
+		estimatedCost = minimum
+	}
+	return estimatedCost, nil
 }
 
-func (ap *Autopilot) calculateFundsAndCollateral(hs rhpv2.HostSettings) (types.Currency, types.Currency) {
-	c := ap.store.Config()
-	download := c.Contracts.Download
-	upload := c.Contracts.Upload
-	duration := c.Contracts.Period
+// TODO: deriving the renter key from the host key using the master key only
+// works if we persist a hash of the renter's master key in the database and
+// compare it on startup, otherwise there's no way of knowing the derived key is
+// usuable
+//
+// TODO: instead of deriving a renter key use a randomly generated salt so we're
+// not limited to one key per host
+func (ap *Autopilot) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(ap.masterKey[:], hostKey[:]...))
+	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
+}
 
-	uploadCost := hs.UploadBandwidthPrice.Mul64(upload)
-	downloadCost := hs.DownloadBandwidthPrice.Mul64(download)
-	storageCost := hs.StoragePrice.Mul64(upload).Mul64(duration)
-
-	renterFunds := hs.ContractPrice.Add(uploadCost).Add(downloadCost).Add(storageCost)
-	hostCollateral := hs.Collateral.Mul64(upload).Mul64(duration)
-	return renterFunds, hostCollateral
+// TODO
+func (ap *Autopilot) periodSpending() (types.Currency, error) {
+	return types.ZeroCurrency, nil
 }

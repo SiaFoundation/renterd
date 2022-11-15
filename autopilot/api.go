@@ -31,6 +31,15 @@ type Config struct {
 	}
 }
 
+// State contains all autopilot state variables.
+// TODO: could be defined on the autopilot directly
+// TODO: synced could be a channel
+type State struct {
+	BlockHeight   uint64
+	CurrentPeriod uint64
+	Synced        bool
+}
+
 func DefaultConfig() (c Config) {
 	c.Wallet.DefragThreshold = 1000
 	c.Hosts.ScoreOverrides = make(map[consensus.PublicKey]float64)
@@ -38,8 +47,8 @@ func DefaultConfig() (c Config) {
 	c.Contracts.Hosts = 50
 	c.Contracts.Period = 144 * 7 * 6      // 6 weeks
 	c.Contracts.RenewWindow = 144 * 7 * 2 // 2 weeks
-	c.Contracts.Upload = 1 << 30          // 1 GiB
-	c.Contracts.Download = 1 << 33        // 8 GiB
+	c.Contracts.Upload = 1 << 40          // 1 TiB
+	c.Contracts.Download = 1 << 40        // 1 TiB
 	c.Objects.MinShards = 10
 	c.Objects.TotalShards = 30
 	return
