@@ -144,16 +144,7 @@ func TestSQLContractStore(t *testing.T) {
 	if err := tableCountCheck(&dbFileContractRevision{}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := tableCountCheck(&dbUnlockConditions{}, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := tableCountCheck(&dbSiaPublicKey{}, 0); err != nil {
-		t.Fatal(err)
-	}
 	if err := tableCountCheck(&dbValidSiacoinOutput{}, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := tableCountCheck(&dbTransactionSignature{}, 0); err != nil {
 		t.Fatal(err)
 	}
 }
