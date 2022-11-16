@@ -67,10 +67,10 @@ func TestSQLHostDB(t *testing.T) {
 	if tx.RowsAffected != 2 {
 		t.Fatalf("expected %v rows but got %v", 2, tx.RowsAffected)
 	}
-	if !reflect.DeepEqual(interactions[0].Interaction(), hi1) {
+	if !reflect.DeepEqual(interactions[0].convert(), hi1) {
 		t.Fatal("interaction mismatch", interactions[0], hi1)
 	}
-	if !reflect.DeepEqual(interactions[1].Interaction(), hi2) {
+	if !reflect.DeepEqual(interactions[1].convert(), hi2) {
 		t.Fatal("interaction mismatch", interactions[1], hi2)
 	}
 
@@ -97,7 +97,7 @@ func TestSQLHostDB(t *testing.T) {
 	if len(announcements) != 1 {
 		t.Fatalf("wrong number of announcements %v != %v", len(announcements), 1)
 	}
-	if !reflect.DeepEqual(announcements[0].Announcement(), a) {
+	if !reflect.DeepEqual(announcements[0].convert(), a) {
 		t.Fatal("announcement mismatch", announcements[0], a)
 	}
 

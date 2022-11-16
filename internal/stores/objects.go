@@ -378,8 +378,8 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 	}, nil
 }
 
-// Object turns a dbObject into a object.Object.
-func (o dbObject) Object() (object.Object, error) {
+// convert turns a dbObject into a object.Object.
+func (o dbObject) convert() (object.Object, error) {
 	var objKey object.EncryptionKey
 	if err := objKey.UnmarshalText(o.Key); err != nil {
 		return object.Object{}, err
@@ -438,7 +438,7 @@ func (s *SQLObjectStore) Get(key string) (object.Object, error) {
 	if err != nil {
 		return object.Object{}, err
 	}
-	return obj.Object()
+	return obj.convert()
 }
 
 // Put implements the bus.ObjectStore interface.

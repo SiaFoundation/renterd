@@ -3,7 +3,6 @@ package stores
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -250,24 +249,24 @@ func (dbInteraction) TableName() string { return "host_interactions" }
 // TableName implements the gorm.Tabler interface.
 func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
-// Host converts a host into a hostdb.Host.
-func (h dbHost) Host() hostdb.Host {
+// convert converts a host into a hostdb.Host.
+func (h dbHost) convert() hostdb.Host {
 	hdbHost := hostdb.Host{
 		Announcements: make([]hostdb.Announcement, len(h.Announcements)),
 		Interactions:  make([]hostdb.Interaction, len(h.Interactions)),
 		PublicKey:     h.PublicKey,
 	}
 	for i, announcement := range h.Announcements {
-		hdbHost.Announcements[i] = announcement.Announcement()
+		hdbHost.Announcements[i] = announcement.convert()
 	}
 	for i, interaction := range h.Interactions {
-		hdbHost.Interactions[i] = interaction.Interaction()
+		hdbHost.Interactions[i] = interaction.convert()
 	}
 	return hdbHost
 }
 
-// Announcement converts a host into a hostdb.Announcement.
-func (a dbAnnouncement) Announcement() hostdb.Announcement {
+// convert converts a host into a hostdb.Announcement.
+func (a dbAnnouncement) convert() hostdb.Announcement {
 	hostdbAnnouncement := hostdb.Announcement{
 		Index: consensus.ChainIndex{
 			Height: a.BlockHeight,
@@ -279,8 +278,8 @@ func (a dbAnnouncement) Announcement() hostdb.Announcement {
 	return hostdbAnnouncement
 }
 
-// Interaction converts an interaction into a hostdb.Interaction.
-func (i dbInteraction) Interaction() hostdb.Interaction {
+// convert converts an interaction into a hostdb.Interaction.
+func (i dbInteraction) convert() hostdb.Interaction {
 	return hostdb.Interaction{
 		Timestamp: i.Timestamp,
 		Type:      i.Type,
@@ -340,9 +339,9 @@ func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 		Preload("Announcements").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.Host{}, fmt.Errorf("host: %v; %w", hostKey, ErrHostNotFound)
+		return hostdb.Host{}, ErrHostNotFound
 	}
-	return h.Host(), tx.Error
+	return h.convert(), tx.Error
 }
 
 // Hosts returns up to max hosts that have not been interacted with since
@@ -373,7 +372,7 @@ func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	}
 	var hosts []hostdb.Host
 	for _, fh := range fullHosts {
-		hosts = append(hosts, fh.Host())
+		hosts = append(hosts, fh.convert())
 	}
 	return hosts, err
 }

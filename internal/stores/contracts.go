@@ -277,31 +277,31 @@ func (dbHostSet) TableName() string { return "host_sets" }
 // TableName implements the gorm.Tabler interface.
 func (dbHostSetEntry) TableName() string { return "host_set_entries" }
 
-// Contract converts a dbContractRHPv2 to a rhpv2.Contract type.
-func (c dbContractRHPv2) Contract() (rhpv2.Contract, error) {
+// convert converts a dbContractRHPv2 to a rhpv2.Contract type.
+func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
 	// Prepare valid and missed outputs.
-	newValidOutputs := make([]types.SiacoinOutput, 0, len(c.Revision.NewValidProofOutputs))
-	for _, sco := range c.Revision.NewValidProofOutputs {
-		newValidOutputs = append(newValidOutputs, types.SiacoinOutput{
+	newValidOutputs := make([]types.SiacoinOutput, len(c.Revision.NewValidProofOutputs))
+	for i, sco := range c.Revision.NewValidProofOutputs {
+		newValidOutputs[i] = types.SiacoinOutput{
 			Value:      types.NewCurrency(sco.Value),
 			UnlockHash: sco.UnlockHash,
-		})
+		}
 	}
-	newMissedOutputs := make([]types.SiacoinOutput, 0, len(c.Revision.NewMissedProofOutputs))
-	for _, sco := range c.Revision.NewMissedProofOutputs {
-		newMissedOutputs = append(newMissedOutputs, types.SiacoinOutput{
+	newMissedOutputs := make([]types.SiacoinOutput, len(c.Revision.NewMissedProofOutputs))
+	for i, sco := range c.Revision.NewMissedProofOutputs {
+		newMissedOutputs[i] = types.SiacoinOutput{
 			Value:      types.NewCurrency(sco.Value),
 			UnlockHash: sco.UnlockHash,
-		})
+		}
 	}
 
 	// Prepare pubkeys.
-	publickeys := make([]types.SiaPublicKey, 0, len(c.Revision.UnlockConditions.PublicKeys))
-	for _, pk := range c.Revision.UnlockConditions.PublicKeys {
-		publickeys = append(publickeys, types.SiaPublicKey{
+	publickeys := make([]types.SiaPublicKey, len(c.Revision.UnlockConditions.PublicKeys))
+	for i, pk := range c.Revision.UnlockConditions.PublicKeys {
+		publickeys[i] = types.SiaPublicKey{
 			Algorithm: pk.Algorithm,
 			Key:       pk.Key,
-		})
+		}
 	}
 
 	// Prepare revision.
@@ -377,48 +377,46 @@ func NewSQLContractStore(conn gorm.Dialector, migrate bool) (*SQLContractStore, 
 
 // AddContract implements the bus.ContractStore interface.
 func (s *SQLContractStore) AddContract(c rhpv2.Contract) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		fcid := c.ID()
+	fcid := c.ID()
 
-		// Prepare valid and missed outputs.
-		newValidOutputs := make([]dbValidSiacoinOutput, 0, len(c.Revision.NewValidProofOutputs))
-		for _, sco := range c.Revision.NewValidProofOutputs {
-			newValidOutputs = append(newValidOutputs, dbValidSiacoinOutput{
-				ParentID:   fcid,
-				UnlockHash: sco.UnlockHash,
-				Value:      sco.Value.Big(),
-			})
+	// Prepare valid and missed outputs.
+	newValidOutputs := make([]dbValidSiacoinOutput, len(c.Revision.NewValidProofOutputs))
+	for i, sco := range c.Revision.NewValidProofOutputs {
+		newValidOutputs[i] = dbValidSiacoinOutput{
+			ParentID:   fcid,
+			UnlockHash: sco.UnlockHash,
+			Value:      sco.Value.Big(),
 		}
-		newMissedOutputs := make([]dbMissedSiacoinOutput, 0, len(c.Revision.NewMissedProofOutputs))
-		for _, sco := range c.Revision.NewMissedProofOutputs {
-			newMissedOutputs = append(newMissedOutputs, dbMissedSiacoinOutput{
-				ParentID:   fcid,
-				UnlockHash: sco.UnlockHash,
-				Value:      sco.Value.Big(),
-			})
+	}
+	newMissedOutputs := make([]dbMissedSiacoinOutput, len(c.Revision.NewMissedProofOutputs))
+	for i, sco := range c.Revision.NewMissedProofOutputs {
+		newMissedOutputs[i] = dbMissedSiacoinOutput{
+			ParentID:   fcid,
+			UnlockHash: sco.UnlockHash,
+			Value:      sco.Value.Big(),
 		}
+	}
 
-		// Prepare contract revision.
-		revision := dbFileContractRevision{
-			ParentID:              fcid,
-			UnlockConditions:      c.Revision.UnlockConditions,
-			NewRevisionNumber:     c.Revision.NewRevisionNumber,
-			NewFileSize:           c.Revision.NewFileSize,
-			NewFileMerkleRoot:     c.Revision.NewFileMerkleRoot,
-			NewWindowStart:        c.Revision.NewWindowStart,
-			NewWindowEnd:          c.Revision.NewWindowEnd,
-			NewValidProofOutputs:  newValidOutputs,
-			NewMissedProofOutputs: newMissedOutputs,
-			NewUnlockHash:         c.Revision.NewUnlockHash,
-		}
+	// Prepare contract revision.
+	revision := dbFileContractRevision{
+		ParentID:              fcid,
+		UnlockConditions:      c.Revision.UnlockConditions,
+		NewRevisionNumber:     c.Revision.NewRevisionNumber,
+		NewFileSize:           c.Revision.NewFileSize,
+		NewFileMerkleRoot:     c.Revision.NewFileMerkleRoot,
+		NewWindowStart:        c.Revision.NewWindowStart,
+		NewWindowEnd:          c.Revision.NewWindowEnd,
+		NewValidProofOutputs:  newValidOutputs,
+		NewMissedProofOutputs: newMissedOutputs,
+		NewUnlockHash:         c.Revision.NewUnlockHash,
+	}
 
-		// Insert contract.
-		return tx.Create(&dbContractRHPv2{
-			ID:         fcid,
-			Revision:   revision,
-			Signatures: c.Signatures[:],
-		}).Error
-	})
+	// Insert contract.
+	return s.db.Create(&dbContractRHPv2{
+		ID:         fcid,
+		Revision:   revision,
+		Signatures: c.Signatures[:],
+	}).Error
 }
 
 // Contract implements the bus.ContractStore interface.
@@ -428,7 +426,7 @@ func (s *SQLContractStore) Contract(id types.FileContractID) (rhpv2.Contract, er
 	if err != nil {
 		return rhpv2.Contract{}, err
 	}
-	return contract.Contract()
+	return contract.convert()
 }
 
 // Contracts implements the bus.ContractStore interface.
@@ -437,13 +435,13 @@ func (s *SQLContractStore) Contracts() ([]rhpv2.Contract, error) {
 	if err != nil {
 		return nil, err
 	}
-	contracts := make([]rhpv2.Contract, 0, len(dbContracts))
-	for _, c := range dbContracts {
-		contract, err := c.Contract()
+	contracts := make([]rhpv2.Contract, len(dbContracts))
+	for i, c := range dbContracts {
+		contract, err := c.convert()
 		if err != nil {
 			return nil, err
 		}
-		contracts = append(contracts, contract)
+		contracts[i] = contract
 	}
 	return contracts, nil
 }
@@ -469,25 +467,25 @@ func (s *SQLContractStore) HostSet(name string) ([]consensus.PublicKey, error) {
 		Preload("Hosts").
 		Take(&hostSet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("name: %v; %w", name, ErrHostNotFound)
+		return nil, ErrHostNotFound
 	} else if err != nil {
 		return nil, err
 	}
-	pks := make([]consensus.PublicKey, 0, len(hostSet.Hosts))
-	for _, entry := range hostSet.Hosts {
-		pks = append(pks, entry.PublicKey)
+	pks := make([]consensus.PublicKey, len(hostSet.Hosts))
+	for i, entry := range hostSet.Hosts {
+		pks[i] = entry.PublicKey
 	}
 	return pks, nil
 }
 
 // SetHostSet implements the bus.HostSetStore interface.
 func (s *SQLContractStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
-	hostSetEntries := make([]dbHostSetEntry, 0, len(hosts))
-	for _, pk := range hosts {
-		hostSetEntries = append(hostSetEntries, dbHostSetEntry{
+	hostSetEntries := make([]dbHostSetEntry, len(hosts))
+	for i, pk := range hosts {
+		hostSetEntries[i] = dbHostSetEntry{
 			HostSetName: name,
 			PublicKey:   pk,
-		})
+		}
 	}
 	return s.db.Create(&dbHostSet{
 		Name:  name,
