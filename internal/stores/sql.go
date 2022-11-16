@@ -11,7 +11,6 @@ import (
 )
 
 type (
-
 	// dbCommon specifies all fields that every table in the database should have.
 	dbCommon struct {
 		CreatedAt time.Time
