@@ -437,6 +437,12 @@ func (db *SQLHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
+	// Create a host if it doesn't exist yet.
+	if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
+		return err
+	}
+
+	// Create the announcement.
 	return tx.Create(&dbAnnouncement{
 		Host:        hostKey,
 		BlockHeight: a.Index.Height,

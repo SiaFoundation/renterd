@@ -64,8 +64,8 @@ func TestSQLHostDB(t *testing.T) {
 	if tx.Error != nil {
 		t.Fatal(err)
 	}
-	if tx.RowsAffected != 2 {
-		t.Fatalf("expected %v rows but got %v", 2, tx.RowsAffected)
+	if len(interactions) != 2 {
+		t.Fatalf("expected %v rows but got %v", 2, len(interactions))
 	}
 	if !reflect.DeepEqual(interactions[0].convert(), hi1) {
 		t.Fatal("interaction mismatch", interactions[0], hi1)
@@ -74,7 +74,8 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal("interaction mismatch", interactions[1], hi2)
 	}
 
-	// Insert an announcement for the host.
+	// Insert an announcement for the host and another one for an unknown
+	// host.
 	a := hostdb.Announcement{
 		Index: consensus.ChainIndex{
 			Height: 42,
@@ -83,12 +84,12 @@ func TestSQLHostDB(t *testing.T) {
 		Timestamp:  time.Now().UTC().Round(time.Second),
 		NetAddress: "host.com",
 	}
-
-	// Read the announcement and verify it.
 	err = insertAnnouncement(hdb.db, hostKey, a)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Read the announcement and verify it.
 	var announcements []dbAnnouncement
 	tx = hdb.db.Find(&announcements)
 	if tx.Error != nil {
@@ -128,6 +129,23 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatalf("wrong number of interactions %v != %v", len(h2.Interactions), 2)
 	}
 	if len(h2.Announcements) != 1 {
+		t.Fatalf("wrong number of announcements %v != %v", len(h2.Announcements), 1)
+	}
+
+	// Insert another announcement for an unknown host.
+	unknownKey := consensus.PublicKey{1, 4, 7}
+	err = insertAnnouncement(hdb.db, unknownKey, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h3, err := hdb.Host(unknownKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h3.Interactions) != 0 {
+		t.Fatalf("wrong number of interactions %v != %v", len(h2.Interactions), 2)
+	}
+	if len(h3.Announcements) != 1 {
 		t.Fatalf("wrong number of announcements %v != %v", len(h2.Announcements), 1)
 	}
 
