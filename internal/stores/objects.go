@@ -326,7 +326,7 @@ type (
 		SlabID uint64 `gorm:"index;NOT NULL"`
 
 		// Root uniquely identifies a sector and is therefore the primary key.
-		Root consenus.Hash256 `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
+		Root consensus.Hash256 `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
 
 		// Host is the key of the host that stores the sector.
 		// TODO: once we migrate the contract store over to a relational
@@ -403,8 +403,8 @@ func (o dbObject) convert() (object.Object, error) {
 			Length: sl.Length,
 		}
 		for j, sh := range sl.Slab.Shards {
-			copy(obj.Slabs[i].Shards[j].Host[:], sh.Sector.Host)
-			copy(obj.Slabs[i].Shards[j].Root[:], sh.Sector.Root)
+			obj.Slabs[i].Shards[j].Host = sh.Host
+			obj.Slabs[i].Shards[j].Root = sh.Root
 		}
 	}
 	return obj, nil
@@ -494,8 +494,8 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 				// Create sector. Might exist already.
 				var sector dbSector
 				err = tx.FirstOrCreate(&sector, &dbSector{
-					Host: shard.Host[:],
-					Root: shard.Root[:],
+					Host: shard.Host,
+					Root: shard.Root,
 				}).Error
 				if err != nil {
 					return err
@@ -503,8 +503,8 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 				// Create shard.
 				err = tx.Create(&dbSector{
 					SlabID: slab.ID,
-					Host:   shard.Host[:],
-					Root:   shard.Root[:],
+					Host:   shard.Host,
+					Root:   shard.Root,
 				}).Error
 				if err != nil {
 					return err
