@@ -15,8 +15,8 @@ import (
 	"lukechampine.com/frand"
 )
 
-// newTestSQLStore creates a new SQLContractStore for testing.
-func newTestSQLStore() (*SQLContractStore, error) {
+// newTestSQLContractStore creates a new SQLContractStore for testing.
+func newTestSQLContractStore() (*SQLContractStore, error) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	conn := NewEphemeralSQLiteConnection(dbName)
 	return NewSQLContractStore(conn, true)
@@ -24,7 +24,7 @@ func newTestSQLStore() (*SQLContractStore, error) {
 
 // TestSQLContractStore tests SQLContractStore functionality.
 func TestSQLContractStore(t *testing.T) {
-	cs, err := newTestSQLStore()
+	cs, err := newTestSQLContractStore()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestSQLContractStore(t *testing.T) {
 
 // TestSQLHostSetStore tests the bus.HostSetStore methods on the SQLContractStore.
 func TestSQLHostSetStore(t *testing.T) {
-	cs, err := newTestSQLStore()
+	cs, err := newTestSQLContractStore()
 	if err != nil {
 		t.Fatal(err)
 	}

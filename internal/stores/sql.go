@@ -2,10 +2,18 @@ package stores
 
 import (
 	"fmt"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+// dbCommon specifies all fields that every table in the database should have.
+type dbCommon struct {
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+}
 
 // NewEphemeralSQLiteConnection creates a connection to an in-memory SQLite DB.
 // NOTE: Use simple names such as a random hex identifier or the filepath.Base

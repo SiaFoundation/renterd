@@ -203,12 +203,16 @@ type (
 	}
 
 	dbContractRHPv2 struct {
+		dbCommon
+
 		ID         types.FileContractID         `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
 		Revision   dbFileContractRevision       `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
 		Signatures []types.TransactionSignature `gorm:"type:bytes;serializer:gob;NOT NULL"`
 	}
 
 	dbFileContractRevision struct {
+		dbCommon
+
 		ParentID              types.FileContractID   `gorm:"primaryKey;type:bytes;serializer:gob;NOT NULL"` // only one revision for a given parent
 		UnlockConditions      types.UnlockConditions `gorm:"NOT NULL;type:bytes;serializer:gob"`
 		NewRevisionNumber     uint64                 `gorm:"index"`
@@ -222,6 +226,8 @@ type (
 	}
 
 	dbTransactionSignature struct {
+		dbCommon
+
 		ID             uint64               `gorm:"primaryKey"`
 		ParentID       types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		PublicKeyIndex uint64
@@ -231,6 +237,8 @@ type (
 	}
 
 	dbValidSiacoinOutput struct {
+		dbCommon
+
 		ID         uint64               `gorm:"primaryKey"`
 		ParentID   types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
@@ -238,6 +246,8 @@ type (
 	}
 
 	dbMissedSiacoinOutput struct {
+		dbCommon
+
 		ID         uint64               `gorm:"primaryKey"`
 		ParentID   types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
@@ -245,11 +255,15 @@ type (
 	}
 
 	dbHostSet struct {
+		dbCommon
+
 		Name  string           `gorm:"primaryKey"`
 		Hosts []dbHostSetEntry `gorm:"constraing:OnDelete:CASCADE;foreignKey:HostSetName;references:Name"`
 	}
 
 	dbHostSetEntry struct {
+		dbCommon
+
 		ID          uint64              `gorm:"primaryKey"`
 		HostSetName string              `gorm:"index;NOT NULL"`
 		PublicKey   consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`

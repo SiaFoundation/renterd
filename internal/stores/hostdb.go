@@ -205,12 +205,16 @@ type (
 	// Deleting a host from the db will cascade the deletion and also delete
 	// the corresponding announcements and interactions with that host.
 	dbHost struct {
+		dbCommon
+
 		PublicKey     consensus.PublicKey `gorm:"primaryKey;type:bytes;serializer:gob"`
-		Announcements []dbAnnouncement    `gorm:"foreignKey:Host;OnDelete:CASCADE"`
-		Interactions  []dbInteraction     `gorm:"foreignKey:Host;OnDelete:CASCADE"`
+		Announcements []dbAnnouncement    `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
+		Interactions  []dbInteraction     `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
 	}
 
 	dbAnnouncement struct {
+		dbCommon
+
 		ID          uint64              `gorm:"primaryKey"`
 		Host        consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
 		BlockHeight uint64              `gorm:"NOT NULL"`
@@ -221,6 +225,8 @@ type (
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
+		dbCommon
+
 		ID        uint64              `gorm:"primaryKey"`
 		Host      consensus.PublicKey `gorm:"index; NOT NULL;type:bytes;serializer:gob"`
 		Result    json.RawMessage
@@ -232,6 +238,8 @@ type (
 	// known to the hostdb. It should only ever contain a single entry with
 	// the consensusInfoID primary key.
 	dbConsensusInfo struct {
+		dbCommon
+
 		ID   uint8 `gorm:"primaryKey"`
 		CCID []byte
 	}

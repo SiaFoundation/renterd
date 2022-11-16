@@ -284,6 +284,8 @@ type (
 
 	// dbObject describes an object.Object in the database.
 	dbObject struct {
+		dbCommon
+
 		// ID uniquely identifies an Object within the database. Since
 		// this ID is also exposed via the API it's a string for
 		// convenience.
@@ -296,6 +298,8 @@ type (
 
 	// dbSlice describes a reference to a slab.Slab in the database.
 	dbSlice struct {
+		dbCommon
+
 		// ID uniquely identifies a slice in the db.
 		ID uint64 `gorm:"primaryKey"`
 
@@ -312,6 +316,8 @@ type (
 	// dbSlab describes a slab.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
+		dbCommon
+
 		ID        uint64 `gorm:"primaryKey"`
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
@@ -322,6 +328,8 @@ type (
 	// multiple times in the sectors table since it can belong to multiple
 	// slabs.
 	dbSector struct {
+		dbCommon
+
 		ID     uint64 `gorm:"primaryKey"`
 		SlabID uint64 `gorm:"index;NOT NULL"`
 
