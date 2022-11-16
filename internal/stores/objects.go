@@ -491,15 +491,6 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 			}
 
 			for _, shard := range ss.Shards {
-				// Create sector. Might exist already.
-				var sector dbSector
-				err = tx.FirstOrCreate(&sector, &dbSector{
-					Host: shard.Host,
-					Root: shard.Root,
-				}).Error
-				if err != nil {
-					return err
-				}
 				// Create shard.
 				err = tx.Create(&dbSector{
 					SlabID: slab.ID,
