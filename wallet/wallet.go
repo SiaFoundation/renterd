@@ -237,13 +237,14 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 	return nil
 }
 
-// Split returns a signed transaction that splits the wallet in the given number
-// of outputs with given amount.
+// Split returns a transaction that splits the wallet in the given number of
+// outputs with given amount. It also returns a list of output IDs that need to
+// be signed.
 //
 // NOTE: split needs to use a minimal set of inputs and therefore does not reuse
 // the fund logic which randomizes the unspent transaction outputs used to fund
 // the transaction
-func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, error) {
+func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error) {
 	// prepare all outputs
 	var txn types.Transaction
 	for i := 0; i < int(outputs); i++ {
@@ -256,7 +257,7 @@ func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, fee
 	// fetch unspent transaction outputs
 	utxos, err := w.store.UnspentSiacoinElements()
 	if err != nil {
-		return types.Transaction{}, err
+		return types.Transaction{}, nil, err
 	}
 
 	// desc sort
@@ -297,14 +298,14 @@ func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, fee
 	// not enough outputs found
 	fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
 	if SumOutputs(inputs).Cmp(want.Add(fee)) < 0 {
-		return types.Transaction{}, errors.New("insufficient balance")
+		return types.Transaction{}, nil, errors.New("insufficient balance")
 	}
 
 	// set the miner fee
 	txn.MinerFees = []types.Currency{fee}
 
 	// add the change output
-	change := SumOutputs(utxos).Sub(want.Add(fee))
+	change := SumOutputs(inputs).Sub(want.Add(fee))
 	if !change.IsZero() {
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
 			Value:      change,
@@ -313,8 +314,8 @@ func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, fee
 	}
 
 	// add the inputs
-	toSign := make([]types.OutputID, len(utxos))
-	for i, sce := range utxos {
+	toSign := make([]types.OutputID, len(inputs))
+	for i, sce := range inputs {
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(sce.ID),
 			UnlockConditions: StandardUnlockConditions(w.priv.PublicKey()),
@@ -323,11 +324,7 @@ func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, fee
 		w.used[sce.ID] = true
 	}
 
-	err = w.SignTransaction(cs, &txn, toSign, ExplicitCoveredFields(txn))
-	if err != nil {
-		return types.Transaction{}, err
-	}
-	return txn, nil
+	return txn, toSign, nil
 }
 
 // SumOutputs returns the total value of the supplied outputs.

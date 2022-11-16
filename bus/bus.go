@@ -47,7 +47,7 @@ type (
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
-		Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, error)
+		Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -190,10 +190,17 @@ func (b *Bus) walletSplitHandler(jc jape.Context) {
 		return
 	}
 
-	txn, err := b.w.Split(b.cm.TipState(), wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
-	if jc.Check("couldn't split the wallet", err) != nil {
+	cs := b.cm.TipState()
+	txn, toSign, err := b.w.Split(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
+	if jc.Check("couldn't split the wallet into the desired outputs", err) != nil {
 		return
 	}
+
+	err = b.w.SignTransaction(cs, &txn, toSign, types.FullCoveredFields)
+	if jc.Check("couldn't sign the transaction", err) != nil {
+		return
+	}
+
 	jc.Encode(txn)
 }
 
