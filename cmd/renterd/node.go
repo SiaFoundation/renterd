@@ -20,7 +20,9 @@ import (
 )
 
 type workerConfig struct {
-	enabled bool
+	enabled     bool
+	busAddr     string
+	busPassword string
 }
 
 type busConfig struct {
@@ -192,7 +194,7 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	if err := os.MkdirAll(objectsDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	os, err := stores.NewJSONObjectStore(objectsDir)
+	os, err := stores.NewSQLObjectStore(dbConn, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -216,8 +218,9 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 }
 
 func newWorker(cfg workerConfig, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
+	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w := worker.New(workerKey)
+	w := worker.New(workerKey, b)
 	return w, func() error { return nil }, nil
 }
 

@@ -243,12 +243,10 @@ func (c *Client) UploadObject(r io.Reader, name string) (err error) {
 	return
 }
 
-// DownloadObject downloads the object with the given name, writing its data to
-// w.
-func (c *Client) DownloadObject(w io.Writer, name string) (err error) {
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s", name), nil, (*[]byte)(nil))
+func (c *Client) object(path string, w io.Writer, entries *[]string) (err error) {
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]string)(nil))
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, name), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -263,7 +261,24 @@ func (c *Client) DownloadObject(w io.Writer, name string) (err error) {
 		err, _ := ioutil.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
-	_, err = io.Copy(w, resp.Body)
+	if w != nil {
+		_, err = io.Copy(w, resp.Body)
+	} else {
+		err = json.NewDecoder(resp.Body).Decode(entries)
+	}
+	return
+}
+
+// ObjectEntries returns the entries at the given path, which must end in /.
+func (c *Client) ObjectEntries(path string) (entries []string, err error) {
+	err = c.object(path, nil, &entries)
+	return
+}
+
+// DownloadObject downloads the object at the given path, writing its data to
+// w.
+func (c *Client) DownloadObject(w io.Writer, path string) (err error) {
+	err = c.object(path, w, nil)
 	return
 }
 

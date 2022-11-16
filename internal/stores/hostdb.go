@@ -202,27 +202,29 @@ type (
 	}
 
 	// dbHost defines a hostdb.Interaction as persisted in the DB.
+	// Deleting a host from the db will cascade the deletion and also delete
+	// the corresponding announcements and interactions with that host.
 	dbHost struct {
 		PublicKey     []byte           `gorm:"primaryKey"`
-		Announcements []dbAnnouncement `gorm:"foreignKey:Host;references:PublicKey"`
-		Interactions  []dbInteraction  `gorm:"foreignKey:Host;references:PublicKey"`
+		Announcements []dbAnnouncement `gorm:"foreignKey:Host;OnDelete:CASCADE"`
+		Interactions  []dbInteraction  `gorm:"foreignKey:Host;OnDelete:CASCADE"`
 	}
 
 	dbAnnouncement struct {
-		ID          uint64 `gorm:"primaryKey"`
-		Host        []byte
-		BlockHeight uint64
-		BlockID     []byte
-		Timestamp   time.Time
-		NetAddress  string
+		ID          uint64    `gorm:"primaryKey"`
+		Host        []byte    `gorm:"NOT NULL"`
+		BlockHeight uint64    `gorm:"NOT NULL"`
+		BlockID     []byte    `gorm:"NOT NULL"`
+		Timestamp   time.Time `gorm:"NOT NULL"`
+		NetAddress  string    `gorm:"NOT NULL"`
 	}
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
-		Host      []byte `gorm:"index"`
 		ID        uint64 `gorm:"primaryKey"`
+		Host      []byte `gorm:"index; NOT NULL"`
 		Result    json.RawMessage
-		Timestamp time.Time `gorm:"index"`
+		Timestamp time.Time `gorm:"index; NOT NULL"`
 		Type      string
 	}
 
@@ -236,24 +238,16 @@ type (
 )
 
 // TableName implements the gorm.Tabler interface.
-func (dbHost) TableName() string {
-	return "hosts"
-}
+func (dbHost) TableName() string { return "hosts" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbAnnouncement) TableName() string {
-	return "announcements"
-}
+func (dbAnnouncement) TableName() string { return "announcements" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbInteraction) TableName() string {
-	return "host_interactions"
-}
+func (dbInteraction) TableName() string { return "host_interactions" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbConsensusInfo) TableName() string {
-	return "consensus_infos"
-}
+func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
 // Host converts a host into a hostdb.Host.
 func (h dbHost) Host() hostdb.Host {
@@ -304,8 +298,7 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 
 	if migrate {
 		// Create the tables.
-		tables := []interface {
-		}{
+		tables := []interface{}{
 			&dbHost{},
 			&dbInteraction{},
 			&dbAnnouncement{},
@@ -313,6 +306,9 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
+		}
+		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
+			return nil, modules.ConsensusChangeID{}, res.Error
 		}
 	}
 
@@ -358,7 +354,7 @@ func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 		Joins("JOIN host_interactions ON host_interactions.Host = hosts.Public_Key").
 		Select("Public_key").
 		Group("Public_Key").
-		Having("MAX(Timestamp) < ?", notSince).
+		Having("MAX(Timestamp) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
 		Limit(max).
 		Find(&foundHosts).
 		Error
@@ -393,7 +389,7 @@ func (db *SQLHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.In
 		// Create an interaction.
 		return tx.Create(&dbInteraction{
 			Host:      hostKey[:],
-			Timestamp: hi.Timestamp,
+			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
 			Type:      hi.Type,
 			Result:    hi.Result,
 		}).Error
@@ -445,7 +441,7 @@ func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Annou
 		Host:        hostKey[:],
 		BlockHeight: a.Index.Height,
 		BlockID:     a.Index.ID[:],
-		Timestamp:   a.Timestamp,
+		Timestamp:   a.Timestamp.UTC(), // explicitly store timestamp as UTC
 		NetAddress:  a.NetAddress,
 	}).Error
 }

@@ -74,7 +74,7 @@ type (
 
 	// An ObjectStore stores objects.
 	ObjectStore interface {
-		List(key string) []string
+		List(key string) ([]string, error)
 		Get(key string) (object.Object, error)
 		Put(key string, o object.Object) error
 		Delete(key string) error
@@ -416,7 +416,10 @@ func (b *Bus) hostsetsContractsHandler(jc jape.Context) {
 
 func (b *Bus) objectsKeyHandlerGET(jc jape.Context) {
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
-		jc.Encode(ObjectsResponse{Entries: b.os.List(jc.PathParam("key"))})
+		keys, err := b.os.List(jc.PathParam("key"))
+		if jc.Check("couldn't list objects", err) == nil {
+			jc.Encode(ObjectsResponse{Entries: keys})
+		}
 		return
 	}
 	o, err := b.os.Get(jc.PathParam("key"))

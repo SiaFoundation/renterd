@@ -16,20 +16,15 @@ type EncryptionKey struct {
 	entropy *[32]byte
 }
 
-// String returns a hex-encoded representation of the key.
-func (k EncryptionKey) String() (s string) {
-	return "key:" + hex.EncodeToString(k.entropy[:])
+// MarshalText implements the encoding.TextMarshaler interface.
+func (k EncryptionKey) MarshalText() ([]byte, error) {
+	return []byte("key:" + hex.EncodeToString(k.entropy[:])), nil
 }
 
-// MarshalJSON implements the json.Marshaler interface.
-func (k EncryptionKey) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + k.String() + `"`), nil
-}
-
-// UnmarshalJSON implements the json.Unmarshaler interface.
-func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
+// UnmarshalText implements the encoding.TextUnmarshaler interface.
+func (k *EncryptionKey) UnmarshalText(b []byte) error {
 	k.entropy = new([32]byte)
-	if n, err := hex.Decode(k.entropy[:], bytes.TrimPrefix(bytes.Trim(b, `"`), []byte("key:"))); err != nil {
+	if n, err := hex.Decode(k.entropy[:], []byte(bytes.TrimPrefix(b, []byte("key:")))); err != nil {
 		return err
 	} else if n != len(k.entropy) {
 		return errors.New("wrong seed length")

@@ -53,49 +53,27 @@ type sharedSession struct {
 	mu       sync.Mutex
 }
 
-func (s *sharedSession) appendSector(sector *[rhpv2.SectorSize]byte, currentHeight uint64, mr MetricsRecorder) (consensus.Hash256, error) {
+func (s *sharedSession) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, currentHeight uint64) (consensus.Hash256, error) {
 	if currentHeight > uint64(s.sess.Contract().Revision.NewWindowStart) {
 		return consensus.Hash256{}, fmt.Errorf("contract has expired")
 	}
 	storageDuration := uint64(s.sess.Contract().Revision.NewWindowStart) - currentHeight
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
-	start := time.Now()
-	root, err := s.sess.Append(sector, price, collateral)
-	mr.RecordMetric(MetricSectorUpload{
-		HostKey:    s.sess.HostKey(),
-		Contract:   s.sess.Contract().ID(),
-		Timestamp:  start,
-		Elapsed:    time.Since(start),
-		Err:        err,
-		Cost:       price,
-		Collateral: collateral,
-	})
-	return root, err
+	return s.sess.Append(ctx, sector, price, collateral)
 }
 
-func (s *sharedSession) readSector(w io.Writer, root consensus.Hash256, offset, length uint32, mr MetricsRecorder) error {
+func (s *sharedSession) readSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
 		Offset:     uint64(offset),
 		Length:     uint64(length),
 	}}
 	price := rhpv2.RPCReadCost(s.settings, sections)
-	start := time.Now()
-	err := s.sess.Read(w, sections, price)
-	mr.RecordMetric(MetricSectorDownload{
-		HostKey:   s.sess.HostKey(),
-		Contract:  s.sess.Contract().ID(),
-		Timestamp: start,
-		Elapsed:   time.Since(start),
-		Err:       err,
-		Cost:      price,
-	})
-	return err
+	return s.sess.Read(ctx, w, sections, price)
 }
 
-func (s *sharedSession) deleteSectors(roots []consensus.Hash256, mr MetricsRecorder) error {
+func (s *sharedSession) deleteSectors(ctx context.Context, roots []consensus.Hash256) error {
 	// download the full set of SectorRoots
-	start := time.Now()
 	contractSectors := s.sess.Contract().NumSectors()
 	rootIndices := make(map[consensus.Hash256]uint64, contractSectors)
 	for offset := uint64(0); offset < contractSectors; {
@@ -104,7 +82,7 @@ func (s *sharedSession) deleteSectors(roots []consensus.Hash256, mr MetricsRecor
 			n = contractSectors - offset
 		}
 		price := rhpv2.RPCSectorRootsCost(s.settings, n)
-		roots, err := s.sess.SectorRoots(offset, n, price)
+		roots, err := s.sess.SectorRoots(ctx, offset, n, price)
 		if err != nil {
 			return err
 		}
@@ -124,17 +102,7 @@ func (s *sharedSession) deleteSectors(roots []consensus.Hash256, mr MetricsRecor
 	}
 
 	price := rhpv2.RPCDeleteCost(s.settings, len(badIndices))
-	err := s.sess.Delete(badIndices, price)
-	mr.RecordMetric(MetricSectorDeletion{
-		HostKey:   s.sess.HostKey(),
-		Contract:  s.sess.Contract().ID(),
-		Timestamp: start,
-		Elapsed:   time.Since(start),
-		Err:       err,
-		Cost:      price,
-		NumRoots:  uint64(len(badIndices)),
-	})
-	return err
+	return s.sess.Delete(ctx, badIndices, price)
 }
 
 // Close gracefully closes the Session.
@@ -151,7 +119,7 @@ type Session struct {
 	hostIP     string
 	contractID types.FileContractID
 	renterKey  consensus.PrivateKey
-	mr         MetricsRecorder
+	ctx        context.Context
 	pool       *SessionPool
 }
 
@@ -166,32 +134,32 @@ func (s *Session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash25
 	if currentHeight == 0 {
 		panic("cannot upload without knowing current height") // developer error
 	}
-	ss, err := s.pool.acquire(s)
+	ss, err := s.pool.acquire(s.ctx, s)
 	if err != nil {
 		return consensus.Hash256{}, err
 	}
 	defer s.pool.release(ss)
-	return ss.appendSector(sector, currentHeight, s.mr)
+	return ss.appendSector(s.ctx, sector, currentHeight)
 }
 
 // DownloadSector implements Host.
 func (s *Session) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
-	ss, err := s.pool.acquire(s)
+	ss, err := s.pool.acquire(s.ctx, s)
 	if err != nil {
 		return err
 	}
 	defer s.pool.release(ss)
-	return ss.readSector(w, root, offset, length, s.mr)
+	return ss.readSector(s.ctx, w, root, offset, length)
 }
 
 // DeleteSectors implements Host.
 func (s *Session) DeleteSectors(roots []consensus.Hash256) error {
-	ss, err := s.pool.acquire(s)
+	ss, err := s.pool.acquire(s.ctx, s)
 	if err != nil {
 		return err
 	}
 	defer s.pool.release(ss)
-	return ss.deleteSectors(roots, s.mr)
+	return ss.deleteSectors(s.ctx, roots)
 }
 
 // A SessionPool is a set of sessions that can be used for uploading and
@@ -202,7 +170,7 @@ type SessionPool struct {
 	mu     sync.Mutex
 }
 
-func (sp *SessionPool) acquire(s *Session) (_ *sharedSession, err error) {
+func (sp *SessionPool) acquire(ctx context.Context, s *Session) (_ *sharedSession, err error) {
 	sp.mu.Lock()
 	if sp.hosts[s.hostKey] == nil {
 		sp.hosts[s.hostKey] = &sharedSession{}
@@ -222,7 +190,7 @@ func (sp *SessionPool) acquire(s *Session) (_ *sharedSession, err error) {
 		t := ss.sess.Transport()
 		if time.Since(ss.lastSeen) >= 2*time.Minute {
 			// use RPCSettings as a generic "ping"
-			ss.settings, err = rhpv2.RPCSettings(t)
+			ss.settings, err = rhpv2.RPCSettings(ctx, t)
 			if err != nil {
 				t.Close()
 				goto reconnect
@@ -235,7 +203,7 @@ func (sp *SessionPool) acquire(s *Session) (_ *sharedSession, err error) {
 					goto reconnect
 				}
 			}
-			ss.sess, err = rhpv2.RPCLock(t, s.contractID, s.renterKey, 10*time.Second)
+			ss.sess, err = rhpv2.RPCLock(ctx, t, s.contractID, s.renterKey, 10*time.Second)
 			if err != nil {
 				t.Close()
 				goto reconnect
@@ -254,12 +222,12 @@ reconnect:
 	if err != nil {
 		return nil, err
 	}
-	ss.settings, err = rhpv2.RPCSettings(t)
+	ss.settings, err = rhpv2.RPCSettings(ctx, t)
 	if err != nil {
 		t.Close()
 		return nil, err
 	}
-	ss.sess, err = rhpv2.RPCLock(t, s.contractID, s.renterKey, 10*time.Second)
+	ss.sess, err = rhpv2.RPCLock(ctx, t, s.contractID, s.renterKey, 10*time.Second)
 	if err != nil {
 		t.Close()
 		return nil, err
@@ -289,13 +257,13 @@ func (sp *SessionPool) currentHeight() uint64 {
 
 // Session adds a RHPv2 session to the pool. The session is initiated lazily; no
 // I/O is performed until the first RPC call is made.
-func (sp *SessionPool) Session(hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey, mr MetricsRecorder) *Session {
+func (sp *SessionPool) Session(ctx context.Context, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey) *Session {
 	return &Session{
 		hostKey:    hostKey,
 		hostIP:     hostIP,
 		contractID: contractID,
 		renterKey:  renterKey,
-		mr:         mr,
+		ctx:        ctx,
 		pool:       sp,
 	}
 }
