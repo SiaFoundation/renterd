@@ -196,19 +196,17 @@ func NewJSONContractStore(dir string) (*JSONContractStore, error) {
 }
 
 type (
-	// SQLContractStore implements the bus.ContractStore interface using SQL as the
-	// persistence backend.
-	SQLContractStore struct {
-		db *gorm.DB
-	}
-
 	dbContractRHPv2 struct {
-		ID         types.FileContractID         `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
-		Revision   dbFileContractRevision       `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
-		Signatures []types.TransactionSignature `gorm:"type:bytes;serializer:gob;NOT NULL"`
+		dbCommon
+
+		ID       types.FileContractID   `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
+		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
 	}
 
 	dbFileContractRevision struct {
+		dbCommon
+		Signatures []types.TransactionSignature `gorm:"type:bytes;serializer:gob;NOT NULL"`
+
 		ParentID              types.FileContractID   `gorm:"primaryKey;type:bytes;serializer:gob;NOT NULL"` // only one revision for a given parent
 		UnlockConditions      types.UnlockConditions `gorm:"NOT NULL;type:bytes;serializer:gob"`
 		NewRevisionNumber     uint64                 `gorm:"index"`
@@ -222,6 +220,8 @@ type (
 	}
 
 	dbTransactionSignature struct {
+		dbCommon
+
 		ID             uint64               `gorm:"primaryKey"`
 		ParentID       types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		PublicKeyIndex uint64
@@ -231,6 +231,8 @@ type (
 	}
 
 	dbValidSiacoinOutput struct {
+		dbCommon
+
 		ID         uint64               `gorm:"primaryKey"`
 		ParentID   types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
@@ -238,6 +240,8 @@ type (
 	}
 
 	dbMissedSiacoinOutput struct {
+		dbCommon
+
 		ID         uint64               `gorm:"primaryKey"`
 		ParentID   types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
@@ -245,11 +249,15 @@ type (
 	}
 
 	dbHostSet struct {
+		dbCommon
+
 		Name  string           `gorm:"primaryKey"`
 		Hosts []dbHostSetEntry `gorm:"constraing:OnDelete:CASCADE;foreignKey:HostSetName;references:Name"`
 	}
 
 	dbHostSetEntry struct {
+		dbCommon
+
 		ID          uint64              `gorm:"primaryKey"`
 		HostSetName string              `gorm:"index;NOT NULL"`
 		PublicKey   consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
@@ -324,10 +332,10 @@ func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
 
 	// Prepare signatures.
 	var signatures [2]types.TransactionSignature
-	if len(c.Signatures) != len(signatures) {
-		return rhpv2.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Signatures), len(signatures))
+	if len(c.Revision.Signatures) != len(signatures) {
+		return rhpv2.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Revision.Signatures), len(signatures))
 	}
-	for i, sig := range c.Signatures {
+	for i, sig := range c.Revision.Signatures {
 		signatures[i] = types.TransactionSignature{
 			ParentID:       crypto.Hash(sig.ParentID),
 			PublicKeyIndex: sig.PublicKeyIndex,
@@ -343,40 +351,8 @@ func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
 	}, nil
 }
 
-// NewSQLContractStore creates a new SQLContractStore from a given gorm
-// Dialector.
-func NewSQLContractStore(conn gorm.Dialector, migrate bool) (*SQLContractStore, error) {
-	db, err := gorm.Open(conn, &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
-
-	if migrate {
-		// Create the tables.
-		tables := []interface{}{
-			&dbContractRHPv2{},
-			&dbFileContractRevision{},
-			&dbTransactionSignature{},
-			&dbValidSiacoinOutput{},
-			&dbMissedSiacoinOutput{},
-			&dbHostSet{},
-			&dbHostSetEntry{},
-		}
-		if err := db.AutoMigrate(tables...); err != nil {
-			return nil, err
-		}
-		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
-			return nil, res.Error
-		}
-	}
-
-	return &SQLContractStore{
-		db: db,
-	}, nil
-}
-
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLContractStore) AddContract(c rhpv2.Contract) error {
+func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -400,6 +376,7 @@ func (s *SQLContractStore) AddContract(c rhpv2.Contract) error {
 	// Prepare contract revision.
 	revision := dbFileContractRevision{
 		ParentID:              fcid,
+		Signatures:            c.Signatures[:],
 		UnlockConditions:      c.Revision.UnlockConditions,
 		NewRevisionNumber:     c.Revision.NewRevisionNumber,
 		NewFileSize:           c.Revision.NewFileSize,
@@ -413,14 +390,13 @@ func (s *SQLContractStore) AddContract(c rhpv2.Contract) error {
 
 	// Insert contract.
 	return s.db.Create(&dbContractRHPv2{
-		ID:         fcid,
-		Revision:   revision,
-		Signatures: c.Signatures[:],
+		ID:       fcid,
+		Revision: revision,
 	}).Error
 }
 
 // Contract implements the bus.ContractStore interface.
-func (s *SQLContractStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
+func (s *SQLStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
 	// Fetch contract.
 	contract, err := s.contract(id)
 	if err != nil {
@@ -430,7 +406,7 @@ func (s *SQLContractStore) Contract(id types.FileContractID) (rhpv2.Contract, er
 }
 
 // Contracts implements the bus.ContractStore interface.
-func (s *SQLContractStore) Contracts() ([]rhpv2.Contract, error) {
+func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 	dbContracts, err := s.contracts()
 	if err != nil {
 		return nil, err
@@ -447,53 +423,11 @@ func (s *SQLContractStore) Contracts() ([]rhpv2.Contract, error) {
 }
 
 // RemoveContract implements the bus.ContractStore interface.
-func (s *SQLContractStore) RemoveContract(id types.FileContractID) error {
+func (s *SQLStore) RemoveContract(id types.FileContractID) error {
 	return s.db.Delete(&dbContractRHPv2{ID: id}).Error
 }
 
-// HostSets implements the bus.HostSetStore interface.
-func (s *SQLContractStore) HostSets() ([]string, error) {
-	var setNames []string
-	tx := s.db.Model(&dbHostSet{}).
-		Select("Name").
-		Find(&setNames)
-	return setNames, tx.Error
-}
-
-// HostSet implements the bus.HostSetStore interface.
-func (s *SQLContractStore) HostSet(name string) ([]consensus.PublicKey, error) {
-	var hostSet dbHostSet
-	err := s.db.Where(&dbHostSet{Name: name}).
-		Preload("Hosts").
-		Take(&hostSet).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrHostSetNotFound
-	} else if err != nil {
-		return nil, err
-	}
-	pks := make([]consensus.PublicKey, len(hostSet.Hosts))
-	for i, entry := range hostSet.Hosts {
-		pks[i] = entry.PublicKey
-	}
-	return pks, nil
-}
-
-// SetHostSet implements the bus.HostSetStore interface.
-func (s *SQLContractStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
-	hostSetEntries := make([]dbHostSetEntry, len(hosts))
-	for i, pk := range hosts {
-		hostSetEntries[i] = dbHostSetEntry{
-			HostSetName: name,
-			PublicKey:   pk,
-		}
-	}
-	return s.db.Create(&dbHostSet{
-		Name:  name,
-		Hosts: hostSetEntries,
-	}).Error
-}
-
-func (s *SQLContractStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
+func (s *SQLStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
 	var contract dbContractRHPv2
 	err := s.db.Where(&dbContractRHPv2{ID: id}).
 		Preload("Revision.NewValidProofOutputs").
@@ -505,7 +439,7 @@ func (s *SQLContractStore) contract(id types.FileContractID) (dbContractRHPv2, e
 	return contract, err
 }
 
-func (s *SQLContractStore) contracts() ([]dbContractRHPv2, error) {
+func (s *SQLStore) contracts() ([]dbContractRHPv2, error) {
 	var contracts []dbContractRHPv2
 	err := s.db.Model(&dbContractRHPv2{}).
 		Preload("Revision.NewValidProofOutputs").

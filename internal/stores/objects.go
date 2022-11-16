@@ -278,12 +278,10 @@ func NewJSONObjectStore(dir string) (*JSONObjectStore, error) {
 }
 
 type (
-	SQLObjectStore struct {
-		db *gorm.DB
-	}
-
 	// dbObject describes an object.Object in the database.
 	dbObject struct {
+		dbCommon
+
 		// ID uniquely identifies an Object within the database. Since
 		// this ID is also exposed via the API it's a string for
 		// convenience.
@@ -296,6 +294,8 @@ type (
 
 	// dbSlice describes a reference to a slab.Slab in the database.
 	dbSlice struct {
+		dbCommon
+
 		// ID uniquely identifies a slice in the db.
 		ID uint64 `gorm:"primaryKey"`
 
@@ -312,6 +312,8 @@ type (
 	// dbSlab describes a slab.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
+		dbCommon
+
 		ID        uint64 `gorm:"primaryKey"`
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
@@ -322,6 +324,8 @@ type (
 	// multiple times in the sectors table since it can belong to multiple
 	// slabs.
 	dbSector struct {
+		dbCommon
+
 		ID     uint64 `gorm:"primaryKey"`
 		SlabID uint64 `gorm:"index;NOT NULL"`
 
@@ -348,35 +352,6 @@ func (dbSlab) TableName() string { return "slabs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
-
-// NewSQLObjectStore creates a new SQLObjectStore connected to a DB through
-// conn.
-func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, error) {
-	db, err := gorm.Open(conn, &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
-
-	if migrate {
-		// Create the tables.
-		tables := []interface{}{
-			&dbObject{},
-			&dbSlice{},
-			&dbSlab{},
-			&dbSector{},
-		}
-		if err := db.AutoMigrate(tables...); err != nil {
-			return nil, err
-		}
-		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
-			return nil, res.Error
-		}
-	}
-
-	return &SQLObjectStore{
-		db: db,
-	}, nil
-}
 
 // convert turns a dbObject into a object.Object.
 func (o dbObject) convert() (object.Object, error) {
@@ -411,7 +386,7 @@ func (o dbObject) convert() (object.Object, error) {
 }
 
 // List implements the bus.ObjectStore interface.
-func (s *SQLObjectStore) List(path string) ([]string, error) {
+func (s *SQLStore) List(path string) ([]string, error) {
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
 	}
@@ -433,7 +408,7 @@ func (s *SQLObjectStore) List(path string) ([]string, error) {
 }
 
 // Get implements the bus.ObjectStore interface.
-func (s *SQLObjectStore) Get(key string) (object.Object, error) {
+func (s *SQLStore) Get(key string) (object.Object, error) {
 	obj, err := s.get(key)
 	if err != nil {
 		return object.Object{}, err
@@ -442,7 +417,7 @@ func (s *SQLObjectStore) Get(key string) (object.Object, error) {
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLObjectStore) Put(key string, o object.Object) error {
+func (s *SQLStore) Put(key string, o object.Object) error {
 	// Put is ACID.
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
@@ -507,7 +482,7 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 }
 
 // Delete implements the bus.ObjectStore interface.
-func (s *SQLObjectStore) Delete(key string) error {
+func (s *SQLStore) Delete(key string) error {
 	return deleteObject(s.db, key)
 }
 
@@ -517,7 +492,7 @@ func deleteObject(tx *gorm.DB, key string) error {
 }
 
 // get retrieves an object from the database.
-func (s *SQLObjectStore) get(key string) (dbObject, error) {
+func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ID: key}).
 		Preload("Slabs").

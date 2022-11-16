@@ -174,10 +174,10 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	if err := os.MkdirAll(hostdbDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	hdb, ccid, err := stores.NewSQLHostDB(dbConn, true)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true)
 	if err != nil {
 		return nil, nil, err
-	} else if err := cm.ConsensusSetSubscribe(hdb, ccid, nil); err != nil {
+	} else if err := cm.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
 		return nil, nil, err
 	}
 
@@ -185,17 +185,9 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	if err := os.MkdirAll(contractsDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	cs, err := stores.NewSQLContractStore(dbConn, true)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	objectsDir := filepath.Join(dir, "objects")
 	if err := os.MkdirAll(objectsDir, 0700); err != nil {
-		return nil, nil, err
-	}
-	os, err := stores.NewSQLObjectStore(dbConn, true)
-	if err != nil {
 		return nil, nil, err
 	}
 
@@ -213,7 +205,7 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 		return nil
 	}
 
-	b := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, hdb, cs, cs, os)
+	b := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore)
 	return b, cleanup, nil
 }
 

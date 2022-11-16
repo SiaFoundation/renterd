@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"encoding/hex"
 	"fmt"
 	"reflect"
 	"testing"
@@ -105,10 +104,7 @@ func TestJSONObjectStore(t *testing.T) {
 
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
-	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
-
-	conn := NewEphemeralSQLiteConnection(dbName)
-	os, err := NewSQLObjectStore(conn, true)
+	os, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,10 +293,7 @@ func TestSQLObjectStore(t *testing.T) {
 
 // TestSQLList is a test for (*SQLObjectStore).List.
 func TestSQLList(t *testing.T) {
-	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
-	//conn := NewEphemeralSQLiteConnection(dbName)
-	conn := NewEphemeralSQLiteConnection(dbName)
-	os, err := NewSQLObjectStore(conn, true)
+	os, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
