@@ -40,14 +40,14 @@ type (
 
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
-		Address() types.UnlockHash
 		Balance() types.Currency
+		Address() types.UnlockHash
+		UnspentOutputs() ([]wallet.SiacoinElement, error)
+		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
-		PublicKey() consensus.PublicKey
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
-		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
-		UnspentOutputs() ([]wallet.SiacoinElement, error)
+		Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -181,58 +181,19 @@ func (b *Bus) walletSignHandler(jc jape.Context) {
 }
 
 func (b *Bus) walletSplitHandler(jc jape.Context) {
-	var wsr WalletSplitRequest
-	if jc.Decode(&wsr) != nil {
+	var wfr WalletSplitRequest
+	if jc.Decode(&wfr) != nil {
 		return
 	}
-	if wsr.Outputs == 0 {
+	if wfr.Outputs == 0 {
 		jc.Error(errors.New("'outputs' has to be greater than zero"), http.StatusBadRequest)
 		return
 	}
 
-	utxos, err := b.w.UnspentOutputs()
-	if jc.Check("couldn't load unspent siacoin outputs", err) != nil {
+	txn, err := b.w.Split(b.cm.TipState(), wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
+	if jc.Check("couldn't split the wallet", err) != nil {
 		return
 	}
-
-	ins, fee, change := wallet.DistributeFunds(utxos, wsr.Outputs, wsr.Amount, b.tp.RecommendedFee())
-	if jc.Check("couldn't distribute funds", err) != nil {
-		return
-	}
-
-	txn := types.Transaction{
-		SiacoinInputs:  make([]types.SiacoinInput, len(ins)),
-		SiacoinOutputs: make([]types.SiacoinOutput, wsr.Outputs),
-		MinerFees:      []types.Currency{fee},
-	}
-
-	var toSign []types.OutputID
-	address := b.w.Address()
-	for i, in := range ins {
-		txn.SiacoinInputs[i] = types.SiacoinInput{
-			ParentID:         types.SiacoinOutputID(in.ID),
-			UnlockConditions: wallet.StandardUnlockConditions(b.w.PublicKey()),
-		}
-		toSign = append(toSign, in.ID)
-	}
-	for i := range txn.SiacoinOutputs {
-		txn.SiacoinOutputs[i] = types.SiacoinOutput{
-			Value:      wsr.Amount,
-			UnlockHash: address,
-		}
-	}
-	if !change.IsZero() {
-		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			Value:      change,
-			UnlockHash: address,
-		})
-	}
-
-	err = b.w.SignTransaction(b.cm.TipState(), &txn, toSign, wallet.ExplicitCoveredFields(txn))
-	if jc.Check("couldn't sign the transaction", err) != nil {
-		return
-	}
-
 	jc.Encode(txn)
 }
 
