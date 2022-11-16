@@ -1,10 +1,8 @@
 package stores
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -12,16 +10,12 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
-	"lukechampine.com/frand"
 )
 
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
-	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
-
-	conn := NewEphemeralSQLiteConnection(dbName)
-	hdb, ccid, err := NewSQLHostDB(conn, true)
+	hdb, dbName, ccid, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +150,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLHostDB(conn2, false)
+	hdb2, ccid, err := NewSQLStore(conn2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,10 +165,7 @@ func TestSQLHostDB(t *testing.T) {
 
 // TestSQLHosts tests the Hosts method of the SQLHostDB type.
 func TestSQLHosts(t *testing.T) {
-	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
-
-	conn := NewEphemeralSQLiteConnection(dbName)
-	hdb, _, err := NewSQLHostDB(conn, true)
+	hdb, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
