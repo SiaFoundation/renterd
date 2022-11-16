@@ -1,17 +1,14 @@
 package autopilot
 
 import (
-	"net/http"
 	"time"
 
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
-	"golang.org/x/crypto/blake2b"
 )
 
 type Store interface {
@@ -77,6 +74,11 @@ type Autopilot struct {
 	stopChan chan struct{}
 }
 
+// Actions returns the autopilot actions that have occurred since the given time.
+func (ap *Autopilot) Actions(since time.Time, max int) []Action {
+	panic("unimplemented")
+}
+
 // Config returns the autopilot's current configuration.
 func (ap *Autopilot) Config() Config {
 	return ap.store.Config()
@@ -85,11 +87,6 @@ func (ap *Autopilot) Config() Config {
 // SetConfig updates the autopilot's configuration.
 func (ap *Autopilot) SetConfig(c Config) error {
 	return ap.store.SetConfig(c)
-}
-
-// Actions returns the autopilot actions that have occurred since the given time.
-func (ap *Autopilot) Actions(since time.Time, max int) []Action {
-	panic("unimplemented")
 }
 
 func (ap *Autopilot) Run() error {
@@ -108,7 +105,6 @@ func (ap *Autopilot) Run() error {
 		// running this is a no-op
 		go ap.s.tryPerformHostScan()
 
-		// perform contract maintenance in a blocking fashion
 		_ = ap.c.performContractMaintenance()
 	}
 }
@@ -133,22 +129,6 @@ func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, e
 	return ap, nil
 }
 
-// TODO: deriving the renter key from the host key using the master key only
-// works if we persist a hash of the renter's master key in the database and
-// compare it on startup, otherwise there's no way of knowing the derived key is
-// usuable
-//
-// TODO: instead of deriving a renter key use a randomly generated salt so we're
-// not limited to one key per host
-func (ap *Autopilot) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
-	seed := blake2b.Sum256(append(ap.masterKey[:], hostKey[:]...))
-	pk := consensus.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
 func (ap *Autopilot) load() error {
 	// set the current period
 	state := ap.store.State()
@@ -165,33 +145,4 @@ func (ap *Autopilot) load() error {
 	}
 
 	return nil
-}
-
-// NewServer returns an HTTP handler that serves the renterd autopilot API.
-func NewServer(ap *Autopilot) http.Handler {
-	return jape.Mux(map[string]jape.Handler{
-		"GET    /actions": ap.actionsHandler,
-		"GET    /config":  ap.configHandlerGET,
-		"PUT    /config":  ap.configHandlerPUT,
-	})
-}
-
-func (ap *Autopilot) actionsHandler(jc jape.Context) {
-	var since time.Time
-	max := -1
-	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
-		return
-	}
-	jc.Encode(ap.Actions(since, max))
-}
-
-func (ap *Autopilot) configHandlerGET(jc jape.Context) {
-	jc.Encode(ap.Config())
-}
-
-func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
-	var c Config
-	if jc.Decode(&c) == nil {
-		ap.SetConfig(c)
-	}
 }
