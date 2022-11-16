@@ -3,7 +3,6 @@ package stores
 import (
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
