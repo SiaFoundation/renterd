@@ -9,22 +9,15 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/autopilot"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
+	"go.sia.tech/siad/types"
 )
 
 // EphemeralAutopilotStore implements autopilot.Store in memory.
 type EphemeralAutopilotStore struct {
 	mu     sync.Mutex
-	tip    consensus.ChainIndex
 	config autopilot.Config
-}
-
-// Tip implements autopilot.Store.
-func (s *EphemeralAutopilotStore) Tip() consensus.ChainIndex {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.tip
+	state  autopilot.State
 }
 
 // Config implements autopilot.Store.
@@ -42,9 +35,45 @@ func (s *EphemeralAutopilotStore) SetConfig(c autopilot.Config) error {
 	return nil
 }
 
+// State implements autopilot.Store.
+func (s *EphemeralAutopilotStore) State() autopilot.State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state
+}
+
+// SetState implements autopilot.Store.
+func (s *EphemeralAutopilotStore) SetState(state autopilot.State) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = state
+	return nil
+}
+
 // ProcessConsensusChange implements chain.Subscriber.
 func (s *EphemeralAutopilotStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	panic("unimplemented")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, block := range cc.RevertedBlocks {
+		if block.ID() != types.GenesisID {
+			s.state.BlockHeight--
+		}
+	}
+	for _, block := range cc.AppliedBlocks {
+		if block.ID() != types.GenesisID {
+			s.state.BlockHeight++
+		}
+	}
+
+	// update current period
+	if s.state.BlockHeight >= s.state.CurrentPeriod+s.config.Contracts.Period {
+		s.state.CurrentPeriod += s.config.Contracts.Period
+	}
+
+	// update synced state
+	// TODO: might need a channel here
+	s.state.Synced = cc.Synced
 }
 
 // NewEphemeralAutopilotStore returns a new EphemeralAutopilotStore.
@@ -61,6 +90,7 @@ type JSONAutopilotStore struct {
 
 type jsonAutopilotPersistData struct {
 	Config autopilot.Config
+	State  autopilot.State
 }
 
 func (s *JSONAutopilotStore) save() error {
@@ -68,6 +98,7 @@ func (s *JSONAutopilotStore) save() error {
 	defer s.mu.Unlock()
 	var p jsonAutopilotPersistData
 	p.Config = s.config
+	p.State = s.state
 	js, _ := json.MarshalIndent(p, "", "  ")
 
 	// atomic save
@@ -99,6 +130,8 @@ func (s *JSONAutopilotStore) load() error {
 		return err
 	}
 	s.config = p.Config
+	s.state = p.State
+	s.state.Synced = false
 	return nil
 }
 
