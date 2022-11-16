@@ -46,7 +46,7 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 	return sqlite.Open(path)
 }
 
-// NewSQLHostDB uses a given Dialector to connect to a SQL database.  NOTE: Only
+// NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
 func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.ConsensusChangeID, error) {

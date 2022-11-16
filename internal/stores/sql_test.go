@@ -7,7 +7,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-// newTestSQLContractStore creates a new SQLContractStore for testing.
+// newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore() (*SQLStore, string, modules.ConsensusChangeID, error) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	conn := NewEphemeralSQLiteConnection(dbName)
