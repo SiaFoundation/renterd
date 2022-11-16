@@ -467,7 +467,7 @@ func (s *SQLContractStore) HostSet(name string) ([]consensus.PublicKey, error) {
 		Preload("Hosts").
 		Take(&hostSet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrHostNotFound
+		return nil, ErrHostSetNotFound
 	} else if err != nil {
 		return nil, err
 	}
