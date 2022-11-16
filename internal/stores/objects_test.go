@@ -7,7 +7,6 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/slab"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
@@ -43,17 +42,17 @@ func TestList(t *testing.T) {
 
 func randomObject() (o object.Object) {
 	n := frand.Intn(10)
-	o.Slabs = make([]slab.Slice, n)
+	o.Slabs = make([]object.SlabSlice, n)
 	o.Key = object.GenerateEncryptionKey()
 	for i := range o.Slabs {
 		n := uint8(frand.Uint64n(10) + 1)
 		offset := uint32(frand.Uint64n(1 << 22))
 		length := offset + uint32(frand.Uint64n(1<<22))
-		o.Slabs[i] = slab.Slice{
-			Slab: slab.Slab{
-				Key:       slab.GenerateEncryptionKey(),
+		o.Slabs[i] = object.SlabSlice{
+			Slab: object.Slab{
+				Key:       object.GenerateEncryptionKey(),
 				MinShards: n,
-				Shards:    make([]slab.Sector, n*2),
+				Shards:    make([]object.Sector, n*2),
 			},
 			Offset: offset,
 			Length: length,
@@ -112,12 +111,12 @@ func TestSQLObjectStore(t *testing.T) {
 	// Create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
 		Key: object.GenerateEncryptionKey(),
-		Slabs: []slab.Slice{
+		Slabs: []object.SlabSlice{
 			{
-				Slab: slab.Slab{
-					Key:       slab.GenerateEncryptionKey(),
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
-					Shards: []slab.Sector{
+					Shards: []object.Sector{
 						{
 							Host: consensus.GeneratePrivateKey().PublicKey(),
 							Root: consensus.Hash256{1},
@@ -128,10 +127,10 @@ func TestSQLObjectStore(t *testing.T) {
 				Length: 100,
 			},
 			{
-				Slab: slab.Slab{
-					Key:       slab.GenerateEncryptionKey(),
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
 					MinShards: 2,
-					Shards: []slab.Sector{
+					Shards: []object.Sector{
 						{
 							Host: consensus.GeneratePrivateKey().PublicKey(),
 							Root: consensus.Hash256{2},

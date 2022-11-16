@@ -1,4 +1,4 @@
-package slab
+package worker
 
 import (
 	"context"
@@ -105,7 +105,6 @@ func (s *sharedSession) deleteSectors(ctx context.Context, roots []consensus.Has
 	return s.sess.Delete(ctx, badIndices, price)
 }
 
-// Close gracefully closes the Session.
 func (s *sharedSession) Close() error {
 	if s.sess != nil {
 		return s.sess.Close()
@@ -113,23 +112,21 @@ func (s *sharedSession) Close() error {
 	return nil
 }
 
-// Session implements Host via the renter-host protocol.
-type Session struct {
+// session implements Host via the renter-host protocol.
+type session struct {
 	hostKey    consensus.PublicKey
 	hostIP     string
 	contractID types.FileContractID
 	renterKey  consensus.PrivateKey
 	ctx        context.Context
-	pool       *SessionPool
+	pool       *sessionPool
 }
 
-// PublicKey returns the host's public key.
-func (s *Session) PublicKey() consensus.PublicKey {
+func (s *session) PublicKey() consensus.PublicKey {
 	return s.hostKey
 }
 
-// UploadSector implements Host.
-func (s *Session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+func (s *session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	currentHeight := s.pool.currentHeight()
 	if currentHeight == 0 {
 		panic("cannot upload without knowing current height") // developer error
@@ -142,8 +139,7 @@ func (s *Session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash25
 	return ss.appendSector(s.ctx, sector, currentHeight)
 }
 
-// DownloadSector implements Host.
-func (s *Session) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (s *session) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	ss, err := s.pool.acquire(s.ctx, s)
 	if err != nil {
 		return err
@@ -152,8 +148,7 @@ func (s *Session) DownloadSector(w io.Writer, root consensus.Hash256, offset, le
 	return ss.readSector(s.ctx, w, root, offset, length)
 }
 
-// DeleteSectors implements Host.
-func (s *Session) DeleteSectors(roots []consensus.Hash256) error {
+func (s *session) DeleteSectors(roots []consensus.Hash256) error {
 	ss, err := s.pool.acquire(s.ctx, s)
 	if err != nil {
 		return err
@@ -162,15 +157,15 @@ func (s *Session) DeleteSectors(roots []consensus.Hash256) error {
 	return ss.deleteSectors(s.ctx, roots)
 }
 
-// A SessionPool is a set of sessions that can be used for uploading and
+// A sessionPool is a set of sessions that can be used for uploading and
 // downloading.
-type SessionPool struct {
+type sessionPool struct {
 	hosts  map[consensus.PublicKey]*sharedSession
 	height uint64
 	mu     sync.Mutex
 }
 
-func (sp *SessionPool) acquire(ctx context.Context, s *Session) (_ *sharedSession, err error) {
+func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSession, err error) {
 	sp.mu.Lock()
 	if sp.hosts[s.hostKey] == nil {
 		sp.hosts[s.hostKey] = &sharedSession{}
@@ -236,29 +231,29 @@ reconnect:
 	return ss, nil
 }
 
-func (sp *SessionPool) release(ss *sharedSession) {
+func (sp *sessionPool) release(ss *sharedSession) {
 	ss.mu.Unlock()
 }
 
-// SetCurrentHeight sets the current height. This value is used when calculating
-// the storage duration for new data, so it must be called before
-// (*Session).UploadSector.
-func (sp *SessionPool) SetCurrentHeight(height uint64) {
+// setCurrentHeight sets the pol's current height. This value is used when
+// calculating the storage duration for new data, so it must be called before
+// (*session).UploadSector.
+func (sp *sessionPool) setCurrentHeight(height uint64) {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	sp.height = height
 }
 
-func (sp *SessionPool) currentHeight() uint64 {
+func (sp *sessionPool) currentHeight() uint64 {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	return sp.height
 }
 
-// Session adds a RHPv2 session to the pool. The session is initiated lazily; no
+// session adds a RHPv2 session to the pool. The session is initiated lazily; no
 // I/O is performed until the first RPC call is made.
-func (sp *SessionPool) Session(ctx context.Context, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey) *Session {
-	return &Session{
+func (sp *sessionPool) session(ctx context.Context, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey) *session {
+	return &session{
 		hostKey:    hostKey,
 		hostIP:     hostIP,
 		contractID: contractID,
@@ -268,8 +263,7 @@ func (sp *SessionPool) Session(ctx context.Context, hostKey consensus.PublicKey,
 	}
 }
 
-// UnlockContract unlocks a Session's contract.
-func (sp *SessionPool) UnlockContract(s *Session) {
+func (sp *sessionPool) unlockContract(s *session) {
 	sp.mu.Lock()
 	ss, ok := s.pool.hosts[s.hostKey]
 	sp.mu.Unlock()
@@ -283,8 +277,7 @@ func (sp *SessionPool) UnlockContract(s *Session) {
 	}
 }
 
-// ForceClose forcibly closes a Session's underlying connection.
-func (sp *SessionPool) ForceClose(s *Session) {
+func (sp *sessionPool) forceClose(s *session) {
 	sp.mu.Lock()
 	ss, ok := s.pool.hosts[s.hostKey]
 	sp.mu.Unlock()
@@ -300,7 +293,7 @@ func (sp *SessionPool) ForceClose(s *Session) {
 }
 
 // Close gracefully closes all of the sessions in the pool.
-func (sp *SessionPool) Close() error {
+func (sp *sessionPool) Close() error {
 	for hostKey, sess := range sp.hosts {
 		sess.Close()
 		delete(sp.hosts, hostKey)
@@ -308,9 +301,9 @@ func (sp *SessionPool) Close() error {
 	return nil
 }
 
-// NewSessionPool creates a new SessionPool.
-func NewSessionPool() *SessionPool {
-	return &SessionPool{
+// newSessionPool creates a new sessionPool.
+func newSessionPool() *sessionPool {
+	return &sessionPool{
 		hosts: make(map[consensus.PublicKey]*sharedSession),
 	}
 }

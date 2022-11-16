@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/renterd/slab"
 	"go.sia.tech/siad/types"
 )
 
@@ -182,20 +182,20 @@ type SlabsUploadRequest struct {
 
 // SlabsDownloadRequest is the request type for the /slabs/download endpoint.
 type SlabsDownloadRequest struct {
-	Slab      slab.Slice `json:"slab"`
-	Contracts []Contract `json:"contracts"`
+	Slab      object.SlabSlice `json:"slab"`
+	Contracts []Contract       `json:"contracts"`
 }
 
 // SlabsDeleteRequest is the request type for the /slabs/delete endpoint.
 type SlabsDeleteRequest struct {
-	Slabs     []slab.Slab `json:"slabs"`
-	Contracts []Contract  `json:"contracts"`
+	Slabs     []object.Slab `json:"slabs"`
+	Contracts []Contract    `json:"contracts"`
 }
 
 // SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
 type SlabsMigrateRequest struct {
-	Slab          slab.Slab  `json:"slab"`
-	From          []Contract `json:"from"`
-	To            []Contract `json:"to"`
-	CurrentHeight uint64     `json:"currentHeight"`
+	Slab          object.Slab `json:"slab"`
+	From          []Contract  `json:"from"`
+	To            []Contract  `json:"to"`
+	CurrentHeight uint64      `json:"currentHeight"`
 }

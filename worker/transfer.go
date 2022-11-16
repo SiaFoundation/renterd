@@ -1,4 +1,4 @@
-package slab
+package worker
 
 import (
 	"bytes"
@@ -7,25 +7,25 @@ import (
 	"io"
 
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
 
-// A Host stores contract data.
-type Host interface {
+// A sectorStore stores contract data.
+type sectorStore interface {
 	PublicKey() consensus.PublicKey
 	UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
 	DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error
 	DeleteSectors(roots []consensus.Hash256) error
 }
 
-// parallelUploadSlab uploads the provided shards in parallel.
-func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]Sector, error) {
+func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore) ([]object.Sector, error) {
 	if len(hosts) < len(shards) {
 		return nil, errors.New("fewer hosts than shards")
 	}
 
 	type req struct {
-		host       Host
+		host       sectorStore
 		shardIndex int
 	}
 	type resp struct {
@@ -54,7 +54,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]S
 	}
 	// collect responses
 	var errs HostErrorSet
-	sectors := make([]Sector, len(shards))
+	sectors := make([]object.Sector, len(shards))
 	rem := len(shards)
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
@@ -69,7 +69,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]S
 				inflight++
 			}
 		} else {
-			sectors[resp.req.shardIndex] = Sector{
+			sectors[resp.req.shardIndex] = object.Sector{
 				Host: resp.req.host.PublicKey(),
 				Root: resp.root,
 			}
@@ -82,16 +82,15 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []Host) ([]S
 	return sectors, nil
 }
 
-// UploadSlab uploads a slab.
-func UploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []Host) (Slab, error) {
+func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStore) (object.Slab, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	_, err := io.ReadFull(r, buf)
 	if err != nil && err != io.ErrUnexpectedEOF {
-		return Slab{}, err
+		return object.Slab{}, err
 	}
-	s := Slab{
-		Key:       GenerateEncryptionKey(),
+	s := object.Slab{
+		Key:       object.GenerateEncryptionKey(),
 		MinShards: m,
 	}
 	s.Encode(buf, shards)
@@ -99,14 +98,13 @@ func UploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []Host) (Sla
 
 	s.Shards, err = parallelUploadSlab(ctx, shards, hosts)
 	if err != nil {
-		return Slab{}, err
+		return object.Slab{}, err
 	}
 	return s, nil
 }
 
-// parallelDownloadSlab downloads the shards comprising a slab in parallel.
-func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte, error) {
-	if len(hosts) < int(s.MinShards) {
+func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sectorStore) ([][]byte, error) {
+	if len(hosts) < int(ss.MinShards) {
 		return nil, errors.New("not enough hosts to recover shard")
 	}
 
@@ -118,16 +116,16 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 		shard []byte
 		err   error
 	}
-	reqChan := make(chan req, s.MinShards)
+	reqChan := make(chan req, ss.MinShards)
 	defer close(reqChan)
-	respChan := make(chan resp, s.MinShards)
+	respChan := make(chan resp, ss.MinShards)
 	worker := func() {
 		for req := range reqChan {
 			h := hosts[req.hostIndex]
-			var shard *Sector
-			for i := range s.Shards {
-				if s.Shards[i].Host == h.PublicKey() {
-					shard = &s.Shards[i]
+			var shard *object.Sector
+			for i := range ss.Shards {
+				if ss.Shards[i].Host == h.PublicKey() {
+					shard = &ss.Shards[i]
 					break
 				}
 			}
@@ -135,7 +133,7 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 				respChan <- resp{req, nil, errors.New("slab is not stored on this host")}
 				continue
 			}
-			offset, length := s.SectorRegion()
+			offset, length := ss.SectorRegion()
 			var buf bytes.Buffer
 			err := h.DownloadSector(&buf, shard.Root, offset, length)
 			respChan <- resp{req, buf.Bytes(), err}
@@ -145,7 +143,7 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 	// spawn workers and send initial requests
 	hostIndex := 0
 	inflight := 0
-	for i := uint8(0); i < s.MinShards; i++ {
+	for i := uint8(0); i < ss.MinShards; i++ {
 		go worker()
 		reqChan <- req{hostIndex}
 		hostIndex++
@@ -153,8 +151,8 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 	}
 	// collect responses
 	var errs HostErrorSet
-	shards := make([][]byte, len(s.Shards))
-	rem := s.MinShards
+	shards := make([][]byte, len(ss.Shards))
+	rem := ss.MinShards
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
 		inflight--
@@ -168,8 +166,8 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 				inflight++
 			}
 		} else {
-			for i := range s.Shards {
-				if s.Shards[i].Host == hosts[resp.req.hostIndex].PublicKey() {
+			for i := range ss.Shards {
+				if ss.Shards[i].Host == hosts[resp.req.hostIndex].PublicKey() {
 					shards[i] = resp.shard
 					rem--
 					break
@@ -183,25 +181,24 @@ func parallelDownloadSlab(ctx context.Context, s Slice, hosts []Host) ([][]byte,
 	return shards, nil
 }
 
-// DownloadSlab downloads slab data.
-func DownloadSlab(ctx context.Context, w io.Writer, s Slice, hosts []Host) error {
-	shards, err := parallelDownloadSlab(ctx, s, hosts)
+func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore) error {
+	shards, err := parallelDownloadSlab(ctx, ss, hosts)
 	if err != nil {
 		return err
 	}
-	s.Decrypt(shards)
-	err = s.Recover(w, shards)
+	ss.Decrypt(shards)
+	err = ss.Recover(w, shards)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// SlabsForDownload returns the slices that comprise the specified offset-length
+// slabsForDownload returns the slices that comprise the specified offset-length
 // span within slabs.
-func SlabsForDownload(slabs []Slice, offset, length int64) []Slice {
+func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.SlabSlice {
 	// mutate a copy
-	slabs = append([]Slice(nil), slabs...)
+	slabs = append([]object.SlabSlice(nil), slabs...)
 
 	firstOffset := offset
 	for i, ss := range slabs {
@@ -226,21 +223,20 @@ func SlabsForDownload(slabs []Slice, offset, length int64) []Slice {
 	return slabs
 }
 
-// DeleteSlabs deletes a set of slabs from the provided hosts.
-func DeleteSlabs(ctx context.Context, slabs []Slab, hosts []Host) error {
-	rootsByHost := make(map[consensus.PublicKey][]consensus.Hash256)
+func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) error {
+	rootsBysectorStore := make(map[consensus.PublicKey][]consensus.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
-			rootsByHost[sector.Host] = append(rootsByHost[sector.Host], sector.Root)
+			rootsBysectorStore[sector.Host] = append(rootsBysectorStore[sector.Host], sector.Root)
 		}
 	}
 
 	errChan := make(chan *HostError)
 	for _, h := range hosts {
-		go func(h Host) {
+		go func(h sectorStore) {
 			// NOTE: if host is not storing any sectors, the map lookup will return
 			// nil, making this a no-op
-			err := h.DeleteSectors(rootsByHost[h.PublicKey()])
+			err := h.DeleteSectors(rootsBysectorStore[h.PublicKey()])
 			if err != nil {
 				errChan <- &HostError{h.PublicKey(), err}
 			} else {
@@ -261,8 +257,7 @@ func DeleteSlabs(ctx context.Context, slabs []Slab, hosts []Host) error {
 	return nil
 }
 
-// MigrateSlab migrates a slab.
-func MigrateSlab(ctx context.Context, s *Slab, from, to []Host) error {
+func migrateSlab(ctx context.Context, s *object.Slab, from, to []sectorStore) error {
 	// determine which shards need migration
 	var shardIndices []int
 outer:
@@ -281,7 +276,11 @@ outer:
 	}
 
 	// download + reconstruct slab
-	ss := Slice{*s, 0, uint32(s.MinShards) * rhpv2.SectorSize}
+	ss := object.SlabSlice{
+		Slab:   *s,
+		Offset: 0,
+		Length: uint32(s.MinShards) * rhpv2.SectorSize,
+	}
 	shards, err := parallelDownloadSlab(ctx, ss, from)
 	if err != nil {
 		return err
@@ -294,7 +293,7 @@ outer:
 
 	// spawn workers and send initial requests
 	type req struct {
-		host       Host
+		host       sectorStore
 		shardIndex int
 	}
 	type resp struct {
@@ -334,7 +333,7 @@ outer:
 				inflight++
 			}
 		} else {
-			s.Shards[resp.req.shardIndex] = Sector{
+			s.Shards[resp.req.shardIndex] = object.Sector{
 				Host: resp.req.host.PublicKey(),
 				Root: resp.root,
 			}

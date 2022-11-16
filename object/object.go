@@ -7,12 +7,11 @@ import (
 	"errors"
 	"io"
 
-	"go.sia.tech/renterd/slab"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
 
-// A EncryptionKey can encrypt and decrypt objects.
+// A EncryptionKey can encrypt and decrypt messages.
 type EncryptionKey struct {
 	entropy *[32]byte
 }
@@ -59,7 +58,7 @@ func GenerateEncryptionKey() EncryptionKey {
 // An Object is a unit of data that has been stored on a host.
 type Object struct {
 	Key   EncryptionKey
-	Slabs []slab.Slice
+	Slabs []SlabSlice
 }
 
 // Size returns the total size of the object.
@@ -73,14 +72,14 @@ func (o Object) Size() int64 {
 
 // SplitSlabs splits a set of slabs into slices comprising objects with the
 // specified lengths.
-func SplitSlabs(slabs []slab.Slab, lengths []int) [][]slab.Slice {
+func SplitSlabs(slabs []Slab, lengths []int) [][]SlabSlice {
 	s := slabs[0]
 	slabs = slabs[1:]
-	objects := make([][]slab.Slice, len(lengths))
+	objects := make([][]SlabSlice, len(lengths))
 	offset := 0
 	for i, l := range lengths {
 		for l > s.Length() {
-			objects[i] = append(objects[i], slab.Slice{
+			objects[i] = append(objects[i], SlabSlice{
 				Slab:   s,
 				Offset: uint32(offset),
 				Length: uint32(s.Length() - offset),
@@ -89,7 +88,7 @@ func SplitSlabs(slabs []slab.Slab, lengths []int) [][]slab.Slice {
 			s, slabs = slabs[0], slabs[1:]
 			offset = 0
 		}
-		objects[i] = append(objects[i], slab.Slice{
+		objects[i] = append(objects[i], SlabSlice{
 			Slab:   s,
 			Offset: uint32(offset),
 			Length: uint32(l),
@@ -101,6 +100,6 @@ func SplitSlabs(slabs []slab.Slab, lengths []int) [][]slab.Slice {
 
 // SingleSlabs converts a set of slabs into slices comprising a single object
 // with the specified length.
-func SingleSlabs(slabs []slab.Slab, length int) []slab.Slice {
+func SingleSlabs(slabs []Slab, length int) []SlabSlice {
 	return SplitSlabs(slabs, []int{length})[0]
 }

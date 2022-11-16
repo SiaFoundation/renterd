@@ -12,7 +12,6 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/slab"
 	"gorm.io/gorm"
 )
 
@@ -32,7 +31,7 @@ type refSlab struct {
 }
 
 type refSlice struct {
-	SlabID slab.EncryptionKey
+	SlabID object.EncryptionKey
 	Offset uint32
 	Length uint32
 }
@@ -100,7 +99,7 @@ func (es *EphemeralObjectStore) Get(key string) (object.Object, error) {
 	if !ok {
 		return object.Object{}, errors.New("not found")
 	}
-	slabs := make([]slab.Slice, len(ro.Slabs))
+	slabs := make([]object.SlabSlice, len(ro.Slabs))
 	for i, rss := range ro.Slabs {
 		slabKey, err := rss.SlabID.MarshalText()
 		if err != nil {
@@ -110,15 +109,15 @@ func (es *EphemeralObjectStore) Get(key string) (object.Object, error) {
 		if !ok {
 			return object.Object{}, errors.New("slab not found")
 		}
-		shards := make([]slab.Sector, len(rs.Shards))
+		shards := make([]object.Sector, len(rs.Shards))
 		for i := range rs.Shards {
-			shards[i] = slab.Sector{
+			shards[i] = object.Sector{
 				Host: es.hosts[rs.Shards[i].HostID],
 				Root: rs.Shards[i].Root,
 			}
 		}
-		slabs[i] = slab.Slice{
-			Slab: slab.Slab{
+		slabs[i] = object.SlabSlice{
+			Slab: object.Slab{
 				Key:       rss.SlabID,
 				MinShards: rs.MinShards,
 				Shards:    shards,
@@ -292,7 +291,7 @@ type (
 		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ID"` // CASCADE to delete slices too
 	}
 
-	// dbSlice describes a reference to a slab.Slab in the database.
+	// dbSlice describes a reference to a object.Slab in the database.
 	dbSlice struct {
 		dbCommon
 
@@ -309,7 +308,7 @@ type (
 		Length uint32
 	}
 
-	// dbSlab describes a slab.Slab in the database.
+	// dbSlab describes a object.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
 		dbCommon
@@ -361,18 +360,18 @@ func (o dbObject) convert() (object.Object, error) {
 	}
 	obj := object.Object{
 		Key:   objKey,
-		Slabs: make([]slab.Slice, len(o.Slabs)),
+		Slabs: make([]object.SlabSlice, len(o.Slabs)),
 	}
 	for i, sl := range o.Slabs {
-		var slabKey slab.EncryptionKey
+		var slabKey object.EncryptionKey
 		if err := slabKey.UnmarshalText(sl.Slab.Key); err != nil {
 			return object.Object{}, err
 		}
-		obj.Slabs[i] = slab.Slice{
-			Slab: slab.Slab{
+		obj.Slabs[i] = object.SlabSlice{
+			Slab: object.Slab{
 				Key:       slabKey,
 				MinShards: sl.Slab.MinShards,
-				Shards:    make([]slab.Sector, len(sl.Slab.Shards)),
+				Shards:    make([]object.Sector, len(sl.Slab.Shards)),
 			},
 			Offset: sl.Offset,
 			Length: sl.Length,
