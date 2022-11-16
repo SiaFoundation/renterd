@@ -196,8 +196,8 @@ func NewJSONHostDB(dir string) (*JSONHostDB, modules.ConsensusChangeID, error) {
 const consensusInfoID = 1
 
 type (
-	// SQLHostDB is a helper type for interacting with a SQL-based HostDB.
-	SQLHostDB struct {
+	// SQLHostDBStore is a helper type for interacting with a SQL-based HostDB.
+	SQLHostDBStore struct {
 		db *gorm.DB
 	}
 
@@ -298,7 +298,7 @@ func (i dbInteraction) convert() hostdb.Interaction {
 // NewSQLHostDB uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.ConsensusChangeID, error) {
+func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDBStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
@@ -334,13 +334,13 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 	var ccid modules.ConsensusChangeID
 	copy(ccid[:], ci.CCID)
 
-	return &SQLHostDB{
+	return &SQLHostDBStore{
 		db: db,
 	}, ccid, nil
 }
 
 // Host returns information about a host.
-func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
+func (db *SQLHostDBStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
 	tx := db.db.Where(&dbHost{PublicKey: hostKey}).
 		Preload("Interactions").
@@ -354,7 +354,7 @@ func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
-func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
+func (db *SQLHostDBStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	// Filter all hosts for the ones that have not been updated since a
 	// given time.
 	var foundHosts [][]byte
@@ -387,7 +387,7 @@ func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 
 // RecordInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
-func (db *SQLHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
+func (db *SQLHostDBStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
 	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Create a host if it doesn't exist yet.
 		if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
@@ -405,7 +405,7 @@ func (db *SQLHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.In
 }
 
 // hosts returns all hosts int he db.
-func (db *SQLHostDB) hosts() ([]dbHost, error) {
+func (db *SQLHostDBStore) hosts() ([]dbHost, error) {
 	var hosts []dbHost
 	tx := db.db.Preload("Interactions").
 		Preload("Announcements").
@@ -417,7 +417,7 @@ func (db *SQLHostDB) hosts() ([]dbHost, error) {
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.
-func (db *SQLHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
+func (db *SQLHostDBStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	height := cc.InitialHeight()
 	for range cc.RevertedBlocks {
 		height--
