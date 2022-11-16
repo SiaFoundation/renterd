@@ -199,13 +199,13 @@ type (
 	dbContractRHPv2 struct {
 		dbCommon
 
-		ID         types.FileContractID         `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
-		Revision   dbFileContractRevision       `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
-		Signatures []types.TransactionSignature `gorm:"type:bytes;serializer:gob;NOT NULL"`
+		ID       types.FileContractID   `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
+		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
 	}
 
 	dbFileContractRevision struct {
 		dbCommon
+		Signatures []types.TransactionSignature `gorm:"type:bytes;serializer:gob;NOT NULL"`
 
 		ParentID              types.FileContractID   `gorm:"primaryKey;type:bytes;serializer:gob;NOT NULL"` // only one revision for a given parent
 		UnlockConditions      types.UnlockConditions `gorm:"NOT NULL;type:bytes;serializer:gob"`
@@ -332,10 +332,10 @@ func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
 
 	// Prepare signatures.
 	var signatures [2]types.TransactionSignature
-	if len(c.Signatures) != len(signatures) {
-		return rhpv2.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Signatures), len(signatures))
+	if len(c.Revision.Signatures) != len(signatures) {
+		return rhpv2.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Revision.Signatures), len(signatures))
 	}
-	for i, sig := range c.Signatures {
+	for i, sig := range c.Revision.Signatures {
 		signatures[i] = types.TransactionSignature{
 			ParentID:       crypto.Hash(sig.ParentID),
 			PublicKeyIndex: sig.PublicKeyIndex,
@@ -376,6 +376,7 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 	// Prepare contract revision.
 	revision := dbFileContractRevision{
 		ParentID:              fcid,
+		Signatures:            c.Signatures[:],
 		UnlockConditions:      c.Revision.UnlockConditions,
 		NewRevisionNumber:     c.Revision.NewRevisionNumber,
 		NewFileSize:           c.Revision.NewFileSize,
@@ -389,9 +390,8 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 
 	// Insert contract.
 	return s.db.Create(&dbContractRHPv2{
-		ID:         fcid,
-		Revision:   revision,
-		Signatures: c.Signatures[:],
+		ID:       fcid,
+		Revision: revision,
 	}).Error
 }
 
