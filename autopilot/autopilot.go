@@ -9,15 +9,9 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
-)
-
-const (
-	defaultContractLoopInterval = 15 * time.Minute
-	defaultScanLoopInterval     = time.Minute
 )
 
 type Store interface {
@@ -30,9 +24,7 @@ type Store interface {
 
 type Bus interface {
 	// wallet
-	WalletBalance() (types.Currency, error)
 	WalletAddress() (types.UnlockHash, error)
-	WalletTransactions(since time.Time, max int) ([]wallet.Transaction, error)
 	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error)
 	WalletDiscard(txn types.Transaction) error
 	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
@@ -72,14 +64,16 @@ type Worker interface {
 }
 
 type Autopilot struct {
-	store     Store
-	bus       Bus
-	worker    Worker
-	masterKey [32]byte
+	store  Store
+	bus    Bus
+	worker Worker
 
 	c *contractor
 	s *scanner
 
+	masterKey [32]byte
+
+	ticker   *time.Ticker
 	stopChan chan struct{}
 }
 
@@ -103,51 +97,40 @@ func (ap *Autopilot) Run() error {
 		return err
 	}
 
-	ap.c.run()
-	ap.s.run()
-	<-ap.stopChan
-	return nil // TODO
+	for {
+		select {
+		case <-ap.stopChan:
+			return nil
+		case <-ap.ticker.C:
+		}
+
+		// run host scan in separate goroutine, if a host scan is already
+		// running this is a no-op
+		go ap.s.tryPerformHostScan()
+
+		// perform contract maintenance in a blocking fashion
+		_ = ap.c.performContractMaintenance()
+	}
 }
 
-func (ap *Autopilot) Stop() error {
-	_ = ap.c.stop()
-	_ = ap.s.stop()
+func (ap *Autopilot) Stop() {
+	ap.ticker.Stop()
 	close(ap.stopChan)
-	return nil // TODO: maybe use https://github.com/hashicorp/go-multierror (?)
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker) (*Autopilot, error) {
+func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		store:  store,
 		bus:    bus,
 		worker: worker,
 
+		ticker:   time.NewTicker(tick),
 		stopChan: make(chan struct{}),
 	}
-	ap.c = newContractor(ap, defaultContractLoopInterval)
-	ap.s = newScanner(ap, defaultScanLoopInterval)
+	ap.c = newContractor(ap)
+	ap.s = newScanner(ap)
 	return ap, nil
-}
-
-func (ap *Autopilot) configHandlerGET(jc jape.Context) {
-	jc.Encode(ap.Config())
-}
-
-func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
-	var c Config
-	if jc.Decode(&c) == nil {
-		ap.SetConfig(c)
-	}
-}
-
-func (ap *Autopilot) actionsHandler(jc jape.Context) {
-	var since time.Time
-	max := -1
-	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
-		return
-	}
-	jc.Encode(ap.Actions(since, max))
 }
 
 // TODO: deriving the renter key from the host key using the master key only
@@ -187,8 +170,28 @@ func (ap *Autopilot) load() error {
 // NewServer returns an HTTP handler that serves the renterd autopilot API.
 func NewServer(ap *Autopilot) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /actions": ap.actionsHandler,
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
-		"GET    /actions": ap.actionsHandler,
 	})
+}
+
+func (ap *Autopilot) actionsHandler(jc jape.Context) {
+	var since time.Time
+	max := -1
+	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+		return
+	}
+	jc.Encode(ap.Actions(since, max))
+}
+
+func (ap *Autopilot) configHandlerGET(jc jape.Context) {
+	jc.Encode(ap.Config())
+}
+
+func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
+	var c Config
+	if jc.Decode(&c) == nil {
+		ap.SetConfig(c)
+	}
 }

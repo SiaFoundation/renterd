@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
@@ -231,7 +232,7 @@ func newAutopilot(cfg autopilotConfig, dir string) (*autopilot.Autopilot, func()
 	}
 	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
 	w := worker.NewClient(cfg.workerAddr, cfg.workerPassword)
-	a, err := autopilot.New(store, b, w)
+	a, err := autopilot.New(store, b, w, time.Minute)
 	if err != nil {
 		return nil, nil, err
 	}

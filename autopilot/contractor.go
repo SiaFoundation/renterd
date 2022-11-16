@@ -1,10 +1,7 @@
 package autopilot
 
 import (
-	"errors"
 	"math"
-	"sync"
-	"time"
 
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
@@ -17,149 +14,75 @@ const (
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
-	//
-	// TODO: move this constant to a separate package along with all others
 	estimatedFileContractTransactionSetSize = 2048
-
-	// stopTimeout is the amount of time we wait on stop before erroring out
-	// indicating an unclean shutdown
-	stopTimeout = time.Minute
 )
 
 type contractor struct {
-	ap                   *Autopilot
-	contractLoopInterval time.Duration
-
-	wg       sync.WaitGroup
-	stopChan chan struct{}
-	wakeChan chan struct{}
+	ap *Autopilot
 }
 
-func newContractor(ap *Autopilot, contractLoopInterval time.Duration) *contractor {
+func newContractor(ap *Autopilot) *contractor {
 	return &contractor{
-		ap:                   ap,
-		contractLoopInterval: contractLoopInterval,
-		stopChan:             make(chan struct{}),
-		wakeChan:             make(chan struct{}),
+		ap: ap,
 	}
 }
 
-func (c *contractor) run() {
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		c.contractLoop()
-	}()
+func (c *contractor) performContractMaintenance() error {
+	// re-use same state and config in every iteration
+	config := c.ap.store.Config()
+	state := c.ap.store.State()
 
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		c.triggerLoop()
-	}()
-}
-
-func (c *contractor) stop() error {
-	close(c.stopChan)
-
-	doneChan := make(chan struct{})
-	go func() {
-		c.wg.Wait()
-		close(doneChan)
-	}()
-	select {
-	case <-doneChan:
-	case <-time.After(stopTimeout):
-		return errors.New("unclean contractor shutdown")
+	// don't perform any maintenance if we're not synced
+	if !state.Synced {
+		return nil
 	}
+
+	// return early if no hosts are requested
+	if config.Contracts.Hosts == 0 {
+		return nil
+	}
+
+	// fetch our wallet address
+	address, err := c.ap.bus.WalletAddress()
+	if err != nil {
+		return err
+	}
+
+	// run checks
+	err = c.runContractChecks()
+	if err != nil {
+		return err
+	}
+
+	// figure out remaining funds
+	spent, err := c.periodSpending()
+	if err != nil {
+		return err
+	}
+	var remaining types.Currency
+	if config.Contracts.Allowance.Cmp(spent) > 0 {
+		remaining = config.Contracts.Allowance.Sub(spent)
+	}
+
+	// run renewals
+	renewed, err := c.runContractRenewals(config, state, &remaining, address)
+	if err != nil {
+		return err
+	}
+
+	// run formations
+	formed, err := c.runContractFormations(config, state, &remaining, address)
+	if err != nil {
+		return err
+	}
+
+	// update contract set
+	err = c.ap.updateDefaultContracts(renewed, formed)
+	if err != nil {
+		return err
+	}
+
 	return nil
-}
-
-func (c *contractor) triggerLoop() {
-	for {
-		select {
-		case <-c.stopChan:
-			return
-		case <-time.After(c.contractLoopInterval):
-			c.wake()
-		}
-	}
-}
-
-func (c *contractor) wake() {
-	select {
-	case c.wakeChan <- struct{}{}:
-	default:
-	}
-}
-
-func (c *contractor) contractLoop() {
-	for {
-		select {
-		case <-c.stopChan:
-			return
-		case <-c.wakeChan:
-		}
-
-		// re-use same state and config in every iteration
-		config := c.ap.store.Config()
-		state := c.ap.store.State()
-
-		// don't run the contract loop if we are not synced
-		if !state.Synced {
-			continue
-		}
-
-		// return early if no hosts are requested
-		if config.Contracts.Hosts == 0 {
-			return
-		}
-
-		// fetch our wallet address
-		address, err := c.ap.bus.WalletAddress()
-		if err != nil {
-			logErr(err)
-			continue
-		}
-
-		// run checks
-		err = c.runContractChecks()
-		if err != nil {
-			logErr(err)
-			continue
-		}
-
-		// figure out remaining funds
-		spent, err := c.periodSpending()
-		if err != nil {
-			logErr(err)
-			continue
-		}
-		var remaining types.Currency
-		if config.Contracts.Allowance.Cmp(spent) > 0 {
-			remaining = config.Contracts.Allowance.Sub(spent)
-		}
-
-		// run renewals
-		renewed, err := c.runContractRenewals(config, state, &remaining, address)
-		if err != nil {
-			logErr(err)
-			continue
-		}
-
-		// run formations
-		formed, err := c.runContractFormations(config, state, &remaining, address)
-		if err != nil {
-			logErr(err)
-			continue
-		}
-
-		// update contract set
-		err = c.ap.updateDefaultContracts(renewed, formed)
-		if err != nil {
-			logErr(err)
-			continue
-		}
-	}
 }
 
 func (c *contractor) runContractChecks() error {
@@ -207,6 +130,8 @@ func (c *contractor) runContractRenewals(cfg Config, s State, budget *types.Curr
 	// perform the renewals
 	var renewed []worker.Contract
 	for _, renew := range toRenew {
+		// TODO: break if autopilot was stopped
+
 		// check our budget
 		renterFunds, err := c.renewFundingEstimate(cfg, s, renew.ID)
 		if budget.Cmp(renterFunds) < 0 {
@@ -280,6 +205,8 @@ func (c *contractor) runContractFormations(cfg Config, s State, budget *types.Cu
 	missing := int(cfg.Contracts.Hosts) - len(active) // TODO: add leeway so we don't form hosts if we dip slightly under `needed` (?)
 	canidates, _ := c.ap.hostsForContracts(missing)   // TODO: add leeway so we have more than enough canidates
 	for h := 0; missing > 0 && h < len(canidates); h++ {
+		// TODO: break if autopilot was stopped
+
 		// fetch host IP
 		candidate := canidates[h]
 		host, err := c.ap.bus.Host(candidate)
@@ -470,11 +397,11 @@ func (c *contractor) renewFundingEstimate(cfg Config, s State, cID types.FileCon
 	var prevUploadSpending types.Currency
 	var prevDownloadSpending types.Currency
 	var prevFundAccountSpending types.Currency
-	hierarchy, err := c.ap.bus.ContractHistory(cID, s.CurrentPeriod)
+	oldContracts, err := c.ap.bus.ContractHistory(cID, s.CurrentPeriod)
 	if err != nil {
 		return types.ZeroCurrency, err
 	}
-	for _, contract := range hierarchy {
+	for _, contract := range oldContracts {
 		spending := contract.Metadata.Spending
 		prevUploadSpending = prevUploadSpending.Add(spending.Uploads)
 		prevDownloadSpending = prevUploadSpending.Add(spending.Downloads)

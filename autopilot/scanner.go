@@ -2,7 +2,6 @@ package autopilot
 
 import (
 	"encoding/json"
-	"errors"
 	"sync"
 	"time"
 
@@ -12,117 +11,77 @@ import (
 )
 
 type scanner struct {
-	ap               *Autopilot
-	scanLoopInterval time.Duration
+	ap *Autopilot
 
-	wg       sync.WaitGroup
-	stopChan chan struct{}
-	wakeChan chan struct{}
+	mu      sync.Mutex
+	running bool
 }
 
-func newScanner(ap *Autopilot, scanLoopInterval time.Duration) *scanner {
+func newScanner(ap *Autopilot) *scanner {
 	return &scanner{
-		ap:               ap,
-		scanLoopInterval: scanLoopInterval,
-		stopChan:         make(chan struct{}),
-		wakeChan:         make(chan struct{}),
+		ap: ap,
 	}
 }
 
-func (s *scanner) run() {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.scanLoop()
+func (s *scanner) tryPerformHostScan() {
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return
+	}
+	s.running = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.running = false
 	}()
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.triggerLoop()
-	}()
-}
-
-func (s *scanner) stop() error {
-	close(s.stopChan)
-
-	doneChan := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(doneChan)
-	}()
-	select {
-	case <-doneChan:
-	case <-time.After(stopTimeout):
-		return errors.New("unclean scanner shutdown")
-	}
-	return nil
-}
-
-func (s *scanner) triggerLoop() {
-	for {
-		select {
-		case <-s.stopChan:
-			return
-		case <-time.After(s.scanLoopInterval):
-			s.wake()
-		}
-	}
-}
-
-func (s *scanner) wake() {
-	select {
-	case s.wakeChan <- struct{}{}:
-	default:
-	}
-}
-
-func (s *scanner) scanLoop() {
 	// TODO: initial scan with much shorter
-	for {
+	// scan up to 10 hosts that we haven't interacted with in at least 1 week
+	hosts, err := s.ap.bus.Hosts(time.Now().Add(-7*24*time.Hour), 10)
+	if err != nil {
+		return
+	}
+	type res struct {
+		hostKey  consensus.PublicKey
+		settings rhpv2.HostSettings
+		err      error
+	}
+	resChan := make(chan res)
+	for _, h := range hosts {
+		go func(h hostdb.Host) {
+			scan, err := s.ap.worker.RHPScan(h.PublicKey, h.NetAddress())
+			resChan <- res{h.PublicKey, scan.Settings, err}
+		}(h)
+	}
+	for range hosts {
+		var r res
+
 		select {
-		case <-s.stopChan:
+		case <-s.ap.stopChan:
 			return
-		case <-s.wakeChan:
+		case r = <-resChan:
 		}
 
-		// scan up to 10 hosts that we haven't interacted with in at least 1 week
-		hosts, err := s.ap.bus.Hosts(time.Now().Add(-7*24*time.Hour), 10)
-		if err != nil {
-			return
-		}
-		type res struct {
-			hostKey  consensus.PublicKey
-			settings rhpv2.HostSettings
-			err      error
-		}
-		resChan := make(chan res)
-		for _, h := range hosts {
-			go func(h hostdb.Host) {
-				scan, err := s.ap.worker.RHPScan(h.PublicKey, h.NetAddress())
-				resChan <- res{h.PublicKey, scan.Settings, err}
-			}(h)
-		}
-		for range hosts {
-			r := <-resChan
-			if r.err != nil {
-				err := s.ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
-					Timestamp: time.Now(),
-					Type:      "scan",
-					Success:   false,
-					Result:    json.RawMessage(`{"error": "` + r.err.Error() + `"}`),
-				})
-				_ = err // TODO
-			} else {
-				js, _ := json.Marshal(r.settings)
-				err := s.ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
-					Timestamp: time.Now(),
-					Type:      "scan",
-					Success:   true,
-					Result:    json.RawMessage(js),
-				})
-				_ = err // TODO
-			}
+		if r.err != nil {
+			err := s.ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
+				Timestamp: time.Now(),
+				Type:      "scan",
+				Success:   false,
+				Result:    json.RawMessage(`{"error": "` + r.err.Error() + `"}`),
+			})
+			_ = err // TODO
+		} else {
+			js, _ := json.Marshal(r.settings)
+			err := s.ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
+				Timestamp: time.Now(),
+				Type:      "scan",
+				Success:   true,
+				Result:    json.RawMessage(js),
+			})
+			_ = err // TODO
 		}
 	}
 }
