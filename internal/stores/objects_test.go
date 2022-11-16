@@ -180,21 +180,21 @@ func TestSQLObjectStore(t *testing.T) {
 
 	expectedObj := dbObject{
 		ID:  objID,
-		Key: string(obj1Key),
+		Key: obj1Key,
 		Slabs: []dbSlice{
 			{
 				ID:       1,
 				ObjectID: objID,
 				Slab: dbSlab{
 					ID:        1,
-					Key:       string(obj1Slab0Key),
+					Key:       obj1Slab0Key,
 					MinShards: 1,
 					Shards: []dbSector{
 						{
 							ID:     1,
 							SlabID: 1,
-							Root:   obj1.Slabs[0].Shards[0].Root[:],
-							Host:   obj1.Slabs[0].Shards[0].Host[:],
+							Root:   obj1.Slabs[0].Shards[0].Root,
+							Host:   obj1.Slabs[0].Shards[0].Host,
 						},
 					},
 				},
@@ -206,14 +206,14 @@ func TestSQLObjectStore(t *testing.T) {
 				ObjectID: objID,
 				Slab: dbSlab{
 					ID:        2,
-					Key:       string(obj1Slab1Key),
+					Key:       obj1Slab1Key,
 					MinShards: 2,
 					Shards: []dbSector{
 						{
 							ID:     2,
 							SlabID: 2,
-							Root:   obj1.Slabs[1].Shards[0].Root[:],
-							Host:   obj1.Slabs[1].Shards[0].Host[:],
+							Root:   obj1.Slabs[1].Shards[0].Root,
+							Host:   obj1.Slabs[1].Shards[0].Host,
 						},
 					},
 				},

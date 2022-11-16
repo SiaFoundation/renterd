@@ -65,8 +65,8 @@ type (
 
 	// A HostSetStore stores host sets.
 	HostSetStore interface {
-		HostSets() []string
-		HostSet(name string) []consensus.PublicKey
+		HostSets() ([]string, error)
+		HostSet(name string) ([]consensus.PublicKey, error)
 		SetHostSet(name string, hosts []consensus.PublicKey) error
 	}
 
@@ -347,11 +347,19 @@ func (b *Bus) contractsIDHandlerDELETE(jc jape.Context) {
 }
 
 func (b *Bus) hostsetsHandler(jc jape.Context) {
-	jc.Encode(b.hss.HostSets())
+	hostSets, err := b.hss.HostSets()
+	if jc.Check("couldn't load host sets", err) != nil {
+		return
+	}
+	jc.Encode(hostSets)
 }
 
 func (b *Bus) hostsetsNameHandlerGET(jc jape.Context) {
-	jc.Encode(b.hss.HostSet(jc.PathParam("name")))
+	hostSet, err := b.hss.HostSet(jc.PathParam("name"))
+	if jc.Check("couldn't load host set", err) != nil {
+		return
+	}
+	jc.Encode(hostSet)
 }
 
 func (b *Bus) hostsetsNameHandlerPUT(jc jape.Context) {
@@ -363,7 +371,10 @@ func (b *Bus) hostsetsNameHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) hostsetsContractsHandler(jc jape.Context) {
-	hosts := b.hss.HostSet(jc.PathParam("name"))
+	hosts, err := b.hss.HostSet(jc.PathParam("name"))
+	if jc.Check("couldn't load host set", err) != nil {
+		return
+	}
 	latest := make(map[consensus.PublicKey]rhpv2.Contract)
 	all, err := b.cs.Contracts()
 	if jc.Check("couldn't load contracts", err) != nil {

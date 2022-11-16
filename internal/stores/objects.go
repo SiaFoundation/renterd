@@ -290,7 +290,7 @@ type (
 		ID string `gorm:"primaryKey"`
 
 		// Object related fields.
-		Key   string    // json string
+		Key   []byte
 		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ID"` // CASCADE to delete slices too
 	}
 
@@ -313,7 +313,7 @@ type (
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
 		ID        uint64 `gorm:"primaryKey"`
-		Key       string `gorm:"unique;NOT NULL"` // json string
+		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
 		Shards    []dbSector `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
 	}
@@ -326,14 +326,14 @@ type (
 		SlabID uint64 `gorm:"index;NOT NULL"`
 
 		// Root uniquely identifies a sector and is therefore the primary key.
-		Root []byte `gorm:"index;NOT NULL"`
+		Root consensus.Hash256 `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
 
 		// Host is the key of the host that stores the sector.
 		// TODO: once we migrate the contract store over to a relational
 		// db as well, we might want to put the contract ID here and
 		// have a contract table with a mapping of contract ID to host.
 		// That makes for better migrations.
-		Host []byte `gorm:"index; NOT NULL"`
+		Host consensus.PublicKey `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
 
@@ -378,10 +378,10 @@ func NewSQLObjectStore(conn gorm.Dialector, migrate bool) (*SQLObjectStore, erro
 	}, nil
 }
 
-// Object turns a dbObject into a object.Object.
-func (o dbObject) Object() (object.Object, error) {
+// convert turns a dbObject into a object.Object.
+func (o dbObject) convert() (object.Object, error) {
 	var objKey object.EncryptionKey
-	if err := objKey.UnmarshalText([]byte(o.Key)); err != nil {
+	if err := objKey.UnmarshalText(o.Key); err != nil {
 		return object.Object{}, err
 	}
 	obj := object.Object{
@@ -390,7 +390,7 @@ func (o dbObject) Object() (object.Object, error) {
 	}
 	for i, sl := range o.Slabs {
 		var slabKey slab.EncryptionKey
-		if err := slabKey.UnmarshalText([]byte(sl.Slab.Key)); err != nil {
+		if err := slabKey.UnmarshalText(sl.Slab.Key); err != nil {
 			return object.Object{}, err
 		}
 		obj.Slabs[i] = slab.Slice{
@@ -403,8 +403,8 @@ func (o dbObject) Object() (object.Object, error) {
 			Length: sl.Length,
 		}
 		for j, sh := range sl.Slab.Shards {
-			copy(obj.Slabs[i].Shards[j].Host[:], sh.Host)
-			copy(obj.Slabs[i].Shards[j].Root[:], sh.Root)
+			obj.Slabs[i].Shards[j].Host = sh.Host
+			obj.Slabs[i].Shards[j].Root = sh.Root
 		}
 	}
 	return obj, nil
@@ -438,7 +438,7 @@ func (s *SQLObjectStore) Get(key string) (object.Object, error) {
 	if err != nil {
 		return object.Object{}, err
 	}
-	return obj.Object()
+	return obj.convert()
 }
 
 // Put implements the bus.ObjectStore interface.
@@ -459,7 +459,7 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 		}
 		err = tx.Create(&dbObject{
 			ID:  key,
-			Key: string(objKey),
+			Key: objKey,
 		}).Error
 		if err != nil {
 			return err
@@ -477,13 +477,13 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 			}
 
 			// Create Slab.
-			var slab dbSlab
-			ssKey, err := ss.Key.MarshalText()
+			slabKey, err := ss.Key.MarshalText()
 			if err != nil {
 				return err
 			}
+			var slab dbSlab
 			err = tx.FirstOrCreate(&slab, &dbSlab{
-				Key:       string(ssKey),
+				Key:       slabKey,
 				MinShards: ss.MinShards,
 			}).Error
 			if err != nil {
@@ -494,8 +494,8 @@ func (s *SQLObjectStore) Put(key string, o object.Object) error {
 				// Create shard.
 				err = tx.Create(&dbSector{
 					SlabID: slab.ID,
-					Host:   shard.Host[:],
-					Root:   shard.Root[:],
+					Host:   shard.Host,
+					Root:   shard.Root,
 				}).Error
 				if err != nil {
 					return err

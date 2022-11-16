@@ -122,7 +122,7 @@ func main() {
 		defer cleanup()
 		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
 		autopilotCfg.busAddr = *apiAddr + "/worker/"
-		autopilotCfg.busPassword = apiPassword
+		autopilotCfg.workerPassword = apiPassword
 	}
 	if autopilotCfg.enabled {
 		a, cleanup, err := newAutopilot(autopilotCfg, *dir)

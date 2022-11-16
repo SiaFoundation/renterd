@@ -185,7 +185,7 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	if err := os.MkdirAll(contractsDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	cs, err := stores.NewJSONContractStore(contractsDir)
+	cs, err := stores.NewSQLContractStore(dbConn, true)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -205,24 +205,24 @@ type (
 	// Deleting a host from the db will cascade the deletion and also delete
 	// the corresponding announcements and interactions with that host.
 	dbHost struct {
-		PublicKey     []byte           `gorm:"primaryKey"`
-		Announcements []dbAnnouncement `gorm:"foreignKey:Host;OnDelete:CASCADE"`
-		Interactions  []dbInteraction  `gorm:"foreignKey:Host;OnDelete:CASCADE"`
+		PublicKey     consensus.PublicKey `gorm:"primaryKey;type:bytes;serializer:gob"`
+		Announcements []dbAnnouncement    `gorm:"foreignKey:Host;OnDelete:CASCADE"`
+		Interactions  []dbInteraction     `gorm:"foreignKey:Host;OnDelete:CASCADE"`
 	}
 
 	dbAnnouncement struct {
-		ID          uint64    `gorm:"primaryKey"`
-		Host        []byte    `gorm:"NOT NULL"`
-		BlockHeight uint64    `gorm:"NOT NULL"`
-		BlockID     []byte    `gorm:"NOT NULL"`
-		Timestamp   time.Time `gorm:"NOT NULL"`
-		NetAddress  string    `gorm:"NOT NULL"`
+		ID          uint64              `gorm:"primaryKey"`
+		Host        consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		BlockHeight uint64              `gorm:"NOT NULL"`
+		BlockID     consensus.BlockID   `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		Timestamp   time.Time           `gorm:"NOT NULL"`
+		NetAddress  string              `gorm:"NOT NULL"`
 	}
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
-		ID        uint64 `gorm:"primaryKey"`
-		Host      []byte `gorm:"index; NOT NULL"`
+		ID        uint64              `gorm:"primaryKey"`
+		Host      consensus.PublicKey `gorm:"index; NOT NULL;type:bytes;serializer:gob"`
 		Result    json.RawMessage
 		Timestamp time.Time `gorm:"index; NOT NULL"`
 		Type      string
@@ -249,37 +249,37 @@ func (dbInteraction) TableName() string { return "host_interactions" }
 // TableName implements the gorm.Tabler interface.
 func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
-// Host converts a host into a hostdb.Host.
-func (h dbHost) Host() hostdb.Host {
+// convert converts a host into a hostdb.Host.
+func (h dbHost) convert() hostdb.Host {
 	hdbHost := hostdb.Host{
 		Announcements: make([]hostdb.Announcement, len(h.Announcements)),
 		Interactions:  make([]hostdb.Interaction, len(h.Interactions)),
+		PublicKey:     h.PublicKey,
 	}
 	for i, announcement := range h.Announcements {
-		hdbHost.Announcements[i] = announcement.Announcement()
+		hdbHost.Announcements[i] = announcement.convert()
 	}
 	for i, interaction := range h.Interactions {
-		hdbHost.Interactions[i] = interaction.Interaction()
+		hdbHost.Interactions[i] = interaction.convert()
 	}
-	copy(hdbHost.PublicKey[:], h.PublicKey)
 	return hdbHost
 }
 
-// Announcement converts a host into a hostdb.Announcement.
-func (a dbAnnouncement) Announcement() hostdb.Announcement {
+// convert converts a host into a hostdb.Announcement.
+func (a dbAnnouncement) convert() hostdb.Announcement {
 	hostdbAnnouncement := hostdb.Announcement{
 		Index: consensus.ChainIndex{
 			Height: a.BlockHeight,
+			ID:     consensus.BlockID(a.BlockID),
 		},
 		Timestamp:  a.Timestamp,
 		NetAddress: a.NetAddress,
 	}
-	copy(hostdbAnnouncement.Index.ID[:], a.BlockID)
 	return hostdbAnnouncement
 }
 
-// Interaction converts an interaction into a hostdb.Interaction.
-func (i dbInteraction) Interaction() hostdb.Interaction {
+// convert converts an interaction into a hostdb.Interaction.
+func (i dbInteraction) convert() hostdb.Interaction {
 	return hostdb.Interaction{
 		Timestamp: i.Timestamp,
 		Type:      i.Type,
@@ -334,14 +334,14 @@ func NewSQLHostDB(conn gorm.Dialector, migrate bool) (*SQLHostDB, modules.Consen
 // Host returns information about a host.
 func (db *SQLHostDB) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
-	tx := db.db.Where(&dbHost{PublicKey: hostKey[:]}).
+	tx := db.db.Where(&dbHost{PublicKey: hostKey}).
 		Preload("Interactions").
 		Preload("Announcements").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound
 	}
-	return h.Host(), tx.Error
+	return h.convert(), tx.Error
 }
 
 // Hosts returns up to max hosts that have not been interacted with since
@@ -372,7 +372,7 @@ func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	}
 	var hosts []hostdb.Host
 	for _, fh := range fullHosts {
-		hosts = append(hosts, fh.Host())
+		hosts = append(hosts, fh.convert())
 	}
 	return hosts, err
 }
@@ -382,13 +382,13 @@ func (db *SQLHostDB) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 func (db *SQLHostDB) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
 	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Create a host if it doesn't exist yet.
-		if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey[:]}).Error; err != nil {
+		if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
 			return err
 		}
 
 		// Create an interaction.
 		return tx.Create(&dbInteraction{
-			Host:      hostKey[:],
+			Host:      hostKey,
 			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
 			Type:      hi.Type,
 			Result:    hi.Result,
@@ -437,10 +437,16 @@ func (db *SQLHostDB) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
+	// Create a host if it doesn't exist yet.
+	if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
+		return err
+	}
+
+	// Create the announcement.
 	return tx.Create(&dbAnnouncement{
-		Host:        hostKey[:],
+		Host:        hostKey,
 		BlockHeight: a.Index.Height,
-		BlockID:     a.Index.ID[:],
+		BlockID:     a.Index.ID,
 		Timestamp:   a.Timestamp.UTC(), // explicitly store timestamp as UTC
 		NetAddress:  a.NetAddress,
 	}).Error
