@@ -199,8 +199,10 @@ type (
 	dbContractRHPv2 struct {
 		dbCommon
 
-		ID       types.FileContractID   `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
-		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
+		GoodForUpload bool                   `gorm:"index"`
+		ID            types.FileContractID   `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
+		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
+		Sectors       []dbSector             `gorm:"foreignKey:Contract;references:ID;constraint:OnDelete:SET NULL"`         // Set Contract field in sector null on delete
 	}
 
 	dbFileContractRevision struct {
@@ -390,8 +392,9 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 
 	// Insert contract.
 	return s.db.Create(&dbContractRHPv2{
-		ID:       fcid,
-		Revision: revision,
+		ID:            fcid,
+		GoodForUpload: true, // new contract is always good for upload
+		Revision:      revision,
 	}).Error
 }
 

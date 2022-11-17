@@ -327,3 +327,96 @@ func TestSQLList(t *testing.T) {
 		}
 	}
 }
+
+func TestWorstHealthSlabs(t *testing.T) {
+	os, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create keys for 4 hosts.
+	hks := []consensus.PublicKey{{1}, {2}, {3}, {4}}
+	hk1, hk2, hk3, hk4 := hks[0], hks[1], hks[2], hks[3]
+
+	for i, hk := range []consensus.PublicKey{hk1, hk2, hk3, hk4} {
+		contract := rhp.Contract{
+			Revision: types.FileContractRevision{
+				ParentID: types.FileContractID{byte(i + 1)},
+			},
+		}
+		err = os.AddContract(hk, contract)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err = os.Put("obj1", object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []slab.Slice{
+			{
+				Slab: slab.Slab{
+					Key:       slab.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []slab.Sector{
+						{
+							Host: hk1,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk2,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk3,
+							Root: consensus.Hash256{1},
+						},
+					},
+				},
+			},
+			{
+				Slab: slab.Slab{
+					Key:       slab.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []slab.Sector{
+						{
+							Host: hk2,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk3,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk4,
+							Root: consensus.Hash256{1},
+						},
+					},
+				},
+			},
+			{
+				Slab: slab.Slab{
+					Key:       slab.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []slab.Sector{
+						{
+							Host: hk3,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk4,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: consensus.PublicKey{}, // NULL
+							Root: consensus.Hash256{1},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"gitlab.com/NebulousLabs/encoding"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"

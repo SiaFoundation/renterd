@@ -336,7 +336,7 @@ type (
 		// db as well, we might want to put the contract ID here and
 		// have a contract table with a mapping of contract ID to host.
 		// That makes for better migrations.
-		Host consensus.PublicKey `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
+		Contract dbContractRHPv2 `gorm:"index;type:bytes;serializer:gob"`
 	}
 )
 
@@ -466,10 +466,13 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 
 			for _, shard := range ss.Shards {
 				// Create shard.
+				// TODO: We potentially want to ignore foreign
+				// key constraint failure on the Contract column
+				// up until MinShards.
 				err = tx.Create(&dbSector{
-					SlabID: slab.ID,
-					Host:   shard.Host,
-					Root:   shard.Root,
+					SlabID:   slab.ID,
+					Contract: contract,
+					Root:     shard.Root,
 				}).Error
 				if err != nil {
 					return err
@@ -483,6 +486,9 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 // Delete implements the bus.ObjectStore interface.
 func (s *SQLStore) Delete(key string) error {
 	return deleteObject(s.db, key)
+}
+
+func (s *SQLStore) WorstHealthSlabs(n int) {
 }
 
 // deleteObject deletes an object from the store.
