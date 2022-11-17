@@ -1,4 +1,4 @@
-package slab
+package object
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 )
 
 func checkRecover(s Slab, shards [][]byte, data []byte) bool {
-	ss := Slice{s, 0, uint32(len(data))}
+	ss := SlabSlice{s, 0, uint32(len(data))}
 	var buf bytes.Buffer
 	if err := ss.Recover(&buf, shards); err != nil {
 		return false
@@ -91,7 +91,7 @@ func BenchmarkReedSolomon(b *testing.B) {
 	benchRecover := func(m, n, r uint8) func(*testing.B) {
 		s, data, shards := makeSlab(m, n)
 		s.Encode(data, shards)
-		ss := Slice{s, 0, uint32(len(data))}
+		ss := SlabSlice{s, 0, uint32(len(data))}
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(data)))

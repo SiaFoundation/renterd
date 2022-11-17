@@ -10,9 +10,9 @@ import (
 	"net/http"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/renterd/slab"
 	"go.sia.tech/siad/types"
 )
 
@@ -141,8 +141,8 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
-func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s slab.Slab, err error) {
-	c.c.Custom("POST", "/slabs/upload", []byte{}, &slab.Slab{})
+func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s object.Slab, err error) {
+	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
 
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
@@ -158,13 +158,13 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return slab.Slab{}, err
+		return object.Slab{}, err
 	}
 	defer io.Copy(ioutil.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := ioutil.ReadAll(resp.Body)
-		return slab.Slab{}, errors.New(string(err))
+		return object.Slab{}, errors.New(string(err))
 	}
 
 	err = json.NewDecoder(resp.Body).Decode(&s)
@@ -172,7 +172,7 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 }
 
 // DownloadSlab downloads data from a set of hosts.
-func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract) (err error) {
+func (c *Client) DownloadSlab(dst io.Writer, s object.SlabSlice, contracts []Contract) (err error) {
 	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
 
 	js, _ := json.Marshal(SlabsDownloadRequest{
@@ -201,7 +201,7 @@ func (c *Client) DownloadSlab(dst io.Writer, s slab.Slice, contracts []Contract)
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight uint64) error {
+func (c *Client) MigrateSlab(s *object.Slab, from, to []Contract, currentHeight uint64) error {
 	req := SlabsMigrateRequest{
 		Slab:          *s,
 		From:          from,
@@ -212,7 +212,7 @@ func (c *Client) MigrateSlab(s *slab.Slab, from, to []Contract, currentHeight ui
 }
 
 // DeleteSlabs deletes the specified slabs.
-func (c *Client) DeleteSlabs(slabs []slab.Slab, contracts []Contract) (err error) {
+func (c *Client) DeleteSlabs(slabs []object.Slab, contracts []Contract) (err error) {
 	req := SlabsDeleteRequest{
 		Slabs:     slabs,
 		Contracts: contracts,
