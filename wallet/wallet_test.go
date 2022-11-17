@@ -23,25 +23,6 @@ func (s *mockStore) Transactions(since time.Time, max int) ([]wallet.Transaction
 	return nil, nil
 }
 
-// applyDistributeTxn ensures the store's internal state reflects the changes
-// dictated by the transaction as if it were mined and fully processed
-//
-// NOTE: this method should only be used to test the redistribute functionality
-// of the wallet as it blatantly ignores to whom money is being sent
-func (s *mockStore) applyDistributeTxn(txn types.Transaction) {
-	for _, input := range txn.SiacoinInputs {
-		for i, utxo := range s.utxos {
-			if input.ParentID == types.SiacoinOutputID(utxo.ID) {
-				s.utxos[i] = s.utxos[len(s.utxos)-1]
-				s.utxos = s.utxos[:len(s.utxos)-1]
-			}
-		}
-	}
-	for _, output := range txn.SiacoinOutputs {
-		s.utxos = append(s.utxos, wallet.SiacoinElement{output, randomOutputID(), 0})
-	}
-}
-
 var cs = consensus.State{
 	Index: consensus.ChainIndex{
 		Height: 1,
@@ -68,8 +49,6 @@ func TestWalletRedistribute(t *testing.T) {
 	s := &mockStore{utxos: []wallet.SiacoinElement{utxo}}
 	w := wallet.NewSingleAddressWallet(priv, s)
 
-	// define a small helper function that returns the amount of unspent outputs
-	// with given value
 	numOutputsWithValue := func(v types.Currency) (c uint64) {
 		utxos, _ := w.UnspentOutputs()
 		for _, utxo := range utxos {
@@ -78,6 +57,20 @@ func TestWalletRedistribute(t *testing.T) {
 			}
 		}
 		return
+	}
+
+	applyTxn := func(txn types.Transaction) {
+		for _, input := range txn.SiacoinInputs {
+			for i, utxo := range s.utxos {
+				if input.ParentID == types.SiacoinOutputID(utxo.ID) {
+					s.utxos[i] = s.utxos[len(s.utxos)-1]
+					s.utxos = s.utxos[:len(s.utxos)-1]
+				}
+			}
+		}
+		for _, output := range txn.SiacoinOutputs {
+			s.utxos = append(s.utxos, wallet.SiacoinElement{output, randomOutputID(), 0})
+		}
 	}
 
 	// assert number of outputs
@@ -92,7 +85,7 @@ func TestWalletRedistribute(t *testing.T) {
 	if txn, _, err := w.Redistribute(cs, 3, amount, types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
 	} else {
-		s.applyDistributeTxn(txn)
+		applyTxn(txn)
 	}
 
 	// assert number of outputs
@@ -118,7 +111,7 @@ func TestWalletRedistribute(t *testing.T) {
 	if txn, _, err := w.Redistribute(cs, 2, oneSC.Mul64(9), types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
 	} else {
-		s.applyDistributeTxn(txn)
+		applyTxn(txn)
 	}
 
 	// assert number of outputs
