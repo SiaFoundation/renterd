@@ -47,8 +47,9 @@ type WalletSignRequest struct {
 	CoveredFields types.CoveredFields `json:"coveredFields"`
 }
 
-// WalletSplitRequest is the request type for the /wallet/split operation.
-type WalletSplitRequest struct {
+// WalletRedistributeRequest is the request type for the /wallet/redistribute
+// endpoint.
+type WalletRedistributeRequest struct {
 	Amount  types.Currency `json:"amount"`
 	Outputs int            `json:"outputs"`
 }

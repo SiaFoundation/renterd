@@ -237,14 +237,13 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 	return nil
 }
 
-// Split returns a transaction that splits the wallet in the given number of
-// outputs with given amount. It also returns a list of output IDs that need to
-// be signed.
+// Redistribute returns a transaction that redistributes money in the wallet by
+// selecting a minimal set of inputs to cover the creation of the requested
+// outputs. It also returns a list of output IDs that need to be signed.
 //
-// NOTE: split needs to use a minimal set of inputs and therefore does not reuse
-// the fund logic which randomizes the unspent transaction outputs used to fund
-// the transaction
-func (w *SingleAddressWallet) Split(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error) {
+// NOTE: we can not reuse 'FundTransaction' because it randomizes the unspent
+// transaction outputs it uses and we need a minimal set of inputs
+func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error) {
 	// prepare all outputs
 	var txn types.Transaction
 	for i := 0; i < int(outputs); i++ {
