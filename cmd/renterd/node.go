@@ -20,6 +20,8 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
+const defaultAutopilotLoopInterval = time.Minute
+
 type workerConfig struct {
 	enabled     bool
 	busAddr     string
@@ -232,7 +234,7 @@ func newAutopilot(cfg autopilotConfig, dir string) (*autopilot.Autopilot, func()
 	}
 	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
 	w := worker.NewClient(cfg.workerAddr, cfg.workerPassword)
-	a, err := autopilot.New(store, b, w, time.Minute)
+	a, err := autopilot.New(store, b, w, defaultAutopilotLoopInterval)
 	if err != nil {
 		return nil, nil, err
 	}

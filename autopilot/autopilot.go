@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"errors"
 	"time"
 
 	"go.sia.tech/renterd/bus"
@@ -71,9 +70,8 @@ type Autopilot struct {
 
 	masterKey [32]byte
 
-	tickerDur time.Duration
-	ticker    *time.Ticker
-	stopChan  chan struct{}
+	ticker   *time.Ticker
+	stopChan chan struct{}
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -92,12 +90,6 @@ func (ap *Autopilot) SetConfig(c Config) error {
 }
 
 func (ap *Autopilot) Run() error {
-	// init ticker
-	if ap.ticker != nil {
-		return errors.New("autopilot is already running")
-	}
-	ap.ticker = time.NewTicker(ap.tickerDur)
-
 	// load config
 	if err := ap.load(); err != nil {
 		return err
@@ -111,15 +103,13 @@ func (ap *Autopilot) Run() error {
 		case <-ap.ticker.C:
 		}
 
-		go ap.s.tryPerformHostScan()
+		ap.s.tryPerformHostScan()
 		_ = ap.c.performContractMaintenance() // TODO: handle error
 	}
 }
 
 func (ap *Autopilot) Stop() {
-	if ap.ticker != nil {
-		ap.ticker.Stop()
-	}
+	ap.ticker.Stop()
 	close(ap.stopChan)
 }
 
@@ -130,8 +120,8 @@ func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, e
 		bus:    bus,
 		worker: worker,
 
-		tickerDur: tick,
-		stopChan:  make(chan struct{}),
+		ticker:   time.NewTicker(tick),
+		stopChan: make(chan struct{}),
 	}
 	ap.c = newContractor(ap)
 	ap.s = newScanner(ap)

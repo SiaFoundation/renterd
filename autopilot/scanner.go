@@ -32,12 +32,15 @@ func (s *scanner) tryPerformHostScan() {
 	s.running = true
 	s.mu.Unlock()
 
-	defer func() {
+	go func() {
+		s.performHostScan()
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		s.running = false
+		s.mu.Unlock()
 	}()
+}
 
+func (s *scanner) performHostScan() {
 	// TODO: initial scan with much shorter
 	// scan up to 10 hosts that we haven't interacted with in at least 1 week
 	hosts, err := s.ap.bus.Hosts(time.Now().Add(-7*24*time.Hour), 10)
