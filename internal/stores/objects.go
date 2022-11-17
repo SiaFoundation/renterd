@@ -12,6 +12,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -331,12 +332,9 @@ type (
 		// Root uniquely identifies a sector and is therefore the primary key.
 		Root consensus.Hash256 `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
 
-		// Host is the key of the host that stores the sector.
-		// TODO: once we migrate the contract store over to a relational
-		// db as well, we might want to put the contract ID here and
-		// have a contract table with a mapping of contract ID to host.
-		// That makes for better migrations.
-		Contract dbContractRHPv2 `gorm:"index;type:bytes;serializer:gob"`
+		// ContractID is the ID of the contract storing the sector.
+		ContractID types.FileContractID `gorm:"type:bytes;serializer:gob"`
+		Contract   dbContractRHPv2      `gorm:"foreignKey:ContractID;references:ID"`
 	}
 )
 
@@ -377,7 +375,8 @@ func (o dbObject) convert() (object.Object, error) {
 			Length: sl.Length,
 		}
 		for j, sh := range sl.Slab.Shards {
-			obj.Slabs[i].Shards[j].Host = sh.Host
+			obj.Slabs[i].Shards[j].Contract = sh.ContractID
+			obj.Slabs[i].Shards[j].Host = sh.Contract.HostPublicKey
 			obj.Slabs[i].Shards[j].Root = sh.Root
 		}
 	}
@@ -465,14 +464,20 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 			}
 
 			for _, shard := range ss.Shards {
-				// Create shard.
 				// TODO: We potentially want to ignore foreign
 				// key constraint failure on the Contract column
 				// up until MinShards.
+
+				// TODO: We completely ignore the hostkey from
+				// the input object here. That's because we can
+				// get it from the contract upon retrieving it
+				// from the database. Although that leaves room
+				// for discrepancies due to the user providing a
+				// hostkey that doesn't match the contract id.
 				err = tx.Create(&dbSector{
-					SlabID:   slab.ID,
-					Contract: contract,
-					Root:     shard.Root,
+					SlabID:     slab.ID,
+					ContractID: shard.Contract,
+					Root:       shard.Root,
 				}).Error
 				if err != nil {
 					return err
@@ -500,8 +505,7 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ID: key}).
-		Preload("Slabs").
-		Preload("Slabs.Slab.Shards").
+		Preload("Slabs.Slab.Shards.Contract").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound

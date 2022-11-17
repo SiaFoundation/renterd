@@ -198,11 +198,12 @@ func NewJSONContractStore(dir string) (*JSONContractStore, error) {
 type (
 	dbContractRHPv2 struct {
 		dbCommon
-
+		HostPublicKey consensus.PublicKey    `gorm:"references:PublicKey;NOT NULL;type:bytes;serializer:gob"`
+		Host          dbHost                 `gorm:"foreignKey:HostPublicKey"`
 		GoodForUpload bool                   `gorm:"index"`
 		ID            types.FileContractID   `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
 		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
-		Sectors       []dbSector             `gorm:"foreignKey:Contract;references:ID;constraint:OnDelete:SET NULL"`         // Set Contract field in sector null on delete
+		Sectors       []dbSector             `gorm:"foreignKey:ContractID;references:ID;constraint:OnDelete:SET NULL"`       // Set Contract field in sector null on delete
 	}
 
 	dbFileContractRevision struct {
@@ -354,7 +355,7 @@ func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
 }
 
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.Contract) error {
+func (s *SQLStore) AddContract(hk consensus.PublicKey, c rhpv2.Contract) error {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -394,6 +395,7 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 	return s.db.Create(&dbContractRHPv2{
 		ID:            fcid,
 		GoodForUpload: true, // new contract is always good for upload
+		HostPublicKey: hk,
 		Revision:      revision,
 	}).Error
 }

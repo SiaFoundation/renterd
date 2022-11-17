@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/siad/types"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
@@ -108,6 +112,36 @@ func TestSQLObjectStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Create hosts for the contracts to avoid the foreign key constraint
+	// failing.
+	hk1, hk2 := consensus.GeneratePrivateKey().PublicKey(), consensus.GeneratePrivateKey().PublicKey()
+	err = os.RecordInteraction(hk1, hostdb.Interaction{Timestamp: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.RecordInteraction(hk2, hostdb.Interaction{Timestamp: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a file contract for the object to avoid the foreign key
+	// constraint failing.
+	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
+	err = os.AddContract(hk1, rhp.Contract{
+		Revision: types.FileContractRevision{
+			ParentID: fcid1,
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.AddContract(hk2, rhp.Contract{
+		Revision: types.FileContractRevision{
+			ParentID: fcid2,
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -118,8 +152,9 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 1,
 					Shards: []object.Sector{
 						{
-							Host: consensus.GeneratePrivateKey().PublicKey(),
-							Root: consensus.Hash256{1},
+							Contract: fcid1,
+							Host:     hk1,
+							Root:     consensus.Hash256{1},
 						},
 					},
 				},
@@ -132,8 +167,9 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 2,
 					Shards: []object.Sector{
 						{
-							Host: consensus.GeneratePrivateKey().PublicKey(),
-							Root: consensus.Hash256{2},
+							Contract: fcid2,
+							Host:     hk2,
+							Root:     consensus.Hash256{2},
 						},
 					},
 				},
@@ -186,10 +222,15 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 1,
 					Shards: []dbSector{
 						{
-							ID:     1,
-							SlabID: 1,
-							Root:   obj1.Slabs[0].Shards[0].Root,
-							Host:   obj1.Slabs[0].Shards[0].Host,
+							ID:         1,
+							SlabID:     1,
+							Root:       obj1.Slabs[0].Shards[0].Root,
+							ContractID: obj1.Slabs[0].Shards[0].Contract,
+							Contract: dbContractRHPv2{
+								ID:            fcid1,
+								HostPublicKey: hk1,
+								GoodForUpload: true,
+							},
 						},
 					},
 				},
@@ -205,10 +246,15 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 2,
 					Shards: []dbSector{
 						{
-							ID:     2,
-							SlabID: 2,
-							Root:   obj1.Slabs[1].Shards[0].Root,
-							Host:   obj1.Slabs[1].Shards[0].Host,
+							ID:         2,
+							SlabID:     2,
+							Root:       obj1.Slabs[1].Shards[0].Root,
+							ContractID: obj1.Slabs[1].Shards[0].Contract,
+							Contract: dbContractRHPv2{
+								ID:            fcid2,
+								HostPublicKey: hk2,
+								GoodForUpload: true,
+							},
 						},
 					},
 				},
@@ -326,97 +372,4 @@ func TestSQLList(t *testing.T) {
 			t.Errorf("\nlist: %v\ngot:  %v\nwant: %v", test.prefix, got, test.want)
 		}
 	}
-}
-
-func TestWorstHealthSlabs(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create keys for 4 hosts.
-	hks := []consensus.PublicKey{{1}, {2}, {3}, {4}}
-	hk1, hk2, hk3, hk4 := hks[0], hks[1], hks[2], hks[3]
-
-	for i, hk := range []consensus.PublicKey{hk1, hk2, hk3, hk4} {
-		contract := rhp.Contract{
-			Revision: types.FileContractRevision{
-				ParentID: types.FileContractID{byte(i + 1)},
-			},
-		}
-		err = os.AddContract(hk, contract)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	err = os.Put("obj1", object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []slab.Slice{
-			{
-				Slab: slab.Slab{
-					Key:       slab.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards: []slab.Sector{
-						{
-							Host: hk1,
-							Root: consensus.Hash256{1},
-						},
-						{
-							Host: hk2,
-							Root: consensus.Hash256{1},
-						},
-						{
-							Host: hk3,
-							Root: consensus.Hash256{1},
-						},
-					},
-				},
-			},
-			{
-				Slab: slab.Slab{
-					Key:       slab.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards: []slab.Sector{
-						{
-							Host: hk2,
-							Root: consensus.Hash256{1},
-						},
-						{
-							Host: hk3,
-							Root: consensus.Hash256{1},
-						},
-						{
-							Host: hk4,
-							Root: consensus.Hash256{1},
-						},
-					},
-				},
-			},
-			{
-				Slab: slab.Slab{
-					Key:       slab.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards: []slab.Sector{
-						{
-							Host: hk3,
-							Root: consensus.Hash256{1},
-						},
-						{
-							Host: hk4,
-							Root: consensus.Hash256{1},
-						},
-						{
-							Host: consensus.PublicKey{}, // NULL
-							Root: consensus.Hash256{1},
-						},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 }

@@ -202,7 +202,7 @@ type (
 	dbHost struct {
 		dbCommon
 
-		PublicKey     consensus.PublicKey `gorm:"primaryKey;type:bytes;serializer:gob"`
+		PublicKey     consensus.PublicKey `gorm:"primaryKey;type:bytes;serializer:gob;NOT NULL"`
 		Announcements []dbAnnouncement    `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
 		Interactions  []dbInteraction     `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
 	}

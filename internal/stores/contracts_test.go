@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
@@ -23,6 +25,13 @@ func TestSQLContractStore(t *testing.T) {
 	// Create random unlock conditions.
 	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
 	uc.Timelock = 192837
+
+	// Create a host for the contract.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	err = cs.RecordInteraction(hk, hostdb.Interaction{Timestamp: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a contract and set all fields.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
@@ -81,7 +90,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Insert it.
-	if err := cs.AddContract(c); err != nil {
+	if err := cs.AddContract(hk, c); err != nil {
 		t.Fatal(err)
 	}
 

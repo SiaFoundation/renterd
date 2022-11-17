@@ -9,10 +9,12 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/siad/types"
 )
 
 // A sectorStore stores contract data.
 type sectorStore interface {
+	Contract() types.FileContractID
 	PublicKey() consensus.PublicKey
 	UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
 	DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error
@@ -70,8 +72,9 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 			}
 		} else {
 			sectors[resp.req.shardIndex] = object.Sector{
-				Host: resp.req.host.PublicKey(),
-				Root: resp.root,
+				Contract: resp.req.host.Contract(),
+				Host:     resp.req.host.PublicKey(),
+				Root:     resp.root,
 			}
 			rem--
 		}
@@ -334,8 +337,9 @@ outer:
 			}
 		} else {
 			s.Shards[resp.req.shardIndex] = object.Sector{
-				Host: resp.req.host.PublicKey(),
-				Root: resp.root,
+				Contract: resp.req.host.Contract(),
+				Host:     resp.req.host.PublicKey(),
+				Root:     resp.root,
 			}
 			rem--
 		}

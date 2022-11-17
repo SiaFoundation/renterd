@@ -59,7 +59,7 @@ type (
 	ContractStore interface {
 		Contracts() ([]rhpv2.Contract, error)
 		Contract(id types.FileContractID) (rhpv2.Contract, error)
-		AddContract(c rhpv2.Contract) error
+		AddContract(hk consensus.PublicKey, c rhpv2.Contract) error
 		RemoveContract(id types.FileContractID) error
 	}
 
@@ -328,14 +328,16 @@ func (b *Bus) contractsIDHandlerGET(jc jape.Context) {
 func (b *Bus) contractsIDHandlerPUT(jc jape.Context) {
 	var id types.FileContractID
 	var c rhpv2.Contract
+	var hk consensus.PublicKey
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&c) != nil {
 		return
 	}
+	// TODO: Populate the host key.
 	if c.ID() != id {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddContract(c))
+	jc.Check("couldn't store contract", b.cs.AddContract(hk, c))
 }
 
 func (b *Bus) contractsIDHandlerDELETE(jc jape.Context) {
