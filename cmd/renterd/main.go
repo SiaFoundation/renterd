@@ -23,6 +23,10 @@ var (
 	// to be supplied at build time
 	githash   = "?"
 	builddate = "?"
+
+	// fetched once, then cached
+	apiPassword *string
+	walletKey   *consensus.PrivateKey
 )
 
 func check(context string, err error) {
@@ -32,37 +36,44 @@ func check(context string, err error) {
 }
 
 func getAPIPassword() string {
-	apiPassword := os.Getenv("RENTERD_API_PASSWORD")
-	if apiPassword != "" {
-		fmt.Println("Using RENTERD_API_PASSWORD environment variable.")
-	} else {
-		fmt.Print("Enter API password: ")
-		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
-		if err != nil {
-			log.Fatal(err)
+	if apiPassword == nil {
+		pw := os.Getenv("RENTERD_API_PASSWORD")
+		if pw != "" {
+			fmt.Println("Using RENTERD_API_PASSWORD environment variable.")
+			apiPassword = &pw
+		} else {
+			fmt.Print("Enter API password: ")
+			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				log.Fatal(err)
+			}
+			s := string(pw)
+			apiPassword = &s
 		}
-		apiPassword = string(pw)
 	}
-	return apiPassword
+	return *apiPassword
 }
 
 func getWalletKey() consensus.PrivateKey {
-	phrase := os.Getenv("RENTERD_WALLET_SEED")
-	if phrase != "" {
-		fmt.Println("Using RENTERD_WALLET_SEED environment variable")
-	} else {
-		fmt.Print("Enter wallet seed: ")
-		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-		check("Could not read seed phrase:", err)
-		fmt.Println()
-		phrase = string(pw)
+	if walletKey == nil {
+		phrase := os.Getenv("RENTERD_WALLET_SEED")
+		if phrase != "" {
+			fmt.Println("Using RENTERD_WALLET_SEED environment variable")
+		} else {
+			fmt.Print("Enter wallet seed: ")
+			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			check("Could not read seed phrase:", err)
+			fmt.Println()
+			phrase = string(pw)
+		}
+		key, err := wallet.KeyFromPhrase(phrase)
+		if err != nil {
+			log.Fatal(err)
+		}
+		walletKey = &key
 	}
-	key, err := wallet.KeyFromPhrase(phrase)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return key
+	return *walletKey
 }
 
 func main() {
@@ -97,21 +108,14 @@ func main() {
 	defer l.Close()
 	*apiAddr = "http://" + l.Addr().String()
 
-	apiPassword := getAPIPassword()
-	auth := jape.BasicAuth(apiPassword)
+	auth := jape.BasicAuth(getAPIPassword())
 	mux := treeMux{
 		h:   createUIHandler(),
 		sub: make(map[string]treeMux),
 	}
 
-	// Call getWalletKey only once if both bus and worker API are enabled.
-	var walletKey consensus.PrivateKey
-	if busCfg.enabled || workerCfg.enabled {
-		walletKey = getWalletKey()
-	}
-
 	if busCfg.enabled {
-		b, cleanup, err := newBus(busCfg, *dir, walletKey)
+		b, cleanup, err := newBus(busCfg, *dir, getWalletKey())
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -119,17 +123,17 @@ func main() {
 		log.Println("bus: Listening on", b.GatewayAddress())
 		mux.sub["/api/store"] = treeMux{h: auth(bus.NewServer(b))}
 		autopilotCfg.busAddr = *apiAddr + "/bus/"
-		autopilotCfg.busPassword = apiPassword
+		autopilotCfg.busPassword = getAPIPassword()
 	}
 	if workerCfg.enabled {
-		w, cleanup, err := newWorker(workerCfg, walletKey)
+		w, cleanup, err := newWorker(workerCfg, getWalletKey())
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
 		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
 		autopilotCfg.workerAddr = *apiAddr + "/worker/"
-		autopilotCfg.workerPassword = apiPassword
+		autopilotCfg.workerPassword = getAPIPassword()
 	}
 	if autopilotCfg.enabled {
 		a, cleanup, err := newAutopilot(autopilotCfg, *dir)
