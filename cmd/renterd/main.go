@@ -103,8 +103,15 @@ func main() {
 		h:   createUIHandler(),
 		sub: make(map[string]treeMux),
 	}
+
+	// Call getWalletKey only once if both bus and worker API are enabled.
+	var walletKey consensus.PrivateKey
+	if busCfg.enabled || workerCfg.enabled {
+		walletKey = getWalletKey()
+	}
+
 	if busCfg.enabled {
-		b, cleanup, err := newBus(busCfg, *dir, getWalletKey())
+		b, cleanup, err := newBus(busCfg, *dir, walletKey)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -115,13 +122,13 @@ func main() {
 		autopilotCfg.busPassword = apiPassword
 	}
 	if workerCfg.enabled {
-		w, cleanup, err := newWorker(workerCfg, getWalletKey())
+		w, cleanup, err := newWorker(workerCfg, walletKey)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
 		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
-		autopilotCfg.busAddr = *apiAddr + "/worker/"
+		autopilotCfg.workerAddr = *apiAddr + "/worker/"
 		autopilotCfg.workerPassword = apiPassword
 	}
 	if autopilotCfg.enabled {
