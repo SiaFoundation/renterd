@@ -2,6 +2,7 @@ package stores
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
+	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
@@ -107,7 +109,9 @@ func TestJSONObjectStore(t *testing.T) {
 
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
+	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/foo.db")
+	os.RemoveAll("/Users/cschinnerl/Desktop/foo.db")
+	os, _, err := NewSQLStore(conn, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,14 +214,14 @@ func TestSQLObjectStore(t *testing.T) {
 	}
 
 	expectedObj := dbObject{
-		ID:  objID,
-		Key: obj1Key,
+		ObjectID: objID,
+		Key:      obj1Key,
 		Slabs: []dbSlice{
 			{
-				ID:       1,
+				Model:    gorm.Model{ID: 1},
 				ObjectID: objID,
 				Slab: dbSlab{
-					ID:        1,
+					Model:     gorm.Model{ID: 1},
 					Key:       obj1Slab0Key,
 					MinShards: 1,
 					Shards: []dbSector{
@@ -237,10 +241,10 @@ func TestSQLObjectStore(t *testing.T) {
 				Length: 100,
 			},
 			{
-				ID:       2,
+				Model:    gorm.Model{ID: 2},
 				ObjectID: objID,
 				Slab: dbSlab{
-					ID:        2,
+					Model:     gorm.Model{ID: 2},
 					Key:       obj1Slab1Key,
 					MinShards: 2,
 					Shards: []dbSector{

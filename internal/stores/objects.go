@@ -279,24 +279,16 @@ func NewJSONObjectStore(dir string) (*JSONObjectStore, error) {
 type (
 	// dbObject describes an object.Object in the database.
 	dbObject struct {
-		dbCommon
+		gorm.Model
 
-		// ID uniquely identifies an Object within the database. Since
-		// this ID is also exposed via the API it's a string for
-		// convenience.
-		ID string `gorm:"primaryKey"`
-
-		// Object related fields.
-		Key   []byte
-		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ID"` // CASCADE to delete slices too
+		Key      []byte
+		ObjectID string    `gorm:"index;unique"`
+		Slabs    []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ObjectID"` // CASCADE to delete slices too
 	}
 
 	// dbSlice describes a reference to a object.Slab in the database.
 	dbSlice struct {
-		dbCommon
-
-		// ID uniquely identifies a slice in the db.
-		ID uint64 `gorm:"primaryKey"`
+		gorm.Model
 
 		// ObjectID identifies the object the slice belongs to. It is
 		// the foreign key of the object table.
@@ -311,28 +303,21 @@ type (
 	// dbSlab describes a object.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
-		dbCommon
+		gorm.Model
 
-		ID        uint64 `gorm:"primaryKey"`
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
-
-		// A slab contains multiple sectors. Therefore many2many.
-		Shards []dbSector `gorm:"many2many:sector_slabs;constraint:OnDelete:CASCADE;foreignKey:ID;references:Root;"` // CASCADE to delete shards too
+		Shards    []dbSector `gorm:"many2many:sector_slabs;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
 	// dbSector describes a sector in the database. A sector can exist
 	// multiple times in the sectors table since it can belong to multiple
 	// slabs.
 	dbSector struct {
-		dbCommon
+		gorm.Model
 
-		// Root uniquely identifies a sector.
-		Root consensus.Hash256 `gorm:"primaryKey;NOT NULL;type:bytes;serializer:gob"`
-
-		// A sector can be uploaded to multiple contracts. Therefore
-		// many2many.
-		Contracts []dbContractRHPv2 `gorm:"many2many:contract_sectors;foreignKey:Root;references:ID"`
+		Contracts []dbContractRHPv2 `gorm:"many2many:contract_sectors"`
+		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
 
@@ -436,8 +421,8 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 			return err
 		}
 		err = tx.Create(&dbObject{
-			ID:  key,
-			Key: objKey,
+			ObjectID: key,
+			Key:      objKey,
 		}).Error
 		if err != nil {
 			return err
@@ -489,6 +474,15 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 					return err
 				}
 
+				// Append the sector to the slab.
+				err = tx.Model(&dbSlab{}).
+					Where(&dbSlab{Model: gorm.Model{ID: slab.ID}}).
+					Association("Shards").
+					Append(&sector)
+				if err != nil {
+					return err
+				}
+
 				// Look for the contract referenced by the shard.
 				var contract dbContractRHPv2
 				err = tx.Model(&dbContractRHPv2{}).
@@ -524,13 +518,13 @@ func (s *SQLStore) WorstHealthSlabs(n int) {
 
 // deleteObject deletes an object from the store.
 func deleteObject(tx *gorm.DB, key string) error {
-	return tx.Delete(&dbObject{ID: key}).Error
+	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
 }
 
 // get retrieves an object from the database.
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
-	tx := s.db.Where(&dbObject{ID: key}).
+	tx := s.db.Where(&dbObject{ObjectID: key}).
 		Preload("Slabs.Slab.Shards.Contracts").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
