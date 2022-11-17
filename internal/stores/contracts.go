@@ -203,7 +203,6 @@ type (
 		GoodForUpload bool                   `gorm:"index"`
 		ID            types.FileContractID   `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
 		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
-		Sectors       []dbSector             `gorm:"foreignKey:ContractID;references:ID;constraint:OnDelete:SET NULL"`       // Set Contract field in sector null on delete
 	}
 
 	dbFileContractRevision struct {

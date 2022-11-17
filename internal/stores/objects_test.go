@@ -222,14 +222,13 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 1,
 					Shards: []dbSector{
 						{
-							ID:         1,
-							SlabID:     1,
-							Root:       obj1.Slabs[0].Shards[0].Root,
-							ContractID: obj1.Slabs[0].Shards[0].Contract,
-							Contract: dbContractRHPv2{
-								ID:            fcid1,
-								HostPublicKey: hk1,
-								GoodForUpload: true,
+							Root: obj1.Slabs[0].Shards[0].Root,
+							Contracts: []dbContractRHPv2{
+								{
+									ID:            fcid1,
+									HostPublicKey: hk1,
+									GoodForUpload: true,
+								},
 							},
 						},
 					},
@@ -246,14 +245,13 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 2,
 					Shards: []dbSector{
 						{
-							ID:         2,
-							SlabID:     2,
-							Root:       obj1.Slabs[1].Shards[0].Root,
-							ContractID: obj1.Slabs[1].Shards[0].Contract,
-							Contract: dbContractRHPv2{
-								ID:            fcid2,
-								HostPublicKey: hk2,
-								GoodForUpload: true,
+							Root: obj1.Slabs[1].Shards[0].Root,
+							Contracts: []dbContractRHPv2{
+								{
+									ID:            fcid2,
+									HostPublicKey: hk2,
+									GoodForUpload: true,
+								},
 							},
 						},
 					},

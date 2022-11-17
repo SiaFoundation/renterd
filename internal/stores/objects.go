@@ -12,7 +12,6 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -317,7 +316,9 @@ type (
 		ID        uint64 `gorm:"primaryKey"`
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
-		Shards    []dbSector `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
+
+		// A slab contains multiple sectors. Therefore many2many.
+		Shards []dbSector `gorm:"many2many:sector_slabs;constraint:OnDelete:CASCADE;foreignKey:ID;references:Root;"` // CASCADE to delete shards too
 	}
 
 	// dbSector describes a sector in the database. A sector can exist
@@ -326,15 +327,12 @@ type (
 	dbSector struct {
 		dbCommon
 
-		ID     uint64 `gorm:"primaryKey"`
-		SlabID uint64 `gorm:"index;NOT NULL"`
+		// Root uniquely identifies a sector.
+		Root consensus.Hash256 `gorm:"primaryKey;NOT NULL;type:bytes;serializer:gob"`
 
-		// Root uniquely identifies a sector and is therefore the primary key.
-		Root consensus.Hash256 `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
-
-		// ContractID is the ID of the contract storing the sector.
-		ContractID types.FileContractID `gorm:"type:bytes;serializer:gob"`
-		Contract   dbContractRHPv2      `gorm:"foreignKey:ContractID;references:ID"`
+		// A sector can be uploaded to multiple contracts. Therefore
+		// many2many.
+		Contracts []dbContractRHPv2 `gorm:"many2many:contract_sectors;foreignKey:Root;references:ID"`
 	}
 )
 
@@ -375,8 +373,15 @@ func (o dbObject) convert() (object.Object, error) {
 			Length: sl.Length,
 		}
 		for j, sh := range sl.Slab.Shards {
-			obj.Slabs[i].Shards[j].Contract = sh.ContractID
-			obj.Slabs[i].Shards[j].Host = sh.Contract.HostPublicKey
+			// Return first contract that's good for upload.
+			for _, c := range sh.Contracts {
+				if !c.GoodForUpload {
+					continue
+				}
+				obj.Slabs[i].Shards[j].Contract = c.ID
+				obj.Slabs[i].Shards[j].Host = c.HostPublicKey
+				break
+			}
 			obj.Slabs[i].Shards[j].Root = sh.Root
 		}
 	}
@@ -474,14 +479,35 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 				// from the database. Although that leaves room
 				// for discrepancies due to the user providing a
 				// hostkey that doesn't match the contract id.
-				err = tx.Create(&dbSector{
-					SlabID:     slab.ID,
-					ContractID: shard.Contract,
-					Root:       shard.Root,
+
+				// Create sector if it doesn't exist yet.
+				var sector dbSector
+				err = tx.FirstOrCreate(&sector, &dbSector{
+					Root: shard.Root,
 				}).Error
 				if err != nil {
 					return err
 				}
+
+				// Look for the contract referenced by the shard.
+				var contract dbContractRHPv2
+				err = tx.Model(&dbContractRHPv2{}).
+					Where(&dbContractRHPv2{ID: shard.Contract}).
+					Take(&contract).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue // don't set contract
+				} else if err != nil {
+					return err
+				}
+
+				// Append the contract to the sector.
+				err = tx.Model(&dbSector{}).
+					Association("Contracts").
+					Append(&contract)
+				if err != nil {
+					return err
+				}
+
 			}
 		}
 		return nil
@@ -505,7 +531,7 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ID: key}).
-		Preload("Slabs.Slab.Shards.Contract").
+		Preload("Slabs.Slab.Shards.Contracts").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound
