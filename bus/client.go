@@ -96,6 +96,18 @@ func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf 
 	return c.c.POST("/wallet/sign", req, txn)
 }
 
+// WalletRedistribute returns a signed transaction that redistributes the money
+// in the wallet in the desired number of outputs of given amount.
+func (c *Client) WalletRedistribute(outputs int, amount types.Currency) (txn types.Transaction, err error) {
+	req := WalletRedistributeRequest{
+		Amount:  amount,
+		Outputs: outputs,
+	}
+
+	err = c.c.POST("/wallet/redistribute", req, &txn)
+	return
+}
+
 // WalletDiscard discards the provided txn, make its inputs usable again. This
 // should only be called on transactions that will never be broadcast.
 func (c *Client) WalletDiscard(txn types.Transaction) error {

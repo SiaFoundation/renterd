@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -39,13 +40,14 @@ type (
 
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
-		Balance() types.Currency
 		Address() types.UnlockHash
-		UnspentOutputs() ([]wallet.SiacoinElement, error)
-		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
+		Balance() types.Currency
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
+		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error)
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
+		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
+		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -176,6 +178,30 @@ func (b *Bus) walletSignHandler(jc jape.Context) {
 	if jc.Check("couldn't sign transaction", err) == nil {
 		jc.Encode(wsr.Transaction)
 	}
+}
+
+func (b *Bus) walletRedistributeHandler(jc jape.Context) {
+	var wfr WalletRedistributeRequest
+	if jc.Decode(&wfr) != nil {
+		return
+	}
+	if wfr.Outputs == 0 {
+		jc.Error(errors.New("'outputs' has to be greater than zero"), http.StatusBadRequest)
+		return
+	}
+
+	cs := b.cm.TipState()
+	txn, toSign, err := b.w.Redistribute(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
+	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
+		return
+	}
+
+	err = b.w.SignTransaction(cs, &txn, toSign, types.FullCoveredFields)
+	if jc.Check("couldn't sign the transaction", err) != nil {
+		return
+	}
+
+	jc.Encode(txn)
 }
 
 func (b *Bus) walletDiscardHandler(jc jape.Context) {
@@ -460,6 +486,7 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /wallet/outputs":       b.walletOutputsHandler,
 		"POST   /wallet/fund":          b.walletFundHandler,
 		"POST   /wallet/sign":          b.walletSignHandler,
+		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
 		"POST   /wallet/discard":       b.walletDiscardHandler,
 		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,

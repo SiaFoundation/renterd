@@ -47,6 +47,13 @@ type WalletSignRequest struct {
 	CoveredFields types.CoveredFields `json:"coveredFields"`
 }
 
+// WalletRedistributeRequest is the request type for the /wallet/redistribute
+// endpoint.
+type WalletRedistributeRequest struct {
+	Amount  types.Currency `json:"amount"`
+	Outputs int            `json:"outputs"`
+}
+
 // WalletPrepareFormRequest is the request type for the /wallet/prepare/form
 // endpoint.
 type WalletPrepareFormRequest struct {
