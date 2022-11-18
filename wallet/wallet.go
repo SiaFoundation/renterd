@@ -244,6 +244,9 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 // NOTE: we can not reuse 'FundTransaction' because it randomizes the unspent
 // transaction outputs it uses and we need a minimal set of inputs
 func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	// prepare all outputs
 	var txn types.Transaction
 	for i := 0; i < int(outputs); i++ {
