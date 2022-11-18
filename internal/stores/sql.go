@@ -2,7 +2,6 @@ package stores
 
 import (
 	"fmt"
-	"time"
 
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/siad/modules"
@@ -11,13 +10,6 @@ import (
 )
 
 type (
-	// dbCommon specifies all fields that every table in the database should have.
-	dbCommon struct {
-		CreatedAt time.Time
-		UpdatedAt time.Time
-		DeletedAt gorm.DeletedAt `gorm:"index"`
-	}
-
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		db *gorm.DB
@@ -60,7 +52,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 			// bus.ContractStore tables
 			&dbContractRHPv2{},
 			&dbFileContractRevision{},
-			&dbTransactionSignature{},
 			&dbValidSiacoinOutput{},
 			&dbMissedSiacoinOutput{},
 
@@ -90,9 +81,11 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 
 	// Get latest consensus change ID or init db.
 	var ci dbConsensusInfo
-	err = db.Where(&dbConsensusInfo{ID: consensusInfoID}).
+	err = db.Where(&dbConsensusInfo{Model: gorm.Model{ID: consensusInfoID}}).
 		Attrs(dbConsensusInfo{
-			ID:   consensusInfoID,
+			Model: gorm.Model{
+				ID: consensusInfoID,
+			},
 			CCID: modules.ConsensusChangeBeginning[:],
 		}).
 		FirstOrCreate(&ci).Error

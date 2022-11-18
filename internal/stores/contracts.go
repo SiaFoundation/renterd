@@ -197,72 +197,59 @@ func NewJSONContractStore(dir string) (*JSONContractStore, error) {
 
 type (
 	dbContractRHPv2 struct {
-		dbCommon
-		HostPublicKey consensus.PublicKey    `gorm:"references:PublicKey;NOT NULL;type:bytes;serializer:gob"`
-		Host          dbHost                 `gorm:"foreignKey:HostPublicKey"`
+		gorm.Model
+
+		HostID        uint `gorm:"index"`
+		Host          dbHost
 		GoodForUpload bool                   `gorm:"index"`
-		ID            types.FileContractID   `gorm:"primaryKey,type:bytes;serializer:gob;NOT NULL"`
-		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;references:ID;NOT NULL"` //CASCADE to delete revision too
+		FCID          types.FileContractID   `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
+		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` //CASCADE to delete revision too
 	}
 
 	dbFileContractRevision struct {
-		dbCommon
-		Signatures []types.TransactionSignature `gorm:"type:bytes;serializer:gob;NOT NULL"`
+		gorm.Model
+		DBContractRHPv2ID uint `gorm:"unique;index"`
 
-		ParentID              types.FileContractID   `gorm:"primaryKey;type:bytes;serializer:gob;NOT NULL"` // only one revision for a given parent
-		UnlockConditions      types.UnlockConditions `gorm:"NOT NULL;type:bytes;serializer:gob"`
-		NewRevisionNumber     uint64                 `gorm:"index"`
+		NewRevisionNumber     uint64 `gorm:"index"`
 		NewFileSize           uint64
-		NewFileMerkleRoot     crypto.Hash             `gorm:"type:bytes;serializer:gob"`
-		NewWindowStart        types.BlockHeight       `gorm:"index"`
-		NewWindowEnd          types.BlockHeight       `gorm:"index"`
-		NewValidProofOutputs  []dbValidSiacoinOutput  `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID;NOT NULL"` // CASCADE to delete output
-		NewMissedProofOutputs []dbMissedSiacoinOutput `gorm:"constraint:OnDelete:CASCADE;foreignKey:ParentID;References:ParentID;NOT NULL"` // CASCADE to delete output
-		NewUnlockHash         types.UnlockHash        `gorm:"index,type:bytes;serializer:gob"`
-	}
-
-	dbTransactionSignature struct {
-		dbCommon
-
-		ID             uint64               `gorm:"primaryKey"`
-		ParentID       types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		PublicKeyIndex uint64
-		Timelock       types.BlockHeight
-		CoveredFields  types.CoveredFields `gorm:"type:bytes;serializer:gob"`
-		Signature      []byte
+		NewFileMerkleRoot     crypto.Hash                  `gorm:"type:bytes;serializer:gob"`
+		NewWindowStart        types.BlockHeight            `gorm:"index"`
+		NewWindowEnd          types.BlockHeight            `gorm:"index"`
+		NewValidProofOutputs  []dbValidSiacoinOutput       `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete output
+		NewMissedProofOutputs []dbMissedSiacoinOutput      `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete output
+		NewUnlockHash         types.UnlockHash             `gorm:"index,type:bytes;serializer:gob"`
+		Signatures            []types.TransactionSignature `gorm:"type:bytes;serializer:gob;NOT NULL"`
+		UnlockConditions      types.UnlockConditions       `gorm:"NOT NULL;type:bytes;serializer:gob"`
 	}
 
 	dbValidSiacoinOutput struct {
-		dbCommon
+		gorm.Model
+		DBFileContractRevisionID uint `gorm:"index"`
 
-		ID         uint64               `gorm:"primaryKey"`
-		ParentID   types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
-		Value      *big.Int             `gorm:"type:bytes;serializer:gob"`
+		UnlockHash types.UnlockHash `gorm:"index;type:bytes;serializer:gob"`
+		Value      *big.Int         `gorm:"type:bytes;serializer:gob"`
 	}
 
 	dbMissedSiacoinOutput struct {
-		dbCommon
+		gorm.Model
+		DBFileContractRevisionID uint `gorm:"index"`
 
-		ID         uint64               `gorm:"primaryKey"`
-		ParentID   types.FileContractID `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		UnlockHash types.UnlockHash     `gorm:"index;type:bytes;serializer:gob"`
-		Value      *big.Int             `gorm:"type:bytes;serializer:gob"`
+		UnlockHash types.UnlockHash `gorm:"index;type:bytes;serializer:gob"`
+		Value      *big.Int         `gorm:"type:bytes;serializer:gob"`
 	}
 
 	dbHostSet struct {
-		dbCommon
+		gorm.Model
 
-		Name  string           `gorm:"primaryKey"`
-		Hosts []dbHostSetEntry `gorm:"constraing:OnDelete:CASCADE;foreignKey:HostSetName;references:Name"`
+		Name  string           `gorm:"unique;index"`
+		Hosts []dbHostSetEntry `gorm:"constraing:OnDelete:CASCADE"`
 	}
 
 	dbHostSetEntry struct {
-		dbCommon
+		gorm.Model
+		DBHostSetID uint `gorm:"index"`
 
-		ID          uint64              `gorm:"primaryKey"`
-		HostSetName string              `gorm:"index;NOT NULL"`
-		PublicKey   consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		PublicKey consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
 	}
 )
 
@@ -271,9 +258,6 @@ func (dbContractRHPv2) TableName() string { return "contracts_v2" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbFileContractRevision) TableName() string { return "file_contract_revisions" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbTransactionSignature) TableName() string { return "transaction_signatures" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbValidSiacoinOutput) TableName() string { return "siacoin_valid_outputs" }
@@ -316,7 +300,7 @@ func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
 
 	// Prepare revision.
 	revision := types.FileContractRevision{
-		ParentID: c.Revision.ParentID,
+		ParentID: c.FCID,
 		UnlockConditions: types.UnlockConditions{
 			Timelock:           c.Revision.UnlockConditions.Timelock,
 			PublicKeys:         publickeys,
@@ -361,7 +345,6 @@ func (s *SQLStore) AddContract(hk consensus.PublicKey, c rhpv2.Contract) error {
 	newValidOutputs := make([]dbValidSiacoinOutput, len(c.Revision.NewValidProofOutputs))
 	for i, sco := range c.Revision.NewValidProofOutputs {
 		newValidOutputs[i] = dbValidSiacoinOutput{
-			ParentID:   fcid,
 			UnlockHash: sco.UnlockHash,
 			Value:      sco.Value.Big(),
 		}
@@ -369,7 +352,6 @@ func (s *SQLStore) AddContract(hk consensus.PublicKey, c rhpv2.Contract) error {
 	newMissedOutputs := make([]dbMissedSiacoinOutput, len(c.Revision.NewMissedProofOutputs))
 	for i, sco := range c.Revision.NewMissedProofOutputs {
 		newMissedOutputs[i] = dbMissedSiacoinOutput{
-			ParentID:   fcid,
 			UnlockHash: sco.UnlockHash,
 			Value:      sco.Value.Big(),
 		}
@@ -377,7 +359,6 @@ func (s *SQLStore) AddContract(hk consensus.PublicKey, c rhpv2.Contract) error {
 
 	// Prepare contract revision.
 	revision := dbFileContractRevision{
-		ParentID:              fcid,
 		Signatures:            c.Signatures[:],
 		UnlockConditions:      c.Revision.UnlockConditions,
 		NewRevisionNumber:     c.Revision.NewRevisionNumber,
@@ -390,13 +371,24 @@ func (s *SQLStore) AddContract(hk consensus.PublicKey, c rhpv2.Contract) error {
 		NewUnlockHash:         c.Revision.NewUnlockHash,
 	}
 
-	// Insert contract.
-	return s.db.Create(&dbContractRHPv2{
-		ID:            fcid,
-		GoodForUpload: true, // new contract is always good for upload
-		HostPublicKey: hk,
-		Revision:      revision,
-	}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Find host.
+		var host dbHost
+		err := s.db.Where(&dbHost{PublicKey: hk}).
+			Take(&host).Error
+		if err != nil {
+			return err
+		}
+
+		// Insert contract.
+		return s.db.Where(&dbHost{PublicKey: hk}).
+			Create(&dbContractRHPv2{
+				FCID:          fcid,
+				GoodForUpload: true, // new contract is always good for upload
+				HostID:        host.ID,
+				Revision:      revision,
+			}).Error
+	})
 }
 
 // Contract implements the bus.ContractStore interface.
@@ -428,12 +420,12 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
-	return s.db.Delete(&dbContractRHPv2{ID: id}).Error
+	return s.db.Delete(&dbContractRHPv2{FCID: id}).Error
 }
 
 func (s *SQLStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
 	var contract dbContractRHPv2
-	err := s.db.Where(&dbContractRHPv2{ID: id}).
+	err := s.db.Where(&dbContractRHPv2{FCID: id}).
 		Preload("Revision.NewValidProofOutputs").
 		Preload("Revision.NewMissedProofOutputs").
 		Take(&contract).Error

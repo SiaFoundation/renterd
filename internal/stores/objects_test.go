@@ -217,20 +217,22 @@ func TestSQLObjectStore(t *testing.T) {
 	// itself and contain a few timestamps which would make the following
 	// code a lot more verbose.
 	obj.Model = gorm.Model{}
-	obj.Slabs[0].Model = gorm.Model{}
-	obj.Slabs[1].Model = gorm.Model{}
-	obj.Slabs[0].Slab.Model = gorm.Model{}
-	obj.Slabs[1].Slab.Model = gorm.Model{}
-	obj.Slabs[0].Slab.Shards[0].Model = gorm.Model{}
-	obj.Slabs[1].Slab.Shards[0].Model = gorm.Model{}
+	for i := range obj.Slabs {
+		obj.Slabs[i].Model = gorm.Model{}
+		obj.Slabs[i].Slab.Model = gorm.Model{}
+		obj.Slabs[i].Slab.Shards[0].Model = gorm.Model{}
+		obj.Slabs[i].Slab.Shards[0].Contracts[0].Model = gorm.Model{}
+		obj.Slabs[i].Slab.Shards[0].Contracts[0].Host.Model = gorm.Model{}
+	}
 
 	expectedObj := dbObject{
 		ObjectID: objID,
 		Key:      obj1Key,
 		Slabs: []dbSlice{
 			{
-				ObjectID: objID,
+				DBObjectID: 1,
 				Slab: dbSlab{
+					DBSliceID: 1,
 					Key:       obj1Slab0Key,
 					MinShards: 1,
 					Shards: []dbSector{
@@ -238,9 +240,12 @@ func TestSQLObjectStore(t *testing.T) {
 							Root: obj1.Slabs[0].Shards[0].Root,
 							Contracts: []dbContractRHPv2{
 								{
-									HostPublicKey: hk1,
+									HostID: 1,
+									Host: dbHost{
+										PublicKey: hk1,
+									},
 									GoodForUpload: true,
-									ID:            fcid1,
+									FCID:          fcid1,
 								},
 							},
 						},
@@ -250,8 +255,9 @@ func TestSQLObjectStore(t *testing.T) {
 				Length: 100,
 			},
 			{
-				ObjectID: objID,
+				DBObjectID: 1,
 				Slab: dbSlab{
+					DBSliceID: 2,
 					Key:       obj1Slab1Key,
 					MinShards: 2,
 					Shards: []dbSector{
@@ -259,9 +265,12 @@ func TestSQLObjectStore(t *testing.T) {
 							Root: obj1.Slabs[1].Shards[0].Root,
 							Contracts: []dbContractRHPv2{
 								{
-									HostPublicKey: hk2,
+									HostID: 2,
+									Host: dbHost{
+										PublicKey: hk2,
+									},
 									GoodForUpload: true,
-									ID:            fcid2,
+									FCID:          fcid2,
 								},
 							},
 						},

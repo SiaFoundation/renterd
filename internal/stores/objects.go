@@ -283,19 +283,16 @@ type (
 
 		Key      []byte
 		ObjectID string    `gorm:"index;unique"`
-		Slabs    []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ObjectID"` // CASCADE to delete slices too
+		Slabs    []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
 	}
 
 	// dbSlice describes a reference to a object.Slab in the database.
 	dbSlice struct {
 		gorm.Model
-
-		// ObjectID identifies the object the slice belongs to. It is
-		// the foreign key of the object table.
-		ObjectID string `gorm:"index;NOT NULL"`
+		DBObjectID uint `gorm:"index"`
 
 		// Slice related fields.
-		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE;foreignKey:ID"` // CASCADE to delete slabs too
+		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slabs too
 		Offset uint32
 		Length uint32
 	}
@@ -304,6 +301,7 @@ type (
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
 		gorm.Model
+		DBSliceID uint `gorm:"index"`
 
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
@@ -363,8 +361,8 @@ func (o dbObject) convert() (object.Object, error) {
 				if !c.GoodForUpload {
 					continue
 				}
-				obj.Slabs[i].Shards[j].Contract = c.ID
-				obj.Slabs[i].Shards[j].Host = c.HostPublicKey
+				obj.Slabs[i].Shards[j].Contract = c.FCID
+				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
 				break
 			}
 			obj.Slabs[i].Shards[j].Root = sh.Root
@@ -420,21 +418,23 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 		if err != nil {
 			return err
 		}
-		err = tx.Create(&dbObject{
+		obj := dbObject{
 			ObjectID: key,
 			Key:      objKey,
-		}).Error
+		}
+		err = tx.Create(&obj).Error
 		if err != nil {
 			return err
 		}
 
 		for _, ss := range o.Slabs {
 			// Create Slice.
-			err = tx.Create(&dbSlice{
-				ObjectID: key,
-				Offset:   ss.Offset,
-				Length:   ss.Length,
-			}).Error
+			slice := dbSlice{
+				DBObjectID: obj.ID,
+				Offset:     ss.Offset,
+				Length:     ss.Length,
+			}
+			err = tx.Create(&slice).Error
 			if err != nil {
 				return err
 			}
@@ -446,6 +446,7 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 			}
 			var slab dbSlab
 			err = tx.FirstOrCreate(&slab, &dbSlab{
+				DBSliceID: slice.ID,
 				Key:       slabKey,
 				MinShards: ss.MinShards,
 			}).Error
@@ -485,7 +486,7 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 				// Look for the contract referenced by the shard.
 				var contract dbContractRHPv2
 				err = tx.Model(&dbContractRHPv2{}).
-					Where(&dbContractRHPv2{ID: shard.Contract}).
+					Where(&dbContractRHPv2{FCID: shard.Contract}).
 					Take(&contract).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					continue // don't set contract
@@ -524,7 +525,7 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.Slab.Shards.Contracts").
+		Preload("Slabs.Slab.Shards.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound

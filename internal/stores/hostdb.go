@@ -200,17 +200,17 @@ type (
 	// Deleting a host from the db will cascade the deletion and also delete
 	// the corresponding announcements and interactions with that host.
 	dbHost struct {
-		dbCommon
+		gorm.Model
 
-		PublicKey     consensus.PublicKey `gorm:"primaryKey;type:bytes;serializer:gob;NOT NULL"`
-		Announcements []dbAnnouncement    `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
-		Interactions  []dbInteraction     `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
+		PublicKey     consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		Announcements []dbAnnouncement    `gorm:"OnDelete:CASCADE"`
+		Interactions  []dbInteraction     `gorm:"OnDelete:CASCADE"`
 	}
 
 	dbAnnouncement struct {
-		dbCommon
+		gorm.Model
+		DBHostID uint `gorm:"index"`
 
-		ID          uint64              `gorm:"primaryKey"`
 		Host        consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
 		BlockHeight uint64              `gorm:"NOT NULL"`
 		BlockID     consensus.BlockID   `gorm:"NOT NULL;type:bytes;serializer:gob"`
@@ -220,10 +220,9 @@ type (
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
-		dbCommon
+		gorm.Model
+		DBHostID uint `gorm:"index"`
 
-		ID        uint64              `gorm:"primaryKey"`
-		Host      consensus.PublicKey `gorm:"index; NOT NULL;type:bytes;serializer:gob"`
 		Result    json.RawMessage
 		Timestamp time.Time `gorm:"index; NOT NULL"`
 		Type      string
@@ -233,9 +232,7 @@ type (
 	// known to the hostdb. It should only ever contain a single entry with
 	// the consensusInfoID primary key.
 	dbConsensusInfo struct {
-		dbCommon
-
-		ID   uint8 `gorm:"primaryKey"`
+		gorm.Model
 		CCID []byte
 	}
 )
@@ -341,13 +338,14 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
 	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Create a host if it doesn't exist yet.
-		if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
+		var host dbHost
+		if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
 			return err
 		}
 
 		// Create an interaction.
 		return tx.Create(&dbInteraction{
-			Host:      hostKey,
+			DBHostID:  host.ID,
 			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
 			Type:      hi.Type,
 			Result:    hi.Result,
@@ -388,7 +386,11 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		if err != nil {
 			return err
 		}
-		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{ID: consensusInfoID}).Update("CCID", cc.ID[:]).Error
+		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
+			Model: gorm.Model{
+				ID: consensusInfoID,
+			},
+		}).Update("CCID", cc.ID[:]).Error
 	})
 	if err != nil {
 		log.Fatalln("Failed to apply consensus change to hostdb", err)
