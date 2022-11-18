@@ -2,7 +2,6 @@ package stores
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -109,9 +108,7 @@ func TestJSONObjectStore(t *testing.T) {
 
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
-	os.RemoveAll("/Users/cschinnerl/Desktop/foo.db")
-	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/foo.db")
-	os, _, err := NewSQLStore(conn, true)
+	os, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -377,8 +377,8 @@ func (s *SQLStore) List(path string) ([]string, error) {
 		panic("path must end in /")
 	}
 
-	inner := s.db.Model(&dbObject{}).Select("SUBSTR(id, ?) AS trimmed", len(path)+1).
-		Where("id LIKE ?", path+"%")
+	inner := s.db.Model(&dbObject{}).Select("SUBSTR(object_id, ?) AS trimmed", len(path)+1).
+		Where("object_id LIKE ?", path+"%")
 	middle := s.db.Table("(?)", inner).
 		Select("trimmed, INSTR(trimmed, ?) AS slashindex", "/")
 	outer := s.db.Table("(?)", middle).
