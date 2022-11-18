@@ -109,8 +109,8 @@ func TestJSONObjectStore(t *testing.T) {
 
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
-	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/foo.db")
 	os.RemoveAll("/Users/cschinnerl/Desktop/foo.db")
+	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/foo.db")
 	os, _, err := NewSQLStore(conn, true)
 	if err != nil {
 		t.Fatal(err)
@@ -213,15 +213,24 @@ func TestSQLObjectStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Set the Model fields to zero before comparing. These are set by gorm
+	// itself and contain a few timestamps which would make the following
+	// code a lot more verbose.
+	obj.Model = gorm.Model{}
+	obj.Slabs[0].Model = gorm.Model{}
+	obj.Slabs[1].Model = gorm.Model{}
+	obj.Slabs[0].Slab.Model = gorm.Model{}
+	obj.Slabs[1].Slab.Model = gorm.Model{}
+	obj.Slabs[0].Slab.Shards[0].Model = gorm.Model{}
+	obj.Slabs[1].Slab.Shards[0].Model = gorm.Model{}
+
 	expectedObj := dbObject{
 		ObjectID: objID,
 		Key:      obj1Key,
 		Slabs: []dbSlice{
 			{
-				Model:    gorm.Model{ID: 1},
 				ObjectID: objID,
 				Slab: dbSlab{
-					Model:     gorm.Model{ID: 1},
 					Key:       obj1Slab0Key,
 					MinShards: 1,
 					Shards: []dbSector{
@@ -229,9 +238,9 @@ func TestSQLObjectStore(t *testing.T) {
 							Root: obj1.Slabs[0].Shards[0].Root,
 							Contracts: []dbContractRHPv2{
 								{
-									ID:            fcid1,
 									HostPublicKey: hk1,
 									GoodForUpload: true,
+									ID:            fcid1,
 								},
 							},
 						},
@@ -241,10 +250,8 @@ func TestSQLObjectStore(t *testing.T) {
 				Length: 100,
 			},
 			{
-				Model:    gorm.Model{ID: 2},
 				ObjectID: objID,
 				Slab: dbSlab{
-					Model:     gorm.Model{ID: 2},
 					Key:       obj1Slab1Key,
 					MinShards: 2,
 					Shards: []dbSector{
@@ -252,9 +259,9 @@ func TestSQLObjectStore(t *testing.T) {
 							Root: obj1.Slabs[1].Shards[0].Root,
 							Contracts: []dbContractRHPv2{
 								{
-									ID:            fcid2,
 									HostPublicKey: hk2,
 									GoodForUpload: true,
+									ID:            fcid2,
 								},
 							},
 						},

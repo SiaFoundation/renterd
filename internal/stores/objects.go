@@ -475,8 +475,7 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 				}
 
 				// Append the sector to the slab.
-				err = tx.Model(&dbSlab{}).
-					Where(&dbSlab{Model: gorm.Model{ID: slab.ID}}).
+				err = tx.Model(&slab).
 					Association("Shards").
 					Append(&sector)
 				if err != nil {
@@ -495,7 +494,7 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 				}
 
 				// Append the contract to the sector.
-				err = tx.Model(&dbSector{}).
+				err = tx.Model(&sector).
 					Association("Contracts").
 					Append(&contract)
 				if err != nil {
@@ -518,7 +517,7 @@ func (s *SQLStore) WorstHealthSlabs(n int) {
 
 // deleteObject deletes an object from the store.
 func deleteObject(tx *gorm.DB, key string) error {
-	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
+	return tx.Unscoped().Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
 }
 
 // get retrieves an object from the database.
