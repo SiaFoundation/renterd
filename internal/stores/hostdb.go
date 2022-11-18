@@ -211,11 +211,10 @@ type (
 		gorm.Model
 		DBHostID uint `gorm:"index"`
 
-		Host        consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
-		BlockHeight uint64              `gorm:"NOT NULL"`
-		BlockID     consensus.BlockID   `gorm:"NOT NULL;type:bytes;serializer:gob"`
-		Timestamp   time.Time           `gorm:"NOT NULL"`
-		NetAddress  string              `gorm:"NOT NULL"`
+		BlockHeight uint64            `gorm:"NOT NULL"`
+		BlockID     consensus.BlockID `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		Timestamp   time.Time         `gorm:"NOT NULL"`
+		NetAddress  string            `gorm:"NOT NULL"`
 	}
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
@@ -399,13 +398,14 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
 	// Create a host if it doesn't exist yet.
-	if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
+	var host dbHost
+	if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
 		return err
 	}
 
 	// Create the announcement.
 	return tx.Create(&dbAnnouncement{
-		Host:        hostKey,
+		DBHostID:    host.ID,
 		BlockHeight: a.Index.Height,
 		BlockID:     a.Index.ID,
 		Timestamp:   a.Timestamp.UTC(), // explicitly store timestamp as UTC

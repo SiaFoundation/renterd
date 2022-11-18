@@ -151,4 +151,13 @@ func TestSQLContractStore(t *testing.T) {
 	if err := tableCountCheck(&dbValidSiacoinOutput{}, 0); err != nil {
 		t.Fatal(err)
 	}
+
+	// Check join table count as well.
+	var count int64
+	if err := cs.db.Table("contract_sectors").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected %v objects in contract_sectors but got %v", 0, count)
+	}
 }

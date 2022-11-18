@@ -420,7 +420,7 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
-	return s.db.Delete(&dbContractRHPv2{FCID: id}).Error
+	return s.db.Where(&dbContractRHPv2{FCID: id}).Delete(&dbContractRHPv2{}).Error
 }
 
 func (s *SQLStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
