@@ -313,8 +313,9 @@ func TestSQLObjectStore(t *testing.T) {
 	// - 1 element in the object table since we only stored and overwrote a single object
 	// - 1 element in the slabs table since we updated the object to only have 1 slab
 	// - 1 element in the slices table for the same reason
-	// - 2 elements in the sectors table because we don't delete sectors
-	countCheck := func(objCount, sliceCount, slabCount, shardCount, sectorCount int64) error {
+	// - 2 elements in the sectors table because we don't delete sectors from the sectors table
+	// - 1 element in the sector_slabs table since we got 1 slab linked to a sector
+	countCheck := func(objCount, sliceCount, slabCount, shardCount, sectorCount, sectorSlabCount int64) error {
 		tableCountCheck := func(table interface{}, tblCount int64) error {
 			var count int64
 			if err := os.db.Model(table).Count(&count).Error; err != nil {
@@ -338,10 +339,14 @@ func TestSQLObjectStore(t *testing.T) {
 		if err := tableCountCheck(&dbSector{}, sectorCount); err != nil {
 			return err
 		}
+		var ssc int64
+		if err := os.db.Table("sector_slabs").Count(&ssc).Error; err != nil {
+			return err
+		}
 		return nil
 	}
-	if err := countCheck(1, 1, 1, 1, 1); err != nil {
-		t.Fatal(err)
+	if err := countCheck(1, 1, 1, 1, 2, 1); err != nil {
+		t.Error(err)
 	}
 
 	// Delete the object. Due to the cascade this should delete everything
@@ -349,7 +354,7 @@ func TestSQLObjectStore(t *testing.T) {
 	if err := os.Delete(objID); err != nil {
 		t.Fatal(err)
 	}
-	if err := countCheck(0, 0, 0, 0, 0); err != nil {
+	if err := countCheck(0, 0, 0, 0, 2, 0); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -501,7 +501,6 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 				if err != nil {
 					return err
 				}
-
 			}
 		}
 		return nil

@@ -199,10 +199,10 @@ type (
 	dbContractRHPv2 struct {
 		gorm.Model
 
-		HostID        uint `gorm:"index"`
+		FCID          types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
+		GoodForUpload bool                 `gorm:"index"`
+		HostID        uint                 `gorm:"index"`
 		Host          dbHost
-		GoodForUpload bool                   `gorm:"index"`
-		FCID          types.FileContractID   `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
 		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` //CASCADE to delete revision too
 	}
 
