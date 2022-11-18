@@ -197,17 +197,17 @@ func NewJSONContractStore(dir string) (*JSONContractStore, error) {
 
 type (
 	dbContractRHPv2 struct {
-		gorm.Model
+		Model
 
 		FCID          types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
 		GoodForUpload bool                 `gorm:"index"`
 		HostID        uint                 `gorm:"index"`
 		Host          dbHost
-		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` //CASCADE to delete revision too
+		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
 	}
 
 	dbFileContractRevision struct {
-		gorm.Model
+		Model
 		DBContractRHPv2ID uint `gorm:"unique;index"`
 
 		NewRevisionNumber     uint64 `gorm:"index"`
@@ -223,7 +223,7 @@ type (
 	}
 
 	dbValidSiacoinOutput struct {
-		gorm.Model
+		Model
 		DBFileContractRevisionID uint `gorm:"index"`
 
 		UnlockHash types.UnlockHash `gorm:"index;type:bytes;serializer:gob"`
@@ -231,7 +231,7 @@ type (
 	}
 
 	dbMissedSiacoinOutput struct {
-		gorm.Model
+		Model
 		DBFileContractRevisionID uint `gorm:"index"`
 
 		UnlockHash types.UnlockHash `gorm:"index;type:bytes;serializer:gob"`
@@ -239,14 +239,14 @@ type (
 	}
 
 	dbHostSet struct {
-		gorm.Model
+		Model
 
 		Name  string           `gorm:"unique;index"`
 		Hosts []dbHostSetEntry `gorm:"constraing:OnDelete:CASCADE"`
 	}
 
 	dbHostSetEntry struct {
-		gorm.Model
+		Model
 		DBHostSetID uint `gorm:"index"`
 
 		PublicKey consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
@@ -420,7 +420,14 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
-	return s.db.Where(&dbContractRHPv2{FCID: id}).Delete(&dbContractRHPv2{}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var contract dbContractRHPv2
+		if err := tx.Where(&dbContractRHPv2{FCID: id}).
+			Take(&contract).Error; err != nil {
+			return err
+		}
+		return tx.Where(&contract).Delete(&contract).Error
+	})
 }
 
 func (s *SQLStore) contract(id types.FileContractID) (dbContractRHPv2, error) {

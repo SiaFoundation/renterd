@@ -2,6 +2,7 @@ package stores
 
 import (
 	"fmt"
+	"time"
 
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/siad/modules"
@@ -10,6 +11,14 @@ import (
 )
 
 type (
+	// Model defines the common fields of every table. Same as Model
+	// but excludes soft deletion since it breaks cascading deletes.
+	Model struct {
+		ID        uint `gorm:"primarykey"`
+		CreatedAt time.Time
+		UpdatedAt time.Time
+	}
+
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		db *gorm.DB
@@ -81,9 +90,9 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 
 	// Get latest consensus change ID or init db.
 	var ci dbConsensusInfo
-	err = db.Where(&dbConsensusInfo{Model: gorm.Model{ID: consensusInfoID}}).
+	err = db.Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
 		Attrs(dbConsensusInfo{
-			Model: gorm.Model{
+			Model: Model{
 				ID: consensusInfoID,
 			},
 			CCID: modules.ConsensusChangeBeginning[:],

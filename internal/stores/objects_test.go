@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
-	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
@@ -213,13 +212,13 @@ func TestSQLObjectStore(t *testing.T) {
 	// Set the Model fields to zero before comparing. These are set by gorm
 	// itself and contain a few timestamps which would make the following
 	// code a lot more verbose.
-	obj.Model = gorm.Model{}
+	obj.Model = Model{}
 	for i := range obj.Slabs {
-		obj.Slabs[i].Model = gorm.Model{}
-		obj.Slabs[i].Slab.Model = gorm.Model{}
-		obj.Slabs[i].Slab.Shards[0].Model = gorm.Model{}
-		obj.Slabs[i].Slab.Shards[0].Contracts[0].Model = gorm.Model{}
-		obj.Slabs[i].Slab.Shards[0].Contracts[0].Host.Model = gorm.Model{}
+		obj.Slabs[i].Model = Model{}
+		obj.Slabs[i].Slab.Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].Contracts[0].Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].Contracts[0].Host.Model = Model{}
 	}
 
 	expectedObj := dbObject{

@@ -279,7 +279,7 @@ func NewJSONObjectStore(dir string) (*JSONObjectStore, error) {
 type (
 	// dbObject describes an object.Object in the database.
 	dbObject struct {
-		gorm.Model
+		Model
 
 		Key      []byte
 		ObjectID string    `gorm:"index;unique"`
@@ -288,7 +288,7 @@ type (
 
 	// dbSlice describes a reference to a object.Slab in the database.
 	dbSlice struct {
-		gorm.Model
+		Model
 		DBObjectID uint `gorm:"index"`
 
 		// Slice related fields.
@@ -300,7 +300,7 @@ type (
 	// dbSlab describes a object.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
-		gorm.Model
+		Model
 		DBSliceID uint `gorm:"index"`
 
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
@@ -312,7 +312,7 @@ type (
 	// multiple times in the sectors table since it can belong to multiple
 	// slabs.
 	dbSector struct {
-		gorm.Model
+		Model
 
 		Contracts []dbContractRHPv2 `gorm:"many2many:contract_sectors"`
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
@@ -517,7 +517,7 @@ func (s *SQLStore) WorstHealthSlabs(n int) {
 
 // deleteObject deletes an object from the store.
 func deleteObject(tx *gorm.DB, key string) error {
-	return tx.Unscoped().Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
+	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
 }
 
 // get retrieves an object from the database.

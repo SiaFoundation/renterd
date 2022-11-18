@@ -200,7 +200,7 @@ type (
 	// Deleting a host from the db will cascade the deletion and also delete
 	// the corresponding announcements and interactions with that host.
 	dbHost struct {
-		gorm.Model
+		Model
 
 		PublicKey     consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
 		Announcements []dbAnnouncement    `gorm:"OnDelete:CASCADE"`
@@ -208,7 +208,7 @@ type (
 	}
 
 	dbAnnouncement struct {
-		gorm.Model
+		Model
 		DBHostID uint `gorm:"index"`
 
 		BlockHeight uint64            `gorm:"NOT NULL"`
@@ -219,7 +219,7 @@ type (
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
-		gorm.Model
+		Model
 		DBHostID uint `gorm:"index"`
 
 		Result    json.RawMessage
@@ -231,7 +231,7 @@ type (
 	// known to the hostdb. It should only ever contain a single entry with
 	// the consensusInfoID primary key.
 	dbConsensusInfo struct {
-		gorm.Model
+		Model
 		CCID []byte
 	}
 )
@@ -386,7 +386,7 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 			return err
 		}
 		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-			Model: gorm.Model{
+			Model: Model{
 				ID: consensusInfoID,
 			},
 		}).Update("CCID", cc.ID[:]).Error
