@@ -12,6 +12,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -361,7 +362,6 @@ func (o dbObject) convert() (object.Object, error) {
 				if !c.GoodForUpload {
 					continue
 				}
-				obj.Slabs[i].Shards[j].Contract = c.FCID
 				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
 				break
 			}
@@ -403,7 +403,7 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLStore) Put(key string, o object.Object) error {
+func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
 	// Put is ACID.
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
@@ -455,16 +455,11 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 			}
 
 			for _, shard := range ss.Shards {
-				// TODO: We potentially want to ignore foreign
-				// key constraint failure on the Contract column
-				// up until MinShards.
-
-				// TODO: We completely ignore the hostkey from
-				// the input object here. That's because we can
-				// get it from the contract upon retrieving it
-				// from the database. Although that leaves room
-				// for discrepancies due to the user providing a
-				// hostkey that doesn't match the contract id.
+				// Translate pubkey to contract.
+				fcid, exists := usedContracts[shard.Host]
+				if !exists {
+					return fmt.Errorf("error converting host pubkey %v to contract id", shard.Host)
+				}
 
 				// Create sector if it doesn't exist yet.
 				var sector dbSector
@@ -486,7 +481,7 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 				// Look for the contract referenced by the shard.
 				var contract dbContractRHPv2
 				err = tx.Model(&dbContractRHPv2{}).
-					Where(&dbContractRHPv2{FCID: shard.Contract}).
+					Where(&dbContractRHPv2{FCID: fcid}).
 					Take(&contract).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					continue // don't set contract

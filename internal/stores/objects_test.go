@@ -148,6 +148,12 @@ func TestSQLObjectStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Define usedHosts.
+	usedHosts := map[consensus.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+	}
+
 	// Create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -158,9 +164,8 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 1,
 					Shards: []object.Sector{
 						{
-							Contract: fcid1,
-							Host:     hk1,
-							Root:     consensus.Hash256{1},
+							Host: hk1,
+							Root: consensus.Hash256{1},
 						},
 					},
 				},
@@ -173,9 +178,8 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 2,
 					Shards: []object.Sector{
 						{
-							Contract: fcid2,
-							Host:     hk2,
-							Root:     consensus.Hash256{2},
+							Host: hk2,
+							Root: consensus.Hash256{2},
 						},
 					},
 				},
@@ -187,12 +191,12 @@ func TestSQLObjectStore(t *testing.T) {
 
 	// Store it.
 	objID := "key1"
-	if err := os.Put(objID, obj1); err != nil {
+	if err := os.Put(objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := os.Put(objID, obj1); err != nil {
+	if err := os.Put(objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,7 +304,7 @@ func TestSQLObjectStore(t *testing.T) {
 	// second one.
 	obj1.Slabs = obj1.Slabs[1:]
 	obj1.Slabs[0].Slab.MinShards = 123
-	if err := os.Put(objID, obj1); err != nil {
+	if err := os.Put(objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = os.Get(objID)
@@ -377,7 +381,7 @@ func TestSQLList(t *testing.T) {
 	for _, path := range paths {
 		os.Put(path, object.Object{
 			Key: object.GenerateEncryptionKey(),
-		})
+		}, map[consensus.PublicKey]types.FileContractID{})
 	}
 	tests := []struct {
 		prefix string

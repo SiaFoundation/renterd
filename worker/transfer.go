@@ -72,9 +72,8 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 			}
 		} else {
 			sectors[resp.req.shardIndex] = object.Sector{
-				Contract: resp.req.host.Contract(),
-				Host:     resp.req.host.PublicKey(),
-				Root:     resp.root,
+				Host: resp.req.host.PublicKey(),
+				Root: resp.root,
 			}
 			rem--
 		}
@@ -337,9 +336,8 @@ outer:
 			}
 		} else {
 			s.Shards[resp.req.shardIndex] = object.Sector{
-				Contract: resp.req.host.Contract(),
-				Host:     resp.req.host.PublicKey(),
-				Root:     resp.root,
+				Host: resp.req.host.PublicKey(),
+				Root: resp.root,
 			}
 			rem--
 		}

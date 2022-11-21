@@ -7,23 +7,11 @@ import (
 	"github.com/klauspost/reedsolomon"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/chacha20"
 )
 
 // A Sector uniquely identifies a sector stored on a particular host.
 type Sector struct {
-	Contract types.FileContractID
-
-	// TODO: remove this comment
-	// NOTE TO REVIEWERS: Seems like we can't remove Host after all. Because
-	// in 'transfer.go' we use it to determine whether a host already has a
-	// sector. If we did remove it, we might end up uploading multiple
-	// pieces to the same host IFF we have multiple contracts with a host.
-	// It's also a bit awkward overall. For creating an object we don't need
-	// Host. We only need it for the aforementioned check.
-	// So overall it's a bit awkward since it's definitely useful in the
-	// worker code but not in the bus code.
 	Host consensus.PublicKey
 	Root consensus.Hash256
 }

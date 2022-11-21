@@ -111,7 +111,7 @@ type Bus interface {
 
 	Object(key string) (object.Object, error)
 	ObjectEntries(key string) ([]string, error)
-	AddObject(key string, o object.Object) error
+	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
 }
 
@@ -322,10 +322,13 @@ func (w *Worker) UpdateRegistry(ctx context.Context, hostIP string, hostKey cons
 	})
 }
 
-func (w *Worker) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract) (s object.Slab, err error) {
+func (w *Worker) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract, usedHosts map[consensus.PublicKey]types.FileContractID) (s object.Slab, err error) {
 	w.pool.setCurrentHeight(currentHeight)
 	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
 		s, err = uploadSlab(ctx, r, m, n, hosts)
+		for _, host := range hosts {
+			usedHosts[host.PublicKey()] = host.Contract()
+		}
 		return err
 	})
 	return
@@ -381,8 +384,9 @@ func (w *Worker) AddObject(ctx context.Context, key string, r io.Reader) error {
 	var minShards uint8 = 0        // TODO
 	var totalShards uint8 = 0      // TODO
 	var currentHeight uint64 = 0   // TODO
+	usedHosts := make(map[consensus.PublicKey]types.FileContractID)
 	for {
-		s, err := w.UploadSlab(ctx, r, minShards, totalShards, currentHeight, contracts)
+		s, err := w.UploadSlab(ctx, r, minShards, totalShards, currentHeight, contracts, usedHosts)
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -394,7 +398,7 @@ func (w *Worker) AddObject(ctx context.Context, key string, r io.Reader) error {
 	var length int = 0 // TODO
 	o.Slabs = object.SingleSlabs(slabs, length)
 
-	return w.bus.AddObject(key, o)
+	return w.bus.AddObject(key, o, usedHosts)
 }
 
 func (w *Worker) DeleteObject(key string) error {

@@ -74,7 +74,7 @@ type (
 	ObjectStore interface {
 		List(key string) ([]string, error)
 		Get(key string) (object.Object, error)
-		Put(key string, o object.Object) error
+		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 	}
 )
@@ -414,9 +414,9 @@ func (b *Bus) objectsKeyHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsKeyHandlerPUT(jc jape.Context) {
-	var o object.Object
-	if jc.Decode(&o) == nil {
-		jc.Check("couldn't store object", b.os.Put(jc.PathParam("key"), o))
+	var aor AddObjectRequest
+	if jc.Decode(&aor) == nil {
+		jc.Check("couldn't store object", b.os.Put(jc.PathParam("key"), aor.Object, aor.UsedContracts))
 	}
 }
 
