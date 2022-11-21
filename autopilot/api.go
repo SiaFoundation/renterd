@@ -32,12 +32,8 @@ type Config struct {
 }
 
 // State contains all autopilot state variables.
-//
-// TODO: get rid of consensus state
 type State struct {
-	BlockHeight   uint64
 	CurrentPeriod uint64
-	Synced        bool
 }
 
 func DefaultConfig() (c Config) {

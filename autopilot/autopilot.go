@@ -50,6 +50,9 @@ type Bus interface {
 
 	// txpool
 	RecommendedFee() (types.Currency, error)
+
+	// consensus
+	ConsensusState() (bus.ConsensusState, error)
 }
 
 type Worker interface {
@@ -90,12 +93,6 @@ func (ap *Autopilot) SetConfig(c Config) error {
 }
 
 func (ap *Autopilot) Run() error {
-	// load config
-	if err := ap.load(); err != nil {
-		return err
-	}
-
-	// autopilot loop
 	for {
 		select {
 		case <-ap.stopChan:
@@ -126,22 +123,4 @@ func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, e
 	ap.c = newContractor(ap)
 	ap.s = newScanner(ap)
 	return ap, nil
-}
-
-func (ap *Autopilot) load() error {
-	// set the current period
-	state := ap.store.State()
-	if state.CurrentPeriod == 0 {
-		contracts := ap.store.Config().Contracts
-		state.CurrentPeriod = state.BlockHeight
-		if contracts.Period > contracts.RenewWindow {
-			state.CurrentPeriod -= contracts.RenewWindow
-		}
-
-		if err := ap.store.SetState(state); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

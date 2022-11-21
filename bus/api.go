@@ -21,6 +21,12 @@ type (
 	PrivateKey = consensus.PrivateKey
 )
 
+// ConsensusState holds the current blockheight and whether we are synced or not.
+type ConsensusState struct {
+	BlockHeight uint64
+	Synced      bool
+}
+
 // for encoding/decoding time.Time values in API params
 type paramTime time.Time
 

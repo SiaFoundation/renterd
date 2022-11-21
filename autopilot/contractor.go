@@ -28,14 +28,20 @@ func newContractor(ap *Autopilot) *contractor {
 }
 
 func (c *contractor) performContractMaintenance() error {
+	// fetch consensus state
+	cs, err := c.ap.bus.ConsensusState()
+	if err != nil {
+		return err
+	}
+
+	// don't perform any maintenance if we're not synced
+	if !cs.Synced {
+		return nil
+	}
+
 	// re-use same state and config in every iteration
 	config := c.ap.store.Config()
 	state := c.ap.store.State()
-
-	// don't perform any maintenance if we're not synced
-	if !state.Synced {
-		return nil
-	}
 
 	// return early if no hosts are requested
 	if config.Contracts.Hosts == 0 {
@@ -65,7 +71,7 @@ func (c *contractor) performContractMaintenance() error {
 	}
 
 	// run renewals
-	renewed, err := c.runContractRenewals(config, state, &remaining, address)
+	renewed, err := c.runContractRenewals(config, state, &remaining, address, cs.BlockHeight)
 	if err != nil {
 		return err
 	}
@@ -120,9 +126,9 @@ func (c *contractor) runContractChecks() error {
 	return nil
 }
 
-func (c *contractor) runContractRenewals(cfg Config, s State, budget *types.Currency, renterAddress types.UnlockHash) ([]worker.Contract, error) {
+func (c *contractor) runContractRenewals(cfg Config, s State, budget *types.Currency, renterAddress types.UnlockHash, blockHeight uint64) ([]worker.Contract, error) {
 	// fetch all contracts that are up for renew
-	toRenew, err := c.ap.renewableContracts(s.BlockHeight + cfg.Contracts.RenewWindow)
+	toRenew, err := c.ap.renewableContracts(blockHeight + cfg.Contracts.RenewWindow)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +139,7 @@ func (c *contractor) runContractRenewals(cfg Config, s State, budget *types.Curr
 		// TODO: break if autopilot was stopped
 
 		// check our budget
-		renterFunds, err := c.renewFundingEstimate(cfg, s, renew.ID)
+		renterFunds, err := c.renewFundingEstimate(cfg, s, renew.ID, blockHeight)
 		if budget.Cmp(renterFunds) < 0 {
 			break
 		}
@@ -370,7 +376,7 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) renewFundingEstimate(cfg Config, s State, cID types.FileContractID) (types.Currency, error) {
+func (c *contractor) renewFundingEstimate(cfg Config, s State, cID types.FileContractID, blockHeight uint64) (types.Currency, error) {
 	// fetch contract
 	contract, err := c.ap.bus.ContractData(cID)
 	if err != nil {
@@ -435,7 +441,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, s State, cID types.FileCon
 	// the file contract (and the transaction fee goes to the miners, not the
 	// file contract).
 	subTtotal := storageCost.Add(newUploadsCost).Add(newDownloadsCost).Add(newFundAccountCost).Add(scan.Settings.ContractPrice)
-	siaFundFeeEstimate := types.Tax(types.BlockHeight(s.BlockHeight), subTtotal)
+	siaFundFeeEstimate := types.Tax(types.BlockHeight(blockHeight), subTtotal)
 
 	// estimate the txn fee
 	txnFee, err := c.ap.bus.RecommendedFee()

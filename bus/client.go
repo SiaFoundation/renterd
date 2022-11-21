@@ -30,9 +30,10 @@ func (c *Client) SyncerConnect(addr string) (err error) {
 	return
 }
 
-// ConsensusTip returns the current tip index.
-func (c *Client) ConsensusTip() (resp ChainIndex, err error) {
-	err = c.c.GET("/consensus/tip", &resp)
+// ConsensusState returns the current block height and whether the node is
+// synced.
+func (c *Client) ConsensusState() (resp ConsensusState, err error) {
+	err = c.c.GET("/consensus/state", &resp)
 	return
 }
 

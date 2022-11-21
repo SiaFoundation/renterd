@@ -45,6 +45,10 @@ type chainManager struct {
 	cs modules.ConsensusSet
 }
 
+func (cm chainManager) Synced() bool {
+	return cm.cs.Synced()
+}
+
 func (cm chainManager) TipState() consensus.State {
 	return consensus.State{
 		Index: consensus.ChainIndex{
