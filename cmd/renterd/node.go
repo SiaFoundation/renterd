@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
@@ -23,6 +24,13 @@ type workerConfig struct {
 	enabled     bool
 	busAddr     string
 	busPassword string
+
+	// server config
+	reqTimeoutEnabled bool
+	reqTimeoutParam   string
+	reqTimeoutDef     time.Duration
+	reqTimeoutMin     time.Duration
+	reqTimeoutMax     time.Duration
 }
 
 type busConfig struct {

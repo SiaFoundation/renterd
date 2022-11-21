@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/autopilot"
@@ -18,6 +19,8 @@ import (
 	"go.sia.tech/renterd/worker"
 	"golang.org/x/term"
 )
+
+const paramTimeout = "timeout"
 
 var (
 	// to be supplied at build time
@@ -86,6 +89,11 @@ func main() {
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable the worker API")
+	flag.BoolVar(&workerCfg.reqTimeoutEnabled, "worker.timeoutEnabled", true, "enable request timeouts")
+	flag.StringVar(&workerCfg.reqTimeoutParam, "worker.reqTimeoutParam", paramTimeout, "timeout param name")
+	flag.DurationVar(&workerCfg.reqTimeoutDef, "worker.reqTimeoutDef", time.Minute*5, "default request timeout for worker API")
+	flag.DurationVar(&workerCfg.reqTimeoutMin, "worker.reqTimeoutMin", 0, "min request timeout for worker API")
+	flag.DurationVar(&workerCfg.reqTimeoutMax, "worker.reqTimeoutMax", time.Minute*15, "max request timeout for worker API")
 	flag.BoolVar(&busCfg.enabled, "bus.enabled", true, "enable the bus API")
 	flag.BoolVar(&busCfg.bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
 	flag.StringVar(&busCfg.gatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
@@ -131,7 +139,13 @@ func main() {
 			log.Fatal(err)
 		}
 		defer cleanup()
-		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
+
+		handler := auth(worker.NewServer(w))
+		if workerCfg.reqTimeoutEnabled {
+			handler = workerCfg.timeout()(handler)
+		}
+
+		mux.sub["/api/worker"] = treeMux{h: handler}
 		autopilotCfg.workerAddr = *apiAddr + "/worker/"
 		autopilotCfg.workerPassword = getAPIPassword()
 	}
