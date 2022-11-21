@@ -306,12 +306,14 @@ type (
 
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
-		Shards    []dbSector `gorm:"many2many:sector_slabs;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+		Shards    []dbSector `gorm:"many2many:shards;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
-	dbSectorSlabs struct {
-		DBSlabID   uint `gorm:"primaryKey"`
-		DBSectorID uint `gorm:"primaryKey"`
+	// dbShard is a join table between dbSlab and dbSector.
+	dbShard struct {
+		ID         uint `gorm:"primaryKey"`
+		DBSlabID   uint `gorm:"index"`
+		DBSectorID uint `gorm:"index"`
 	}
 
 	// dbSector describes a sector in the database. A sector can exist
@@ -322,10 +324,12 @@ type (
 
 		Contracts []dbContract      `gorm:"many2many:contract_sectors"`
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
+		Slabs     []dbSlab          `gorm:"many2many:shards"`
 	}
 )
 
-func (dbSectorSlabs) TableName() string { return "sector_slabs" }
+// TableName implements the gorm.Tabler interface.
+func (dbShard) TableName() string { return "shards" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
@@ -366,7 +370,7 @@ func (o dbObject) convert() (object.Object, error) {
 		for j, sh := range sl.Slab.Shards {
 			// Return first contract that's good for upload.
 			for _, c := range sh.Contracts {
-				if !c.GoodForUpload {
+				if !c.IsGood {
 					continue
 				}
 				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
@@ -451,12 +455,12 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 			if err != nil {
 				return err
 			}
-			var slab dbSlab
-			err = tx.FirstOrCreate(&slab, &dbSlab{
+			slab := &dbSlab{
 				DBSliceID: slice.ID,
 				Key:       slabKey,
 				MinShards: ss.MinShards,
-			}).Error
+			}
+			err = tx.Create(&slab).Error
 			if err != nil {
 				return err
 			}
@@ -477,10 +481,12 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 					return err
 				}
 
-				// Append the sector to the slab.
-				err = tx.Model(&slab).
-					Association("Shards").
-					Append(&sector)
+				// Add the slab-sector link to the sector to the
+				// shards table.
+				err = tx.Create(&dbShard{
+					DBSlabID:   slab.ID,
+					DBSectorID: sector.ID,
+				}).Error
 				if err != nil {
 					return err
 				}
@@ -496,10 +502,13 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 					return err
 				}
 
-				// Append the contract to the sector.
-				err = tx.Model(&sector).
-					Association("Contracts").
-					Append(&contract)
+				// Add the sector-contract link to the
+				// contract_sectors table if it doesn't exist
+				// yet.
+				err = tx.FirstOrCreate(&dbContractSector{}, &dbContractSector{
+					DBContractID: contract.ID,
+					DBSectorID:   sector.ID,
+				}).Error
 				if err != nil {
 					return err
 				}
@@ -512,9 +521,6 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 // Delete implements the bus.ObjectStore interface.
 func (s *SQLStore) Delete(key string) error {
 	return deleteObject(s.db, key)
-}
-
-func (s *SQLStore) WorstHealthSlabs(n int) {
 }
 
 // deleteObject deletes an object from the store.
@@ -537,8 +543,10 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 // TODO: Extend this to mark the returned slabs with a current timestamp to
 // avoid returning the same slabs over and over again in case they can't be
 // repaired.
+// TODO: Should we return slabs which are below MinShards? I think so because
+// the caller should handle that and then manually delete them if necessary.
 func (s *SQLStore) slabsForRepair(n int) ([]uint, error) {
-	inner := s.db.Model(&dbSectorSlabs{}).
+	inner := s.db.Model(&dbShard{}).
 		Select("db_slab_id as slab_id, db_sector_id as sector_id")
 	middle := s.db.Table("(?)", inner).
 		Select("slab_id, sector_id, db_contract_id as contract_id").
@@ -546,7 +554,7 @@ func (s *SQLStore) slabsForRepair(n int) ([]uint, error) {
 	outer := s.db.Table("(?)", middle).
 		Select("slab_id").
 		Joins("LEFT JOIN contracts ON contract_id = contracts.id").
-		Where("contract_id IS NULL OR good_for_upload IS 0").
+		Where("contract_id IS NULL OR is_good IS 0").
 		Group("slab_id").
 		Order("COUNT(slab_id) DESC").
 		Limit(n)

@@ -256,8 +256,8 @@ func TestSQLObjectStore(t *testing.T) {
 									Host: dbHost{
 										PublicKey: hk1,
 									},
-									GoodForUpload: true,
-									FCID:          fcid1,
+									IsGood: true,
+									FCID:   fcid1,
 								},
 							},
 						},
@@ -281,8 +281,8 @@ func TestSQLObjectStore(t *testing.T) {
 									Host: dbHost{
 										PublicKey: hk2,
 									},
-									GoodForUpload: true,
-									FCID:          fcid2,
+									IsGood: true,
+									FCID:   fcid2,
 								},
 							},
 						},
@@ -409,7 +409,8 @@ func TestSQLList(t *testing.T) {
 	}
 }
 
-func TestFoo(t *testing.T) {
+// TestSlabsForRepair tests the functionality of slabsForRepair.
+func TestSlabsForRepair(t *testing.T) {
 	//os, _, _, err := newTestSQLStore()
 	os.RemoveAll("/Users/cschinnerl/Desktop/TestFoo.db")
 	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/TestFoo.db")
@@ -453,10 +454,6 @@ func TestFoo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.MarkGFU(fcidBad, false)
-	if err != nil {
-		t.Fatal(err)
-	}
 	err = os.AddContract(newTestContract(fcidDeleted, hkDeleted))
 	if err != nil {
 		t.Fatal(err)
@@ -485,6 +482,7 @@ func TestFoo(t *testing.T) {
 	obj := object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
+			// 2/3 sectors bad
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
@@ -496,9 +494,75 @@ func TestFoo(t *testing.T) {
 					},
 				},
 			},
+			// 1/3 sectors bad
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorGood,
+						sectorGood,
+						sectorDeleted,
+					},
+				},
+			},
+			// 2/3 sectors bad
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorBad,
+						sectorBad,
+						sectorGood,
+					},
+				},
+			},
+			// 2/3 sectors bad
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorBad,
+						sectorDeleted,
+						sectorGood,
+					},
+				},
+			},
+			// 2/3 sectors bad
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorDeleted,
+						sectorDeleted,
+						sectorGood,
+					},
+				},
+			},
+			// 3/3 sectors bad
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorBad,
+						sectorBad,
+						sectorDeleted,
+					},
+				},
+			},
 		},
 	}
 	if err := os.Put("foo", obj, usedContracts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mark contract bad.
+	err = os.SetIsGood(fcidBad, false)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -508,9 +572,29 @@ func TestFoo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slabIDs, err := os.slabsForRepair(3)
-	if err != nil {
+	// Count the shards. Every slab should have 3 shards associated with it
+	// which makes 18 in total.
+	var sslabs []dbShard
+	if err := os.db.Find(&sslabs).Error; err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println("slabIDs", slabIDs)
+	if len(sslabs) != len(obj.Slabs)*3 {
+		t.Fatalf("wrong length %v != %v", len(sslabs), len(obj.Slabs)*3)
+	}
+
+	// Make sure the slab IDs are returned in the right order.
+	// 6 first since it doesn't have any good sectors
+	// 2 last since it only got 1 bad sector
+	// 1, 3, 4, 5 in the middle since they all have 2 bad sectors.
+	expectedSlabIDs := []uint{6, 1, 3, 4, 5, 2}
+	for i := 0; i < len(expectedSlabIDs); i++ {
+		// Check the i worst slabs.
+		slabIDs, err := os.slabsForRepair(i + 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(slabIDs, expectedSlabIDs[:i+1]) {
+			t.Fatalf("wrong IDs returned: %v != %v", slabIDs, expectedSlabIDs[:i+1])
+		}
+	}
 }

@@ -199,12 +199,12 @@ type (
 	dbContract struct {
 		Model
 
-		FCID          types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
-		GoodForUpload bool                 `gorm:"index"`
-		HostID        uint                 `gorm:"index"`
-		Host          dbHost
-		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
-		Sectors       []dbSector             `gorm:"many2many:contract_sectors"`
+		FCID     types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
+		IsGood   bool                 `gorm:"index"`
+		HostID   uint                 `gorm:"index"`
+		Host     dbHost
+		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
+		Sectors  []dbSector             `gorm:"many2many:contract_sectors"`
 	}
 
 	dbContractSector struct {
@@ -403,10 +403,10 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 		// Insert contract.
 		return s.db.Where(&dbHost{PublicKey: c.HostKey()}).
 			Create(&dbContract{
-				FCID:          fcid,
-				GoodForUpload: true, // new contract is always good for upload
-				HostID:        host.ID,
-				Revision:      revision,
+				FCID:     fcid,
+				IsGood:   true, // new contract is always good for upload
+				HostID:   host.ID,
+				Revision: revision,
 			}).Error
 	})
 }
@@ -438,11 +438,11 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 	return contracts, nil
 }
 
-func (s *SQLStore) MarkGFU(fcid types.FileContractID, gfu bool) error {
+// SetIsGood marks a contract as either good or bad.
+func (s *SQLStore) SetIsGood(fcid types.FileContractID, isGood bool) error {
 	return s.db.Model(&dbContract{}).
 		Where(&dbContract{FCID: fcid}).
-		Update("good_for_upload", gfu).Error
-
+		Update("is_good", isGood).Error
 }
 
 // RemoveContract implements the bus.ContractStore interface.
