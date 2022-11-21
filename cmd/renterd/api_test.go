@@ -54,21 +54,21 @@ func TestTimeoutMiddleware(t *testing.T) {
 		{
 			"request timeout, exceeds default timeout",
 			0, // uses default of 50ms
-			time.Millisecond * 100,
+			time.Second,
 			http.StatusRequestTimeout,
 			"request timed out",
 		},
 		{
 			"request timeout, exceeds provided timeout",
 			time.Millisecond * 20,
-			time.Millisecond * 30,
+			time.Millisecond * 200,
 			http.StatusRequestTimeout,
 			"request timed out",
 		},
 		{
 			"no timeout, custom timeout provided",
 			0, // uses default of 50ms
-			time.Millisecond * 30,
+			time.Millisecond * 10,
 			http.StatusOK,
 			"OK",
 		},
