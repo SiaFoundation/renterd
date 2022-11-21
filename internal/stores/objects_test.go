@@ -112,7 +112,11 @@ func TestSQLObjectStore(t *testing.T) {
 
 	// Create hosts for the contracts to avoid the foreign key constraint
 	// failing.
-	hk1, hk2 := consensus.GeneratePrivateKey().PublicKey(), consensus.GeneratePrivateKey().PublicKey()
+	uc1, _ := types.GenerateDeterministicMultisig(2, 2, "hk1")
+	uc2, _ := types.GenerateDeterministicMultisig(2, 2, "hk2")
+	var hk1, hk2 consensus.PublicKey
+	copy(hk1[:], uc1.PublicKeys[1].Key)
+	copy(hk2[:], uc2.PublicKeys[1].Key)
 	err = os.addTestHost(hk1)
 	if err != nil {
 		t.Fatal(err)
@@ -127,15 +131,19 @@ func TestSQLObjectStore(t *testing.T) {
 	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
 	err = os.AddContract(rhp.Contract{
 		Revision: types.FileContractRevision{
-			ParentID: fcid1,
-		}})
+			ParentID:         fcid1,
+			UnlockConditions: uc1,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = os.AddContract(rhp.Contract{
 		Revision: types.FileContractRevision{
-			ParentID: fcid2,
-		}})
+			ParentID:         fcid2,
+			UnlockConditions: uc2,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

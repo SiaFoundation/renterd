@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
@@ -22,16 +20,17 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create random unlock conditions.
-	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
-	uc.Timelock = 192837
-
 	// Create a host for the contract.
 	hk := consensus.GeneratePrivateKey().PublicKey()
-	err = cs.RecordInteraction(hk, hostdb.Interaction{Timestamp: time.Now()})
+	err = cs.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Create random unlock conditions for the host.
+	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
+	uc.PublicKeys[1].Key = hk[:]
+	uc.Timelock = 192837
 
 	// Create a contract and set all fields.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
