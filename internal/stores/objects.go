@@ -309,16 +309,23 @@ type (
 		Shards    []dbSector `gorm:"many2many:sector_slabs;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
+	dbSectorSlabs struct {
+		DBSlabID   uint `gorm:"primaryKey"`
+		DBSectorID uint `gorm:"primaryKey"`
+	}
+
 	// dbSector describes a sector in the database. A sector can exist
 	// multiple times in the sectors table since it can belong to multiple
 	// slabs.
 	dbSector struct {
 		Model
 
-		Contracts []dbContractRHPv2 `gorm:"many2many:contract_sectors"`
+		Contracts []dbContract      `gorm:"many2many:contract_sectors"`
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
+
+func (dbSectorSlabs) TableName() string { return "sector_slabs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
@@ -479,9 +486,9 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 				}
 
 				// Look for the contract referenced by the shard.
-				var contract dbContractRHPv2
-				err = tx.Model(&dbContractRHPv2{}).
-					Where(&dbContractRHPv2{FCID: fcid}).
+				var contract dbContract
+				err = tx.Model(&dbContract{}).
+					Where(&dbContract{FCID: fcid}).
 					Take(&contract).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					continue // don't set contract
@@ -525,4 +532,26 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 		return dbObject{}, ErrObjectNotFound
 	}
 	return obj, nil
+}
+
+// TODO: Extend this to mark the returned slabs with a current timestamp to
+// avoid returning the same slabs over and over again in case they can't be
+// repaired.
+func (s *SQLStore) slabsForRepair(n int) ([]uint, error) {
+	inner := s.db.Model(&dbSectorSlabs{}).
+		Select("db_slab_id as slab_id, db_sector_id as sector_id")
+	middle := s.db.Table("(?)", inner).
+		Select("slab_id, sector_id, db_contract_id as contract_id").
+		Joins("LEFT JOIN contract_sectors ON sector_id = contract_sectors.db_sector_id")
+	outer := s.db.Table("(?)", middle).
+		Select("slab_id").
+		Joins("LEFT JOIN contracts ON contract_id = contracts.id").
+		Where("contract_id IS NULL OR good_for_upload IS 0").
+		Group("slab_id").
+		Order("COUNT(slab_id) DESC").
+		Limit(n)
+
+	var slabIDs []uint
+	err := outer.Find(&slabIDs).Error
+	return slabIDs, err
 }

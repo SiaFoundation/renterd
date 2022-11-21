@@ -2,6 +2,7 @@ package stores
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 
@@ -12,6 +13,22 @@ import (
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
+
+func newTestContract(fcid types.FileContractID, hk consensus.PublicKey) rhp.Contract {
+	uc := types.UnlockConditions{
+		PublicKeys:         make([]types.SiaPublicKey, 2),
+		SignaturesRequired: 2,
+	}
+	uc.PublicKeys[1].Algorithm = types.SignatureEd25519
+	uc.PublicKeys[1].Key = hk[:]
+
+	return rhp.Contract{
+		Revision: types.FileContractRevision{
+			ParentID:         fcid,
+			UnlockConditions: uc,
+		},
+	}
+}
 
 func TestList(t *testing.T) {
 	es := NewEphemeralObjectStore()
@@ -112,11 +129,8 @@ func TestSQLObjectStore(t *testing.T) {
 
 	// Create hosts for the contracts to avoid the foreign key constraint
 	// failing.
-	uc1, _ := types.GenerateDeterministicMultisig(2, 2, "hk1")
-	uc2, _ := types.GenerateDeterministicMultisig(2, 2, "hk2")
-	var hk1, hk2 consensus.PublicKey
-	copy(hk1[:], uc1.PublicKeys[1].Key)
-	copy(hk2[:], uc2.PublicKeys[1].Key)
+	hk1 := consensus.GeneratePrivateKey().PublicKey()
+	hk2 := consensus.GeneratePrivateKey().PublicKey()
 	err = os.addTestHost(hk1)
 	if err != nil {
 		t.Fatal(err)
@@ -129,21 +143,13 @@ func TestSQLObjectStore(t *testing.T) {
 	// Create a file contract for the object to avoid the foreign key
 	// constraint failing.
 	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
-	err = os.AddContract(rhp.Contract{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid1,
-			UnlockConditions: uc1,
-		},
-	})
+	c1 := newTestContract(fcid1, hk1)
+	c2 := newTestContract(fcid2, hk2)
+	err = os.AddContract(c1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(rhp.Contract{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid2,
-			UnlockConditions: uc2,
-		},
-	})
+	err = os.AddContract(c2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +250,7 @@ func TestSQLObjectStore(t *testing.T) {
 					Shards: []dbSector{
 						{
 							Root: obj1.Slabs[0].Shards[0].Root,
-							Contracts: []dbContractRHPv2{
+							Contracts: []dbContract{
 								{
 									HostID: 1,
 									Host: dbHost{
@@ -269,7 +275,7 @@ func TestSQLObjectStore(t *testing.T) {
 					Shards: []dbSector{
 						{
 							Root: obj1.Slabs[1].Shards[0].Root,
-							Contracts: []dbContractRHPv2{
+							Contracts: []dbContract{
 								{
 									HostID: 2,
 									Host: dbHost{
@@ -401,4 +407,110 @@ func TestSQLList(t *testing.T) {
 			t.Errorf("\nlist: %v\ngot:  %v\nwant: %v", test.prefix, got, test.want)
 		}
 	}
+}
+
+func TestFoo(t *testing.T) {
+	//os, _, _, err := newTestSQLStore()
+	os.RemoveAll("/Users/cschinnerl/Desktop/TestFoo.db")
+	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/TestFoo.db")
+	os, _, err := NewSQLStore(conn, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Prepare public keys and contract ids for a host with a good contract
+	// and a host with a bad contract.
+	hkGood := consensus.PublicKey{1}
+	hkBad := consensus.PublicKey{2}
+	fcidGood := types.FileContractID{1}
+	fcidBad := types.FileContractID{2}
+	hkDeleted := consensus.PublicKey{3}
+	fcidDeleted := types.FileContractID{3}
+
+	// Create hosts.
+	err = os.addTestHost(hkGood)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.addTestHost(hkBad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.addTestHost(hkDeleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Prepare 3 sectors:
+	// - one that is part of a good contract
+	// - one that is part of a bad contract
+	// - one that is part of no contract (because it failed to renew etc.)
+	err = os.AddContract(newTestContract(fcidGood, hkGood))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.AddContract(newTestContract(fcidBad, hkBad))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.MarkGFU(fcidBad, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.AddContract(newTestContract(fcidDeleted, hkDeleted))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sectorGood := object.Sector{
+		Host: hkGood,
+		Root: consensus.Hash256{1},
+	}
+	sectorBad := object.Sector{
+		Host: hkBad,
+		Root: consensus.Hash256{2},
+	}
+	sectorDeleted := object.Sector{
+		Host: hkDeleted,
+		Root: consensus.Hash256{3},
+	}
+
+	// Prepare used contracts.
+	usedContracts := map[consensus.PublicKey]types.FileContractID{
+		hkGood:    fcidGood,
+		hkBad:     fcidBad,
+		hkDeleted: fcidDeleted,
+	}
+
+	// Create object.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorGood,
+						sectorBad,
+						sectorDeleted,
+					},
+				},
+			},
+		},
+	}
+	if err := os.Put("foo", obj, usedContracts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the contract.
+	err = os.RemoveContract(fcidDeleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	slabIDs, err := os.slabsForRepair(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("slabIDs", slabIDs)
 }
