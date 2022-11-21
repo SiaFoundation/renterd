@@ -90,7 +90,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Insert it.
-	if err := cs.AddContract(hk, c); err != nil {
+	if err := cs.AddContract(c); err != nil {
 		t.Fatal(err)
 	}
 

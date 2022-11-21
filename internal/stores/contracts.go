@@ -338,7 +338,7 @@ func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
 }
 
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(hk consensus.PublicKey, c rhpv2.Contract) error {
+func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -374,14 +374,14 @@ func (s *SQLStore) AddContract(hk consensus.PublicKey, c rhpv2.Contract) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Find host.
 		var host dbHost
-		err := s.db.Where(&dbHost{PublicKey: hk}).
+		err := s.db.Where(&dbHost{PublicKey: c.HostKey()}).
 			Take(&host).Error
 		if err != nil {
 			return err
 		}
 
 		// Insert contract.
-		return s.db.Where(&dbHost{PublicKey: hk}).
+		return s.db.Where(&dbHost{PublicKey: c.HostKey()}).
 			Create(&dbContractRHPv2{
 				FCID:          fcid,
 				GoodForUpload: true, // new contract is always good for upload

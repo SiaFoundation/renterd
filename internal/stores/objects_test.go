@@ -127,14 +127,14 @@ func TestSQLObjectStore(t *testing.T) {
 	// Create a file contract for the object to avoid the foreign key
 	// constraint failing.
 	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
-	err = os.AddContract(hk1, rhp.Contract{
+	err = os.AddContract(rhp.Contract{
 		Revision: types.FileContractRevision{
 			ParentID: fcid1,
 		}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(hk2, rhp.Contract{
+	err = os.AddContract(rhp.Contract{
 		Revision: types.FileContractRevision{
 			ParentID: fcid2,
 		}})
