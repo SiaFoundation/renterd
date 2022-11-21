@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/rhp/v2"
@@ -115,11 +113,11 @@ func TestSQLObjectStore(t *testing.T) {
 	// Create hosts for the contracts to avoid the foreign key constraint
 	// failing.
 	hk1, hk2 := consensus.GeneratePrivateKey().PublicKey(), consensus.GeneratePrivateKey().PublicKey()
-	err = os.RecordInteraction(hk1, hostdb.Interaction{Timestamp: time.Now()})
+	err = os.addTestHost(hk1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.RecordInteraction(hk2, hostdb.Interaction{Timestamp: time.Now()})
+	err = os.addTestHost(hk2)
 	if err != nil {
 		t.Fatal(err)
 	}

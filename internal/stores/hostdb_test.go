@@ -12,6 +12,16 @@ import (
 	"go.sia.tech/siad/modules"
 )
 
+// addTestHost adds a host to the db by creating a fake interaction for it.
+func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
+	return s.RecordInteraction(hk, hostdb.Interaction{
+		Timestamp: time.Now(),
+		Type:      "foo1",
+
+		Result: []byte{1},
+	})
+}
+
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
