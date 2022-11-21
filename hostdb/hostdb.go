@@ -6,10 +6,13 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/renterd/internal/consensus"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
+
+const InteractionScan = "scan"
 
 // Announcement represents a host announcement in a given block.
 type Announcement struct {
@@ -67,6 +70,8 @@ type Host struct {
 	PublicKey     consensus.PublicKey
 	Announcements []Announcement
 	Interactions  []Interaction
+
+	Settings rhpv2.HostSettings
 }
 
 // NetAddress returns the host's last announced NetAddress, if available.
@@ -75,4 +80,20 @@ func (h *Host) NetAddress() string {
 		return ""
 	}
 	return h.Announcements[len(h.Announcements)-1].NetAddress
+}
+
+// NetAddress returns the host's last announced NetAddress, if available.
+func (h *Host) LastKnownSettings() (rhpv2.HostSettings, time.Time, bool) {
+	for i := len(h.Interactions) - 1; i >= 0; i-- {
+		if !h.Interactions[i].Success {
+			continue
+		}
+
+		var settings rhpv2.HostSettings
+		if err := json.Unmarshal(h.Interactions[i].Result, &settings); err != nil {
+			continue
+		}
+		return settings, h.Interactions[i].Timestamp, true
+	}
+	return rhpv2.HostSettings{}, time.Time{}, false
 }

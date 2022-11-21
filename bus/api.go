@@ -12,9 +12,6 @@ import (
 
 // exported types from internal/consensus
 type (
-	// A ChainIndex pairs a block's height with its ID.
-	ChainIndex = consensus.ChainIndex
-
 	// A PublicKey is an Ed25519 public key.
 	PublicKey = consensus.PublicKey
 
