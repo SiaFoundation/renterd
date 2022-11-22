@@ -313,9 +313,8 @@ type (
 
 	// dbShard is a join table between dbSlab and dbSector.
 	dbShard struct {
-		ID         uint `gorm:"primaryKey"`
-		DBSlabID   uint `gorm:"index"`
-		DBSectorID uint `gorm:"index"`
+		DBSlabID   uint `gorm:"primaryKey"`
+		DBSectorID uint `gorm:"primaryKey"`
 	}
 
 	// dbSector describes a sector in the database. A sector can exist
@@ -326,7 +325,6 @@ type (
 
 		Contracts []dbContract      `gorm:"many2many:contract_sectors"`
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
-		Slabs     []dbSlab          `gorm:"many2many:shards"`
 	}
 )
 
@@ -485,10 +483,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 
 				// Add the slab-sector link to the sector to the
 				// shards table.
-				err = tx.Create(&dbShard{
-					DBSlabID:   slab.ID,
-					DBSectorID: sector.ID,
-				}).Error
+				err = tx.Model(&slab).Association("Shards").Append(&sector)
 				if err != nil {
 					return err
 				}
@@ -507,10 +502,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 				// Add the sector-contract link to the
 				// contract_sectors table if it doesn't exist
 				// yet.
-				err = tx.FirstOrCreate(&dbContractSector{}, &dbContractSector{
-					DBContractID: contract.ID,
-					DBSectorID:   sector.ID,
-				}).Error
+				err = tx.Model(&sector).Association("Contracts").Append(&contract)
 				if err != nil {
 					return err
 				}

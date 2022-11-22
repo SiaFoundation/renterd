@@ -204,7 +204,7 @@ type (
 		HostID   uint                 `gorm:"index"`
 		Host     dbHost
 		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
-		Sectors  []dbSector             `gorm:"many2many:contract_sectors"`
+		Sectors  []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
 	}
 
 	dbContractSector struct {

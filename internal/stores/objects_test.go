@@ -3,7 +3,6 @@ package stores
 import (
 	"fmt"
 	"math"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -354,7 +353,7 @@ func TestSQLObjectStore(t *testing.T) {
 			return err
 		}
 		var ssc int64
-		if err := os.db.Table("sector_slabs").Count(&ssc).Error; err != nil {
+		if err := os.db.Table("shards").Count(&ssc).Error; err != nil {
 			return err
 		}
 		return nil
@@ -413,10 +412,7 @@ func TestSQLList(t *testing.T) {
 
 // TestSlabsForRepair tests the functionality of slabsForRepair.
 func TestSlabsForRepair(t *testing.T) {
-	//os, _, _, err := newTestSQLStore()
-	os.RemoveAll("/Users/cschinnerl/Desktop/TestFoo.db")
-	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/TestFoo.db")
-	os, _, err := NewSQLStore(conn, true)
+	os, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,17 +456,29 @@ func TestSlabsForRepair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sectorGood := object.Sector{
-		Host: hkGood,
-		Root: consensus.Hash256{1},
+	sectorGood := func() object.Sector {
+		var root consensus.Hash256
+		frand.Read(root[:])
+		return object.Sector{
+			Host: hkGood,
+			Root: root,
+		}
 	}
-	sectorBad := object.Sector{
-		Host: hkBad,
-		Root: consensus.Hash256{2},
+	sectorBad := func() object.Sector {
+		var root consensus.Hash256
+		frand.Read(root[:])
+		return object.Sector{
+			Host: hkBad,
+			Root: root,
+		}
 	}
-	sectorDeleted := object.Sector{
-		Host: hkDeleted,
-		Root: consensus.Hash256{3},
+	sectorDeleted := func() object.Sector {
+		var root consensus.Hash256
+		frand.Read(root[:])
+		return object.Sector{
+			Host: hkDeleted,
+			Root: root,
+		}
 	}
 
 	// Prepare used contracts.
@@ -490,9 +498,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorGood,
-						sectorBad,
-						sectorDeleted,
+						sectorGood(),
+						sectorBad(),
+						sectorDeleted(),
 					},
 				},
 			},
@@ -502,9 +510,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorGood,
-						sectorGood,
-						sectorDeleted,
+						sectorGood(),
+						sectorGood(),
+						sectorDeleted(),
 					},
 				},
 			},
@@ -514,9 +522,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad,
-						sectorBad,
-						sectorGood,
+						sectorBad(),
+						sectorBad(),
+						sectorGood(),
 					},
 				},
 			},
@@ -526,9 +534,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad,
-						sectorDeleted,
-						sectorGood,
+						sectorBad(),
+						sectorDeleted(),
+						sectorGood(),
 					},
 				},
 			},
@@ -538,9 +546,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorDeleted,
-						sectorDeleted,
-						sectorGood,
+						sectorDeleted(),
+						sectorDeleted(),
+						sectorGood(),
 					},
 				},
 			},
@@ -550,9 +558,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad,
-						sectorBad,
-						sectorDeleted,
+						sectorBad(),
+						sectorBad(),
+						sectorDeleted(),
 					},
 				},
 			},
