@@ -87,8 +87,8 @@ type ObjectsResponse struct {
 
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.
 type AddObjectRequest struct {
-	Object        object.Object `json:"object"`
-	UsedContracts map[consensus.PublicKey]types.FileContractID
+	Object        object.Object                                `json:"object"`
+	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
 // A Contract uniquely identifies a Sia file contract on a host, along with the
