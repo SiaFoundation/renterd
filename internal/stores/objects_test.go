@@ -2,9 +2,11 @@ package stores
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -589,12 +591,25 @@ func TestSlabsForRepair(t *testing.T) {
 	expectedSlabIDs := []uint{6, 1, 3, 4, 5, 2}
 	for i := 0; i < len(expectedSlabIDs); i++ {
 		// Check the i worst slabs.
-		slabIDs, err := os.slabsForRepair(i + 1)
+		slabIDs, err := os.slabsForRepair(i+1, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(slabIDs, expectedSlabIDs[:i+1]) {
 			t.Fatalf("wrong IDs returned: %v != %v", slabIDs, expectedSlabIDs[:i+1])
 		}
+	}
+
+	// Mark the second half of the slabs as failed. Only the first half should be
+	// returned then.
+	if err := os.MarkSlabsFailure(expectedSlabIDs[3:]); err != nil {
+		t.Fatal(err)
+	}
+	slabIDs, err := os.slabsForRepair(math.MaxInt, time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(slabIDs, expectedSlabIDs[:3]) {
+		t.Fatalf("wrong IDs returned: %v != %v", slabIDs, expectedSlabIDs[:3])
 	}
 }

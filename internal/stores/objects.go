@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -304,9 +305,10 @@ type (
 		Model
 		DBSliceID uint `gorm:"index"`
 
-		Key       []byte `gorm:"unique;NOT NULL"` // json string
-		MinShards uint8
-		Shards    []dbSector `gorm:"many2many:shards;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+		Key         []byte    `gorm:"unique;NOT NULL"` // json string
+		LastFailure time.Time `gorm:"index"`
+		MinShards   uint8
+		Shards      []dbSector `gorm:"many2many:shards;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
 	// dbShard is a join table between dbSlab and dbSector.
@@ -540,14 +542,15 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 	return obj, nil
 }
 
-// TODO: Extend this to mark the returned slabs with a current timestamp to
-// avoid returning the same slabs over and over again in case they can't be
-// repaired.
 // TODO: Should we return slabs which are below MinShards? I think so because
 // the caller should handle that and then manually delete them if necessary.
-func (s *SQLStore) slabsForRepair(n int) ([]uint, error) {
-	inner := s.db.Model(&dbShard{}).
-		Select("db_slab_id as slab_id, db_sector_id as sector_id")
+func (s *SQLStore) slabsForRepair(n int, failureCutoff time.Time) ([]uint, error) {
+	failureQuery := s.db.Model(&dbSlab{}).
+		Select("id as slab_id").
+		Where("last_failure < ?", failureCutoff.UTC())
+	inner := s.db.Table("(?)", failureQuery).
+		Select("slab_id, db_sector_id as sector_id").
+		Joins("LEFT JOIN shards ON slab_id = shards.db_slab_id")
 	middle := s.db.Table("(?)", inner).
 		Select("slab_id, sector_id, db_contract_id as contract_id").
 		Joins("LEFT JOIN contract_sectors ON sector_id = contract_sectors.db_sector_id")
@@ -562,4 +565,14 @@ func (s *SQLStore) slabsForRepair(n int) ([]uint, error) {
 	var slabIDs []uint
 	err := outer.Find(&slabIDs).Error
 	return slabIDs, err
+}
+
+// MarkSlabsFailure sets the last_failure field for the given slabs to the
+// current time.
+func (s *SQLStore) MarkSlabsFailure(slabIDs []uint) error {
+	now := time.Now().UTC()
+	return s.db.Model(&dbSlab{}).
+		Where("id in ?", slabIDs).
+		Update("last_failure", now).
+		Error
 }
