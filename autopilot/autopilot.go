@@ -1,15 +1,12 @@
 package autopilot
 
 import (
-	"net/http"
 	"time"
 
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
@@ -24,9 +21,7 @@ type Store interface {
 
 type Bus interface {
 	// wallet
-	WalletBalance() (types.Currency, error)
 	WalletAddress() (types.UnlockHash, error)
-	WalletTransactions(since time.Time, max int) ([]wallet.Transaction, error)
 	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error)
 	WalletDiscard(txn types.Transaction) error
 	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
@@ -55,6 +50,9 @@ type Bus interface {
 
 	// txpool
 	RecommendedFee() (types.Currency, error)
+
+	// consensus
+	ConsensusState() (bus.ConsensusState, error)
 }
 
 type Worker interface {
@@ -66,12 +64,22 @@ type Worker interface {
 }
 
 type Autopilot struct {
-	store     Store
-	bus       Bus
-	worker    Worker
+	store  Store
+	bus    Bus
+	worker Worker
+
+	c *contractor
+	s *scanner
+
 	masterKey [32]byte
 
+	ticker   *time.Ticker
 	stopChan chan struct{}
+}
+
+// Actions returns the autopilot actions that have occurred since the given time.
+func (ap *Autopilot) Actions(since time.Time, max int) []Action {
+	panic("unimplemented")
 }
 
 // Config returns the autopilot's current configuration.
@@ -84,80 +92,35 @@ func (ap *Autopilot) SetConfig(c Config) error {
 	return ap.store.SetConfig(c)
 }
 
-// Actions returns the autopilot actions that have occurred since the given time.
-func (ap *Autopilot) Actions(since time.Time, max int) []Action {
-	panic("unimplemented")
-}
-
 func (ap *Autopilot) Run() error {
-	if err := ap.load(); err != nil {
-		return err
-	}
+	for {
+		select {
+		case <-ap.stopChan:
+			return nil
+		case <-ap.ticker.C:
+		}
 
-	go ap.contractLoop()
-	go ap.hostScanLoop()
-	<-ap.stopChan
-	return nil // TODO
+		ap.s.tryPerformHostScan()
+		_ = ap.c.performContractMaintenance() // TODO: handle error
+	}
 }
 
 func (ap *Autopilot) Stop() {
+	ap.ticker.Stop()
 	close(ap.stopChan)
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker) (*Autopilot, error) {
-	return &Autopilot{
+func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, error) {
+	ap := &Autopilot{
 		store:  store,
 		bus:    bus,
 		worker: worker,
 
+		ticker:   time.NewTicker(tick),
 		stopChan: make(chan struct{}),
-	}, nil
-}
-
-func (ap *Autopilot) configHandlerGET(jc jape.Context) {
-	jc.Encode(ap.Config())
-}
-
-func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
-	var c Config
-	if jc.Decode(&c) == nil {
-		ap.SetConfig(c)
 	}
-}
-
-func (ap *Autopilot) actionsHandler(jc jape.Context) {
-	var since time.Time
-	max := -1
-	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
-		return
-	}
-	jc.Encode(ap.Actions(since, max))
-}
-
-func (ap *Autopilot) load() error {
-	// set the current period
-	state := ap.store.State()
-	if state.CurrentPeriod == 0 {
-		contracts := ap.store.Config().Contracts
-		state.CurrentPeriod = state.BlockHeight
-		if contracts.Period > contracts.RenewWindow {
-			state.CurrentPeriod -= contracts.RenewWindow
-		}
-
-		if err := ap.store.SetState(state); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// NewServer returns an HTTP handler that serves the renterd autopilot API.
-func NewServer(ap *Autopilot) http.Handler {
-	return jape.Mux(map[string]jape.Handler{
-		"GET    /config":  ap.configHandlerGET,
-		"PUT    /config":  ap.configHandlerPUT,
-		"GET    /actions": ap.actionsHandler,
-	})
+	ap.c = newContractor(ap)
+	ap.s = newScanner(ap)
+	return ap, nil
 }

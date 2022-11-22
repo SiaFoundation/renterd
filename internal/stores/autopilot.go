@@ -10,7 +10,6 @@ import (
 
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
 )
 
 // EphemeralAutopilotStore implements autopilot.Store in memory.
@@ -52,28 +51,7 @@ func (s *EphemeralAutopilotStore) SetState(state autopilot.State) error {
 
 // ProcessConsensusChange implements chain.Subscriber.
 func (s *EphemeralAutopilotStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, block := range cc.RevertedBlocks {
-		if block.ID() != types.GenesisID {
-			s.state.BlockHeight--
-		}
-	}
-	for _, block := range cc.AppliedBlocks {
-		if block.ID() != types.GenesisID {
-			s.state.BlockHeight++
-		}
-	}
-
-	// update current period
-	if s.state.BlockHeight >= s.state.CurrentPeriod+s.config.Contracts.Period {
-		s.state.CurrentPeriod += s.config.Contracts.Period
-	}
-
-	// update synced state
-	// TODO: might need a channel here
-	s.state.Synced = cc.Synced
+	panic("not implemented")
 }
 
 // NewEphemeralAutopilotStore returns a new EphemeralAutopilotStore.
@@ -131,7 +109,6 @@ func (s *JSONAutopilotStore) load() error {
 	}
 	s.config = p.Config
 	s.state = p.State
-	s.state.Synced = false
 	return nil
 }
 

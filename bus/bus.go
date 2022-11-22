@@ -20,6 +20,7 @@ type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
 		TipState() consensus.State
+		Synced() bool
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -103,8 +104,11 @@ func (b *Bus) syncerConnectHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) consensusTipHandler(jc jape.Context) {
-	jc.Encode(b.cm.TipState().Index)
+func (b *Bus) consensusStateHandler(jc jape.Context) {
+	jc.Encode(ConsensusState{
+		BlockHeight: b.cm.TipState().Index.Height,
+		Synced:      b.cm.Synced(),
+	})
 }
 
 func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
@@ -475,7 +479,7 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
 
-		"GET    /consensus/tip": b.consensusTipHandler,
+		"GET    /consensus/state": b.consensusStateHandler,
 
 		"GET    /txpool/transactions": b.txpoolTransactionsHandler,
 		"POST   /txpool/broadcast":    b.txpoolBroadcastHandler,

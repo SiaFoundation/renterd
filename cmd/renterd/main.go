@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/autopilot"
@@ -90,6 +91,7 @@ func main() {
 	flag.BoolVar(&busCfg.bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
 	flag.StringVar(&busCfg.gatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot API")
+	flag.DurationVar(&autopilotCfg.loopInterval, "autopilot.loopInterval", time.Minute, "with which the autopilot loop is triggered")
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")

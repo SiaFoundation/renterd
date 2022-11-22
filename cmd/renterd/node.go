@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
@@ -37,10 +38,15 @@ type autopilotConfig struct {
 	busPassword    string
 	workerAddr     string
 	workerPassword string
+	loopInterval   time.Duration
 }
 
 type chainManager struct {
 	cs modules.ConsensusSet
+}
+
+func (cm chainManager) Synced() bool {
+	return cm.cs.Synced()
 }
 
 func (cm chainManager) TipState() consensus.State {
@@ -223,7 +229,7 @@ func newAutopilot(cfg autopilotConfig, dir string) (*autopilot.Autopilot, func()
 	}
 	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
 	w := worker.NewClient(cfg.workerAddr, cfg.workerPassword)
-	a, err := autopilot.New(store, b, w)
+	a, err := autopilot.New(store, b, w, cfg.loopInterval)
 	if err != nil {
 		return nil, nil, err
 	}

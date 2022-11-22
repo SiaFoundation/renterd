@@ -32,12 +32,8 @@ type Config struct {
 }
 
 // State contains all autopilot state variables.
-// TODO: could be defined on the autopilot directly
-// TODO: synced could be a channel
 type State struct {
-	BlockHeight   uint64
 	CurrentPeriod uint64
-	Synced        bool
 }
 
 func DefaultConfig() (c Config) {
