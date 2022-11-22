@@ -7,6 +7,8 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/siad/types"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
@@ -108,6 +110,50 @@ func TestSQLObjectStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Create hosts for the contracts to avoid the foreign key constraint
+	// failing.
+	uc1, _ := types.GenerateDeterministicMultisig(2, 2, "hk1")
+	uc2, _ := types.GenerateDeterministicMultisig(2, 2, "hk2")
+	var hk1, hk2 consensus.PublicKey
+	copy(hk1[:], uc1.PublicKeys[1].Key)
+	copy(hk2[:], uc2.PublicKeys[1].Key)
+	err = os.addTestHost(hk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.addTestHost(hk2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a file contract for the object to avoid the foreign key
+	// constraint failing.
+	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
+	err = os.AddContract(rhp.Contract{
+		Revision: types.FileContractRevision{
+			ParentID:         fcid1,
+			UnlockConditions: uc1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.AddContract(rhp.Contract{
+		Revision: types.FileContractRevision{
+			ParentID:         fcid2,
+			UnlockConditions: uc2,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Define usedHosts.
+	usedHosts := map[consensus.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+	}
+
 	// Create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -118,7 +164,7 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 1,
 					Shards: []object.Sector{
 						{
-							Host: consensus.GeneratePrivateKey().PublicKey(),
+							Host: hk1,
 							Root: consensus.Hash256{1},
 						},
 					},
@@ -132,7 +178,7 @@ func TestSQLObjectStore(t *testing.T) {
 					MinShards: 2,
 					Shards: []object.Sector{
 						{
-							Host: consensus.GeneratePrivateKey().PublicKey(),
+							Host: hk2,
 							Root: consensus.Hash256{2},
 						},
 					},
@@ -145,12 +191,12 @@ func TestSQLObjectStore(t *testing.T) {
 
 	// Store it.
 	objID := "key1"
-	if err := os.Put(objID, obj1); err != nil {
+	if err := os.Put(objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := os.Put(objID, obj1); err != nil {
+	if err := os.Put(objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -173,23 +219,41 @@ func TestSQLObjectStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Set the Model fields to zero before comparing. These are set by gorm
+	// itself and contain a few timestamps which would make the following
+	// code a lot more verbose.
+	obj.Model = Model{}
+	for i := range obj.Slabs {
+		obj.Slabs[i].Model = Model{}
+		obj.Slabs[i].Slab.Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].Contracts[0].Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].Contracts[0].Host.Model = Model{}
+	}
+
 	expectedObj := dbObject{
-		ID:  objID,
-		Key: obj1Key,
+		ObjectID: objID,
+		Key:      obj1Key,
 		Slabs: []dbSlice{
 			{
-				ID:       1,
-				ObjectID: objID,
+				DBObjectID: 1,
 				Slab: dbSlab{
-					ID:        1,
+					DBSliceID: 1,
 					Key:       obj1Slab0Key,
 					MinShards: 1,
 					Shards: []dbSector{
 						{
-							ID:     1,
-							SlabID: 1,
-							Root:   obj1.Slabs[0].Shards[0].Root,
-							Host:   obj1.Slabs[0].Shards[0].Host,
+							Root: obj1.Slabs[0].Shards[0].Root,
+							Contracts: []dbContractRHPv2{
+								{
+									HostID: 1,
+									Host: dbHost{
+										PublicKey: hk1,
+									},
+									GoodForUpload: true,
+									FCID:          fcid1,
+								},
+							},
 						},
 					},
 				},
@@ -197,18 +261,24 @@ func TestSQLObjectStore(t *testing.T) {
 				Length: 100,
 			},
 			{
-				ID:       2,
-				ObjectID: objID,
+				DBObjectID: 1,
 				Slab: dbSlab{
-					ID:        2,
+					DBSliceID: 2,
 					Key:       obj1Slab1Key,
 					MinShards: 2,
 					Shards: []dbSector{
 						{
-							ID:     2,
-							SlabID: 2,
-							Root:   obj1.Slabs[1].Shards[0].Root,
-							Host:   obj1.Slabs[1].Shards[0].Host,
+							Root: obj1.Slabs[1].Shards[0].Root,
+							Contracts: []dbContractRHPv2{
+								{
+									HostID: 2,
+									Host: dbHost{
+										PublicKey: hk2,
+									},
+									GoodForUpload: true,
+									FCID:          fcid2,
+								},
+							},
 						},
 					},
 				},
@@ -234,7 +304,7 @@ func TestSQLObjectStore(t *testing.T) {
 	// second one.
 	obj1.Slabs = obj1.Slabs[1:]
 	obj1.Slabs[0].Slab.MinShards = 123
-	if err := os.Put(objID, obj1); err != nil {
+	if err := os.Put(objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = os.Get(objID)
@@ -249,8 +319,9 @@ func TestSQLObjectStore(t *testing.T) {
 	// - 1 element in the object table since we only stored and overwrote a single object
 	// - 1 element in the slabs table since we updated the object to only have 1 slab
 	// - 1 element in the slices table for the same reason
-	// - 2 elements in the sectors table because we don't delete sectors
-	countCheck := func(objCount, sliceCount, slabCount, shardCount, sectorCount int64) error {
+	// - 2 elements in the sectors table because we don't delete sectors from the sectors table
+	// - 1 element in the sector_slabs table since we got 1 slab linked to a sector
+	countCheck := func(objCount, sliceCount, slabCount, shardCount, sectorCount, sectorSlabCount int64) error {
 		tableCountCheck := func(table interface{}, tblCount int64) error {
 			var count int64
 			if err := os.db.Model(table).Count(&count).Error; err != nil {
@@ -274,10 +345,14 @@ func TestSQLObjectStore(t *testing.T) {
 		if err := tableCountCheck(&dbSector{}, sectorCount); err != nil {
 			return err
 		}
+		var ssc int64
+		if err := os.db.Table("sector_slabs").Count(&ssc).Error; err != nil {
+			return err
+		}
 		return nil
 	}
-	if err := countCheck(1, 1, 1, 1, 1); err != nil {
-		t.Fatal(err)
+	if err := countCheck(1, 1, 1, 1, 2, 1); err != nil {
+		t.Error(err)
 	}
 
 	// Delete the object. Due to the cascade this should delete everything
@@ -285,7 +360,7 @@ func TestSQLObjectStore(t *testing.T) {
 	if err := os.Delete(objID); err != nil {
 		t.Fatal(err)
 	}
-	if err := countCheck(0, 0, 0, 0, 0); err != nil {
+	if err := countCheck(0, 0, 0, 0, 2, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -306,7 +381,7 @@ func TestSQLList(t *testing.T) {
 	for _, path := range paths {
 		os.Put(path, object.Object{
 			Key: object.GenerateEncryptionKey(),
-		})
+		}, map[consensus.PublicKey]types.FileContractID{})
 	}
 	tests := []struct {
 		prefix string

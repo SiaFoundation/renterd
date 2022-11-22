@@ -12,12 +12,18 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
 type mockHost struct {
-	publicKey consensus.PublicKey
-	sectors   map[consensus.Hash256][]byte
+	contractID types.FileContractID
+	publicKey  consensus.PublicKey
+	sectors    map[consensus.Hash256][]byte
+}
+
+func (h *mockHost) Contract() types.FileContractID {
+	return h.contractID
 }
 
 func (h *mockHost) PublicKey() consensus.PublicKey {
@@ -49,9 +55,12 @@ func (h *mockHost) DeleteSectors(roots []consensus.Hash256) error {
 }
 
 func newMockHost() *mockHost {
+	var contractID types.FileContractID
+	frand.Read(contractID[:])
 	return &mockHost{
-		publicKey: consensus.GeneratePrivateKey().PublicKey(),
-		sectors:   make(map[consensus.Hash256][]byte),
+		contractID: contractID,
+		publicKey:  consensus.GeneratePrivateKey().PublicKey(),
+		sectors:    make(map[consensus.Hash256][]byte),
 	}
 }
 

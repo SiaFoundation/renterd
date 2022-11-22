@@ -274,8 +274,11 @@ func (c *Client) ObjectEntries(path string) (entries []string, err error) {
 }
 
 // AddObject stores the provided object under the given name.
-func (c *Client) AddObject(name string, o object.Object) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), o)
+func (c *Client) AddObject(name string, o object.Object, usedContract map[consensus.PublicKey]types.FileContractID) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), AddObjectRequest{
+		Object:        o,
+		UsedContracts: usedContract,
+	})
 	return
 }
 

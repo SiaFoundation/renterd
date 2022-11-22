@@ -122,6 +122,10 @@ type session struct {
 	pool       *sessionPool
 }
 
+func (s *session) Contract() types.FileContractID {
+	return s.contractID
+}
+
 func (s *session) PublicKey() consensus.PublicKey {
 	return s.hostKey
 }

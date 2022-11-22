@@ -200,30 +200,28 @@ type (
 	// Deleting a host from the db will cascade the deletion and also delete
 	// the corresponding announcements and interactions with that host.
 	dbHost struct {
-		dbCommon
+		Model
 
-		PublicKey     consensus.PublicKey `gorm:"primaryKey;type:bytes;serializer:gob"`
-		Announcements []dbAnnouncement    `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
-		Interactions  []dbInteraction     `gorm:"foreignKey:Host;references:PublicKey;OnDelete:CASCADE"`
+		PublicKey     consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		Announcements []dbAnnouncement    `gorm:"OnDelete:CASCADE"`
+		Interactions  []dbInteraction     `gorm:"OnDelete:CASCADE"`
 	}
 
 	dbAnnouncement struct {
-		dbCommon
+		Model
+		DBHostID uint `gorm:"index"`
 
-		ID          uint64              `gorm:"primaryKey"`
-		Host        consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
-		BlockHeight uint64              `gorm:"NOT NULL"`
-		BlockID     consensus.BlockID   `gorm:"NOT NULL;type:bytes;serializer:gob"`
-		Timestamp   time.Time           `gorm:"NOT NULL"`
-		NetAddress  string              `gorm:"NOT NULL"`
+		BlockHeight uint64            `gorm:"NOT NULL"`
+		BlockID     consensus.BlockID `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		Timestamp   time.Time         `gorm:"NOT NULL"`
+		NetAddress  string            `gorm:"NOT NULL"`
 	}
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
-		dbCommon
+		Model
+		DBHostID uint `gorm:"index"`
 
-		ID        uint64              `gorm:"primaryKey"`
-		Host      consensus.PublicKey `gorm:"index; NOT NULL;type:bytes;serializer:gob"`
 		Result    json.RawMessage
 		Timestamp time.Time `gorm:"index; NOT NULL"`
 		Type      string
@@ -233,9 +231,7 @@ type (
 	// known to the hostdb. It should only ever contain a single entry with
 	// the consensusInfoID primary key.
 	dbConsensusInfo struct {
-		dbCommon
-
-		ID   uint8 `gorm:"primaryKey"`
+		Model
 		CCID []byte
 	}
 )
@@ -310,7 +306,7 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	// given time.
 	var foundHosts [][]byte
 	err := db.db.Table("hosts").
-		Joins("JOIN host_interactions ON host_interactions.Host = hosts.Public_Key").
+		Joins("JOIN host_interactions ON host_interactions.db_host_id = hosts.ID").
 		Select("Public_key").
 		Group("Public_Key").
 		Having("MAX(Timestamp) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
@@ -341,13 +337,14 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
 	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Create a host if it doesn't exist yet.
-		if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
+		var host dbHost
+		if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
 			return err
 		}
 
 		// Create an interaction.
 		return tx.Create(&dbInteraction{
-			Host:      hostKey,
+			DBHostID:  host.ID,
 			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
 			Type:      hi.Type,
 			Result:    hi.Result,
@@ -388,7 +385,11 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		if err != nil {
 			return err
 		}
-		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{ID: consensusInfoID}).Update("CCID", cc.ID[:]).Error
+		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
+			Model: Model{
+				ID: consensusInfoID,
+			},
+		}).Update("CCID", cc.ID[:]).Error
 	})
 	if err != nil {
 		log.Fatalln("Failed to apply consensus change to hostdb", err)
@@ -397,13 +398,14 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
 	// Create a host if it doesn't exist yet.
-	if err := tx.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hostKey}).Error; err != nil {
+	var host dbHost
+	if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
 		return err
 	}
 
 	// Create the announcement.
 	return tx.Create(&dbAnnouncement{
-		Host:        hostKey,
+		DBHostID:    host.ID,
 		BlockHeight: a.Index.Height,
 		BlockID:     a.Index.ID,
 		Timestamp:   a.Timestamp.UTC(), // explicitly store timestamp as UTC

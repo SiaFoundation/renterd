@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
+	"go.sia.tech/siad/types"
 )
 
 type server struct {
@@ -148,7 +149,7 @@ func (s *server) slabsUploadHandler(jc jape.Context) {
 	}
 
 	data := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
-	slab, err := s.w.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts)
+	slab, err := s.w.UploadSlab(jc.Request.Context(), data, sur.MinShards, sur.TotalShards, sur.CurrentHeight, sur.Contracts, make(map[consensus.PublicKey]types.FileContractID))
 	if jc.Check("couldn't upload slab", err) != nil {
 		return
 	}

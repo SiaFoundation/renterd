@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
@@ -19,8 +20,16 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create random unlock conditions.
+	// Create a host for the contract.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	err = cs.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create random unlock conditions for the host.
 	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
+	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
 	// Create a contract and set all fields.
@@ -140,5 +149,14 @@ func TestSQLContractStore(t *testing.T) {
 	}
 	if err := tableCountCheck(&dbValidSiacoinOutput{}, 0); err != nil {
 		t.Fatal(err)
+	}
+
+	// Check join table count as well.
+	var count int64
+	if err := cs.db.Table("contract_sectors").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected %v objects in contract_sectors but got %v", 0, count)
 	}
 }

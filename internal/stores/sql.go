@@ -11,12 +11,12 @@ import (
 )
 
 type (
-
-	// dbCommon specifies all fields that every table in the database should have.
-	dbCommon struct {
+	// Model defines the common fields of every table. Same as Model
+	// but excludes soft deletion since it breaks cascading deletes.
+	Model struct {
+		ID        uint `gorm:"primarykey"`
 		CreatedAt time.Time
 		UpdatedAt time.Time
-		DeletedAt gorm.DeletedAt `gorm:"index"`
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
@@ -61,7 +61,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 			// bus.ContractStore tables
 			&dbContractRHPv2{},
 			&dbFileContractRevision{},
-			&dbTransactionSignature{},
 			&dbValidSiacoinOutput{},
 			&dbMissedSiacoinOutput{},
 
@@ -91,9 +90,11 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 
 	// Get latest consensus change ID or init db.
 	var ci dbConsensusInfo
-	err = db.Where(&dbConsensusInfo{ID: consensusInfoID}).
+	err = db.Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
 		Attrs(dbConsensusInfo{
-			ID:   consensusInfoID,
+			Model: Model{
+				ID: consensusInfoID,
+			},
 			CCID: modules.ConsensusChangeBeginning[:],
 		}).
 		FirstOrCreate(&ci).Error

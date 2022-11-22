@@ -12,6 +12,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -279,31 +280,20 @@ func NewJSONObjectStore(dir string) (*JSONObjectStore, error) {
 type (
 	// dbObject describes an object.Object in the database.
 	dbObject struct {
-		dbCommon
+		Model
 
-		// ID uniquely identifies an Object within the database. Since
-		// this ID is also exposed via the API it's a string for
-		// convenience.
-		ID string `gorm:"primaryKey"`
-
-		// Object related fields.
-		Key   []byte
-		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE;foreignKey:ObjectID;references:ID"` // CASCADE to delete slices too
+		Key      []byte
+		ObjectID string    `gorm:"index;unique"`
+		Slabs    []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
 	}
 
 	// dbSlice describes a reference to a object.Slab in the database.
 	dbSlice struct {
-		dbCommon
-
-		// ID uniquely identifies a slice in the db.
-		ID uint64 `gorm:"primaryKey"`
-
-		// ObjectID identifies the object the slice belongs to. It is
-		// the foreign key of the object table.
-		ObjectID string `gorm:"index;NOT NULL"`
+		Model
+		DBObjectID uint `gorm:"index"`
 
 		// Slice related fields.
-		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE;foreignKey:ID"` // CASCADE to delete slabs too
+		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slabs too
 		Offset uint32
 		Length uint32
 	}
@@ -311,32 +301,22 @@ type (
 	// dbSlab describes a object.Slab in the database.
 	// NOTE: A Slab is uniquely identified by its key.
 	dbSlab struct {
-		dbCommon
+		Model
+		DBSliceID uint `gorm:"index"`
 
-		ID        uint64 `gorm:"primaryKey"`
 		Key       []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards uint8
-		Shards    []dbSector `gorm:"constraint:OnDelete:CASCADE;foreignKey:SlabID;references:ID"` // CASCADE to delete shards too
+		Shards    []dbSector `gorm:"many2many:sector_slabs;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
 	// dbSector describes a sector in the database. A sector can exist
 	// multiple times in the sectors table since it can belong to multiple
 	// slabs.
 	dbSector struct {
-		dbCommon
+		Model
 
-		ID     uint64 `gorm:"primaryKey"`
-		SlabID uint64 `gorm:"index;NOT NULL"`
-
-		// Root uniquely identifies a sector and is therefore the primary key.
-		Root consensus.Hash256 `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
-
-		// Host is the key of the host that stores the sector.
-		// TODO: once we migrate the contract store over to a relational
-		// db as well, we might want to put the contract ID here and
-		// have a contract table with a mapping of contract ID to host.
-		// That makes for better migrations.
-		Host consensus.PublicKey `gorm:"index;NOT NULL;type:bytes;serializer:gob"`
+		Contracts []dbContractRHPv2 `gorm:"many2many:contract_sectors"`
+		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
 
@@ -377,7 +357,14 @@ func (o dbObject) convert() (object.Object, error) {
 			Length: sl.Length,
 		}
 		for j, sh := range sl.Slab.Shards {
-			obj.Slabs[i].Shards[j].Host = sh.Host
+			// Return first contract that's good for upload.
+			for _, c := range sh.Contracts {
+				if !c.GoodForUpload {
+					continue
+				}
+				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
+				break
+			}
 			obj.Slabs[i].Shards[j].Root = sh.Root
 		}
 	}
@@ -390,8 +377,8 @@ func (s *SQLStore) List(path string) ([]string, error) {
 		panic("path must end in /")
 	}
 
-	inner := s.db.Model(&dbObject{}).Select("SUBSTR(id, ?) AS trimmed", len(path)+1).
-		Where("id LIKE ?", path+"%")
+	inner := s.db.Model(&dbObject{}).Select("SUBSTR(object_id, ?) AS trimmed", len(path)+1).
+		Where("object_id LIKE ?", path+"%")
 	middle := s.db.Table("(?)", inner).
 		Select("trimmed, INSTR(trimmed, ?) AS slashindex", "/")
 	outer := s.db.Table("(?)", middle).
@@ -416,7 +403,17 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLStore) Put(key string, o object.Object) error {
+func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
+	// Sanity check input.
+	for _, ss := range o.Slabs {
+		for _, shard := range ss.Shards {
+			_, exists := usedContracts[shard.Host]
+			if !exists {
+				return fmt.Errorf("missing contract id for host pubkey %v", shard.Host)
+			}
+		}
+	}
+
 	// Put is ACID.
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
@@ -431,21 +428,23 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 		if err != nil {
 			return err
 		}
-		err = tx.Create(&dbObject{
-			ID:  key,
-			Key: objKey,
-		}).Error
+		obj := dbObject{
+			ObjectID: key,
+			Key:      objKey,
+		}
+		err = tx.Create(&obj).Error
 		if err != nil {
 			return err
 		}
 
 		for _, ss := range o.Slabs {
 			// Create Slice.
-			err = tx.Create(&dbSlice{
-				ObjectID: key,
-				Offset:   ss.Offset,
-				Length:   ss.Length,
-			}).Error
+			slice := dbSlice{
+				DBObjectID: obj.ID,
+				Offset:     ss.Offset,
+				Length:     ss.Length,
+			}
+			err = tx.Create(&slice).Error
 			if err != nil {
 				return err
 			}
@@ -457,6 +456,7 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 			}
 			var slab dbSlab
 			err = tx.FirstOrCreate(&slab, &dbSlab{
+				DBSliceID: slice.ID,
 				Key:       slabKey,
 				MinShards: ss.MinShards,
 			}).Error
@@ -465,12 +465,41 @@ func (s *SQLStore) Put(key string, o object.Object) error {
 			}
 
 			for _, shard := range ss.Shards {
-				// Create shard.
-				err = tx.Create(&dbSector{
-					SlabID: slab.ID,
-					Host:   shard.Host,
-					Root:   shard.Root,
+				// Translate pubkey to contract.
+				fcid := usedContracts[shard.Host]
+
+				// Create sector if it doesn't exist yet.
+				var sector dbSector
+				err = tx.FirstOrCreate(&sector, &dbSector{
+					Root: shard.Root,
 				}).Error
+				if err != nil {
+					return err
+				}
+
+				// Append the sector to the slab.
+				err = tx.Model(&slab).
+					Association("Shards").
+					Append(&sector)
+				if err != nil {
+					return err
+				}
+
+				// Look for the contract referenced by the shard.
+				var contract dbContractRHPv2
+				err = tx.Model(&dbContractRHPv2{}).
+					Where(&dbContractRHPv2{FCID: fcid}).
+					Take(&contract).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue // don't set contract
+				} else if err != nil {
+					return err
+				}
+
+				// Append the contract to the sector.
+				err = tx.Model(&sector).
+					Association("Contracts").
+					Append(&contract)
 				if err != nil {
 					return err
 				}
@@ -487,15 +516,14 @@ func (s *SQLStore) Delete(key string) error {
 
 // deleteObject deletes an object from the store.
 func deleteObject(tx *gorm.DB, key string) error {
-	return tx.Delete(&dbObject{ID: key}).Error
+	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
 }
 
 // get retrieves an object from the database.
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
-	tx := s.db.Where(&dbObject{ID: key}).
-		Preload("Slabs").
-		Preload("Slabs.Slab.Shards").
+	tx := s.db.Where(&dbObject{ObjectID: key}).
+		Preload("Slabs.Slab.Shards.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound

@@ -39,8 +39,7 @@ func (s *SQLStore) SetHostSet(name string, hosts []consensus.PublicKey) error {
 	hostSetEntries := make([]dbHostSetEntry, len(hosts))
 	for i, pk := range hosts {
 		hostSetEntries[i] = dbHostSetEntry{
-			HostSetName: name,
-			PublicKey:   pk,
+			PublicKey: pk,
 		}
 	}
 	return s.db.Create(&dbHostSet{
