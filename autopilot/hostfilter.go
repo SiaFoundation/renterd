@@ -40,18 +40,18 @@ func (r filterResult) filtered() bool {
 	return r.reason != ""
 }
 
+func (r *filterResult) setNotGFU(reason string) {
+	r.reason = reason
+	r.transformer = func(m *bus.ContractMetadata) {
+		m.GoodForUpload = false
+	}
+}
+
 func (r *filterResult) setNotGFUnotGFR(reason string) {
 	r.reason = reason
 	r.transformer = func(m *bus.ContractMetadata) {
 		m.GoodForUpload = false
 		m.GoodForRenew = false
-	}
-}
-
-func (r *filterResult) setNotGFU(reason string) {
-	r.reason = reason
-	r.transformer = func(m *bus.ContractMetadata) {
-		m.GoodForUpload = false
 	}
 }
 

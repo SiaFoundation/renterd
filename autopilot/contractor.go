@@ -494,12 +494,17 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		return nil, err
 	}
 
+	// loop variables
+	ipNets := make(map[string]struct{})
+
 	// apply host filter
 	filterFn := hostFilter(
 		cfg.isWhiteListed,
 		cfg.isBlackListed,
 		// TODO: isGouging,
+		isLowScore(cfg, 0), // TODO: set threshold
 		isOffline,
+		isRedundantIP(ipNets),
 	)
 	hosts = hosts[:0]
 	for _, h := range hosts {
@@ -518,8 +523,10 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		ageScore,
 		collateralScore(cfg),
 		interactionScore,
+		settingsScore(cfg),
 		uptimeScore,
 		versionScore,
+		// TODO: priceScore
 	)
 	scores := make([]float64, len(hosts))
 	for i, h := range hosts {
