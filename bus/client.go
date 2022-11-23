@@ -240,10 +240,16 @@ func (c *Client) ActiveContracts(maxEndHeight uint64) ([]Contract, error) {
 func (c *Client) AllContracts(currentPeriod uint64) ([]Contract, error) {
 	panic("unimplemented")
 }
+func (c *Client) CandidateHosts() ([]hostdb.Host, error) {
+	panic("unimplemented")
+}
 func (c *Client) ContractData(types.FileContractID) (rhpv2.Contract, error) {
 	panic("unimplemented")
 }
-func (c *Client) ContractHistory(types.FileContractID, uint64) ([]Contract, error) {
+func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {
+	panic("unimplemented")
+}
+func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error) {
 	panic("unimplemented")
 }
 func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {

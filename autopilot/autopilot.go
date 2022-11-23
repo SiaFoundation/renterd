@@ -9,6 +9,7 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
+	"golang.org/x/crypto/blake2b"
 )
 
 type Store interface {
@@ -28,6 +29,7 @@ type Bus interface {
 
 	// hostdb
 	AllHosts() ([]hostdb.Host, error)
+	CandidateHosts() ([]hostdb.Host, error)
 	Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
@@ -38,8 +40,10 @@ type Bus interface {
 	ActiveContracts(maxEndHeight uint64) ([]bus.Contract, error)
 
 	ContractData(cID types.FileContractID) (rhpv2.Contract, error)
-	ContractHistory(cID types.FileContractID, currentPeriod uint64) ([]bus.Contract, error)
+	ContractMetadata(cID types.FileContractID) (bus.ContractMetadata, error)
 	UpdateContractMetadata(cID types.FileContractID, metadata bus.ContractMetadata) error
+
+	SpendingHistory(cID types.FileContractID, currentPeriod uint64) ([]bus.ContractSpending, error)
 
 	AcquireContractLock(cID types.FileContractID) (types.FileContractRevision, error)
 	ReleaseContractLock(cID types.FileContractID) error
@@ -123,4 +127,20 @@ func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, e
 	ap.c = newContractor(ap)
 	ap.s = newScanner(ap)
 	return ap, nil
+}
+
+// TODO: deriving the renter key from the host key using the master key only
+// works if we persist a hash of the renter's master key in the database and
+// compare it on startup, otherwise there's no way of knowing the derived key is
+// usuable
+//
+// TODO: instead of deriving a renter key use a randomly generated salt so we're
+// not limited to one key per host
+func (ap *Autopilot) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(ap.masterKey[:], hostKey[:]...))
+	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }

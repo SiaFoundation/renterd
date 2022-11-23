@@ -107,18 +107,33 @@ type AddObjectRequest struct {
 // A Contract uniquely identifies a Sia file contract on a host, along with the
 // host's IP.
 type Contract struct {
+	ID          types.FileContractID `json:"id"`
 	HostKey     PublicKey            `json:"hostKey"`
 	HostIP      string               `json:"hostIP"`
-	ID          types.FileContractID `json:"id"`
 	StartHeight uint64               `json:"startHeight"`
 	EndHeight   uint64               `json:"endHeight"`
-	Metadata    ContractMetadata     `json:"metadata"`
 }
 
 // ContractMetadata contains all metadata for a contract.
 type ContractMetadata struct {
-	RenewedFrom types.FileContractID `json:"renewedFrom"`
-	Spending    ContractSpending     `json:"spending"`
+	ParentID      types.FileContractID `json:"parentID"`
+	Spending      ContractSpending     `json:"spending"`
+	GoodForUpload bool                 `json:"goodForUpload"`
+	GoodForRenew  bool                 `json:"goodForRenew"`
+	TotalCost     types.Currency       `json:"totalCost"`
+}
+
+type ContractMetadataTransformer = func(m *ContractMetadata) bool
+
+func (m *ContractMetadata) Apply(t func(m *ContractMetadata)) (transformed bool) {
+	defer func() {
+		gfu := m.GoodForUpload
+		gfr := m.GoodForRenew
+		transformed = (!m.GoodForUpload && gfu) || (!m.GoodForRenew && gfr)
+	}()
+
+	t(m)
+	return
 }
 
 // ContractSpending contains all spending details for a contract.
