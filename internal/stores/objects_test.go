@@ -233,9 +233,10 @@ func TestSQLObjectStore(t *testing.T) {
 	for i := range obj.Slabs {
 		obj.Slabs[i].Model = Model{}
 		obj.Slabs[i].Slab.Model = Model{}
-		obj.Slabs[i].Slab.Shards[0].Model = Model{}
-		obj.Slabs[i].Slab.Shards[0].Contracts[0].Model = Model{}
-		obj.Slabs[i].Slab.Shards[0].Contracts[0].Host.Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].ID = 0
+		obj.Slabs[i].Slab.Shards[0].DBSector.Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].DBSector.Contracts[0].Model = Model{}
+		obj.Slabs[i].Slab.Shards[0].DBSector.Contracts[0].Host.Model = Model{}
 	}
 
 	expectedObj := dbObject{
@@ -248,17 +249,21 @@ func TestSQLObjectStore(t *testing.T) {
 					DBSliceID: 1,
 					Key:       obj1Slab0Key,
 					MinShards: 1,
-					Shards: []dbSector{
+					Shards: []dbShard{
 						{
-							Root: obj1.Slabs[0].Shards[0].Root,
-							Contracts: []dbContract{
-								{
-									HostID: 1,
-									Host: dbHost{
-										PublicKey: hk1,
+							DBSlabID:   1,
+							DBSectorID: 1,
+							DBSector: dbSector{
+								Root: obj1.Slabs[0].Shards[0].Root,
+								Contracts: []dbContract{
+									{
+										HostID: 1,
+										Host: dbHost{
+											PublicKey: hk1,
+										},
+										IsGood: true,
+										FCID:   fcid1,
 									},
-									IsGood: true,
-									FCID:   fcid1,
 								},
 							},
 						},
@@ -273,17 +278,21 @@ func TestSQLObjectStore(t *testing.T) {
 					DBSliceID: 2,
 					Key:       obj1Slab1Key,
 					MinShards: 2,
-					Shards: []dbSector{
+					Shards: []dbShard{
 						{
-							Root: obj1.Slabs[1].Shards[0].Root,
-							Contracts: []dbContract{
-								{
-									HostID: 2,
-									Host: dbHost{
-										PublicKey: hk2,
+							DBSlabID:   2,
+							DBSectorID: 2,
+							DBSector: dbSector{
+								Root: obj1.Slabs[1].Shards[0].Root,
+								Contracts: []dbContract{
+									{
+										HostID: 2,
+										Host: dbHost{
+											PublicKey: hk2,
+										},
+										IsGood: true,
+										FCID:   fcid2,
 									},
-									IsGood: true,
-									FCID:   fcid2,
 								},
 							},
 						},
@@ -456,29 +465,17 @@ func TestSlabsForRepair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sectorGood := func() object.Sector {
-		var root consensus.Hash256
-		frand.Read(root[:])
-		return object.Sector{
-			Host: hkGood,
-			Root: root,
-		}
+	sectorGood := object.Sector{
+		Host: hkGood,
+		Root: consensus.Hash256{1},
 	}
-	sectorBad := func() object.Sector {
-		var root consensus.Hash256
-		frand.Read(root[:])
-		return object.Sector{
-			Host: hkBad,
-			Root: root,
-		}
+	sectorBad := object.Sector{
+		Host: hkBad,
+		Root: consensus.Hash256{2},
 	}
-	sectorDeleted := func() object.Sector {
-		var root consensus.Hash256
-		frand.Read(root[:])
-		return object.Sector{
-			Host: hkDeleted,
-			Root: root,
-		}
+	sectorDeleted := object.Sector{
+		Host: hkDeleted,
+		Root: consensus.Hash256{3},
 	}
 
 	// Prepare used contracts.
@@ -498,9 +495,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorGood(),
-						sectorBad(),
-						sectorDeleted(),
+						sectorGood,
+						sectorBad,
+						sectorDeleted,
 					},
 				},
 			},
@@ -510,9 +507,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorGood(),
-						sectorGood(),
-						sectorDeleted(),
+						sectorGood,
+						sectorGood,
+						sectorDeleted,
 					},
 				},
 			},
@@ -522,9 +519,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad(),
-						sectorBad(),
-						sectorGood(),
+						sectorBad,
+						sectorBad,
+						sectorGood,
 					},
 				},
 			},
@@ -534,9 +531,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad(),
-						sectorDeleted(),
-						sectorGood(),
+						sectorBad,
+						sectorDeleted,
+						sectorGood,
 					},
 				},
 			},
@@ -546,9 +543,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorDeleted(),
-						sectorDeleted(),
-						sectorGood(),
+						sectorDeleted,
+						sectorDeleted,
+						sectorGood,
 					},
 				},
 			},
@@ -558,9 +555,9 @@ func TestSlabsForRepair(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad(),
-						sectorBad(),
-						sectorDeleted(),
+						sectorBad,
+						sectorBad,
+						sectorDeleted,
 					},
 				},
 			},

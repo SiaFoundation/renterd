@@ -308,13 +308,15 @@ type (
 		Key         []byte    `gorm:"unique;NOT NULL"` // json string
 		LastFailure time.Time `gorm:"index"`
 		MinShards   uint8
-		Shards      []dbSector `gorm:"many2many:shards;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
 	// dbShard is a join table between dbSlab and dbSector.
 	dbShard struct {
-		DBSlabID   uint `gorm:"primaryKey"`
-		DBSectorID uint `gorm:"primaryKey"`
+		ID         uint `gorm:"primaryKey"`
+		DBSlabID   uint `gorm:"index"`
+		DBSector   dbSector
+		DBSectorID uint `gorm:"index"`
 	}
 
 	// dbSector describes a sector in the database. A sector can exist
@@ -369,14 +371,14 @@ func (o dbObject) convert() (object.Object, error) {
 		}
 		for j, sh := range sl.Slab.Shards {
 			// Return first contract that's good for upload.
-			for _, c := range sh.Contracts {
+			for _, c := range sh.DBSector.Contracts {
 				if !c.IsGood {
 					continue
 				}
 				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
 				break
 			}
-			obj.Slabs[i].Shards[j].Root = sh.Root
+			obj.Slabs[i].Shards[j].Root = sh.DBSector.Root
 		}
 	}
 	return obj, nil
@@ -416,24 +418,13 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 // Put implements the bus.ObjectStore interface.
 func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
 	// Sanity check input.
-	for i, ss := range o.Slabs {
-		roots := make(map[consensus.Hash256]struct{})
-		for j, shard := range ss.Shards {
+	for _, ss := range o.Slabs {
+		for _, shard := range ss.Shards {
 			// Verify that all hosts have a contract.
 			_, exists := usedContracts[shard.Host]
 			if !exists {
 				return fmt.Errorf("missing contract id for host pubkey %v", shard.Host)
 			}
-			// Verify that no slab contains the same sector twice.
-			// This should never be the case unless encryption is
-			// disabled. Once we support plaintext uploads, we will
-			// need to update the db to handle this edge case
-			// correctly.
-			_, exists = roots[shard.Root]
-			if exists {
-				return fmt.Errorf("duplicate root found for slab %v at shard %v", i, j)
-			}
-			roots[shard.Root] = struct{}{}
 		}
 	}
 
@@ -502,7 +493,10 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 
 				// Add the slab-sector link to the sector to the
 				// shards table.
-				err = tx.Model(&slab).Association("Shards").Append(&sector)
+				err = tx.Create(&dbShard{
+					DBSlabID:   slab.ID,
+					DBSectorID: sector.ID,
+				}).Error
 				if err != nil {
 					return err
 				}
@@ -545,7 +539,7 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.Slab.Shards.Contracts.Host").
+		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound
