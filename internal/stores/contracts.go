@@ -404,7 +404,7 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 		return s.db.Where(&dbHost{PublicKey: c.HostKey()}).
 			Create(&dbContract{
 				FCID:     fcid,
-				IsGood:   true, // new contract is always good for upload
+				IsGood:   true, // new contracts always start as good
 				HostID:   host.ID,
 				Revision: revision,
 			}).Error

@@ -416,12 +416,24 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 // Put implements the bus.ObjectStore interface.
 func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
 	// Sanity check input.
-	for _, ss := range o.Slabs {
-		for _, shard := range ss.Shards {
+	for i, ss := range o.Slabs {
+		roots := make(map[consensus.Hash256]struct{})
+		for j, shard := range ss.Shards {
+			// Verify that all hosts have a contract.
 			_, exists := usedContracts[shard.Host]
 			if !exists {
 				return fmt.Errorf("missing contract id for host pubkey %v", shard.Host)
 			}
+			// Verify that no slab contains the same sector twice.
+			// This should never be the case unless encryption is
+			// disabled. Once we support plaintext uploads, we will
+			// need to update the db to handle this edge case
+			// correctly.
+			_, exists = roots[shard.Root]
+			if exists {
+				return fmt.Errorf("duplicate root found for slab %v at shard %v", i, j)
+			}
+			roots[shard.Root] = struct{}{}
 		}
 	}
 
