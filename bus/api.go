@@ -21,6 +21,12 @@ type (
 	PrivateKey = consensus.PrivateKey
 )
 
+// ConsensusState holds the current blockheight and whether we are synced or not.
+type ConsensusState struct {
+	BlockHeight uint64
+	Synced      bool
+}
+
 // for encoding/decoding time.Time values in API params
 type paramTime time.Time
 
@@ -45,6 +51,13 @@ type WalletSignRequest struct {
 	Transaction   types.Transaction   `json:"transaction"`
 	ToSign        []types.OutputID    `json:"toSign"`
 	CoveredFields types.CoveredFields `json:"coveredFields"`
+}
+
+// WalletRedistributeRequest is the request type for the /wallet/redistribute
+// endpoint.
+type WalletRedistributeRequest struct {
+	Amount  types.Currency `json:"amount"`
+	Outputs int            `json:"outputs"`
 }
 
 // WalletPrepareFormRequest is the request type for the /wallet/prepare/form
@@ -87,8 +100,8 @@ type ObjectsResponse struct {
 
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.
 type AddObjectRequest struct {
-	Object        object.Object `json:"object"`
-	UsedContracts map[consensus.PublicKey]types.FileContractID
+	Object        object.Object                                `json:"object"`
+	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
 // A Contract uniquely identifies a Sia file contract on a host, along with the

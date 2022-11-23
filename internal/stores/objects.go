@@ -415,6 +415,16 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 
 // Put implements the bus.ObjectStore interface.
 func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
+	// Sanity check input.
+	for _, ss := range o.Slabs {
+		for _, shard := range ss.Shards {
+			_, exists := usedContracts[shard.Host]
+			if !exists {
+				return fmt.Errorf("missing contract id for host pubkey %v", shard.Host)
+			}
+		}
+	}
+
 	// Put is ACID.
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
@@ -467,10 +477,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 
 			for _, shard := range ss.Shards {
 				// Translate pubkey to contract.
-				fcid, exists := usedContracts[shard.Host]
-				if !exists {
-					return fmt.Errorf("error converting host pubkey %v to contract id", shard.Host)
-				}
+				fcid := usedContracts[shard.Host]
 
 				// Create sector if it doesn't exist yet.
 				var sector dbSector

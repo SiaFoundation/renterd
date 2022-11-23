@@ -30,9 +30,10 @@ func (c *Client) SyncerConnect(addr string) (err error) {
 	return
 }
 
-// ConsensusTip returns the current tip index.
-func (c *Client) ConsensusTip() (resp ChainIndex, err error) {
-	err = c.c.GET("/consensus/tip", &resp)
+// ConsensusState returns the current block height and whether the node is
+// synced.
+func (c *Client) ConsensusState() (resp ConsensusState, err error) {
+	err = c.c.GET("/consensus/state", &resp)
 	return
 }
 
@@ -94,6 +95,18 @@ func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf 
 		CoveredFields: cf,
 	}
 	return c.c.POST("/wallet/sign", req, txn)
+}
+
+// WalletRedistribute returns a signed transaction that redistributes the money
+// in the wallet in the desired number of outputs of given amount.
+func (c *Client) WalletRedistribute(outputs int, amount types.Currency) (txn types.Transaction, err error) {
+	req := WalletRedistributeRequest{
+		Amount:  amount,
+		Outputs: outputs,
+	}
+
+	err = c.c.POST("/wallet/redistribute", req, &txn)
+	return
 }
 
 // WalletDiscard discards the provided txn, make its inputs usable again. This

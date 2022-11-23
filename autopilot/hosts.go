@@ -13,56 +13,24 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
+	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 )
 
-func (ap *Autopilot) hostScanLoop() {
-	// TODO: initial scan with much shorter
-	for {
-		select {
-		case <-ap.stopChan:
-			return
-		case <-time.After(time.Minute):
-			// scan up to 10 hosts that we haven't interacted with in at least 1 week
-			hosts, err := ap.bus.Hosts(time.Now().Add(-7*24*time.Hour), 10)
-			if err != nil {
-				return
-			}
-			type res struct {
-				hostKey  consensus.PublicKey
-				settings rhpv2.HostSettings
-				err      error
-			}
-			resChan := make(chan res)
-			for _, h := range hosts {
-				go func(h hostdb.Host) {
-					scan, err := ap.worker.RHPScan(h.PublicKey, h.NetAddress())
-					resChan <- res{h.PublicKey, scan.Settings, err}
-				}(h)
-			}
-			for range hosts {
-				r := <-resChan
-				if r.err != nil {
-					err := ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
-						Timestamp: time.Now(),
-						Type:      "scan",
-						Success:   false,
-						Result:    json.RawMessage(`{"error": "` + r.err.Error() + `"}`),
-					})
-					_ = err // TODO
-				} else {
-					js, _ := json.Marshal(r.settings)
-					err := ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
-						Timestamp: time.Now(),
-						Type:      "scan",
-						Success:   true,
-						Result:    json.RawMessage(js),
-					})
-					_ = err // TODO
-				}
-			}
-		}
+// TODO: deriving the renter key from the host key using the master key only
+// works if we persist a hash of the renter's master key in the database and
+// compare it on startup, otherwise there's no way of knowing the derived key is
+// usuable
+//
+// TODO: instead of deriving a renter key use a randomly generated salt so we're
+// not limited to one key per host
+func (ap *Autopilot) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(ap.masterKey[:], hostKey[:]...))
+	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
 	}
+	return pk
 }
 
 func (ap *Autopilot) hostsForContracts(n int) ([]consensus.PublicKey, error) {
