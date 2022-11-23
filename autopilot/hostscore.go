@@ -31,8 +31,6 @@ const (
 
 type scoreFn func(h host) float64
 
-func noopscore(h host) float64 { return 1 }
-
 func HostScore(scoreFns ...scoreFn) scoreFn {
 	if len(scoreFns) == 0 {
 		return noopscore
@@ -44,6 +42,8 @@ func HostScore(scoreFns ...scoreFn) scoreFn {
 		return
 	}
 }
+
+func noopscore(h host) float64 { return 1 }
 
 func ageScore(h host) float64 {
 	const day = 24 * time.Hour

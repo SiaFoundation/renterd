@@ -40,7 +40,7 @@ func (c *contractor) performContractMaintenance() error {
 		return nil
 	}
 
-	// re-use same state and cfg in every iteration
+	// re-use same state and config in every iteration
 	cfg := c.ap.store.Config()
 	state := c.ap.store.State()
 
@@ -99,8 +99,9 @@ func (c *contractor) runContractChecks(cfg Config, blockHeight uint64) error {
 		return err
 	}
 
-	numActive := uint64(len(active))
+	// loop variables
 	ipNets := make(map[string]struct{})
+	numActive := uint64(len(active))
 
 	// run checks on the contracts individually
 	for _, contract := range active {
@@ -538,16 +539,13 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 	return selected, nil
 }
 
-// host is a convenience type that bundles host info and contract info
-//
-// TODO: bus should expose this as a single DTO
+// host is a convenience type that bundles host and contract info
 type host struct {
 	hostdb.Host
 	rhpv2.Contract
 }
 
-// TODO: this is not ideal, bus should expose methods that return all host info
-// in a single call
+// TODO: bus should expose all data in single call
 func (c *contractor) host(contract bus.Contract) (host, error) {
 	h, err := c.ap.bus.Host(contract.HostKey)
 	if err != nil {

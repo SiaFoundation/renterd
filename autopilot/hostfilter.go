@@ -182,7 +182,7 @@ func isUpForRenewal(cfg Config, blockHeight uint64) filter {
 
 func (c *Config) isBlackListed(h host) (result filterResult) {
 	for _, host := range c.Hosts.Blacklist {
-		if h.CorrespondsTo(host) {
+		if h.IsHost(host) {
 			result.setNotGFUnotGFR("host is blacklisted")
 			break
 		}
@@ -194,7 +194,7 @@ func (c *Config) isWhiteListed(h host) (result filterResult) {
 	if len(c.Hosts.Whitelist) > 0 {
 		var found bool
 		for _, host := range c.Hosts.Whitelist {
-			if h.CorrespondsTo(host) {
+			if h.IsHost(host) {
 				found = true
 				break
 			}

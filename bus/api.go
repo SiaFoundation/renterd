@@ -123,16 +123,14 @@ type ContractMetadata struct {
 	TotalCost     types.Currency       `json:"totalCost"`
 }
 
-type ContractMetadataTransformer = func(m *ContractMetadata) bool
-
-func (m *ContractMetadata) Apply(t func(m *ContractMetadata)) (transformed bool) {
+func (m *ContractMetadata) Apply(transform func(m *ContractMetadata)) (transformed bool) {
 	defer func() {
 		gfu := m.GoodForUpload
 		gfr := m.GoodForRenew
 		transformed = (!m.GoodForUpload && gfu) || (!m.GoodForRenew && gfr)
 	}()
 
-	t(m)
+	transform(m)
 	return
 }
 

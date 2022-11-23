@@ -66,10 +66,8 @@ type Interaction struct {
 	Result    json.RawMessage
 }
 
-// A scan represents a host scan.
-type Scan struct {
-	Timestamp time.Time
-	Success   bool
+func (i Interaction) IsScan() bool {
+	return i.Type == InteractionTypeScan
 }
 
 // A Host pairs a host's public key with a set of interactions.
@@ -79,22 +77,7 @@ type Host struct {
 	Interactions  []Interaction
 }
 
-func (i Interaction) IsScan() bool {
-	return i.Type == InteractionTypeScan
-}
-
-func (h *Host) IsOnline() bool {
-	switch scans := h.LatestHostScans(2); len(scans) {
-	case 0:
-		return false
-	case 1:
-		return scans[0].Success
-	default:
-		return scans[0].Success || scans[1].Success
-	}
-}
-
-func (h *Host) CorrespondsTo(host string) bool {
+func (h *Host) IsHost(host string) bool {
 	if host == "" {
 		return false
 	}
@@ -113,6 +96,17 @@ func (h *Host) CorrespondsTo(host string) bool {
 		return false
 	}
 	return ipNet.Contains(ip.IP)
+}
+
+func (h *Host) IsOnline() bool {
+	switch scans := h.LatestHostScans(2); len(scans) {
+	case 0:
+		return false
+	case 1:
+		return scans[0].Success
+	default:
+		return scans[0].Success || scans[1].Success
+	}
 }
 
 // NetAddress returns the host's last announced NetAddress, if available.
@@ -138,7 +132,7 @@ func (h *Host) LastKnownSettings() (rhpv2.HostSettings, time.Time, bool) {
 	return rhpv2.HostSettings{}, time.Time{}, false
 }
 
-// LatestHostScans returns the host's last scan results
+// LatestHostScans returns all host scans in reverse order
 func (h *Host) LatestHostScans(limit int) (scans []Interaction) {
 	for i := len(h.Interactions) - 1; i >= 0; i-- {
 		if h.Interactions[i].IsScan() {
