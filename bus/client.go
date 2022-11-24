@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -286,6 +287,31 @@ func (c *Client) AddObject(name string, o object.Object, usedContract map[consen
 func (c *Client) DeleteObject(name string) (err error) {
 	err = c.c.DELETE(fmt.Sprintf("/objects/%s", name))
 	return
+}
+
+// MarkSlabsMigrationFailure updates the latest failure time of the given slabs
+// to the current time.
+func (c *Client) MarkSlabsMigrationFailure(slabIDs ...uint) (err error) {
+	err = c.c.POST("/objects/migration/failed", ObjectsMarkSlabMigrationFailureRequest{}, nil)
+	return
+}
+
+// SlabsForMigration returns up to n slabs which require migration and haven't
+// failed migration since failureCutoff.
+func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error) {
+	var resp ObjectsMigrateSlabsResponse
+	err := c.c.POST("/objects/migration/slabs", ObjectsMigrateSlabsRequest{
+		Limit:  n,
+		Cutoff: failureCutoff,
+	}, &resp)
+	return resp.SlabIDs, err
+}
+
+// SlabForMigration returns a slab and the contracts its stored on.
+func (c *Client) SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error) {
+	var resp ObjectsMigrateSlabResponse
+	err := c.c.POST(fmt.Sprintf("/objects/migration/slab/%d", slabID), nil, &resp)
+	return resp.Slab, resp.Contracts, err
 }
 
 // NewClient returns a client that communicates with a renterd store server

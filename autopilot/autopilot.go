@@ -6,6 +6,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
@@ -53,9 +54,15 @@ type Bus interface {
 
 	// consensus
 	ConsensusState() (bus.ConsensusState, error)
+
+	// objects
+	MarkSlabsMigrationFailure(slabIDs ...uint) error
+	SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error)
+	SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error)
 }
 
 type Worker interface {
+	MigrateSlab(s *object.Slab, from, to []worker.Contract, currentHeight uint64) error
 	RHPScan(hostKey consensus.PublicKey, hostIP string) (worker.RHPScanResponse, error)
 	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
 	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
@@ -69,6 +76,7 @@ type Autopilot struct {
 	worker Worker
 
 	c *contractor
+	m *migrator
 	s *scanner
 
 	masterKey [32]byte
@@ -102,6 +110,10 @@ func (ap *Autopilot) Run() error {
 
 		ap.s.tryPerformHostScan()
 		_ = ap.c.performContractMaintenance() // TODO: handle error
+
+		// Migration
+		_ = ap.m.UpdateContracts() // TODO: handle error
+		ap.m.TryPerformMigrations()
 	}
 }
 
@@ -121,6 +133,7 @@ func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, e
 		stopChan: make(chan struct{}),
 	}
 	ap.c = newContractor(ap)
+	ap.m = newMigrator(ap)
 	ap.s = newScanner(ap)
 	return ap, nil
 }

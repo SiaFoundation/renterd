@@ -13,13 +13,20 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
-// ErrOBjectNotFound is returned if get is unable to retrieve an object from the
-// database.
-var ErrObjectNotFound = errors.New("object not found in database")
+var (
+	// ErrOBjectNotFound is returned if get is unable to retrieve an object
+	// from the database.
+	ErrObjectNotFound = errors.New("object not found in database")
+
+	// ErrSlabNotFound is returned if get is unable to retrieve a slab from
+	// the database.
+	ErrSlabNotFound = errors.New("slab not found in database")
+)
 
 type refSector struct {
 	HostID uint32
@@ -345,6 +352,19 @@ func (dbSlab) TableName() string { return "slabs" }
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
 
+// convert turns a dbObject into a object.Slab.
+func (s dbSlab) convert() (object.Slab, error) {
+	var slabKey object.EncryptionKey
+	if err := slabKey.UnmarshalText(s.Key); err != nil {
+		return object.Slab{}, err
+	}
+	return object.Slab{
+		Key:       slabKey,
+		MinShards: s.MinShards,
+		Shards:    make([]object.Sector, len(s.Shards)),
+	}, nil
+}
+
 // convert turns a dbObject into a object.Object.
 func (o dbObject) convert() (object.Object, error) {
 	var objKey object.EncryptionKey
@@ -356,16 +376,12 @@ func (o dbObject) convert() (object.Object, error) {
 		Slabs: make([]object.SlabSlice, len(o.Slabs)),
 	}
 	for i, sl := range o.Slabs {
-		var slabKey object.EncryptionKey
-		if err := slabKey.UnmarshalText(sl.Slab.Key); err != nil {
+		slab, err := sl.Slab.convert()
+		if err != nil {
 			return object.Object{}, err
 		}
 		obj.Slabs[i] = object.SlabSlice{
-			Slab: object.Slab{
-				Key:       slabKey,
-				MinShards: sl.Slab.MinShards,
-				Shards:    make([]object.Sector, len(sl.Slab.Shards)),
-			},
+			Slab:   slab,
 			Offset: sl.Offset,
 			Length: sl.Length,
 		}
@@ -547,9 +563,10 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 	return obj, nil
 }
 
-// TODO: Should we return slabs which are below MinShards? I think so because
-// the caller should handle that and then manually delete them if necessary.
-func (s *SQLStore) slabsForRepair(n int, failureCutoff time.Time) ([]uint, error) {
+// SlabsForMigration returns up to n IDs of slabs which require repair. Only
+// slabs are considered which haven't failed since failureCutoff.
+// TODO: consider that we don't want to migrate slabs above a given health.
+func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error) {
 	failureQuery := s.db.Model(&dbSlab{}).
 		Select("id as slab_id").
 		Where("last_failure < ?", failureCutoff.UTC())
@@ -572,9 +589,49 @@ func (s *SQLStore) slabsForRepair(n int, failureCutoff time.Time) ([]uint, error
 	return slabIDs, err
 }
 
-// MarkSlabsFailure sets the last_failure field for the given slabs to the
-// current time.
-func (s *SQLStore) MarkSlabsFailure(slabIDs []uint) error {
+// SlabsForMigration returns up to n slabs which require migration and haven't
+// failed migration since failureCutoff.
+func (s *SQLStore) SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error) {
+	var dSlab dbSlab
+	tx := s.db.Where(&dbSlab{Model: Model{ID: slabID}}).
+		Preload("Shards.DBSector.Contracts.Host").
+		Take(&dSlab)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return object.Slab{}, nil, ErrSlabNotFound
+	}
+	slab, err := dSlab.convert()
+	if err != nil {
+		return object.Slab{}, nil, err
+	}
+
+	// Return all contracts that have ever stored any shard of the slab.
+	addedContracts := make(map[types.FileContractID]struct{})
+	var contracts []worker.Contract
+	for _, shard := range dSlab.Shards {
+		for _, c := range shard.DBSector.Contracts {
+			if _, exists := addedContracts[c.FCID]; exists {
+				continue
+			}
+			addedContracts[c.FCID] = struct{}{}
+
+			contracts = append(contracts, worker.Contract{
+				HostKey: c.Host.PublicKey,
+				HostIP:  c.Host.NetAddress(),
+				ID:      c.FCID,
+
+				// TODO: This is set by the autopilot. Should we keep
+				// worker.Contract as the return arg or use a custom
+				// type without the field instead?
+				RenterKey: nil,
+			})
+		}
+	}
+	return slab, contracts, nil
+}
+
+// MarkSlabsMigrationFailure sets the last_failure field for the given slabs to
+// the current time.
+func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs ...uint) error {
 	now := time.Now().UTC()
 	return s.db.Model(&dbSlab{}).
 		Where("id in ?", slabIDs).

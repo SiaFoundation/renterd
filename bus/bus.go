@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -75,10 +76,13 @@ type (
 
 	// An ObjectStore stores objects.
 	ObjectStore interface {
-		List(key string) ([]string, error)
 		Get(key string) (object.Object, error)
+		List(key string) ([]string, error)
+		MarkSlabsMigrationFailure(slabIDs ...uint) error
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
+		SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error)
+		SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error)
 	}
 )
 
@@ -454,6 +458,43 @@ func (b *Bus) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.os.Delete(jc.PathParam("key")))
 }
 
+func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
+	var req ObjectsMigrateSlabsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	slabIDs, err := b.os.SlabsForMigration(req.Limit, req.Cutoff)
+	if jc.Check("couldn't fetch slabs for migration", err) != nil {
+		return
+	}
+	jc.Encode(ObjectsMigrateSlabsResponse{
+		SlabIDs: slabIDs,
+	})
+}
+
+func (b *Bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
+	var slabID uint
+	if jc.DecodeParam("id", &slabID) != nil {
+		return
+	}
+	slab, contracts, err := b.os.SlabForMigration(slabID)
+	if jc.Check("couldn't fetch slab for migration", err) != nil {
+		return
+	}
+	jc.Encode(ObjectsMigrateSlabResponse{
+		Contracts: contracts,
+		Slab:      slab,
+	})
+}
+
+func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
+	var req ObjectsMarkSlabMigrationFailureRequest
+	if err := jc.Decode(&req); err != nil {
+		return
+	}
+	jc.Check("couldn't mark slab migration failure", b.os.MarkSlabsMigrationFailure())
+}
+
 // GatewayAddress returns the address of the gateway.
 func (b *Bus) GatewayAddress() string {
 	return b.s.Addr()
@@ -510,8 +551,11 @@ func NewServer(b *Bus) http.Handler {
 		"PUT    /hostsets/:name":           b.hostsetsNameHandlerPUT,
 		"GET    /hostsets/:name/contracts": b.hostsetsContractsHandler,
 
-		"GET    /objects/*key": b.objectsKeyHandlerGET,
-		"PUT    /objects/*key": b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key": b.objectsKeyHandlerDELETE,
+		"GET    /objects/*key":               b.objectsKeyHandlerGET,
+		"PUT    /objects/*key":               b.objectsKeyHandlerPUT,
+		"DELETE /objects/*key":               b.objectsKeyHandlerDELETE,
+		"GET    /objects/migration/slabs":    b.objectsMigrationSlabsHandlerGET,
+		"GET    /objects/migration/slab/:id": b.objectsMigrationSlabHandlerGET,
+		"POST    /objects/migration/failed":  b.objectsMarkSlabMigrationFailureHandlerPOST,
 	})
 }

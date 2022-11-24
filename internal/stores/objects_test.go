@@ -596,7 +596,7 @@ func TestSlabsForRepair(t *testing.T) {
 	expectedSlabIDs := []uint{6, 1, 3, 4, 5, 2}
 	for i := 0; i < len(expectedSlabIDs); i++ {
 		// Check the i worst slabs.
-		slabIDs, err := os.slabsForRepair(i+1, time.Now())
+		slabIDs, err := os.SlabsForMigration(i+1, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -607,10 +607,10 @@ func TestSlabsForRepair(t *testing.T) {
 
 	// Mark the second half of the slabs as failed. Only the first half should be
 	// returned then.
-	if err := os.MarkSlabsFailure(expectedSlabIDs[3:]); err != nil {
+	if err := os.MarkSlabsMigrationFailure(expectedSlabIDs[3:]...); err != nil {
 		t.Fatal(err)
 	}
-	slabIDs, err := os.slabsForRepair(math.MaxInt, time.Now().Add(-time.Minute))
+	slabIDs, err := os.SlabsForMigration(math.MaxInt, time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

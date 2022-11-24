@@ -6,6 +6,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -96,6 +97,24 @@ type WalletPrepareRenewResponse struct {
 type ObjectsResponse struct {
 	Entries []string       `json:"entries,omitempty"`
 	Object  *object.Object `json:"object,omitempty"`
+}
+
+type ObjectsMarkSlabMigrationFailureRequest struct {
+	SlabIDs []uint `json:"slabIDs"`
+}
+
+type ObjectsMigrateSlabsRequest struct {
+	Cutoff time.Time `json:"cutoff"`
+	Limit  int       `json:"limit"`
+}
+
+type ObjectsMigrateSlabsResponse struct {
+	SlabIDs []uint `json:"slabIDs"`
+}
+
+type ObjectsMigrateSlabResponse struct {
+	Contracts []worker.Contract `json:"contracts"`
+	Slab      object.Slab       `json:"slab"`
 }
 
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.
