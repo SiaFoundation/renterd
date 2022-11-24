@@ -310,6 +310,7 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]SlabID, er
 // SlabForMigration returns a slab and the contracts its stored on.
 func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []worker.Contract, error) {
 	var resp ObjectsMigrateSlabResponse
+	// TODO: Why does jape hate this?
 	err := c.c.GET(fmt.Sprintf("/objects/migration/slab/%s", slabID.String()), &resp)
 	return resp.Slab, resp.Contracts, err
 }
