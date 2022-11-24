@@ -37,7 +37,7 @@ func (ap *Autopilot) defaultContracts() ([]worker.Contract, error) {
 }
 
 func (ap *Autopilot) renewableContracts(endHeight uint64) ([]worker.Contract, error) {
-	cs, err := ap.bus.ActiveContracts(endHeight)
+	cs, err := ap.bus.ActiveContracts("", endHeight)
 	if err != nil {
 		return nil, err
 	}

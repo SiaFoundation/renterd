@@ -112,6 +112,7 @@ type Contract struct {
 	HostIP      string               `json:"hostIP"`
 	StartHeight uint64               `json:"startHeight"`
 	EndHeight   uint64               `json:"endHeight"`
+	ContractMetadata
 }
 
 // ContractMetadata contains all metadata for a contract.
@@ -121,17 +122,6 @@ type ContractMetadata struct {
 	GoodForUpload bool                 `json:"goodForUpload"`
 	GoodForRenew  bool                 `json:"goodForRenew"`
 	TotalCost     types.Currency       `json:"totalCost"`
-}
-
-func (m *ContractMetadata) Apply(transform func(m *ContractMetadata)) (transformed bool) {
-	defer func() {
-		gfu := m.GoodForUpload
-		gfr := m.GoodForRenew
-		transformed = (!m.GoodForUpload && gfu) || (!m.GoodForRenew && gfr)
-	}()
-
-	transform(m)
-	return
 }
 
 // ContractSpending contains all spending details for a contract.

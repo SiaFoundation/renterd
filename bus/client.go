@@ -179,7 +179,7 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 }
 
 // Contracts returns the current set of contracts.
-func (c *Client) Contracts() (contracts []rhpv2.Contract, err error) {
+func (c *Client) Contracts(orderBy string, limit int) (contracts []rhpv2.Contract, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
 }
@@ -234,16 +234,16 @@ func (c *Client) AcquireContractLock(types.FileContractID) (types.FileContractRe
 func (c *Client) ReleaseContractLock(types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) ActiveContracts(maxEndHeight uint64) ([]Contract, error) {
+func (c *Client) ActiveContracts(orderBy string, maxEndHeight uint64) ([]Contract, error) {
+	panic("unimplemented")
+}
+func (c *Client) CancelContract(id types.FileContractID) error {
 	panic("unimplemented")
 }
 func (c *Client) AllContracts(currentPeriod uint64) ([]Contract, error) {
 	panic("unimplemented")
 }
 func (c *Client) CandidateHosts() ([]hostdb.Host, error) {
-	panic("unimplemented")
-}
-func (c *Client) ContractData(types.FileContractID) (rhpv2.Contract, error) {
 	panic("unimplemented")
 }
 func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {

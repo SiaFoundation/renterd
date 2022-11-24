@@ -18,9 +18,16 @@ const (
 	estimatedFileContractTransactionSetSize = 2048
 )
 
-type contractor struct {
-	ap *Autopilot
-}
+type (
+	contractor struct {
+		ap *Autopilot
+	}
+
+	host struct {
+		hostdb.Host
+		rhpv2.Contract
+	}
+)
 
 func newContractor(ap *Autopilot) *contractor {
 	return &contractor{
@@ -61,6 +68,12 @@ func (c *contractor) performContractMaintenance() error {
 		return err
 	}
 
+	// run limiter
+	err = c.runContractLimiter(cfg)
+	if err != nil {
+		return err
+	}
+
 	// figure out remaining funds
 	spent, err := c.periodSpending()
 	if err != nil {
@@ -94,16 +107,15 @@ func (c *contractor) performContractMaintenance() error {
 
 func (c *contractor) runContractChecks(cfg Config, blockHeight uint64) error {
 	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts(math.MaxUint64)
+	active, err := c.ap.bus.ActiveContracts("", math.MaxUint64)
 	if err != nil {
 		return err
 	}
 
-	// loop variables
-	ipNets := make(map[string]struct{})
-	numActive := uint64(len(active))
+	// create an IP filter
+	ipFilter := newIPFilter()
 
-	// run checks on the contracts individually
+	// check every contract
 	for _, contract := range active {
 		// fetch host from hostdb
 		host, err := c.host(contract)
@@ -117,29 +129,45 @@ func (c *contractor) runContractChecks(cfg Config, blockHeight uint64) error {
 			return err
 		}
 
-		// apply host filters
-		if result := hostFilter(
-			cfg.isBlackListed,
-			cfg.isWhiteListed,
-			// TODO: isGouging,
-			isLowScore(cfg, 0), // TODO: set threshold
-			isMaxRevision,
-			isOffline,
-			isOutOfFunds(cfg, metadata),
-			isRedundantIP(ipNets),
-			isSuperfluous(cfg, &numActive),
-			isUpForRenewal(cfg, blockHeight),
-		)(host); result.filtered() {
-			if transformed := metadata.Apply(result.transformer); transformed {
-				err = c.ap.bus.UpdateContractMetadata(contract.ID, metadata)
-				if err != nil {
-					return err
-				}
-				// TODO: log the update
-			} else {
-				// TODO: log this event as it should not occur
+		// apply host filter
+		newMetadata, _, updated := newHostFilter(host, metadata).
+			withBlackListFilter(cfg).
+			withMaxRevisionFilter().
+			withOfflineFilter().
+			withRedundantIPFilter(ipFilter).
+			withRemainingFundsFilter(cfg).
+			withScoreFilter(cfg, 0). // TODO: set threshold
+			withUpForRenewalFilter(cfg, blockHeight).
+			withWhiteListFilter(cfg).
+			finalize()
+
+		// apply update
+		if updated {
+			err = c.ap.bus.UpdateContractMetadata(contract.ID, newMetadata)
+			if err != nil {
+				return err
 			}
+			// TODO: log reasons
 		}
+	}
+
+	return nil
+}
+
+func (c *contractor) runContractLimiter(cfg Config) error {
+	// fetch all active contracts
+	active, err := c.ap.bus.ActiveContracts("asc(Revision.NewFileSize)", math.MaxUint64)
+	if err != nil {
+		return err
+	}
+
+	// cancel contracts until we reach the required amount of contracts
+	numActive := uint64(len(active))
+	for i := 0; i < len(active) && numActive > cfg.Contracts.Hosts; i++ {
+		if err := c.ap.bus.CancelContract(active[i].ID); err != nil {
+			continue
+		}
+		numActive--
 	}
 
 	return nil
@@ -207,7 +235,7 @@ func (c *contractor) runContractRenewals(cfg Config, s State, budget *types.Curr
 
 func (c *contractor) runContractFormations(cfg Config, s State, budget *types.Currency, renterAddress types.UnlockHash) ([]worker.Contract, error) {
 	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts(math.MaxUint64)
+	active, err := c.ap.bus.ActiveContracts("", math.MaxUint64)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +428,7 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 
 func (c *contractor) renewFundingEstimate(cfg Config, s State, cID types.FileContractID, blockHeight uint64) (types.Currency, error) {
 	// fetch contract
-	contract, err := c.ap.bus.ContractData(cID)
+	contract, err := c.ap.bus.Contract(cID)
 	if err != nil {
 		return types.ZeroCurrency, err
 	}
@@ -494,21 +522,21 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		return nil, err
 	}
 
-	// loop variables
-	ipNets := make(map[string]struct{})
+	// create IP filter
+	ipFilter := newIPFilter()
 
-	// apply host filter
-	filterFn := hostFilter(
-		cfg.isWhiteListed,
-		cfg.isBlackListed,
-		// TODO: isGouging,
-		isLowScore(cfg, 0), // TODO: set threshold
-		isOffline,
-		isRedundantIP(ipNets),
-	)
 	hosts = hosts[:0]
 	for _, h := range hosts {
-		if result := filterFn(host{h, rhpv2.Contract{}}); !result.filtered() {
+		// apply host filter
+		metadata := bus.ContractMetadata{GoodForUpload: true, GoodForRenew: true}
+		_, _, filtered := newHostFilter(host{h, rhpv2.Contract{}}, metadata).
+			withBlackListFilter(cfg).
+			withOfflineFilter().
+			withRedundantIPFilter(ipFilter).
+			withScoreFilter(cfg, 0). // TODO: set threshold
+			withWhiteListFilter(cfg).
+			finalize()
+		if !filtered {
 			hosts = append(hosts, h)
 		}
 	}
@@ -519,18 +547,16 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 	}
 
 	// score each host
-	scoreFn := HostScore(
-		ageScore,
-		collateralScore(cfg),
-		interactionScore,
-		settingsScore(cfg),
-		uptimeScore,
-		versionScore,
-		// TODO: priceScore
-	)
 	scores := make([]float64, len(hosts))
 	for i, h := range hosts {
-		scores[i] = scoreFn(host{h, rhpv2.Contract{}})
+		scores[i] = newHostScore(host{h, rhpv2.Contract{}}).
+			withAgeScore().
+			withCollateralScore(cfg).
+			withInteractionScore().
+			withSettingsScore(cfg).
+			withUptimeScore().
+			withVersionScore().
+			finalize()
 	}
 
 	// select hosts
@@ -546,20 +572,13 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 	return selected, nil
 }
 
-// host is a convenience type that bundles host and contract info
-type host struct {
-	hostdb.Host
-	rhpv2.Contract
-}
-
-// TODO: bus should expose all data in single call
 func (c *contractor) host(contract bus.Contract) (host, error) {
 	h, err := c.ap.bus.Host(contract.HostKey)
 	if err != nil {
 		return host{}, err
 	}
 
-	data, err := c.ap.bus.ContractData(contract.ID)
+	data, err := c.ap.bus.Contract(contract.ID)
 	if err != nil {
 		return host{}, err
 	}

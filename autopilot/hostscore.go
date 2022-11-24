@@ -29,23 +29,23 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
-type scoreFn func(h host) float64
+type hostScore struct {
+	host  host
+	score float64
+}
 
-func HostScore(scoreFns ...scoreFn) scoreFn {
-	if len(scoreFns) == 0 {
-		return noopscore
-	}
-	return func(h host) (total float64) {
-		for _, scoreFn := range scoreFns {
-			total *= scoreFn(h)
-		}
-		return
+func newHostScore(h host) *hostScore {
+	return &hostScore{
+		host:  h,
+		score: 1,
 	}
 }
 
-func noopscore(h host) float64 { return 1 }
+func (s *hostScore) finalize() float64 {
+	return s.score
+}
 
-func ageScore(h host) float64 {
+func (s *hostScore) withAgeScore() *hostScore {
 	const day = 24 * time.Hour
 	weights := []struct {
 		age    time.Duration
@@ -61,7 +61,7 @@ func ageScore(h host) float64 {
 		{1 * day, 3},
 	}
 
-	age := time.Since(h.Announcements[0].Timestamp)
+	age := time.Since(s.host.Announcements[0].Timestamp)
 	weight := 1.0
 	for _, w := range weights {
 		if age >= w.age {
@@ -69,72 +69,76 @@ func ageScore(h host) float64 {
 		}
 		weight /= w.factor
 	}
-	return weight
+
+	s.score *= weight
+	return s
 }
 
-func collateralScore(cfg Config) scoreFn {
-	return func(h host) float64 {
-		settings, _, ok := h.LastKnownSettings()
-		if !ok {
-			return 0.01
-		}
-
-		// NOTE: This math is copied directly from the old siad hostdb. It would
-		// probably benefit from a thorough review.
-
-		var fundsPerHost types.Currency = cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
-		var storage, duration uint64 // TODO
-
-		contractCollateral := settings.Collateral.Mul64(storage).Mul64(duration)
-		if maxCollateral := settings.MaxCollateral.Div64(2); contractCollateral.Cmp(maxCollateral) > 0 {
-			contractCollateral = maxCollateral
-		}
-		collateral, _ := new(big.Rat).SetInt(contractCollateral.Big()).Float64()
-		cutoff, _ := new(big.Rat).SetInt(fundsPerHost.Div64(5).Big()).Float64()
-		collateral = math.Max(1, collateral)               // ensure 1 <= collateral
-		cutoff = math.Min(math.Max(1, cutoff), collateral) // ensure 1 <= cutoff <= collateral
-		return math.Pow(cutoff, 4) * math.Pow(collateral/cutoff, 0.5)
+func (s *hostScore) withCollateralScore(cfg Config) *hostScore {
+	settings, _, ok := s.host.LastKnownSettings()
+	if !ok {
+		s.score *= math.SmallestNonzeroFloat64
+		return s
 	}
+
+	// NOTE: This math is copied directly from the old siad hostdb. It would
+	// probably benefit from a thorough review.
+
+	var fundsPerHost types.Currency = cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	var storage, duration uint64 // TODO
+
+	contractCollateral := settings.Collateral.Mul64(storage).Mul64(duration)
+	if maxCollateral := settings.MaxCollateral.Div64(2); contractCollateral.Cmp(maxCollateral) > 0 {
+		contractCollateral = maxCollateral
+	}
+	collateral, _ := new(big.Rat).SetInt(contractCollateral.Big()).Float64()
+	cutoff, _ := new(big.Rat).SetInt(fundsPerHost.Div64(5).Big()).Float64()
+	collateral = math.Max(1, collateral)               // ensure 1 <= collateral
+	cutoff = math.Min(math.Max(1, cutoff), collateral) // ensure 1 <= cutoff <= collateral
+
+	weight := math.Pow(cutoff, 4) * math.Pow(collateral/cutoff, 0.5)
+	s.score *= weight
+	return s
 }
 
-func interactionScore(h host) float64 {
+func (s *hostScore) withInteractionScore() *hostScore {
 	success, fail := 30.0, 1.0
-	for _, hi := range h.Interactions {
+	for _, hi := range s.host.Interactions {
 		if hi.Success {
 			success++
 		} else {
 			fail++
 		}
 	}
-	return math.Pow(success/(success+fail), 10)
+
+	weight := math.Pow(success/(success+fail), 10)
+	s.score *= weight
+	return s
 }
 
-func settingsScore(cfg Config) scoreFn {
-	return func(h host) float64 {
-		settings, _, found := h.LastKnownSettings()
-		if !found {
-			return math.SmallestNonzeroFloat64
-		}
-		if !settings.AcceptingContracts {
-			return math.SmallestNonzeroFloat64
-		}
-		if cfg.Contracts.Period+cfg.Contracts.RenewWindow > settings.MaxDuration {
-			return math.SmallestNonzeroFloat64
-		}
-		maxBaseRPCPrice := settings.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
-		if settings.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
-			return math.SmallestNonzeroFloat64
-		}
-		maxSectorAccessPrice := settings.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
-		if settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
-			return math.SmallestNonzeroFloat64
-		}
-		return 1
+func (s *hostScore) withSettingsScore(cfg Config) *hostScore {
+	settings, _, found := s.host.LastKnownSettings()
+	if !found {
+		s.score *= math.SmallestNonzeroFloat64
+		return s
 	}
+
+	maxBaseRPCPrice := settings.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
+	maxSectorAccessPrice := settings.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
+
+	if !settings.AcceptingContracts ||
+		cfg.Contracts.Period+cfg.Contracts.RenewWindow > settings.MaxDuration ||
+		settings.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 ||
+		settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
+		s.score *= math.SmallestNonzeroFloat64
+		return s
+	}
+
+	return s
 }
 
-func uptimeScore(h host) float64 {
-	sorted := append([]hostdb.Interaction(nil), h.Interactions...)
+func (s *hostScore) withUptimeScore() *hostScore {
+	sorted := append([]hostdb.Interaction(nil), s.host.Interactions...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Timestamp.Before(sorted[j].Timestamp)
 	})
@@ -142,19 +146,25 @@ func uptimeScore(h host) float64 {
 	// special cases
 	switch len(sorted) {
 	case 0:
-		return 0.25
+		s.score *= 0.25
+		return s
 	case 1:
 		if sorted[0].Success {
-			return 0.75
+			s.score *= 0.75
+			return s
 		}
-		return 0.25
+		s.score *= 0.25
+		return s
 	case 2:
 		if sorted[0].Success && sorted[1].Success {
-			return 0.85
+			s.score *= 0.85
+			return s
 		} else if sorted[0].Success || sorted[1].Success {
-			return 0.50
+			s.score *= 0.5
+			return s
 		}
-		return 0.05
+		s.score *= 0.05
+		return s
 	default:
 	}
 
@@ -192,14 +202,18 @@ func uptimeScore(h host) float64 {
 
 	// Calculate the penalty for poor uptime. Penalties increase extremely
 	// quickly as uptime falls away from 95%.
-	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
+	weight := math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
+	s.score *= weight
+	return s
 }
 
-func versionScore(h host) float64 {
-	settings, _, ok := h.LastKnownSettings()
+func (s *hostScore) withVersionScore() *hostScore {
+	settings, _, ok := s.host.LastKnownSettings()
 	if !ok {
-		return 0.01
+		s.score *= math.SmallestNonzeroFloat64
+		return s
 	}
+
 	versions := []struct {
 		version string
 		penalty float64
@@ -215,7 +229,8 @@ func versionScore(h host) float64 {
 			weight *= v.penalty
 		}
 	}
-	return weight
+	s.score *= weight
+	return s
 }
 
 func randSelectByWeight(weights []float64) int {

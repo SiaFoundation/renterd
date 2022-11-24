@@ -36,9 +36,11 @@ type Bus interface {
 	// contracts
 	AddContract(c rhpv2.Contract) error
 	AllContracts(currentPeriod uint64) ([]bus.Contract, error)
-	ActiveContracts(maxEndHeight uint64) ([]bus.Contract, error)
+	ActiveContracts(orderBy string, maxEndHeight uint64) ([]bus.Contract, error)
 
-	ContractData(cID types.FileContractID) (rhpv2.Contract, error)
+	Contract(id types.FileContractID) (contract rhpv2.Contract, err error)
+	CancelContract(id types.FileContractID) error
+
 	ContractMetadata(cID types.FileContractID) (bus.ContractMetadata, error)
 	UpdateContractMetadata(cID types.FileContractID, metadata bus.ContractMetadata) error
 
