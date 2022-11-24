@@ -554,7 +554,7 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /objects/*key":               b.objectsKeyHandlerGET,
 		"PUT    /objects/*key":               b.objectsKeyHandlerPUT,
 		"DELETE /objects/*key":               b.objectsKeyHandlerDELETE,
-		"GET    /objects/migration/slabs":    b.objectsMigrationSlabsHandlerGET,
+		"POST    /objects/migration/slabs":   b.objectsMigrationSlabsHandlerGET, // should be GET but how???
 		"GET    /objects/migration/slab/:id": b.objectsMigrationSlabHandlerGET,
 		"POST    /objects/migration/failed":  b.objectsMarkSlabMigrationFailureHandlerPOST,
 	})

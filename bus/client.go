@@ -301,8 +301,8 @@ func (c *Client) MarkSlabsMigrationFailure(slabIDs ...uint) (err error) {
 func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error) {
 	var resp ObjectsMigrateSlabsResponse
 	err := c.c.POST("/objects/migration/slabs", ObjectsMigrateSlabsRequest{
-		Limit:  n,
 		Cutoff: failureCutoff,
+		Limit:  n,
 	}, &resp)
 	return resp.SlabIDs, err
 }
@@ -310,7 +310,7 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, erro
 // SlabForMigration returns a slab and the contracts its stored on.
 func (c *Client) SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error) {
 	var resp ObjectsMigrateSlabResponse
-	err := c.c.POST(fmt.Sprintf("/objects/migration/slab/%d", slabID), nil, &resp)
+	err := c.c.GET(fmt.Sprintf("/objects/migration/slab/%s", fmt.Sprint(slabID)), &resp)
 	return resp.Slab, resp.Contracts, err
 }
 
