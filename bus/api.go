@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"fmt"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -20,7 +21,22 @@ type (
 
 	// A PrivateKey is an Ed25519 private key.
 	PrivateKey = consensus.PrivateKey
+
+	SlabID uint
 )
+
+// LoadString is implemented for jape's DecodeParam.
+func (sid *SlabID) LoadString(s string) (err error) {
+	var slabID uint
+	_, err = fmt.Sscan(s, &slabID)
+	*sid = SlabID(slabID)
+	return
+}
+
+// String encodes the SlabID as a string.
+func (sid SlabID) String() string {
+	return fmt.Sprint(uint8(sid))
+}
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
@@ -109,7 +125,7 @@ type ObjectsMigrateSlabsRequest struct {
 }
 
 type ObjectsMigrateSlabsResponse struct {
-	SlabIDs []uint `json:"slabIDs"`
+	SlabIDs []SlabID `json:"slabIDs"`
 }
 
 type ObjectsMigrateSlabResponse struct {

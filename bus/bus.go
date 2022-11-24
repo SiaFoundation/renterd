@@ -78,11 +78,11 @@ type (
 	ObjectStore interface {
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
-		MarkSlabsMigrationFailure(slabIDs ...uint) error
+		MarkSlabsMigrationFailure(slabIDs ...SlabID) error
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
-		SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error)
-		SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error)
+		SlabsForMigration(n int, failureCutoff time.Time) ([]SlabID, error)
+		SlabForMigration(slabID SlabID) (object.Slab, []worker.Contract, error)
 	}
 )
 
@@ -473,7 +473,7 @@ func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
-	var slabID uint
+	var slabID SlabID
 	if jc.DecodeParam("id", &slabID) != nil {
 		return
 	}

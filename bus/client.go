@@ -291,14 +291,14 @@ func (c *Client) DeleteObject(name string) (err error) {
 
 // MarkSlabsMigrationFailure updates the latest failure time of the given slabs
 // to the current time.
-func (c *Client) MarkSlabsMigrationFailure(slabIDs ...uint) (err error) {
+func (c *Client) MarkSlabsMigrationFailure(slabIDs ...SlabID) (err error) {
 	err = c.c.POST("/objects/migration/failed", ObjectsMarkSlabMigrationFailureRequest{}, nil)
 	return
 }
 
 // SlabsForMigration returns up to n slabs which require migration and haven't
 // failed migration since failureCutoff.
-func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error) {
+func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]SlabID, error) {
 	var resp ObjectsMigrateSlabsResponse
 	err := c.c.POST("/objects/migration/slabs", ObjectsMigrateSlabsRequest{
 		Cutoff: failureCutoff,
@@ -308,9 +308,9 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, erro
 }
 
 // SlabForMigration returns a slab and the contracts its stored on.
-func (c *Client) SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error) {
+func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []worker.Contract, error) {
 	var resp ObjectsMigrateSlabResponse
-	err := c.c.GET(fmt.Sprintf("/objects/migration/slab/%s", fmt.Sprint(slabID)), &resp)
+	err := c.c.GET(fmt.Sprintf("/objects/migration/slab/%s", slabID.String()), &resp)
 	return resp.Slab, resp.Contracts, err
 }
 

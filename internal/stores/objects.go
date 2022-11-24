@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/worker"
@@ -566,7 +567,7 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 // SlabsForMigration returns up to n IDs of slabs which require repair. Only
 // slabs are considered which haven't failed since failureCutoff.
 // TODO: consider that we don't want to migrate slabs above a given health.
-func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, error) {
+func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time) ([]bus.SlabID, error) {
 	failureQuery := s.db.Model(&dbSlab{}).
 		Select("id as slab_id").
 		Where("last_failure < ?", failureCutoff.UTC())
@@ -584,16 +585,16 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time) ([]uint, er
 		Order("COUNT(slab_id) DESC").
 		Limit(n)
 
-	var slabIDs []uint
+	var slabIDs []bus.SlabID
 	err := outer.Find(&slabIDs).Error
 	return slabIDs, err
 }
 
 // SlabsForMigration returns up to n slabs which require migration and haven't
 // failed migration since failureCutoff.
-func (s *SQLStore) SlabForMigration(slabID uint) (object.Slab, []worker.Contract, error) {
+func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Contract, error) {
 	var dSlab dbSlab
-	tx := s.db.Where(&dbSlab{Model: Model{ID: slabID}}).
+	tx := s.db.Where(&dbSlab{Model: Model{ID: uint(slabID)}}).
 		Preload("Shards.DBSector.Contracts.Host").
 		Take(&dSlab)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -631,7 +632,7 @@ func (s *SQLStore) SlabForMigration(slabID uint) (object.Slab, []worker.Contract
 
 // MarkSlabsMigrationFailure sets the last_failure field for the given slabs to
 // the current time.
-func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs ...uint) error {
+func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs ...bus.SlabID) error {
 	now := time.Now().UTC()
 	return s.db.Model(&dbSlab{}).
 		Where("id in ?", slabIDs).

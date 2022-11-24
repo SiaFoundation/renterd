@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/worker"
 )
 
@@ -66,11 +67,11 @@ func (m *migrator) TryPerformMigrations() {
 	}()
 }
 
-func (m *migrator) fetchSlabsForMigration() ([]uint, error) {
+func (m *migrator) fetchSlabsForMigration() ([]bus.SlabID, error) {
 	return m.ap.bus.SlabsForMigration(10, time.Now().Add(-time.Hour))
 }
 
-func (m *migrator) migrateSlab(slabID uint) (bool, error) {
+func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
 	// Fetch slab data.
 	slab, contracts, err := m.ap.bus.SlabForMigration(slabID)
 	if err != nil {
@@ -99,7 +100,7 @@ func (m *migrator) migrateSlab(slabID uint) (bool, error) {
 	return false, nil
 }
 
-func (m *migrator) markFailedMigration(slabID uint) error {
+func (m *migrator) markFailedMigration(slabID bus.SlabID) error {
 	return m.ap.bus.MarkSlabsMigrationFailure(slabID)
 }
 

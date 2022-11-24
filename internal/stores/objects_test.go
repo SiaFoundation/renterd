@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/rhp/v2"
@@ -593,7 +594,7 @@ func TestSlabsForRepair(t *testing.T) {
 	// 6 first since it doesn't have any good sectors
 	// 2 last since it only got 1 bad sector
 	// 1, 3, 4, 5 in the middle since they all have 2 bad sectors.
-	expectedSlabIDs := []uint{6, 1, 3, 4, 5, 2}
+	expectedSlabIDs := []bus.SlabID{6, 1, 3, 4, 5, 2}
 	for i := 0; i < len(expectedSlabIDs); i++ {
 		// Check the i worst slabs.
 		slabIDs, err := os.SlabsForMigration(i+1, time.Now())
