@@ -107,6 +107,9 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 	// create a new ip filter
 	f := newIPFilter()
 
+	// fetch low score threshold
+	lowScoreThreshold := float64(0) // TODO
+
 	// state variables
 	contractIds := make([]types.FileContractID, 0, len(contracts))
 	contractSizes := make(map[types.FileContractID]uint64)
@@ -133,7 +136,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		}
 
 		// decide whether the host is still good
-		usable, _ := isUsableHost(cfg, f, Host{host})
+		usable, _ := isUsableHost(cfg, f, Host{host}, lowScoreThreshold)
 		if !usable {
 			toDelete = append(toDelete, contract.ID) // TODO: log reasons
 			continue
@@ -534,14 +537,17 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		return nil, err
 	}
 
-	// filter hosts
+	// fetch low score threshold
+	lowScoreThreshold := float64(0) // TODO
+
+	// filter only usable hosts
 	hosts = hosts[:0]
 	for _, h := range hosts {
 		if used[h.PublicKey.String()] {
 			continue
 		}
 
-		usable, _ := isUsableHost(cfg, ipFilter, Host{h})
+		usable, _ := isUsableHost(cfg, ipFilter, Host{h}, lowScoreThreshold)
 		if usable {
 			hosts = append(hosts, h)
 		}
@@ -552,6 +558,21 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		wanted = len(hosts)
 	}
 
-	// TODO: score each host and return selected hosts
-	return nil, nil
+	// score each host
+	scores := make([]float64, len(hosts))
+	for i, h := range hosts {
+		scores[i] = hostScore(cfg, Host{h})
+	}
+
+	// select hosts
+	var selected []consensus.PublicKey
+	for len(selected) < wanted {
+		i := randSelectByWeight(scores)
+		selected = append(selected, hosts[i].PublicKey)
+
+		// remove selected host
+		hosts[i], hosts = hosts[len(hosts)-1], hosts[:len(hosts)-1]
+		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
+	}
+	return selected, nil
 }

@@ -24,6 +24,7 @@ type Config struct {
 		RenewWindow uint64
 		Download    uint64
 		Upload      uint64
+		Storage     uint64
 	}
 	Objects struct {
 		MinShards   uint8
@@ -40,6 +41,7 @@ func DefaultConfig() (c Config) {
 	c.Contracts.RenewWindow = 144 * 7 * 2 // 2 weeks
 	c.Contracts.Upload = 1 << 40          // 1 TiB
 	c.Contracts.Download = 1 << 40        // 1 TiB
+	c.Contracts.Storage = 1 << 42         // 4 TiB
 	c.Objects.MinShards = 10
 	c.Objects.TotalShards = 30
 	return

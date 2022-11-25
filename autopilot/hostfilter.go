@@ -18,7 +18,7 @@ const (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
+func isUsableHost(cfg Config, f *ipFilter, h Host, scoreThreshold float64) (bool, []string) {
 	var reasons []string
 
 	if !cfg.isWhitelisted(h) {
@@ -33,7 +33,9 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 	if f.isRedundantIP(h) {
 		reasons = append(reasons, "host IP is redundant")
 	}
-	// TODO: isLowScore
+	if isLowScore(cfg, h, scoreThreshold) {
+		reasons = append(reasons, "host score is too low")
+	}
 
 	return len(reasons) == 0, reasons
 }
@@ -81,6 +83,10 @@ func isOutOfFunds(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata) 
 
 func isUpForRenewal(cfg Config, c rhpv2.Contract, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
+}
+
+func isLowScore(cfg Config, h Host, threshold float64) bool {
+	return hostScore(cfg, h) < threshold
 }
 
 func (cfg Config) isBlacklisted(h Host) bool {
