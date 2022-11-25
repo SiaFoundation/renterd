@@ -11,12 +11,9 @@ import (
 	"os/signal"
 	"time"
 
-	"go.sia.tech/jape"
-	"go.sia.tech/renterd/autopilot"
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/node"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/renterd/worker"
 	"golang.org/x/term"
 )
 
@@ -80,18 +77,18 @@ func getWalletKey() consensus.PrivateKey {
 func main() {
 	log.SetFlags(0)
 
-	var workerCfg workerConfig
-	var busCfg busConfig
-	var autopilotCfg autopilotConfig
+	var workerCfg node.WorkerConfig
+	var busCfg node.BusConfig
+	var autopilotCfg node.AutopilotConfig
 
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
-	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable the worker API")
-	flag.BoolVar(&busCfg.enabled, "bus.enabled", true, "enable the bus API")
-	flag.BoolVar(&busCfg.bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
-	flag.StringVar(&busCfg.gatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
-	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot API")
-	flag.DurationVar(&autopilotCfg.loopInterval, "autopilot.loopInterval", time.Minute, "with which the autopilot loop is triggered")
+	flag.BoolVar(&workerCfg.Enabled, "worker.enabled", true, "enable the worker API")
+	flag.BoolVar(&busCfg.Enabled, "bus.enabled", true, "enable the bus API")
+	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
+	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
+	flag.BoolVar(&autopilotCfg.Enabled, "autopilot.enabled", true, "enable the autopilot API")
+	flag.DurationVar(&autopilotCfg.LoopInterval, "autopilot.loopInterval", time.Minute, "with which the autopilot loop is triggered")
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")
@@ -108,49 +105,54 @@ func main() {
 		log.Fatal(err)
 	}
 	defer l.Close()
+
+	// All components use the same API password.
+	workerCfg.APIPassword = getAPIPassword()
+	busCfg.APIPassword = getAPIPassword()
+	autopilotCfg.APIPassword = getAPIPassword()
+
+	workerCfg.BusPassword = getAPIPassword()
+	autopilotCfg.BusPassword = getAPIPassword()
+	autopilotCfg.WorkerPassword = getAPIPassword()
+
+	// All components use the same API address.
 	*apiAddr = "http://" + l.Addr().String()
+	workerCfg.BusAddr = *apiAddr
+	busCfg.GatewayAddr = *apiAddr
+	autopilotCfg.BusAddr = *apiAddr
+	autopilotCfg.WorkerAddr = *apiAddr
 
-	auth := jape.BasicAuth(getAPIPassword())
-	mux := treeMux{
-		h:   createUIHandler(),
-		sub: make(map[string]treeMux),
+	// All components use the same dir.
+	workerCfg.Dir = *dir
+	busCfg.Dir = *dir
+	autopilotCfg.Dir = *dir
+
+	mux := node.TreeMux{
+		H:   createUIHandler(),
+		Sub: make(map[string]http.Handler),
 	}
 
-	if busCfg.enabled {
-		b, cleanup, err := newBus(busCfg, *dir, getWalletKey())
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer cleanup()
-		log.Println("bus: Listening on", b.GatewayAddress())
-		mux.sub["/api/store"] = treeMux{h: auth(bus.NewServer(b))}
-		autopilotCfg.busAddr = *apiAddr + "/bus/"
-		autopilotCfg.busPassword = getAPIPassword()
+	node, cleanup, err := node.NewNode(busCfg, workerCfg, autopilotCfg, getWalletKey())
+	if err != nil {
+		log.Fatal(err)
 	}
-	if workerCfg.enabled {
-		w, cleanup, err := newWorker(workerCfg, getWalletKey())
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer cleanup()
-		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
-		autopilotCfg.workerAddr = *apiAddr + "/worker/"
-		autopilotCfg.workerPassword = getAPIPassword()
+	defer cleanup()
+
+	if node.BusSrv != nil {
+		log.Println("bus: Listening on", node.Bus.GatewayAddress())
+		mux.Sub["/api/store"] = node.BusSrv
 	}
-	if autopilotCfg.enabled {
-		a, cleanup, err := newAutopilot(autopilotCfg, *dir)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer cleanup()
+	if node.WorkerSrv != nil {
+		mux.Sub["/api/worker"] = node.WorkerSrv
+	}
+	if node.AutopilotSrv != nil {
+		mux.Sub["/api/autopilot"] = node.AutopilotSrv
 		go func() {
-			err := a.Run()
+			err := node.Autopilot.Run()
 			if err != nil {
 				log.Fatalln("Fatal autopilot error:", err)
 			}
 		}()
-
-		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(a))}
 	}
 
 	srv := &http.Server{Handler: mux}

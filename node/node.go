@@ -1,11 +1,13 @@
-package main
+package node
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
@@ -20,25 +22,34 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-type workerConfig struct {
-	enabled     bool
-	busAddr     string
-	busPassword string
+type WorkerConfig struct {
+	APIPassword string
+	Enabled     bool
+	BusAddr     string
+	BusPassword string
+
+	Dir string
 }
 
-type busConfig struct {
-	enabled     bool
-	bootstrap   bool
-	gatewayAddr string
+type BusConfig struct {
+	APIPassword string
+	Enabled     bool
+	Bootstrap   bool
+	GatewayAddr string
+
+	Dir string
 }
 
-type autopilotConfig struct {
-	enabled        bool
-	busAddr        string
-	busPassword    string
-	workerAddr     string
-	workerPassword string
-	loopInterval   time.Duration
+type AutopilotConfig struct {
+	APIPassword    string
+	Enabled        bool
+	BusAddr        string
+	BusPassword    string
+	WorkerAddr     string
+	WorkerPassword string
+	LoopInterval   time.Duration
+
+	Dir string
 }
 
 type chainManager struct {
@@ -122,12 +133,12 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus, func() error, error) {
+func newBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus, func() error, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	g, err := gateway.New(cfg.gatewayAddr, cfg.bootstrap, gatewayDir)
+	g, err := gateway.New(cfg.GatewayAddr, cfg.Bootstrap, gatewayDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -135,7 +146,7 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	cm, errCh := mconsensus.New(g, cfg.bootstrap, consensusDir)
+	cm, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
 	select {
 	case err := <-errCh:
 		if err != nil {
@@ -215,21 +226,21 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	return b, cleanup, nil
 }
 
-func newWorker(cfg workerConfig, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
-	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
+func newWorker(cfg WorkerConfig, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
+	b := bus.NewClient(cfg.BusAddr, cfg.BusPassword)
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
 	w := worker.New(workerKey, b)
 	return w, func() error { return nil }, nil
 }
 
-func newAutopilot(cfg autopilotConfig, dir string) (*autopilot.Autopilot, func() error, error) {
+func newAutopilot(cfg AutopilotConfig, dir string) (*autopilot.Autopilot, func() error, error) {
 	store, err := stores.NewJSONAutopilotStore(dir)
 	if err != nil {
 		return nil, nil, err
 	}
-	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
-	w := worker.NewClient(cfg.workerAddr, cfg.workerPassword)
-	a, err := autopilot.New(store, b, w, cfg.loopInterval)
+	b := bus.NewClient(cfg.BusAddr, cfg.BusPassword)
+	w := worker.NewClient(cfg.WorkerAddr, cfg.WorkerPassword)
+	a, err := autopilot.New(store, b, w, cfg.LoopInterval)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -238,4 +249,73 @@ func newAutopilot(cfg autopilotConfig, dir string) (*autopilot.Autopilot, func()
 		return nil
 	}
 	return a, cleanup, nil
+}
+
+type Node struct {
+	Bus    *bus.Bus
+	BusSrv http.Handler
+
+	Worker    *worker.Worker
+	WorkerSrv http.Handler
+
+	Autopilot    *autopilot.Autopilot
+	AutopilotSrv http.Handler
+}
+
+func NewNode(bc BusConfig, wc WorkerConfig, ac AutopilotConfig, wk consensus.PrivateKey) (_ *Node, _ func() error, err error) {
+	var cleanupFncs []func() error
+	cleanup := func() error {
+		for _, fn := range cleanupFncs {
+			fn()
+		}
+		return nil
+	}
+	defer func() {
+		if err != nil {
+			cleanup()
+		}
+	}()
+
+	node := &Node{}
+
+	if bc.Enabled {
+		b, cleanup, err := newBus(bc, bc.Dir, wk)
+		if err != nil {
+			return nil, nil, err
+		}
+		cleanupFncs = append(cleanupFncs, cleanup)
+		auth := jape.BasicAuth(bc.APIPassword)
+		node.Bus = b
+		node.BusSrv = &TreeMux{H: auth(bus.NewServer(b))}
+	}
+
+	if wc.Enabled {
+		w, cleanup, err := newWorker(wc, wk)
+		if err != nil {
+			return nil, nil, err
+		}
+		cleanupFncs = append(cleanupFncs, cleanup)
+		auth := jape.BasicAuth(wc.APIPassword)
+		node.Worker = w
+		node.WorkerSrv = &TreeMux{H: auth(worker.NewServer(w))}
+	}
+
+	if ac.Enabled {
+		a, cleanup, err := newAutopilot(ac, ac.Dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer cleanup()
+		go func() {
+			err := a.Run()
+			if err != nil {
+				log.Fatalln("Fatal autopilot error:", err)
+			}
+		}()
+		cleanupFncs = append(cleanupFncs, cleanup)
+		auth := jape.BasicAuth(ac.APIPassword)
+		node.Autopilot = a
+		node.AutopilotSrv = &TreeMux{H: auth(autopilot.NewServer(a))}
+	}
+	return node, cleanup, nil
 }

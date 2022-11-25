@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
-	"strings"
 )
 
 //go:embed dist
@@ -29,20 +28,4 @@ func createUIHandler() http.Handler {
 		panic(err)
 	}
 	return http.FileServer(http.FS(&clientRouterFS{fs: assets}))
-}
-
-type treeMux struct {
-	h   http.Handler
-	sub map[string]treeMux
-}
-
-func (t treeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	for prefix, c := range t.sub {
-		if strings.HasPrefix(req.URL.Path, prefix) {
-			req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
-			c.ServeHTTP(w, req)
-			return
-		}
-	}
-	t.h.ServeHTTP(w, req)
 }
