@@ -493,7 +493,7 @@ func (b *Bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
 
 func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	var req ObjectsMarkSlabMigrationFailureRequest
-	if err := jc.Decode(&req); err != nil {
+	if jc.Decode(&req) != nil {
 		return
 	}
 	updates, err := b.os.MarkSlabsMigrationFailure()
