@@ -1,7 +1,9 @@
 package node
 
 import (
+	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,33 +25,24 @@ import (
 )
 
 type WorkerConfig struct {
-	APIPassword string
 	Enabled     bool
 	BusAddr     string
 	BusPassword string
-
-	Dir string
 }
 
 type BusConfig struct {
-	APIPassword string
 	Enabled     bool
 	Bootstrap   bool
 	GatewayAddr string
-
-	Dir string
 }
 
 type AutopilotConfig struct {
-	APIPassword    string
 	Enabled        bool
 	BusAddr        string
 	BusPassword    string
 	WorkerAddr     string
 	WorkerPassword string
 	LoopInterval   time.Duration
-
-	Dir string
 }
 
 type chainManager struct {
@@ -252,58 +245,117 @@ func newAutopilot(cfg AutopilotConfig, dir string) (*autopilot.Autopilot, func()
 }
 
 type Node struct {
-	Bus    *bus.Bus
-	BusSrv http.Handler
-
+	Bus       *bus.Bus
 	Worker    *worker.Worker
-	WorkerSrv http.Handler
+	Autopilot *autopilot.Autopilot
 
-	Autopilot    *autopilot.Autopilot
-	AutopilotSrv http.Handler
+	APIAddr string
+
+	cleanup []func() error
+	l       net.Listener
+	srv     *http.Server
 }
 
-func NewNode(bc BusConfig, wc WorkerConfig, ac AutopilotConfig, wk consensus.PrivateKey) (_ *Node, _ func() error, err error) {
-	var cleanupFncs []func() error
-	cleanup := func() error {
-		for _, fn := range cleanupFncs {
-			fn()
-		}
-		return nil
+type NodeConfig struct {
+	APIAddr     string
+	APIPassword string
+	Dir         string
+	UIHandler   http.Handler
+}
+
+func (n *Node) Close() error {
+	if err := n.srv.Shutdown(context.Background()); err != nil {
+		return err
 	}
+	for _, fn := range n.cleanup {
+		if err := fn(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (n *Node) APIAddress() string {
+	return n.APIAddr
+}
+
+func NewNode(nc NodeConfig, bc BusConfig, wc WorkerConfig, ac AutopilotConfig, wk consensus.PrivateKey) (_ *Node, err error) {
+	// create listener first, so that we know the actual apiAddr if the user
+	// specifies port :0
+	l, err := net.Listen("tcp", nc.APIAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer l.Close()
+
+	// Overwrite APIAddr now that we know the exact addr from the listener.
+	nc.APIAddr = "http://" + l.Addr().String()
+
+	// authenticate API
+	auth := jape.BasicAuth(nc.APIPassword)
+
+	mux := TreeMux{
+		H:   nc.UIHandler,
+		Sub: make(map[string]http.Handler),
+	}
+
+	// Cleanup.
+	var cleanupFncs []func() error
 	defer func() {
 		if err != nil {
-			cleanup()
+			for _, fn := range cleanupFncs {
+				fn()
+			}
 		}
 	}()
 
-	node := &Node{}
-
-	if bc.Enabled {
-		b, cleanup, err := newBus(bc, bc.Dir, wk)
-		if err != nil {
-			return nil, nil, err
-		}
-		cleanupFncs = append(cleanupFncs, cleanup)
-		auth := jape.BasicAuth(bc.APIPassword)
-		node.Bus = b
-		node.BusSrv = &TreeMux{H: auth(bus.NewServer(b))}
+	node := &Node{
+		APIAddr: nc.APIAddr,
+		l:       l,
 	}
 
+	// Create the bus.
+	if bc.Enabled {
+		b, cleanup, err := newBus(bc, nc.Dir, wk)
+		if err != nil {
+			return nil, err
+		}
+		cleanupFncs = append(cleanupFncs, cleanup)
+		node.Bus = b
+		mux.Sub["/api/store"] = &TreeMux{H: auth(bus.NewServer(b))}
+	}
+
+	// Create the worker. If we also previously created a bus, we overwrite
+	// the worker config to connect to that bus.
 	if wc.Enabled {
+		if bc.Enabled {
+			wc.BusAddr = nc.APIAddr
+			wc.BusPassword = nc.APIPassword
+		}
 		w, cleanup, err := newWorker(wc, wk)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		cleanupFncs = append(cleanupFncs, cleanup)
-		auth := jape.BasicAuth(wc.APIPassword)
 		node.Worker = w
-		node.WorkerSrv = &TreeMux{H: auth(worker.NewServer(w))}
+		mux.Sub["/api/worker"] = &TreeMux{H: auth(worker.NewServer(w))}
 	}
 
+	// Create the autopilot. If we also previously created a bus, we
+	// overwrite the autopilot config to connect to that bus. We do the same
+	// thing for the worker.
 	if ac.Enabled {
-		a, cleanup, err := newAutopilot(ac, ac.Dir)
+		if bc.Enabled {
+			ac.BusAddr = nc.APIAddr
+			ac.BusPassword = nc.APIPassword
+		}
+		if wc.Enabled {
+			ac.WorkerAddr = nc.APIAddr
+			ac.WorkerPassword = nc.APIPassword
+		}
+		a, cleanup, err := newAutopilot(ac, nc.Dir)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		defer cleanup()
 		go func() {
@@ -313,9 +365,16 @@ func NewNode(bc BusConfig, wc WorkerConfig, ac AutopilotConfig, wk consensus.Pri
 			}
 		}()
 		cleanupFncs = append(cleanupFncs, cleanup)
-		auth := jape.BasicAuth(ac.APIPassword)
 		node.Autopilot = a
-		node.AutopilotSrv = &TreeMux{H: auth(autopilot.NewServer(a))}
+		mux.Sub["/api/autopilot"] = &TreeMux{H: auth(autopilot.NewServer(a))}
 	}
-	return node, cleanup, nil
+
+	// Prepare API.
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(l)
+
+	node.cleanup = cleanupFncs
+	node.srv = srv
+
+	return node, nil
 }

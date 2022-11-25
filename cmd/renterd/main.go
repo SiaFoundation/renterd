@@ -1,12 +1,9 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"time"
@@ -98,70 +95,26 @@ func main() {
 		return
 	}
 
-	// create listener first, so that we know the actual apiAddr if the user
-	// specifies port :0
-	l, err := net.Listen("tcp", *apiAddr)
+	nodeCfg := node.NodeConfig{
+		APIAddr:     *apiAddr,
+		APIPassword: getAPIPassword(),
+		Dir:         *dir,
+		UIHandler:   createUIHandler(),
+	}
+
+	node, err := node.NewNode(nodeCfg, busCfg, workerCfg, autopilotCfg, getWalletKey())
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer l.Close()
+	defer node.Close()
 
-	// All components use the same API password.
-	workerCfg.APIPassword = getAPIPassword()
-	busCfg.APIPassword = getAPIPassword()
-	autopilotCfg.APIPassword = getAPIPassword()
-
-	workerCfg.BusPassword = getAPIPassword()
-	autopilotCfg.BusPassword = getAPIPassword()
-	autopilotCfg.WorkerPassword = getAPIPassword()
-
-	// All components use the same API address.
-	*apiAddr = "http://" + l.Addr().String()
-	workerCfg.BusAddr = *apiAddr
-	busCfg.GatewayAddr = *apiAddr
-	autopilotCfg.BusAddr = *apiAddr
-	autopilotCfg.WorkerAddr = *apiAddr
-
-	// All components use the same dir.
-	workerCfg.Dir = *dir
-	busCfg.Dir = *dir
-	autopilotCfg.Dir = *dir
-
-	mux := node.TreeMux{
-		H:   createUIHandler(),
-		Sub: make(map[string]http.Handler),
-	}
-
-	node, cleanup, err := node.NewNode(busCfg, workerCfg, autopilotCfg, getWalletKey())
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer cleanup()
-
-	if node.BusSrv != nil {
+	if node.Bus != nil {
 		log.Println("bus: Listening on", node.Bus.GatewayAddress())
-		mux.Sub["/api/store"] = node.BusSrv
 	}
-	if node.WorkerSrv != nil {
-		mux.Sub["/api/worker"] = node.WorkerSrv
-	}
-	if node.AutopilotSrv != nil {
-		mux.Sub["/api/autopilot"] = node.AutopilotSrv
-		go func() {
-			err := node.Autopilot.Run()
-			if err != nil {
-				log.Fatalln("Fatal autopilot error:", err)
-			}
-		}()
-	}
-
-	srv := &http.Server{Handler: mux}
-	go srv.Serve(l)
-	log.Println("api: Listening on", l.Addr())
+	log.Println("api: Listening on", node.APIAddress())
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
 	<-signalCh
 	log.Println("Shutting down...")
-	srv.Shutdown(context.Background())
 }
