@@ -116,7 +116,11 @@ type ObjectsResponse struct {
 }
 
 type ObjectsMarkSlabMigrationFailureRequest struct {
-	SlabIDs []uint `json:"slabIDs"`
+	SlabIDs []SlabID `json:"slabIDs"`
+}
+
+type ObjectsMarkSlabMigrationFailureResponse struct {
+	Updates int `json:"updates"`
 }
 
 type ObjectsMigrateSlabsResponse struct {

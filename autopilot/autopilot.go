@@ -56,7 +56,7 @@ type Bus interface {
 	ConsensusState() (bus.ConsensusState, error)
 
 	// objects
-	MarkSlabsMigrationFailure(slabIDs ...bus.SlabID) error
+	MarkSlabsMigrationFailure(slabIDs ...bus.SlabID) (int, error)
 	SlabsForMigration(n int, failureCutoff time.Time) ([]bus.SlabID, error)
 	SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Contract, error)
 }

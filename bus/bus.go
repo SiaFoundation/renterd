@@ -78,7 +78,7 @@ type (
 	ObjectStore interface {
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
-		MarkSlabsMigrationFailure(slabIDs ...SlabID) error
+		MarkSlabsMigrationFailure(slabIDs ...SlabID) (int, error)
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 		SlabsForMigration(n int, failureCutoff time.Time) ([]SlabID, error)
@@ -496,8 +496,12 @@ func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	if err := jc.Decode(&req); err != nil {
 		return
 	}
-	// TODO: Why does jape hate this?
-	jc.Check("couldn't mark slab migration failure", b.os.MarkSlabsMigrationFailure())
+	updates, err := b.os.MarkSlabsMigrationFailure()
+	if jc.Check("couldn't mark slab migration failure", err) == nil {
+		jc.Encode(ObjectsMarkSlabMigrationFailureResponse{
+			Updates: updates,
+		})
+	}
 }
 
 // GatewayAddress returns the address of the gateway.

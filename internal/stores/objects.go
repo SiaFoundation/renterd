@@ -632,10 +632,13 @@ func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Co
 
 // MarkSlabsMigrationFailure sets the last_failure field for the given slabs to
 // the current time.
-func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs ...bus.SlabID) error {
+func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs ...bus.SlabID) (int, error) {
 	now := time.Now().UTC()
-	return s.db.Model(&dbSlab{}).
+	txn := s.db.Model(&dbSlab{}).
 		Where("id in ?", slabIDs).
-		Update("last_failure", now).
-		Error
+		Update("last_failure", now)
+	if txn.Error != nil {
+		return 0, txn.Error
+	}
+	return int(txn.RowsAffected), nil
 }

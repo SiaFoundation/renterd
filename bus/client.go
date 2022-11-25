@@ -292,9 +292,12 @@ func (c *Client) DeleteObject(name string) (err error) {
 
 // MarkSlabsMigrationFailure updates the latest failure time of the given slabs
 // to the current time.
-func (c *Client) MarkSlabsMigrationFailure(slabIDs ...SlabID) (err error) {
-	err = c.c.POST("/objects/migration/failed", ObjectsMarkSlabMigrationFailureRequest{}, nil)
-	return
+func (c *Client) MarkSlabsMigrationFailure(slabIDs ...SlabID) (int, error) {
+	var resp ObjectsMarkSlabMigrationFailureResponse
+	err := c.c.POST("/objects/migration/failed", ObjectsMarkSlabMigrationFailureRequest{
+		SlabIDs: slabIDs,
+	}, &resp)
+	return resp.Updates, err
 }
 
 // SlabsForMigration returns up to n slabs which require migration and haven't
