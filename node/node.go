@@ -244,6 +244,8 @@ func newAutopilot(cfg AutopilotConfig, dir string) (*autopilot.Autopilot, func()
 	return a, cleanup, nil
 }
 
+// Node describes a single instance of renterd with its own API. A Node can
+// either contain a bus, worker and autopilot or any combination thereof.
 type Node struct {
 	Bus       *bus.Bus
 	Worker    *worker.Worker
@@ -256,13 +258,22 @@ type Node struct {
 	srv     *http.Server
 }
 
+// NodeConfig contains configuration common between the individual components of
+// a node.
 type NodeConfig struct {
 	APIAddr     string
 	APIPassword string
-	Dir         string
-	UIHandler   http.Handler
+
+	Dir       string
+	UIHandler http.Handler
 }
 
+// APIAddress returns the http address used to serve the node's API.
+func (n *Node) APIAddress() string {
+	return n.APIAddr
+}
+
+// Close shuts down the API and cleans up the node's resources.
 func (n *Node) Close() error {
 	if err := n.srv.Shutdown(context.Background()); err != nil {
 		return err
@@ -275,10 +286,10 @@ func (n *Node) Close() error {
 	return nil
 }
 
-func (n *Node) APIAddress() string {
-	return n.APIAddr
-}
-
+// NewNode creates a new Node which serves its own API and UI. If the node
+// creates its own bus, then both worker and autopilot will also connect to it
+// and ignore the settings 'BusAddr', 'WorkerAddr' and corresponding password
+// settings.
 func NewNode(nc NodeConfig, bc BusConfig, wc WorkerConfig, ac AutopilotConfig, wk consensus.PrivateKey) (_ *Node, err error) {
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
@@ -290,6 +301,17 @@ func NewNode(nc NodeConfig, bc BusConfig, wc WorkerConfig, ac AutopilotConfig, w
 
 	// Overwrite APIAddr now that we know the exact addr from the listener.
 	nc.APIAddr = "http://" + l.Addr().String()
+
+	if bc.Enabled {
+		// If a bus is created, all the other components are expected to connect
+		// to it since a cluster can only ever have a single bus.
+		wc.BusAddr = nc.APIAddr
+		wc.BusPassword = nc.APIPassword
+		ac.BusAddr = nc.APIAddr
+		ac.BusPassword = nc.APIPassword
+		ac.WorkerAddr = nc.APIAddr
+		ac.WorkerPassword = nc.APIPassword
+	}
 
 	// authenticate API
 	auth := jape.BasicAuth(nc.APIPassword)
@@ -328,10 +350,6 @@ func NewNode(nc NodeConfig, bc BusConfig, wc WorkerConfig, ac AutopilotConfig, w
 	// Create the worker. If we also previously created a bus, we overwrite
 	// the worker config to connect to that bus.
 	if wc.Enabled {
-		if bc.Enabled {
-			wc.BusAddr = nc.APIAddr
-			wc.BusPassword = nc.APIPassword
-		}
 		w, cleanup, err := newWorker(wc, wk)
 		if err != nil {
 			return nil, err
@@ -345,14 +363,6 @@ func NewNode(nc NodeConfig, bc BusConfig, wc WorkerConfig, ac AutopilotConfig, w
 	// overwrite the autopilot config to connect to that bus. We do the same
 	// thing for the worker.
 	if ac.Enabled {
-		if bc.Enabled {
-			ac.BusAddr = nc.APIAddr
-			ac.BusPassword = nc.APIPassword
-		}
-		if wc.Enabled {
-			ac.WorkerAddr = nc.APIAddr
-			ac.WorkerPassword = nc.APIPassword
-		}
 		a, cleanup, err := newAutopilot(ac, nc.Dir)
 		if err != nil {
 			return nil, err
