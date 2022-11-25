@@ -136,7 +136,7 @@ func (c *contractor) runContractChecks(cfg Config, blockHeight uint64) error {
 			withOfflineFilter().
 			withRedundantIPFilter(ipFilter).
 			withRemainingFundsFilter(cfg).
-			withScoreFilter(cfg, 0). // TODO: set threshold
+			// TODO: score filter
 			withUpForRenewalFilter(cfg, blockHeight).
 			withWhiteListFilter(cfg).
 			finalize()
@@ -533,7 +533,7 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 			withBlackListFilter(cfg).
 			withOfflineFilter().
 			withRedundantIPFilter(ipFilter).
-			withScoreFilter(cfg, 0). // TODO: set threshold
+			// TODO: score filter
 			withWhiteListFilter(cfg).
 			finalize()
 		if !filtered {
@@ -546,30 +546,8 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		wanted = len(hosts)
 	}
 
-	// score each host
-	scores := make([]float64, len(hosts))
-	for i, h := range hosts {
-		scores[i] = newHostScore(host{h, rhpv2.Contract{}}).
-			withAgeScore().
-			withCollateralScore(cfg).
-			withInteractionScore().
-			withSettingsScore(cfg).
-			withUptimeScore().
-			withVersionScore().
-			finalize()
-	}
-
-	// select hosts
-	var selected []consensus.PublicKey
-	for len(selected) < wanted {
-		i := randSelectByWeight(scores)
-		selected = append(selected, hosts[i].PublicKey)
-
-		// remove selected host
-		hosts[i], hosts = hosts[len(hosts)-1], hosts[:len(hosts)-1]
-		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
-	}
-	return selected, nil
+	// TODO: score each host and return selected hosts
+	return nil, nil
 }
 
 // TODO: would be nice if the bus would expose both host and contract data in a

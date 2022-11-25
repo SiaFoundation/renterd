@@ -21,8 +21,8 @@ type hostFilter struct {
 	metadata bus.ContractMetadata
 	reasons  []string
 
-	gfu bool
-	gfr bool
+	initialGFU bool
+	initialGFR bool
 }
 
 func newHostFilter(h host, m bus.ContractMetadata) *hostFilter {
@@ -30,15 +30,16 @@ func newHostFilter(h host, m bus.ContractMetadata) *hostFilter {
 		host:     h,
 		metadata: m,
 
-		// save original GFU & GFR values
-		gfu: m.GoodForUpload,
-		gfr: m.GoodForRenew,
+		// save initial GFU & GFR values
+		initialGFU: m.GoodForUpload,
+		initialGFR: m.GoodForRenew,
 	}
 }
 
 func (f *hostFilter) finalize() (bus.ContractMetadata, []string, bool) {
-	filtered := (!f.metadata.GoodForUpload && f.gfu) || (!f.metadata.GoodForRenew && f.gfr)
-	return f.metadata, f.reasons, filtered
+	updatedGFU := !f.metadata.GoodForUpload && f.initialGFU
+	updatedGFR := !f.metadata.GoodForRenew && f.initialGFR
+	return f.metadata, f.reasons, updatedGFU || updatedGFR
 }
 
 func (f *hostFilter) withBlackListFilter(cfg Config) *hostFilter {
@@ -46,7 +47,7 @@ func (f *hostFilter) withBlackListFilter(cfg Config) *hostFilter {
 		if f.host.IsHost(host) {
 			f.metadata.GoodForUpload = false
 			f.metadata.GoodForRenew = false
-			f.reasons = append(f.reasons, fmt.Sprintf("host is blacklisted, GFU: %v -> false, GFR: %v -> false", f.gfu, f.gfr))
+			f.reasons = append(f.reasons, fmt.Sprintf("host is blacklisted, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
 			break
 		}
 	}
@@ -57,7 +58,7 @@ func (f *hostFilter) withMaxRevisionFilter() *hostFilter {
 	if f.host.Revision.NewRevisionNumber == math.MaxUint64 {
 		f.metadata.GoodForUpload = false
 		f.metadata.GoodForRenew = false
-		f.reasons = append(f.reasons, fmt.Sprintf("max revision check failed, GFU: %v -> false, GFR: %v -> false", f.gfu, f.gfr))
+		f.reasons = append(f.reasons, fmt.Sprintf("max revision check failed, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
 	}
 	return f
 }
@@ -66,7 +67,7 @@ func (f *hostFilter) withOfflineFilter() *hostFilter {
 	if !f.host.IsOnline() {
 		f.metadata.GoodForUpload = false
 		f.metadata.GoodForRenew = false
-		f.reasons = append(f.reasons, fmt.Sprintf("host is not online, GFU: %v -> false, GFR: %v -> false", f.gfu, f.gfr))
+		f.reasons = append(f.reasons, fmt.Sprintf("host is not online, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
 	}
 	return f
 }
@@ -75,7 +76,7 @@ func (f *hostFilter) withRedundantIPFilter(filter *ipFilter) *hostFilter {
 	if filter.filtered(f.host) {
 		f.metadata.GoodForUpload = false
 		f.metadata.GoodForRenew = false
-		f.reasons = append(f.reasons, fmt.Sprintf("host IP is redundant, GFU: %v -> false, GFR: %v -> false", f.gfu, f.gfr))
+		f.reasons = append(f.reasons, fmt.Sprintf("host IP is redundant, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
 	}
 	return f
 }
@@ -96,25 +97,7 @@ func (f *hostFilter) withRemainingFundsFilter(cfg Config) *hostFilter {
 
 	if f.host.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold {
 		f.metadata.GoodForUpload = false
-		f.reasons = append(f.reasons, fmt.Sprintf("contract has insufficient funds, GFU: %v -> false", f.gfu))
-	}
-	return f
-}
-
-func (f *hostFilter) withScoreFilter(cfg Config, threshold float64) *hostFilter {
-	score := newHostScore(f.host).
-		withAgeScore().
-		withCollateralScore(cfg).
-		withInteractionScore().
-		withSettingsScore(cfg).
-		withUptimeScore().
-		withVersionScore().
-		finalize()
-
-	if score < threshold {
-		f.metadata.GoodForUpload = false
-		f.metadata.GoodForRenew = false
-		f.reasons = append(f.reasons, fmt.Sprintf("host score too low, %f < %f, GFU: %v -> false, GFR: %v -> false", score, threshold, f.gfu, f.gfr))
+		f.reasons = append(f.reasons, fmt.Sprintf("contract has insufficient funds, GFU: %v -> false", f.initialGFU))
 	}
 	return f
 }
@@ -122,7 +105,7 @@ func (f *hostFilter) withScoreFilter(cfg Config, threshold float64) *hostFilter 
 func (f *hostFilter) withUpForRenewalFilter(cfg Config, blockHeight uint64) *hostFilter {
 	if blockHeight+cfg.Contracts.RenewWindow/2 >= f.host.EndHeight() {
 		f.metadata.GoodForUpload = false
-		f.reasons = append(f.reasons, fmt.Sprintf("contract is up for renewal, GFU: %v -> false", f.gfu))
+		f.reasons = append(f.reasons, fmt.Sprintf("contract is up for renewal, GFU: %v -> false", f.initialGFU))
 	}
 	return f
 }
@@ -139,7 +122,7 @@ func (f *hostFilter) withWhiteListFilter(cfg Config) *hostFilter {
 		if !found {
 			f.metadata.GoodForUpload = false
 			f.metadata.GoodForRenew = false
-			f.reasons = append(f.reasons, fmt.Sprintf("host is not on whitelist, GFU: %v -> false, GFR: %v -> false", f.gfu, f.gfr))
+			f.reasons = append(f.reasons, fmt.Sprintf("host is not on whitelist, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
 		}
 	}
 	return f

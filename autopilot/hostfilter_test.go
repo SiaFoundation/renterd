@@ -130,18 +130,6 @@ func TestHostFilter(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 
-	// score filter - good score
-	md, _, filtered = newHostFilter(h1, m).withScoreFilter(cfg, 0).finalize()
-	if !isGFU(md) || !isGFR(md) || filtered {
-		t.Fatal("unexpected")
-	}
-
-	// score filter - bad score
-	md, _, filtered = newHostFilter(h1, m).withScoreFilter(cfg, 0.1).finalize()
-	if isGFU(md) || isGFR(md) || !filtered {
-		t.Fatal("unexpected")
-	}
-
 	// up for renewal filter - not up for renewal
 	blockHeight := uint64(0)
 	h1.Contract.Revision.NewWindowStart = (144 * 7) + 1
@@ -165,11 +153,10 @@ func TestHostFilter(t *testing.T) {
 		withOfflineFilter().
 		withRedundantIPFilter(ipf).
 		withRemainingFundsFilter(cfg).
-		withScoreFilter(cfg, .1).
 		withUpForRenewalFilter(cfg, blockHeight).
 		finalize()
 
-	if isGFU(md) || isGFR(md) || len(reasons) != 8 {
+	if isGFU(md) || isGFR(md) || len(reasons) != 7 {
 		t.Fatal("unexpected")
 	}
 }
