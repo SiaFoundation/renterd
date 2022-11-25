@@ -95,24 +95,28 @@ func main() {
 		return
 	}
 
-	nodeCfg := node.NodeConfig{
-		APIAddr:     *apiAddr,
-		APIPassword: getAPIPassword(),
-		Dir:         *dir,
-		UIHandler:   createUIHandler(),
-	}
+	c := node.NewCluster(*apiAddr, getAPIPassword(), *dir, createUIHandler(), getWalletKey())
+	defer c.Close()
 
-	node, err := node.NewNode(nodeCfg, busCfg, workerCfg, autopilotCfg, getWalletKey())
-	if err != nil {
-		log.Fatal(err)
+	if busCfg.Enabled {
+		if err := c.CreateBus(busCfg.Bootstrap, busCfg.GatewayAddr); err != nil {
+			log.Fatal("failed to create bus", err)
+		}
+		log.Println("bus: Listening on", busCfg.GatewayAddr)
 	}
-	defer node.Close()
-
-	if node.Bus != nil {
-		log.Println("bus: Listening on", node.Bus.GatewayAddress())
+	if workerCfg.Enabled {
+		if err := c.CreateWorker(); err != nil {
+			log.Fatal("failed to create worker", err)
+		}
 	}
-	log.Println("api: Listening on", node.APIAddress())
+	if autopilotCfg.Enabled {
+		if err := c.CreateAutopilot(autopilotCfg.LoopInterval); err != nil {
+			log.Fatal("failed to create autopilot", err)
+		}
+	}
+	log.Println("api: Listening on", c.APIAddress())
 
+	go c.Serve()
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
 	<-signalCh
