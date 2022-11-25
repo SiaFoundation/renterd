@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,8 +66,16 @@ func (s *server) rhpScanHandler(jc jape.Context) {
 	if jc.Decode(&rsr) != nil {
 		return
 	}
+
+	ctx := jc.Request.Context()
+	if rsr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), rsr.Timeout)
+		defer cancel()
+	}
+
 	start := time.Now()
-	settings, err := s.w.Settings(jc.Request.Context(), rsr.HostIP, rsr.HostKey)
+	settings, err := s.w.Settings(ctx, rsr.HostIP, rsr.HostKey)
 	if jc.Check("couldn't scan host", err) != nil {
 		return
 	}
