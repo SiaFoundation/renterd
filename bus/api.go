@@ -119,11 +119,6 @@ type ObjectsMarkSlabMigrationFailureRequest struct {
 	SlabIDs []uint `json:"slabIDs"`
 }
 
-type ObjectsMigrateSlabsRequest struct {
-	Cutoff time.Time `json:"cutoff"`
-	Limit  int       `json:"limit"`
-}
-
 type ObjectsMigrateSlabsResponse struct {
 	SlabIDs []SlabID `json:"slabIDs"`
 }

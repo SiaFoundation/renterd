@@ -459,11 +459,15 @@ func (b *Bus) objectsKeyHandlerDELETE(jc jape.Context) {
 }
 
 func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
-	var req ObjectsMigrateSlabsRequest
-	if jc.Decode(&req) != nil {
+	var cutoff paramTime
+	var limit int
+	if jc.DecodeForm("cutoff", &cutoff) != nil {
 		return
 	}
-	slabIDs, err := b.os.SlabsForMigration(req.Limit, req.Cutoff)
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+	slabIDs, err := b.os.SlabsForMigration(limit, time.Time(cutoff))
 	if jc.Check("couldn't fetch slabs for migration", err) != nil {
 		return
 	}
@@ -555,7 +559,7 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /objects/*key":               b.objectsKeyHandlerGET,
 		"PUT    /objects/*key":               b.objectsKeyHandlerPUT,
 		"DELETE /objects/*key":               b.objectsKeyHandlerDELETE,
-		"POST    /objects/migration/slabs":   b.objectsMigrationSlabsHandlerGET, // TODO: should be GET but how???
+		"GET    /objects/migration/slabs":    b.objectsMigrationSlabsHandlerGET,
 		"GET    /objects/migration/slab/:id": b.objectsMigrationSlabHandlerGET,
 		"POST    /objects/migration/failed":  b.objectsMarkSlabMigrationFailureHandlerPOST,
 	})
