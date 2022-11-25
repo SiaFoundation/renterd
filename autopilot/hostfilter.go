@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"net"
 
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/siad/modules"
@@ -73,12 +72,7 @@ func (f *hostFilter) withOfflineFilter() *hostFilter {
 }
 
 func (f *hostFilter) withRedundantIPFilter(filter *ipFilter) *hostFilter {
-	ip, err := net.ResolveIPAddr("ip", f.host.NetAddress())
-	if err != nil {
-		return f
-	}
-
-	if filter.exists(ip) {
+	if filter.filtered(f.host) {
 		f.metadata.GoodForUpload = false
 		f.metadata.GoodForRenew = false
 		f.reasons = append(f.reasons, fmt.Sprintf("host IP is redundant, GFU: %v -> false, GFR: %v -> false", f.gfu, f.gfr))

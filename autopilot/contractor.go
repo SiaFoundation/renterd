@@ -572,6 +572,8 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 	return selected, nil
 }
 
+// TODO: would be nice if the bus would expose both host and contract data in a
+// single endpoint but currently it's stored in two separate stores
 func (c *contractor) host(contract bus.Contract) (host, error) {
 	h, err := c.ap.bus.Host(contract.HostKey)
 	if err != nil {
