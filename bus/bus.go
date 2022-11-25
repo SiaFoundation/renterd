@@ -496,7 +496,7 @@ func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	updates, err := b.os.MarkSlabsMigrationFailure()
+	updates, err := b.os.MarkSlabsMigrationFailure(req.SlabIDs...)
 	if jc.Check("couldn't mark slab migration failure", err) == nil {
 		jc.Encode(ObjectsMarkSlabMigrationFailureResponse{
 			Updates: updates,
