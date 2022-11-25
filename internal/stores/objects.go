@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -304,9 +305,18 @@ type (
 		Model
 		DBSliceID uint `gorm:"index"`
 
-		Key       []byte `gorm:"unique;NOT NULL"` // json string
-		MinShards uint8
-		Shards    []dbSector `gorm:"many2many:sector_slabs;constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+		Key         []byte    `gorm:"unique;NOT NULL"` // json string
+		LastFailure time.Time `gorm:"index"`
+		MinShards   uint8
+		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+	}
+
+	// dbShard is a join table between dbSlab and dbSector.
+	dbShard struct {
+		ID         uint `gorm:"primaryKey"`
+		DBSlabID   uint `gorm:"index"`
+		DBSector   dbSector
+		DBSectorID uint `gorm:"index"`
 	}
 
 	// dbSector describes a sector in the database. A sector can exist
@@ -315,10 +325,13 @@ type (
 	dbSector struct {
 		Model
 
-		Contracts []dbContractRHPv2 `gorm:"many2many:contract_sectors"`
+		Contracts []dbContract      `gorm:"many2many:contract_sectors"`
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
+
+// TableName implements the gorm.Tabler interface.
+func (dbShard) TableName() string { return "shards" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
@@ -358,14 +371,14 @@ func (o dbObject) convert() (object.Object, error) {
 		}
 		for j, sh := range sl.Slab.Shards {
 			// Return first contract that's good for upload.
-			for _, c := range sh.Contracts {
-				if !c.GoodForUpload {
+			for _, c := range sh.DBSector.Contracts {
+				if !c.IsGood {
 					continue
 				}
 				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
 				break
 			}
-			obj.Slabs[i].Shards[j].Root = sh.Root
+			obj.Slabs[i].Shards[j].Root = sh.DBSector.Root
 		}
 	}
 	return obj, nil
@@ -407,6 +420,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
+			// Verify that all hosts have a contract.
 			_, exists := usedContracts[shard.Host]
 			if !exists {
 				return fmt.Errorf("missing contract id for host pubkey %v", shard.Host)
@@ -454,12 +468,12 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 			if err != nil {
 				return err
 			}
-			var slab dbSlab
-			err = tx.FirstOrCreate(&slab, &dbSlab{
+			slab := &dbSlab{
 				DBSliceID: slice.ID,
 				Key:       slabKey,
 				MinShards: ss.MinShards,
-			}).Error
+			}
+			err = tx.Create(&slab).Error
 			if err != nil {
 				return err
 			}
@@ -477,18 +491,20 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 					return err
 				}
 
-				// Append the sector to the slab.
-				err = tx.Model(&slab).
-					Association("Shards").
-					Append(&sector)
+				// Add the slab-sector link to the sector to the
+				// shards table.
+				err = tx.Create(&dbShard{
+					DBSlabID:   slab.ID,
+					DBSectorID: sector.ID,
+				}).Error
 				if err != nil {
 					return err
 				}
 
 				// Look for the contract referenced by the shard.
-				var contract dbContractRHPv2
-				err = tx.Model(&dbContractRHPv2{}).
-					Where(&dbContractRHPv2{FCID: fcid}).
+				var contract dbContract
+				err = tx.Model(&dbContract{}).
+					Where(&dbContract{FCID: fcid}).
 					Take(&contract).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					continue // don't set contract
@@ -496,10 +512,10 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 					return err
 				}
 
-				// Append the contract to the sector.
-				err = tx.Model(&sector).
-					Association("Contracts").
-					Append(&contract)
+				// Add the sector-contract link to the
+				// contract_sectors table if it doesn't exist
+				// yet.
+				err = tx.Model(&sector).Association("Contracts").Append(&contract)
 				if err != nil {
 					return err
 				}
@@ -523,10 +539,45 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.Slab.Shards.Contracts.Host").
+		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound
 	}
 	return obj, nil
+}
+
+// TODO: Should we return slabs which are below MinShards? I think so because
+// the caller should handle that and then manually delete them if necessary.
+func (s *SQLStore) slabsForRepair(n int, failureCutoff time.Time) ([]uint, error) {
+	failureQuery := s.db.Model(&dbSlab{}).
+		Select("id as slab_id").
+		Where("last_failure < ?", failureCutoff.UTC())
+	inner := s.db.Table("(?)", failureQuery).
+		Select("slab_id, db_sector_id as sector_id").
+		Joins("LEFT JOIN shards ON slab_id = shards.db_slab_id")
+	middle := s.db.Table("(?)", inner).
+		Select("slab_id, sector_id, db_contract_id as contract_id").
+		Joins("LEFT JOIN contract_sectors ON sector_id = contract_sectors.db_sector_id")
+	outer := s.db.Table("(?)", middle).
+		Select("slab_id").
+		Joins("LEFT JOIN contracts ON contract_id = contracts.id").
+		Where("contract_id IS NULL OR is_good IS 0").
+		Group("slab_id").
+		Order("COUNT(slab_id) DESC").
+		Limit(n)
+
+	var slabIDs []uint
+	err := outer.Find(&slabIDs).Error
+	return slabIDs, err
+}
+
+// MarkSlabsFailure sets the last_failure field for the given slabs to the
+// current time.
+func (s *SQLStore) MarkSlabsFailure(slabIDs []uint) error {
+	now := time.Now().UTC()
+	return s.db.Model(&dbSlab{}).
+		Where("id in ?", slabIDs).
+		Update("last_failure", now).
+		Error
 }

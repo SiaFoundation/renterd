@@ -196,19 +196,25 @@ func NewJSONContractStore(dir string) (*JSONContractStore, error) {
 }
 
 type (
-	dbContractRHPv2 struct {
+	dbContract struct {
 		Model
 
-		FCID          types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
-		GoodForUpload bool                 `gorm:"index"`
-		HostID        uint                 `gorm:"index"`
-		Host          dbHost
-		Revision      dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
+		FCID     types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
+		IsGood   bool                 `gorm:"index"`
+		HostID   uint                 `gorm:"index"`
+		Host     dbHost
+		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
+		Sectors  []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
+	}
+
+	dbContractSector struct {
+		DBContractID uint `gorm:"primaryKey"`
+		DBSectorID   uint `gorm:"primaryKey"`
 	}
 
 	dbFileContractRevision struct {
 		Model
-		DBContractRHPv2ID uint `gorm:"unique;index"`
+		DBContractID uint `gorm:"unique;index"`
 
 		NewRevisionNumber     uint64 `gorm:"index"`
 		NewFileSize           uint64
@@ -253,8 +259,22 @@ type (
 	}
 )
 
+// BeforeDelete implements a deletion hook for dbContract. This is necessary
+// because we can't delete a contract without first removing the corresponding
+// entry from the contract_sectors since that table potentially keeps a
+// reference to the contract..
+func (cs *dbContract) BeforeDelete(tx *gorm.DB) error {
+	return tx.Table("contract_sectors").
+		Where("db_contract_id = ?", cs.ID).
+		Delete(&dbContractSector{}).
+		Error
+}
+
 // TableName implements the gorm.Tabler interface.
-func (dbContractRHPv2) TableName() string { return "contracts_v2" }
+func (dbContractSector) TableName() string { return "contract_sectors" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbContract) TableName() string { return "contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbFileContractRevision) TableName() string { return "file_contract_revisions" }
@@ -272,7 +292,7 @@ func (dbHostSet) TableName() string { return "host_sets" }
 func (dbHostSetEntry) TableName() string { return "host_set_entries" }
 
 // convert converts a dbContractRHPv2 to a rhpv2.Contract type.
-func (c dbContractRHPv2) convert() (rhpv2.Contract, error) {
+func (c dbContract) convert() (rhpv2.Contract, error) {
 	// Prepare valid and missed outputs.
 	newValidOutputs := make([]types.SiacoinOutput, len(c.Revision.NewValidProofOutputs))
 	for i, sco := range c.Revision.NewValidProofOutputs {
@@ -382,11 +402,11 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 
 		// Insert contract.
 		return s.db.Where(&dbHost{PublicKey: c.HostKey()}).
-			Create(&dbContractRHPv2{
-				FCID:          fcid,
-				GoodForUpload: true, // new contract is always good for upload
-				HostID:        host.ID,
-				Revision:      revision,
+			Create(&dbContract{
+				FCID:     fcid,
+				IsGood:   true, // new contracts always start as good
+				HostID:   host.ID,
+				Revision: revision,
 			}).Error
 	})
 }
@@ -418,21 +438,29 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 	return contracts, nil
 }
 
+// SetIsGood marks a contract as either good or bad.
+func (s *SQLStore) SetIsGood(fcid types.FileContractID, isGood bool) error {
+	return s.db.Model(&dbContract{}).
+		Where(&dbContract{FCID: fcid}).
+		Update("is_good", isGood).Error
+}
+
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		var contract dbContractRHPv2
-		if err := tx.Where(&dbContractRHPv2{FCID: id}).
+		var contract dbContract
+		if err := tx.Where(&dbContract{FCID: id}).
 			Take(&contract).Error; err != nil {
 			return err
 		}
-		return tx.Where(&contract).Delete(&contract).Error
+		return tx.Where(&dbContract{Model: Model{ID: contract.ID}}).
+			Delete(&contract).Error
 	})
 }
 
-func (s *SQLStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
-	var contract dbContractRHPv2
-	err := s.db.Where(&dbContractRHPv2{FCID: id}).
+func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
+	var contract dbContract
+	err := s.db.Where(&dbContract{FCID: id}).
 		Preload("Revision.NewValidProofOutputs").
 		Preload("Revision.NewMissedProofOutputs").
 		Take(&contract).Error
@@ -442,9 +470,9 @@ func (s *SQLStore) contract(id types.FileContractID) (dbContractRHPv2, error) {
 	return contract, err
 }
 
-func (s *SQLStore) contracts() ([]dbContractRHPv2, error) {
-	var contracts []dbContractRHPv2
-	err := s.db.Model(&dbContractRHPv2{}).
+func (s *SQLStore) contracts() ([]dbContract, error) {
+	var contracts []dbContract
+	err := s.db.Model(&dbContract{}).
 		Preload("Revision.NewValidProofOutputs").
 		Preload("Revision.NewMissedProofOutputs").
 		Find(&contracts).Error

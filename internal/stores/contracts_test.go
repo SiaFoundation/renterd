@@ -141,7 +141,7 @@ func TestSQLContractStore(t *testing.T) {
 		}
 		return nil
 	}
-	if err := tableCountCheck(&dbContractRHPv2{}, 0); err != nil {
+	if err := tableCountCheck(&dbContract{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := tableCountCheck(&dbFileContractRevision{}, 0); err != nil {
