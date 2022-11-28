@@ -352,8 +352,8 @@ func (c *Node) AddBus(busAddr, busPassword string) error {
 		return errors.New("cluster already contains a bus")
 	}
 	// Set bus address and password to remote bus.
-	*c.busAddr = busAddr
-	*c.busPassword = busPassword
+	c.busAddr = &busAddr
+	c.busPassword = &busPassword
 	return nil
 }
 
@@ -384,8 +384,8 @@ func (c *Node) AddWorker(workerAddr, workerPassword string) error {
 		return errors.New("cluster already contains a worker")
 	}
 	// Set worker address and password to remote worker.
-	*c.workerAddr = workerAddr
-	*c.workerPassword = workerPassword
+	c.workerAddr = &workerAddr
+	c.workerPassword = &workerPassword
 	return nil
 }
 
