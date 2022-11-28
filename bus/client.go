@@ -237,13 +237,10 @@ func (c *Client) ReleaseContractLock(types.FileContractID) error {
 func (c *Client) ActiveContracts() ([]Contract, error) {
 	panic("unimplemented")
 }
-func (c *Client) RenewableContracts(endHeight uint64) ([]Contract, error) {
+func (c *Client) DeleteContracts(ids ...types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) CancelContract(id types.FileContractID) error {
-	panic("unimplemented")
-}
-func (c *Client) AllContracts(currentPeriod uint64) ([]Contract, error) {
+func (c *Client) AllContracts() ([]Contract, error) {
 	panic("unimplemented")
 }
 func (c *Client) CandidateHosts() ([]hostdb.Host, error) {

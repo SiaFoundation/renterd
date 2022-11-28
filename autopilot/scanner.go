@@ -71,7 +71,7 @@ func (s *scanner) performHostScan() {
 		if r.err != nil {
 			err := s.ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
 				Timestamp: time.Now(),
-				Type:      hostdb.InteractionTypeScan,
+				Type:      "scan",
 				Success:   false,
 				Result:    json.RawMessage(`{"error": "` + r.err.Error() + `"}`),
 			})
@@ -80,7 +80,7 @@ func (s *scanner) performHostScan() {
 			js, _ := json.Marshal(r.settings)
 			err := s.ap.bus.RecordHostInteraction(r.hostKey, hostdb.Interaction{
 				Timestamp: time.Now(),
-				Type:      hostdb.InteractionTypeScan,
+				Type:      "scan",
 				Success:   true,
 				Result:    json.RawMessage(js),
 			})

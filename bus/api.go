@@ -117,11 +117,9 @@ type Contract struct {
 
 // ContractMetadata contains all metadata for a contract.
 type ContractMetadata struct {
-	ParentID      types.FileContractID `json:"parentID"`
-	Spending      ContractSpending     `json:"spending"`
-	GoodForUpload bool                 `json:"goodForUpload"`
-	GoodForRenew  bool                 `json:"goodForRenew"`
-	TotalCost     types.Currency       `json:"totalCost"`
+	RenewedFrom types.FileContractID `json:"renewedFrom"`
+	Spending    ContractSpending     `json:"spending"`
+	TotalCost   types.Currency       `json:"totalCost"`
 }
 
 // ContractSpending contains all spending details for a contract.

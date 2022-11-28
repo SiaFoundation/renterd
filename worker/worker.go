@@ -125,7 +125,7 @@ type Worker struct {
 func (w *Worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) {
 	hi := hostdb.Interaction{
 		Timestamp: time.Now(),
-		Type:      hostdb.InteractionTypeScan,
+		Type:      "scan",
 		Success:   err == nil,
 	}
 	if err == nil {

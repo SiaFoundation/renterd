@@ -36,57 +36,29 @@ func (ap *Autopilot) defaultContracts() ([]worker.Contract, error) {
 	return ap.toWorkerContracts(cs), nil
 }
 
-func (ap *Autopilot) renewableContracts(endHeight uint64) ([]worker.Contract, error) {
-	cs, err := ap.bus.RenewableContracts(endHeight)
-	if err != nil {
-		return nil, err
+func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []bus.Contract, deleted []types.FileContractID) error {
+	// build some maps
+	isDeleted := make(map[types.FileContractID]bool)
+	for _, d := range deleted {
+		isDeleted[d] = true
 	}
-	return ap.toWorkerContracts(cs), nil
-}
-
-func (ap *Autopilot) updateDefaultContracts(renewed, formed []worker.Contract) error {
-	// fetch current set
-	cs, err := ap.defaultContracts()
-	if err != nil {
-		return err
+	isUpForRenewal := make(map[types.FileContractID]bool)
+	for _, r := range toRenew {
+		isUpForRenewal[r.ID] = true
 	}
-
-	// build hostkey -> index map
-	csMap := make(map[string]int)
-	for i, contract := range cs {
-		csMap[contract.HostKey.String()] = i
+	isRenewed := make(map[types.FileContractID]bool)
+	for _, r := range renewed {
+		isRenewed[r.ContractMetadata.RenewedFrom] = true
 	}
 
-	// swap renewed contracts
-	for _, contract := range renewed {
-		index, exists := csMap[contract.HostKey.String()]
-		if !exists {
-			// TODO: panic/log? shouldn't happen
-			csMap[contract.HostKey.String()] = len(cs)
-			cs = append(cs, contract)
-			continue
+	// build new contract set
+	var contracts []consensus.PublicKey
+	for _, c := range append(active, formed...) {
+		if !isDeleted[c.ID] && !(isUpForRenewal[c.ID] && !isRenewed[c.ID]) {
+			contracts = append(contracts, c.HostKey)
 		}
-		cs[index] = contract
-	}
-
-	// append formations
-	for _, contract := range formed {
-		_, exists := csMap[contract.HostKey.String()]
-		if exists {
-			// TODO: panic/log? shouldn't happen
-			continue
-		}
-		cs = append(cs, contract)
 	}
 
 	// update contract set
-	contracts := make([]consensus.PublicKey, len(cs))
-	for i, c := range cs {
-		contracts[i] = c.HostKey
-	}
-	err = ap.bus.SetHostSet(defaultSetName, contracts)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ap.bus.SetHostSet(defaultSetName, contracts)
 }

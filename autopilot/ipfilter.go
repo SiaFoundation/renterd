@@ -28,7 +28,7 @@ func newIPFilter() *ipFilter {
 	}
 }
 
-func (f *ipFilter) filtered(h host) bool {
+func (f *ipFilter) isRedundantIP(h Host) bool {
 	// lookup all IP addresses for the given host
 	host, _, err := net.SplitHostPort(h.NetAddress())
 	if err != nil {
@@ -50,10 +50,10 @@ func (f *ipFilter) filtered(h host) bool {
 	var filter bool
 	for _, subnet := range subnets(addresses) {
 		original, exists := f.subnets[subnet]
-		if exists && h.NetAddress() != original {
+		if exists && h.PublicKey.String() != original {
 			filter = true
 		} else if !exists {
-			f.subnets[subnet] = h.NetAddress() // add it
+			f.subnets[subnet] = h.PublicKey.String()
 		}
 	}
 	return filter

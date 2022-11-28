@@ -1,11 +1,11 @@
 package autopilot
 
 import (
-	"fmt"
 	"math"
 	"math/big"
 
 	"go.sia.tech/renterd/bus"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
@@ -16,75 +16,56 @@ const (
 	minContractFundUploadThreshold = float64(0.05) // 5%
 )
 
-type hostFilter struct {
-	host     host
-	metadata bus.ContractMetadata
-	reasons  []string
+// isUsableHost returns whether the given host is usable along with a list of
+// reasons why it was deemed unusable.
+func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
+	var reasons []string
 
-	initialGFU bool
-	initialGFR bool
-}
-
-func newHostFilter(h host, m bus.ContractMetadata) *hostFilter {
-	return &hostFilter{
-		host:     h,
-		metadata: m,
-
-		// save initial GFU & GFR values
-		initialGFU: m.GoodForUpload,
-		initialGFR: m.GoodForRenew,
+	if !cfg.isWhitelisted(h) {
+		reasons = append(reasons, "host is not on whitelist")
 	}
-}
-
-func (f *hostFilter) finalize() (bus.ContractMetadata, []string, bool) {
-	updatedGFU := !f.metadata.GoodForUpload && f.initialGFU
-	updatedGFR := !f.metadata.GoodForRenew && f.initialGFR
-	return f.metadata, f.reasons, updatedGFU || updatedGFR
-}
-
-func (f *hostFilter) withBlackListFilter(cfg Config) *hostFilter {
-	for _, host := range cfg.Hosts.Blacklist {
-		if f.host.IsHost(host) {
-			f.metadata.GoodForUpload = false
-			f.metadata.GoodForRenew = false
-			f.reasons = append(f.reasons, fmt.Sprintf("host is blacklisted, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
-			break
-		}
+	if cfg.isBlacklisted(h) {
+		reasons = append(reasons, "host is on blacklist")
 	}
-	return f
-}
-
-func (f *hostFilter) withMaxRevisionFilter() *hostFilter {
-	if f.host.Revision.NewRevisionNumber == math.MaxUint64 {
-		f.metadata.GoodForUpload = false
-		f.metadata.GoodForRenew = false
-		f.reasons = append(f.reasons, fmt.Sprintf("max revision check failed, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
+	if !h.IsOnline() {
+		reasons = append(reasons, "host is not online")
 	}
-	return f
-}
-
-func (f *hostFilter) withOfflineFilter() *hostFilter {
-	if !f.host.IsOnline() {
-		f.metadata.GoodForUpload = false
-		f.metadata.GoodForRenew = false
-		f.reasons = append(f.reasons, fmt.Sprintf("host is not online, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
+	if f.isRedundantIP(h) {
+		reasons = append(reasons, "host IP is redundant")
 	}
-	return f
+	// TODO: isLowScore
+
+	return len(reasons) == 0, reasons
 }
 
-func (f *hostFilter) withRedundantIPFilter(filter *ipFilter) *hostFilter {
-	if filter.filtered(f.host) {
-		f.metadata.GoodForUpload = false
-		f.metadata.GoodForRenew = false
-		f.reasons = append(f.reasons, fmt.Sprintf("host IP is redundant, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
+// isUsableContract returns whether the given contract is usable and whether it
+// can be renewed, along with a list of reasons why it was deemed unusable.
+func isUsableContract(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata, bh uint64) (bool, bool, []string) {
+	var reasons []string
+	renewable := true
+
+	if isOutOfFunds(cfg, h, c, m) {
+		reasons = append(reasons, "contract is out of funds")
 	}
-	return f
+	if isUpForRenewal(cfg, c, bh) {
+		reasons = append(reasons, "contract is up for renewal")
+	}
+	if isMaxRevision(c) {
+		reasons = append(reasons, "contract reached max revision number")
+		renewable = false
+	}
+
+	return len(reasons) == 0, renewable, reasons
 }
 
-func (f *hostFilter) withRemainingFundsFilter(cfg Config) *hostFilter {
-	settings, _, found := f.host.LastKnownSettings()
+func isMaxRevision(c rhpv2.Contract) bool {
+	return c.Revision.NewRevisionNumber == math.MaxUint64
+}
+
+func isOutOfFunds(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata) bool {
+	settings, _, found := h.LastKnownSettings()
 	if !found {
-		return f
+		return false
 	}
 
 	blockBytes := types.NewCurrency64(modules.SectorSize * cfg.Contracts.Period)
@@ -93,37 +74,36 @@ func (f *hostFilter) withRemainingFundsFilter(cfg Config) *hostFilter {
 	sectorDownloadBandwidthPrice := settings.DownloadBandwidthPrice.Mul64(modules.SectorSize)
 	sectorBandwidthPrice := sectorUploadBandwidthPrice.Add(sectorDownloadBandwidthPrice)
 	sectorPrice := sectorStoragePrice.Add(sectorBandwidthPrice)
-	percentRemaining, _ := big.NewRat(0, 1).SetFrac(f.host.RenterFunds().Big(), f.metadata.TotalCost.Big()).Float64()
+	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), m.TotalCost.Big()).Float64()
 
-	if f.host.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold {
-		f.metadata.GoodForUpload = false
-		f.reasons = append(f.reasons, fmt.Sprintf("contract has insufficient funds, GFU: %v -> false", f.initialGFU))
-	}
-	return f
+	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func (f *hostFilter) withUpForRenewalFilter(cfg Config, blockHeight uint64) *hostFilter {
-	if blockHeight+cfg.Contracts.RenewWindow/2 >= f.host.EndHeight() {
-		f.metadata.GoodForUpload = false
-		f.reasons = append(f.reasons, fmt.Sprintf("contract is up for renewal, GFU: %v -> false", f.initialGFU))
-	}
-	return f
+func isUpForRenewal(cfg Config, c rhpv2.Contract, blockHeight uint64) bool {
+	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
 }
 
-func (f *hostFilter) withWhiteListFilter(cfg Config) *hostFilter {
+func (cfg Config) isBlacklisted(h Host) bool {
+	for _, host := range cfg.Hosts.Blacklist {
+		if h.IsHost(host) {
+			return true
+		}
+	}
+	return false
+}
+
+func (cfg Config) isWhitelisted(h Host) bool {
 	if len(cfg.Hosts.Whitelist) > 0 {
 		var found bool
 		for _, host := range cfg.Hosts.Whitelist {
-			if f.host.IsHost(host) {
+			if h.IsHost(host) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			f.metadata.GoodForUpload = false
-			f.metadata.GoodForRenew = false
-			f.reasons = append(f.reasons, fmt.Sprintf("host is not on whitelist, GFU: %v -> false, GFR: %v -> false", f.initialGFU, f.initialGFR))
+			return false
 		}
 	}
-	return f
+	return true
 }
