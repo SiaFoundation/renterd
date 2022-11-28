@@ -33,6 +33,7 @@ func (m *migrator) UpdateContracts() error {
 		return err
 	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.goodContracts = m.goodContracts[:0]
 	for _, c := range contracts {
 		if true { // TODO: should be gfu
@@ -53,7 +54,7 @@ func (m *migrator) UpdateContracts() error {
 func (m *migrator) TryPerformMigrations() {
 	m.mu.Lock()
 	if m.running {
-		m.mu.Lock()
+		m.mu.Unlock()
 		return
 	}
 	m.running = true
