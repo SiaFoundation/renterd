@@ -243,9 +243,6 @@ func (c *Client) DeleteContracts(ids ...types.FileContractID) error {
 func (c *Client) AllContracts() ([]Contract, error) {
 	panic("unimplemented")
 }
-func (c *Client) CandidateHosts() ([]hostdb.Host, error) {
-	panic("unimplemented")
-}
 func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {
 	panic("unimplemented")
 }

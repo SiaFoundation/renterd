@@ -513,19 +513,36 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 }
 
 func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicKey, error) {
-	// fetch all candidate hosts
-	hosts, err := c.ap.bus.CandidateHosts()
+	// fetch all contracts
+	active, err := c.ap.bus.ActiveContracts()
 	if err != nil {
 		return nil, err
+	}
+
+	// build a map
+	used := make(map[string]bool)
+	for _, contract := range active {
+		used[contract.HostKey.String()] = true
 	}
 
 	// create IP filter
 	ipFilter := newIPFilter()
 
-	// filter only usable hosts
+	// fetch all hosts
+	hosts, err := c.ap.bus.AllHosts()
+	if err != nil {
+		return nil, err
+	}
+
+	// filter hosts
 	hosts = hosts[:0]
 	for _, h := range hosts {
-		if usable, _ := isUsableHost(cfg, ipFilter, Host{h}); usable {
+		if used[h.PublicKey.String()] {
+			continue
+		}
+
+		usable, _ := isUsableHost(cfg, ipFilter, Host{h})
+		if usable {
 			hosts = append(hosts, h)
 		}
 	}
