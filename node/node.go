@@ -1,7 +1,9 @@
 package node
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -244,7 +246,16 @@ func newAutopilot(cfg AutopilotConfig, dir string) (*autopilot.Autopilot, func()
 	return a, cleanup, nil
 }
 
-type Cluster struct {
+// Node describes a single renterd process with one or more enabled components.
+// A node always needs to either create a bus or connect to an existing one by
+// calling CreateBus or AddBus respectively.
+// Afterwards a worker can be created or added with CreateWorker/AddWorker. If
+// the worker is created, it will automatically connect to the known bus. If it
+// is added, the caller needs to guarantee that the worker is connected to the
+// same bus as specified in the node.
+// After both a bus and a worker were added, the autopilot can be created. It
+// will connect to the bus and worker from the previous steps.
+type Node struct {
 	busAddr     *string
 	busPassword *string
 	bus         *bus.Bus
@@ -265,11 +276,15 @@ type Cluster struct {
 	wk          consensus.PrivateKey
 
 	mux TreeMux
+	srv *http.Server
 
 	cleanupFuncs []func() error
 }
 
-func NewCluster(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk consensus.PrivateKey) *Cluster {
+// NewNode creates a new, empty node without any components. The components are
+// then added through the various exposed methods. For a more detailed
+// description take a look at the Node's type documentation.
+func NewNode(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk consensus.PrivateKey) *Node {
 	// Start listening.
 	l, err := net.Listen("tcp", apiAddr)
 	if err != nil {
@@ -278,7 +293,7 @@ func NewCluster(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk con
 	defer l.Close()
 
 	// Overwrite APIAddr now that we know the exact addr from the listener.
-	return &Cluster{
+	return &Node{
 		apiAddr:     "http://" + l.Addr().String(),
 		apiPassword: apiPassword,
 		auth:        jape.BasicAuth(apiPassword),
@@ -288,22 +303,55 @@ func NewCluster(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk con
 			H:   uiHandler,
 			Sub: make(map[string]http.Handler),
 		},
+		wk: wk,
 	}
 }
 
-func (c *Cluster) APIAddress() string {
-	panic("unimplemented")
+// APIAddress returns the node's API address.
+func (c *Node) APIAddress() string {
+	return c.apiAddr
 }
 
-func (c *Cluster) Close() error {
-	panic("unimplemented")
+// Close shuts down the API as well as the components that were created.
+// Remote components that were added instead of created will remain active.
+func (c *Node) Close() error {
+	if c.srv != nil {
+		if err := c.srv.Shutdown(context.Background()); err != nil {
+			return err
+		}
+	}
+	var errs error
+	for _, f := range c.cleanupFuncs {
+		err := f()
+		if err == nil {
+			continue
+		} else if errs == nil {
+			errs = err
+		} else {
+			errs = fmt.Errorf("%w; %s", errs, err.Error())
+		}
+	}
+	return errs
 }
 
-func (c *Cluster) Serve() error {
-	panic("unimplemented")
+// Serve starts serving the API. This is blocking and can be interrupted by
+// calling 'Close'.
+func (c *Node) Serve() error {
+	if c.srv != nil {
+		return errors.New("already serving API")
+	}
+	c.srv = &http.Server{
+		Handler: c.mux,
+	}
+	err := c.srv.Serve(c.l)
+	if errors.Is(err, net.ErrClosed) {
+		return nil // ignore
+	}
+	return err
 }
 
-func (c *Cluster) AddBus(busAddr, busPassword string) error {
+// AddBus adds an already running, remote bus to the node.
+func (c *Node) AddBus(busAddr, busPassword string) error {
 	if c.busAddr != nil || c.busPassword != nil {
 		return errors.New("cluster already contains a bus")
 	}
@@ -313,7 +361,8 @@ func (c *Cluster) AddBus(busAddr, busPassword string) error {
 	return nil
 }
 
-func (c *Cluster) CreateBus(bootstrap bool, gatewayAddr string) error {
+// CreateBus creates a new bus.
+func (c *Node) CreateBus(bootstrap bool, gatewayAddr string) error {
 	if c.busAddr != nil || c.busPassword != nil {
 		return errors.New("cluster already contains a bus")
 	}
@@ -325,15 +374,16 @@ func (c *Cluster) CreateBus(bootstrap bool, gatewayAddr string) error {
 		return err
 	}
 	// Set bus address and password to local bus.
-	*c.busAddr = c.apiAddr
-	*c.busPassword = c.apiPassword
+	c.busAddr = &c.apiAddr
+	c.busPassword = &c.apiPassword
 	c.cleanupFuncs = append(c.cleanupFuncs, cleanup)
 	c.bus = b
 	c.mux.Sub["/api/store"] = &TreeMux{H: c.auth(bus.NewServer(b))}
 	return nil
 }
 
-func (c *Cluster) AddWorker(workerAddr, workerPassword string) error {
+// AddWorker adds an already running, remote worker to the node.
+func (c *Node) AddWorker(workerAddr, workerPassword string) error {
 	if c.workerAddr != nil || c.workerPassword != nil {
 		return errors.New("cluster already contains a worker")
 	}
@@ -343,7 +393,9 @@ func (c *Cluster) AddWorker(workerAddr, workerPassword string) error {
 	return nil
 }
 
-func (c *Cluster) CreateWorker() error {
+// CreateWorker creates a new worker that is connected to the previously
+// created/added bus.
+func (c *Node) CreateWorker() error {
 	if c.busAddr == nil || c.busPassword == nil {
 		return errors.New("can't add a worker to a cluster without bus - call CreateBus or AddBus first")
 	}
@@ -358,24 +410,17 @@ func (c *Cluster) CreateWorker() error {
 		return err
 	}
 	// Set worker address and password to local worker.
-	*c.workerAddr = c.apiAddr
-	*c.workerPassword = c.apiPassword
+	c.workerAddr = &c.apiAddr
+	c.workerPassword = &c.apiPassword
 	c.cleanupFuncs = append(c.cleanupFuncs, cleanup)
 	c.w = w
 	c.mux.Sub["/api/worker"] = &TreeMux{H: c.auth(worker.NewServer(w))}
 	return nil
 }
 
-func (c *Cluster) AddAutopilot(autopilotAddr, autopilotPassword string) error {
-	if c.autopilotAddr != nil || c.autopilotPassword != nil {
-		return errors.New("cluster already contains an autopilot")
-	}
-	*c.autopilotAddr = autopilotAddr
-	*c.autopilotPassword = autopilotPassword
-	return nil
-}
-
-func (c *Cluster) CreateAutopilot(loopInterval time.Duration) error {
+// CreateAutopilot creates a new autopilot that is connected to the previously
+// created/added bus and worker.
+func (c *Node) CreateAutopilot(loopInterval time.Duration) error {
 	if c.autopilotAddr != nil || c.autopilotPassword != nil {
 		return errors.New("cluster already contains an autopilot")
 	}
@@ -395,7 +440,6 @@ func (c *Cluster) CreateAutopilot(loopInterval time.Duration) error {
 	if err != nil {
 		return err
 	}
-	defer cleanup()
 	go func() {
 		err := a.Run()
 		if err != nil {
@@ -403,8 +447,8 @@ func (c *Cluster) CreateAutopilot(loopInterval time.Duration) error {
 		}
 	}()
 	// Set autopilot address and password to local autopilot.
-	*c.autopilotAddr = c.apiAddr
-	*c.autopilotPassword = c.apiPassword
+	c.autopilotAddr = &c.apiAddr
+	c.autopilotPassword = &c.apiPassword
 	c.cleanupFuncs = append(c.cleanupFuncs, cleanup)
 	c.a = a
 	c.mux.Sub["/api/autopilot"] = &TreeMux{H: c.auth(autopilot.NewServer(a))}

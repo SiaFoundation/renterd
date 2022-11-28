@@ -95,7 +95,7 @@ func main() {
 		return
 	}
 
-	c := node.NewCluster(*apiAddr, getAPIPassword(), *dir, createUIHandler(), getWalletKey())
+	c := node.NewNode(*apiAddr, getAPIPassword(), *dir, createUIHandler(), getWalletKey())
 	defer c.Close()
 
 	if busCfg.Enabled {
