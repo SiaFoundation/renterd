@@ -48,6 +48,9 @@ func TestNewNode(t *testing.T) {
 		}
 	}()
 
+	// Wait a second to guarantee that we started serving the API.
+	time.Sleep(time.Second)
+
 	// Close node again.
 	if err := n.Close(); err != nil {
 		t.Fatal(err)
