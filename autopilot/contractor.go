@@ -427,9 +427,9 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) renewFundingEstimate(cfg Config, s State, cID types.FileContractID, blockHeight uint64) (types.Currency, error) {
+func (c *contractor) renewFundingEstimate(cfg Config, s State, id types.FileContractID, blockHeight uint64) (types.Currency, error) {
 	// fetch contract
-	contract, err := c.ap.bus.Contract(cID)
+	contract, err := c.ap.bus.Contract(id)
 	if err != nil {
 		return types.ZeroCurrency, err
 	}
@@ -454,7 +454,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, s State, cID types.FileCon
 	var prevUploadSpending types.Currency
 	var prevDownloadSpending types.Currency
 	var prevFundAccountSpending types.Currency
-	spendingHistory, err := c.ap.bus.SpendingHistory(cID, s.CurrentPeriod)
+	spendingHistory, err := c.ap.bus.SpendingHistory(id, s.CurrentPeriod)
 	if err != nil {
 		return types.ZeroCurrency, err
 	}

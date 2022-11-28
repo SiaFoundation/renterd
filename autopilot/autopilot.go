@@ -42,13 +42,13 @@ type Bus interface {
 	Contract(id types.FileContractID) (contract rhpv2.Contract, err error)
 	CancelContract(id types.FileContractID) error
 
-	ContractMetadata(cID types.FileContractID) (bus.ContractMetadata, error)
-	UpdateContractMetadata(cID types.FileContractID, metadata bus.ContractMetadata) error
+	ContractMetadata(id types.FileContractID) (bus.ContractMetadata, error)
+	UpdateContractMetadata(id types.FileContractID, metadata bus.ContractMetadata) error
 
-	SpendingHistory(cID types.FileContractID, currentPeriod uint64) ([]bus.ContractSpending, error)
+	SpendingHistory(id types.FileContractID, currentPeriod uint64) ([]bus.ContractSpending, error)
 
-	AcquireContractLock(cID types.FileContractID) (types.FileContractRevision, error)
-	ReleaseContractLock(cID types.FileContractID) error
+	AcquireContractLock(id types.FileContractID) (types.FileContractRevision, error)
+	ReleaseContractLock(id types.FileContractID) error
 
 	// contractsets
 	SetHostSet(name string, hosts []consensus.PublicKey) error
