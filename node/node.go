@@ -276,7 +276,7 @@ type Node struct {
 	wk          consensus.PrivateKey
 
 	mux TreeMux
-	srv *http.Server
+	srv http.Server
 
 	cleanupFuncs []func() error
 }
@@ -292,6 +292,11 @@ func NewNode(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk consen
 	}
 	defer l.Close()
 
+	mux := TreeMux{
+		H:   uiHandler,
+		Sub: make(map[string]http.Handler),
+	}
+
 	// Overwrite APIAddr now that we know the exact addr from the listener.
 	return &Node{
 		apiAddr:     "http://" + l.Addr().String(),
@@ -299,11 +304,9 @@ func NewNode(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk consen
 		auth:        jape.BasicAuth(apiPassword),
 		dir:         dir,
 		l:           l,
-		mux: TreeMux{
-			H:   uiHandler,
-			Sub: make(map[string]http.Handler),
-		},
-		wk: wk,
+		mux:         mux,
+		srv:         http.Server{Handler: mux},
+		wk:          wk,
 	}
 }
 
@@ -315,10 +318,8 @@ func (c *Node) APIAddress() string {
 // Close shuts down the API as well as the components that were created.
 // Remote components that were added instead of created will remain active.
 func (c *Node) Close() error {
-	if c.srv != nil {
-		if err := c.srv.Shutdown(context.Background()); err != nil {
-			return err
-		}
+	if err := c.srv.Shutdown(context.Background()); err != nil {
+		return err
 	}
 	var errs error
 	for _, f := range c.cleanupFuncs {
@@ -337,12 +338,6 @@ func (c *Node) Close() error {
 // Serve starts serving the API. This is blocking and can be interrupted by
 // calling 'Close'.
 func (c *Node) Serve() error {
-	if c.srv != nil {
-		return errors.New("already serving API")
-	}
-	c.srv = &http.Server{
-		Handler: c.mux,
-	}
 	err := c.srv.Serve(c.l)
 	if errors.Is(err, net.ErrClosed) {
 		return nil // ignore
