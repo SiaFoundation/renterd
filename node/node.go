@@ -208,6 +208,7 @@ func newBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 			g.Close(),
 			cm.Close(),
 			tp.Close(),
+			sqlStore.Close(),
 		}
 		for _, err := range errs {
 			if err != nil {
