@@ -1,8 +1,6 @@
 package autopilot
 
 import (
-	"math"
-
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
@@ -107,7 +105,7 @@ func (c *contractor) performContractMaintenance() error {
 
 func (c *contractor) runContractChecks(cfg Config, blockHeight uint64) error {
 	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts("", math.MaxUint64)
+	active, err := c.ap.bus.ActiveContracts()
 	if err != nil {
 		return err
 	}
@@ -156,10 +154,13 @@ func (c *contractor) runContractChecks(cfg Config, blockHeight uint64) error {
 
 func (c *contractor) runContractLimiter(cfg Config) error {
 	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts("asc(Revision.NewFileSize)", math.MaxUint64)
+	active, err := c.ap.bus.ActiveContracts()
 	if err != nil {
 		return err
 	}
+
+	// TODO: active contracts should be sorted by the amount of data in the
+	// contract, so we cancel the contract with the least amount of data
 
 	// cancel contracts until we reach the required amount of contracts
 	numActive := uint64(len(active))
@@ -235,7 +236,7 @@ func (c *contractor) runContractRenewals(cfg Config, s State, budget *types.Curr
 
 func (c *contractor) runContractFormations(cfg Config, s State, budget *types.Currency, renterAddress types.UnlockHash) ([]worker.Contract, error) {
 	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts("", math.MaxUint64)
+	active, err := c.ap.bus.ActiveContracts()
 	if err != nil {
 		return nil, err
 	}

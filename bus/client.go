@@ -234,7 +234,10 @@ func (c *Client) AcquireContractLock(types.FileContractID) (types.FileContractRe
 func (c *Client) ReleaseContractLock(types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) ActiveContracts(orderBy string, maxEndHeight uint64) ([]Contract, error) {
+func (c *Client) ActiveContracts() ([]Contract, error) {
+	panic("unimplemented")
+}
+func (c *Client) RenewableContracts(endHeight uint64) ([]Contract, error) {
 	panic("unimplemented")
 }
 func (c *Client) CancelContract(id types.FileContractID) error {

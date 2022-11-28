@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"net"
@@ -16,21 +17,22 @@ import (
 )
 
 type testResolver struct {
-	cache map[string][]net.IP
+	cache map[string][]net.IPAddr
 }
 
-func (r testResolver) LookupIP(host string) ([]net.IP, error) {
+func (r testResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
 	if _, exists := r.cache[host]; !exists {
 		rawIP := make([]byte, 16)
 		fastrand.Read(rawIP)
-		r.cache[host] = []net.IP{net.IP(rawIP)}
+
+		r.cache[host] = []net.IPAddr{{IP: rawIP}}
 	}
 
 	return r.cache[host], nil
 }
 
 func TestHostFilter(t *testing.T) {
-	r := testResolver{cache: make(map[string][]net.IP)}
+	r := testResolver{cache: make(map[string][]net.IPAddr)}
 	m := newTestMetadata()
 	h1 := newTestHost("foo.bar:5882")
 	h2 := newTestHost("bar.baz:5882")

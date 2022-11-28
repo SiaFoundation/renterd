@@ -1,18 +1,19 @@
 package autopilot
 
 import (
+	"context"
 	"fmt"
 	"net"
 )
 
 const (
 	// number of unique bits the host IP must have to prevent it from being filtered
-	IPv4FilterRange = 24
-	IPv6FilterRange = 54
+	ipv4FilterRange = 24
+	ipv6FilterRange = 54
 )
 
 type resolver interface {
-	LookupIP(string) ([]net.IP, error)
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
 type ipFilter struct {
@@ -20,16 +21,10 @@ type ipFilter struct {
 	resolver resolver
 }
 
-type prodResolver struct{}
-
-func (r prodResolver) LookupIP(host string) ([]net.IP, error) {
-	return net.LookupIP(host)
-}
-
 func newIPFilter() *ipFilter {
 	return &ipFilter{
 		subnets:  make(map[string]string),
-		resolver: prodResolver{},
+		resolver: &net.Resolver{},
 	}
 }
 
@@ -39,43 +34,39 @@ func (f *ipFilter) filtered(h host) bool {
 	if err != nil {
 		return true
 	}
-	addresses, err := f.resolver.LookupIP(host)
+	addresses, err := f.resolver.LookupIPAddr(context.Background(), host) // TODO: pass in context (?) could define a default timeout on the ipFilter
 	if err != nil {
 		return true
 	}
 
 	// filter hosts associated with more than two addresses or two of the same type
-	if len(addresses) > 2 || (len(addresses) == 2) && (len(addresses[0]) == len(addresses[1])) {
+	if len(addresses) > 2 || (len(addresses) == 2) && (len(addresses[0].IP) == len(addresses[1].IP)) {
 		return true
 	}
 
-	// defer a function that adds every subnet
-	subnets := subnets(addresses)
-	defer func() {
-		for _, subnet := range subnets {
-			f.subnets[subnet] = h.NetAddress()
-		}
-	}()
-
 	// check whether the host's subnet was already in the list, if it is in the
 	// list we compare the cached net address with the one from the host being
-	// filtered - might be the same host
-	for _, subnet := range subnets {
-		if original, exists := f.subnets[subnet]; exists && h.NetAddress() != original {
-			return true
+	// filtered as it might be the same host
+	var filter bool
+	for _, subnet := range subnets(addresses) {
+		original, exists := f.subnets[subnet]
+		if exists && h.NetAddress() != original {
+			filter = true
+		} else if !exists {
+			f.subnets[subnet] = h.NetAddress() // add it
 		}
 	}
-	return false
+	return filter
 }
 
-func subnets(addresses []net.IP) []string {
+func subnets(addresses []net.IPAddr) []string {
 	subnets := make([]string, 0, len(addresses))
 
 	for _, address := range addresses {
 		// figure out the IP range
-		ipRange := IPv6FilterRange
-		if address.To4() != nil {
-			ipRange = IPv4FilterRange
+		ipRange := ipv6FilterRange
+		if address.IP.To4() != nil {
+			ipRange = ipv4FilterRange
 		}
 
 		// parse the subnet
