@@ -116,7 +116,8 @@ func main() {
 			log.Fatal("failed to create autopilot", err)
 		}
 	}
-	log.Println("api: Listening on", n.APIAddress())
+	addr, _ := n.APICredentials()
+	log.Println("api: Listening on", addr)
 
 	go n.Serve()
 	signalCh := make(chan os.Signal, 1)

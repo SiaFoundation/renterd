@@ -158,7 +158,10 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
 func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts?notSince=%v&max=%d", paramTime(notSince), max), &hosts)
+	values := url.Values{}
+	values.Set("notSince", paramTime(notSince).String())
+	values.Set("max", fmt.Sprint(max))
+	err = c.c.GET(fmt.Sprintf("/hosts?%s", values.Encode()), &hosts)
 	return
 }
 
@@ -324,7 +327,7 @@ func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContra
 // listening on the specified address.
 func NewClient(addr, password string) *Client {
 	return &Client{jape.Client{
-		BaseURL:  addr,
+		BaseURL:  addr + "/api/store",
 		Password: password,
 	}}
 }

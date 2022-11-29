@@ -278,6 +278,10 @@ type Node struct {
 	cleanupFuncs []func() error
 }
 
+func (n *Node) APICredentials() (string, string) {
+	return n.apiAddr, n.apiPassword
+}
+
 // NewNode creates a new, empty node without any components. The components are
 // then added through the various exposed methods. For a more detailed
 // description take a look at the Node's type documentation.
@@ -304,11 +308,6 @@ func NewNode(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk consen
 		srv:         http.Server{Handler: mux},
 		walletKey:   wk,
 	}, nil
-}
-
-// APIAddress returns the node's API address.
-func (n *Node) APIAddress() string {
-	return n.apiAddr
 }
 
 // Close shuts down the API as well as the components that were created.

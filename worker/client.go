@@ -292,7 +292,7 @@ func (c *Client) DeleteObject(name string) (err error) {
 // listening on the specified address.
 func NewClient(addr, password string) *Client {
 	return &Client{jape.Client{
-		BaseURL:  addr,
+		BaseURL:  addr + "/api/worker",
 		Password: password,
 	}}
 }

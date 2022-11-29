@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/node"
+	"go.sia.tech/renterd/worker"
 	"lukechampine.com/frand"
 )
 
@@ -20,9 +22,9 @@ func (h *noopHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
-	Autopilot *node.Node
-	Bus       *node.Node
-	Workers   []*node.Node
+	ap      *node.Node
+	bus     *node.Node
+	workers []*node.Node
 
 	Cleanup []func(context.Context) error
 }
@@ -54,46 +56,70 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	if err != nil {
 		return nil, err
 	}
+	busAPIAddr, _ := bus.APICredentials()
 
 	// Create worker.
 	worker, err := node.NewNode("127.0.0.1:0", workerPassword, workerDir, &noopHandler{}, wk)
 	if err != nil {
 		return nil, err
 	}
-	err = worker.AddBus(bus.APIAddress(), busPassword)
+	err = worker.AddBus(busAPIAddr, busPassword)
 	if err != nil {
 		return nil, err
 	}
 	if err := worker.CreateWorker(); err != nil {
 		return nil, err
 	}
+	workerAPIAddr, _ := worker.APICredentials()
 
 	// Create autopilot.
 	autopilot, err := node.NewNode("127.0.0.1:0", autopilotPassword, autopilotDir, &noopHandler{}, wk)
 	if err != nil {
 		return nil, err
 	}
-	err = autopilot.AddBus(bus.APIAddress(), busPassword)
+	err = autopilot.AddBus(busAPIAddr, busPassword)
 	if err != nil {
 		return nil, err
 	}
-	if err := autopilot.AddWorker(worker.APIAddress(), workerPassword); err != nil {
+	if err := autopilot.AddWorker(workerAPIAddr, workerPassword); err != nil {
 		return nil, err
 	}
 	if err := autopilot.CreateAutopilot(3 * time.Second); err != nil {
 		return nil, err
 	}
 
+	go bus.Serve()
+	go worker.Serve()
+	go autopilot.Serve()
+
 	return &TestCluster{
-		Autopilot: autopilot,
-		Bus:       bus,
-		Workers:   []*node.Node{worker},
+		ap:      autopilot,
+		bus:     bus,
+		workers: []*node.Node{worker},
 		Cleanup: []func(ctx context.Context) error{
 			autopilot.Shutdown,
 			worker.Shutdown,
 			bus.Shutdown,
 		},
 	}, nil
+}
+
+func (c *TestCluster) AP() {
+	panic("not implemented")
+}
+
+func (c *TestCluster) Bus() *bus.Client {
+	apiAddr, apiPW := c.bus.APICredentials()
+	return bus.NewClient(apiAddr, apiPW)
+}
+
+func (c *TestCluster) Workers() []*worker.Client {
+	workers := make([]*worker.Client, len(c.workers))
+	for i, w := range c.workers {
+		apiAddr, apiPW := w.APICredentials()
+		workers[i] = worker.NewClient(apiAddr, apiPW)
+	}
+	return workers
 }
 
 // Close closes all nodes within the cluster.
