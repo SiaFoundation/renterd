@@ -40,6 +40,10 @@ func hostScore(cfg Config, h Host) float64 {
 }
 
 func ageScore(h Host) float64 {
+	if len(h.Announcements) == 0 {
+		return math.SmallestNonzeroFloat64
+	}
+
 	const day = 24 * time.Hour
 	weights := []struct {
 		age    time.Duration
