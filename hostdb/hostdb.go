@@ -12,8 +12,6 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-const InteractionScan = "scan"
-
 // Announcement represents a host announcement in a given block.
 type Announcement struct {
 	Index      consensus.ChainIndex
@@ -70,8 +68,6 @@ type Host struct {
 	PublicKey     consensus.PublicKey
 	Announcements []Announcement
 	Interactions  []Interaction
-
-	Settings rhpv2.HostSettings
 }
 
 // NetAddress returns the host's last announced NetAddress, if available.

@@ -144,13 +144,13 @@ func (ap *Autopilot) Stop() {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, error) {
+func New(store Store, bus Bus, worker Worker, heartbeat time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		store:  store,
 		bus:    bus,
 		worker: worker,
 
-		ticker:   time.NewTicker(tick),
+		ticker:   time.NewTicker(heartbeat),
 		stopChan: make(chan struct{}),
 	}
 	ap.c = newContractor(ap)

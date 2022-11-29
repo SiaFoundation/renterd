@@ -322,11 +322,11 @@ func (b *Bus) hostsHandler(jc jape.Context) {
 }
 
 func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
-	var hk PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
+	var hostKey PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	host, err := b.hdb.Host(hk)
+	host, err := b.hdb.Host(hostKey)
 	if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
@@ -334,9 +334,9 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 
 func (b *Bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var hi hostdb.Interaction
-	var hk PublicKey
-	if jc.Decode(&hi) == nil && jc.DecodeParam("hostkey", &hk) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordInteraction(hk, hi))
+	var hostKey PublicKey
+	if jc.Decode(&hi) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
+		jc.Check("couldn't record interaction", b.hdb.RecordInteraction(hostKey, hi))
 	}
 }
 

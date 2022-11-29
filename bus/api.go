@@ -18,6 +18,9 @@ type (
 	// A PrivateKey is an Ed25519 private key.
 	PrivateKey = consensus.PrivateKey
 
+	// ChainState represents the full state of the chain as of a particular block.
+	ChainState = consensus.State
+
 	SlabID uint
 )
 

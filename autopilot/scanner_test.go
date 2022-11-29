@@ -52,8 +52,8 @@ func (w *mockWorker) RHPScan(_ consensus.PublicKey, hostIP string, _ time.Durati
 	if strings.HasSuffix(hostIP, "fail") {
 		e = errors.New("fail")
 	}
-	if strings.HasSuffix(hostIP, "sleep") {
-		time.Sleep(time.Second)
+	if strings.HasSuffix(hostIP, "lock") {
+		<-make(chan struct{}) // scan never completes
 	}
 	return
 }
@@ -75,16 +75,22 @@ func TestScanner(t *testing.T) {
 	h[1].Announcements[0].NetAddress += "fail"
 	h[2].Announcements[0].NetAddress += "fail"
 
-	// start scan and assert consecutive calls are no-ops
-	if !s.tryPerformHostScan() || s.tryPerformHostScan() {
+	// assert it started a host scan
+	doneChan := s.tryPerformHostScan()
+	if doneChan == nil {
+		t.Fatal("unexpected")
+	}
+
+	// assert consecutive calls don't start a new scan
+	if s.tryPerformHostScan() != nil {
 		t.Fatal("unexpected")
 	}
 
 	// wait until the scan is done
-	var c int
-	for s.isScanning() && c < 100 {
-		time.Sleep(time.Millisecond * 10)
-		c++
+	select {
+	case <-doneChan:
+	case <-time.After(time.Second): // avoid test deadlock
+		t.Fatal("scan took longer than expected")
 	}
 
 	// assert interactions were recorded
@@ -93,30 +99,30 @@ func TestScanner(t *testing.T) {
 		t.Fatal("unexpected", success, fail)
 	}
 
-	// ensure one scan takes a long time
-	h[4].Announcements[0].NetAddress += "sleep"
+	// ensure one scan hangs
+	h[4].Announcements[0].NetAddress += "lock"
 
 	// start scan
 	b.itxs = b.itxs[:0]
 	s.scanningLastStart = time.Time{}
-	if !s.tryPerformHostScan() {
+	doneChan = s.tryPerformHostScan()
+	if doneChan == nil {
 		t.Fatal("unexpected")
 	}
 
-	// interrupt the scanner after 100ms
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		close(s.stopChan)
-	}()
+	// interrupt the scan
+	time.Sleep(time.Second)
+	close(s.stopChan)
 
 	// wait until the scan is done
-	for s.isScanning() && c < 100 {
-		time.Sleep(time.Millisecond * 10)
-		c++
+	select {
+	case <-doneChan:
+	case <-time.After(time.Second): // avoid test deadlock
+		t.Fatal("scan took longer than expected")
 	}
 
-	// assert the loop above didn't exit due to the builtin endless loop safety
-	if c == 100 {
+	// assert scanner is not scanning
+	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
 
