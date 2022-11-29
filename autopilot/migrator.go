@@ -36,15 +36,13 @@ func (m *migrator) UpdateContracts() error {
 	defer m.mu.Unlock()
 	m.goodContracts = m.goodContracts[:0]
 	for _, c := range contracts {
-		if true { // TODO: should be gfu
-			m.goodContracts = append(m.goodContracts, worker.Contract{
-				ID:        c.ID,
-				HostKey:   c.HostKey,
-				HostIP:    c.HostIP,
-				RenterKey: m.ap.deriveRenterKey(c.HostKey),
-			})
-		}
-		panic("leftover todo")
+		// TODO: filter out contracts that are not good.
+		m.goodContracts = append(m.goodContracts, worker.Contract{
+			ID:        c.ID,
+			HostKey:   c.HostKey,
+			HostIP:    c.HostIP,
+			RenterKey: m.ap.deriveRenterKey(c.HostKey),
+		})
 	}
 	return nil
 }

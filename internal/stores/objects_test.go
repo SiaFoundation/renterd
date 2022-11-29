@@ -3,7 +3,6 @@ package stores
 import (
 	"fmt"
 	"math"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -421,9 +420,7 @@ func TestSQLList(t *testing.T) {
 
 // TestSlabsForRepair tests the functionality of slabsForRepair.
 func TestSlabsForRepair(t *testing.T) {
-	os.RemoveAll("/Users/cschinnerl/Desktop/foo.sql")
-	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/foo.sql")
-	os, _, err := NewSQLStore(conn, true)
+	os, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
