@@ -81,7 +81,7 @@ type (
 		MarkSlabsMigrationFailure(slabIDs ...SlabID) (int, error)
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
-		SlabsForMigration(n int, failureCutoff time.Time) ([]SlabID, error)
+		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
 		SlabForMigration(slabID SlabID) (object.Slab, []worker.Contract, error)
 	}
 )
@@ -461,13 +461,17 @@ func (b *Bus) objectsKeyHandlerDELETE(jc jape.Context) {
 func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	var cutoff paramTime
 	var limit int
+	var goodContracts []types.FileContractID
 	if jc.DecodeForm("cutoff", &cutoff) != nil {
 		return
 	}
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	slabIDs, err := b.os.SlabsForMigration(limit, time.Time(cutoff))
+	if jc.DecodeForm("goodContracts", &goodContracts) != nil {
+		return
+	}
+	slabIDs, err := b.os.SlabsForMigration(limit, time.Time(cutoff), goodContracts)
 	if jc.Check("couldn't fetch slabs for migration", err) != nil {
 		return
 	}

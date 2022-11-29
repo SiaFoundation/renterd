@@ -3,6 +3,7 @@ package stores
 import (
 	"fmt"
 	"math"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -262,8 +263,7 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk1,
 										},
-										IsGood: true,
-										FCID:   fcid1,
+										FCID: fcid1,
 									},
 								},
 							},
@@ -291,8 +291,7 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk2,
 										},
-										IsGood: true,
-										FCID:   fcid2,
+										FCID: fcid2,
 									},
 								},
 							},
@@ -422,7 +421,9 @@ func TestSQLList(t *testing.T) {
 
 // TestSlabsForRepair tests the functionality of slabsForRepair.
 func TestSlabsForRepair(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
+	os.RemoveAll("/Users/cschinnerl/Desktop/foo.sql")
+	conn := NewSQLiteConnection("/Users/cschinnerl/Desktop/foo.sql")
+	os, _, err := NewSQLStore(conn, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,11 +569,8 @@ func TestSlabsForRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Mark contract bad.
-	err = os.SetIsGood(fcidBad, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Only consider fcidGood and fcidDeleted good contracts.
+	goodContracts := []types.FileContractID{fcidGood, fcidDeleted}
 
 	// Delete the contract.
 	err = os.RemoveContract(fcidDeleted)
@@ -597,7 +595,7 @@ func TestSlabsForRepair(t *testing.T) {
 	expectedSlabIDs := []bus.SlabID{6, 1, 3, 4, 5, 2}
 	for i := 0; i < len(expectedSlabIDs); i++ {
 		// Check the i worst slabs.
-		slabIDs, err := os.SlabsForMigration(i+1, time.Now())
+		slabIDs, err := os.SlabsForMigration(i+1, time.Now(), goodContracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -611,7 +609,7 @@ func TestSlabsForRepair(t *testing.T) {
 	if updates, err := os.MarkSlabsMigrationFailure(expectedSlabIDs[3:]...); err != nil || updates != 3 {
 		t.Fatalf("marking slabs for failure failed: %v %v", err, updates)
 	}
-	slabIDs, err := os.SlabsForMigration(math.MaxInt, time.Now().Add(-time.Minute))
+	slabIDs, err := os.SlabsForMigration(math.MaxInt, time.Now().Add(-time.Minute), goodContracts)
 	if err != nil {
 		t.Fatal(err)
 	}

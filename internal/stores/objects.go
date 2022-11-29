@@ -1,6 +1,8 @@
 package stores
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -389,11 +391,11 @@ func (o dbObject) convert() (object.Object, error) {
 		for j, sh := range sl.Slab.Shards {
 			// Return first contract that's good for upload.
 			for _, c := range sh.DBSector.Contracts {
-				if !c.IsGood {
-					continue
-				}
+				// TODO: This might cause issues. For now we can
+				// ignore the edge case for a shard existing on
+				// multiple hosts but we might want to be
+				// smarter about what host we return here.
 				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
-				break
 			}
 			obj.Slabs[i].Shards[j].Root = sh.DBSector.Root
 		}
@@ -567,7 +569,17 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 // SlabsForMigration returns up to n IDs of slabs which require repair. Only
 // slabs are considered which haven't failed since failureCutoff.
 // TODO: consider that we don't want to migrate slabs above a given health.
-func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time) ([]bus.SlabID, error) {
+func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error) {
+	// Serialize contract ids.
+	var fcids [][]byte
+	for _, fcid := range goodContracts {
+		buf := bytes.NewBuffer(nil)
+		enc := gob.NewEncoder(buf)
+		if err := enc.Encode(fcid); err != nil {
+			return nil, err
+		}
+		fcids = append(fcids, buf.Bytes())
+	}
 	failureQuery := s.db.Model(&dbSlab{}).
 		Select("id as slab_id").
 		Where("last_failure < ?", failureCutoff.UTC())
@@ -578,15 +590,15 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time) ([]bus.Slab
 		Select("slab_id, sector_id, db_contract_id as contract_id").
 		Joins("LEFT JOIN contract_sectors ON sector_id = contract_sectors.db_sector_id")
 	outer := s.db.Table("(?)", middle).
-		Select("slab_id").
+		Select("slab_id, fc_id").
 		Joins("LEFT JOIN contracts ON contract_id = contracts.id").
-		Where("contract_id IS NULL OR is_good IS 0").
+		Where("contract_id IS NULL OR fc_id NOT IN ?", fcids).
 		Group("slab_id").
 		Order("COUNT(slab_id) DESC").
 		Limit(n)
 
 	var slabIDs []bus.SlabID
-	err := outer.Find(&slabIDs).Error
+	err := outer.Select("slab_id").Find(&slabIDs).Error
 	return slabIDs, err
 }
 

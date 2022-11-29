@@ -305,10 +305,11 @@ func (c *Client) MarkSlabsMigrationFailure(slabIDs ...SlabID) (int, error) {
 
 // SlabsForMigration returns up to n slabs which require migration and haven't
 // failed migration since failureCutoff.
-func (c *Client) SlabsForMigration(n int, failureCutoff time.Time) ([]SlabID, error) {
+func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error) {
 	var values url.Values
 	values.Set("cutoff", paramTime(failureCutoff).String())
 	values.Set("limit", fmt.Sprint(n))
+	values.Set("goodContracts", fmt.Sprint(goodContracts))
 	var resp ObjectsMigrateSlabsResponse
 	err := c.c.GET("/objects/migration/slabs?%s"+values.Encode(), &resp)
 	return resp.SlabIDs, err

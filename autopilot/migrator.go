@@ -6,6 +6,7 @@ import (
 
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/siad/types"
 )
 
 type migrator struct {
@@ -68,7 +69,11 @@ func (m *migrator) TryPerformMigrations() {
 }
 
 func (m *migrator) fetchSlabsForMigration() ([]bus.SlabID, error) {
-	return m.ap.bus.SlabsForMigration(10, time.Now().Add(-time.Hour))
+	goodContracts := make([]types.FileContractID, len(m.goodContracts))
+	for i := range m.goodContracts {
+		goodContracts[i] = m.goodContracts[i].ID
+	}
+	return m.ap.bus.SlabsForMigration(10, time.Now().Add(-time.Hour), goodContracts)
 }
 
 func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
