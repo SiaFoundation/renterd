@@ -31,11 +31,6 @@ type Config struct {
 	}
 }
 
-// State contains all autopilot state variables.
-type State struct {
-	CurrentPeriod uint64
-}
-
 func DefaultConfig() (c Config) {
 	c.Wallet.DefragThreshold = 1000
 	c.Hosts.ScoreOverrides = make(map[consensus.PublicKey]float64)

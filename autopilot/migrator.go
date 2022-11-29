@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"math"
 	"sync"
 	"time"
 
@@ -28,7 +27,7 @@ func newMigrator(ap *Autopilot) *migrator {
 func (m *migrator) UpdateContracts() error {
 	bus := m.ap.bus
 
-	contracts, err := bus.ActiveContracts(math.MaxInt64)
+	contracts, err := bus.ActiveContracts()
 	if err != nil {
 		return err
 	}

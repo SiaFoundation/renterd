@@ -141,18 +141,19 @@ type AddObjectRequest struct {
 // A Contract uniquely identifies a Sia file contract on a host, along with the
 // host's IP.
 type Contract struct {
+	ID          types.FileContractID `json:"id"`
 	HostKey     PublicKey            `json:"hostKey"`
 	HostIP      string               `json:"hostIP"`
-	ID          types.FileContractID `json:"id"`
 	StartHeight uint64               `json:"startHeight"`
 	EndHeight   uint64               `json:"endHeight"`
-	Metadata    ContractMetadata     `json:"metadata"`
+	ContractMetadata
 }
 
 // ContractMetadata contains all metadata for a contract.
 type ContractMetadata struct {
 	RenewedFrom types.FileContractID `json:"renewedFrom"`
 	Spending    ContractSpending     `json:"spending"`
+	TotalCost   types.Currency       `json:"totalCost"`
 }
 
 // ContractSpending contains all spending details for a contract.
