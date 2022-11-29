@@ -70,7 +70,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// delete contracts
-	err = c.ap.bus.DeleteContracts(toDelete...)
+	err = c.ap.bus.DeleteContracts(toDelete)
 	if err != nil {
 		return err
 	}
