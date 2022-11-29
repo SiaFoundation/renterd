@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
+	"lukechampine.com/frand"
 )
 
 func TestHostScore(t *testing.T) {
@@ -70,6 +72,27 @@ func TestHostScore(t *testing.T) {
 	}
 }
 
+func TestRandSelectByWeight(t *testing.T) {
+	// assert min float is never selected
+	weights := []float64{.1, .2, math.SmallestNonzeroFloat64}
+	for i := 0; i < 100; i++ {
+		frand.Shuffle(len(weights), func(i, j int) { weights[i], weights[j] = weights[j], weights[i] })
+		if weights[randSelectByWeight(weights)] == math.SmallestNonzeroFloat64 {
+			t.Fatal("unexpected")
+		}
+	}
+
+	// assert select is random on equal inputs
+	counts := make([]int, 2)
+	weights = []float64{.1, .1}
+	for i := 0; i < 100; i++ {
+		counts[randSelectByWeight(weights)]++
+	}
+	if diff := absDiffInt(counts[0], counts[1]); diff > 40 {
+		t.Fatal("unexpected", counts[0], counts[1], diff)
+	}
+}
+
 func newTestHost(settings *rhpv2.HostSettings) Host {
 	return Host{
 		hostdb.Host{
@@ -99,4 +122,11 @@ func newTestScan(settings *rhpv2.HostSettings) hostdb.Interaction {
 		Success:   true,
 		Result:    json.RawMessage(js),
 	}
+}
+
+func absDiffInt(x, y int) int {
+	if x < y {
+		return y - x
+	}
+	return x - y
 }

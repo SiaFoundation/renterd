@@ -238,6 +238,9 @@ func versionScore(h Host) float64 {
 }
 
 func randSelectByWeight(weights []float64) int {
+	// deep copy the input
+	weights = append([]float64{}, weights...)
+
 	// normalize
 	var total float64
 	for _, w := range weights {
