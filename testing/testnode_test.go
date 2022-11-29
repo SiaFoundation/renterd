@@ -1,6 +1,9 @@
 package testing
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestNewTestCluster is a smoke test for creating a cluster of Nodes for
 // testing and shutting them down.
@@ -9,7 +12,7 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.Close(); err != nil {
+	if err := cluster.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }

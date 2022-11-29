@@ -1,6 +1,7 @@
 package testing
 
 import (
+	"context"
 	"encoding/hex"
 	"net/http"
 	"path/filepath"
@@ -16,12 +17,14 @@ type noopHandler struct{}
 func (h *noopHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
 }
 
+// TestCluster is a helper type that allows for easily creating a number of
+// nodes connected to each other and ready for testing.
 type TestCluster struct {
 	Autopilot *node.Node
 	Bus       *node.Node
 	Workers   []*node.Node
 
-	Cleanup []func() error
+	Cleanup []func(context.Context) error
 }
 
 func randomPassword() string {
@@ -43,14 +46,20 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	autopilotPassword := randomPassword()
 
 	// Create bus.
-	bus := node.NewNode("127.0.0.1:0", busPassword, busDir, &noopHandler{}, wk)
-	err := bus.CreateBus(true, "127.0.0.1:0")
+	bus, err := node.NewNode("127.0.0.1:0", busPassword, busDir, &noopHandler{}, wk)
+	if err != nil {
+		return nil, err
+	}
+	err = bus.CreateBus(true, "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 
 	// Create worker.
-	worker := node.NewNode("127.0.0.1:0", workerPassword, workerDir, &noopHandler{}, wk)
+	worker, err := node.NewNode("127.0.0.1:0", workerPassword, workerDir, &noopHandler{}, wk)
+	if err != nil {
+		return nil, err
+	}
 	err = worker.AddBus(bus.APIAddress(), busPassword)
 	if err != nil {
 		return nil, err
@@ -60,7 +69,10 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}
 
 	// Create autopilot.
-	autopilot := node.NewNode("127.0.0.1:0", autopilotPassword, autopilotDir, &noopHandler{}, wk)
+	autopilot, err := node.NewNode("127.0.0.1:0", autopilotPassword, autopilotDir, &noopHandler{}, wk)
+	if err != nil {
+		return nil, err
+	}
 	err = autopilot.AddBus(bus.APIAddress(), busPassword)
 	if err != nil {
 		return nil, err
@@ -76,17 +88,18 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		Autopilot: autopilot,
 		Bus:       bus,
 		Workers:   []*node.Node{worker},
-		Cleanup: []func() error{
-			autopilot.Close,
-			worker.Close,
-			bus.Close,
+		Cleanup: []func(ctx context.Context) error{
+			autopilot.Shutdown,
+			worker.Shutdown,
+			bus.Shutdown,
 		},
 	}, nil
 }
 
-func (c *TestCluster) Close() error {
+// Close closes all nodes within the cluster.
+func (c *TestCluster) Shutdown(ctx context.Context) error {
 	for _, f := range c.Cleanup {
-		if err := f(); err != nil {
+		if err := f(ctx); err != nil {
 			return err
 		}
 	}

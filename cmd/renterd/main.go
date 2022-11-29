@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -95,30 +96,37 @@ func main() {
 		return
 	}
 
-	c := node.NewNode(*apiAddr, getAPIPassword(), *dir, createUIHandler(), getWalletKey())
-	defer c.Close()
-
+	n, err := node.NewNode(*apiAddr, getAPIPassword(), *dir, createUIHandler(), getWalletKey())
+	if err != nil {
+		log.Fatal(err)
+	}
 	if busCfg.Enabled {
-		if err := c.CreateBus(busCfg.Bootstrap, busCfg.GatewayAddr); err != nil {
+		if err := n.CreateBus(busCfg.Bootstrap, busCfg.GatewayAddr); err != nil {
 			log.Fatal("failed to create bus", err)
 		}
 		log.Println("bus: Listening on", busCfg.GatewayAddr)
 	}
 	if workerCfg.Enabled {
-		if err := c.CreateWorker(); err != nil {
+		if err := n.CreateWorker(); err != nil {
 			log.Fatal("failed to create worker", err)
 		}
 	}
 	if autopilotCfg.Enabled {
-		if err := c.CreateAutopilot(autopilotCfg.LoopInterval); err != nil {
+		if err := n.CreateAutopilot(autopilotCfg.LoopInterval); err != nil {
 			log.Fatal("failed to create autopilot", err)
 		}
 	}
-	log.Println("api: Listening on", c.APIAddress())
+	log.Println("api: Listening on", n.APIAddress())
 
-	go c.Serve()
+	go n.Serve()
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
 	<-signalCh
 	log.Println("Shutting down...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := n.Shutdown(ctx); err != nil {
+		log.Fatal(err)
+	}
 }

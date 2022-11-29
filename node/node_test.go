@@ -1,6 +1,8 @@
 package node
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -22,7 +24,10 @@ func TestNewNode(t *testing.T) {
 	apiPassword := "password"
 	dir := t.TempDir()
 
-	n := NewNode(apiAddr, apiPassword, dir, &noopHandler{}, consensus.GeneratePrivateKey())
+	n, err := NewNode(apiAddr, apiPassword, dir, &noopHandler{}, consensus.GeneratePrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Add a bus.
 	if err := n.CreateBus(true, gatewayAddr); err != nil {
@@ -43,7 +48,7 @@ func TestNewNode(t *testing.T) {
 	doneServing := make(chan struct{})
 	go func() {
 		defer close(doneServing)
-		if err := n.Serve(); err != nil {
+		if err := n.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			t.Error(err)
 		}
 	}()
@@ -52,7 +57,14 @@ func TestNewNode(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// Close node again.
-	if err := n.Close(); err != nil {
+	if err := n.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+
+	// Wait for goroutine to finish.
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("goroutine is stuck")
+	case <-doneServing:
 	}
 }

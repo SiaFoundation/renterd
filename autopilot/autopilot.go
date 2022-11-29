@@ -105,9 +105,10 @@ func (ap *Autopilot) Run() error {
 	}
 }
 
-func (ap *Autopilot) Stop() {
+func (ap *Autopilot) Stop() error {
 	ap.ticker.Stop()
 	close(ap.stopChan)
+	return nil
 }
 
 // New initializes an Autopilot.
