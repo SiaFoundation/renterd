@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 
@@ -33,7 +34,14 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 	if f.isRedundantIP(h) {
 		reasons = append(reasons, "host IP is redundant")
 	}
-	// TODO: isLowScore
+	if bad, reason := hasBadSettings(cfg, h); bad {
+		reasons = append(reasons, fmt.Sprintf("host has bad settings, %v", reason))
+	}
+
+	// sanity check - should never happen but this would cause a zero score
+	if len(h.Announcements) == 0 {
+		reasons = append(reasons, "host is not announced")
+	}
 
 	return len(reasons) == 0, reasons
 }
@@ -81,6 +89,28 @@ func isOutOfFunds(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata) 
 
 func isUpForRenewal(cfg Config, c rhpv2.Contract, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
+}
+
+func hasBadSettings(cfg Config, h Host) (bool, string) {
+	settings, _, found := h.LastKnownSettings()
+	if !found {
+		return true, "no settings found"
+	}
+	if !settings.AcceptingContracts {
+		return true, "not accepting contracts"
+	}
+	if cfg.Contracts.Period+cfg.Contracts.RenewWindow > settings.MaxDuration {
+		return true, fmt.Sprintf("max duration too low, %v > %v", cfg.Contracts.Period+cfg.Contracts.RenewWindow, settings.MaxDuration)
+	}
+	maxBaseRPCPrice := settings.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
+	if settings.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
+		return true, fmt.Sprintf("base RPC price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
+	}
+	maxSectorAccessPrice := settings.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
+	if settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
+		return true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
+	}
+	return false, ""
 }
 
 func (cfg Config) isBlacklisted(h Host) bool {

@@ -70,7 +70,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// delete contracts
-	err = c.ap.bus.DeleteContracts(toDelete...)
+	err = c.ap.bus.DeleteContracts(toDelete)
 	if err != nil {
 		return err
 	}
@@ -534,16 +534,15 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		return nil, err
 	}
 
-	// filter hosts
-	hosts = hosts[:0]
+	// filter unusable hosts
+	filtered := hosts[:0]
 	for _, h := range hosts {
 		if used[h.PublicKey.String()] {
 			continue
 		}
 
-		usable, _ := isUsableHost(cfg, ipFilter, Host{h})
-		if usable {
-			hosts = append(hosts, h)
+		if usable, _ := isUsableHost(cfg, ipFilter, Host{h}); usable {
+			filtered = append(filtered, h)
 		}
 	}
 
@@ -552,6 +551,29 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		wanted = len(hosts)
 	}
 
-	// TODO: score each host and return selected hosts
-	return nil, nil
+	// score each host
+	scores := make([]float64, 0, len(filtered))
+	scored := filtered[:0]
+	for _, host := range filtered {
+		score := hostScore(cfg, Host{host})
+		if score == 0 {
+			// TODO: should not happen at this point, log this event
+			continue
+		}
+
+		scores = append(scores, score)
+		scored = append(scored, host)
+	}
+
+	// select hosts
+	var selected []consensus.PublicKey
+	for len(selected) < wanted {
+		i := randSelectByWeight(scores)
+		selected = append(selected, scored[i].PublicKey)
+
+		// remove selected host
+		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
+		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
+	}
+	return selected, nil
 }

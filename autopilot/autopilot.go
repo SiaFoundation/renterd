@@ -34,7 +34,7 @@ type Bus interface {
 	AddContract(c rhpv2.Contract) error
 	AllContracts() ([]bus.Contract, error)
 	ActiveContracts() ([]bus.Contract, error)
-	DeleteContracts(ids ...types.FileContractID) error
+	DeleteContracts(ids []types.FileContractID) error
 
 	Contract(id types.FileContractID) (contract rhpv2.Contract, err error)
 	ContractMetadata(id types.FileContractID) (bus.ContractMetadata, error)

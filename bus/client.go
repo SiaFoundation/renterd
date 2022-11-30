@@ -238,7 +238,7 @@ func (c *Client) ReleaseContractLock(types.FileContractID) error {
 func (c *Client) ActiveContracts() ([]Contract, error) {
 	panic("unimplemented")
 }
-func (c *Client) DeleteContracts(ids ...types.FileContractID) error {
+func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 	panic("unimplemented")
 }
 func (c *Client) AllContracts() ([]Contract, error) {
