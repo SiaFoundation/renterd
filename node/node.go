@@ -55,6 +55,8 @@ func (cm chainManager) Synced() bool {
 	return cm.cs.Synced()
 }
 
+func (cm chainManager) Ping() bool { return true }
+
 func (cm chainManager) TipState() consensus.State {
 	return consensus.State{
 		Index: consensus.ChainIndex{
@@ -89,6 +91,8 @@ func (s syncer) BroadcastTransaction(txn types.Transaction, dependsOn []types.Tr
 	s.tp.Broadcast(append(dependsOn, txn))
 }
 
+func (s syncer) Ping() bool { return true }
+
 type txpool struct {
 	tp modules.TransactionPool
 }
@@ -105,6 +109,8 @@ func (tp txpool) Transactions() []types.Transaction {
 func (tp txpool) AddTransactionSet(txns []types.Transaction) error {
 	return tp.tp.AcceptTransactionSet(txns)
 }
+
+func (tp txpool) Ping() bool { return true }
 
 func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
 	pool := tp.Transactions()

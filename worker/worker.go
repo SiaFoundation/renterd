@@ -110,6 +110,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
+	Health() (bus.HealthResponse, error)
 
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error

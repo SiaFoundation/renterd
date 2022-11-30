@@ -2,7 +2,10 @@ package testing
 
 import (
 	"context"
+	"reflect"
 	"testing"
+
+	"go.sia.tech/renterd/bus"
 )
 
 // TestNewTestCluster is a smoke test for creating a cluster of Nodes for
@@ -19,23 +22,34 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the bus API.
-	bus := cluster.Bus()
-	hosts, err := bus.AllHosts()
+	b := cluster.Bus()
+	busHealth, err := b.Health()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hosts) != 0 {
-		t.Fatalf("expected 0 hosts but got %v", len(hosts))
+	if !reflect.DeepEqual(busHealth, bus.HealthResponse{
+		Syncer:          true,
+		ChainManager:    true,
+		TransactionPool: true,
+		Wallet:          true,
+		HostDB:          true,
+		ContractStore:   true,
+		HostSetStore:    true,
+		ObjectStore:     true,
+	}) {
+		t.Fatal("bus isn't healthy")
 	}
 
 	// Try talking to the worker. Use an endpoint that forces the worker to
 	// reach out to the bus as well.
-	// TODO: Enable this once object upload is implemented.
-	// worker := cluster.Workers()[0]
-	//	r := bytes.NewReader(frand.Bytes(100))
-	//	if err := worker.UploadObject(r, "foo"); err != nil {
-	//		t.Fatal(err)
-	//	}
+	w := cluster.Workers()[0]
+	wHealth, err := w.Health()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wHealth.Bus {
+		t.Fatal("worker isn't connected to bus")
+	}
 
 	// TODO: Once there is an autopilot client we test the autopilot as
 	// well.

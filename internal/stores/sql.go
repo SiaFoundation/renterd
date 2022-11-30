@@ -46,6 +46,15 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 	return sqlite.Open(path)
 }
 
+// Ping returns whether the store is reachable or not.
+func (s *SQLStore) Ping() bool {
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return false
+	}
+	return sqlDB.Ping() == nil
+}
+
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.

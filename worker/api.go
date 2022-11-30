@@ -42,6 +42,10 @@ func (d *Duration) UnmarshalText(b []byte) error {
 	return nil
 }
 
+type HealthResponse struct {
+	Bus bool `json:"bus"`
+}
+
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
 	HostKey PublicKey `json:"hostKey"`

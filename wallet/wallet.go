@@ -329,6 +329,11 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	return txn, toSign, nil
 }
 
+// Ping the wallet is always reachable.
+func (w *SingleAddressWallet) Ping() bool {
+	return true
+}
+
 // SumOutputs returns the total value of the supplied outputs.
 func SumOutputs(outputs []SiacoinElement) types.Currency {
 	sum := new(big.Int)

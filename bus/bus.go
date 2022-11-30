@@ -19,6 +19,7 @@ import (
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
+		Ping() bool
 		TipState() consensus.State
 		Synced() bool
 	}
@@ -29,10 +30,12 @@ type (
 		Peers() []string
 		Connect(addr string) error
 		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
+		Ping() bool
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
+		Ping() bool
 		RecommendedFee() types.Currency
 		Transactions() []types.Transaction
 		AddTransactionSet(txns []types.Transaction) error
@@ -44,6 +47,7 @@ type (
 		Address() types.UnlockHash
 		Balance() types.Currency
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
+		Ping() bool
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error)
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
@@ -55,6 +59,7 @@ type (
 	HostDB interface {
 		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+		Ping() bool
 		RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	}
 
@@ -63,6 +68,7 @@ type (
 		Contracts() ([]rhpv2.Contract, error)
 		Contract(id types.FileContractID) (rhpv2.Contract, error)
 		AddContract(c rhpv2.Contract) error
+		Ping() bool
 		RemoveContract(id types.FileContractID) error
 	}
 
@@ -70,6 +76,7 @@ type (
 	HostSetStore interface {
 		HostSets() ([]string, error)
 		HostSet(name string) ([]consensus.PublicKey, error)
+		Ping() bool
 		SetHostSet(name string, hosts []consensus.PublicKey) error
 	}
 
@@ -78,6 +85,7 @@ type (
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
 		MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error)
+		Ping() bool
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
@@ -94,6 +102,19 @@ type Bus struct {
 	cs  ContractStore
 	hss HostSetStore
 	os  ObjectStore
+}
+
+func (b *Bus) healthHandler(jc jape.Context) {
+	jc.Encode(HealthResponse{
+		Syncer:          b.s.Ping(),
+		ChainManager:    b.cm.Ping(),
+		TransactionPool: b.tp.Ping(),
+		Wallet:          b.w.Ping(),
+		HostDB:          b.hdb.Ping(),
+		ContractStore:   b.cs.Ping(),
+		HostSetStore:    b.hss.Ping(),
+		ObjectStore:     b.os.Ping(),
+	})
 }
 
 func (b *Bus) syncerPeersHandler(jc jape.Context) {
@@ -529,6 +550,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 // NewServer returns an HTTP handler that serves the renterd store API.
 func NewServer(b *Bus) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /health": b.healthHandler,
+
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
 
@@ -563,11 +586,12 @@ func NewServer(b *Bus) http.Handler {
 		"PUT    /hostsets/:name":           b.hostsetsNameHandlerPUT,
 		"GET    /hostsets/:name/contracts": b.hostsetsContractsHandler,
 
-		"GET    /objects/*key":               b.objectsKeyHandlerGET,
-		"PUT    /objects/*key":               b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key":               b.objectsKeyHandlerDELETE,
-		"GET    /objects/migration/slabs":    b.objectsMigrationSlabsHandlerGET,
-		"GET    /objects/migration/slab/:id": b.objectsMigrationSlabHandlerGET,
-		"POST   /objects/migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
+		"GET    /objects/*key": b.objectsKeyHandlerGET,
+		"PUT    /objects/*key": b.objectsKeyHandlerPUT,
+		"DELETE /objects/*key": b.objectsKeyHandlerDELETE,
+
+		"GET    /migration/slabs":    b.objectsMigrationSlabsHandlerGET,
+		"GET    /migration/slab/:id": b.objectsMigrationSlabHandlerGET,
+		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
 	})
 }

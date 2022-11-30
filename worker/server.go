@@ -22,6 +22,13 @@ type server struct {
 	w *Worker
 }
 
+func (s *server) healthHandler(jc jape.Context) {
+	_, err := s.w.bus.Health()
+	jc.Encode(HealthResponse{
+		Bus: err == nil,
+	})
+}
+
 func (s *server) rhpPrepareFormHandler(jc jape.Context) {
 	var rpfr RHPPrepareFormRequest
 	if jc.Decode(&rpfr) != nil {
@@ -310,6 +317,8 @@ func (s *server) objectsKeyHandlerDELETE(jc jape.Context) {
 func NewServer(w *Worker) http.Handler {
 	s := &server{w: w}
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /health": s.healthHandler,
+
 		"POST   /rhp/prepare/form":    s.rhpPrepareFormHandler,
 		"POST   /rhp/prepare/renew":   s.rhpPrepareRenewHandler,
 		"POST   /rhp/prepare/payment": s.rhpPreparePaymentHandler,

@@ -49,6 +49,18 @@ type paramTime time.Time
 func (t paramTime) String() string                { return (time.Time)(t).Format(time.RFC3339) }
 func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
+// HealthResponse is the response returned by the /health endpoint.
+type HealthResponse struct {
+	Syncer          bool `json:"syncer"`
+	ChainManager    bool `json:"chainManager"`
+	TransactionPool bool `json:"transactionPool"`
+	Wallet          bool `json:"wallet"`
+	HostDB          bool `json:"hostDB"`
+	ContractStore   bool `json:"contractStore"`
+	HostSetStore    bool `json:"hostSetStore"`
+	ObjectStore     bool `json:"objectStore"`
+}
+
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`

@@ -21,6 +21,12 @@ type Client struct {
 	c jape.Client
 }
 
+// Health requests the /health endpoint of the worker.
+func (c *Client) Health() (resp HealthResponse, err error) {
+	err = c.c.GET("/health", &resp)
+	return
+}
+
 // RHPScan scans a host, returning its current settings.
 func (c *Client) RHPScan(hostKey PublicKey, hostIP string) (resp RHPScanResponse, err error) {
 	err = c.c.POST("/rhp/scan", RHPScanRequest{hostKey, hostIP}, &resp)
