@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/rhp/v2"
@@ -261,8 +262,7 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk1,
 										},
-										IsGood: true,
-										FCID:   fcid1,
+										FCID: fcid1,
 									},
 								},
 							},
@@ -290,8 +290,7 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk2,
 										},
-										IsGood: true,
-										FCID:   fcid2,
+										FCID: fcid2,
 									},
 								},
 							},
@@ -567,11 +566,8 @@ func TestSlabsForRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Mark contract bad.
-	err = os.SetIsGood(fcidBad, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Only consider fcidGood and fcidDeleted good contracts.
+	goodContracts := []types.FileContractID{fcidGood, fcidDeleted}
 
 	// Delete the contract.
 	err = os.RemoveContract(fcidDeleted)
@@ -593,10 +589,10 @@ func TestSlabsForRepair(t *testing.T) {
 	// 6 first since it doesn't have any good sectors
 	// 2 last since it only got 1 bad sector
 	// 1, 3, 4, 5 in the middle since they all have 2 bad sectors.
-	expectedSlabIDs := []uint{6, 1, 3, 4, 5, 2}
+	expectedSlabIDs := []bus.SlabID{6, 1, 3, 4, 5, 2}
 	for i := 0; i < len(expectedSlabIDs); i++ {
 		// Check the i worst slabs.
-		slabIDs, err := os.slabsForRepair(i+1, time.Now())
+		slabIDs, err := os.SlabsForMigration(i+1, time.Now(), goodContracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -607,10 +603,10 @@ func TestSlabsForRepair(t *testing.T) {
 
 	// Mark the second half of the slabs as failed. Only the first half should be
 	// returned then.
-	if err := os.MarkSlabsFailure(expectedSlabIDs[3:]); err != nil {
-		t.Fatal(err)
+	if updates, err := os.MarkSlabsMigrationFailure(expectedSlabIDs[3:]); err != nil || updates != 3 {
+		t.Fatalf("marking slabs for failure failed: %v %v", err, updates)
 	}
-	slabIDs, err := os.slabsForRepair(math.MaxInt, time.Now().Add(-time.Minute))
+	slabIDs, err := os.SlabsForMigration(math.MaxInt, time.Now().Add(-time.Minute), goodContracts)
 	if err != nil {
 		t.Fatal(err)
 	}

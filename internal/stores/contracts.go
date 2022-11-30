@@ -200,7 +200,6 @@ type (
 		Model
 
 		FCID     types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
-		IsGood   bool                 `gorm:"index"`
 		HostID   uint                 `gorm:"index"`
 		Host     dbHost
 		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
@@ -404,7 +403,6 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 		return s.db.Where(&dbHost{PublicKey: c.HostKey()}).
 			Create(&dbContract{
 				FCID:     fcid,
-				IsGood:   true, // new contracts always start as good
 				HostID:   host.ID,
 				Revision: revision,
 			}).Error
@@ -436,13 +434,6 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 		contracts[i] = contract
 	}
 	return contracts, nil
-}
-
-// SetIsGood marks a contract as either good or bad.
-func (s *SQLStore) SetIsGood(id types.FileContractID, isGood bool) error {
-	return s.db.Model(&dbContract{}).
-		Where(&dbContract{FCID: id}).
-		Update("is_good", isGood).Error
 }
 
 // RemoveContract implements the bus.ContractStore interface.

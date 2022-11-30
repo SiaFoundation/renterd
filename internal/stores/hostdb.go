@@ -239,6 +239,14 @@ type (
 // TableName implements the gorm.Tabler interface.
 func (dbHost) TableName() string { return "hosts" }
 
+// NetAddress returns the latest announced address of a host.
+func (h dbHost) NetAddress() string {
+	if len(h.Announcements) == 0 {
+		return ""
+	}
+	return h.Announcements[len(h.Announcements)-1].NetAddress
+}
+
 // TableName implements the gorm.Tabler interface.
 func (dbAnnouncement) TableName() string { return "announcements" }
 

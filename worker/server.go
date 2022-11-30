@@ -183,6 +183,9 @@ func (s *server) slabsMigrateHandler(jc jape.Context) {
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
+
+	// TODO: After migration, we need to notify the object store of the changes to the slab.
+
 	jc.Encode(smr.Slab)
 }
 

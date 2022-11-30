@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"fmt"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -19,7 +20,22 @@ type (
 
 	// A PrivateKey is an Ed25519 private key.
 	PrivateKey = consensus.PrivateKey
+
+	SlabID uint
 )
+
+// LoadString is implemented for jape's DecodeParam.
+func (sid *SlabID) LoadString(s string) (err error) {
+	var slabID uint
+	_, err = fmt.Sscan(s, &slabID)
+	*sid = SlabID(slabID)
+	return
+}
+
+// String encodes the SlabID as a string.
+func (sid SlabID) String() string {
+	return fmt.Sprint(uint8(sid))
+}
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
@@ -98,6 +114,23 @@ type ObjectsResponse struct {
 	Object  *object.Object `json:"object,omitempty"`
 }
 
+type ObjectsMarkSlabMigrationFailureRequest struct {
+	SlabIDs []SlabID `json:"slabIDs"`
+}
+
+type ObjectsMarkSlabMigrationFailureResponse struct {
+	Updates int `json:"updates"`
+}
+
+type ObjectsMigrateSlabsResponse struct {
+	SlabIDs []SlabID `json:"slabIDs"`
+}
+
+type ObjectsMigrateSlabResponse struct {
+	Contracts []MigrationContract `json:"contracts"`
+	Slab      object.Slab         `json:"slab"`
+}
+
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.
 type AddObjectRequest struct {
 	Object        object.Object                                `json:"object"`
@@ -127,4 +160,15 @@ type ContractSpending struct {
 	Uploads     types.Currency `json:"uploads"`
 	Downloads   types.Currency `json:"downloads"`
 	FundAccount types.Currency `json:"fundAccount"`
+}
+
+// A MigrationContract contains all the information necessary to access and revise an
+// existing file contract.
+// NOTE: This is essentially a copy of the worker.Contract minus the renter key
+// but since we can't import that within the bus it's redeclared here. A better
+// way to do this could be to migrate all API types to their own package.
+type MigrationContract struct {
+	HostKey PublicKey            `json:"hostKey"`
+	HostIP  string               `json:"hostIP"`
+	ID      types.FileContractID `json:"id"`
 }

@@ -75,10 +75,13 @@ type (
 
 	// An ObjectStore stores objects.
 	ObjectStore interface {
-		List(key string) ([]string, error)
 		Get(key string) (object.Object, error)
+		List(key string) ([]string, error)
+		MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error)
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
+		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
+		SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error)
 	}
 )
 
@@ -454,6 +457,56 @@ func (b *Bus) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.os.Delete(jc.PathParam("key")))
 }
 
+func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
+	var cutoff time.Time
+	var limit int
+	var goodContracts []types.FileContractID
+	if jc.DecodeForm("cutoff", (*paramTime)(&cutoff)) != nil {
+		return
+	}
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+	if jc.DecodeForm("goodContracts", &goodContracts) != nil {
+		return
+	}
+	slabIDs, err := b.os.SlabsForMigration(limit, time.Time(cutoff), goodContracts)
+	if jc.Check("couldn't fetch slabs for migration", err) != nil {
+		return
+	}
+	jc.Encode(ObjectsMigrateSlabsResponse{
+		SlabIDs: slabIDs,
+	})
+}
+
+func (b *Bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
+	var slabID SlabID
+	if jc.DecodeParam("id", &slabID) != nil {
+		return
+	}
+	slab, contracts, err := b.os.SlabForMigration(slabID)
+	if jc.Check("couldn't fetch slab for migration", err) != nil {
+		return
+	}
+	jc.Encode(ObjectsMigrateSlabResponse{
+		Contracts: contracts,
+		Slab:      slab,
+	})
+}
+
+func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
+	var req ObjectsMarkSlabMigrationFailureRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	updates, err := b.os.MarkSlabsMigrationFailure(req.SlabIDs)
+	if jc.Check("couldn't mark slab migration failure", err) == nil {
+		jc.Encode(ObjectsMarkSlabMigrationFailureResponse{
+			Updates: updates,
+		})
+	}
+}
+
 // GatewayAddress returns the address of the gateway.
 func (b *Bus) GatewayAddress() string {
 	return b.s.Addr()
@@ -510,8 +563,11 @@ func NewServer(b *Bus) http.Handler {
 		"PUT    /hostsets/:name":           b.hostsetsNameHandlerPUT,
 		"GET    /hostsets/:name/contracts": b.hostsetsContractsHandler,
 
-		"GET    /objects/*key": b.objectsKeyHandlerGET,
-		"PUT    /objects/*key": b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key": b.objectsKeyHandlerDELETE,
+		"GET    /objects/*key":               b.objectsKeyHandlerGET,
+		"PUT    /objects/*key":               b.objectsKeyHandlerPUT,
+		"DELETE /objects/*key":               b.objectsKeyHandlerDELETE,
+		"GET    /objects/migration/slabs":    b.objectsMigrationSlabsHandlerGET,
+		"GET    /objects/migration/slab/:id": b.objectsMigrationSlabHandlerGET,
+		"POST   /objects/migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
 	})
 }
