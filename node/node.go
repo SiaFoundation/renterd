@@ -272,7 +272,7 @@ type Node struct {
 	l           net.Listener
 	walletKey   consensus.PrivateKey
 
-	mux TreeMux
+	mux treeMux
 	srv http.Server
 
 	cleanupFuncs []func() error
@@ -288,7 +288,7 @@ func NewNode(apiAddr, apiPassword, dir string, uiHandler http.Handler, wk consen
 		return nil, err
 	}
 
-	mux := TreeMux{
+	mux := treeMux{
 		H:   uiHandler,
 		Sub: make(map[string]http.Handler),
 	}
@@ -367,7 +367,7 @@ func (n *Node) CreateBus(bootstrap bool, gatewayAddr string) error {
 	n.busPassword = &n.apiPassword
 	n.cleanupFuncs = append(n.cleanupFuncs, cleanup)
 	n.bus = b
-	n.mux.Sub["/api/store"] = &TreeMux{H: n.auth(bus.NewServer(b))}
+	n.mux.Sub["/api/bus"] = &treeMux{H: n.auth(bus.NewServer(b))}
 	return nil
 }
 
@@ -403,7 +403,7 @@ func (n *Node) CreateWorker() error {
 	n.workerPassword = &n.apiPassword
 	n.cleanupFuncs = append(n.cleanupFuncs, cleanup)
 	n.w = w
-	n.mux.Sub["/api/worker"] = &TreeMux{H: n.auth(worker.NewServer(w))}
+	n.mux.Sub["/api/worker"] = &treeMux{H: n.auth(worker.NewServer(w))}
 	return nil
 }
 
@@ -440,6 +440,6 @@ func (n *Node) CreateAutopilot(loopInterval time.Duration) error {
 	n.autopilotPassword = &n.apiPassword
 	n.cleanupFuncs = append(n.cleanupFuncs, cleanup)
 	n.ap = a
-	n.mux.Sub["/api/autopilot"] = &TreeMux{H: n.auth(autopilot.NewServer(a))}
+	n.mux.Sub["/api/autopilot"] = &treeMux{H: n.auth(autopilot.NewServer(a))}
 	return nil
 }
