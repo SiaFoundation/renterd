@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/renterd/node"
+	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/wallet"
 	"golang.org/x/term"
 )
