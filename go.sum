@@ -134,8 +134,8 @@ gitlab.com/NebulousLabs/errors v0.0.0-20200929122200-06c536cf6975/go.mod h1:ZkMZ
 gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40 h1:dizWJqTWjwyD8KGcMOwgrkqu1JIkofYgKkmDeNE7oAs=
 gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40/go.mod h1:rOnSnoRyxMI3fe/7KIbVcsHRGxe30OONv8dEgo+vCfA=
 gitlab.com/NebulousLabs/go-upnp v0.0.0-20181011194642-3a71999ed0d3/go.mod h1:sleOmkovWsDEQVYXmOJhx69qheoMTmCuPYyiCFCihlg=
-gitlab.com/NebulousLabs/go-upnp v0.0.0-20210414172302-67b91c9a5c03 h1:RJ5YhMTigGRkUb8bTA83iU1v8bbTn1uc+7q84saIH1U=
-gitlab.com/NebulousLabs/go-upnp v0.0.0-20210414172302-67b91c9a5c03/go.mod h1:vhrHTGDh4YR7wK8Z+kRJ+x8SF/6RUM3Vb64Si5FD0L8=
+gitlab.com/NebulousLabs/go-upnp v0.0.0-20211002182029-11da932010b6 h1:WKij6HF8ECp9E7K0E44dew9NrRDGiNR5u4EFsXnJUx4=
+gitlab.com/NebulousLabs/go-upnp v0.0.0-20211002182029-11da932010b6/go.mod h1:vhrHTGDh4YR7wK8Z+kRJ+x8SF/6RUM3Vb64Si5FD0L8=
 gitlab.com/NebulousLabs/log v0.0.0-20200529173103-40b250c2d92c/go.mod h1:qOhJbQ7Vzw+F+RCVmpPZ7WAwBIM9PZv4tWKp6Kgd9CY=
 gitlab.com/NebulousLabs/log v0.0.0-20200604091839-0ba4a941cdc2 h1:b6KJfBiIrGGSxcHVmLLyjJbwAmlIiA9M1qsMTsr8d1s=
 gitlab.com/NebulousLabs/log v0.0.0-20200604091839-0ba4a941cdc2/go.mod h1:qOhJbQ7Vzw+F+RCVmpPZ7WAwBIM9PZv4tWKp6Kgd9CY=
@@ -148,8 +148,8 @@ gitlab.com/NebulousLabs/persist v0.0.0-20200605115618-007e5e23d877/go.mod h1:KT2
 gitlab.com/NebulousLabs/ratelimit v0.0.0-20200811080431-99b8f0768b2e h1:sMZdmPFduUilFk8Ed1Ya/DP0gVfUbGhLlNtLG2tONYk=
 gitlab.com/NebulousLabs/ratelimit v0.0.0-20200811080431-99b8f0768b2e/go.mod h1:HVrehlTxX2hYjsrL1k0WK43OZ0NGZfGvqzPL+n0/zrM=
 gitlab.com/NebulousLabs/siamux v0.0.0-20200723083235-f2c35a421446/go.mod h1:B0RyynPElUG2Y2CAVIIRriIqR9qht2I+nDisi3gfKn0=
-gitlab.com/NebulousLabs/siamux v0.0.0-20210409140711-e667c5f458e4 h1:WFW1/RgVkIFXnKd/PEuGVhr74ev2A51CE+j7CtQHt9E=
-gitlab.com/NebulousLabs/siamux v0.0.0-20210409140711-e667c5f458e4/go.mod h1:Edr1el/xhHsWOYPBrm6oR1WLkU8YX1QRcY+efONUxiw=
+gitlab.com/NebulousLabs/siamux v0.0.2-0.20220630142132-142a1443a259 h1:94CUlkiIN8Mu+hTYgT7n36SbJ7WR6ZMM91ReaSDxUlQ=
+gitlab.com/NebulousLabs/siamux v0.0.2-0.20220630142132-142a1443a259/go.mod h1:owMSVLlMMCSK6tfhfSshZhrsIFCUNvQEsiGZoWhaXcc=
 gitlab.com/NebulousLabs/threadgroup v0.0.0-20200527092543-afa01960408c/go.mod h1:av52iTyGuPtGU+GMcqfGtZu2vxhIjPgrxvIwVYelEvs=
 gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213 h1:owERlKtUEFTPQ897iiqWPOuWBdq7BYqPxDOCgEZnbN4=
 gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213/go.mod h1:vIutAvl7lmJqLVYTCBY5WDdJomP+V74At8LCeEYoH8w=
@@ -157,8 +157,8 @@ gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130/go.mod 
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.sia.tech/jape v0.5.0 h1:6BLMZEePInWwQcJO1mcmrPBpF0QuvkrXmHSWGKeR0tY=
 go.sia.tech/jape v0.5.0/go.mod h1:bu+ka8FgKq7MNH2JRTTOjfvVNku97V4ffyKr0dKoU90=
-go.sia.tech/siad v1.5.7 h1:yFVNyMrCSl6vE0XjlhitFYXxgpVf15ILuCSbp7ZfExM=
-go.sia.tech/siad v1.5.7/go.mod h1:/xtHgMhNKI+cpwm5kjl9u7EG4kqMiYpmucDG710GaRY=
+go.sia.tech/siad v1.5.9 h1:uhaTYAkJQxXh0NEFRIvgD+9bR/1WmKTWQOPojNPdutA=
+go.sia.tech/siad v1.5.9/go.mod h1:ifu7TjXlL9s+47DSmqeMz8LOvthALMysZkJ3Df0daAY=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/0=
 go.uber.org/zap v1.10.0/go.mod h1:vwi/ZaCAaUcBkycHslxD9B2zi4UTXhF60s6SWpuDF0Q=
@@ -176,6 +176,7 @@ golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e/go.mod h1:IxCIyHEi3zRg3s0
 golang.org/x/lint v0.0.0-20181026193005-c67002cb31c3/go.mod h1:UVdnD1Gm6xHRNCYTkRU2/jEulfH38KcIWyp/GAMgvoE=
 golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3/go.mod h1:6SW0HCj/g11FgYtHlgUYUwCkIfeOF89ocIRzGO/8vkc=
 golang.org/x/lint v0.0.0-20200302205851-738671d3881b/go.mod h1:3xt1FjdF8hUf6vQPIChWIBhFzV8gjjsPE/fR3IyQdNY=
+golang.org/x/lint v0.0.0-20210508222113-6edffad5e616/go.mod h1:3xt1FjdF8hUf6vQPIChWIBhFzV8gjjsPE/fR3IyQdNY=
 golang.org/x/mod v0.1.1-0.20191105210325-c90efee705ee/go.mod h1:QqPTAvyqsEbceGzBzNggFXnrqF1CaUcvgkdR5Ot7KZg=
 golang.org/x/net v0.0.0-20180826012351-8a410e7b638d/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/net v0.0.0-20181114220301-adae6a3d119a/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
