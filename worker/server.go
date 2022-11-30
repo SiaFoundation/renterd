@@ -2,8 +2,11 @@ package worker
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -194,32 +197,96 @@ func (s *server) slabsDeleteHandler(jc jape.Context) {
 	}
 }
 
-type dirtyWriter bool
-
-func (dw *dirtyWriter) Write(p []byte) (int, error) {
-	*dw = true
-	return len(p), nil
+// parseRange parses a Range header string as per RFC 7233. Only the first range
+// is returned. If no range is specified, parseRange returns 0, size.
+func parseRange(s string, size int64) (offset, length int64, _ error) {
+	if s == "" {
+		return 0, size, nil
+	}
+	const b = "bytes="
+	if !strings.HasPrefix(s, b) {
+		return 0, 0, errors.New("invalid range")
+	}
+	rs := strings.Split(s[len(b):], ",")
+	if len(rs) == 0 {
+		return 0, 0, errors.New("invalid range")
+	}
+	ra := strings.TrimSpace(rs[0])
+	if ra == "" {
+		return 0, 0, errors.New("invalid range")
+	}
+	i := strings.Index(ra, "-")
+	if i < 0 {
+		return 0, 0, errors.New("invalid range")
+	}
+	start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
+	if start == "" {
+		if end == "" || end[0] == '-' {
+			return 0, 0, errors.New("invalid range")
+		}
+		i, err := strconv.ParseInt(end, 10, 64)
+		if i < 0 || err != nil {
+			return 0, 0, errors.New("invalid range")
+		}
+		if i > size {
+			i = size
+		}
+		offset = size - i
+		length = size - offset
+	} else {
+		i, err := strconv.ParseInt(start, 10, 64)
+		if err != nil || i < 0 {
+			return 0, 0, errors.New("invalid range")
+		} else if i >= size {
+			return 0, 0, errors.New("invalid range")
+		}
+		offset = i
+		if end == "" {
+			length = size - offset
+		} else {
+			i, err := strconv.ParseInt(end, 10, 64)
+			if err != nil || offset > i {
+				return 0, 0, errors.New("invalid range")
+			}
+			if i >= size {
+				i = size - 1
+			}
+			length = i - offset + 1
+		}
+	}
+	return offset, length, nil
 }
 
 func (s *server) objectsKeyHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []string{})
 
-	key := jc.PathParam("key")
-	if strings.HasSuffix(key, "/") {
-		es, err := s.w.ObjectEntries(key)
-		if jc.Check("couldn't get object entries", err) != nil {
-			return
-		}
+	o, es, err := s.w.Object(jc.PathParam("key"))
+	if jc.Check("couldn't get object or entries", err) != nil {
+		return
+	}
+	if len(es) > 0 {
 		jc.Encode(es)
 		return
 	}
 
-	// only call Check if we haven't already started writing a response
-	var dirty bool
-	err := s.w.Object(jc.Request.Context(), key, io.MultiWriter(jc.ResponseWriter, (*dirtyWriter)(&dirty)))
-	if !dirty {
-		jc.Check("couldn't load object", err)
+	// NOTE: ideally we would use http.ServeContent in this handler, but that
+	// has performance issues. If we implemented io.ReadSeeker in the most
+	// straightforward fashion, we would need one (or more!) RHP RPCs for each
+	// Read call. We can improve on this to some degree by buffering, but
+	// without knowing the exact ranges being requested, this will always be
+	// suboptimal. Thus, sadly, we have to roll our own range support.
+	offset, length, err := parseRange(jc.Request.Header.Get("Range"), o.Size())
+	if err != nil {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
+		return
 	}
+	if length < o.Size() {
+		jc.ResponseWriter.WriteHeader(http.StatusPartialContent)
+		jc.ResponseWriter.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, o.Size()))
+	}
+	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	err = s.w.DownloadObject(jc.Request.Context(), jc.ResponseWriter, o, offset, length)
+	_ = err // TODO: log?
 }
 
 func (s *server) objectsKeyHandlerPUT(jc jape.Context) {
