@@ -603,7 +603,7 @@ func TestSlabsForRepair(t *testing.T) {
 
 	// Mark the second half of the slabs as failed. Only the first half should be
 	// returned then.
-	if updates, err := os.MarkSlabsMigrationFailure(expectedSlabIDs[3:]...); err != nil || updates != 3 {
+	if updates, err := os.MarkSlabsMigrationFailure(expectedSlabIDs[3:]); err != nil || updates != 3 {
 		t.Fatalf("marking slabs for failure failed: %v %v", err, updates)
 	}
 	slabIDs, err := os.SlabsForMigration(math.MaxInt, time.Now().Add(-time.Minute), goodContracts)

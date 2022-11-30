@@ -602,8 +602,8 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 	return slabIDs, err
 }
 
-// SlabsForMigration returns up to n slabs which require migration and haven't
-// failed migration since failureCutoff.
+// SlabForMigration returns all the info about a s lab necessary for migrating
+// it to better hosts/contracts.
 func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Contract, error) {
 	var dSlab dbSlab
 	tx := s.db.Where(&dbSlab{Model: Model{ID: uint(slabID)}}).
@@ -644,7 +644,7 @@ func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Co
 
 // MarkSlabsMigrationFailure sets the last_failure field for the given slabs to
 // the current time.
-func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs ...bus.SlabID) (int, error) {
+func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error) {
 	now := time.Now().UTC()
 	txn := s.db.Model(&dbSlab{}).
 		Where("id in ?", slabIDs).

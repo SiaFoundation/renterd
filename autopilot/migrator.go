@@ -104,7 +104,7 @@ func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
 }
 
 func (m *migrator) markFailedMigration(slabID bus.SlabID) error {
-	updates, err := m.ap.bus.MarkSlabsMigrationFailure(slabID)
+	updates, err := m.ap.bus.MarkSlabsMigrationFailure([]bus.SlabID{slabID})
 	if err != nil {
 		return err
 	}

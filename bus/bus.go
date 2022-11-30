@@ -78,7 +78,7 @@ type (
 	ObjectStore interface {
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
-		MarkSlabsMigrationFailure(slabIDs ...SlabID) (int, error)
+		MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error)
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
@@ -459,10 +459,10 @@ func (b *Bus) objectsKeyHandlerDELETE(jc jape.Context) {
 }
 
 func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
-	var cutoff paramTime
+	var cutoff time.Time
 	var limit int
 	var goodContracts []types.FileContractID
-	if jc.DecodeForm("cutoff", &cutoff) != nil {
+	if jc.DecodeForm("cutoff", (*paramTime)(&cutoff)) != nil {
 		return
 	}
 	if jc.DecodeForm("limit", &limit) != nil {
@@ -500,7 +500,7 @@ func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	updates, err := b.os.MarkSlabsMigrationFailure(req.SlabIDs...)
+	updates, err := b.os.MarkSlabsMigrationFailure(req.SlabIDs)
 	if jc.Check("couldn't mark slab migration failure", err) == nil {
 		jc.Encode(ObjectsMarkSlabMigrationFailureResponse{
 			Updates: updates,
@@ -569,6 +569,6 @@ func NewServer(b *Bus) http.Handler {
 		"DELETE /objects/*key":               b.objectsKeyHandlerDELETE,
 		"GET    /objects/migration/slabs":    b.objectsMigrationSlabsHandlerGET,
 		"GET    /objects/migration/slab/:id": b.objectsMigrationSlabHandlerGET,
-		"POST    /objects/migration/failed":  b.objectsMarkSlabMigrationFailureHandlerPOST,
+		"POST   /objects/migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
 	})
 }

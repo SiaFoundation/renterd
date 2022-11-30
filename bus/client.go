@@ -295,7 +295,7 @@ func (c *Client) DeleteObject(name string) (err error) {
 
 // MarkSlabsMigrationFailure updates the latest failure time of the given slabs
 // to the current time.
-func (c *Client) MarkSlabsMigrationFailure(slabIDs ...SlabID) (int, error) {
+func (c *Client) MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error) {
 	var resp ObjectsMarkSlabMigrationFailureResponse
 	err := c.c.POST("/objects/migration/failed", ObjectsMarkSlabMigrationFailureRequest{
 		SlabIDs: slabIDs,
@@ -318,7 +318,6 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 // SlabForMigration returns a slab and the contracts its stored on.
 func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []worker.Contract, error) {
 	var resp ObjectsMigrateSlabResponse
-	// TODO: Why does jape hate this?
 	err := c.c.GET(fmt.Sprintf("/objects/migration/slab/%s", slabID), &resp)
 	return resp.Slab, resp.Contracts, err
 }
