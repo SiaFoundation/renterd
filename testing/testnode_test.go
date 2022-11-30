@@ -13,6 +13,11 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Add a host.
+	if err := cluster.AddHosts(1); err != nil {
+		t.Fatal(err)
+	}
+
 	// Try talking to the bus API.
 	bus := cluster.Bus()
 	hosts, err := bus.AllHosts()

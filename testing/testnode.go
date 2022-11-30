@@ -117,17 +117,17 @@ func newTestCluster(dir string) (*TestCluster, error) {
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
 // themselves on the network, ready to form contracts.
 func (c *TestCluster) AddHosts(n int) error {
-	apiAddr, _ := c.bus.APICredentials()
+	gatewayAddr, _ := c.bus.GatewayAddress()
 	for i := 0; i < n; i++ {
 		hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-		n, err := siatest.NewCleanNode(sianode.Host(hostDir))
+		n, err := siatest.NewCleanNodeAsync(sianode.Host(hostDir))
 		if err != nil {
 			return err
 		}
 		c.hosts = append(c.hosts, n)
 
 		// Connect to bus.
-		if err := n.GatewayConnectPost(modules.NetAddress(apiAddr)); err != nil {
+		if err := n.GatewayConnectPost(modules.NetAddress(gatewayAddr)); err != nil {
 			return err
 		}
 
@@ -167,6 +167,11 @@ func (c *TestCluster) Workers() []*worker.Client {
 func (c *TestCluster) Shutdown(ctx context.Context) error {
 	for _, f := range c.Cleanup {
 		if err := f(ctx); err != nil {
+			return err
+		}
+	}
+	for _, h := range c.hosts {
+		if err := h.Close(); err != nil {
 			return err
 		}
 	}

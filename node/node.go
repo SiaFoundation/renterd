@@ -370,6 +370,15 @@ func (n *Node) CreateBus(bootstrap bool, gatewayAddr string) error {
 	return nil
 }
 
+// GatewayAddress returns the address of the running gateway or 'false' if no
+// gateway was created as part of the node.
+func (n *Node) GatewayAddress() (string, bool) {
+	if n.bus == nil {
+		return "", false
+	}
+	return n.bus.GatewayAddress(), true
+}
+
 // AddWorker adds an already running, remote worker to the node.
 func (n *Node) AddWorker(workerAddr, workerPassword string) error {
 	if n.workerAddr != nil || n.workerPassword != nil {
