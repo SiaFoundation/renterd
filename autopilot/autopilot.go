@@ -156,6 +156,11 @@ func New(store Store, bus Bus, worker Worker, heartbeat time.Duration) (*Autopil
 	}
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap)
-	ap.s = newScanner(ap, 5, 10*time.Minute, 10*time.Minute)
+	ap.s = newScanner(
+		ap,
+		scannerNumThreads,
+		scannerScanInterval,
+		scannerTimeoutInterval,
+	)
 	return ap, nil
 }

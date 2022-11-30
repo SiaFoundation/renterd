@@ -14,9 +14,15 @@ import (
 )
 
 const (
-	trackerNumDataPoints     = 1000
+	// TODO: we could make these configurable
+	scannerNumThreads      = 5
+	scannerScanInterval    = 10 * time.Minute
+	scannerTimeoutInterval = 10 * time.Minute
+
+	trackerMinTimeout = time.Second * 30
+
 	trackerMinDataPoints     = 25
-	trackerMinTimeout        = time.Second * 30
+	trackerNumDataPoints     = 1000
 	trackerTimeoutPercentile = 99
 )
 
@@ -107,15 +113,6 @@ func (p *scanPool) launchThreads(workerFn func(chan scanResp)) chan scanResp {
 	return respChan
 }
 
-func defaultTracker() *tracker {
-	return newTracker(
-		trackerMinDataPoints,
-		trackerNumDataPoints,
-		trackerTimeoutPercentile,
-		trackerMinTimeout,
-	)
-}
-
 func newTracker(threshold, total uint64, percentile float64, minTimeout time.Duration) *tracker {
 	return &tracker{
 		threshold:  threshold,
@@ -159,9 +156,14 @@ func (t *tracker) timeout() (time.Duration, error) {
 
 func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
 	s := &scanner{
-		bus:     ap.bus,
-		worker:  ap.worker,
-		tracker: defaultTracker(),
+		bus:    ap.bus,
+		worker: ap.worker,
+		tracker: newTracker(
+			trackerMinDataPoints,
+			trackerNumDataPoints,
+			trackerTimeoutPercentile,
+			trackerMinTimeout,
+		),
 
 		stopChan: ap.stopChan,
 

@@ -63,9 +63,14 @@ func TestScanner(t *testing.T) {
 	b := &mockBus{hosts: h}
 	w := &mockWorker{}
 	s := &scanner{
-		bus:             b,
-		worker:          w,
-		tracker:         defaultTracker(),
+		bus:    b,
+		worker: w,
+		tracker: newTracker(
+			trackerMinDataPoints,
+			trackerNumDataPoints,
+			trackerTimeoutPercentile,
+			trackerMinTimeout,
+		),
 		stopChan:        make(chan struct{}),
 		scanMinInterval: time.Second,
 	}
