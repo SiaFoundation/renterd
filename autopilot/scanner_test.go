@@ -3,16 +3,24 @@ package autopilot
 import (
 	"errors"
 	"net"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"gitlab.com/NebulousLabs/fastrand"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/worker"
 	"lukechampine.com/frand"
+)
+
+var (
+	errRecordHostInteractionFailed = errors.New("RecordHostInteraction failed")
+
+	testHost1 consensus.PublicKey
+	testHost2 consensus.PublicKey
+	testHost3 consensus.PublicKey
 )
 
 type mockBus struct {
@@ -26,10 +34,15 @@ func (b *mockBus) AllHosts() ([]hostdb.Host, error) { return b.hosts, nil }
 func (b *mockBus) ConsensusState() (bus.ConsensusState, error) {
 	return bus.ConsensusState{BlockHeight: 0, Synced: true}, nil
 }
-func (b *mockBus) RecordHostInteraction(_ consensus.PublicKey, itx hostdb.Interaction) error {
+func (b *mockBus) RecordHostInteraction(hostKey consensus.PublicKey, itx hostdb.Interaction) error {
+	if hostKey == testHost3 {
+		return errRecordHostInteractionFailed
+	}
+
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.itxs = append(b.itxs, itx)
+	b.mu.Unlock()
+
 	return nil
 }
 
@@ -48,20 +61,127 @@ func (b *mockBus) counts() (success int, failed int) {
 
 type mockWorker struct{}
 
-func (w *mockWorker) RHPScan(_ consensus.PublicKey, hostIP string, _ time.Duration) (r worker.RHPScanResponse, e error) {
-	if strings.HasSuffix(hostIP, "fail") {
+func (w *mockWorker) RHPScan(hostKey consensus.PublicKey, hostIP string, _ time.Duration) (r worker.RHPScanResponse, e error) {
+	if hostKey == testHost1 || hostKey == testHost2 {
 		e = errors.New("fail")
-	}
-	if strings.HasSuffix(hostIP, "lock") {
-		<-make(chan struct{}) // scan never completes
 	}
 	return
 }
 
+func (s *scanner) isScanning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scanning
+}
+
 func TestScanner(t *testing.T) {
-	h := testHosts(100)
-	b := &mockBus{hosts: h}
+	// init host keys
+	fastrand.Read(testHost1[:])
+	fastrand.Read(testHost2[:])
+	fastrand.Read(testHost3[:])
+
+	// init new scanner
+	b := &mockBus{hosts: append(testHosts(98), newTestHost(testHost1), newTestHost(testHost2))}
 	w := &mockWorker{}
+	s := newTestScanner(b, w)
+
+	// assert it started a host scan
+	errChan := s.tryPerformHostScan()
+	if errChan == nil {
+		t.Fatal("unexpected")
+	}
+
+	// wait until the scan is done
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Fatal("unexpected error", err)
+		}
+	case <-time.After(time.Second): // avoid test deadlock
+		t.Fatal("scan took longer than expected")
+	}
+
+	// assert interactions were properly recorded
+	success, fail := b.counts()
+	if success != 98 || fail != 2 {
+		t.Fatal("unexpected", success, fail)
+	}
+
+	// assert we prevent starting a host scan immediately after a scan was done
+	if s.tryPerformHostScan() != nil {
+		t.Fatal("unexpected")
+	}
+
+	// reset the scanner
+	s = newTestScanner(b, w)
+
+	// start another scan
+	if errChan = s.tryPerformHostScan(); errChan == nil || !s.isScanning() {
+		t.Fatal("unexpected")
+	}
+
+	// immediately interrupt the scanner
+	close(s.stopChan)
+
+	// wait until the scan is done
+	select {
+	case err := <-errChan:
+		if err != errScanInterrupted {
+			t.Fatal("unexpected error", err)
+		}
+	case <-time.After(time.Second): // avoid test deadlock
+		t.Fatal("scan took longer than expected")
+	}
+
+	// assert scanner is no longer scanning
+	if s.isScanning() {
+		t.Fatal("unexpected")
+	}
+
+	// reset the scanner and bus
+	b = &mockBus{hosts: append(testHosts(99), newTestHost(testHost3))}
+	s = newTestScanner(b, w)
+
+	// start another scan
+	if errChan = s.tryPerformHostScan(); errChan == nil || !s.isScanning() {
+		t.Fatal("unexpected")
+	}
+
+	// wait until the scan is done
+	select {
+	case err := <-errChan:
+		if err != errRecordHostInteractionFailed {
+			t.Fatal("unexpected error", err)
+		}
+	case <-time.After(time.Second): // avoid test deadlock
+		t.Fatal("scan took longer than expected")
+	}
+}
+
+func testHosts(n int) []hostdb.Host {
+	hosts := make([]hostdb.Host, n)
+	for i := 0; i < n; i++ {
+		var hk consensus.PublicKey
+		frand.Read(hk[:])
+		hosts[i] = newTestHost(hk)
+	}
+	return hosts
+}
+
+func newTestHost(hk consensus.PublicKey) hostdb.Host {
+	randIP := func() string {
+		rawIP := make([]byte, 16)
+		fastrand.Read(rawIP)
+		return net.IP(rawIP).String()
+	}
+
+	return hostdb.Host{
+		PublicKey:     hk,
+		Announcements: []hostdb.Announcement{{NetAddress: randIP()}},
+	}
+}
+
+func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	s := &scanner{
 		bus:    b,
 		worker: w,
@@ -75,82 +195,5 @@ func TestScanner(t *testing.T) {
 		scanMinInterval: time.Second,
 	}
 	s.pool = &scanPool{numThreads: 3, s: s}
-
-	h[0].Announcements[0].NetAddress += "fail"
-	h[1].Announcements[0].NetAddress += "fail"
-	h[2].Announcements[0].NetAddress += "fail"
-
-	// assert it started a host scan
-	doneChan := s.tryPerformHostScan()
-	if doneChan == nil {
-		t.Fatal("unexpected")
-	}
-
-	// wait until the scan is done
-	select {
-	case <-doneChan:
-	case <-time.After(time.Second): // avoid test deadlock
-		t.Fatal("scan took longer than expected")
-	}
-
-	// assert interactions were recorded
-	success, fail := b.counts()
-	if success != 97 || fail != 3 {
-		t.Fatal("unexpected", success, fail)
-	}
-
-	// ensure one scan hangs
-	h[4].Announcements[0].NetAddress += "lock"
-
-	// start scan
-	b.itxs = b.itxs[:0]
-	s.scanningLastStart = time.Time{}
-	doneChan = s.tryPerformHostScan()
-	if doneChan == nil {
-		t.Fatal("unexpected")
-	}
-
-	// interrupt the scan
-	time.Sleep(time.Second)
-	close(s.stopChan)
-
-	// wait until the scan is done
-	select {
-	case <-doneChan:
-	case <-time.After(time.Second): // avoid test deadlock
-		t.Fatal("scan took longer than expected")
-	}
-
-	// assert scanner is not scanning
-	if s.isScanning() {
-		t.Fatal("unexpected")
-	}
-
-	// assert scan was interrupted, one scan did not complete
-	success, fail = b.counts()
-	if success != 96 || fail != 3 {
-		t.Fatal("unexpected", len(b.itxs))
-	}
-}
-
-func testHosts(n int) []hostdb.Host {
-	randIP := func() string {
-		rawIP := make([]byte, 16)
-		frand.Read(rawIP)
-		return net.IP(rawIP).String()
-	}
-
-	hosts := make([]hostdb.Host, n)
-	for i := 0; i < n; i++ {
-		var h hostdb.Host
-		frand.Read(h.PublicKey[:])
-		hosts[i] = hostdb.Host{Announcements: []hostdb.Announcement{{NetAddress: randIP()}}}
-	}
-	return hosts
-}
-
-func (s *scanner) isScanning() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.scanning
+	return s
 }

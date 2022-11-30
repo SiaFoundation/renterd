@@ -2,6 +2,8 @@ package autopilot
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +26,10 @@ const (
 	trackerMinDataPoints     = 25
 	trackerNumDataPoints     = 1000
 	trackerTimeoutPercentile = 99
+)
+
+var (
+	errScanInterrupted = errors.New("scan was interrupted")
 )
 
 type (
@@ -101,8 +107,8 @@ func (p *scanPool) launchScans(hosts []hostdb.Host) {
 
 func (p *scanPool) launchThreads(workerFn func(chan scanResp)) chan scanResp {
 	respChan := make(chan scanResp, p.numThreads)
+	atomic.AddUint64(&p.liveThreads, p.numThreads)
 	for i := uint64(0); i < p.numThreads; i++ {
-		atomic.AddUint64(&p.liveThreads, 1)
 		go func() {
 			workerFn(respChan)
 			if atomic.AddUint64(&p.liveThreads, ^uint64(0)) == 0 {
@@ -174,7 +180,7 @@ func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterv
 	return s
 }
 
-func (s *scanner) tryPerformHostScan() <-chan struct{} {
+func (s *scanner) tryPerformHostScan() <-chan error {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
@@ -185,15 +191,17 @@ func (s *scanner) tryPerformHostScan() <-chan struct{} {
 	s.scanning = true
 	s.mu.Unlock()
 
-	doneChan := make(chan struct{})
+	errChan := make(chan error, 1)
 	go func() {
-		defer close(doneChan)
-		s.performHostScans()
+		defer close(errChan)
+		if err := s.performHostScans(); err != nil {
+			errChan <- err
+		}
 		s.mu.Lock()
 		s.scanning = false
 		s.mu.Unlock()
 	}()
-	return doneChan
+	return errChan
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -213,56 +221,76 @@ func (s *scanner) tryUpdateTimeout() {
 }
 
 // performHostScans scans every host in our database
-func (s *scanner) performHostScans() {
+func (s *scanner) performHostScans() error {
 	// TODO: running a scan on all hosts is not infinitely scalable, this will
 	// need to be updated to be smarter and run on a subset of all hosts
-	hosts, _ := s.bus.AllHosts()
-	s.pool.launchScans(hosts)
-	inflight := len(hosts)
+	hosts, err := s.bus.AllHosts()
+	if err != nil {
+		return err
+	}
 
-	// launch workers
-	respChan := s.pool.launchThreads(func(resChan chan scanResp) {
+	s.pool.launchScans(hosts)
+
+	workerFn := func(resChan chan scanResp) {
 		for req := range s.pool.scanQueue {
 			if s.isStopped() {
 				return
 			}
 
 			scan, err := s.worker.RHPScan(req.hostKey, req.hostIP, s.currentTimeout())
+			resChan <- scanResp{req.hostKey, scan.Settings, err}
+
 			if err == nil {
 				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}
-			resChan <- scanResp{req.hostKey, scan.Settings, err}
 		}
-	})
+	}
+
+	respChan := s.pool.launchThreads(workerFn)
+
+	var errs error
 
 	// handle responses
+	inflight := len(hosts)
 	for inflight > 0 {
 		var res scanResp
 		select {
 		case <-s.stopChan:
-			return
+			return errScanInterrupted
 		case res = <-respChan:
 			inflight--
 		}
 
 		if res.err != nil {
-			err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
+			if err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
 				Timestamp: time.Now(),
 				Type:      "scan",
 				Success:   false,
 				Result:    json.RawMessage(`{"error": "` + res.err.Error() + `"}`),
-			})
-			_ = err // TODO
+			}); err != nil {
+				if errs == nil {
+					errs = err
+				} else {
+					errs = fmt.Errorf("%w; %s", errs, err.Error())
+				}
+			}
 		} else {
-			err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
+			if err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
 				Timestamp: time.Now(),
 				Type:      "scan",
 				Success:   true,
 				Result:    json.RawMessage(jsonMarshal(res.settings)),
-			})
-			_ = err // TODO
+			}); err != nil {
+				if errs == nil {
+					errs = err
+				} else {
+					errs = fmt.Errorf("%w; %s", errs, err.Error())
+				}
+			}
 		}
 	}
+
+	return errs
 }
 
 func (s *scanner) isScanRequired() bool {
