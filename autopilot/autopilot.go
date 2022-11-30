@@ -58,7 +58,7 @@ type Bus interface {
 	// objects
 	MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error)
 	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error)
-	SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Contract, error)
+	SlabForMigration(slabID bus.SlabID) (object.Slab, []bus.MigrationContract, error)
 }
 
 type Worker interface {

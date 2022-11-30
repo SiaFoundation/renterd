@@ -7,7 +7,6 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -128,8 +127,8 @@ type ObjectsMigrateSlabsResponse struct {
 }
 
 type ObjectsMigrateSlabResponse struct {
-	Contracts []worker.Contract `json:"contracts"`
-	Slab      object.Slab       `json:"slab"`
+	Contracts []MigrationContract `json:"contracts"`
+	Slab      object.Slab         `json:"slab"`
 }
 
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.
@@ -161,4 +160,15 @@ type ContractSpending struct {
 	Uploads     types.Currency `json:"uploads"`
 	Downloads   types.Currency `json:"downloads"`
 	FundAccount types.Currency `json:"fundAccount"`
+}
+
+// A MigrationContract contains all the information necessary to access and revise an
+// existing file contract.
+// NOTE: This is essentially a copy of the worker.Contract minus the renter key
+// but since we can't import that within the bus it's redeclared here. A better
+// way to do this could be to migrate all API types to their own package.
+type MigrationContract struct {
+	HostKey PublicKey            `json:"hostKey"`
+	HostIP  string               `json:"hostIP"`
+	ID      types.FileContractID `json:"id"`
 }

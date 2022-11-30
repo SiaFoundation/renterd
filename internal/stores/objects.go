@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
@@ -604,7 +603,7 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 
 // SlabForMigration returns all the info about a s lab necessary for migrating
 // it to better hosts/contracts.
-func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Contract, error) {
+func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []bus.MigrationContract, error) {
 	var dSlab dbSlab
 	tx := s.db.Where(&dbSlab{Model: Model{ID: uint(slabID)}}).
 		Preload("Shards.DBSector.Contracts.Host").
@@ -619,7 +618,7 @@ func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Co
 
 	// Return all contracts that have ever stored any shard of the slab.
 	addedContracts := make(map[types.FileContractID]struct{})
-	var contracts []worker.Contract
+	var contracts []bus.MigrationContract
 	for _, shard := range dSlab.Shards {
 		for _, c := range shard.DBSector.Contracts {
 			if _, exists := addedContracts[c.FCID]; exists {
@@ -627,15 +626,10 @@ func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []worker.Co
 			}
 			addedContracts[c.FCID] = struct{}{}
 
-			contracts = append(contracts, worker.Contract{
+			contracts = append(contracts, bus.MigrationContract{
+				ID:      c.FCID,
 				HostKey: c.Host.PublicKey,
 				HostIP:  c.Host.NetAddress(),
-				ID:      c.FCID,
-
-				// TODO: This is set by the autopilot. Should we keep
-				// worker.Contract as the return arg or use a custom
-				// type without the field instead?
-				RenterKey: nil,
 			})
 		}
 	}

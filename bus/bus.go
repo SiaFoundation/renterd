@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -82,7 +81,7 @@ type (
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
-		SlabForMigration(slabID SlabID) (object.Slab, []worker.Contract, error)
+		SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error)
 	}
 )
 

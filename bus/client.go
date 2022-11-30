@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -315,7 +314,7 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 }
 
 // SlabForMigration returns a slab and the contracts its stored on.
-func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []worker.Contract, error) {
+func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error) {
 	var resp ObjectsMigrateSlabResponse
 	err := c.c.GET(fmt.Sprintf("/objects/migration/slab/%s", slabID), &resp)
 	return resp.Slab, resp.Contracts, err
