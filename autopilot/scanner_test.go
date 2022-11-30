@@ -86,11 +86,6 @@ func TestScanner(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 
-	// assert consecutive calls don't start a new scan
-	if s.tryPerformHostScan() != nil {
-		t.Fatal("unexpected")
-	}
-
 	// wait until the scan is done
 	select {
 	case <-doneChan:
