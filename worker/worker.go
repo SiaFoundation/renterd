@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/metrics"
@@ -108,9 +109,9 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
 
-	Object(key string) (object.Object, error)
-	ObjectEntries(key string) ([]string, error)
+	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
 }
@@ -354,25 +355,31 @@ func (w *Worker) MigrateSlab(ctx context.Context, s *object.Slab, currentHeight 
 	})
 }
 
-func (w *Worker) Object(ctx context.Context, key string, dst io.Writer) error {
-	o, err := w.bus.Object(key)
-	if err != nil {
-		return fmt.Errorf("couldn't load object: %w", err)
-	}
-	var offset int64 = 0 // TODO
-	var length int64 = 0 // TODO
+func (w *Worker) Object(key string) (object.Object, []string, error) {
+	return w.bus.Object(key)
+}
+
+func (w *Worker) DownloadObject(ctx context.Context, dst io.Writer, o object.Object, offset, length int64) error {
 	cw := o.Key.Decrypt(dst, offset)
 	for _, ss := range slabsForDownload(o.Slabs, offset, length) {
-		var contracts []Contract = nil // TODO: ask bus, using ss.Slab.Shards
-		if err := w.DownloadSlab(ctx, cw, ss, contracts); err != nil {
+		contracts, err := w.bus.ContractsForSlab(ss.Shards)
+		if err != nil {
+			return err
+		}
+		cs := make([]Contract, len(contracts))
+		for i, c := range contracts {
+			cs[i] = Contract{
+				HostKey:   c.HostKey,
+				HostIP:    c.HostIP,
+				ID:        c.ID,
+				RenterKey: nil, // TODO
+			}
+		}
+		if err := w.DownloadSlab(ctx, cw, ss, cs); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func (w *Worker) ObjectEntries(key string) ([]string, error) {
-	return w.bus.ObjectEntries(key)
 }
 
 func (w *Worker) AddObject(ctx context.Context, key string, r io.Reader) error {

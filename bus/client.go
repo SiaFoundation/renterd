@@ -258,24 +258,23 @@ func (c *Client) RecommendedFee() (types.Currency, error) {
 	panic("unimplemented")
 }
 
-func (c *Client) objects(path string) (or ObjectsResponse, err error) {
-	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
-	return
+// ContractsForSlab returns contracts that can be used to download the provided
+// slab.
+func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract, err error) {
+	panic("unimplemented")
 }
 
-// Object returns the object with the given name.
-func (c *Client) Object(name string) (o object.Object, err error) {
-	or, err := c.objects(name)
-	if err == nil {
+// Object returns the object at the given path, or, if path ends in '/', the
+// entries under that path.
+func (c *Client) Object(path string) (o object.Object, entries []string, err error) {
+	var or ObjectsResponse
+	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
+	if or.Object != nil {
 		o = *or.Object
+	} else {
+		entries = or.Entries
 	}
 	return
-}
-
-// ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(path string) (entries []string, err error) {
-	or, err := c.objects(path)
-	return or.Entries, err
 }
 
 // AddObject stores the provided object under the given name.
