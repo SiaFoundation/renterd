@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/NebulousLabs/fastrand"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
+	"lukechampine.com/frand"
 )
 
 // mockStore implements wallet.SingleAddressStore and allows to manipulate the
@@ -128,6 +128,6 @@ func TestWalletRedistribute(t *testing.T) {
 }
 
 func randomOutputID() (t types.OutputID) {
-	fastrand.Read(t[:])
+	frand.Read(t[:])
 	return
 }

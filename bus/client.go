@@ -179,7 +179,7 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 }
 
 // Contracts returns the current set of contracts.
-func (c *Client) Contracts() (contracts []rhpv2.Contract, err error) {
+func (c *Client) Contracts(orderBy string, limit int) (contracts []rhpv2.Contract, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
 }
@@ -234,16 +234,19 @@ func (c *Client) AcquireContractLock(types.FileContractID) (types.FileContractRe
 func (c *Client) ReleaseContractLock(types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) ActiveContracts(maxEndHeight uint64) ([]Contract, error) {
+func (c *Client) ActiveContracts() ([]Contract, error) {
 	panic("unimplemented")
 }
-func (c *Client) AllContracts(currentPeriod uint64) ([]Contract, error) {
+func (c *Client) DeleteContracts(ids ...types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) ContractData(types.FileContractID) (rhpv2.Contract, error) {
+func (c *Client) AllContracts() ([]Contract, error) {
 	panic("unimplemented")
 }
-func (c *Client) ContractHistory(types.FileContractID, uint64) ([]Contract, error) {
+func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {
+	panic("unimplemented")
+}
+func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error) {
 	panic("unimplemented")
 }
 func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
@@ -253,24 +256,23 @@ func (c *Client) RecommendedFee() (types.Currency, error) {
 	panic("unimplemented")
 }
 
-func (c *Client) objects(path string) (or ObjectsResponse, err error) {
-	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
-	return
+// ContractsForSlab returns contracts that can be used to download the provided
+// slab.
+func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract, err error) {
+	panic("unimplemented")
 }
 
-// Object returns the object with the given name.
-func (c *Client) Object(name string) (o object.Object, err error) {
-	or, err := c.objects(name)
-	if err == nil {
+// Object returns the object at the given path, or, if path ends in '/', the
+// entries under that path.
+func (c *Client) Object(path string) (o object.Object, entries []string, err error) {
+	var or ObjectsResponse
+	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
+	if or.Object != nil {
 		o = *or.Object
+	} else {
+		entries = or.Entries
 	}
 	return
-}
-
-// ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(path string) (entries []string, err error) {
-	or, err := c.objects(path)
-	return or.Entries, err
 }
 
 // AddObject stores the provided object under the given name.

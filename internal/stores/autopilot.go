@@ -16,7 +16,6 @@ import (
 type EphemeralAutopilotStore struct {
 	mu     sync.Mutex
 	config autopilot.Config
-	state  autopilot.State
 }
 
 // Config implements autopilot.Store.
@@ -31,21 +30,6 @@ func (s *EphemeralAutopilotStore) SetConfig(c autopilot.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.config = c
-	return nil
-}
-
-// State implements autopilot.Store.
-func (s *EphemeralAutopilotStore) State() autopilot.State {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.state
-}
-
-// SetState implements autopilot.Store.
-func (s *EphemeralAutopilotStore) SetState(state autopilot.State) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.state = state
 	return nil
 }
 
@@ -68,7 +52,6 @@ type JSONAutopilotStore struct {
 
 type jsonAutopilotPersistData struct {
 	Config autopilot.Config
-	State  autopilot.State
 }
 
 func (s *JSONAutopilotStore) save() error {
@@ -76,7 +59,6 @@ func (s *JSONAutopilotStore) save() error {
 	defer s.mu.Unlock()
 	var p jsonAutopilotPersistData
 	p.Config = s.config
-	p.State = s.state
 	js, _ := json.MarshalIndent(p, "", "  ")
 
 	// atomic save
@@ -108,7 +90,6 @@ func (s *JSONAutopilotStore) load() error {
 		return err
 	}
 	s.config = p.Config
-	s.state = p.State
 	return nil
 }
 

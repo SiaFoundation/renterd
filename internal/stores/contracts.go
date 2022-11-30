@@ -439,9 +439,9 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 }
 
 // SetIsGood marks a contract as either good or bad.
-func (s *SQLStore) SetIsGood(fcid types.FileContractID, isGood bool) error {
+func (s *SQLStore) SetIsGood(id types.FileContractID, isGood bool) error {
 	return s.db.Model(&dbContract{}).
-		Where(&dbContract{FCID: fcid}).
+		Where(&dbContract{FCID: id}).
 		Update("is_good", isGood).Error
 }
 
