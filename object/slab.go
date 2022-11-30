@@ -51,7 +51,10 @@ func (s Slab) Encode(buf []byte, shards [][]byte) {
 		shards[i] = shards[i][:rhpv2.SectorSize]
 	}
 	stripedSplit(buf, shards[:s.MinShards])
-	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
+	rsc, err := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
+	if err != nil {
+		panic(err)
+	}
 	if err := rsc.Encode(shards); err != nil {
 		panic(err)
 	}
