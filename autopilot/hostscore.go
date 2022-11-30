@@ -34,14 +34,14 @@ func hostScore(cfg Config, h Host) float64 {
 	return ageScore(h) *
 		collateralScore(cfg, h) *
 		interactionScore(h) *
-		settingsScore(cfg, h) *
 		uptimeScore(h) *
 		versionScore(h)
 }
 
 func ageScore(h Host) float64 {
+	// sanity check to avoid panic - host should have been filtered
 	if len(h.Announcements) == 0 {
-		return math.SmallestNonzeroFloat64
+		return 0
 	}
 
 	const day = 24 * time.Hour
@@ -72,9 +72,10 @@ func ageScore(h Host) float64 {
 }
 
 func collateralScore(cfg Config, h Host) float64 {
+	// sanity check - host should have been filtered
 	settings, _, ok := h.LastKnownSettings()
 	if !ok {
-		return math.SmallestNonzeroFloat64
+		return 0
 	}
 
 	// NOTE: This math is copied directly from the old siad hostdb. It would
@@ -124,25 +125,6 @@ func interactionScore(h Host) float64 {
 
 	weight := math.Pow(success/(success+fail), 10)
 	return weight
-}
-
-func settingsScore(cfg Config, h Host) float64 {
-	settings, _, found := h.LastKnownSettings()
-	if !found {
-		return math.SmallestNonzeroFloat64
-	}
-
-	maxBaseRPCPrice := settings.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
-	maxSectorAccessPrice := settings.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
-
-	if !settings.AcceptingContracts ||
-		cfg.Contracts.Period+cfg.Contracts.RenewWindow > settings.MaxDuration ||
-		settings.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 ||
-		settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
-		return math.SmallestNonzeroFloat64
-	}
-
-	return 1
 }
 
 func uptimeScore(h Host) float64 {
@@ -214,9 +196,10 @@ func uptimeScore(h Host) float64 {
 }
 
 func versionScore(h Host) float64 {
+	// sanity check - host should have been filtered
 	settings, _, ok := h.LastKnownSettings()
 	if !ok {
-		return math.SmallestNonzeroFloat64
+		return 0
 	}
 
 	versions := []struct {

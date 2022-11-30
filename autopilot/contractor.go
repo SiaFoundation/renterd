@@ -107,9 +107,6 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 	// create a new ip filter
 	f := newIPFilter()
 
-	// fetch low score threshold
-	lowScoreThreshold := float64(0) // TODO
-
 	// state variables
 	contractIds := make([]types.FileContractID, 0, len(contracts))
 	contractSizes := make(map[types.FileContractID]uint64)
@@ -136,7 +133,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		}
 
 		// decide whether the host is still good
-		usable, _ := isUsableHost(cfg, f, Host{host}, lowScoreThreshold)
+		usable, _ := isUsableHost(cfg, f, Host{host})
 		if !usable {
 			toDelete = append(toDelete, contract.ID) // TODO: log reasons
 			continue
@@ -537,19 +534,15 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		return nil, err
 	}
 
-	// fetch low score threshold
-	lowScoreThreshold := float64(0) // TODO
-
-	// filter only usable hosts
-	hosts = hosts[:0]
+	// filter unusable hosts
+	filtered := hosts[:0]
 	for _, h := range hosts {
 		if used[h.PublicKey.String()] {
 			continue
 		}
 
-		usable, _ := isUsableHost(cfg, ipFilter, Host{h}, lowScoreThreshold)
-		if usable {
-			hosts = append(hosts, h)
+		if usable, _ := isUsableHost(cfg, ipFilter, Host{h}); usable {
+			filtered = append(filtered, h)
 		}
 	}
 
@@ -559,19 +552,27 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 	}
 
 	// score each host
-	scores := make([]float64, len(hosts))
-	for i, h := range hosts {
-		scores[i] = hostScore(cfg, Host{h})
+	scores := make([]float64, 0, len(filtered))
+	scored := filtered[:0]
+	for _, host := range filtered {
+		score := hostScore(cfg, Host{host})
+		if score == 0 {
+			// TODO: should not happen at this point, log this event
+			continue
+		}
+
+		scores = append(scores, score)
+		scored = append(scored, host)
 	}
 
 	// select hosts
 	var selected []consensus.PublicKey
 	for len(selected) < wanted {
 		i := randSelectByWeight(scores)
-		selected = append(selected, hosts[i].PublicKey)
+		selected = append(selected, scored[i].PublicKey)
 
 		// remove selected host
-		hosts[i], hosts = hosts[len(hosts)-1], hosts[:len(hosts)-1]
+		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
 		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
 	}
 	return selected, nil

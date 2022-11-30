@@ -47,15 +47,6 @@ func TestHostScore(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 
-	// assert settings affect the score
-	h1 = newTestHost(newTestHostSettings()) // reset
-	h2Settings := newTestHostSettings()
-	h2Settings.AcceptingContracts = false
-	h2.Interactions = append(h2.Interactions, newTestScan(h2Settings))
-	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
-		t.Fatal("unexpected")
-	}
-
 	// assert uptime affects the score
 	h2 = newTestHost(newTestHostSettings())
 	h2.Interactions[0].Success = false
@@ -64,7 +55,7 @@ func TestHostScore(t *testing.T) {
 	}
 
 	// assert version affects the score
-	h2Settings = newTestHostSettings()
+	h2Settings := newTestHostSettings()
 	h2Settings.Version = "1.5.6" // lower
 	h2 = newTestHost(h2Settings) // reset
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
