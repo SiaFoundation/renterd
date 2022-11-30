@@ -1,11 +1,8 @@
 package testing
 
 import (
-	"bytes"
 	"context"
 	"testing"
-
-	"lukechampine.com/frand"
 )
 
 // TestNewTestCluster is a smoke test for creating a cluster of Nodes for
@@ -28,11 +25,12 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Try talking to the worker. Use an endpoint that forces the worker to
 	// reach out to the bus as well.
-	worker := cluster.Workers()[0]
-	r := bytes.NewReader(frand.Bytes(100))
-	if err := worker.UploadObject(r, "foo"); err != nil {
-		t.Fatal(err)
-	}
+	// TODO: Enable this once object upload is implemented.
+	// worker := cluster.Workers()[0]
+	//	r := bytes.NewReader(frand.Bytes(100))
+	//	if err := worker.UploadObject(r, "foo"); err != nil {
+	//		t.Fatal(err)
+	//	}
 
 	// TODO: Once there is an autopilot client we test the autopilot as
 	// well.
