@@ -108,6 +108,7 @@ func (ap *Autopilot) Run() error {
 		case <-ap.ticker.C:
 		}
 
+		ap.s.tryUpdateTimeout()
 		ap.s.tryPerformHostScan()
 
 		// fetch consensus state

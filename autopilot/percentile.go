@@ -1,5 +1,4 @@
 // Copyright (c) 2014-2020 Montana Flynn (https://montanaflynn.com)
-
 package autopilot
 
 import (

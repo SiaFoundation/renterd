@@ -16,7 +16,8 @@ import (
 const (
 	trackerNumDataPoints     = 1000
 	trackerMinDataPoints     = 25
-	trackerTimeoutPercentile = 95
+	trackerMinTimeout        = time.Second * 30
+	trackerTimeoutPercentile = 99
 )
 
 type (
@@ -69,6 +70,7 @@ type (
 	tracker struct {
 		threshold  uint64
 		percentile float64
+		minTimeout time.Duration
 
 		mu      sync.Mutex
 		count   uint64
@@ -105,9 +107,19 @@ func (p *scanPool) launchThreads(workerFn func(chan scanResp)) chan scanResp {
 	return respChan
 }
 
-func newTracker(min, total uint64, percentile float64) *tracker {
+func defaultTracker() *tracker {
+	return newTracker(
+		trackerMinDataPoints,
+		trackerNumDataPoints,
+		trackerTimeoutPercentile,
+		trackerMinTimeout,
+	)
+}
+
+func newTracker(threshold, total uint64, percentile float64, minTimeout time.Duration) *tracker {
 	return &tracker{
-		threshold:  min,
+		threshold:  threshold,
+		minTimeout: minTimeout,
 		percentile: percentile,
 		timings:    make([]float64, total),
 	}
@@ -129,22 +141,27 @@ func (t *tracker) timeout() (time.Duration, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.count < uint64(t.threshold) {
-		return 0, nil
+		return t.minTimeout, nil
 	}
 
 	percentile, err := percentile(t.timings, t.percentile)
 	if err != nil {
-		return 0, err
+		return t.minTimeout, err
 	}
 
-	return time.Duration(percentile) * time.Millisecond, nil
+	timeout := time.Duration(percentile) * time.Millisecond
+	if timeout < t.minTimeout {
+		timeout = t.minTimeout
+	}
+
+	return timeout, nil
 }
 
 func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
 	s := &scanner{
 		bus:     ap.bus,
 		worker:  ap.worker,
-		tracker: newTracker(trackerMinDataPoints, trackerNumDataPoints, trackerTimeoutPercentile),
+		tracker: defaultTracker(),
 
 		stopChan: ap.stopChan,
 
@@ -177,21 +194,20 @@ func (s *scanner) tryPerformHostScan() <-chan struct{} {
 	return doneChan
 }
 
-func (s *scanner) tryUpdateTimeout() time.Duration {
+func (s *scanner) tryUpdateTimeout() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.isTimeoutUpdateRequired() {
-		return s.timeout
+		return
 	}
 
-	timeout, _ := s.tracker.timeout() // TODO: handle error
-	if timeout == 0 {
-		return 0
+	timeout, err := s.tracker.timeout()
+	if err != nil {
+		// TODO: log error
 	}
 
 	s.timeoutLastUpdate = time.Now()
 	s.timeout = timeout
-	return s.timeout
 }
 
 // performHostScans scans every host in our database
@@ -209,8 +225,7 @@ func (s *scanner) performHostScans() {
 				return
 			}
 
-			timeout := s.tryUpdateTimeout()
-			scan, err := s.worker.RHPScan(req.hostKey, req.hostIP, timeout)
+			scan, err := s.worker.RHPScan(req.hostKey, req.hostIP, s.currentTimeout())
 			if err == nil {
 				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}
@@ -263,6 +278,12 @@ func (s *scanner) isStopped() bool {
 
 func (s *scanner) isTimeoutUpdateRequired() bool {
 	return s.timeoutLastUpdate.IsZero() || time.Since(s.timeoutLastUpdate) > s.timeoutMinInterval
+}
+
+func (s *scanner) currentTimeout() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.timeout
 }
 
 func jsonMarshal(v interface{}) []byte {

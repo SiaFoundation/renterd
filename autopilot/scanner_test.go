@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/NebulousLabs/fastrand"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/worker"
+	"lukechampine.com/frand"
 )
 
 type mockBus struct {
@@ -65,7 +65,7 @@ func TestScanner(t *testing.T) {
 	s := &scanner{
 		bus:             b,
 		worker:          w,
-		tracker:         newTracker(trackerMinDataPoints, trackerNumDataPoints, trackerTimeoutPercentile),
+		tracker:         defaultTracker(),
 		stopChan:        make(chan struct{}),
 		scanMinInterval: time.Second,
 	}
@@ -136,14 +136,14 @@ func TestScanner(t *testing.T) {
 func testHosts(n int) []hostdb.Host {
 	randIP := func() string {
 		rawIP := make([]byte, 16)
-		fastrand.Read(rawIP)
+		frand.Read(rawIP)
 		return net.IP(rawIP).String()
 	}
 
 	hosts := make([]hostdb.Host, n)
 	for i := 0; i < n; i++ {
 		var h hostdb.Host
-		fastrand.Read(h.PublicKey[:])
+		frand.Read(h.PublicKey[:])
 		hosts[i] = hostdb.Host{Announcements: []hostdb.Announcement{{NetAddress: randIP()}}}
 	}
 	return hosts
