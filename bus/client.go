@@ -210,7 +210,7 @@ func (c *Client) ContractSets() (sets []string, err error) {
 }
 
 // HostSet returns the contracts in the given set.
-func (c *Client) ContractSet(name string) (hosts []consensus.PublicKey, err error) {
+func (c *Client) ContractSet(name string) (hosts []types.FileContractID, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
 	return
 }
