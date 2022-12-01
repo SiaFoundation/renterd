@@ -62,7 +62,7 @@ type Bus interface {
 
 type Worker interface {
 	MigrateSlab(s *object.Slab, from, to []worker.Contract, currentHeight uint64) error
-	RHPScan(hostKey consensus.PublicKey, hostIP string) (worker.RHPScanResponse, error)
+	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
 	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
 	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
 	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error)
@@ -107,6 +107,7 @@ func (ap *Autopilot) Run() error {
 		case <-ap.ticker.C:
 		}
 
+		ap.s.tryUpdateTimeout()
 		ap.s.tryPerformHostScan()
 
 		// fetch consensus state
@@ -143,17 +144,22 @@ func (ap *Autopilot) Stop() {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, tick time.Duration) (*Autopilot, error) {
+func New(store Store, bus Bus, worker Worker, heartbeat time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		store:  store,
 		bus:    bus,
 		worker: worker,
 
-		ticker:   time.NewTicker(tick),
+		ticker:   time.NewTicker(heartbeat),
 		stopChan: make(chan struct{}),
 	}
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap)
-	ap.s = newScanner(ap)
+	ap.s = newScanner(
+		ap,
+		scannerNumThreads,
+		scannerScanInterval,
+		scannerTimeoutInterval,
+	)
 	return ap, nil
 }

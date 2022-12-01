@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
@@ -17,8 +16,9 @@ func TestHostScore(t *testing.T) {
 	cfg := DefaultConfig()
 	day := 24 * time.Hour
 
-	h1 := newTestHost(newTestHostSettings())
-	h2 := newTestHost(newTestHostSettings())
+	newHost := func(s *rhpv2.HostSettings) Host { return Host{newTestHost(randomHostKey(), s)} }
+	h1 := newHost(newTestHostSettings())
+	h2 := newHost(newTestHostSettings())
 
 	// assert both hosts score equal
 	if hostScore(cfg, h1) != hostScore(cfg, h2) {
@@ -35,20 +35,20 @@ func TestHostScore(t *testing.T) {
 	settings := newTestHostSettings()
 	settings.Collateral = types.NewCurrency64(1)
 	settings.MaxCollateral = types.NewCurrency64(10)
-	h1 = newTestHost(settings) // reset
+	h1 = newHost(settings) // reset
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
 		t.Fatal("unexpected")
 	}
 
 	// assert interactions affect the score
-	h1 = newTestHost(newTestHostSettings()) // reset
-	h1.Interactions = append(h1.Interactions, newTestScan(newTestHostSettings()))
+	h1 = newHost(newTestHostSettings()) // reset
+	h1.Interactions = append(h1.Interactions, newTestScan(newTestHostSettings(), true))
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
 		t.Fatal("unexpected")
 	}
 
 	// assert uptime affects the score
-	h2 = newTestHost(newTestHostSettings())
+	h2 = newHost(newTestHostSettings()) // reset
 	h2.Interactions[0].Success = false
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) || ageScore(h1) != ageScore(h2) {
 		t.Fatal("unexpected")
@@ -57,7 +57,7 @@ func TestHostScore(t *testing.T) {
 	// assert version affects the score
 	h2Settings := newTestHostSettings()
 	h2Settings.Version = "1.5.6" // lower
-	h2 = newTestHost(h2Settings) // reset
+	h2 = newHost(h2Settings)     // reset
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
 		t.Fatal("unexpected")
 	}
@@ -84,25 +84,7 @@ func TestRandSelectByWeight(t *testing.T) {
 	}
 }
 
-func newTestHost(settings *rhpv2.HostSettings) Host {
-	return Host{
-		hostdb.Host{
-			Announcements: []hostdb.Announcement{{Timestamp: time.Now()}},
-			Interactions:  []hostdb.Interaction{newTestScan(settings)},
-			PublicKey:     consensus.PublicKey{1},
-		},
-	}
-}
-
-func newTestHostSettings() *rhpv2.HostSettings {
-	return &rhpv2.HostSettings{
-		AcceptingContracts: true,
-		MaxDuration:        144 * 7 * 12, // 12w
-		Version:            "1.5.10",
-	}
-}
-
-func newTestScan(settings *rhpv2.HostSettings) hostdb.Interaction {
+func newTestScan(settings *rhpv2.HostSettings, success bool) hostdb.Interaction {
 	js, err := json.Marshal(settings)
 	if err != nil {
 		panic(err)
@@ -110,7 +92,7 @@ func newTestScan(settings *rhpv2.HostSettings) hostdb.Interaction {
 	return hostdb.Interaction{
 		Timestamp: time.Now(),
 		Type:      "scan",
-		Success:   true,
+		Success:   success,
 		Result:    json.RawMessage(js),
 	}
 }

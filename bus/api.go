@@ -12,14 +12,14 @@ import (
 
 // exported types from internal/consensus
 type (
-	// A ChainIndex pairs a block's height with its ID.
-	ChainIndex = consensus.ChainIndex
-
 	// A PublicKey is an Ed25519 public key.
 	PublicKey = consensus.PublicKey
 
 	// A PrivateKey is an Ed25519 private key.
 	PrivateKey = consensus.PrivateKey
+
+	// ChainState represents the full state of the chain as of a particular block.
+	ChainState = consensus.State
 
 	SlabID uint
 )

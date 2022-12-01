@@ -182,7 +182,10 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 
 	// perform the renewals
 	for _, renew := range toRenew {
-		// TODO: break if autopilot was stopped
+		// break if autopilot is stopped
+		if c.isStopped() {
+			break
+		}
 
 		// check our budget
 		renterFunds, err := c.renewFundingEstimate(cfg, renew.ID)
@@ -258,7 +261,10 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	missing := int(cfg.Contracts.Hosts) - len(active) // TODO: add leeway so we don't form contracts if we dip slightly under `needed` (?)
 	canidates, _ := c.candidateHosts(cfg, missing)    // TODO: add leeway so we have more than enough canidates
 	for h := 0; missing > 0 && h < len(canidates); h++ {
-		// TODO: break if autopilot was stopped
+		// break if autopilot is stopped
+		if c.isStopped() {
+			break
+		}
 
 		// fetch host IP
 		candidate := canidates[h]
@@ -270,7 +276,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		hostIP := host.NetAddress()
 
 		// fetch host settings
-		scan, err := c.ap.worker.RHPScan(host.PublicKey, hostIP)
+		scan, err := c.ap.worker.RHPScan(host.PublicKey, hostIP, 0)
 		if err != nil {
 			// TODO: log error
 			continue
@@ -341,7 +347,7 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 	defer c.ap.bus.ReleaseContract(toRenew.ID)
 
 	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(toRenew.HostKey, toRenew.HostIP)
+	scan, err := c.ap.worker.RHPScan(toRenew.HostKey, toRenew.HostIP, 0)
 	if err != nil {
 		return rhpv2.Contract{}, nil
 	}
@@ -440,7 +446,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	}
 
 	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress())
+	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress(), 0)
 	if err != nil {
 		return types.ZeroCurrency, err
 	}
@@ -579,4 +585,13 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
 	}
 	return selected, nil
+}
+
+func (c *contractor) isStopped() bool {
+	select {
+	case <-c.ap.stopChan:
+		return true
+	default:
+	}
+	return false
 }

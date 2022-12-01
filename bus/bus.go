@@ -19,8 +19,8 @@ import (
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
-		TipState() consensus.State
 		Synced() bool
+		TipState() consensus.State
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -324,11 +324,11 @@ func (b *Bus) hostsHandler(jc jape.Context) {
 }
 
 func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
-	var pk PublicKey
-	if jc.DecodeParam("pubkey", &pk) != nil {
+	var hostKey PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	host, err := b.hdb.Host(pk)
+	host, err := b.hdb.Host(hostKey)
 	if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
@@ -336,9 +336,9 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 
 func (b *Bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var hi hostdb.Interaction
-	var pk PublicKey
-	if jc.Decode(&hi) == nil && jc.DecodeParam("pubkey", &pk) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordInteraction(pk, hi))
+	var hostKey PublicKey
+	if jc.Decode(&hi) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
+		jc.Check("couldn't record interaction", b.hdb.RecordInteraction(hostKey, hi))
 	}
 }
 
@@ -584,9 +584,9 @@ func NewServer(b *Bus) http.Handler {
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":         b.hostsHandler,
-		"GET    /hosts/:pubkey": b.hostsPubkeyHandlerGET,
-		"POST   /hosts/:pubkey": b.hostsPubkeyHandlerPOST,
+		"GET    /hosts":          b.hostsHandler,
+		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
+		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
 		"GET    /contracts":              b.contractsHandler,
 		"GET    /contracts/:id":          b.contractsIDHandlerGET,

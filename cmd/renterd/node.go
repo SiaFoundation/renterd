@@ -38,7 +38,7 @@ type autopilotConfig struct {
 	busPassword    string
 	workerAddr     string
 	workerPassword string
-	loopInterval   time.Duration
+	heartbeat      time.Duration
 }
 
 type chainManager struct {
@@ -229,7 +229,7 @@ func newAutopilot(cfg autopilotConfig, dir string) (*autopilot.Autopilot, func()
 	}
 	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
 	w := worker.NewClient(cfg.workerAddr, cfg.workerPassword)
-	a, err := autopilot.New(store, b, w, cfg.loopInterval)
+	a, err := autopilot.New(store, b, w, cfg.heartbeat)
 	if err != nil {
 		return nil, nil, err
 	}

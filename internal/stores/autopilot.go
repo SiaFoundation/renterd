@@ -2,7 +2,6 @@ package stores
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -97,17 +96,6 @@ func (s *JSONAutopilotStore) load() error {
 func (s *JSONAutopilotStore) SetConfig(c autopilot.Config) error {
 	s.EphemeralAutopilotStore.SetConfig(c)
 	return s.save()
-}
-
-// ProcessConsensusChange implements chain.Subscriber.
-func (s *JSONAutopilotStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	s.EphemeralAutopilotStore.ProcessConsensusChange(cc)
-	if time.Since(s.lastSave) > 2*time.Minute {
-		if err := s.save(); err != nil {
-			log.Fatalln("Couldn't save autopilot state:", err)
-		}
-		s.lastSave = time.Now()
-	}
 }
 
 // NewJSONAutopilotStore returns a new JSONAutopilotStore.

@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"time"
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/object"
@@ -22,8 +23,8 @@ type Client struct {
 }
 
 // RHPScan scans a host, returning its current settings.
-func (c *Client) RHPScan(hostKey PublicKey, hostIP string) (resp RHPScanResponse, err error) {
-	err = c.c.POST("/rhp/scan", RHPScanRequest{hostKey, hostIP}, &resp)
+func (c *Client) RHPScan(hostKey PublicKey, hostIP string, timeout time.Duration) (resp RHPScanResponse, err error) {
+	err = c.c.POST("/rhp/scan", RHPScanRequest{hostKey, hostIP, timeout}, &resp)
 	return
 }
 

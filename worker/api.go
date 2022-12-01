@@ -44,8 +44,9 @@ func (d *Duration) UnmarshalText(b []byte) error {
 
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
-	HostKey PublicKey `json:"hostKey"`
-	HostIP  string    `json:"hostIP"`
+	HostKey PublicKey     `json:"hostKey"`
+	HostIP  string        `json:"hostIP"`
+	Timeout time.Duration `json:"timeout"`
 }
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
