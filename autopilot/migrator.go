@@ -81,9 +81,9 @@ func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
 		return false, err
 	}
 
-	currentContracts := make([]worker.Contract, len(contracts))
+	oldContracts := make([]worker.Contract, len(contracts))
 	for i, c := range contracts {
-		currentContracts[i] = worker.Contract{
+		oldContracts[i] = worker.Contract{
 			ID:        c.ID,
 			HostKey:   c.HostKey,
 			HostIP:    c.HostIP,
@@ -106,7 +106,7 @@ func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
 	// is not very accurate (yet) but since we were already able to fetch a
 	// slab before we can at least be sure that it's probably not a
 	// connection issue between autopilot, bus and database.
-	err = m.ap.worker.MigrateSlab(&slab, currentContracts, goodContracts, cs.BlockHeight)
+	err = m.ap.worker.MigrateSlab(&slab, oldContracts, goodContracts, cs.BlockHeight)
 	if err != nil {
 		return true, err
 	}

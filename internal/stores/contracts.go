@@ -25,9 +25,9 @@ var (
 	// database.
 	ErrContractNotFound = errors.New("couldn't find contract")
 
-	// ErrHostSetNotFound is returned when a contract can't be retrieved from the
+	// ErrContractSetNotFound is returned when a contract can't be retrieved from the
 	// database.
-	ErrHostSetNotFound = errors.New("couldn't find host set")
+	ErrContractSetNotFound = errors.New("couldn't find contract set")
 )
 
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
@@ -246,20 +246,6 @@ type (
 		UnlockHash types.UnlockHash `gorm:"index;type:bytes;serializer:gob"`
 		Value      *big.Int         `gorm:"type:bytes;serializer:gob"`
 	}
-
-	dbHostSet struct {
-		Model
-
-		Name  string           `gorm:"unique;index"`
-		Hosts []dbHostSetEntry `gorm:"constraing:OnDelete:CASCADE"`
-	}
-
-	dbHostSetEntry struct {
-		Model
-		DBHostSetID uint `gorm:"index"`
-
-		PublicKey consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
-	}
 )
 
 // BeforeDelete implements a deletion hook for dbContract. This is necessary
@@ -289,10 +275,10 @@ func (dbValidSiacoinOutput) TableName() string { return "siacoin_valid_outputs" 
 func (dbMissedSiacoinOutput) TableName() string { return "siacoin_missed_outputs" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbHostSet) TableName() string { return "host_sets" }
+func (dbContractSet) TableName() string { return "contract_sets" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbHostSetEntry) TableName() string { return "host_set_entries" }
+func (dbContractSetEntry) TableName() string { return "contract_set_entries" }
 
 // convert converts a dbFileContractRevision to a types.FileContractRevision type.
 func (r dbFileContractRevision) convert(fcid types.FileContractID) types.FileContractRevision {
