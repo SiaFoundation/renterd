@@ -263,6 +263,11 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 	return
 }
 
+// DeleteContracts deletes the contracts with the given IDs.
+func (c *Client) DeleteContracts(ids []types.FileContractID) error {
+	panic("unimplemented")
+}
+
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 	err = c.c.DELETE(fmt.Sprintf("/contracts/%s", id))
@@ -308,10 +313,6 @@ func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (re
 func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
 	err = c.c.POST(fmt.Sprintf("/contracts/%s/release", fcid), nil, nil)
 	return
-}
-
-func (c *Client) DeleteContracts(ids []types.FileContractID) error {
-	panic("unimplemented")
 }
 
 // RecommendedFee returns the recommended fee for a txn.
