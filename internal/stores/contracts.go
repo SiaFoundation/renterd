@@ -1,6 +1,8 @@
 package stores
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"go.sia.tech/siad/crypto"
 
@@ -199,11 +202,12 @@ type (
 	dbContract struct {
 		Model
 
-		FCID     types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL"`
-		HostID   uint                 `gorm:"index"`
-		Host     dbHost
-		Revision dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
-		Sectors  []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
+		FCID        types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
+		HostID      uint                 `gorm:"index"`
+		Host        dbHost
+		LockedUntil time.Time
+		Revision    dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
+		Sectors     []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
 	}
 
 	dbContractSector struct {
@@ -290,50 +294,54 @@ func (dbHostSet) TableName() string { return "host_sets" }
 // TableName implements the gorm.Tabler interface.
 func (dbHostSetEntry) TableName() string { return "host_set_entries" }
 
-// convert converts a dbContractRHPv2 to a rhpv2.Contract type.
-func (c dbContract) convert() (rhpv2.Contract, error) {
+// convert converts a dbFileContractRevision to a types.FileContractRevision type.
+func (r dbFileContractRevision) convert(fcid types.FileContractID) types.FileContractRevision {
 	// Prepare valid and missed outputs.
-	newValidOutputs := make([]types.SiacoinOutput, len(c.Revision.NewValidProofOutputs))
-	for i, sco := range c.Revision.NewValidProofOutputs {
+	newValidOutputs := make([]types.SiacoinOutput, len(r.NewValidProofOutputs))
+	for i, sco := range r.NewValidProofOutputs {
 		newValidOutputs[i] = types.SiacoinOutput{
 			Value:      types.NewCurrency(sco.Value),
 			UnlockHash: sco.UnlockHash,
 		}
 	}
-	newMissedOutputs := make([]types.SiacoinOutput, len(c.Revision.NewMissedProofOutputs))
-	for i, sco := range c.Revision.NewMissedProofOutputs {
+	newMissedOutputs := make([]types.SiacoinOutput, len(r.NewMissedProofOutputs))
+	for i, sco := range r.NewMissedProofOutputs {
 		newMissedOutputs[i] = types.SiacoinOutput{
 			Value:      types.NewCurrency(sco.Value),
 			UnlockHash: sco.UnlockHash,
 		}
 	}
-
 	// Prepare pubkeys.
-	publickeys := make([]types.SiaPublicKey, len(c.Revision.UnlockConditions.PublicKeys))
-	for i, pk := range c.Revision.UnlockConditions.PublicKeys {
+	publickeys := make([]types.SiaPublicKey, len(r.UnlockConditions.PublicKeys))
+	for i, pk := range r.UnlockConditions.PublicKeys {
 		publickeys[i] = types.SiaPublicKey{
 			Algorithm: pk.Algorithm,
 			Key:       pk.Key,
 		}
 	}
-
 	// Prepare revision.
-	revision := types.FileContractRevision{
-		ParentID: c.FCID,
+	return types.FileContractRevision{
+		ParentID: fcid,
 		UnlockConditions: types.UnlockConditions{
-			Timelock:           c.Revision.UnlockConditions.Timelock,
+			Timelock:           r.UnlockConditions.Timelock,
 			PublicKeys:         publickeys,
-			SignaturesRequired: c.Revision.UnlockConditions.SignaturesRequired,
+			SignaturesRequired: r.UnlockConditions.SignaturesRequired,
 		},
-		NewRevisionNumber:     c.Revision.NewRevisionNumber,
-		NewFileSize:           c.Revision.NewFileSize,
-		NewFileMerkleRoot:     c.Revision.NewFileMerkleRoot,
-		NewWindowStart:        c.Revision.NewWindowStart,
-		NewWindowEnd:          c.Revision.NewWindowEnd,
+		NewRevisionNumber:     r.NewRevisionNumber,
+		NewFileSize:           r.NewFileSize,
+		NewFileMerkleRoot:     r.NewFileMerkleRoot,
+		NewWindowStart:        r.NewWindowStart,
+		NewWindowEnd:          r.NewWindowEnd,
 		NewValidProofOutputs:  newValidOutputs,
 		NewMissedProofOutputs: newMissedOutputs,
-		NewUnlockHash:         c.Revision.NewUnlockHash,
+		NewUnlockHash:         r.NewUnlockHash,
 	}
+}
+
+// convert converts a dbContractRHPv2 to a rhpv2.Contract type.
+func (c dbContract) convert() (rhpv2.Contract, error) {
+	// Prepare revision.
+	revision := c.Revision.convert(c.FCID)
 
 	// Prepare signatures.
 	var signatures [2]types.TransactionSignature
@@ -354,6 +362,61 @@ func (c dbContract) convert() (rhpv2.Contract, error) {
 		Revision:   revision,
 		Signatures: signatures,
 	}, nil
+}
+
+// AcquireContract acquires a contract assuming that the contract exists and
+// that it isn't locked right now. The returned bool indicates whether locking
+// the contract was successful.
+func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Duration) (types.FileContractRevision, bool, error) {
+	var contract dbContract
+	var locked bool
+
+	fcidGob := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
+		return types.FileContractRevision{}, false, err
+	}
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// Get revision.
+		err := tx.Model(&dbContract{}).
+			Where("fcid", fcidGob.Bytes()).
+			Preload("Revision").
+			Take(&contract).
+			Error
+		if err != nil {
+			return err
+		}
+		// See if it is locked.
+		locked = time.Now().Before(contract.LockedUntil)
+		if locked {
+			return nil
+		}
+
+		// Update lock.
+		return tx.Model(&dbContract{}).
+			Where("fcid", fcidGob.Bytes()).
+			Update("locked_until", time.Now().Add(duration).UTC()).
+			Error
+	})
+	if err != nil {
+		return types.FileContractRevision{}, false, fmt.Errorf("failed to lock contract: %w", err)
+	}
+	if locked {
+		return types.FileContractRevision{}, false, nil
+	}
+	return contract.Revision.convert(fcid), true, nil
+}
+
+// ReleaseContract releases a contract by setting its locked_until field to 0.
+func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
+	fcidGob := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
+		return err
+	}
+	return s.db.Model(&dbContract{}).
+		Where("fcid", fcidGob.Bytes()).
+		Update("locked_until", time.Time{}).
+		Error
 }
 
 // AddContract implements the bus.ContractStore interface.

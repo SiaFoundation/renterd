@@ -589,9 +589,9 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 		Select("slab_id, sector_id, db_contract_id as contract_id").
 		Joins("LEFT JOIN contract_sectors ON sector_id = contract_sectors.db_sector_id")
 	outer := s.db.Table("(?)", middle).
-		Select("slab_id, fc_id").
+		Select("slab_id, fcid").
 		Joins("LEFT JOIN contracts ON contract_id = contracts.id").
-		Where("contract_id IS NULL OR fc_id NOT IN ?", fcids).
+		Where("contract_id IS NULL OR fcid NOT IN ?", fcids).
 		Group("slab_id").
 		Order("COUNT(slab_id) DESC").
 		Limit(n)
