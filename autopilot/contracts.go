@@ -22,7 +22,7 @@ func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []b
 	}
 	isRenewed := make(map[types.FileContractID]bool)
 	for _, r := range renewed {
-		isRenewed[r.ContractMetadata.RenewedFrom] = true
+		isRenewed[r.RenewedFrom] = true
 	}
 
 	// build new contract set

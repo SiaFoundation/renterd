@@ -235,7 +235,6 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 			)
 			continue
 		}
-		metadata := contractData.ContractMetadata
 
 		// decide whether the host is still good
 		usable, reasons := isUsableHost(cfg, gs, rs, f, Host{host})
@@ -251,7 +250,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		}
 
 		// decide whether the contract is still good
-		usable, renewable, reasons := isUsableContract(cfg, Host{host}, contractData, metadata, c.blockHeight)
+		usable, renewable, reasons := isUsableContract(cfg, Host{host}, contractData, c.blockHeight)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
