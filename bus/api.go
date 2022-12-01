@@ -49,6 +49,19 @@ type paramTime time.Time
 func (t paramTime) String() string                { return (time.Time)(t).Format(time.RFC3339) }
 func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
+// ContractAcquireRequest is the request type for the /contracts/:id/acquire
+// endpoint.
+type ContractAcquireRequest struct {
+	Duration time.Duration
+}
+
+// ContractAcquireResponse is the response type for the /contracts/:id/acquire
+// endpoint.
+type ContractAcquireResponse struct {
+	Locked   bool                       `json:"locked"`
+	Revision types.FileContractRevision `json:"revision,omitempty"`
+}
+
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`

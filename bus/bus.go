@@ -60,6 +60,8 @@ type (
 
 	// A ContractStore stores contracts.
 	ContractStore interface {
+		AcquireContract(fcid types.FileContractID, duration time.Duration) (types.FileContractRevision, bool, error)
+		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]rhpv2.Contract, error)
 		Contract(id types.FileContractID) (rhpv2.Contract, error)
 		AddContract(c rhpv2.Contract) error
@@ -347,6 +349,35 @@ func (b *Bus) contractsHandler(jc jape.Context) {
 	}
 }
 
+func (b *Bus) contractsAcquireHandler(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req ContractAcquireRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	rev, locked, err := b.cs.AcquireContract(id, req.Duration)
+	if jc.Check("failed to acquire contract", err) != nil {
+		return
+	}
+	jc.Encode(ContractAcquireResponse{
+		Locked:   locked,
+		Revision: rev,
+	})
+}
+
+func (b *Bus) contractsReleaseHandler(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	if jc.Check("failed to release contract", b.cs.ReleaseContract(id)) != nil {
+		return
+	}
+}
+
 func (b *Bus) contractsIDHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
@@ -553,10 +584,12 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /hosts/:pubkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:pubkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":     b.contractsHandler,
-		"GET    /contracts/:id": b.contractsIDHandlerGET,
-		"PUT    /contracts/:id": b.contractsIDHandlerPUT,
-		"DELETE /contracts/:id": b.contractsIDHandlerDELETE,
+		"GET    /contracts":              b.contractsHandler,
+		"GET    /contracts/:id":          b.contractsIDHandlerGET,
+		"PUT    /contracts/:id":          b.contractsIDHandlerPUT,
+		"DELETE /contracts/:id":          b.contractsIDHandlerDELETE,
+		"POST    /contracts/:id/acquire": b.contractsAcquireHandler,
+		"POST    /contracts/:id/release": b.contractsReleaseHandler,
 
 		"GET    /hostsets":                 b.hostsetsHandler,
 		"GET    /hostsets/:name":           b.hostsetsNameHandlerGET,

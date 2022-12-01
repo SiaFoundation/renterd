@@ -229,19 +229,25 @@ func (c *Client) HostSetContracts(name string) (contracts []Contract, err error)
 	return
 }
 
-func (c *Client) AcquireContractLock(types.FileContractID) (types.FileContractRevision, error) {
-	panic("unimplemented")
+// AcquireContract acquires a contract for a given amount of time unless
+// released manually before that time.
+func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (rev types.FileContractRevision, err error) {
+	var resp ContractAcquireResponse
+	err = c.c.POST(fmt.Sprintf("/contracts/%s/acquire", fcid), ContractAcquireRequest{Duration: d}, &resp)
+	rev = resp.Revision
+	return
 }
-func (c *Client) ReleaseContractLock(types.FileContractID) error {
-	panic("unimplemented")
+
+// ReleaseContract releases a contract that was previously acquired using AcquireContract.
+func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
+	err = c.c.POST(fmt.Sprintf("/contracts/%s/release", fcid), nil, nil)
+	return
 }
-func (c *Client) ActiveContracts() ([]Contract, error) {
-	panic("unimplemented")
-}
+
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) AllContracts() ([]Contract, error) {
+func (c *Client) ActiveContracts() ([]Contract, error) {
 	panic("unimplemented")
 }
 func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {

@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"sort"
+	"time"
 
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
@@ -14,6 +15,8 @@ const (
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
 	estimatedFileContractTransactionSetSize = 2048
+
+	contractLockingDurationRenew = 30 * time.Second
 )
 
 type (
@@ -331,11 +334,11 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 
 func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.Contract, error) {
 	// handle contract locking
-	revision, err := c.ap.bus.AcquireContractLock(toRenew.ID)
+	revision, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
 		return rhpv2.Contract{}, nil
 	}
-	defer c.ap.bus.ReleaseContractLock(toRenew.ID)
+	defer c.ap.bus.ReleaseContract(toRenew.ID)
 
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(toRenew.HostKey, toRenew.HostIP)

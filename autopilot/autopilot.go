@@ -32,7 +32,6 @@ type Bus interface {
 
 	// contracts
 	AddContract(c rhpv2.Contract) error
-	AllContracts() ([]bus.Contract, error)
 	ActiveContracts() ([]bus.Contract, error)
 	DeleteContracts(ids []types.FileContractID) error
 
@@ -42,8 +41,8 @@ type Bus interface {
 
 	SpendingHistory(id types.FileContractID, currentPeriod uint64) ([]bus.ContractSpending, error)
 
-	AcquireContractLock(id types.FileContractID) (types.FileContractRevision, error)
-	ReleaseContractLock(id types.FileContractID) error
+	AcquireContract(id types.FileContractID, d time.Duration) (types.FileContractRevision, error)
+	ReleaseContract(id types.FileContractID) error
 
 	// contractsets
 	SetHostSet(name string, hosts []consensus.PublicKey) error
