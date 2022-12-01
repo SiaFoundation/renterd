@@ -194,12 +194,13 @@ func (s *scanner) tryPerformHostScan() <-chan error {
 	errChan := make(chan error, 1)
 	go func() {
 		defer close(errChan)
-		if err := s.performHostScans(); err != nil {
-			errChan <- err
-		}
+		err := s.performHostScans()
+
 		s.mu.Lock()
 		s.scanning = false
 		s.mu.Unlock()
+
+		errChan <- err
 	}()
 	return errChan
 }

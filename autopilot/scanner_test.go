@@ -2,7 +2,6 @@ package autopilot
 
 import (
 	"errors"
-	"net"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/worker"
-	"lukechampine.com/frand"
 )
 
 var (
@@ -80,8 +78,18 @@ func TestScanner(t *testing.T) {
 	fastrand.Read(testHost2[:])
 	fastrand.Read(testHost3[:])
 
+	// prepare some hosts
+	settings := newTestHostSettings()
+	var hosts []hostdb.Host
+	for i := 0; i < 8; i++ {
+		h := newTestHost(randomHostKey(), settings)
+		hosts = append(hosts, h)
+	}
+	hosts = append(hosts, newTestHost(testHost1, settings))
+	hosts = append(hosts, newTestHost(testHost2, settings))
+
 	// init new scanner
-	b := &mockBus{hosts: append(testHosts(98), newTestHost(testHost1), newTestHost(testHost2))}
+	b := &mockBus{hosts: hosts}
 	w := &mockWorker{}
 	s := newTestScanner(b, w)
 
@@ -103,7 +111,7 @@ func TestScanner(t *testing.T) {
 
 	// assert interactions were properly recorded
 	success, fail := b.counts()
-	if success != 98 || fail != 2 {
+	if success != 8 || fail != 2 {
 		t.Fatal("unexpected", success, fail)
 	}
 
@@ -139,7 +147,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// reset the scanner and bus
-	b = &mockBus{hosts: append(testHosts(99), newTestHost(testHost3))}
+	b.hosts[0] = newTestHost(testHost3, settings)
 	s = newTestScanner(b, w)
 
 	// start another scan
@@ -155,29 +163,6 @@ func TestScanner(t *testing.T) {
 		}
 	case <-time.After(time.Second): // avoid test deadlock
 		t.Fatal("scan took longer than expected")
-	}
-}
-
-func testHosts(n int) []hostdb.Host {
-	hosts := make([]hostdb.Host, n)
-	for i := 0; i < n; i++ {
-		var hk consensus.PublicKey
-		frand.Read(hk[:])
-		hosts[i] = newTestHost(hk)
-	}
-	return hosts
-}
-
-func newTestHost(hk consensus.PublicKey) hostdb.Host {
-	randIP := func() string {
-		rawIP := make([]byte, 16)
-		fastrand.Read(rawIP)
-		return net.IP(rawIP).String()
-	}
-
-	return hostdb.Host{
-		PublicKey:     hk,
-		Announcements: []hostdb.Announcement{{NetAddress: randIP()}},
 	}
 }
 
