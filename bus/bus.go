@@ -66,11 +66,11 @@ type (
 		RemoveContract(id types.FileContractID) error
 	}
 
-	// A HostSetStore stores host sets.
-	HostSetStore interface {
-		HostSets() ([]string, error)
-		HostSet(name string) ([]consensus.PublicKey, error)
-		SetHostSet(name string, hosts []consensus.PublicKey) error
+	// A ContractSetStore stores contract sets.
+	ContractSetStore interface {
+		ContractSets() ([]string, error)
+		ContractSet(name string) ([]types.FileContractID, error)
+		SetContractSet(name string, contracts []types.FileContractID) error
 	}
 
 	// An ObjectStore stores objects.
@@ -92,7 +92,7 @@ type Bus struct {
 	w   Wallet
 	hdb HostDB
 	cs  ContractStore
-	hss HostSetStore
+	css ContractSetStore
 	os  ObjectStore
 }
 
@@ -379,54 +379,58 @@ func (b *Bus) contractsIDHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contract", b.cs.RemoveContract(id))
 }
 
-func (b *Bus) hostsetsHandler(jc jape.Context) {
-	hostSets, err := b.hss.HostSets()
-	if jc.Check("couldn't load host sets", err) != nil {
+func (b *Bus) contractSetHandler(jc jape.Context) {
+	contractSets, err := b.css.ContractSets()
+	if jc.Check("couldn't load contract sets", err) != nil {
 		return
 	}
-	jc.Encode(hostSets)
+	jc.Encode(contractSets)
 }
 
-func (b *Bus) hostsetsNameHandlerGET(jc jape.Context) {
-	hostSet, err := b.hss.HostSet(jc.PathParam("name"))
+func (b *Bus) contractSetsNameHandlerGET(jc jape.Context) {
+	hostSet, err := b.css.ContractSet(jc.PathParam("name"))
 	if jc.Check("couldn't load host set", err) != nil {
 		return
 	}
 	jc.Encode(hostSet)
 }
 
-func (b *Bus) hostsetsNameHandlerPUT(jc jape.Context) {
-	var hosts []consensus.PublicKey
-	if jc.Decode(&hosts) != nil {
+func (b *Bus) contractSetsNameHandlerPUT(jc jape.Context) {
+	var contracts []types.FileContractID
+	if jc.Decode(&contracts) != nil {
 		return
 	}
-	jc.Check("couldn't store host set", b.hss.SetHostSet(jc.PathParam("name"), hosts))
+	jc.Check("couldn't store host set", b.css.SetContractSet(jc.PathParam("name"), contracts))
 }
 
-func (b *Bus) hostsetsContractsHandler(jc jape.Context) {
-	hosts, err := b.hss.HostSet(jc.PathParam("name"))
+func (b *Bus) contractSetContractsHandler(jc jape.Context) {
+	setContracts, err := b.css.ContractSet(jc.PathParam("name"))
 	if jc.Check("couldn't load host set", err) != nil {
 		return
 	}
-	latest := make(map[consensus.PublicKey]rhpv2.Contract)
 	all, err := b.cs.Contracts()
 	if jc.Check("couldn't load contracts", err) != nil {
 		return
 	}
+	allMap := make(map[types.FileContractID]*rhpv2.Contract)
 	for _, c := range all {
-		if old, ok := latest[c.HostKey()]; !ok || c.EndHeight() > old.EndHeight() {
-			latest[c.HostKey()] = c
-		}
+		allMap[c.ID()] = &c
 	}
-	contracts := make([]Contract, len(hosts))
-	for i, host := range hosts {
-		contracts[i].HostKey = host
-		hi, err := b.hdb.Host(host)
-		if err == nil {
-			contracts[i].HostIP = hi.NetAddress()
-		}
-		if c, ok := latest[host]; ok {
-			contracts[i].ID = c.ID()
+	var contracts []Contract
+	for _, fcid := range setContracts {
+		c, exists := allMap[fcid]
+		if exists {
+			// TODO: The number of contract types we have slowly
+			// grows out of control. We should find a solution for
+			// this.
+			contracts = append(contracts, Contract{
+				ID:               c.ID(),
+				HostKey:          c.HostKey(),
+				HostIP:           "", // TODO
+				StartHeight:      0,  // TODO
+				EndHeight:        c.EndHeight(),
+				ContractMetadata: ContractMetadata{}, // TODO
+			})
 		}
 	}
 	jc.Encode(contracts)
@@ -513,7 +517,7 @@ func (b *Bus) GatewayAddress() string {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, hss HostSetStore, os ObjectStore) *Bus {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) *Bus {
 	return &Bus{
 		s:   s,
 		cm:  cm,
@@ -521,7 +525,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		w:   w,
 		hdb: hdb,
 		cs:  cs,
-		hss: hss,
+		css: css,
 		os:  os,
 	}
 }
@@ -558,10 +562,10 @@ func NewServer(b *Bus) http.Handler {
 		"PUT    /contracts/:id": b.contractsIDHandlerPUT,
 		"DELETE /contracts/:id": b.contractsIDHandlerDELETE,
 
-		"GET    /hostsets":                 b.hostsetsHandler,
-		"GET    /hostsets/:name":           b.hostsetsNameHandlerGET,
-		"PUT    /hostsets/:name":           b.hostsetsNameHandlerPUT,
-		"GET    /hostsets/:name/contracts": b.hostsetsContractsHandler,
+		"GET    /contractsets":                 b.contractSetHandler,
+		"GET    /contractsets/:name":           b.contractSetsNameHandlerGET,
+		"GET    /contractsets/:name/contracts": b.contractSetContractsHandler,
+		"PUT    /contractsets/:name":           b.contractSetsNameHandlerPUT,
 
 		"GET    /objects/*key":               b.objectsKeyHandlerGET,
 		"PUT    /objects/*key":               b.objectsKeyHandlerPUT,

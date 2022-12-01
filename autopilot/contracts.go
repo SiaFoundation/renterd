@@ -2,7 +2,6 @@ package autopilot
 
 import (
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/types"
 )
 
@@ -27,17 +26,17 @@ func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []b
 	}
 
 	// build new contract set
-	var contracts []consensus.PublicKey
+	var contracts []types.FileContractID
 	for _, c := range append(active, formed...) {
 		// TODO: excluding contracts that are up for renewal but have not been
 		// renewed yet, we probably want the autopilot to manage more than one
 		// set of contracts (e.g. goodForUpload - goodForDownload contracts)
 		upForRenewal := wasUpForRenewal[c.ID] && !isRenewed[c.ID]
 		if !isDeleted[c.ID] && !upForRenewal {
-			contracts = append(contracts, c.HostKey)
+			contracts = append(contracts, c.ID)
 		}
 	}
 
 	// update contract set
-	return ap.bus.SetHostSet(defaultSetName, contracts)
+	return ap.bus.SetContractSet(defaultSetName, contracts)
 }

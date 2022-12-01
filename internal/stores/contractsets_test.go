@@ -5,11 +5,11 @@ import (
 	"reflect"
 	"testing"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/siad/types"
 )
 
-// TestSQLHostSetStore tests the bus.HostSetStore methods on the SQLContractStore.
-func TestSQLHostSetStore(t *testing.T) {
+// TestSQLContractSetStore tests the bus.ContractSetStore methods on the SQLContractStore.
+func TestSQLContractSetStore(t *testing.T) {
 	cs, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
@@ -17,37 +17,37 @@ func TestSQLHostSetStore(t *testing.T) {
 
 	// Check db before adding a set.
 	setName := "foo"
-	sets, err := cs.HostSets()
+	sets, err := cs.ContractSets()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sets) != 0 {
 		t.Fatalf("expected 0 sets got %v", len(sets))
 	}
-	_, err = cs.HostSet(setName)
-	if !errors.Is(err, ErrHostSetNotFound) {
+	_, err = cs.ContractSet(setName)
+	if !errors.Is(err, ErrContractSetNotFound) {
 		t.Fatal("should fail", err)
 	}
 
 	// Add another one.
-	pks := []consensus.PublicKey{{1, 2, 3}, {3, 2, 1}}
-	if err := cs.SetHostSet(setName, pks); err != nil {
+	contracts := []types.FileContractID{{1, 2, 3}, {3, 2, 1}}
+	if err := cs.SetContractSet(setName, contracts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Check again.
-	sets, err = cs.HostSets()
+	sets, err = cs.ContractSets()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sets) != 1 {
 		t.Fatalf("expected 0 sets got %v", len(sets))
 	}
-	set, err := cs.HostSet(setName)
+	set, err := cs.ContractSet(setName)
 	if err != nil {
 		t.Fatal("should fail", err)
 	}
-	if !reflect.DeepEqual(set, pks) {
+	if !reflect.DeepEqual(set, contracts) {
 		t.Fatal("set mismatch")
 	}
 }

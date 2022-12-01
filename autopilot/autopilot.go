@@ -46,8 +46,8 @@ type Bus interface {
 	ReleaseContractLock(id types.FileContractID) error
 
 	// contractsets
-	SetHostSet(name string, hosts []consensus.PublicKey) error
-	HostSetContracts(name string) ([]bus.Contract, error)
+	SetContractSet(name string, contracts []types.FileContractID) error
+	SetContracts(name string) ([]bus.Contract, error)
 
 	// txpool
 	RecommendedFee() (types.Currency, error)

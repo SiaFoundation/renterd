@@ -27,10 +27,10 @@ type (
 
 // Check that the SQLStore implements all the required interfaces.
 var (
-	_ bus.ContractStore = &SQLStore{}
-	_ bus.HostDB        = &SQLStore{}
-	_ bus.HostSetStore  = &SQLStore{}
-	_ bus.ObjectStore   = &SQLStore{}
+	_ bus.ContractStore    = &SQLStore{}
+	_ bus.HostDB           = &SQLStore{}
+	_ bus.ContractSetStore = &SQLStore{}
+	_ bus.ObjectStore      = &SQLStore{}
 )
 
 // NewEphemeralSQLiteConnection creates a connection to an in-memory SQLite DB.
@@ -70,9 +70,9 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 			&dbAnnouncement{},
 			&dbConsensusInfo{},
 
-			// bus.HostSetStore tables
-			&dbHostSet{},
-			&dbHostSetEntry{},
+			// bus.ContractSetStore tables
+			&dbContractSet{},
+			&dbContractSetEntry{},
 
 			// bus.ObjectStore tables
 			&dbObject{},

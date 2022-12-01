@@ -203,29 +203,29 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 	return
 }
 
-// HostSets returns the names of all host sets.
-func (c *Client) HostSets() (sets []string, err error) {
-	err = c.c.GET("/hostsets", &sets)
+// ContractSets returns the names of all host sets.
+func (c *Client) ContractSets() (sets []string, err error) {
+	err = c.c.GET("/contractsets", &sets)
 	return
 }
 
-// HostSet returns the hosts in the given set.
-func (c *Client) HostSet(name string) (hosts []consensus.PublicKey, err error) {
-	err = c.c.GET(fmt.Sprintf("/hostsets/%s", name), &hosts)
+// HostSet returns the contracts in the given set.
+func (c *Client) ContractSet(name string) (hosts []consensus.PublicKey, err error) {
+	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
 	return
 }
 
-// SetHostSet assigns a name to the given hosts.
-func (c *Client) SetHostSet(name string, hosts []consensus.PublicKey) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/hostsets/%s", name), hosts)
+// SetContractSet assigns a name to the given contracts.
+func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/contractsets/%s", name), contracts)
 	return
 }
 
-// HostSetContracts returns the latest contract for each host in the given set.
+// SetContracts returns the full contract for each contract id in the given set.
 // The ID and HostIP fields may be empty, depending on whether a contract exists
 // and a host announcement is known.
-func (c *Client) HostSetContracts(name string) (contracts []Contract, err error) {
-	err = c.c.GET(fmt.Sprintf("/hostsets/%s/contracts", name), &contracts)
+func (c *Client) SetContracts(name string) (contracts []Contract, err error) {
+	err = c.c.GET(fmt.Sprintf("/contractsets/%s/contracts", name), &contracts)
 	return
 }
 
