@@ -29,8 +29,8 @@ const (
 	// leewayPctRequiredContracts is the leeway we apply on the amount of
 	// contracts the config dictates we should have, this leeway is negative
 	// which means that we'll only form new contracts if the number of active
-	// contracts dips below 95% of the required contracts
-	leewayPctRequiredContracts = -.05
+	// contracts dips below 87.5% of the required contracts
+	leewayPctRequiredContracts = -.125
 )
 
 type (

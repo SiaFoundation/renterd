@@ -18,6 +18,7 @@ func TestAddLeeway(t *testing.T) {
 		{name: "100% less", n: 1, pct: -1, result: 0},
 		{name: "100% more", n: 1, pct: 1, result: 2},
 		{name: "0% less", n: 1, pct: 0, result: 1},
+		{name: "required contracts leeway", n: 50, pct: leewayPctRequiredContracts, result: 44},
 	}
 
 	for _, tt := range tests {
