@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"net/url"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -57,5 +58,5 @@ type Action struct {
 // for encoding/decoding time.Time values in API params
 type paramTime time.Time
 
-func (t paramTime) String() string                { return (time.Time)(t).Format(time.RFC3339) }
+func (t paramTime) String() string                { return url.QueryEscape((time.Time)(t).Format(time.RFC3339)) }
 func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
