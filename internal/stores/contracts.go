@@ -218,7 +218,7 @@ type (
 		HostID      uint                 `gorm:"index"`
 		Host        dbHost
 		LockedUntil time.Time
-		RenewedFrom types.FileContractID   `gorm:"unique;index,type:bytes;serializer:gob"`
+		RenewedFrom types.FileContractID   `gorm:"index,type:bytes;serializer:gob"`
 		Revision    dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
 		Sectors     []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
 	}
