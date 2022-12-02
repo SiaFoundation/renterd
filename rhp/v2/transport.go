@@ -13,7 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20"
@@ -75,7 +74,7 @@ type Transport struct {
 	outbuf    objBuffer
 	challenge [16]byte
 	isRenter  bool
-	hostKey   consensus.PublicKey
+	hostKey   PublicKey
 
 	mu     sync.Mutex
 	r, w   uint64
@@ -95,7 +94,7 @@ func (t *Transport) setErr(err error) {
 }
 
 // HostKey returns the host's public key.
-func (t *Transport) HostKey() consensus.PublicKey { return t.hostKey }
+func (t *Transport) HostKey() PublicKey { return t.hostKey }
 
 // BytesRead returns the number of bytes read from the underlying connection.
 func (t *Transport) BytesRead() uint64 { return atomic.LoadUint64(&t.r) }
@@ -132,7 +131,7 @@ func hashChallenge(challenge [16]byte) [32]byte {
 }
 
 // SignChallenge signs the current Transport challenge.
-func (t *Transport) SignChallenge(priv consensus.PrivateKey) consensus.Signature {
+func (t *Transport) SignChallenge(priv PrivateKey) Signature {
 	return priv.SignHash(hashChallenge(t.challenge))
 }
 
@@ -408,13 +407,13 @@ func (t *Transport) Close() (err error) {
 	return t.conn.Close()
 }
 
-func hashKeys(k1, k2 [32]byte) consensus.Hash256 {
+func hashKeys(k1, k2 [32]byte) Hash256 {
 	return blake2b.Sum256(append(append(make([]byte, 0, len(k1)+len(k2)), k1[:]...), k2[:]...))
 }
 
 // NewHostTransport conducts the hosts's half of the renter-host protocol
 // handshake, returning a Transport that can be used to handle RPC requests.
-func NewHostTransport(conn net.Conn, priv consensus.PrivateKey) (_ *Transport, err error) {
+func NewHostTransport(conn net.Conn, priv PrivateKey) (_ *Transport, err error) {
 	defer wrapErr(&err, "NewHostTransport")
 	var req loopKeyExchangeRequest
 	if err := req.readFrom(conn); err != nil {
@@ -462,7 +461,7 @@ func NewHostTransport(conn net.Conn, priv consensus.PrivateKey) (_ *Transport, e
 
 // NewRenterTransport conducts the renter's half of the renter-host protocol
 // handshake, returning a Transport that can be used to make RPC requests.
-func NewRenterTransport(conn net.Conn, pub consensus.PublicKey) (_ *Transport, err error) {
+func NewRenterTransport(conn net.Conn, pub PublicKey) (_ *Transport, err error) {
 	defer wrapErr(&err, "NewRenterTransport")
 
 	xsk, xpk := crypto.GenerateX25519KeyPair()
@@ -513,7 +512,7 @@ type (
 
 	loopKeyExchangeResponse struct {
 		PublicKey crypto.X25519PublicKey
-		Signature consensus.Signature
+		Signature Signature
 		Cipher    Specifier
 	}
 )

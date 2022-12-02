@@ -10,6 +10,20 @@ import (
 	"go.sia.tech/siad/types"
 )
 
+// exported types from internal/consensus
+type (
+	// A Hash256 is a generic 256-bit cryptographic hash.
+	Hash256 = consensus.Hash256
+	// A PublicKey is an Ed25519 public key.
+	PublicKey = consensus.PublicKey
+	// A PrivateKey is an Ed25519 private key.
+	PrivateKey = consensus.PrivateKey
+	// A Signature is an Ed25519 signature.
+	Signature = consensus.Signature
+	// ConsensusState represents the full state of the chain as of a particular block.
+	ConsensusState = consensus.State
+)
+
 func wrapErr(err *error, fnName string) {
 	if *err != nil {
 		*err = fmt.Errorf("%s: %w", fnName, *err)
@@ -34,7 +48,7 @@ func (c Contract) ID() types.FileContractID {
 }
 
 // HostKey returns the public key of the host.
-func (c Contract) HostKey() (pk consensus.PublicKey) {
+func (c Contract) HostKey() (pk PublicKey) {
 	copy(pk[:], c.Revision.UnlockConditions.PublicKeys[1].Key)
 	return
 }
@@ -156,13 +170,13 @@ type (
 	RPCRenewAndClearContractSignatures struct {
 		ContractSignatures     []types.TransactionSignature
 		RevisionSignature      types.TransactionSignature
-		FinalRevisionSignature consensus.Signature
+		FinalRevisionSignature Signature
 	}
 
 	// RPCLockRequest contains the request parameters for the Lock RPC.
 	RPCLockRequest struct {
 		ContractID types.FileContractID
-		Signature  consensus.Signature
+		Signature  Signature
 		Timeout    uint64
 	}
 
@@ -176,7 +190,7 @@ type (
 
 	// RPCReadRequestSection is a section requested in RPCReadRequest.
 	RPCReadRequestSection struct {
-		MerkleRoot consensus.Hash256
+		MerkleRoot Hash256
 		Offset     uint64
 		Length     uint64
 	}
@@ -189,14 +203,14 @@ type (
 		NewRevisionNumber    uint64
 		NewValidProofValues  []types.Currency
 		NewMissedProofValues []types.Currency
-		Signature            consensus.Signature
+		Signature            Signature
 	}
 
 	// RPCReadResponse contains the response data for the Read RPC.
 	RPCReadResponse struct {
-		Signature   consensus.Signature
+		Signature   Signature
 		Data        []byte
-		MerkleProof []consensus.Hash256
+		MerkleProof []Hash256
 	}
 
 	// RPCSectorRootsRequest contains the request parameters for the SectorRoots RPC.
@@ -207,14 +221,14 @@ type (
 		NewRevisionNumber    uint64
 		NewValidProofValues  []types.Currency
 		NewMissedProofValues []types.Currency
-		Signature            consensus.Signature
+		Signature            Signature
 	}
 
 	// RPCSectorRootsResponse contains the response data for the SectorRoots RPC.
 	RPCSectorRootsResponse struct {
-		Signature   consensus.Signature
-		SectorRoots []consensus.Hash256
-		MerkleProof []consensus.Hash256
+		Signature   Signature
+		SectorRoots []Hash256
+		MerkleProof []Hash256
 	}
 
 	// RPCSettingsResponse contains the response data for the SettingsResponse RPC.
@@ -243,20 +257,20 @@ type (
 	// RPCWriteMerkleProof contains the optional Merkle proof for response data
 	// for the Write RPC.
 	RPCWriteMerkleProof struct {
-		OldSubtreeHashes []consensus.Hash256
-		OldLeafHashes    []consensus.Hash256
-		NewMerkleRoot    consensus.Hash256
+		OldSubtreeHashes []Hash256
+		OldLeafHashes    []Hash256
+		NewMerkleRoot    Hash256
 	}
 
 	// RPCWriteResponse contains the response data for the Write RPC.
 	RPCWriteResponse struct {
-		Signature consensus.Signature
+		Signature Signature
 	}
 )
 
 // MetricRPC contains metrics relating to a single RPC.
 type MetricRPC struct {
-	HostKey    consensus.PublicKey
+	HostKey    PublicKey
 	RPC        Specifier
 	Timestamp  time.Time
 	Elapsed    time.Duration

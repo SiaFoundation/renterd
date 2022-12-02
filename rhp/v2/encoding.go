@@ -11,7 +11,6 @@ import (
 	"unsafe"
 
 	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
 )
@@ -525,7 +524,7 @@ func (r *RPCReadResponse) unmarshalBuffer(b *objBuffer) error {
 	r.Data = r.Data[:dataLen]
 	b.read(r.Data)
 
-	r.MerkleProof = make([]consensus.Hash256, b.readPrefix(32))
+	r.MerkleProof = make([]Hash256, b.readPrefix(32))
 	for i := range r.MerkleProof {
 		b.read(r.MerkleProof[i][:])
 	}
@@ -595,11 +594,11 @@ func (r *RPCSectorRootsResponse) marshalBuffer(b *objBuffer) {
 
 func (r *RPCSectorRootsResponse) unmarshalBuffer(b *objBuffer) error {
 	copy(r.Signature[:], b.readPrefixedBytes())
-	r.SectorRoots = make([]consensus.Hash256, b.readPrefix(32))
+	r.SectorRoots = make([]Hash256, b.readPrefix(32))
 	for i := range r.SectorRoots {
 		b.read(r.SectorRoots[i][:])
 	}
-	r.MerkleProof = make([]consensus.Hash256, b.readPrefix(32))
+	r.MerkleProof = make([]Hash256, b.readPrefix(32))
 	for i := range r.MerkleProof {
 		b.read(r.MerkleProof[i][:])
 	}
@@ -697,11 +696,11 @@ func (r *RPCWriteMerkleProof) marshalBuffer(b *objBuffer) {
 }
 
 func (r *RPCWriteMerkleProof) unmarshalBuffer(b *objBuffer) error {
-	r.OldSubtreeHashes = make([]consensus.Hash256, b.readPrefix(32))
+	r.OldSubtreeHashes = make([]Hash256, b.readPrefix(32))
 	for i := range r.OldSubtreeHashes {
 		b.read(r.OldSubtreeHashes[i][:])
 	}
-	r.OldLeafHashes = make([]consensus.Hash256, b.readPrefix(32))
+	r.OldLeafHashes = make([]Hash256, b.readPrefix(32))
 	for i := range r.OldLeafHashes {
 		b.read(r.OldLeafHashes[i][:])
 	}
