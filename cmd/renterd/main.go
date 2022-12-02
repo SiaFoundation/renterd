@@ -81,17 +81,30 @@ func getWalletKey() consensus.PrivateKey {
 func main() {
 	log.SetFlags(0)
 
-	var workerCfg node.WorkerConfig
-	var busCfg node.BusConfig
-	var autopilotCfg node.AutopilotConfig
+	var busCfg struct {
+		remoteAddr  string
+		apiPassword string
+		node.BusConfig
+	}
+	var workerCfg struct {
+		remoteAddr  string
+		apiPassword string
+		node.WorkerConfig
+	}
+	var autopilotCfg struct {
+		enabled bool
+		node.AutopilotConfig
+	}
 
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
-	flag.BoolVar(&workerCfg.Enabled, "worker.enabled", true, "enable the worker API")
-	flag.BoolVar(&busCfg.Enabled, "bus.enabled", true, "enable the bus API")
+	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service")
+	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service")
 	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
 	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
-	flag.BoolVar(&autopilotCfg.Enabled, "autopilot.enabled", true, "enable the autopilot API")
+	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
+	flag.StringVar(&workerCfg.apiPassword, "bus.apiPassword", "", "API password for remote worker service")
+	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", time.Minute, "interval at which autopilot loop runs")
 	flag.Parse()
 
@@ -100,6 +113,10 @@ func main() {
 		log.Println("Commit:", githash)
 		log.Println("Build Date:", builddate)
 		return
+	}
+
+	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
+		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
 
 	// create listener first, so that we know the actual apiAddr if the user
@@ -117,40 +134,48 @@ func main() {
 		sub: make(map[string]treeMux),
 	}
 
-	if busCfg.Enabled {
-		b, cleanup, err := node.NewBus(busCfg, *dir, getWalletKey())
+	var wb worker.Bus
+	var ab autopilot.Bus
+	if busCfg.remoteAddr != "" {
+		b := bus.NewClient(busCfg.remoteAddr, busCfg.apiPassword)
+		wb = b
+		ab = b
+	} else {
+		b, cleanup, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey())
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
 		log.Println("bus: Listening on", b.GatewayAddress())
-		mux.sub["/api/store"] = treeMux{h: auth(bus.NewServer(b))}
-		autopilotCfg.BusAddr = *apiAddr + "/bus/"
-		autopilotCfg.BusPassword = getAPIPassword()
+		mux.sub["/api/bus"] = treeMux{h: auth(bus.NewServer(b))}
+		panic("TODO: unify bus interfaces")
+		// wb = b
+		// ab = b
 	}
-	if workerCfg.Enabled {
-		w, cleanup, err := node.NewWorker(workerCfg, getWalletKey())
+
+	var aw autopilot.Worker
+	if workerCfg.remoteAddr != "" {
+		w := worker.NewClient(workerCfg.remoteAddr, workerCfg.apiPassword)
+		aw = w
+	} else {
+		w, cleanup, err := node.NewWorker(workerCfg.WorkerConfig, wb, getWalletKey())
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
 		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
-		autopilotCfg.WorkerAddr = *apiAddr + "/worker/"
-		autopilotCfg.WorkerPassword = getAPIPassword()
+		panic("TODO: unify worker interfaces")
+		// aw = w
 	}
-	if autopilotCfg.Enabled {
-		a, cleanup, err := node.NewAutopilot(autopilotCfg, *dir)
+
+	autopilotErr := make(chan error)
+	if autopilotCfg.enabled {
+		a, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, ab, aw, *dir)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
-		go func() {
-			err := a.Run()
-			if err != nil {
-				log.Fatalln("Fatal autopilot error:", err)
-			}
-		}()
-
+		go func() { autopilotErr <- a.Run() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(a))}
 	}
 
@@ -160,7 +185,11 @@ func main() {
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
-	<-signalCh
-	log.Println("Shutting down...")
-	srv.Shutdown(context.Background())
+	select {
+	case <-signalCh:
+		log.Println("Shutting down...")
+		srv.Shutdown(context.Background())
+	case err := <-autopilotErr:
+		log.Fatalln("Fatal autopilot error:", err)
+	}
 }

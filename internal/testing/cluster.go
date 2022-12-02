@@ -70,7 +70,6 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	// Create bus.
 	var cleanups []func() error
 	b, cleanup, err := node.NewBus(node.BusConfig{
-		Enabled:     true,
 		Bootstrap:   true,
 		GatewayAddr: "127.0.0.1:0",
 	}, busDir, wk)
@@ -82,13 +81,10 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	busServer := http.Server{
 		Handler: busAuth(bus.NewServer(b)),
 	}
+	busClient := bus.NewClient(busAddr, busPassword)
 
 	// Create worker.
-	w, cleanup, err := node.NewWorker(node.WorkerConfig{
-		Enabled:     true,
-		BusAddr:     busAddr,
-		BusPassword: busPassword,
-	}, wk)
+	w, cleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
 	if err != nil {
 		return nil, err
 	}
@@ -97,16 +93,12 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	workerServer := http.Server{
 		Handler: workerAuth(worker.NewServer(w)),
 	}
+	workerClient := worker.NewClient(workerAddr, workerPassword)
 
 	// Create autopilot.
 	ap, cleanup, err := node.NewAutopilot(node.AutopilotConfig{
-		Enabled:        true,
-		BusAddr:        busAddr,
-		BusPassword:    busPassword,
-		WorkerAddr:     workerAddr,
-		WorkerPassword: workerPassword,
-		Heartbeat:      time.Minute,
-	}, autopilotDir)
+		Heartbeat: time.Minute,
+	}, busClient, workerClient, autopilotDir)
 	if err != nil {
 		return nil, err
 	}

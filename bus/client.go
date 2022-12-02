@@ -158,10 +158,7 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
 func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
-	values := url.Values{}
-	values.Set("notSince", paramTime(notSince).String())
-	values.Set("max", fmt.Sprint(max))
-	err = c.c.GET(fmt.Sprintf("/hosts?%s", values.Encode()), &hosts)
+	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, paramTime(notSince)), &hosts)
 	return
 }
 

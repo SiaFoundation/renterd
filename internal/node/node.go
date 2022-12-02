@@ -21,24 +21,15 @@ import (
 )
 
 type WorkerConfig struct {
-	Enabled     bool
-	BusAddr     string
-	BusPassword string
 }
 
 type BusConfig struct {
-	Enabled     bool
 	Bootstrap   bool
 	GatewayAddr string
 }
 
 type AutopilotConfig struct {
-	Enabled        bool
-	BusAddr        string
-	BusPassword    string
-	WorkerAddr     string
-	WorkerPassword string
-	Heartbeat      time.Duration
+	Heartbeat time.Duration
 }
 
 type chainManager struct {
@@ -215,20 +206,17 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	return b, cleanup, nil
 }
 
-func NewWorker(cfg WorkerConfig, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
-	b := bus.NewClient(cfg.BusAddr, cfg.BusPassword)
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
 	w := worker.New(workerKey, b)
 	return w, func() error { return nil }, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, dir string) (*autopilot.Autopilot, func() error, error) {
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (*autopilot.Autopilot, func() error, error) {
 	store, err := stores.NewJSONAutopilotStore(dir)
 	if err != nil {
 		return nil, nil, err
 	}
-	b := bus.NewClient(cfg.BusAddr, cfg.BusPassword)
-	w := worker.NewClient(cfg.WorkerAddr, cfg.WorkerPassword)
 	a, err := autopilot.New(store, b, w, cfg.Heartbeat)
 	if err != nil {
 		return nil, nil, err
