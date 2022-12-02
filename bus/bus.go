@@ -588,12 +588,12 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":              b.contractsHandler,
-		"GET    /contracts/:id":          b.contractsIDHandlerGET,
-		"PUT    /contracts/:id":          b.contractsIDHandlerPUT,
-		"DELETE /contracts/:id":          b.contractsIDHandlerDELETE,
-		"POST    /contracts/:id/acquire": b.contractsAcquireHandler,
-		"POST    /contracts/:id/release": b.contractsReleaseHandler,
+		"GET    /contracts":             b.contractsHandler,
+		"GET    /contracts/:id":         b.contractsIDHandlerGET,
+		"PUT    /contracts/:id":         b.contractsIDHandlerPUT,
+		"DELETE /contracts/:id":         b.contractsIDHandlerDELETE,
+		"POST   /contracts/:id/acquire": b.contractsAcquireHandler,
+		"POST   /contracts/:id/release": b.contractsReleaseHandler,
 
 		"GET    /contractsets":                 b.contractSetHandler,
 		"GET    /contractsets/:name":           b.contractSetsNameHandlerGET,
