@@ -65,6 +65,7 @@ type (
 		Contracts() ([]rhpv2.Contract, error)
 		Contract(id types.FileContractID) (rhpv2.Contract, error)
 		AddContract(c rhpv2.Contract) error
+		AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
 	}
 
@@ -389,7 +390,7 @@ func (b *Bus) contractsIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) contractsIDHandlerPUT(jc jape.Context) {
+func (b *Bus) contractsIDNewHandlerPUT(jc jape.Context) {
 	var id types.FileContractID
 	var c rhpv2.Contract
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&c) != nil {
@@ -400,6 +401,19 @@ func (b *Bus) contractsIDHandlerPUT(jc jape.Context) {
 		return
 	}
 	jc.Check("couldn't store contract", b.cs.AddContract(c))
+}
+
+func (b *Bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
+	var id types.FileContractID
+	var req ContractsIDRenewedRequest
+	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
+		return
+	}
+	if req.Contract.ID() != id {
+		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
+		return
+	}
+	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.RenewedFrom))
 }
 
 func (b *Bus) contractsIDHandlerDELETE(jc jape.Context) {
@@ -588,12 +602,13 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":              b.contractsHandler,
-		"GET    /contracts/:id":          b.contractsIDHandlerGET,
-		"PUT    /contracts/:id":          b.contractsIDHandlerPUT,
-		"DELETE /contracts/:id":          b.contractsIDHandlerDELETE,
-		"POST    /contracts/:id/acquire": b.contractsAcquireHandler,
-		"POST    /contracts/:id/release": b.contractsReleaseHandler,
+		"GET    /contracts":             b.contractsHandler,
+		"GET    /contracts/:id":         b.contractsIDHandlerGET,
+		"PUT    /contracts/:id/new":     b.contractsIDNewHandlerPUT,
+		"PUT    /contracts/:id/renewed": b.contractsIDRenewedHandlerPUT,
+		"DELETE /contracts/:id":         b.contractsIDHandlerDELETE,
+		"POST   /contracts/:id/acquire": b.contractsAcquireHandler,
+		"POST   /contracts/:id/release": b.contractsReleaseHandler,
 
 		"GET    /contractsets":                 b.contractSetHandler,
 		"GET    /contractsets/:name":           b.contractSetsNameHandlerGET,

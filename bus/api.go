@@ -54,6 +54,10 @@ func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).Unmar
 type ContractAcquireRequest struct {
 	Duration time.Duration
 }
+type ContractsIDRenewedRequest struct {
+	Contract    rhpv2.Contract `json:"contract"`
+	RenewedFrom types.FileContractID
+}
 
 // ContractAcquireResponse is the response type for the /contracts/:id/acquire
 // endpoint.

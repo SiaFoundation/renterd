@@ -32,6 +32,7 @@ type Bus interface {
 
 	// contracts
 	AddContract(c rhpv2.Contract) error
+	AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error
 	ActiveContracts() ([]bus.Contract, error)
 	DeleteContracts(ids []types.FileContractID) error
 
