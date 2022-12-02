@@ -488,7 +488,6 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 
 		// add contract to contract set
 		formed = append(formed, formedContract)
-
 		missing--
 	}
 
