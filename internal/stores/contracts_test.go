@@ -229,3 +229,95 @@ func TestContractLocking(t *testing.T) {
 		t.Fatal("contract wasn't locked")
 	}
 }
+
+// TestRenewContract is a test for AddRenewedContract.
+func TestRenewedContract(t *testing.T) {
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a host for the contract.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	err = cs.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create random unlock conditions for the host.
+	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
+	uc.PublicKeys[1].Key = hk[:]
+	uc.Timelock = 192837
+
+	// Insert a contract.
+	fcid := types.FileContractID{1, 1, 1, 1, 1}
+	c := rhpv2.Contract{
+		Revision: types.FileContractRevision{
+			NewFileSize:       1,
+			NewWindowStart:    2,
+			NewWindowEnd:      3,
+			NewRevisionNumber: 4,
+			ParentID:          fcid,
+			UnlockConditions:  uc,
+		},
+	}
+	if err := cs.AddContract(c); err != nil {
+		t.Fatal(err)
+	}
+
+	// Renew it.
+	fcid2 := types.FileContractID{2, 2, 2, 2, 2}
+	renewed := rhpv2.Contract{
+		Revision: types.FileContractRevision{
+			ParentID:              fcid2,
+			UnlockConditions:      uc,
+			NewMissedProofOutputs: []types.SiacoinOutput{},
+			NewValidProofOutputs:  []types.SiacoinOutput{},
+		},
+	}
+	if err := cs.AddRenewedContract(renewed, fcid); err != nil {
+		t.Fatal(err)
+	}
+
+	// Contract should be gone from active contracts.
+	_, err = cs.Contract(fcid)
+	if !errors.Is(err, ErrContractNotFound) {
+		t.Fatal(err)
+	}
+
+	// New contract should exist.
+	newContract, err := cs.Contract(fcid2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(newContract, renewed) {
+		t.Fatal("mismatch")
+	}
+
+	// Archived contract should exist.
+	var ac dbArchivedContract
+	err = cs.db.Model(&dbArchivedContract{}).
+		Where("fcid", fileContractID(fcid).gob()).
+		Take(&ac).
+		Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ac.Model = Model{}
+	expectedContract := dbArchivedContract{
+		FCID:           fcid,
+		FileSize:       c.Revision.NewFileSize,
+		Host:           c.HostKey(),
+		RenewedTo:      fcid2,
+		Reason:         archivalReasonRenewed,
+		RevisionNumber: c.Revision.NewRevisionNumber,
+		WindowStart:    c.Revision.NewWindowStart,
+		WindowEnd:      c.Revision.NewWindowEnd,
+	}
+	if !reflect.DeepEqual(ac, expectedContract) {
+		fmt.Println(ac)
+		fmt.Println(expectedContract)
+		t.Fatal("mismatch")
+	}
+}

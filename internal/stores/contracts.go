@@ -20,6 +20,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const archivalReasonRenewed = "renewed"
+
 var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from the
 	// database.
@@ -29,6 +31,16 @@ var (
 	// database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
 )
+
+type fileContractID types.FileContractID
+
+func (fcid fileContractID) gob() []byte {
+	buf := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(buf).Encode(types.FileContractID(fcid)); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
 
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
 type EphemeralContractStore struct {
@@ -206,8 +218,21 @@ type (
 		HostID      uint                 `gorm:"index"`
 		Host        dbHost
 		LockedUntil time.Time
+		RenewedFrom types.FileContractID   `gorm:"index,type:bytes;serializer:gob"`
 		Revision    dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
 		Sectors     []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
+	}
+
+	dbArchivedContract struct {
+		Model
+		FCID           types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
+		FileSize       uint64
+		Host           consensus.PublicKey  `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
+		RenewedTo      types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob"`
+		Reason         string
+		RevisionNumber uint64
+		WindowStart    types.BlockHeight
+		WindowEnd      types.BlockHeight
 	}
 
 	dbContractSector struct {
@@ -258,6 +283,9 @@ func (cs *dbContract) BeforeDelete(tx *gorm.DB) error {
 		Delete(&dbContractSector{}).
 		Error
 }
+
+// TableName implements the gorm.Tabler interface.
+func (dbArchivedContract) TableName() string { return "archived_contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSector) TableName() string { return "contract_sectors" }
@@ -405,8 +433,8 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 		Error
 }
 
-// AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.Contract) error {
+// addContract implements the bus.ContractStore interface.
+func addContract(tx *gorm.DB, c rhpv2.Contract, renewedFrom types.FileContractID) error {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -439,22 +467,66 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 		NewUnlockHash:         c.Revision.NewUnlockHash,
 	}
 
+	// Find host.
+	var host dbHost
+	err := tx.Where(&dbHost{PublicKey: c.HostKey()}).
+		Take(&host).Error
+	if err != nil {
+		return err
+	}
+
+	// Insert contract.
+	return tx.Where(&dbHost{PublicKey: c.HostKey()}).
+		Create(&dbContract{
+			FCID:        fcid,
+			HostID:      host.ID,
+			RenewedFrom: renewedFrom,
+			Revision:    revision,
+		}).Error
+}
+
+// AddContract implements the bus.ContractStore interface.
+func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// Find host.
-		var host dbHost
-		err := s.db.Where(&dbHost{PublicKey: c.HostKey()}).
-			Take(&host).Error
+		return addContract(tx, c, types.FileContractID{})
+	})
+}
+
+// AddRenewedContract adds a new contract which was created as the result of a renewal to the store.
+// The old contract specified as 'renewedFrom' will be deleted from the active
+// contracts and moved to the archive. Both new and old contract will be linked
+// to each other through the RenewedFrom and RenewedTo fields respectively.
+func (s *SQLStore) AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Fetch contract we renew from.
+		oldContract, err := contract(tx, renewedFrom)
 		if err != nil {
 			return err
 		}
 
-		// Insert contract.
-		return s.db.Where(&dbHost{PublicKey: c.HostKey()}).
-			Create(&dbContract{
-				FCID:     fcid,
-				HostID:   host.ID,
-				Revision: revision,
-			}).Error
+		// Create copy in archive.
+		err = tx.Create(&dbArchivedContract{
+			FCID:           oldContract.FCID,
+			Host:           oldContract.Host.PublicKey,
+			Reason:         archivalReasonRenewed,
+			RenewedTo:      c.ID(),
+			RevisionNumber: oldContract.Revision.NewRevisionNumber,
+			FileSize:       oldContract.Revision.NewFileSize,
+			WindowStart:    oldContract.Revision.NewWindowStart,
+			WindowEnd:      oldContract.Revision.NewWindowEnd,
+		}).Error
+		if err != nil {
+			return err
+		}
+
+		// Delete the contract from the regular table.
+		err = removeContract(tx, renewedFrom)
+		if err != nil {
+			return err
+		}
+
+		// Add the new contract.
+		return addContract(tx, c, renewedFrom)
 	})
 }
 
@@ -485,29 +557,39 @@ func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
 	return contracts, nil
 }
 
+// removeContract implements the bus.ContractStore interface.
+func removeContract(tx *gorm.DB, id types.FileContractID) error {
+	var contract dbContract
+	if err := tx.Where(&dbContract{FCID: id}).
+		Take(&contract).Error; err != nil {
+		return err
+	}
+	return tx.Where(&dbContract{Model: Model{ID: contract.ID}}).
+		Delete(&contract).Error
+}
+
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		var contract dbContract
-		if err := tx.Where(&dbContract{FCID: id}).
-			Take(&contract).Error; err != nil {
-			return err
-		}
-		return tx.Where(&dbContract{Model: Model{ID: contract.ID}}).
-			Delete(&contract).Error
+		return removeContract(tx, id)
 	})
 }
 
-func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
+func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {
 	var contract dbContract
-	err := s.db.Where(&dbContract{FCID: id}).
+	err := tx.Where(&dbContract{FCID: id}).
 		Preload("Revision.NewValidProofOutputs").
 		Preload("Revision.NewMissedProofOutputs").
+		Preload("Host").
 		Take(&contract).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return contract, ErrContractNotFound
 	}
 	return contract, err
+}
+
+func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
+	return contract(s.db, id)
 }
 
 func (s *SQLStore) contracts() ([]dbContract, error) {
