@@ -208,7 +208,10 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
 func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, paramTime(notSince)), &hosts)
+	values := url.Values{}
+	values.Set("notSince", paramTime(notSince).String())
+	values.Set("max", fmt.Sprint(max))
+	err = c.c.GET(fmt.Sprintf("/hosts?%s", values.Encode()), &hosts)
 	return
 }
 
@@ -304,19 +307,24 @@ func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
 }
 
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
-	panic("unimplemented")
+	// panic("unimplemented")
+	return nil
 }
 func (c *Client) ActiveContracts() ([]Contract, error) {
-	panic("unimplemented")
+	// panic("unimplemented")
+	return nil, nil
 }
 func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {
-	panic("unimplemented")
+	// panic("unimplemented")
+	return nil, nil
 }
 func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error) {
-	panic("unimplemented")
+	// panic("unimplemented")
+	return ContractMetadata{}, nil
 }
 func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
-	panic("unimplemented")
+	// panic("unimplemented")
+	return nil
 }
 
 // RecommendedFee returns the recommended fee for a txn.
@@ -335,7 +343,7 @@ func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract,
 // entries under that path.
 func (c *Client) Object(path string) (o object.Object, entries []string, err error) {
 	var or ObjectsResponse
-	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
+	err = c.c.GET(fmt.Sprintf("/objects/store/%s", path), &or)
 	if or.Object != nil {
 		o = *or.Object
 	} else {
@@ -346,7 +354,7 @@ func (c *Client) Object(path string) (o object.Object, entries []string, err err
 
 // AddObject stores the provided object under the given name.
 func (c *Client) AddObject(name string, o object.Object, usedContract map[consensus.PublicKey]types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), AddObjectRequest{
+	err = c.c.PUT(fmt.Sprintf("/objects/store/%s", name), AddObjectRequest{
 		Object:        o,
 		UsedContracts: usedContract,
 	})
@@ -355,7 +363,7 @@ func (c *Client) AddObject(name string, o object.Object, usedContract map[consen
 
 // DeleteObject deletes the object with the given name.
 func (c *Client) DeleteObject(name string) (err error) {
-	err = c.c.DELETE(fmt.Sprintf("/objects/%s", name))
+	err = c.c.DELETE(fmt.Sprintf("/objects/store/%s", name))
 	return
 }
 
@@ -372,7 +380,7 @@ func (c *Client) MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error) {
 // SlabsForMigration returns up to n slabs which require migration and haven't
 // failed migration since failureCutoff.
 func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error) {
-	var values url.Values
+	values := url.Values{}
 	values.Set("cutoff", paramTime(failureCutoff).String())
 	values.Set("limit", fmt.Sprint(n))
 	values.Set("goodContracts", fmt.Sprint(goodContracts))

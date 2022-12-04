@@ -185,6 +185,7 @@ func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	s := &scanner{
 		bus:    b,
 		worker: w,
+		logger: newTestLogger().Sugar(),
 		tracker: newTracker(
 			trackerMinDataPoints,
 			trackerNumDataPoints,

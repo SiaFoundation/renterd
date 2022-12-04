@@ -231,11 +231,15 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 }
 
 func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (*autopilot.Autopilot, func() error, error) {
-	store, err := stores.NewJSONAutopilotStore(dir)
+	autopilotDir := filepath.Join(dir, "autopilot")
+	if err := os.MkdirAll(autopilotDir, 0700); err != nil {
+		return nil, nil, err
+	}
+	store, err := stores.NewJSONAutopilotStore(autopilotDir)
 	if err != nil {
 		return nil, nil, err
 	}
-	a, err := autopilot.New(store, b, w, cfg.Heartbeat)
+	a, err := autopilot.New(store, b, w, autopilotDir, cfg.Heartbeat)
 	if err != nil {
 		return nil, nil, err
 	}
