@@ -615,11 +615,11 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /contractsets/:name/contracts": b.contractSetContractsHandler,
 		"PUT    /contractsets/:name":           b.contractSetsNameHandlerPUT,
 
-		"GET    /objects/*key":               b.objectsKeyHandlerGET,
-		"PUT    /objects/*key":               b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key":               b.objectsKeyHandlerDELETE,
-		"GET    /objects/migration/slabs":    b.objectsMigrationSlabsHandlerGET,
-		"GET    /objects/migration/slab/:id": b.objectsMigrationSlabHandlerGET,
-		"POST   /objects/migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
+		"GET    /objects/*key":       b.objectsKeyHandlerGET,
+		"PUT    /objects/*key":       b.objectsKeyHandlerPUT,
+		"DELETE /objects/*key":       b.objectsKeyHandlerDELETE,
+		"GET    /migration/slabs":    b.objectsMigrationSlabsHandlerGET,
+		"GET    /migration/slab/:id": b.objectsMigrationSlabHandlerGET,
+		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
 	})
 }

@@ -110,3 +110,12 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 		db: db,
 	}, ccid, nil
 }
+
+// Close closes the underlying database connection of the store.
+func (s *SQLStore) Close() error {
+	db, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return db.Close()
+}

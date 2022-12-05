@@ -1,4 +1,4 @@
-package main
+package node
 
 import (
 	"log"
@@ -20,25 +20,16 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-type workerConfig struct {
-	enabled     bool
-	busAddr     string
-	busPassword string
+type WorkerConfig struct {
 }
 
-type busConfig struct {
-	enabled     bool
-	bootstrap   bool
-	gatewayAddr string
+type BusConfig struct {
+	Bootstrap   bool
+	GatewayAddr string
 }
 
-type autopilotConfig struct {
-	enabled        bool
-	busAddr        string
-	busPassword    string
-	workerAddr     string
-	workerPassword string
-	heartbeat      time.Duration
+type AutopilotConfig struct {
+	Heartbeat time.Duration
 }
 
 type chainManager struct {
@@ -122,12 +113,12 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus, func() error, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	g, err := gateway.New(cfg.gatewayAddr, cfg.bootstrap, gatewayDir)
+	g, err := gateway.New(cfg.GatewayAddr, cfg.Bootstrap, gatewayDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -135,7 +126,7 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	cm, errCh := mconsensus.New(g, cfg.bootstrap, consensusDir)
+	cm, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
 	select {
 	case err := <-errCh:
 		if err != nil {
@@ -202,6 +193,7 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 			g.Close(),
 			cm.Close(),
 			tp.Close(),
+			sqlStore.Close(),
 		}
 		for _, err := range errs {
 			if err != nil {
@@ -215,21 +207,18 @@ func newBus(cfg busConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	return b, cleanup, nil
 }
 
-func newWorker(cfg workerConfig, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
-	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
 	w := worker.New(workerKey, b)
 	return w, func() error { return nil }, nil
 }
 
-func newAutopilot(cfg autopilotConfig, dir string) (*autopilot.Autopilot, func() error, error) {
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (*autopilot.Autopilot, func() error, error) {
 	store, err := stores.NewJSONAutopilotStore(dir)
 	if err != nil {
 		return nil, nil, err
 	}
-	b := bus.NewClient(cfg.busAddr, cfg.busPassword)
-	w := worker.NewClient(cfg.workerAddr, cfg.workerPassword)
-	a, err := autopilot.New(store, b, w, cfg.heartbeat)
+	a, err := autopilot.New(store, b, w, cfg.Heartbeat)
 	if err != nil {
 		return nil, nil, err
 	}

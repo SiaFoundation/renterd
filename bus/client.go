@@ -158,7 +158,7 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
 func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts?notSince=%v&max=%d", paramTime(notSince), max), &hosts)
+	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, paramTime(notSince)), &hosts)
 	return
 }
 
@@ -310,7 +310,7 @@ func (c *Client) DeleteObject(name string) (err error) {
 // to the current time.
 func (c *Client) MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error) {
 	var resp ObjectsMarkSlabMigrationFailureResponse
-	err := c.c.POST("/objects/migration/failed", ObjectsMarkSlabMigrationFailureRequest{
+	err := c.c.POST("/migration/failed", ObjectsMarkSlabMigrationFailureRequest{
 		SlabIDs: slabIDs,
 	}, &resp)
 	return resp.Updates, err
@@ -324,14 +324,14 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 	values.Set("limit", fmt.Sprint(n))
 	values.Set("goodContracts", fmt.Sprint(goodContracts))
 	var resp ObjectsMigrateSlabsResponse
-	err := c.c.GET("/objects/migration/slabs?%s"+values.Encode(), &resp)
+	err := c.c.GET("/migration/slabs?%s"+values.Encode(), &resp)
 	return resp.SlabIDs, err
 }
 
 // SlabForMigration returns a slab and the contracts its stored on.
 func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error) {
 	var resp ObjectsMigrateSlabResponse
-	err := c.c.GET(fmt.Sprintf("/objects/migration/slab/%s", slabID), &resp)
+	err := c.c.GET(fmt.Sprintf("/migration/slab/%s", slabID), &resp)
 	return resp.Slab, resp.Contracts, err
 }
 
