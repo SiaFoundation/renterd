@@ -67,6 +67,44 @@ func (c *Client) WalletOutputs() (resp []wallet.SiacoinElement, err error) {
 	return
 }
 
+// estimatedSiacoinTxnSize estimates the txn size of a siacoin txn without file
+// contract given its number of outputs.
+func estimatedSiacoinTxnSize(nOutputs uint64) uint64 {
+	return 1000 + 60*nOutputs
+}
+
+// SendSiacoins is a helper method that sends siacoins to the given outputs.
+func (c *Client) SendSiacoins(scos []types.SiacoinOutput) (err error) {
+	fee, err := c.RecommendedFee()
+	if err != nil {
+		return err
+	}
+	fee = fee.Mul64(estimatedSiacoinTxnSize(uint64(len(scos))))
+
+	var value types.Currency
+	for _, sco := range scos {
+		value = value.Add(sco.Value)
+	}
+	txn := types.Transaction{
+		SiacoinOutputs: scos,
+		MinerFees:      []types.Currency{fee},
+	}
+	toSign, parents, err := c.WalletFund(&txn, value)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = c.WalletDiscard(txn)
+		}
+	}()
+	err = c.WalletSign(&txn, toSign, types.FullCoveredFields)
+	if err != nil {
+		return err
+	}
+	return c.BroadcastTransaction(append(parents, txn))
+}
+
 // WalletTransactions returns all transactions relevant to the wallet.
 func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Transaction, err error) {
 	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", paramTime(since), max), &resp)
@@ -268,8 +306,11 @@ func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error
 func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
 	panic("unimplemented")
 }
-func (c *Client) RecommendedFee() (types.Currency, error) {
-	panic("unimplemented")
+
+// RecommendedFee returns the recommended fee for a txn.
+func (c *Client) RecommendedFee() (fee types.Currency, err error) {
+	err = c.c.GET("/txpool/recommendedfee", &fee)
+	return
 }
 
 // ContractsForSlab returns contracts that can be used to download the provided
@@ -333,6 +374,12 @@ func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContra
 	var resp ObjectsMigrateSlabResponse
 	err := c.c.GET(fmt.Sprintf("/migration/slab/%s", slabID), &resp)
 	return resp.Slab, resp.Contracts, err
+}
+
+// MineBlocks updates the latest failure time of the given slabs
+// to the current time.
+func (c *Client) MineBlocks(uh types.UnlockHash, n int) error {
+	return c.c.POST(fmt.Sprintf("/mine/%v?numBlocks=%d", uh, n), nil, nil)
 }
 
 // NewClient returns a client that communicates with a renterd store server

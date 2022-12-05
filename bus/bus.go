@@ -86,11 +86,17 @@ type (
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
 		SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error)
 	}
+
+	// A Miner mines blocks and submits them to the network.
+	Miner interface {
+		Mine(addr types.UnlockHash, n int) error
+	}
 )
 
 type Bus struct {
 	s   Syncer
 	cm  ChainManager
+	m   Miner
 	tp  TransactionPool
 	w   Wallet
 	hdb HostDB
@@ -115,6 +121,11 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 		BlockHeight: b.cm.TipState().Index.Height,
 		Synced:      b.cm.Synced(),
 	})
+}
+
+func (b *Bus) txpoolFeeHandler(jc jape.Context) {
+	fee := b.tp.RecommendedFee()
+	jc.Encode(fee)
 }
 
 func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
@@ -556,16 +567,37 @@ func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	}
 }
 
+// TODO: ideally we can get rid of this handler again once we have a way to
+// subscribe to consensus through the API and submit blocks through the API.
+func (b *Bus) minerMineHandlerPOST(jc jape.Context) {
+	if b.m == nil {
+		jc.ResponseWriter.WriteHeader(http.StatusNotFound) // miner not enabled
+		return
+	}
+	var uh types.UnlockHash
+	if jc.DecodeParam("unlockhash", &uh) != nil {
+		return
+	}
+	var n int
+	if jc.DecodeForm("numBlocks", &n) != nil {
+		return
+	}
+	if jc.Check("failed to mine blocks", b.m.Mine(uh, n)) != nil {
+		return
+	}
+}
+
 // GatewayAddress returns the address of the gateway.
 func (b *Bus) GatewayAddress() string {
 	return b.s.Addr()
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) *Bus {
+func New(s Syncer, cm ChainManager, m Miner, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) *Bus {
 	return &Bus{
 		s:   s,
 		cm:  cm,
+		m:   m,
 		tp:  tp,
 		w:   w,
 		hdb: hdb,
@@ -583,8 +615,9 @@ func NewServer(b *Bus) http.Handler {
 
 		"GET    /consensus/state": b.consensusStateHandler,
 
-		"GET    /txpool/transactions": b.txpoolTransactionsHandler,
-		"POST   /txpool/broadcast":    b.txpoolBroadcastHandler,
+		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
+		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
+		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
 
 		"GET    /wallet/balance":       b.walletBalanceHandler,
 		"GET    /wallet/address":       b.walletAddressHandler,
@@ -621,5 +654,7 @@ func NewServer(b *Bus) http.Handler {
 		"GET    /migration/slabs":    b.objectsMigrationSlabsHandlerGET,
 		"GET    /migration/slab/:id": b.objectsMigrationSlabHandlerGET,
 		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
+
+		"POST   /mine/:unlockhash": b.minerMineHandlerPOST,
 	})
 }
