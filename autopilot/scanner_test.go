@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/NebulousLabs/fastrand"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/worker"
+	"lukechampine.com/frand"
 )
 
 var (
@@ -74,9 +74,9 @@ func (s *scanner) isScanning() bool {
 
 func TestScanner(t *testing.T) {
 	// init host keys
-	fastrand.Read(testHost1[:])
-	fastrand.Read(testHost2[:])
-	fastrand.Read(testHost3[:])
+	frand.Read(testHost1[:])
+	frand.Read(testHost2[:])
+	frand.Read(testHost3[:])
 
 	// prepare some hosts
 	settings := newTestHostSettings()

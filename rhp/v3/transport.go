@@ -4,14 +4,20 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 
 	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/mux"
 	"go.sia.tech/siad/types"
 )
+
+func wrapErr(err *error, fnName string) {
+	if *err != nil {
+		*err = fmt.Errorf("%s: %w", fnName, *err)
+	}
+}
 
 // An RPCError may be sent instead of a response object to any RPC.
 type RPCError struct {
@@ -107,7 +113,7 @@ func (t *Transport) Close() error {
 }
 
 // NewRenterTransport establishes a new RHPv3 session over the supplied connection.
-func NewRenterTransport(conn net.Conn, hostKey consensus.PublicKey) (*Transport, error) {
+func NewRenterTransport(conn net.Conn, hostKey PublicKey) (*Transport, error) {
 	m, err := mux.Dial(conn, hostKey[:])
 	if err != nil {
 		return nil, err
@@ -212,7 +218,7 @@ func RPCReadRegistry(t *Transport, payment PaymentMethod, key RegistryKey) (rv R
 	if _, err := s.Read(buf); err != nil {
 		return RegistryValue{}, err
 	}
-	var sig consensus.Signature
+	var sig Signature
 	copy(sig[:], buf[:64])
 	rev := binary.BigEndian.Uint64(buf[64:72])
 	data := buf[72 : len(buf)-1]

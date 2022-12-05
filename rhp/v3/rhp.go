@@ -3,7 +3,6 @@ package rhp
 
 import (
 	"bytes"
-	"fmt"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -12,14 +11,20 @@ import (
 	"lukechampine.com/frand"
 )
 
-func wrapErr(err *error, fnName string) {
-	if *err != nil {
-		*err = fmt.Errorf("%s: %w", fnName, *err)
-	}
-}
+// exported types from internal/consensus
+type (
+	// A Hash256 is a generic 256-bit cryptographic hash.
+	Hash256 = consensus.Hash256
+	// A PublicKey is an Ed25519 public key.
+	PublicKey = consensus.PublicKey
+	// A PrivateKey is an Ed25519 private key.
+	PrivateKey = consensus.PrivateKey
+	// A Signature is an Ed25519 signature.
+	Signature = consensus.Signature
+)
 
 // An Account is a public key used to identify an ephemeral account on a host.
-type Account consensus.PublicKey
+type Account PublicKey
 
 // ZeroAccount is a sentinel value that indicates the lack of an account.
 var ZeroAccount Account
@@ -34,7 +39,7 @@ func (PayByEphemeralAccountRequest) isPaymentMethod() {}
 func (PayByContractRequest) isPaymentMethod()         {}
 
 // PayByEphemeralAccount creates a PayByEphemeralAccountRequest.
-func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64, sk consensus.PrivateKey) PayByEphemeralAccountRequest {
+func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64, sk PrivateKey) PayByEphemeralAccountRequest {
 	p := PayByEphemeralAccountRequest{
 		Account:  account,
 		Expiry:   expiry,
@@ -42,13 +47,13 @@ func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64
 		Priority: 0, // TODO ???
 	}
 	frand.Read(p.Nonce[:])
-	p.Signature = sk.SignHash(consensus.Hash256(crypto.HashAll(p.Account, p.Expiry, p.Account, p.Nonce)))
+	p.Signature = sk.SignHash(Hash256(crypto.HashAll(p.Account, p.Expiry, p.Account, p.Nonce)))
 	return p
 }
 
 // PayByContract creates a PayByContractRequest by revising the supplied
 // contract.
-func PayByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct Account, sk consensus.PrivateKey) (PayByContractRequest, bool) {
+func PayByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct Account, sk PrivateKey) (PayByContractRequest, bool) {
 	if rev.ValidRenterPayout().Cmp(amount) < 0 || rev.MissedRenterPayout().Cmp(amount) < 0 {
 		return PayByContractRequest{}, false
 	}
@@ -81,7 +86,7 @@ func PayByContract(rev *types.FileContractRevision, amount types.Currency, refun
 			CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		}},
 	}
-	p.Signature = sk.SignHash(consensus.Hash256(txn.SigHash(0, rev.NewWindowEnd)))
+	p.Signature = sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
 	return p, true
 }
 
@@ -133,7 +138,7 @@ type (
 		Expiry    uint64
 		Amount    types.Currency
 		Nonce     [8]byte
-		Signature consensus.Signature
+		Signature Signature
 		Priority  int64
 	}
 
@@ -144,8 +149,8 @@ type (
 		NewValidProofValues  []types.Currency
 		NewMissedProofValues []types.Currency
 		RefundAccount        Account
-		Signature            consensus.Signature
-		HostSignature        consensus.Signature
+		Signature            Signature
+		HostSignature        Signature
 	}
 )
 
@@ -182,7 +187,7 @@ var (
 // RPC request/response objects
 type (
 	paymentResponse struct {
-		Signature consensus.Signature
+		Signature Signature
 	}
 
 	rpcPriceTableResponse struct{}
@@ -199,7 +204,7 @@ type (
 			Amount    types.Currency
 			Timestamp int64
 		}
-		Signature consensus.Signature
+		Signature Signature
 	}
 
 	instruction struct {
@@ -216,9 +221,9 @@ type (
 	rpcExecuteProgramResponse struct {
 		AdditionalCollateral types.Currency
 		OutputLength         uint64
-		NewMerkleRoot        consensus.Hash256
+		NewMerkleRoot        Hash256
 		NewSize              uint64
-		Proof                []consensus.Hash256
+		Proof                []Hash256
 		Error                error
 		TotalCost            types.Currency
 		FailureRefund        types.Currency

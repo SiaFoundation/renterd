@@ -15,7 +15,6 @@ import (
 	"sort"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/siad/types"
 )
@@ -130,15 +129,15 @@ func RPCDeleteCost(settings HostSettings, n int) types.Currency {
 type Session struct {
 	transport   *Transport
 	contract    Contract
-	key         consensus.PrivateKey
-	appendRoots []consensus.Hash256
+	key         PrivateKey
+	appendRoots []Hash256
 }
 
 // Transport returns the underlying Transport of the session.
 func (s *Session) Transport() *Transport { return s.transport }
 
 // HostKey returns the public key of the host.
-func (s *Session) HostKey() consensus.PublicKey { return s.contract.HostKey() }
+func (s *Session) HostKey() PublicKey { return s.contract.HostKey() }
 
 // Contract returns the current revision of the contract.
 func (s *Session) Contract() Contract { return s.contract }
@@ -190,7 +189,7 @@ func recordRPC(ctx context.Context, t *Transport, c Contract, id Specifier, err 
 
 // SectorRoots calls the SectorRoots RPC, returning the requested range of
 // sector Merkle roots of the currently-locked contract.
-func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []consensus.Hash256, err error) {
+func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []Hash256, err error) {
 	defer wrapErr(&err, "SectorRoots")
 	defer recordRPC(ctx, s.transport, s.contract, RPCSectorRootsID, &err)()
 
@@ -238,7 +237,7 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 	s.contract.Signatures[1].Signature = resp.Signature[:]
 
 	// verify the proof
-	if !VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, s.contract.NumSectors(), consensus.Hash256(rev.NewFileMerkleRoot)) {
+	if !VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, s.contract.NumSectors(), Hash256(rev.NewFileMerkleRoot)) {
 		return nil, ErrInvalidMerkleProof
 	}
 	return resp.SectorRoots, nil
@@ -315,7 +314,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
 	defer s.transport.WriteResponse(&RPCReadStop)
-	var hostSig *consensus.Signature
+	var hostSig *Signature
 	for _, sec := range sections {
 		// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
 		// message, verify the tag and decrypt, and then pass the data to
@@ -333,7 +332,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 			return fmt.Errorf("couldn't read signature len: %w", err)
 		}
 		if n := binary.LittleEndian.Uint64(lenbuf); n > 0 {
-			hostSig = new(consensus.Signature)
+			hostSig = new(Signature)
 			if _, err := io.ReadFull(msgReader, hostSig[:]); err != nil {
 				return fmt.Errorf("couldn't read signature: %w", err)
 			}
@@ -360,7 +359,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 		if binary.LittleEndian.Uint64(lenbuf) != uint64(RangeProofSize(LeavesPerSector, proofStart, proofEnd)) {
 			return errors.New("invalid proof size")
 		}
-		proof := make([]consensus.Hash256, binary.LittleEndian.Uint64(lenbuf))
+		proof := make([]Hash256, binary.LittleEndian.Uint64(lenbuf))
 		for i := range proof {
 			if _, err := io.ReadFull(msgReader, proof[i][:]); err != nil {
 				return fmt.Errorf("couldn't read Merkle proof: %w", err)
@@ -460,7 +459,7 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 	}
 	proofHashes := merkleResp.OldSubtreeHashes
 	leafHashes := merkleResp.OldLeafHashes
-	oldRoot, newRoot := consensus.Hash256(rev.NewFileMerkleRoot), merkleResp.NewMerkleRoot
+	oldRoot, newRoot := Hash256(rev.NewFileMerkleRoot), merkleResp.NewMerkleRoot
 	<-precompChan
 	if newFileSize > 0 && !VerifyDiffProof(actions, s.contract.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
 		err := ErrInvalidMerkleProof
@@ -497,13 +496,13 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 
 // Append calls the Write RPC with a single action, appending the provided
 // sector. It returns the Merkle root of the sector.
-func (s *Session) Append(ctx context.Context, sector *[SectorSize]byte, price, collateral types.Currency) (consensus.Hash256, error) {
+func (s *Session) Append(ctx context.Context, sector *[SectorSize]byte, price, collateral types.Currency) (Hash256, error) {
 	err := s.Write(ctx, []RPCWriteAction{{
 		Type: RPCWriteActionAppend,
 		Data: sector[:],
 	}}, price, collateral)
 	if err != nil {
-		return consensus.Hash256{}, err
+		return Hash256{}, err
 	}
 	return s.appendRoots[0], nil
 }
@@ -586,7 +585,7 @@ func RPCSettings(ctx context.Context, t *Transport) (settings HostSettings, err 
 // milliseconds, so a timeout of less than 1ms will be rounded down to 0. (A
 // timeout of 0 is valid: it means that the lock will only be acquired if the
 // contract is unlocked at the moment the host receives the RPC.)
-func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key consensus.PrivateKey, timeout time.Duration) (_ *Session, err error) {
+func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key PrivateKey, timeout time.Duration) (_ *Session, err error) {
 	defer wrapErr(&err, "Lock")
 	defer recordRPC(ctx, t, Contract{}, RPCLockID, &err)()
 	req := &RPCLockRequest{
@@ -604,7 +603,7 @@ func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key con
 		return nil, fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
 	}
 	revHash := hashRevision(resp.Revision)
-	if !key.PublicKey().VerifyHash(revHash, *(*consensus.Signature)(resp.Signatures[0].Signature)) {
+	if !key.PublicKey().VerifyHash(revHash, *(*Signature)(resp.Signatures[0].Signature)) {
 		return nil, errors.New("renter's signature on claimed revision is invalid")
 	} else if !ed25519.Verify(resp.Revision.UnlockConditions.PublicKeys[1].Key, revHash[:], resp.Signatures[1].Signature) {
 		return nil, errors.New("host's signature on claimed revision is invalid")
@@ -625,7 +624,7 @@ func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key con
 
 // DialSession is a convenience function that connects to the specified host and
 // locks the specified contract.
-func DialSession(ctx context.Context, hostIP string, hostKey consensus.PublicKey, id types.FileContractID, renterKey consensus.PrivateKey) (_ *Session, err error) {
+func DialSession(ctx context.Context, hostIP string, hostKey PublicKey, id types.FileContractID, renterKey PrivateKey) (_ *Session, err error) {
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	if err != nil {
 		return nil, err
@@ -664,8 +663,8 @@ func DialSession(ctx context.Context, hostIP string, hostKey consensus.PublicKey
 
 // DeleteSectorActions calculates a set of Write actions that will delete the
 // specified sectors from the contract.
-func DeleteSectorActions(allRoots, toDelete []consensus.Hash256) []RPCWriteAction {
-	rootIndices := make(map[consensus.Hash256]uint64, len(allRoots))
+func DeleteSectorActions(allRoots, toDelete []Hash256) []RPCWriteAction {
+	rootIndices := make(map[Hash256]uint64, len(allRoots))
 	for i, root := range allRoots {
 		rootIndices[root] = uint64(i)
 	}

@@ -10,7 +10,6 @@ import (
 	"unsafe"
 
 	"go.sia.tech/renterd/internal/blake2b"
-	"go.sia.tech/renterd/internal/consensus"
 )
 
 // Most of these algorithms are derived from "Streaming Merkle Proofs within
@@ -30,7 +29,7 @@ const (
 // A proofAccumulator is a specialized accumulator for building and verifying
 // Merkle proofs.
 type proofAccumulator struct {
-	trees     [64]consensus.Hash256
+	trees     [64]Hash256
 	numLeaves uint64
 }
 
@@ -38,7 +37,7 @@ func (pa *proofAccumulator) hasNodeAtHeight(height int) bool {
 	return pa.numLeaves&(1<<height) != 0
 }
 
-func (pa *proofAccumulator) insertNode(h consensus.Hash256, height int) {
+func (pa *proofAccumulator) insertNode(h Hash256, height int) {
 	i := height
 	for ; pa.hasNodeAtHeight(i); i++ {
 		h = blake2b.SumPair(pa.trees[i], h)
@@ -47,10 +46,10 @@ func (pa *proofAccumulator) insertNode(h consensus.Hash256, height int) {
 	pa.numLeaves += 1 << height
 }
 
-func (pa *proofAccumulator) root() consensus.Hash256 {
+func (pa *proofAccumulator) root() Hash256 {
 	i := bits.TrailingZeros64(pa.numLeaves)
 	if i == 64 {
-		return consensus.Hash256{}
+		return Hash256{}
 	}
 	root := pa.trees[i]
 	for i++; i < len(pa.trees); i++ {
@@ -90,7 +89,7 @@ func (sa *sectorAccumulator) hasNodeAtHeight(i int) bool {
 	return (sa.numLeaves>>2)&(1<<(len(sa.trees)-i-1)) != 0
 }
 
-func (sa *sectorAccumulator) appendNode(h consensus.Hash256) {
+func (sa *sectorAccumulator) appendNode(h Hash256) {
 	sa.nodeBuf[sa.numLeaves%4] = h
 	sa.numLeaves++
 	if sa.numLeaves%4 == 0 {
@@ -126,13 +125,13 @@ func (sa *sectorAccumulator) mergeNodeBuf() {
 	sa.numLeaves += 4
 }
 
-func (sa *sectorAccumulator) root() consensus.Hash256 {
+func (sa *sectorAccumulator) root() Hash256 {
 	if sa.numLeaves == 0 {
-		return consensus.Hash256{}
+		return Hash256{}
 	}
 
 	// helper function for computing the root of four subtrees
-	root4 := func(nodes [4][32]byte) consensus.Hash256 {
+	root4 := func(nodes [4][32]byte) Hash256 {
 		// NOTE: it would be more efficient to mutate sa.trees directly, but
 		// that would make root non-idempotent
 		in := (*[8][32]byte)(unsafe.Pointer(&[2][4][32]byte{0: nodes}))
@@ -143,7 +142,7 @@ func (sa *sectorAccumulator) root() consensus.Hash256 {
 	}
 
 	i := len(sa.trees) - 1 - bits.TrailingZeros32(sa.numLeaves>>2)
-	var root consensus.Hash256
+	var root Hash256
 	switch sa.numLeaves % 4 {
 	case 0:
 		root = root4(sa.trees[i])
@@ -164,7 +163,7 @@ func (sa *sectorAccumulator) root() consensus.Hash256 {
 }
 
 // SectorRoot computes the Merkle root of a sector.
-func SectorRoot(sector *[SectorSize]byte) consensus.Hash256 {
+func SectorRoot(sector *[SectorSize]byte) Hash256 {
 	var sa sectorAccumulator
 	sa.appendLeaves(sector[:])
 	return sa.root()
@@ -172,7 +171,7 @@ func SectorRoot(sector *[SectorSize]byte) consensus.Hash256 {
 
 // ReaderRoot returns the Merkle root of the supplied stream, which must contain
 // an integer multiple of leaves.
-func ReaderRoot(r io.Reader) (consensus.Hash256, error) {
+func ReaderRoot(r io.Reader) (Hash256, error) {
 	var s sectorAccumulator
 	leafBatch := make([]byte, LeafSize*16)
 	for {
@@ -181,10 +180,10 @@ func ReaderRoot(r io.Reader) (consensus.Hash256, error) {
 			break
 		} else if err == io.ErrUnexpectedEOF {
 			if n%LeafSize != 0 {
-				return consensus.Hash256{}, errors.New("stream does not contain integer multiple of leaves")
+				return Hash256{}, errors.New("stream does not contain integer multiple of leaves")
 			}
 		} else if err != nil {
-			return consensus.Hash256{}, err
+			return Hash256{}, err
 		}
 		s.appendLeaves(leafBatch[:n])
 	}
@@ -192,18 +191,18 @@ func ReaderRoot(r io.Reader) (consensus.Hash256, error) {
 }
 
 // ReadSector reads a single sector from r and calculates its root.
-func ReadSector(r io.Reader) (consensus.Hash256, *[SectorSize]byte, error) {
+func ReadSector(r io.Reader) (Hash256, *[SectorSize]byte, error) {
 	var sector [SectorSize]byte
 	buf := bytes.NewBuffer(sector[:0])
 	root, err := ReaderRoot(io.TeeReader(io.LimitReader(r, SectorSize), buf))
 	if buf.Len() != SectorSize {
-		return consensus.Hash256{}, nil, io.ErrUnexpectedEOF
+		return Hash256{}, nil, io.ErrUnexpectedEOF
 	}
 	return root, &sector, err
 }
 
 // MetaRoot calculates the root of a set of existing Merkle roots.
-func MetaRoot(roots []consensus.Hash256) consensus.Hash256 {
+func MetaRoot(roots []Hash256) Hash256 {
 	// sectorAccumulator is only designed to store one sector's worth of leaves,
 	// so we'll panic if we insert more than leavesPerSector leaves. To
 	// compensate, call MetaRoot recursively.
@@ -254,7 +253,7 @@ func nextSubtreeSize(start, end uint64) uint64 {
 // A RangeProofVerifier allows range proofs to be verified in streaming fashion.
 type RangeProofVerifier struct {
 	start, end uint64
-	roots      []consensus.Hash256
+	roots      []Hash256
 }
 
 // ReadFrom implements io.ReaderFrom.
@@ -276,12 +275,12 @@ func (rpv *RangeProofVerifier) ReadFrom(r io.Reader) (int64, error) {
 }
 
 // Verify verifies the supplied proof, using the data ingested from ReadFrom.
-func (rpv *RangeProofVerifier) Verify(proof []consensus.Hash256, root consensus.Hash256) bool {
+func (rpv *RangeProofVerifier) Verify(proof []Hash256, root Hash256) bool {
 	if uint64(len(proof)) != RangeProofSize(LeavesPerSector, rpv.start, rpv.end) {
 		return false
 	}
 	var acc proofAccumulator
-	consume := func(roots *[]consensus.Hash256, i, j uint64) {
+	consume := func(roots *[]Hash256, i, j uint64) {
 		for i < j && len(*roots) > 0 {
 			subtreeSize := nextSubtreeSize(i, j)
 			height := bits.TrailingZeros64(subtreeSize) // log2
@@ -306,7 +305,7 @@ func NewRangeProofVerifier(start, end uint64) *RangeProofVerifier {
 }
 
 // VerifySectorRangeProof verifies a proof produced by BuildRangeProof.
-func VerifySectorRangeProof(proof []consensus.Hash256, rangeRoots []consensus.Hash256, start, end, numRoots uint64, root consensus.Hash256) bool {
+func VerifySectorRangeProof(proof []Hash256, rangeRoots []Hash256, start, end, numRoots uint64, root Hash256) bool {
 	if numRoots == 0 {
 		return len(proof) == 0
 	} else if uint64(len(rangeRoots)) != end-start {
@@ -338,7 +337,7 @@ func VerifySectorRangeProof(proof []consensus.Hash256, rangeRoots []consensus.Ha
 }
 
 // VerifyAppendProof verifies a proof produced by BuildAppendProof.
-func VerifyAppendProof(numLeaves uint64, treeHashes []consensus.Hash256, sectorRoot, oldRoot, newRoot consensus.Hash256) bool {
+func VerifyAppendProof(numLeaves uint64, treeHashes []Hash256, sectorRoot, oldRoot, newRoot Hash256) bool {
 	acc := proofAccumulator{numLeaves: numLeaves}
 	for i := range acc.trees {
 		if acc.hasNodeAtHeight(i) && len(treeHashes) > 0 {
@@ -353,8 +352,8 @@ func VerifyAppendProof(numLeaves uint64, treeHashes []consensus.Hash256, sectorR
 	return acc.root() == newRoot
 }
 
-func precomputeAppendRoots(actions []RPCWriteAction) []consensus.Hash256 {
-	var roots []consensus.Hash256
+func precomputeAppendRoots(actions []RPCWriteAction) []Hash256 {
+	var roots []Hash256
 	for _, action := range actions {
 		if action.Type == RPCWriteActionAppend {
 			roots = append(roots, SectorRoot((*[SectorSize]byte)(action.Data)))
@@ -366,8 +365,8 @@ func precomputeAppendRoots(actions []RPCWriteAction) []consensus.Hash256 {
 // VerifyDiffProof verifies a proof produced by BuildDiffProof. ActionUpdate is
 // not supported. If appendRoots is non-nil, it is assumed to contain the
 // precomputed SectorRoots of all Append actions.
-func VerifyDiffProof(actions []RPCWriteAction, numLeaves uint64, treeHashes, leafHashes []consensus.Hash256, oldRoot, newRoot consensus.Hash256, appendRoots []consensus.Hash256) bool {
-	verifyMulti := func(proofIndices []uint64, treeHashes, leafHashes []consensus.Hash256, numLeaves uint64, root consensus.Hash256) bool {
+func VerifyDiffProof(actions []RPCWriteAction, numLeaves uint64, treeHashes, leafHashes []Hash256, oldRoot, newRoot Hash256, appendRoots []Hash256) bool {
+	verifyMulti := func(proofIndices []uint64, treeHashes, leafHashes []Hash256, numLeaves uint64, root Hash256) bool {
 		var acc proofAccumulator
 		insertRange := func(i, j uint64) {
 			for i < j {
@@ -468,7 +467,7 @@ func modifyProofRanges(proofIndices []uint64, actions []RPCWriteAction, numSecto
 
 // modifyLeaves modifies the leaf hashes of a Merkle diff proof to verify a
 // post-modification Merkle diff proof for the specified actions.
-func modifyLeaves(leafHashes []consensus.Hash256, actions []RPCWriteAction, numSectors uint64, appendRoots []consensus.Hash256) []consensus.Hash256 {
+func modifyLeaves(leafHashes []Hash256, actions []RPCWriteAction, numSectors uint64, appendRoots []Hash256) []Hash256 {
 	// determine which sector index corresponds to each leaf hash
 	var indices []uint64
 	for _, action := range actions {
@@ -498,11 +497,11 @@ func modifyLeaves(leafHashes []consensus.Hash256, actions []RPCWriteAction, numS
 		}
 		indexMap[index] = uint64(len(indexMap))
 	}
-	leafHashes = append([]consensus.Hash256(nil), leafHashes...)
+	leafHashes = append([]Hash256(nil), leafHashes...)
 	for _, action := range actions {
 		switch action.Type {
 		case RPCWriteActionAppend:
-			var root consensus.Hash256
+			var root Hash256
 			if len(appendRoots) > 0 {
 				root, appendRoots = appendRoots[0], appendRoots[1:]
 			} else {

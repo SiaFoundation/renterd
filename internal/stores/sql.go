@@ -59,6 +59,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 		// Create the tables.
 		tables := []interface{}{
 			// bus.ContractStore tables
+			&dbArchivedContract{},
 			&dbContract{},
 			&dbFileContractRevision{},
 			&dbValidSiacoinOutput{},

@@ -212,12 +212,14 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		err = c.ap.bus.AddContract(contract)
+		err = c.ap.bus.AddRenewedContract(contract, renew.ID)
 		if err != nil {
 			return nil, err
 		}
 
 		// persist the metadata
+		// TODO: instead of updating the metadata separately,
+		// AddRenewedContract should do that.
 		metadata := bus.ContractMetadata{RenewedFrom: renew.ID, TotalCost: renterFunds}
 		err = c.ap.bus.UpdateContractMetadata(contract.ID(), metadata)
 		if err != nil {
@@ -312,6 +314,8 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		}
 
 		// persist the metadata
+		// TODO: Instead of doing a separate metadata update,
+		// AddContract should already save the metadata.
 		metadata := bus.ContractMetadata{TotalCost: renterFunds}
 		err = c.ap.bus.UpdateContractMetadata(contract.ID(), metadata)
 		if err != nil {

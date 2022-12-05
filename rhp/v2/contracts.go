@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/big"
 
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
@@ -14,20 +13,20 @@ import (
 
 // A TransactionSigner can sign transaction inputs.
 type TransactionSigner interface {
-	SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error
+	SignTransaction(cs ConsensusState, txn *types.Transaction, toSign []types.OutputID) error
 }
 
 // A SingleKeySigner signs transaction using a single key.
-type SingleKeySigner consensus.PrivateKey
+type SingleKeySigner PrivateKey
 
 // SignTransaction implements TransactionSigner.
-func (s SingleKeySigner) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID) error {
+func (s SingleKeySigner) SignTransaction(cs ConsensusState, txn *types.Transaction, toSign []types.OutputID) error {
 outer:
 	for _, id := range toSign {
 		for i := range txn.TransactionSignatures {
 			ts := &txn.TransactionSignatures[i]
 			if ts.ParentID == crypto.Hash(id) {
-				sig := consensus.PrivateKey(s).SignHash(cs.InputSigHash(*txn, i))
+				sig := PrivateKey(s).SignHash(cs.InputSigHash(*txn, i))
 				ts.Signature = sig[:]
 				continue outer
 			}
@@ -37,7 +36,7 @@ outer:
 	return nil
 }
 
-func hashRevision(rev types.FileContractRevision) consensus.Hash256 {
+func hashRevision(rev types.FileContractRevision) Hash256 {
 	or := (*objFileContractRevision)(&rev)
 	var b objBuffer
 	b.buf = *bytes.NewBuffer(make([]byte, 0, 1024))
@@ -52,7 +51,7 @@ func ContractFormationCost(fc types.FileContract, contractFee types.Currency) ty
 }
 
 // PrepareContractFormation constructs a contract formation transaction.
-func PrepareContractFormation(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
+func PrepareContractFormation(renterKey PrivateKey, hostKey PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
 	renterPubkey := renterKey.PublicKey()
 	uc := types.UnlockConditions{
 		PublicKeys: []types.SiaPublicKey{
@@ -96,7 +95,7 @@ func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) type
 }
 
 // PrepareContractRenewal constructs a contract renewal transaction.
-func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
+func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
 	// calculate "base" price and collateral -- the storage cost and collateral
 	// contribution for the amount of data already in contract. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.
@@ -163,7 +162,7 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 }
 
 // RPCFormContract forms a contract with a host.
-func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, txnSet []types.Transaction) (_ Contract, _ []types.Transaction, err error) {
+func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, hostKey PublicKey, txnSet []types.Transaction) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
 
 	// strip our signatures before sending
@@ -250,7 +249,7 @@ func RPCFormContract(t *Transport, cs consensus.State, renterKey consensus.Priva
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host. The old contract is "cleared," reverting its
 // filesize to zero.
-func (s *Session) RenewContract(cs consensus.State, txnSet []types.Transaction, finalPayment types.Currency) (_ Contract, _ []types.Transaction, err error) {
+func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, finalPayment types.Currency) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 
 	// strip our signatures before sending
