@@ -12,6 +12,10 @@ import (
 // TestNewTestCluster is a smoke test for creating a cluster of Nodes for
 // testing and shutting them down.
 func TestNewTestCluster(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
 	cluster, err := newTestCluster(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -21,6 +25,11 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
+
+	// Add a host.
+	if err := cluster.AddHosts(1); err != nil {
+		t.Fatal(err)
+	}
 
 	// Try talking to the bus API by adding an object.
 	b := cluster.Bus

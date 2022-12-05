@@ -25,7 +25,7 @@ type (
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
 	Syncer interface {
-		Addr() string
+		SyncerAddress() (string, error)
 		Peers() []string
 		Connect(addr string) error
 		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
@@ -86,17 +86,31 @@ type (
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
 		SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error)
 	}
+
+	// A Miner mines blocks and submits them to the network.
+	Miner interface {
+		Mine(addr types.UnlockHash, n int) error
+	}
 )
 
 type bus struct {
 	s   Syncer
 	cm  ChainManager
+	m   Miner
 	tp  TransactionPool
 	w   Wallet
 	hdb HostDB
 	cs  ContractStore
 	css ContractSetStore
 	os  ObjectStore
+}
+
+func (b *bus) syncerAddrHandler(jc jape.Context) {
+	addr, err := b.s.SyncerAddress()
+	if jc.Check("failed to fetch syncer's address", err) != nil {
+		return
+	}
+	jc.Encode(addr)
 }
 
 func (b *bus) syncerPeersHandler(jc jape.Context) {
@@ -115,6 +129,11 @@ func (b *bus) consensusStateHandler(jc jape.Context) {
 		BlockHeight: b.cm.TipState().Index.Height,
 		Synced:      b.cm.Synced(),
 	})
+}
+
+func (b *bus) txpoolFeeHandler(jc jape.Context) {
+	fee := b.tp.RecommendedFee()
+	jc.Encode(fee)
 }
 
 func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
@@ -556,11 +575,32 @@ func (b *bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	}
 }
 
-// New returns an HTTP handler that serves the bus API.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) http.Handler {
+// TODO: ideally we can get rid of this handler again once we have a way to
+// subscribe to consensus through the API and submit blocks through the API.
+func (b *bus) minerMineHandlerPOST(jc jape.Context) {
+	if b.m == nil {
+		jc.ResponseWriter.WriteHeader(http.StatusNotFound) // miner not enabled
+		return
+	}
+	var uh types.UnlockHash
+	if jc.DecodeParam("unlockhash", &uh) != nil {
+		return
+	}
+	var n int
+	if jc.DecodeForm("numBlocks", &n) != nil {
+		return
+	}
+	if jc.Check("failed to mine blocks", b.m.Mine(uh, n)) != nil {
+		return
+	}
+}
+
+// New returns a new Bus.
+func New(s Syncer, cm ChainManager, m Miner, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) http.Handler {
 	b := &bus{
 		s:   s,
 		cm:  cm,
+		m:   m,
 		tp:  tp,
 		w:   w,
 		hdb: hdb,
@@ -569,13 +609,15 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		os:  os,
 	}
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
 
 		"GET    /consensus/state": b.consensusStateHandler,
 
-		"GET    /txpool/transactions": b.txpoolTransactionsHandler,
-		"POST   /txpool/broadcast":    b.txpoolBroadcastHandler,
+		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
+		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
+		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
 
 		"GET    /wallet/balance":       b.walletBalanceHandler,
 		"GET    /wallet/address":       b.walletAddressHandler,
@@ -612,5 +654,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /migration/slabs":    b.objectsMigrationSlabsHandlerGET,
 		"GET    /migration/slab/:id": b.objectsMigrationSlabHandlerGET,
 		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
+
+		"POST   /mine/:unlockhash": b.minerMineHandlerPOST,
 	})
 }
