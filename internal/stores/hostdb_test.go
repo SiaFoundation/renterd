@@ -10,17 +10,8 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
+	"gorm.io/gorm"
 )
-
-// addTestHost adds a host to the db by creating a fake interaction for it.
-func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
-	return s.RecordInteraction(hk, hostdb.Interaction{
-		Timestamp: time.Now(),
-		Type:      "foo1",
-
-		Result: []byte{1},
-	})
-}
 
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
 // SQLite DB.
@@ -33,33 +24,56 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal("wrong ccid", ccid, modules.ConsensusChangeBeginning)
 	}
 
-	// Create a host and 2 interactions. One interaction is an hour in the
-	// past and one is an hour in the future.
-	hostKey := consensus.GeneratePrivateKey().PublicKey()
+	// Try to fetch a random host. Should fail.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	_, err = hdb.Host(hk)
+	if !errors.Is(err, ErrHostNotFound) {
+		t.Fatal(err)
+	}
+
+	// Add the host
+	err = hdb.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert it's returned
+	allHosts, err := hdb.Hosts(time.Now(), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allHosts) != 1 || allHosts[0].PublicKey != hk {
+		t.Fatal("unexpected result", len(allHosts))
+	}
+
+	// Add an interaction one hour in the past
 	currentTime := time.Now().UTC().Round(time.Second)
 	hi1 := hostdb.Interaction{
-		Timestamp: currentTime,
+		Timestamp: currentTime.Add(-time.Hour),
 		Type:      "foo1",
 
 		Result: []byte{1},
 	}
+	if err := hdb.RecordInteraction(hk, hi1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert it's excluded from the return set if we pass a `notSince` before the interaction
+	allHosts, err = hdb.Hosts(time.Now().Add(-2*time.Hour), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allHosts) != 0 {
+		t.Fatal("unexpected result", len(allHosts))
+	}
+
+	// Add another interaction.
 	hi2 := hostdb.Interaction{
 		Timestamp: currentTime,
 		Type:      "foo2",
 		Result:    []byte{2},
 	}
-
-	// Try to fetch the host. Should fail.
-	_, err = hdb.Host(hostKey)
-	if !errors.Is(err, ErrHostNotFound) {
-		t.Fatal(err)
-	}
-
-	// Add the interactions to the db.
-	if err := hdb.RecordInteraction(hostKey, hi1); err != nil {
-		t.Fatal(err)
-	}
-	if err := hdb.RecordInteraction(hostKey, hi2); err != nil {
+	if err := hdb.RecordInteraction(hk, hi2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,7 +103,7 @@ func TestSQLHostDB(t *testing.T) {
 		Timestamp:  time.Now().UTC().Round(time.Second),
 		NetAddress: "host.com",
 	}
-	err = insertAnnouncement(hdb.db, hostKey, a)
+	err = insertAnnouncement(hdb.db, hk, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +140,7 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Same thing again but with Host.
-	h2, err := hdb.Host(hostKey)
+	h2, err := hdb.Host(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +181,7 @@ func TestSQLHostDB(t *testing.T) {
 	if ccid != ccid2 {
 		t.Fatal("ccid wasn't updated", ccid, ccid2)
 	}
-	_, err = hdb2.Host(hostKey)
+	_, err = hdb2.Host(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,4 +302,12 @@ func TestSQLHosts(t *testing.T) {
 	if err1 != nil && err2 != nil && err3 != nil {
 		t.Fatal(err1, err2, err3)
 	}
+}
+
+// addTestHost ensures a host with given hostkey exists in the db.
+func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var host dbHost
+		return tx.FirstOrCreate(&host, &dbHost{PublicKey: hk}).Error
+	})
 }
