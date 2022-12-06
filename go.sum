@@ -163,6 +163,8 @@ gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130/go.mod 
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.sia.tech/jape v0.5.0 h1:6BLMZEePInWwQcJO1mcmrPBpF0QuvkrXmHSWGKeR0tY=
 go.sia.tech/jape v0.5.0/go.mod h1:bu+ka8FgKq7MNH2JRTTOjfvVNku97V4ffyKr0dKoU90=
+go.sia.tech/siad v1.5.9 h1:uhaTYAkJQxXh0NEFRIvgD+9bR/1WmKTWQOPojNPdutA=
+go.sia.tech/siad v1.5.9/go.mod h1:ifu7TjXlL9s+47DSmqeMz8LOvthALMysZkJ3Df0daAY=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/0=
 go.uber.org/zap v1.10.0/go.mod h1:vwi/ZaCAaUcBkycHslxD9B2zi4UTXhF60s6SWpuDF0Q=
