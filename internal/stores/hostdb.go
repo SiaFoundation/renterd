@@ -314,10 +314,10 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	// given time.
 	var foundHosts [][]byte
 	err := db.db.Table("hosts").
-		Joins("JOIN host_interactions ON host_interactions.db_host_id = hosts.ID").
+		Joins("LEFT JOIN host_interactions ON host_interactions.db_host_id = hosts.ID").
 		Select("Public_key").
 		Group("Public_Key").
-		Having("MAX(Timestamp) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
+		Having("IFNULL(MAX(Timestamp), 0) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
 		Limit(max).
 		Find(&foundHosts).
 		Error
