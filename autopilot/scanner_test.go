@@ -136,7 +136,7 @@ func TestScanner(t *testing.T) {
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
-	close(w.blockChan) // use blockchan to avoid NDF when checking isScanning
+	close(w.blockChan) // we have to block on a channel to avoid an NDF on the isScanning check
 
 	// immediately interrupt the scanner
 	close(s.stopChan)
