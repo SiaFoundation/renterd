@@ -27,19 +27,19 @@ func TestNewTestCluster(t *testing.T) {
 	}()
 
 	// Add a host.
+	b := cluster.Bus
 	if err := cluster.AddHosts(1); err != nil {
 		t.Fatal(err)
 	}
-
-	// Try talking to the bus API by adding an object.
-	b := cluster.Bus
 	hosts, err := b.AllHosts()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hosts) != 0 {
-		t.Fatal("shouldn't have any hosts")
+	if len(hosts) != 1 {
+		t.Fatal("should have one host but got", len(hosts))
 	}
+
+	// Try talking to the bus API by adding an object.
 	err = b.AddObject("/foo", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
