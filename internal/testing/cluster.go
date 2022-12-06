@@ -244,7 +244,6 @@ func (c *TestCluster) AddHosts(n int) error {
 		newHosts = append(newHosts, n)
 
 		// Connect gateways.
-		time.Sleep(time.Second * 5)
 		if err := c.Bus.SyncerConnect(string(n.GatewayAddress())); err != nil {
 			return err
 		}

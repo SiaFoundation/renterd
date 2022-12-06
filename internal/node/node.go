@@ -190,6 +190,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		if err := cm.ConsensusSetSubscribe(m, ccid, nil); err != nil {
 			return nil, nil, err
 		}
+		tp.TransactionPoolSubscribe(m)
 	}
 
 	contractsDir := filepath.Join(dir, "contracts")
