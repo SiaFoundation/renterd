@@ -131,7 +131,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		Worker: worker.NewClient(workerAddr, workerPassword),
 
 		cleanups:  cleanups,
-		shutdowns: []func(context.Context) error{busServer.Shutdown, workerServer.Shutdown}, //, autopilotServer.Shutdown},
+		shutdowns: []func(context.Context) error{busServer.Shutdown, workerServer.Shutdown, autopilotServer.Shutdown},
 	}
 
 	// Spin up the servers.
@@ -294,10 +294,23 @@ func (c *TestCluster) AddHosts(n int) error {
 		return err
 	}
 
-	// TODO: wait for hosts to show up in hostdb.
+	// Sync cluster.
+	if err := c.Sync(); err != nil {
+		return err
+	}
 
-	// Return once the whole cluster is synced.
-	return c.Sync()
+	// Hosts should show up in hostdb.
+	for _, h := range newHosts {
+		hpk, err := h.HostPublicKey()
+		if err != nil {
+			return err
+		}
+		_, err = c.Bus.Host(consensus.PublicKey(hpk.ToPublicKey()))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close performs the cleanup on all servers of the cluster.

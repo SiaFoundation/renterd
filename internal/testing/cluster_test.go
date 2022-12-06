@@ -31,13 +31,6 @@ func TestNewTestCluster(t *testing.T) {
 	if err := cluster.AddHosts(1); err != nil {
 		t.Fatal(err)
 	}
-	hosts, err := b.AllHosts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 1 {
-		t.Fatal("should have one host but got", len(hosts))
-	}
 
 	// Try talking to the bus API by adding an object.
 	err = b.AddObject("/foo", object.Object{
