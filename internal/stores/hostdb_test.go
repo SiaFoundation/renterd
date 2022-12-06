@@ -57,13 +57,14 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Assert it's excluded from the return set if we pass a `notSince` before the interaction
+	// Assert we can include/exclude the host if we play around with the notSince param
 	allHosts, err = hdb.Hosts(time.Now().Add(-2*time.Hour), -1)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(allHosts) != 0 {
+		t.Fatal("unexpected result", err, len(allHosts))
 	}
-	if len(allHosts) != 0 {
-		t.Fatal("unexpected result", len(allHosts))
+	allHosts, err = hdb.Hosts(time.Now().Add(-30*time.Minute), -1)
+	if err != nil || len(allHosts) != 1 || allHosts[0].PublicKey != hk {
+		t.Fatal("unexpected result", err, len(allHosts))
 	}
 
 	// Add another interaction.
