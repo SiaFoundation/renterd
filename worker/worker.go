@@ -7,9 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
@@ -17,9 +21,68 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/types"
 )
+
+// parseRange parses a Range header string as per RFC 7233. Only the first range
+// is returned. If no range is specified, parseRange returns 0, size.
+func parseRange(s string, size int64) (offset, length int64, _ error) {
+	if s == "" {
+		return 0, size, nil
+	}
+	const b = "bytes="
+	if !strings.HasPrefix(s, b) {
+		return 0, 0, errors.New("invalid range")
+	}
+	rs := strings.Split(s[len(b):], ",")
+	if len(rs) == 0 {
+		return 0, 0, errors.New("invalid range")
+	}
+	ra := strings.TrimSpace(rs[0])
+	if ra == "" {
+		return 0, 0, errors.New("invalid range")
+	}
+	i := strings.Index(ra, "-")
+	if i < 0 {
+		return 0, 0, errors.New("invalid range")
+	}
+	start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
+	if start == "" {
+		if end == "" || end[0] == '-' {
+			return 0, 0, errors.New("invalid range")
+		}
+		i, err := strconv.ParseInt(end, 10, 64)
+		if i < 0 || err != nil {
+			return 0, 0, errors.New("invalid range")
+		}
+		if i > size {
+			i = size
+		}
+		offset = size - i
+		length = size - offset
+	} else {
+		i, err := strconv.ParseInt(start, 10, 64)
+		if err != nil || i < 0 {
+			return 0, 0, errors.New("invalid range")
+		} else if i >= size {
+			return 0, 0, errors.New("invalid range")
+		}
+		offset = i
+		if end == "" {
+			length = size - offset
+		} else {
+			i, err := strconv.ParseInt(end, 10, 64)
+			if err != nil || offset > i {
+				return 0, 0, errors.New("invalid range")
+			}
+			if i >= size {
+				i = size - 1
+			}
+			length = i - offset + 1
+		}
+	}
+	return offset, length, nil
+}
 
 type ephemeralMetricsRecorder struct {
 	ms []metrics.Metric
@@ -116,14 +179,14 @@ type Bus interface {
 	DeleteObject(key string) error
 }
 
-// A Worker talks to Sia hosts to perform contract and storage operations within
+// A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
-type Worker struct {
+type worker struct {
 	bus  Bus
 	pool *sessionPool
 }
 
-func (w *Worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) {
+func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) {
 	hi := hostdb.Interaction{
 		Timestamp: time.Now(),
 		Type:      "scan",
@@ -138,7 +201,7 @@ func (w *Worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSett
 	_ = w.bus.RecordHostInteraction(hostKey, hi)
 }
 
-func (w *Worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
+func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
 		// TODO: send all interactions in one request
@@ -174,7 +237,7 @@ func (w *Worker) withTransportV2(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *Worker) withTransportV3(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
+func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
 	conn, err := dial(ctx, hostIP, hostKey)
 	if err != nil {
 		return err
@@ -201,7 +264,7 @@ func (w *Worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *Worker) withHosts(ctx context.Context, contracts []Contract, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []Contract, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
@@ -229,48 +292,138 @@ func (w *Worker) withHosts(ctx context.Context, contracts []Contract, fn func([]
 	return err
 }
 
-func (w *Worker) Settings(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (settings rhpv2.HostSettings, err error) {
-	err = w.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
+func (w *worker) rhpPrepareFormHandler(jc jape.Context) {
+	var rpfr RHPPrepareFormRequest
+	if jc.Decode(&rpfr) != nil {
+		return
+	}
+	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
+	cost := rhpv2.ContractFormationCost(fc, rpfr.HostSettings.ContractPrice)
+	jc.Encode(RHPPrepareFormResponse{
+		Contract: fc,
+		Cost:     cost,
+	})
+}
+
+func (w *worker) rhpPrepareRenewHandler(jc jape.Context) {
+	var rprr RHPPrepareRenewRequest
+	if jc.Decode(&rprr) != nil {
+		return
+	}
+	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
+	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
+	finalPayment := rprr.HostSettings.BaseRPCPrice
+	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
+		finalPayment = rprr.Contract.ValidRenterPayout()
+	}
+	jc.Encode(RHPPrepareRenewResponse{
+		Contract:     fc,
+		Cost:         cost,
+		FinalPayment: finalPayment,
+	})
+}
+
+func (w *worker) rhpPreparePaymentHandler(jc jape.Context) {
+	var rppr RHPPreparePaymentRequest
+	if jc.Decode(&rppr) == nil {
+		jc.Encode(rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey))
+	}
+}
+
+func (w *worker) rhpScanHandler(jc jape.Context) {
+	var rsr RHPScanRequest
+	if jc.Decode(&rsr) != nil {
+		return
+	}
+
+	ctx := jc.Request.Context()
+	if rsr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), rsr.Timeout)
+		defer cancel()
+	}
+
+	var settings rhpv2.HostSettings
+	start := time.Now()
+	err := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
 		settings, err = rhpv2.RPCSettings(ctx, t)
 		return err
 	})
-	w.recordScan(hostKey, settings, err)
-	return
-}
+	elapsed := time.Since(start)
+	w.recordScan(rsr.HostKey, settings, err)
 
-func (w *Worker) FormContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, txns []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
-	var contract rhpv2.Contract
-	var txnSet []types.Transaction
-	err := w.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		var err error
-		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, renterKey, hostKey, txns)
-		return err
+	if jc.Check("couldn't scan host", err) != nil {
+		return
+	}
+	jc.Encode(RHPScanResponse{
+		Settings: settings,
+		Ping:     Duration(elapsed),
 	})
-	return contract, txnSet, err
 }
 
-func (w *Worker) RenewContract(ctx context.Context, cs consensus.State, hostIP string, hostKey consensus.PublicKey, renterKey consensus.PrivateKey, contractID types.FileContractID, txns []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
+func (w *worker) rhpFormHandler(jc jape.Context) {
+	var rfr RHPFormRequest
+	if jc.Decode(&rfr) != nil {
+		return
+	}
+	var cs consensus.State
+	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
+
 	var contract rhpv2.Contract
 	var txnSet []types.Transaction
-	err := w.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		session, err := rhpv2.RPCLock(ctx, t, contractID, renterKey, 5*time.Second)
+	err := w.withTransportV2(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
+		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, rfr.RenterKey, rfr.TransactionSet)
+		return
+	})
+	if jc.Check("couldn't form contract", err) != nil {
+		return
+	}
+	jc.Encode(RHPFormResponse{
+		ContractID:     contract.ID(),
+		Contract:       contract,
+		TransactionSet: txnSet,
+	})
+}
+
+func (w *worker) rhpRenewHandler(jc jape.Context) {
+	var rrr RHPRenewRequest
+	if jc.Decode(&rrr) != nil {
+		return
+	}
+	var cs consensus.State
+	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
+
+	var contract rhpv2.Contract
+	var txnSet []types.Transaction
+	err := w.withTransportV2(jc.Request.Context(), rrr.HostIP, rrr.HostKey, func(t *rhpv2.Transport) error {
+		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rrr.ContractID, rrr.RenterKey, 5*time.Second)
 		if err != nil {
 			return err
 		}
-		contract, txnSet, err = session.RenewContract(cs, txns, finalPayment)
+		contract, txnSet, err = session.RenewContract(cs, rrr.TransactionSet, rrr.FinalPayment)
 		return err
 	})
-	return contract, txnSet, err
+	if jc.Check("couldn't renew contract", err) != nil {
+		return
+	}
+	jc.Encode(RHPRenewResponse{
+		ContractID:     contract.ID(),
+		Contract:       contract,
+		TransactionSet: txnSet,
+	})
 }
 
-func (w *Worker) FundAccount(ctx context.Context, hostIP string, hostKey consensus.PublicKey, contract types.FileContractRevision, renterKey consensus.PrivateKey, account rhpv3.Account, amount types.Currency) (rhpv2.Contract, error) {
-	var renterSig, hostSig consensus.Signature
-	err := w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) (err error) {
+func (w *worker) rhpFundHandler(jc jape.Context) {
+	var rfr RHPFundRequest
+	if jc.Decode(&rfr) != nil {
+		return
+	}
+	err := w.withTransportV3(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 		// The FundAccount RPC requires a SettingsID, which we also have to pay
 		// for. To simplify things, we pay for the SettingsID using the full
 		// amount, with the "refund" going to the desired account; we then top
 		// up the account to cover the cost of the two RPCs.
-		payment, ok := rhpv3.PayByContract(&contract, amount, account, renterKey)
+		payment, ok := rhpv3.PayByContract(&rfr.Contract, rfr.Amount, rfr.Account, rfr.RenterKey)
 		if !ok {
 			return errors.New("insufficient funds")
 		}
@@ -278,93 +431,152 @@ func (w *Worker) FundAccount(ctx context.Context, hostIP string, hostKey consens
 		if err != nil {
 			return err
 		}
-		payment, ok = rhpv3.PayByContract(&contract, priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost), rhpv3.ZeroAccount, renterKey)
+		payment, ok = rhpv3.PayByContract(&rfr.Contract, priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost), rhpv3.ZeroAccount, rfr.RenterKey)
 		if !ok {
 			return errors.New("insufficient funds")
 		}
-		err = rhpv3.RPCFundAccount(t, &payment, account, priceTable.ID)
-		renterSig, hostSig = payment.Signature, payment.HostSignature
-		return
+		return rhpv3.RPCFundAccount(t, &payment, rfr.Account, priceTable.ID)
 	})
-	if err != nil {
-		return rhpv2.Contract{}, err
+	if jc.Check("couldn't fund account", err) != nil {
+		return
 	}
-	return rhpv2.Contract{
-		Revision: contract,
-		Signatures: [2]types.TransactionSignature{
-			{
-				ParentID:       crypto.Hash(contract.ID()),
-				CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
-				PublicKeyIndex: 0,
-				Signature:      renterSig[:],
-			},
-			{
-				ParentID:       crypto.Hash(contract.ID()),
-				CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
-				PublicKeyIndex: 1,
-				Signature:      hostSig[:],
-			},
-		},
-	}, nil
 }
 
-func (w *Worker) ReadRegistry(ctx context.Context, hostIP string, hostKey consensus.PublicKey, payment rhpv3.PaymentMethod, registryKey rhpv3.RegistryKey) (rhpv3.RegistryValue, error) {
+func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
+	var rrrr RHPRegistryReadRequest
+	if jc.Decode(&rrrr) != nil {
+		return
+	}
 	var value rhpv3.RegistryValue
-	err := w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) (err error) {
-		value, err = rhpv3.RPCReadRegistry(t, payment, registryKey)
+	err := w.withTransportV3(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
+		value, err = rhpv3.RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
-	return value, err
+	if jc.Check("couldn't read registry", err) != nil {
+		return
+	}
+	jc.Encode(value)
 }
 
-func (w *Worker) UpdateRegistry(ctx context.Context, hostIP string, hostKey consensus.PublicKey, payment rhpv3.PaymentMethod, registryKey rhpv3.RegistryKey, registryValue rhpv3.RegistryValue) error {
-	return w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) (err error) {
-		return rhpv3.RPCUpdateRegistry(t, payment, registryKey, registryValue)
+func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
+	var rrur RHPRegistryUpdateRequest
+	if jc.Decode(&rrur) != nil {
+		return
+	}
+	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
+		return rhpv3.RPCUpdateRegistry(t, &rrur.Payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
+	if jc.Check("couldn't update registry", err) != nil {
+		return
+	}
 }
 
-func (w *Worker) UploadSlab(ctx context.Context, r io.Reader, m, n uint8, currentHeight uint64, contracts []Contract, usedHosts map[consensus.PublicKey]types.FileContractID) (s object.Slab, err error) {
-	w.pool.setCurrentHeight(currentHeight)
-	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		s, err = uploadSlab(ctx, r, m, n, hosts)
-		for _, host := range hosts {
-			usedHosts[host.PublicKey()] = host.Contract()
-		}
+func (w *worker) slabsUploadHandler(jc jape.Context) {
+	jc.Custom((*[]byte)(nil), object.Slab{})
+
+	var sur SlabsUploadRequest
+	dec := json.NewDecoder(jc.Request.Body)
+	if err := dec.Decode(&sur); err != nil {
+		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	r := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
+	w.pool.setCurrentHeight(sur.CurrentHeight)
+	var slab object.Slab
+	err := w.withHosts(jc.Request.Context(), sur.Contracts, func(hosts []sectorStore) (err error) {
+		slab, err = uploadSlab(jc.Request.Context(), r, sur.MinShards, sur.TotalShards, hosts)
 		return err
 	})
-	return
+	if jc.Check("couldn't upload slab", err) != nil {
+		return
+	}
+	jc.Encode(slab)
 }
 
-func (w *Worker) DownloadSlab(ctx context.Context, dst io.Writer, s object.SlabSlice, contracts []Contract) (err error) {
-	return w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return downloadSlab(ctx, dst, s, hosts)
+func (w *worker) slabsDownloadHandler(jc jape.Context) {
+	jc.Custom(&SlabsDownloadRequest{}, []byte{})
+
+	var sdr SlabsDownloadRequest
+	if jc.Decode(&sdr) != nil {
+		return
+	}
+
+	err := w.withHosts(jc.Request.Context(), sdr.Contracts, func(hosts []sectorStore) error {
+		return downloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, hosts)
 	})
+	if jc.Check("couldn't download slabs", err) != nil {
+		return
+	}
 }
 
-func (w *Worker) DeleteSlabs(ctx context.Context, slabs []object.Slab, contracts []Contract) (err error) {
-	return w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return deleteSlabs(ctx, slabs, hosts)
+func (w *worker) slabsMigrateHandler(jc jape.Context) {
+	var smr SlabsMigrateRequest
+	if jc.Decode(&smr) != nil {
+		return
+	}
+
+	w.pool.setCurrentHeight(smr.CurrentHeight)
+	err := w.withHosts(jc.Request.Context(), append(smr.From, smr.To...), func(hosts []sectorStore) error {
+		return migrateSlab(jc.Request.Context(), &smr.Slab, hosts[:len(smr.From)], hosts[len(smr.From):])
 	})
+	if jc.Check("couldn't migrate slabs", err) != nil {
+		return
+	}
+
+	// TODO: After migration, we need to notify the bus of the changes to the slab.
+
+	jc.Encode(smr.Slab)
 }
 
-func (w *Worker) MigrateSlab(ctx context.Context, s *object.Slab, currentHeight uint64, from, to []Contract) (err error) {
-	w.pool.setCurrentHeight(currentHeight)
-	return w.withHosts(ctx, append(from, to...), func(hosts []sectorStore) error {
-		from, to := hosts[:len(from)], hosts[len(from):]
-		return migrateSlab(ctx, s, from, to)
+func (w *worker) slabsDeleteHandler(jc jape.Context) {
+	var sdr SlabsDeleteRequest
+	if jc.Decode(&sdr) != nil {
+		return
+	}
+	err := w.withHosts(jc.Request.Context(), sdr.Contracts, func(hosts []sectorStore) error {
+		return deleteSlabs(jc.Request.Context(), sdr.Slabs, hosts)
 	})
+	if jc.Check("couldn't delete slabs", err) != nil {
+		return
+	}
 }
 
-func (w *Worker) Object(key string) (object.Object, []string, error) {
-	return w.bus.Object(key)
-}
+func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
+	jc.Custom(nil, []string{})
 
-func (w *Worker) DownloadObject(ctx context.Context, dst io.Writer, o object.Object, offset, length int64) error {
-	cw := o.Key.Decrypt(dst, offset)
+	o, es, err := w.bus.Object(jc.PathParam("key"))
+	if jc.Check("couldn't get object or entries", err) != nil {
+		return
+	}
+	if len(es) > 0 {
+		jc.Encode(es)
+		return
+	}
+
+	// NOTE: ideally we would use http.ServeContent in this handler, but that
+	// has performance issues. If we implemented io.ReadSeeker in the most
+	// straightforward fashion, we would need one (or more!) RHP RPCs for each
+	// Read call. We can improve on this to some degree by buffering, but
+	// without knowing the exact ranges being requested, this will always be
+	// suboptimal. Thus, sadly, we have to roll our own range support.
+	offset, length, err := parseRange(jc.Request.Header.Get("Range"), o.Size())
+	if err != nil {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	if length < o.Size() {
+		jc.ResponseWriter.WriteHeader(http.StatusPartialContent)
+		jc.ResponseWriter.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, o.Size()))
+	}
+	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+
+	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
 	for _, ss := range slabsForDownload(o.Slabs, offset, length) {
 		contracts, err := w.bus.ContractsForSlab(ss.Shards)
 		if err != nil {
-			return err
+			_ = err // NOTE: can't write error because we may have already written to the response
+			return
 		}
 		cs := make([]Contract, len(contracts))
 		for i, c := range contracts {
@@ -375,14 +587,19 @@ func (w *Worker) DownloadObject(ctx context.Context, dst io.Writer, o object.Obj
 				RenterKey: nil, // TODO
 			}
 		}
-		if err := w.DownloadSlab(ctx, cw, ss, cs); err != nil {
-			return err
+		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
+			return downloadSlab(jc.Request.Context(), cw, ss, hosts)
+		})
+		if err != nil {
+			_ = err // NOTE: can't write error because we may have already written to the response
+			return
 		}
 	}
-	return nil
 }
 
-func (w *Worker) AddObject(ctx context.Context, key string, r io.Reader) error {
+func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
+	jc.Custom((*[]byte)(nil), nil)
+
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
 	}
@@ -393,11 +610,17 @@ func (w *Worker) AddObject(ctx context.Context, key string, r io.Reader) error {
 	var currentHeight uint64 = 0   // TODO
 	usedHosts := make(map[consensus.PublicKey]types.FileContractID)
 	for {
-		s, err := w.UploadSlab(ctx, r, minShards, totalShards, currentHeight, contracts, usedHosts)
+		r := io.LimitReader(jc.Request.Body, int64(minShards)*rhpv2.SectorSize)
+		w.pool.setCurrentHeight(currentHeight)
+		var s object.Slab
+		err := w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) (err error) {
+			s, err = uploadSlab(jc.Request.Context(), r, minShards, totalShards, hosts)
+			return err
+		})
 		if err == io.EOF {
 			break
-		} else if err != nil {
-			return fmt.Errorf("couldn't upload slab: %w", err)
+		} else if jc.Check("couldn't upload slab", err) != nil {
+			return
 		}
 		slabs = append(slabs, s)
 	}
@@ -405,17 +628,39 @@ func (w *Worker) AddObject(ctx context.Context, key string, r io.Reader) error {
 	var length int = 0 // TODO
 	o.Slabs = object.SingleSlabs(slabs, length)
 
-	return w.bus.AddObject(key, o, usedHosts)
+	if jc.Check("couldn't add object", w.bus.AddObject(jc.PathParam("key"), o, usedHosts)) != nil {
+		return
+	}
 }
 
-func (w *Worker) DeleteObject(key string) error {
-	return w.bus.DeleteObject(key)
+func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
+	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-// New returns a new Worker.
-func New(masterKey [32]byte, b Bus) *Worker {
-	return &Worker{
+// New returns an HTTP handler that serves the worker API.
+func New(masterKey [32]byte, b Bus) http.Handler {
+	w := &worker{
 		bus:  b,
 		pool: newSessionPool(),
 	}
+	return jape.Mux(map[string]jape.Handler{
+		"POST   /rhp/prepare/form":    w.rhpPrepareFormHandler,
+		"POST   /rhp/prepare/renew":   w.rhpPrepareRenewHandler,
+		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
+		"POST   /rhp/scan":            w.rhpScanHandler,
+		"POST   /rhp/form":            w.rhpFormHandler,
+		"POST   /rhp/renew":           w.rhpRenewHandler,
+		"POST   /rhp/fund":            w.rhpFundHandler,
+		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
+
+		"POST   /slabs/upload":   w.slabsUploadHandler,
+		"POST   /slabs/download": w.slabsDownloadHandler,
+		"POST   /slabs/migrate":  w.slabsMigrateHandler,
+		"POST   /slabs/delete":   w.slabsDeleteHandler,
+
+		"GET    /objects/*key": w.objectsKeyHandlerGET,
+		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
+		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
+	})
 }

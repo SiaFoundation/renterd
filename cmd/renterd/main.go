@@ -146,11 +146,9 @@ func main() {
 			log.Fatal(err)
 		}
 		defer cleanup()
-		log.Println("bus: Listening on", b.GatewayAddress())
-		mux.sub["/api/bus"] = treeMux{h: auth(bus.NewServer(b))}
-		panic("TODO: unify bus interfaces")
-		// wb = b
-		// ab = b
+		// TODO: restore this (by calling /syncer)
+		//log.Println("bus: Listening on", b.GatewayAddress())
+		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 	}
 
 	var aw autopilot.Worker
@@ -163,9 +161,7 @@ func main() {
 			log.Fatal(err)
 		}
 		defer cleanup()
-		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
-		panic("TODO: unify worker interfaces")
-		// aw = w
+		mux.sub["/api/worker"] = treeMux{h: auth(w)}
 	}
 
 	autopilotErr := make(chan error)

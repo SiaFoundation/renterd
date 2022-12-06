@@ -162,8 +162,10 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 }
 
 // RPCFormContract forms a contract with a host.
-func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, hostKey PublicKey, txnSet []types.Transaction) (_ Contract, _ []types.Transaction, err error) {
+func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, txnSet []types.Transaction) (_ Contract, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
+
+	hostKey := t.HostKey()
 
 	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
