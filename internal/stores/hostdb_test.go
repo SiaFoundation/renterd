@@ -10,7 +10,6 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
-	"gorm.io/gorm"
 )
 
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
@@ -306,8 +305,6 @@ func TestSQLHosts(t *testing.T) {
 
 // addTestHost ensures a host with given hostkey exists in the db.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var host dbHost
-		return tx.FirstOrCreate(&host, &dbHost{PublicKey: hk}).Error
-	})
+	var host dbHost
+	return s.db.FirstOrCreate(&host, &dbHost{PublicKey: hk}).Error
 }
