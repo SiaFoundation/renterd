@@ -57,9 +57,14 @@ func (b *mockBus) counts() (success int, failed int) {
 	return
 }
 
-type mockWorker struct{}
+type mockWorker struct {
+	blockChan chan struct{}
+}
 
 func (w *mockWorker) RHPScan(hostKey consensus.PublicKey, hostIP string, _ time.Duration) (r worker.RHPScanResponse, e error) {
+	if w.blockChan != nil {
+		<-w.blockChan
+	}
 	if hostKey == testHost1 || hostKey == testHost2 {
 		e = errors.New("fail")
 	}
@@ -121,12 +126,17 @@ func TestScanner(t *testing.T) {
 	}
 
 	// reset the scanner
+	w = &mockWorker{blockChan: make(chan struct{})}
 	s = newTestScanner(b, w)
 
 	// start another scan
-	if errChan = s.tryPerformHostScan(); errChan == nil || !s.isScanning() {
+	if errChan = s.tryPerformHostScan(); errChan == nil {
 		t.Fatal("unexpected")
 	}
+	if !s.isScanning() {
+		t.Fatal("unexpected")
+	}
+	close(w.blockChan) // use blockchan to avoid NDF when checking isScanning
 
 	// immediately interrupt the scanner
 	close(s.stopChan)
