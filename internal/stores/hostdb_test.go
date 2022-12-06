@@ -306,6 +306,5 @@ func TestSQLHosts(t *testing.T) {
 
 // addTestHost ensures a host with given hostkey exists in the db.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
-	var host dbHost
-	return s.db.FirstOrCreate(&host, &dbHost{PublicKey: hk}).Error
+	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk}).Error
 }
