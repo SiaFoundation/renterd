@@ -28,23 +28,25 @@ jobs:
       - name: Test Windows 1.18 # can't run race detector on windows with go 1.18 or lower due to a bug (https://github.com/golang/go/issues/46099)
         if: matrix.os == 'windows-latest' && matrix.go-version == '1.18'
         uses: n8maninger/action-golang-test@v1
+        with:
+          args: "-short"
       - name: Test
         if: matrix.os != 'windows-latest' || matrix.go-version != '1.18'
         uses: n8maninger/action-golang-test@v1
         with:
-          args: "-race"
+          args: "-race;-short"
       - name: Test Integration Windows 1.18 # can't run race detector on windows with go 1.18 or lower due to a bug (https://github.com/golang/go/issues/46099)
         if: matrix.os == 'windows-latest' && matrix.go-version == '1.18'
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
-          args: "-race;-tags='debug testing netgo';-timeout 300s"
+          args: "-race;-tags='testing';-timeout=300s"
       - name: Test Integration
         if: matrix.os != 'windows-latest' || matrix.go-version != '1.18'
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
-          args: "-race;-tags='debug testing netgo';-timeout 300s"
+          args: "-race;-tags='testing';-timeout=300s"
       - name: Check Endpoints
         shell: bash
         run: |
