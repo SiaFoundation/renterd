@@ -40,7 +40,7 @@ jobs:
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
-          args: "-race;-tags='testing';-timeout=300s"
+          args: "-tags='testing';-timeout=300s"
       - name: Test Integration
         if: matrix.os != 'windows-latest' || matrix.go-version != '1.18'
         uses: n8maninger/action-golang-test@v1
