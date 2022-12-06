@@ -148,9 +148,8 @@ func main() {
 		defer cleanup()
 		log.Println("bus: Listening on", b.GatewayAddress())
 		mux.sub["/api/bus"] = treeMux{h: auth(bus.NewServer(b))}
-		panic("TODO: unify bus interfaces")
-		// wb = b
-		// ab = b
+		wb = bus.NewClient(*apiAddr, *apiPassword)
+		ab = bus.NewClient(*apiAddr, *apiPassword)
 	}
 
 	var aw autopilot.Worker
@@ -164,8 +163,7 @@ func main() {
 		}
 		defer cleanup()
 		mux.sub["/api/worker"] = treeMux{h: auth(worker.NewServer(w))}
-		panic("TODO: unify worker interfaces")
-		// aw = w
+		aw = worker.NewClient(*apiAddr, *apiPassword)
 	}
 
 	autopilotErr := make(chan error)
