@@ -19,6 +19,18 @@ type Client struct {
 	c jape.Client
 }
 
+// AcceptBlock submits a block to the consensus manager.
+func (c *Client) AcceptBlock(b types.Block) (err error) {
+	err = c.c.POST("/consensus/acceptblock", b, nil)
+	return
+}
+
+// SyncerAddress returns the address the syncer is listening on.
+func (c *Client) SyncerAddress() (addr string, err error) {
+	err = c.c.GET("/syncer/address", &addr)
+	return
+}
+
 // SyncerPeers returns the current peers of the syncer.
 func (c *Client) SyncerPeers() (resp []string, err error) {
 	err = c.c.GET("/syncer/peers", &resp)
@@ -65,6 +77,44 @@ func (c *Client) WalletAddress() (resp types.UnlockHash, err error) {
 func (c *Client) WalletOutputs() (resp []wallet.SiacoinElement, err error) {
 	err = c.c.GET("/wallet/outputs", &resp)
 	return
+}
+
+// estimatedSiacoinTxnSize estimates the txn size of a siacoin txn without file
+// contract given its number of outputs.
+func estimatedSiacoinTxnSize(nOutputs uint64) uint64 {
+	return 1000 + 60*nOutputs
+}
+
+// SendSiacoins is a helper method that sends siacoins to the given outputs.
+func (c *Client) SendSiacoins(scos []types.SiacoinOutput) (err error) {
+	fee, err := c.RecommendedFee()
+	if err != nil {
+		return err
+	}
+	fee = fee.Mul64(estimatedSiacoinTxnSize(uint64(len(scos))))
+
+	var value types.Currency
+	for _, sco := range scos {
+		value = value.Add(sco.Value)
+	}
+	txn := types.Transaction{
+		SiacoinOutputs: scos,
+		MinerFees:      []types.Currency{fee},
+	}
+	toSign, parents, err := c.WalletFund(&txn, value)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = c.WalletDiscard(txn)
+		}
+	}()
+	err = c.WalletSign(&txn, toSign, types.FullCoveredFields)
+	if err != nil {
+		return err
+	}
+	return c.BroadcastTransaction(append(parents, txn))
 }
 
 // WalletTransactions returns all transactions relevant to the wallet.
@@ -268,8 +318,11 @@ func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error
 func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
 	panic("unimplemented")
 }
-func (c *Client) RecommendedFee() (types.Currency, error) {
-	panic("unimplemented")
+
+// RecommendedFee returns the recommended fee for a txn.
+func (c *Client) RecommendedFee() (fee types.Currency, err error) {
+	err = c.c.GET("/txpool/recommendedfee", &fee)
+	return
 }
 
 // ContractsForSlab returns contracts that can be used to download the provided

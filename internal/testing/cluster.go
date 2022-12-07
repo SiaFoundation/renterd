@@ -3,6 +3,8 @@ package testing
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -14,6 +16,11 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/siad/modules"
+	sianode "go.sia.tech/siad/node"
+	"go.sia.tech/siad/node/api/client"
+	"go.sia.tech/siad/types"
+
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/siatest"
 	"lukechampine.com/frand"
@@ -29,17 +36,35 @@ type TestCluster struct {
 	// Autopilot *autopilot.Client // TODO: add once available
 
 	cleanups  []func() error
-	listeners []net.Listener
 	shutdowns []func(context.Context) error
 
-	dir string
-	wg  sync.WaitGroup
+	miner       *node.Miner
+	dir         string
+	gatewayAddr string
+	wg          sync.WaitGroup
 }
 
+// randomPassword creates a random 32 byte password encoded as a string.
 func randomPassword() string {
 	return hex.EncodeToString(frand.Bytes(32))
 }
 
+// Retry will call 'fn' 'tries' times, waiting 'durationBetweenAttempts'
+// between each attempt, returning 'nil' the first time that 'fn' returns nil.
+// If 'nil' is never returned, then the final error returned by 'fn' is
+// returned.
+func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (err error) {
+	for i := 1; i < tries; i++ {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+		time.Sleep(durationBetweenAttempts)
+	}
+	return fn()
+}
+
+// newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string) (*TestCluster, error) {
 	// Use shared wallet key.
 	wk := consensus.GeneratePrivateKey()
@@ -67,11 +92,20 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	busAddr := "http://" + busListener.Addr().String()
 	workerAddr := "http://" + workerListener.Addr().String()
 
+	// Create clients.
+	//autopilotClient := nil // autopilot.NewClient(autopilotAddr, autopilotPassword), // TODO
+	busClient := bus.NewClient(busAddr, busPassword)
+	workerClient := worker.NewClient(workerAddr, workerPassword)
+
+	// Create miner.
+	miner := node.NewMiner(busClient)
+
 	// Create bus.
 	var cleanups []func() error
 	b, cleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:   true,
+		Bootstrap:   false,
 		GatewayAddr: "127.0.0.1:0",
+		Miner:       miner,
 	}, busDir, wk)
 	if err != nil {
 		return nil, err
@@ -81,7 +115,6 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	busServer := http.Server{
 		Handler: busAuth(b),
 	}
-	busClient := bus.NewClient(busAddr, busPassword)
 
 	// Create worker.
 	w, cleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
@@ -93,7 +126,6 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	workerServer := http.Server{
 		Handler: workerAuth(w),
 	}
-	workerClient := worker.NewClient(workerAddr, workerPassword)
 
 	// Create autopilot.
 	ap, cleanup, err := node.NewAutopilot(node.AutopilotConfig{
@@ -109,11 +141,12 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}
 
 	cluster := &TestCluster{
-		dir: dir,
+		dir:   dir,
+		miner: miner,
 
-		// Autopilot: autopilot.NewClient(autopilotAddr, autopilotPassword), // TODO
-		Bus:    bus.NewClient(busAddr, busPassword),
-		Worker: worker.NewClient(workerAddr, workerPassword),
+		//Autopilot: autopilotClient, TODO
+		Bus:    busClient,
+		Worker: workerClient,
 
 		cleanups:  cleanups,
 		shutdowns: []func(context.Context) error{busServer.Shutdown, workerServer.Shutdown, autopilotServer.Shutdown},
@@ -135,19 +168,185 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		_ = autopilotServer.Serve(autopilotListener)
 		cluster.wg.Done()
 	}()
+
+	// Get gateway address.
+	cluster.gatewayAddr, err = busClient.SyncerAddress()
+	if err != nil {
+		return nil, err
+	}
+
+	// Fund the bus by mining beyond the foundation hardfork height.
+	if err := cluster.MineBlocks(10 + int(types.FoundationHardforkHeight)); err != nil {
+		return nil, err
+	}
 	return cluster, nil
+}
+
+// addStorageFolderToHosts adds a single storage folder to each host.
+func addStorageFolderToHost(hosts []*siatest.TestNode) error {
+	for _, host := range hosts {
+		storage := 512 * modules.SectorSize
+		if err := host.HostStorageFoldersAddPost(host.Dir, storage); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// announceHosts adds storage and a registry to each host and announces them to
+// the group
+func announceHosts(hosts []*siatest.TestNode) error {
+	for _, host := range hosts {
+		if err := host.HostModifySettingPost(client.HostParamAcceptingContracts, true); err != nil {
+			return err
+		}
+		if err := host.HostModifySettingPost(client.HostParamRegistrySize, 1<<18); err != nil {
+			return err
+		}
+		if err := host.HostAnnouncePost(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sync blocks until the cluster is synced.
+func (c *TestCluster) sync(hosts []*siatest.TestNode) error {
+	return Retry(100, 100*time.Millisecond, func() error {
+		synced, err := c.synced(hosts)
+		if err != nil {
+			return err
+		}
+		if !synced {
+			return errors.New("cluster was unable to sync in time")
+		}
+		return nil
+	})
+}
+
+// synced returns true if bus and hosts are at the same blockheight.
+func (c *TestCluster) synced(hosts []*siatest.TestNode) (bool, error) {
+	cs, err := c.Bus.ConsensusState()
+	if err != nil {
+		return false, err
+	}
+	if !cs.Synced {
+		return false, nil // can't be synced if bus itself isn't synced
+	}
+	for _, h := range hosts {
+		bh, err := h.BlockHeight()
+		if err != nil {
+			return false, err
+		}
+		if cs.BlockHeight != uint64(bh) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// MineBlocks uses the bus' miner to mine n blocks.
+func (c *TestCluster) MineBlocks(n int) error {
+	addr, err := c.Bus.WalletAddress()
+	if err != nil {
+		return err
+	}
+	return c.miner.Mine(addr, n)
 }
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
 // themselves on the network, ready to form contracts.
 func (c *TestCluster) AddHosts(n int) error {
-	panic("not implemented")
+	// Create hosts.
+	var newHosts []*siatest.TestNode
+	for i := 0; i < n; i++ {
+		hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
+		n, err := siatest.NewCleanNodeAsync(sianode.Host(hostDir))
+		if err != nil {
+			return err
+		}
+		c.hosts = append(c.hosts, n)
+		newHosts = append(newHosts, n)
+
+		// Connect gateways.
+		if err := c.Bus.SyncerConnect(string(n.GatewayAddress())); err != nil {
+			return err
+		}
+	}
+
+	// Fund host from bus.
+	balance, err := c.Bus.WalletBalance()
+	if err != nil {
+		return err
+	}
+	fundAmt := balance.Div64(2).Div64(uint64(len(newHosts))) // 50% of bus balance
+	var scos []types.SiacoinOutput
+	for _, h := range newHosts {
+		wag, err := h.WalletAddressGet()
+		if err != nil {
+			return err
+		}
+		scos = append(scos, types.SiacoinOutput{
+			Value:      fundAmt,
+			UnlockHash: wag.Address,
+		})
+	}
+	if err := c.Bus.SendSiacoins(scos); err != nil {
+		return err
+	}
+
+	// Mine transaction.
+	if err := c.MineBlocks(1); err != nil {
+		return err
+	}
+
+	// Wait for hosts to sync up with consensus.
+	if err := c.sync(newHosts); err != nil {
+		return err
+	}
+
+	// Announce hosts.
+	if err := addStorageFolderToHost(newHosts); err != nil {
+		return err
+	}
+	if err := announceHosts(newHosts); err != nil {
+		return err
+	}
+
+	// Mine a few more blocks to mine the announcements and sync the
+	// cluster.
+	if err := c.MineBlocks(5); err != nil {
+		return err
+	}
+
+	// Sync cluster.
+	if err := c.Sync(); err != nil {
+		return err
+	}
+
+	// Hosts should show up in hostdb.
+	for _, h := range newHosts {
+		hpk, err := h.HostPublicKey()
+		if err != nil {
+			return err
+		}
+		_, err = c.Bus.Host(consensus.PublicKey(hpk.ToPublicKey()))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close performs the cleanup on all servers of the cluster.
 func (c *TestCluster) Close() error {
 	for _, c := range c.cleanups {
 		if err := c(); err != nil {
+			return err
+		}
+	}
+	for _, h := range c.hosts {
+		if err := h.Close(); err != nil {
 			return err
 		}
 	}
@@ -163,4 +362,9 @@ func (c *TestCluster) Shutdown(ctx context.Context) error {
 	}
 	c.wg.Wait() // wait for servers to shut down
 	return nil
+}
+
+// Sync blocks until the whole cluster has reached the same block height.
+func (c *TestCluster) Sync() error {
+	return c.sync(c.hosts)
 }

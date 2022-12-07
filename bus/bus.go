@@ -19,13 +19,14 @@ import (
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
+		AcceptBlock(types.Block) error
 		Synced() bool
 		TipState() consensus.State
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
 	Syncer interface {
-		Addr() string
+		SyncerAddress() (string, error)
 		Peers() []string
 		Connect(addr string) error
 		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
@@ -99,6 +100,24 @@ type bus struct {
 	os  ObjectStore
 }
 
+func (b *bus) consensusAcceptBlock(jc jape.Context) {
+	var block types.Block
+	if jc.Decode(&block) != nil {
+		return
+	}
+	if jc.Check("failed to accept block", b.cm.AcceptBlock(block)) != nil {
+		return
+	}
+}
+
+func (b *bus) syncerAddrHandler(jc jape.Context) {
+	addr, err := b.s.SyncerAddress()
+	if jc.Check("failed to fetch syncer's address", err) != nil {
+		return
+	}
+	jc.Encode(addr)
+}
+
 func (b *bus) syncerPeersHandler(jc jape.Context) {
 	jc.Encode(b.s.Peers())
 }
@@ -115,6 +134,11 @@ func (b *bus) consensusStateHandler(jc jape.Context) {
 		BlockHeight: b.cm.TipState().Index.Height,
 		Synced:      b.cm.Synced(),
 	})
+}
+
+func (b *bus) txpoolFeeHandler(jc jape.Context) {
+	fee := b.tp.RecommendedFee()
+	jc.Encode(fee)
 }
 
 func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
@@ -556,7 +580,7 @@ func (b *bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	}
 }
 
-// New returns an HTTP handler that serves the bus API.
+// New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) http.Handler {
 	b := &bus{
 		s:   s,
@@ -569,13 +593,16 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		os:  os,
 	}
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
 
-		"GET    /consensus/state": b.consensusStateHandler,
+		"POST   /consensus/acceptblock": b.consensusAcceptBlock,
+		"GET    /consensus/state":       b.consensusStateHandler,
 
-		"GET    /txpool/transactions": b.txpoolTransactionsHandler,
-		"POST   /txpool/broadcast":    b.txpoolBroadcastHandler,
+		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
+		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
+		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
 
 		"GET    /wallet/balance":       b.walletBalanceHandler,
 		"GET    /wallet/address":       b.walletAddressHandler,

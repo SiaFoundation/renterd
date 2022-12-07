@@ -27,6 +27,7 @@ type WorkerConfig struct {
 type BusConfig struct {
 	Bootstrap   bool
 	GatewayAddr string
+	Miner       *Miner
 }
 
 type AutopilotConfig struct {
@@ -35,6 +36,10 @@ type AutopilotConfig struct {
 
 type chainManager struct {
 	cs modules.ConsensusSet
+}
+
+func (cm chainManager) AcceptBlock(b types.Block) error {
+	return cm.cs.AcceptBlock(b)
 }
 
 func (cm chainManager) Synced() bool {
@@ -73,6 +78,10 @@ func (s syncer) Connect(addr string) error {
 
 func (s syncer) BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction) {
 	s.tp.Broadcast(append(dependsOn, txn))
+}
+
+func (s syncer) SyncerAddress() (string, error) {
+	return string(s.g.Address()), nil
 }
 
 type txpool struct {
@@ -177,6 +186,13 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		return nil, nil, err
 	} else if err := cm.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
 		return nil, nil, err
+	}
+
+	if m := cfg.Miner; m != nil {
+		if err := cm.ConsensusSetSubscribe(m, ccid, nil); err != nil {
+			return nil, nil, err
+		}
+		tp.TransactionPoolSubscribe(m)
 	}
 
 	contractsDir := filepath.Join(dir, "contracts")
