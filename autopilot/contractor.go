@@ -125,9 +125,8 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		host, err := c.ap.bus.Host(contract.HostKey)
 		if err != nil {
 			c.logger.Errorw(
-				"missing host",
+				fmt.Sprintf("missing host, err: %v", err),
 				"hk", contract.HostKey,
-				"err", err,
 			)
 			continue
 		}
@@ -136,10 +135,9 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		contractData, err := c.ap.bus.Contract(contract.ID)
 		if err != nil {
 			c.logger.Errorw(
-				"missing contract",
+				fmt.Sprintf("missing contract, err: %v", err),
 				"hk", contract.HostKey,
 				"fcid", contract.ID,
-				"err", err,
 			)
 			continue
 		}
@@ -265,10 +263,9 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		err = c.ap.bus.AddRenewedContract(contract, renew.ID)
 		if err != nil {
 			c.logger.Errorw(
-				"renewal failed to persist",
+				fmt.Sprintf("renewal failed to persist, err: %v", err),
 				"hk", renew.HostKey,
 				"fcid", renew.ID,
-				"err", err,
 			)
 			return nil, err
 		}
@@ -346,9 +343,8 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		host, err := c.ap.bus.Host(candidate)
 		if err != nil {
 			c.logger.Errorw(
-				"missing host",
+				fmt.Sprintf("missing host, err: %v", err),
 				"hk", candidate,
-				"err", err,
 			)
 			continue
 		}
@@ -357,9 +353,8 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		scan, err := c.ap.worker.RHPScan(candidate, host.NetAddress(), 0)
 		if err != nil {
 			c.logger.Debugw(
-				"failed scan",
+				fmt.Sprintf("failed scan, err: %v", err),
 				"hk", candidate,
-				"err", err,
 			)
 			continue
 		}
@@ -383,9 +378,11 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		var hostCollateral types.Currency // TODO
 		contract, err := c.formContract(cfg, candidate, host.NetAddress(), hostSettings, renterKey, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
-			// TODO: handle error properly, if the wallet ran out of outputs
-			// here there's no point in forming more contracts until a block
-			// is mined, maybe we could/should wait for pending transactions?
+			// TODO: keep track of consecutive failures and break at some point
+			c.logger.Errorw(
+				fmt.Sprintf("failed contract formation, err : %v", err),
+				"hk", candidate,
+			)
 			continue
 		}
 
@@ -396,9 +393,8 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		err = c.ap.bus.AddContract(contract)
 		if err != nil {
 			c.logger.Errorw(
-				"new contract failed to persist",
+				fmt.Sprintf("new contract failed to persist, err: %v", err),
 				"hk", candidate,
-				"err", err,
 			)
 			continue
 		}
@@ -440,9 +436,8 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 	scan, err := c.ap.worker.RHPScan(toRenew.HostKey, toRenew.HostIP, 0)
 	if err != nil {
 		c.logger.Debugw(
-			"failed scan",
+			fmt.Sprintf("failed scan, err: %v", err),
 			"hk", toRenew.HostKey,
-			"err", err,
 		)
 		return rhpv2.Contract{}, nil
 	}
@@ -532,10 +527,9 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	contract, err := c.ap.bus.Contract(id)
 	if err != nil {
 		c.logger.Errorw(
-			"missing contract",
+			fmt.Sprintf("missing contract, err: %v", err),
 			"hk", contract.HostKey,
 			"fcid", contract.ID,
-			"err", err,
 		)
 		return types.ZeroCurrency, err
 	}
@@ -544,9 +538,8 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	host, err := c.ap.bus.Host(contract.HostKey())
 	if err != nil {
 		c.logger.Errorw(
-			"missing host",
+			fmt.Sprintf("missing host, err: %v", err),
 			"hk", contract.HostKey,
-			"err", err,
 		)
 		return types.ZeroCurrency, err
 	}
@@ -555,9 +548,8 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress(), 0)
 	if err != nil {
 		c.logger.Debugw(
-			"failed scan",
+			fmt.Sprintf("failed scan, err: %v", err),
 			"hk", contract.HostKey(),
-			"err", err,
 		)
 		return types.ZeroCurrency, err
 	}
