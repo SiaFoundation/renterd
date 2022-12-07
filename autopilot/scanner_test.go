@@ -158,12 +158,17 @@ func TestScanner(t *testing.T) {
 
 	// reset the scanner and bus
 	b.hosts[0] = newTestHost(testHost3, settings)
+	w = &mockWorker{blockChan: make(chan struct{})}
 	s = newTestScanner(b, w)
 
 	// start another scan
-	if errChan = s.tryPerformHostScan(); errChan == nil || !s.isScanning() {
+	if errChan = s.tryPerformHostScan(); errChan == nil {
 		t.Fatal("unexpected")
 	}
+	if !s.isScanning() {
+		t.Fatal("unexpected")
+	}
+	close(w.blockChan) // we have to block on a channel to avoid an NDF on the isScanning check
 
 	// wait until the scan is done
 	select {
