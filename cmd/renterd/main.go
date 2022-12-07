@@ -141,11 +141,15 @@ func main() {
 			log.Fatal(err)
 		}
 		defer cleanup()
-		// TODO: restore this (by calling /syncer)
-		//log.Println("bus: Listening on", b.GatewayAddress())
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
 		busPassword = getAPIPassword()
+
+		syncerAddress, err := bus.NewClient(busAddr, busPassword).SyncerAddress()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("bus: Listening on", syncerAddress)
 	}
 	bc := bus.NewClient(busAddr, busPassword)
 
