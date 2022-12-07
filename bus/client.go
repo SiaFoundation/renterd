@@ -324,7 +324,7 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 	values.Set("limit", fmt.Sprint(n))
 	values.Set("goodContracts", fmt.Sprint(goodContracts))
 	var resp ObjectsMigrateSlabsResponse
-	err := c.c.GET("/migration/slabs?%s"+values.Encode(), &resp)
+	err := c.c.GET("/migration/slabs?"+values.Encode(), &resp)
 	return resp.SlabIDs, err
 }
 
@@ -333,6 +333,11 @@ func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContra
 	var resp ObjectsMigrateSlabResponse
 	err := c.c.GET(fmt.Sprintf("/migration/slab/%s", slabID), &resp)
 	return resp.Slab, resp.Contracts, err
+}
+
+// UploadParams returns parameters used for uploading slabs.
+func (c *Client) UploadParams() (up UploadParams, err error) {
+	panic("unimplemented")
 }
 
 // NewClient returns a client that communicates with a renterd store server

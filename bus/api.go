@@ -190,3 +190,11 @@ type MigrationContract struct {
 	HostIP  string               `json:"hostIP"`
 	ID      types.FileContractID `json:"id"`
 }
+
+// UploadParams contains the metadata needed by a worker to upload an object.
+type UploadParams struct {
+	CurrentHeight uint64
+	MinShards     uint8
+	TotalShards   uint8
+	ContractSet   string
+}

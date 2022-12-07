@@ -79,7 +79,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	cleanups = append(cleanups, cleanup)
 	busAuth := jape.BasicAuth(busPassword)
 	busServer := http.Server{
-		Handler: busAuth(bus.NewServer(b)),
+		Handler: busAuth(b),
 	}
 	busClient := bus.NewClient(busAddr, busPassword)
 
@@ -91,7 +91,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	cleanups = append(cleanups, cleanup)
 	workerAuth := jape.BasicAuth(workerPassword)
 	workerServer := http.Server{
-		Handler: workerAuth(worker.NewServer(w)),
+		Handler: workerAuth(w),
 	}
 	workerClient := worker.NewClient(workerAddr, workerPassword)
 

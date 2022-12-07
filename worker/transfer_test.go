@@ -75,7 +75,7 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, newMockHost())
 	}
-	s, err := uploadSlab(ctx, bytes.NewReader(data), 3, 10, hosts)
+	s, _, err := uploadSlab(ctx, bytes.NewReader(data), 3, 10, hosts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 	var slabs []object.Slab
 	for {
-		s, err := uploadSlab(context.Background(), r, 3, 10, hosts)
+		s, _, err := uploadSlab(context.Background(), r, 3, 10, hosts)
 		if err == io.EOF {
 			break
 		} else if err != nil {

@@ -88,7 +88,7 @@ type (
 	}
 )
 
-type Bus struct {
+type bus struct {
 	s   Syncer
 	cm  ChainManager
 	tp  TransactionPool
@@ -99,44 +99,44 @@ type Bus struct {
 	os  ObjectStore
 }
 
-func (b *Bus) syncerPeersHandler(jc jape.Context) {
+func (b *bus) syncerPeersHandler(jc jape.Context) {
 	jc.Encode(b.s.Peers())
 }
 
-func (b *Bus) syncerConnectHandler(jc jape.Context) {
+func (b *bus) syncerConnectHandler(jc jape.Context) {
 	var addr string
 	if jc.Decode(&addr) == nil {
 		jc.Check("couldn't connect to peer", b.s.Connect(addr))
 	}
 }
 
-func (b *Bus) consensusStateHandler(jc jape.Context) {
+func (b *bus) consensusStateHandler(jc jape.Context) {
 	jc.Encode(ConsensusState{
 		BlockHeight: b.cm.TipState().Index.Height,
 		Synced:      b.cm.Synced(),
 	})
 }
 
-func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
+func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
 	jc.Encode(b.tp.Transactions())
 }
 
-func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
+func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	if jc.Decode(&txnSet) == nil {
 		jc.Check("couldn't broadcast transaction set", b.tp.AddTransactionSet(txnSet))
 	}
 }
 
-func (b *Bus) walletBalanceHandler(jc jape.Context) {
+func (b *bus) walletBalanceHandler(jc jape.Context) {
 	jc.Encode(b.w.Balance())
 }
 
-func (b *Bus) walletAddressHandler(jc jape.Context) {
+func (b *bus) walletAddressHandler(jc jape.Context) {
 	jc.Encode(b.w.Address())
 }
 
-func (b *Bus) walletTransactionsHandler(jc jape.Context) {
+func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	var since time.Time
 	max := -1
 	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
@@ -148,14 +148,14 @@ func (b *Bus) walletTransactionsHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) walletOutputsHandler(jc jape.Context) {
+func (b *bus) walletOutputsHandler(jc jape.Context) {
 	utxos, err := b.w.UnspentOutputs()
 	if jc.Check("couldn't load outputs", err) == nil {
 		jc.Encode(utxos)
 	}
 }
 
-func (b *Bus) walletFundHandler(jc jape.Context) {
+func (b *bus) walletFundHandler(jc jape.Context) {
 	var wfr WalletFundRequest
 	if jc.Decode(&wfr) != nil {
 		return
@@ -179,7 +179,7 @@ func (b *Bus) walletFundHandler(jc jape.Context) {
 	})
 }
 
-func (b *Bus) walletSignHandler(jc jape.Context) {
+func (b *bus) walletSignHandler(jc jape.Context) {
 	var wsr WalletSignRequest
 	if jc.Decode(&wsr) != nil {
 		return
@@ -190,7 +190,7 @@ func (b *Bus) walletSignHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) walletRedistributeHandler(jc jape.Context) {
+func (b *bus) walletRedistributeHandler(jc jape.Context) {
 	var wfr WalletRedistributeRequest
 	if jc.Decode(&wfr) != nil {
 		return
@@ -214,14 +214,14 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	jc.Encode(txn)
 }
 
-func (b *Bus) walletDiscardHandler(jc jape.Context) {
+func (b *bus) walletDiscardHandler(jc jape.Context) {
 	var txn types.Transaction
 	if jc.Decode(&txn) == nil {
 		b.w.ReleaseInputs(txn)
 	}
 }
 
-func (b *Bus) walletPrepareFormHandler(jc jape.Context) {
+func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	var wpfr WalletPrepareFormRequest
 	if jc.Decode(&wpfr) != nil {
 		return
@@ -250,7 +250,7 @@ func (b *Bus) walletPrepareFormHandler(jc jape.Context) {
 	jc.Encode(append(parents, txn))
 }
 
-func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
+func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	var wprr WalletPrepareRenewRequest
 	if jc.Decode(&wprr) != nil {
 		return
@@ -286,7 +286,7 @@ func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
 	})
 }
 
-func (b *Bus) walletPendingHandler(jc jape.Context) {
+func (b *bus) walletPendingHandler(jc jape.Context) {
 	isRelevant := func(txn types.Transaction) bool {
 		addr := b.w.Address()
 		for _, sci := range txn.SiacoinInputs {
@@ -312,7 +312,7 @@ func (b *Bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *Bus) hostsHandler(jc jape.Context) {
+func (b *bus) hostsHandler(jc jape.Context) {
 	var notSince time.Time
 	max := -1
 	if jc.DecodeForm("notSince", (*paramTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
@@ -324,7 +324,7 @@ func (b *Bus) hostsHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
+func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	var hostKey PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
@@ -335,7 +335,7 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) hostsPubkeyHandlerPOST(jc jape.Context) {
+func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var hi hostdb.Interaction
 	var hostKey PublicKey
 	if jc.Decode(&hi) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
@@ -343,14 +343,14 @@ func (b *Bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *Bus) contractsHandler(jc jape.Context) {
+func (b *bus) contractsHandler(jc jape.Context) {
 	cs, err := b.cs.Contracts()
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
 }
 
-func (b *Bus) contractsAcquireHandler(jc jape.Context) {
+func (b *bus) contractsAcquireHandler(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -369,7 +369,7 @@ func (b *Bus) contractsAcquireHandler(jc jape.Context) {
 	})
 }
 
-func (b *Bus) contractsReleaseHandler(jc jape.Context) {
+func (b *bus) contractsReleaseHandler(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -379,7 +379,7 @@ func (b *Bus) contractsReleaseHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) contractsIDHandlerGET(jc jape.Context) {
+func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -390,7 +390,7 @@ func (b *Bus) contractsIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) contractsIDNewHandlerPUT(jc jape.Context) {
+func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
 	var id types.FileContractID
 	var c rhpv2.Contract
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&c) != nil {
@@ -403,7 +403,7 @@ func (b *Bus) contractsIDNewHandlerPUT(jc jape.Context) {
 	jc.Check("couldn't store contract", b.cs.AddContract(c))
 }
 
-func (b *Bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
+func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 	var id types.FileContractID
 	var req ContractsIDRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -416,7 +416,7 @@ func (b *Bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.RenewedFrom))
 }
 
-func (b *Bus) contractsIDHandlerDELETE(jc jape.Context) {
+func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -424,7 +424,7 @@ func (b *Bus) contractsIDHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contract", b.cs.RemoveContract(id))
 }
 
-func (b *Bus) contractSetHandler(jc jape.Context) {
+func (b *bus) contractSetHandler(jc jape.Context) {
 	contractSets, err := b.css.ContractSets()
 	if jc.Check("couldn't load contract sets", err) != nil {
 		return
@@ -432,7 +432,7 @@ func (b *Bus) contractSetHandler(jc jape.Context) {
 	jc.Encode(contractSets)
 }
 
-func (b *Bus) contractSetsNameHandlerGET(jc jape.Context) {
+func (b *bus) contractSetsNameHandlerGET(jc jape.Context) {
 	hostSet, err := b.css.ContractSet(jc.PathParam("name"))
 	if jc.Check("couldn't load host set", err) != nil {
 		return
@@ -440,7 +440,7 @@ func (b *Bus) contractSetsNameHandlerGET(jc jape.Context) {
 	jc.Encode(hostSet)
 }
 
-func (b *Bus) contractSetsNameHandlerPUT(jc jape.Context) {
+func (b *bus) contractSetsNameHandlerPUT(jc jape.Context) {
 	var contracts []types.FileContractID
 	if jc.Decode(&contracts) != nil {
 		return
@@ -448,7 +448,7 @@ func (b *Bus) contractSetsNameHandlerPUT(jc jape.Context) {
 	jc.Check("couldn't store host set", b.css.SetContractSet(jc.PathParam("name"), contracts))
 }
 
-func (b *Bus) contractSetContractsHandler(jc jape.Context) {
+func (b *bus) contractSetContractsHandler(jc jape.Context) {
 	setContracts, err := b.css.ContractSet(jc.PathParam("name"))
 	if jc.Check("couldn't load host set", err) != nil {
 		return
@@ -481,7 +481,7 @@ func (b *Bus) contractSetContractsHandler(jc jape.Context) {
 	jc.Encode(contracts)
 }
 
-func (b *Bus) objectsKeyHandlerGET(jc jape.Context) {
+func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
 		keys, err := b.os.List(jc.PathParam("key"))
 		if jc.Check("couldn't list objects", err) == nil {
@@ -495,18 +495,18 @@ func (b *Bus) objectsKeyHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) objectsKeyHandlerPUT(jc jape.Context) {
+func (b *bus) objectsKeyHandlerPUT(jc jape.Context) {
 	var aor AddObjectRequest
 	if jc.Decode(&aor) == nil {
 		jc.Check("couldn't store object", b.os.Put(jc.PathParam("key"), aor.Object, aor.UsedContracts))
 	}
 }
 
-func (b *Bus) objectsKeyHandlerDELETE(jc jape.Context) {
+func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.os.Delete(jc.PathParam("key")))
 }
 
-func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
+func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	var cutoff time.Time
 	var limit int
 	var goodContracts []types.FileContractID
@@ -528,7 +528,7 @@ func (b *Bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	})
 }
 
-func (b *Bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
+func (b *bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
 	var slabID SlabID
 	if jc.DecodeParam("id", &slabID) != nil {
 		return
@@ -543,7 +543,7 @@ func (b *Bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
 	})
 }
 
-func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
+func (b *bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	var req ObjectsMarkSlabMigrationFailureRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -556,14 +556,9 @@ func (b *Bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	}
 }
 
-// GatewayAddress returns the address of the gateway.
-func (b *Bus) GatewayAddress() string {
-	return b.s.Addr()
-}
-
-// New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) *Bus {
-	return &Bus{
+// New returns an HTTP handler that serves the bus API.
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) http.Handler {
+	b := &bus{
 		s:   s,
 		cm:  cm,
 		tp:  tp,
@@ -573,10 +568,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		css: css,
 		os:  os,
 	}
-}
-
-// NewServer returns an HTTP handler that serves the renterd store API.
-func NewServer(b *Bus) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,

@@ -2,6 +2,7 @@ package node
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -113,7 +114,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Handler, func() error, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -207,7 +208,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (*bus.Bus
 	return b, cleanup, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (*worker.Worker, func() error, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
 	w := worker.New(workerKey, b)
 	return w, func() error { return nil }, nil
