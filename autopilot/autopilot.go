@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	logFileName = "autopilotlog.json"
+	logFileName = "autopilot.log"
 )
 
 type Store interface {
@@ -88,8 +88,9 @@ type Autopilot struct {
 
 	masterKey [32]byte
 
-	ticker   *time.Ticker
-	stopChan chan struct{}
+	ticker    *time.Ticker
+	stopChan  chan struct{}
+	onStopFns []func() error
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -140,6 +141,7 @@ func (ap *Autopilot) Run() error {
 		err = ap.c.performContractMaintenance(cfg)
 		if err != nil {
 			ap.logger.Errorf("contract maintenance failed, err: %v", err)
+			continue
 		}
 
 		// migration
@@ -154,15 +156,26 @@ func (ap *Autopilot) Run() error {
 func (ap *Autopilot) Stop() error {
 	ap.ticker.Stop()
 	close(ap.stopChan)
-	return ap.logger.Sync()
+
+	errs := make([]error, len(ap.onStopFns))
+	for i, onStopFn := range ap.onStopFns {
+		errs[i] = onStopFn()
+	}
+	return joinErrors(errs)
 }
 
 // New initializes an Autopilot.
 func New(store Store, bus Bus, worker Worker, dir string, heartbeat time.Duration) (*Autopilot, error) {
 	// instantiate the logger
-	logger, err := newLogger(filepath.Join(dir, logFileName))
+	logger, closeFn, err := newLogger(filepath.Join(dir, logFileName))
 	if err != nil {
 		return nil, err
+	}
+
+	onStopFn := func() (err error) {
+		err = logger.Sync()
+		closeFn()
+		return
 	}
 
 	ap := &Autopilot{
@@ -171,8 +184,9 @@ func New(store Store, bus Bus, worker Worker, dir string, heartbeat time.Duratio
 		store:  store,
 		worker: worker,
 
-		ticker:   time.NewTicker(heartbeat),
-		stopChan: make(chan struct{}),
+		ticker:    time.NewTicker(heartbeat),
+		stopChan:  make(chan struct{}),
+		onStopFns: []func() error{onStopFn},
 	}
 
 	ap.c = newContractor(ap)

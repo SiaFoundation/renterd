@@ -7,10 +7,10 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func newLogger(path string) (*zap.Logger, error) {
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+func newLogger(path string) (*zap.Logger, func(), error) {
+	writer, closeFn, err := zap.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// console
@@ -28,7 +28,6 @@ func newLogger(path string) (*zap.Logger, error) {
 	config.TimeKey = "date"
 	fileEncoder := zapcore.NewJSONEncoder(config)
 
-	writer := zapcore.AddSync(file)
 	core := zapcore.NewTee(
 		zapcore.NewCore(fileEncoder, writer, zapcore.DebugLevel),
 		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel),
@@ -38,7 +37,7 @@ func newLogger(path string) (*zap.Logger, error) {
 		core,
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
-	), nil
+	), closeFn, nil
 }
 
 func newTestLogger() *zap.Logger {
