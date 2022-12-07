@@ -48,6 +48,21 @@ func randomPassword() string {
 	return hex.EncodeToString(frand.Bytes(32))
 }
 
+// Retry will call 'fn' 'tries' times, waiting 'durationBetweenAttempts'
+// between each attempt, returning 'nil' the first time that 'fn' returns nil.
+// If 'nil' is never returned, then the final error returned by 'fn' is
+// returned.
+func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (err error) {
+	for i := 1; i < tries; i++ {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+		time.Sleep(durationBetweenAttempts)
+	}
+	return fn()
+}
+
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string) (*TestCluster, error) {
 	// Use shared wallet key.
@@ -92,10 +107,6 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		Handler: busAuth(b),
 	}
 	busClient := bus.NewClient(busAddr, busPassword)
-	gatewayAddr, err := busClient.SyncerAddress()
-	if err != nil {
-		return nil, err
-	}
 
 	// Create worker.
 	w, cleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
@@ -123,8 +134,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}
 
 	cluster := &TestCluster{
-		dir:         dir,
-		gatewayAddr: gatewayAddr,
+		dir: dir,
 
 		//Autopilot: autopilot.NewClient(autopilotAddr, autopilotPassword), // TODO
 		Bus:    bus.NewClient(busAddr, busPassword),
@@ -151,6 +161,12 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		cluster.wg.Done()
 	}()
 
+	// Get gateway address.
+	cluster.gatewayAddr, err = busClient.SyncerAddress()
+	if err != nil {
+		return nil, err
+	}
+
 	// Fund the bus by mining beyond the foundation hardfork height.
 	if err := cluster.MineBlocks(10 + int(types.FoundationHardforkHeight)); err != nil {
 		return nil, err
@@ -160,8 +176,6 @@ func newTestCluster(dir string) (*TestCluster, error) {
 
 // addStorageFolderToHosts adds a single storage folder to each host.
 func addStorageFolderToHost(hosts []*siatest.TestNode) error {
-	// The following api call is very slow. Using multiple threads speeds that
-	// process up a lot.
 	for _, host := range hosts {
 		storage := 512 * modules.SectorSize
 		if err := host.HostStorageFoldersAddPost(host.Dir, storage); err != nil {
@@ -188,18 +202,18 @@ func announceHosts(hosts []*siatest.TestNode) error {
 	return nil
 }
 
+// sync blocks until the cluster is synced.
 func (c *TestCluster) sync(hosts []*siatest.TestNode) error {
-	for i := 0; i < 100; i++ {
+	return Retry(100, 100*time.Millisecond, func() error {
 		synced, err := c.synced(hosts)
 		if err != nil {
 			return err
 		}
-		if synced {
-			return nil
+		if !synced {
+			return errors.New("cluster was unable to sync in time")
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return errors.New("cluster was unable to sync in time")
+		return nil
+	})
 }
 
 // synced returns true if bus and hosts are at the same blockheight.
@@ -207,6 +221,9 @@ func (c *TestCluster) synced(hosts []*siatest.TestNode) (bool, error) {
 	cs, err := c.Bus.ConsensusState()
 	if err != nil {
 		return false, err
+	}
+	if !cs.Synced {
+		return false, nil // can't be synced if bus itself isn't synced
 	}
 	for _, h := range hosts {
 		bh, err := h.BlockHeight()
