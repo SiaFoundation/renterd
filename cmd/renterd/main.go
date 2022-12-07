@@ -134,13 +134,8 @@ func main() {
 		sub: make(map[string]treeMux),
 	}
 
-	var wb worker.Bus
-	var ab autopilot.Bus
-	if busCfg.remoteAddr != "" {
-		b := bus.NewClient(busCfg.remoteAddr, busCfg.apiPassword)
-		wb = b
-		ab = b
-	} else {
+	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
+	if busAddr == "" {
 		b, cleanup, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey())
 		if err != nil {
 			log.Fatal(err)
@@ -149,24 +144,27 @@ func main() {
 		// TODO: restore this (by calling /syncer)
 		//log.Println("bus: Listening on", b.GatewayAddress())
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
+		busAddr = *apiAddr + "/api/bus"
+		busPassword = getAPIPassword()
 	}
+	bc := bus.NewClient(busAddr, busPassword)
 
-	var aw autopilot.Worker
-	if workerCfg.remoteAddr != "" {
-		w := worker.NewClient(workerCfg.remoteAddr, workerCfg.apiPassword)
-		aw = w
-	} else {
-		w, cleanup, err := node.NewWorker(workerCfg.WorkerConfig, wb, getWalletKey())
+	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
+	if workerAddr == "" {
+		w, cleanup, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey())
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
+		workerAddr = *apiAddr + "/api/worker"
+		workerPassword = getAPIPassword()
 	}
+	wc := worker.NewClient(workerAddr, workerPassword)
 
-	autopilotErr := make(chan error)
+	autopilotErr := make(chan error, 1)
 	if autopilotCfg.enabled {
-		a, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, ab, aw, *dir)
+		a, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, *dir)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -196,5 +196,5 @@ type UploadParams struct {
 	CurrentHeight uint64
 	MinShards     uint8
 	TotalShards   uint8
-	Contracts     []Contract
+	ContractSet   string
 }

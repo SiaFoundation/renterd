@@ -172,6 +172,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+	SetContracts(name string) ([]bus.Contract, error)
 	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
@@ -606,25 +607,32 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
-	contracts := make([]Contract, len(up.Contracts))
-	for i, c := range up.Contracts {
-		contracts[i] = Contract{
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			ID:        c.ID,
-			RenterKey: nil, // TODO
-		}
-	}
 
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
 	}
 	w.pool.setCurrentHeight(up.CurrentHeight)
+	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
 	for {
+		// fetch contracts
+		bcs, err := w.bus.SetContracts(up.ContractSet)
+		if jc.Check("couldn't fetch contracts from bus", err) != nil {
+			return
+		}
+		contracts := make([]Contract, len(bcs))
+		for i, c := range bcs {
+			contracts[i] = Contract{
+				HostKey:   c.HostKey,
+				HostIP:    c.HostIP,
+				ID:        c.ID,
+				RenterKey: nil, // TODO
+			}
+		}
+
 		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
 		var s object.Slab
 		var length int
-		err := w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) (err error) {
+		err = w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) (err error) {
 			s, length, err = uploadSlab(jc.Request.Context(), r, up.MinShards, up.TotalShards, hosts)
 			return err
 		})
@@ -638,15 +646,12 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 			Offset: 0,
 			Length: uint32(length),
 		})
-	}
 
-	usedHosts := make(map[consensus.PublicKey]types.FileContractID)
-	for _, s := range o.Slabs {
 		for _, ss := range s.Shards {
-			if _, ok := usedHosts[ss.Host]; !ok {
+			if _, ok := usedContracts[ss.Host]; !ok {
 				for _, c := range contracts {
 					if c.HostKey == ss.Host {
-						usedHosts[ss.Host] = c.ID
+						usedContracts[ss.Host] = c.ID
 						break
 					}
 				}
@@ -654,7 +659,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	if jc.Check("couldn't add object", w.bus.AddObject(jc.PathParam("key"), o, usedHosts)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(jc.PathParam("key"), o, usedContracts)) != nil {
 		return
 	}
 }
