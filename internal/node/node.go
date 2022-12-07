@@ -27,7 +27,7 @@ type WorkerConfig struct {
 type BusConfig struct {
 	Bootstrap   bool
 	GatewayAddr string
-	Miner       bool
+	Miner       *Miner
 }
 
 type AutopilotConfig struct {
@@ -36,6 +36,10 @@ type AutopilotConfig struct {
 
 type chainManager struct {
 	cs modules.ConsensusSet
+}
+
+func (cm chainManager) AcceptBlock(b types.Block) error {
+	return cm.cs.AcceptBlock(b)
 }
 
 func (cm chainManager) Synced() bool {
@@ -184,9 +188,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		return nil, nil, err
 	}
 
-	var m *Miner
-	if cfg.Miner {
-		m = NewMiner(cm)
+	if m := cfg.Miner; m != nil {
 		if err := cm.ConsensusSetSubscribe(m, ccid, nil); err != nil {
 			return nil, nil, err
 		}
@@ -218,7 +220,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		return nil
 	}
 
-	b := bus.New(syncer{g, tp}, chainManager{cm}, m, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore)
+	b := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore)
 	return b, cleanup, nil
 }
 

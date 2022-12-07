@@ -19,6 +19,12 @@ type Client struct {
 	c jape.Client
 }
 
+// AcceptBlock submits a block to the consensus manager.
+func (c *Client) AcceptBlock(b types.Block) (err error) {
+	err = c.c.POST("/consensus/acceptblock", b, nil)
+	return
+}
+
 // SyncerAddress returns the address the syncer is listening on.
 func (c *Client) SyncerAddress() (addr string, err error) {
 	err = c.c.GET("/syncer/address", &addr)
@@ -385,12 +391,6 @@ func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContra
 // UploadParams returns parameters used for uploading slabs.
 func (c *Client) UploadParams() (up UploadParams, err error) {
 	panic("unimplemented")
-}
-
-// MineBlocks updates the latest failure time of the given slabs
-// to the current time.
-func (c *Client) MineBlocks(uh types.UnlockHash, n int) error {
-	return c.c.POST(fmt.Sprintf("/mine/%v?numBlocks=%d", uh, n), nil, nil)
 }
 
 // NewClient returns a client that communicates with a renterd store server

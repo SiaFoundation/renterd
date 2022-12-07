@@ -38,6 +38,7 @@ type TestCluster struct {
 	cleanups  []func() error
 	shutdowns []func(context.Context) error
 
+	miner       *node.Miner
 	dir         string
 	gatewayAddr string
 	wg          sync.WaitGroup
@@ -91,12 +92,20 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	busAddr := "http://" + busListener.Addr().String()
 	workerAddr := "http://" + workerListener.Addr().String()
 
+	// Create clients.
+	//autopilotClient := nil // autopilot.NewClient(autopilotAddr, autopilotPassword), // TODO
+	busClient := bus.NewClient(busAddr, busPassword)
+	workerClient := worker.NewClient(workerAddr, workerPassword)
+
+	// Create miner.
+	miner := node.NewMiner(busClient)
+
 	// Create bus.
 	var cleanups []func() error
 	b, cleanup, err := node.NewBus(node.BusConfig{
 		Bootstrap:   false,
 		GatewayAddr: "127.0.0.1:0",
-		Miner:       true,
+		Miner:       miner,
 	}, busDir, wk)
 	if err != nil {
 		return nil, err
@@ -106,7 +115,6 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	busServer := http.Server{
 		Handler: busAuth(b),
 	}
-	busClient := bus.NewClient(busAddr, busPassword)
 
 	// Create worker.
 	w, cleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
@@ -118,7 +126,6 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	workerServer := http.Server{
 		Handler: workerAuth(w),
 	}
-	workerClient := worker.NewClient(workerAddr, workerPassword)
 
 	// Create autopilot.
 	ap, cleanup, err := node.NewAutopilot(node.AutopilotConfig{
@@ -134,11 +141,12 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}
 
 	cluster := &TestCluster{
-		dir: dir,
+		dir:   dir,
+		miner: miner,
 
-		//Autopilot: autopilot.NewClient(autopilotAddr, autopilotPassword), // TODO
-		Bus:    bus.NewClient(busAddr, busPassword),
-		Worker: worker.NewClient(workerAddr, workerPassword),
+		//Autopilot: autopilotClient, TODO
+		Bus:    busClient,
+		Worker: workerClient,
 
 		cleanups:  cleanups,
 		shutdowns: []func(context.Context) error{busServer.Shutdown, workerServer.Shutdown, autopilotServer.Shutdown},
@@ -243,7 +251,7 @@ func (c *TestCluster) MineBlocks(n int) error {
 	if err != nil {
 		return err
 	}
-	return c.Bus.MineBlocks(addr, n)
+	return c.miner.Mine(addr, n)
 }
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
