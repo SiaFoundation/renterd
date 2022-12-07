@@ -304,24 +304,19 @@ func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
 }
 
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
-	// panic("unimplemented")
-	return nil
+	panic("unimplemented")
 }
 func (c *Client) ActiveContracts() ([]Contract, error) {
-	// panic("unimplemented")
-	return nil, nil
+	panic("unimplemented")
 }
 func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {
-	// panic("unimplemented")
-	return nil, nil
+	panic("unimplemented")
 }
 func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error) {
-	// panic("unimplemented")
-	return ContractMetadata{}, nil
+	panic("unimplemented")
 }
 func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
-	// panic("unimplemented")
-	return nil
+	panic("unimplemented")
 }
 
 // RecommendedFee returns the recommended fee for a txn.
@@ -340,7 +335,7 @@ func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract,
 // entries under that path.
 func (c *Client) Object(path string) (o object.Object, entries []string, err error) {
 	var or ObjectsResponse
-	err = c.c.GET(fmt.Sprintf("/objects/store/%s", path), &or)
+	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
 	if or.Object != nil {
 		o = *or.Object
 	} else {
@@ -351,7 +346,7 @@ func (c *Client) Object(path string) (o object.Object, entries []string, err err
 
 // AddObject stores the provided object under the given name.
 func (c *Client) AddObject(name string, o object.Object, usedContract map[consensus.PublicKey]types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/objects/store/%s", name), AddObjectRequest{
+	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), AddObjectRequest{
 		Object:        o,
 		UsedContracts: usedContract,
 	})
@@ -360,7 +355,7 @@ func (c *Client) AddObject(name string, o object.Object, usedContract map[consen
 
 // DeleteObject deletes the object with the given name.
 func (c *Client) DeleteObject(name string) (err error) {
-	err = c.c.DELETE(fmt.Sprintf("/objects/store/%s", name))
+	err = c.c.DELETE(fmt.Sprintf("/objects/%s", name))
 	return
 }
 

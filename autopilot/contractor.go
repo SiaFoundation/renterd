@@ -137,6 +137,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		if err != nil {
 			c.logger.Errorw(
 				"missing contract",
+				"hk", contract.HostKey,
 				"fcid", contract.ID,
 				"err", err,
 			)
@@ -532,6 +533,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	if err != nil {
 		c.logger.Errorw(
 			"missing contract",
+			"hk", contract.HostKey,
 			"fcid", contract.ID,
 			"err", err,
 		)

@@ -335,7 +335,7 @@ func jsonMarshal(v interface{}) []byte {
 	return js
 }
 
-// TODO:
+// TODO: replace with errors.join (Go 1.20)
 func joinErrors(errs []error) error {
 	switch len(errs) {
 	case 0:

@@ -143,13 +143,11 @@ func (ap *Autopilot) Run() error {
 		}
 
 		// migration
-		//
-		// TODO: re-enable, currently causing panics
-		// err = ap.m.UpdateContracts()
-		// if err != nil {
-		// 	ap.logger.Errorf("update contracts failed, err: %v", err)
-		// }
-		// ap.m.TryPerformMigrations()
+		err = ap.m.UpdateContracts()
+		if err != nil {
+			ap.logger.Errorf("update contracts failed, err: %v", err)
+		}
+		ap.m.TryPerformMigrations()
 	}
 }
 
