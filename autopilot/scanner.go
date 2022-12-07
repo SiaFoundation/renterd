@@ -350,7 +350,7 @@ func joinErrors(errs []error) error {
 	case 1:
 		return filtered[0]
 	default:
-		strs := make([]string, len(errs))
+		strs := make([]string, len(filtered))
 		for i := range strs {
 			strs[i] = filtered[i].Error()
 		}
