@@ -174,6 +174,8 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
 
+	UploadParams() (bus.UploadParams, error)
+
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
@@ -485,7 +487,7 @@ func (w *worker) slabsUploadHandler(jc jape.Context) {
 	w.pool.setCurrentHeight(sur.CurrentHeight)
 	var slab object.Slab
 	err := w.withHosts(jc.Request.Context(), sur.Contracts, func(hosts []sectorStore) (err error) {
-		slab, err = uploadSlab(jc.Request.Context(), r, sur.MinShards, sur.TotalShards, hosts)
+		slab, _, err = uploadSlab(jc.Request.Context(), r, sur.MinShards, sur.TotalShards, hosts)
 		return err
 	})
 	if jc.Check("couldn't upload slab", err) != nil {
@@ -600,21 +602,30 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 
+	up, err := w.bus.UploadParams()
+	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
+		return
+	}
+	contracts := make([]Contract, len(up.Contracts))
+	for i, c := range up.Contracts {
+		contracts[i] = Contract{
+			HostKey:   c.HostKey,
+			HostIP:    c.HostIP,
+			ID:        c.ID,
+			RenterKey: nil, // TODO
+		}
+	}
+
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
 	}
-	var slabs []object.Slab
-	var contracts []Contract = nil // TODO: ask bus, using ss.Slab.Shards
-	var minShards uint8 = 0        // TODO
-	var totalShards uint8 = 0      // TODO
-	var currentHeight uint64 = 0   // TODO
-	usedHosts := make(map[consensus.PublicKey]types.FileContractID)
+	w.pool.setCurrentHeight(up.CurrentHeight)
 	for {
-		r := io.LimitReader(jc.Request.Body, int64(minShards)*rhpv2.SectorSize)
-		w.pool.setCurrentHeight(currentHeight)
+		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
 		var s object.Slab
+		var length int
 		err := w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) (err error) {
-			s, err = uploadSlab(jc.Request.Context(), r, minShards, totalShards, hosts)
+			s, length, err = uploadSlab(jc.Request.Context(), r, up.MinShards, up.TotalShards, hosts)
 			return err
 		})
 		if err == io.EOF {
@@ -622,11 +633,26 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		} else if jc.Check("couldn't upload slab", err) != nil {
 			return
 		}
-		slabs = append(slabs, s)
+		o.Slabs = append(o.Slabs, object.SlabSlice{
+			Slab:   s,
+			Offset: 0,
+			Length: uint32(length),
+		})
 	}
 
-	var length int = 0 // TODO
-	o.Slabs = object.SingleSlabs(slabs, length)
+	usedHosts := make(map[consensus.PublicKey]types.FileContractID)
+	for _, s := range o.Slabs {
+		for _, ss := range s.Shards {
+			if _, ok := usedHosts[ss.Host]; !ok {
+				for _, c := range contracts {
+					if c.HostKey == ss.Host {
+						usedHosts[ss.Host] = c.ID
+						break
+					}
+				}
+			}
+		}
+	}
 
 	if jc.Check("couldn't add object", w.bus.AddObject(jc.PathParam("key"), o, usedHosts)) != nil {
 		return

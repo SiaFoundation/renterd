@@ -84,12 +84,12 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	return sectors, nil
 }
 
-func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStore) (object.Slab, error) {
+func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStore) (object.Slab, int, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
-	_, err := io.ReadFull(r, buf)
+	length, err := io.ReadFull(r, buf)
 	if err != nil && err != io.ErrUnexpectedEOF {
-		return object.Slab{}, err
+		return object.Slab{}, 0, err
 	}
 	s := object.Slab{
 		Key:       object.GenerateEncryptionKey(),
@@ -100,9 +100,9 @@ func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStor
 
 	s.Shards, err = parallelUploadSlab(ctx, shards, hosts)
 	if err != nil {
-		return object.Slab{}, err
+		return object.Slab{}, 0, err
 	}
-	return s, nil
+	return s, length, nil
 }
 
 func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sectorStore) ([][]byte, error) {
