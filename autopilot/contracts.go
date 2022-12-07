@@ -10,33 +10,55 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []bus.Contract, deleted []types.FileContractID) error {
+func (ap *Autopilot) updateDefaultContracts(active, renewed, formed, toRenew, toArchive, toDelete []bus.Contract) error {
 	// build some maps
-	isDeleted := make(map[types.FileContractID]bool)
-	for _, d := range deleted {
-		isDeleted[d] = true
-	}
-	wasUpForRenewal := make(map[types.FileContractID]bool)
-	for _, r := range toRenew {
-		wasUpForRenewal[r.ID()] = true
-	}
+	isArchived := contractMapBool(toArchive)
+	isDeleted := contractMapBool(toDelete)
+	isUpForRenew := contractMapBool(toRenew)
+
+	// renewed map is special case since we need renewed from
 	isRenewed := make(map[types.FileContractID]bool)
-	for _, r := range renewed {
-		isRenewed[r.RenewedFrom] = true
+	for _, c := range renewed {
+		isRenewed[c.RenewedFrom] = true
 	}
 
 	// build new contract set
 	var contracts []types.FileContractID
-	for _, c := range append(active, formed...) {
-		// TODO: excluding contracts that are up for renewal but have not been
-		// renewed yet, we probably want the autopilot to manage more than one
-		// set of contracts (e.g. goodForUpload - goodForDownload contracts)
-		upForRenewal := wasUpForRenewal[c.ID()] && !isRenewed[c.ID()]
-		if !isDeleted[c.ID()] && !upForRenewal {
-			contracts = append(contracts, c.ID())
+	for _, c := range append(active, append(renewed, formed...)...) {
+		if isArchived[c.ID()] {
+			continue // exclude archived contracts
 		}
+		if isDeleted[c.ID()] {
+			continue // exclude archived contracts
+		}
+		if isRenewed[c.ID()] {
+			continue // exclude renewed contracts
+		}
+		if isUpForRenew[c.ID()] && !isRenewed[c.ID()] {
+			continue // exclude contracts that were up for renewal but failed to renew
+		}
+		contracts = append(contracts, c.ID())
 	}
+
+	// TODO: contracts that are up for renewal could be used for dl, not ul
+	// TODO: contracts should be sorted according to host score
 
 	// update contract set
 	return ap.bus.SetContractSet(defaultSetName, contracts)
+}
+
+func contractIds(contracts []bus.Contract) []types.FileContractID {
+	ids := make([]types.FileContractID, len(contracts))
+	for i, c := range contracts {
+		ids[i] = c.ID()
+	}
+	return ids
+}
+
+func contractMapBool(contracts []bus.Contract) map[types.FileContractID]bool {
+	cmap := make(map[types.FileContractID]bool)
+	for _, c := range contracts {
+		cmap[c.ID()] = true
+	}
+	return cmap
 }

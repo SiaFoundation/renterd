@@ -61,8 +61,12 @@ func isUsableContract(cfg Config, h Host, c bus.Contract, bh uint64) (bool, bool
 	if isUpForRenewal(cfg, c, bh) {
 		reasons = append(reasons, "up for renewal")
 	}
-	if isMaxRevision(c) {
+	if c.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
+		renewable = false
+	}
+	if bh > c.EndHeight() {
+		reasons = append(reasons, "expired")
 		renewable = false
 	}
 

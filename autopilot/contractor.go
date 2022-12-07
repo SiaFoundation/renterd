@@ -15,12 +15,12 @@ import (
 )
 
 const (
+	contractLockingDurationRenew = 30 * time.Second
+
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
 	estimatedFileContractTransactionSetSize = 2048
-
-	contractLockingDurationRenew = 30 * time.Second
 
 	// leewayPctCandidateHosts is the leeway we apply when fetching candidate
 	// hosts, we fetch ~10% more than required
@@ -106,9 +106,9 @@ func (c *contractor) currentPeriodSpending() (types.Currency, error) {
 		remaining := contract.RenterFunds()
 		if remaining.Cmp(contract.TotalCost) <= 0 {
 			spent = spent.Add(contract.TotalCost.Sub(remaining))
+		} else {
+			c.logger.DPanicw("sanity check failed", "remaining", remaining, "totalcost", contract.TotalCost)
 		}
-
-		// TODO: log event where remaining is highter than total cost
 	}
 
 	return spent, nil
@@ -142,14 +142,14 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// run checks
-	toRenew, toDelete, err := c.runContractChecks(cfg, active)
+	toRenew, toArchive, toDelete, err := c.runContractChecks(cfg, active)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
 
 	// delete contracts
 	if len(toDelete) > 0 {
-		err = c.ap.bus.DeleteContracts(toDelete)
+		err = c.ap.bus.DeleteContracts(contractIds(toDelete))
 		if err != nil {
 			return fmt.Errorf("failed to delete contracts, err: %v", err)
 		}
@@ -180,7 +180,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// update contract set
-	err = c.ap.updateDefaultContracts(active, toRenew, renewed, formed, toDelete)
+	err = c.ap.updateDefaultContracts(active, renewed, formed, toRenew, toArchive, toDelete)
 	if err != nil {
 		return fmt.Errorf("failed to update default contracts, err: %v", err)
 	}
@@ -188,9 +188,12 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]bus.Contract, []types.FileContractID, error) {
+// runContractChecks performs a series of checks on the given contracts and
+// splits them over three buckets, contracts to renew, archive or delete
+func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]bus.Contract, []bus.Contract, []bus.Contract, error) {
 	// collect contracts to renew and to delete
-	toDelete := make([]types.FileContractID, 0, len(contracts))
+	toArchive := make([]bus.Contract, 0, len(contracts))
+	toDelete := make([]bus.Contract, 0, len(contracts))
 	toRenew := make([]bus.Contract, 0, len(contracts))
 
 	// create a new ip filter
@@ -199,6 +202,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 	// state variables
 	contractIds := make([]types.FileContractID, 0, len(contracts))
 	contractSizes := make(map[types.FileContractID]uint64)
+	contractMap := make(map[types.FileContractID]bus.Contract)
 	renewIndices := make(map[types.FileContractID]int)
 
 	// fetch gouging settings
@@ -245,7 +249,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 				"fcid", contract.ID(),
 				"reasons", reasons,
 			)
-			toDelete = append(toDelete, contract.ID())
+			toArchive = append(toArchive, contract)
 			continue
 		}
 
@@ -260,7 +264,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 				"renewable", renewable,
 			)
 			if !renewable {
-				toDelete = append(toDelete, contract.ID())
+				toDelete = append(toDelete, contract)
 				continue
 			} else {
 				renewIndices[contract.ID()] = len(toRenew)
@@ -270,27 +274,29 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 
 		// keep track of file size
 		contractIds = append(contractIds, contract.ID())
+		contractMap[contract.ID()] = contract
 		contractSizes[contract.ID()] = contractData.Revision.NewFileSize
 	}
 
 	// apply active contract limit
-	active := len(contracts) - len(toDelete)
-	if active > int(cfg.Contracts.Hosts) {
+	numContractsTooMany := len(contracts) - len(toArchive) - len(toDelete) - int(cfg.Contracts.Hosts)
+	if numContractsTooMany > 0 {
 		// sort by contract size
 		sort.Slice(contractIds, func(i, j int) bool {
 			return contractSizes[contractIds[i]] < contractSizes[contractIds[j]]
 		})
-		for i := 0; i < active-int(cfg.Contracts.Hosts); i++ {
-			// remove from renewal list if necessary
-			if index, exists := renewIndices[contractIds[i]]; exists {
+
+		// remove superfluous contract from renewal list and add to archive list
+		for _, id := range contractIds[:numContractsTooMany] {
+			if index, exists := renewIndices[id]; exists {
 				toRenew[index] = toRenew[len(toRenew)-1]
 				toRenew = toRenew[:len(toRenew)-1]
 			}
-			toDelete = append(toDelete, contractIds[i])
+			toArchive = append(toArchive, contractMap[id])
 		}
 	}
 
-	return toRenew, toDelete, nil
+	return toRenew, toArchive, toDelete, nil
 }
 
 func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []bus.Contract) ([]bus.Contract, error) {
@@ -468,7 +474,11 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		contract, err := c.formContract(cfg, candidate, host.NetAddress(), settings, renterKey, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
-			// TODO: log error
+			c.logger.Errorw(
+				"failed contract formation",
+				"hk", candidate,
+				"err", err,
+			)
 			continue
 		}
 		missing--
@@ -735,7 +745,7 @@ func (c *contractor) candidateHosts(cfg Config, wanted uint64) ([]consensus.Publ
 	for _, host := range filtered {
 		score := hostScore(cfg, Host{host})
 		if score == 0 {
-			// TODO: should not happen at this point, log this event
+			c.logger.DPanicw("sanity check failed", "score", score, "hk", host.PublicKey)
 			continue
 		}
 
