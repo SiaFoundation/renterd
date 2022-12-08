@@ -31,9 +31,9 @@ import (
 type TestCluster struct {
 	hosts []*siatest.TestNode
 
-	Bus    *bus.Client
-	Worker *worker.Client
-	// Autopilot *autopilot.Client // TODO: add once available
+	Autopilot *autopilot.Client
+	Bus       *bus.Client
+	Worker    *worker.Client
 
 	cleanups  []func() error
 	shutdowns []func(context.Context) error
@@ -64,6 +64,25 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 	return fn()
 }
 
+// defaultAutopilotConfig is the autopilot used for testing unless a different
+// one is explicitly set.
+var defaultAutopilotConfig = autopilot.Config{
+	Contracts: autopilot.ContractsConfig{
+		Allowance:   types.SiacoinPrecision.Mul64(1e3),
+		Hosts:       5,
+		Period:      50,
+		RenewWindow: 24,
+
+		Download: modules.SectorSize * 500,
+		Upload:   modules.SectorSize * 500,
+		Storage:  modules.SectorSize * 5e3,
+	},
+	Objects: autopilot.ObjectsConfig{
+		MinShards:   2,
+		TotalShards: 2,
+	},
+}
+
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string) (*TestCluster, error) {
 	// Use shared wallet key.
@@ -91,9 +110,10 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}
 	busAddr := "http://" + busListener.Addr().String()
 	workerAddr := "http://" + workerListener.Addr().String()
+	autopilotAddr := "http://" + autopilotListener.Addr().String()
 
 	// Create clients.
-	//autopilotClient := nil // autopilot.NewClient(autopilotAddr, autopilotPassword), // TODO
+	autopilotClient := autopilot.NewClient(autopilotAddr, autopilotPassword)
 	busClient := bus.NewClient(busAddr, busPassword)
 	workerClient := worker.NewClient(workerAddr, workerPassword)
 
@@ -128,8 +148,8 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}
 
 	// Create autopilot.
-	ap, cleanup, err := node.NewAutopilot(node.AutopilotConfig{
-		Heartbeat: time.Minute,
+	ap, run, cleanup, err := node.NewAutopilot(node.AutopilotConfig{
+		Heartbeat: time.Second,
 	}, busClient, workerClient, autopilotDir)
 	if err != nil {
 		return nil, err
@@ -137,16 +157,16 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	cleanups = append(cleanups, cleanup)
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
 	autopilotServer := http.Server{
-		Handler: autopilotAuth(autopilot.NewServer(ap)),
+		Handler: autopilotAuth(ap),
 	}
 
 	cluster := &TestCluster{
 		dir:   dir,
 		miner: miner,
 
-		//Autopilot: autopilotClient, TODO
-		Bus:    busClient,
-		Worker: workerClient,
+		Autopilot: autopilotClient,
+		Bus:       busClient,
+		Worker:    workerClient,
 
 		cleanups:  cleanups,
 		shutdowns: []func(context.Context) error{busServer.Shutdown, workerServer.Shutdown, autopilotServer.Shutdown},
@@ -168,6 +188,16 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		_ = autopilotServer.Serve(autopilotListener)
 		cluster.wg.Done()
 	}()
+	cluster.wg.Add(1)
+	go func() {
+		_ = run()
+		cluster.wg.Done()
+	}()
+
+	// Fund the bus by mining beyond the foundation hardfork height.
+	if err := cluster.MineBlocks(10 + int(types.FoundationHardforkHeight)); err != nil {
+		return nil, err
+	}
 
 	// Get gateway address.
 	cluster.gatewayAddr, err = busClient.SyncerAddress()
@@ -175,8 +205,9 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		return nil, err
 	}
 
-	// Fund the bus by mining beyond the foundation hardfork height.
-	if err := cluster.MineBlocks(10 + int(types.FoundationHardforkHeight)); err != nil {
+	// Set autopilot config.
+	err = autopilotClient.SetConfig(defaultAutopilotConfig)
+	if err != nil {
 		return nil, err
 	}
 	return cluster, nil

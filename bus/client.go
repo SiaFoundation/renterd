@@ -230,7 +230,7 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 }
 
 // Contracts returns the current set of contracts.
-func (c *Client) Contracts(orderBy string, limit int) (contracts []rhpv2.Contract, err error) {
+func (c *Client) Contracts(limit int) (contracts []rhpv2.Contract, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
 }

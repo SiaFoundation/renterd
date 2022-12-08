@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
@@ -168,13 +167,13 @@ func main() {
 
 	autopilotErr := make(chan error, 1)
 	if autopilotCfg.enabled {
-		a, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, *dir)
+		a, run, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, *dir)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
-		go func() { autopilotErr <- a.Run() }()
-		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(a))}
+		go func() { autopilotErr <- run() }()
+		mux.sub["/api/autopilot"] = treeMux{h: auth(a)}
 	}
 
 	srv := &http.Server{Handler: mux}

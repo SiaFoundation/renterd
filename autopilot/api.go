@@ -8,17 +8,16 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// Config contains all autopilot configuration parameters.
-type Config struct {
-	Wallet struct {
+type (
+	WalletConfig struct {
 		DefragThreshold uint64
 	}
-	Hosts struct {
+	HostsConfig struct {
 		Whitelist      []string
 		Blacklist      []string
 		ScoreOverrides map[consensus.PublicKey]float64
 	}
-	Contracts struct {
+	ContractsConfig struct {
 		Allowance   types.Currency
 		Hosts       uint64
 		Period      uint64
@@ -27,10 +26,18 @@ type Config struct {
 		Upload      uint64
 		Storage     uint64
 	}
-	Objects struct {
+	ObjectsConfig struct {
 		MinShards   uint8
 		TotalShards uint8
 	}
+)
+
+// Config contains all autopilot configuration parameters.
+type Config struct {
+	Wallet    WalletConfig
+	Hosts     HostsConfig
+	Contracts ContractsConfig
+	Objects   ObjectsConfig
 }
 
 func DefaultConfig() (c Config) {

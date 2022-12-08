@@ -230,18 +230,14 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 	return w, func() error { return nil }, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (*autopilot.Autopilot, func() error, error) {
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (_ http.Handler, run, cleanup func() error, _ error) {
 	store, err := stores.NewJSONAutopilotStore(dir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	a, err := autopilot.New(store, b, w, cfg.Heartbeat)
+	a, run, cleanup := autopilot.New(store, b, w, cfg.Heartbeat)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	cleanup := func() error {
-		a.Stop()
-		return nil
-	}
-	return a, cleanup, nil
+	return a, run, cleanup, nil
 }

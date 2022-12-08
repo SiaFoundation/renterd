@@ -2,7 +2,10 @@ package testing
 
 import (
 	"context"
+	"errors"
+	"math"
 	"testing"
+	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -54,6 +57,20 @@ func TestNewTestCluster(t *testing.T) {
 	// Try talking to the worker and request the object.
 	w := cluster.Worker
 	err = w.DeleteObject("/foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = Retry(30, time.Second, func() error {
+		contracts, err := b.Contracts(math.MaxInt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(contracts) != 1 {
+			return errors.New("no contract")
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
