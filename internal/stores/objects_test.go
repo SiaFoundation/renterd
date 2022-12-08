@@ -263,7 +263,8 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk1,
 										},
-										FCID: fcid1,
+										FCID:      fcid1,
+										TotalCost: totalCost1.Big(),
 									},
 								},
 							},
@@ -291,7 +292,8 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk2,
 										},
-										FCID: fcid2,
+										FCID:      fcid2,
+										TotalCost: totalCost2.Big(),
 									},
 								},
 							},
