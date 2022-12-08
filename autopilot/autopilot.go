@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"go.sia.tech/jape"
@@ -88,6 +89,7 @@ type Autopilot struct {
 
 	ticker   *time.Ticker
 	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -106,6 +108,8 @@ func (ap *Autopilot) SetConfig(c Config) error {
 }
 
 func (ap *Autopilot) Run() error {
+	ap.wg.Add(1)
+	defer ap.wg.Done()
 	for {
 		select {
 		case <-ap.stopChan:
@@ -153,6 +157,7 @@ func (ap *Autopilot) Run() error {
 func (ap *Autopilot) Stop() error {
 	ap.ticker.Stop()
 	close(ap.stopChan)
+	ap.wg.Wait()
 	return nil
 }
 

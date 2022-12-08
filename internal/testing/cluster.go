@@ -378,7 +378,7 @@ func (c *TestCluster) AddHosts(n int) error {
 
 // Shutdown shuts down a TestCluster. Cleanups are performed in reverse order.
 func (c *TestCluster) Shutdown(ctx context.Context) error {
-	for i := len(c.cleanups) - 1; i > 0; i-- {
+	for i := len(c.cleanups) - 1; i >= 0; i-- {
 		if err := c.cleanups[i](ctx); err != nil {
 			return err
 		}
