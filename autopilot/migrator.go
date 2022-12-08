@@ -31,7 +31,7 @@ func newMigrator(ap *Autopilot) *migrator {
 func (m *migrator) UpdateContracts() error {
 	bus := m.ap.bus
 
-	contracts, err := bus.ActiveContracts()
+	contracts, err := bus.Contracts()
 	if err != nil {
 		return err
 	}
@@ -41,10 +41,8 @@ func (m *migrator) UpdateContracts() error {
 	for _, c := range contracts {
 		// TODO: filter out contracts that are not good.
 		m.goodContracts = append(m.goodContracts, worker.Contract{
-			ID:        c.ID,
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			RenterKey: m.ap.deriveRenterKey(c.HostKey),
+			Contract:  c,
+			RenterKey: m.ap.deriveRenterKey(c.HostKey()),
 		})
 	}
 	return nil
@@ -72,7 +70,7 @@ func (m *migrator) TryPerformMigrations() {
 func (m *migrator) fetchSlabsForMigration() ([]bus.SlabID, error) {
 	goodContracts := make([]types.FileContractID, len(m.goodContracts))
 	for i := range m.goodContracts {
-		goodContracts[i] = m.goodContracts[i].ID
+		goodContracts[i] = m.goodContracts[i].ID()
 	}
 	return m.ap.bus.SlabsForMigration(10, time.Now().Add(-time.Hour), goodContracts)
 }
@@ -87,10 +85,8 @@ func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
 	oldContracts := make([]worker.Contract, len(contracts))
 	for i, c := range contracts {
 		oldContracts[i] = worker.Contract{
-			ID:        c.ID,
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			RenterKey: m.ap.deriveRenterKey(c.HostKey),
+			Contract:  c,
+			RenterKey: m.ap.deriveRenterKey(c.HostKey()),
 		}
 	}
 

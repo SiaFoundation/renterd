@@ -5,10 +5,9 @@ import (
 	"math"
 	"math/big"
 
-	"go.sia.tech/renterd/bus"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/types"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
+	siatypes "go.sia.tech/siad/types"
 )
 
 const (
@@ -48,7 +47,7 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata, bh uint64) (bool, bool, []string) {
+func isUsableContract(cfg Config, h Host, c types.Contract, m types.ContractMetadata, bh uint64) (bool, bool, []string) {
 	var reasons []string
 	renewable := true
 
@@ -66,17 +65,17 @@ func isUsableContract(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetada
 	return len(reasons) == 0, renewable, reasons
 }
 
-func isMaxRevision(c rhpv2.Contract) bool {
+func isMaxRevision(c types.Contract) bool {
 	return c.Revision.NewRevisionNumber == math.MaxUint64
 }
 
-func isOutOfFunds(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata) bool {
+func isOutOfFunds(cfg Config, h Host, c types.Contract, m types.ContractMetadata) bool {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return false
 	}
 
-	blockBytes := types.NewCurrency64(modules.SectorSize * cfg.Contracts.Period)
+	blockBytes := siatypes.NewCurrency64(modules.SectorSize * cfg.Contracts.Period)
 	sectorStoragePrice := settings.StoragePrice.Mul(blockBytes)
 	sectorUploadBandwidthPrice := settings.UploadBandwidthPrice.Mul64(modules.SectorSize)
 	sectorDownloadBandwidthPrice := settings.DownloadBandwidthPrice.Mul64(modules.SectorSize)
@@ -87,7 +86,7 @@ func isOutOfFunds(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata) 
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func isUpForRenewal(cfg Config, c rhpv2.Contract, blockHeight uint64) bool {
+func isUpForRenewal(cfg Config, c types.Contract, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
 }
 

@@ -21,7 +21,8 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/siad/types"
+	"go.sia.tech/renterd/types"
+	siatypes "go.sia.tech/siad/types"
 )
 
 // parseRange parses a Range header string as per RFC 7233. Only the first range
@@ -155,14 +156,14 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 		}{m.HostIP, m.Timestamp, m.Elapsed})
 	case rhpv2.MetricRPC:
 		return transform(m.Timestamp, "rhpv2 rpc", m.Err, struct {
-			RPC        string         `json:"RPC"`
-			Timestamp  time.Time      `json:"timestamp"`
-			Elapsed    time.Duration  `json:"elapsed"`
-			Contract   string         `json:"contract"`
-			Uploaded   uint64         `json:"uploaded"`
-			Downloaded uint64         `json:"downloaded"`
-			Cost       types.Currency `json:"cost"`
-			Collateral types.Currency `json:"collateral"`
+			RPC        string            `json:"RPC"`
+			Timestamp  time.Time         `json:"timestamp"`
+			Elapsed    time.Duration     `json:"elapsed"`
+			Contract   string            `json:"contract"`
+			Uploaded   uint64            `json:"uploaded"`
+			Downloaded uint64            `json:"downloaded"`
+			Cost       siatypes.Currency `json:"cost"`
+			Collateral siatypes.Currency `json:"collateral"`
 		}{m.RPC.String(), m.Timestamp, m.Elapsed, m.Contract.String(), m.Uploaded, m.Downloaded, m.Cost, m.Collateral})
 	default:
 		return hostdb.Interaction{}, false
@@ -172,13 +173,13 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	SetContracts(name string) ([]bus.Contract, error)
-	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
+	SetContracts(name string) ([]types.Contract, error)
+	ContractsForSlab(shards []object.Sector) ([]types.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
 
 	Object(key string) (object.Object, []string, error)
-	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
+	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]siatypes.FileContractID) error
 	DeleteObject(key string) error
 }
 
@@ -270,7 +271,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 func (w *worker) withHosts(ctx context.Context, contracts []Contract, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
+		hosts = append(hosts, w.pool.session(ctx, c.HostKey(), c.HostIP, c.ID(), c.RenterKey))
 	}
 	done := make(chan struct{})
 	go func() {
@@ -373,7 +374,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
 
 	var contract rhpv2.Contract
-	var txnSet []types.Transaction
+	var txnSet []siatypes.Transaction
 	err := w.withTransportV2(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
 		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, rfr.RenterKey, rfr.TransactionSet)
 		return
@@ -397,7 +398,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
 
 	var contract rhpv2.Contract
-	var txnSet []types.Transaction
+	var txnSet []siatypes.Transaction
 	err := w.withTransportV2(jc.Request.Context(), rrr.HostIP, rrr.HostKey, func(t *rhpv2.Transport) error {
 		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rrr.ContractID, rrr.RenterKey, 5*time.Second)
 		if err != nil {
@@ -584,9 +585,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		cs := make([]Contract, len(contracts))
 		for i, c := range contracts {
 			cs[i] = Contract{
-				HostKey:   c.HostKey,
-				HostIP:    c.HostIP,
-				ID:        c.ID,
+				Contract:  c,
 				RenterKey: nil, // TODO
 			}
 		}
@@ -612,7 +611,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		Key: object.GenerateEncryptionKey(),
 	}
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+	usedContracts := make(map[consensus.PublicKey]siatypes.FileContractID)
 	for {
 		// fetch contracts
 		bcs, err := w.bus.SetContracts(up.ContractSet)
@@ -622,9 +621,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		contracts := make([]Contract, len(bcs))
 		for i, c := range bcs {
 			contracts[i] = Contract{
-				HostKey:   c.HostKey,
-				HostIP:    c.HostIP,
-				ID:        c.ID,
+				Contract:  c,
 				RenterKey: nil, // TODO
 			}
 		}
@@ -650,8 +647,8 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		for _, ss := range s.Shards {
 			if _, ok := usedContracts[ss.Host]; !ok {
 				for _, c := range contracts {
-					if c.HostKey == ss.Host {
-						usedContracts[ss.Host] = c.ID
+					if c.HostKey() == ss.Host {
+						usedContracts[ss.Host] = c.ID()
 						break
 					}
 				}

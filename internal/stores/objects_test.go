@@ -16,7 +16,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func newTestContract(id types.FileContractID, hk consensus.PublicKey) rhp.Contract {
+func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.Contract, types.Currency) {
 	uc := types.UnlockConditions{
 		PublicKeys:         make([]types.SiaPublicKey, 2),
 		SignaturesRequired: 2,
@@ -24,12 +24,13 @@ func newTestContract(id types.FileContractID, hk consensus.PublicKey) rhp.Contra
 	uc.PublicKeys[1].Algorithm = types.SignatureEd25519
 	uc.PublicKeys[1].Key = hk[:]
 
+	totalCost := types.NewCurrency64(frand.Uint64n(1000))
 	return rhp.Contract{
 		Revision: types.FileContractRevision{
 			ParentID:         id,
 			UnlockConditions: uc,
 		},
-	}
+	}, totalCost
 }
 
 func TestList(t *testing.T) {
@@ -145,13 +146,13 @@ func TestSQLObjectStore(t *testing.T) {
 	// Create a file contract for the object to avoid the foreign key
 	// constraint failing.
 	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
-	c1 := newTestContract(fcid1, hk1)
-	c2 := newTestContract(fcid2, hk2)
-	err = os.AddContract(c1)
+	c1, totalCost1 := newTestContract(fcid1, hk1)
+	c2, totalCost2 := newTestContract(fcid2, hk2)
+	err = os.AddContract(c1, totalCost1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(c2)
+	err = os.AddContract(c2, totalCost2)
 	if err != nil {
 		t.Fatal(err)
 	}

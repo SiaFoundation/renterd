@@ -10,8 +10,9 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/types"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/siad/types"
+	siatypes "go.sia.tech/siad/types"
 )
 
 // A Client provides methods for interacting with a renterd API server.
@@ -20,7 +21,7 @@ type Client struct {
 }
 
 // AcceptBlock submits a block to the consensus manager.
-func (c *Client) AcceptBlock(b types.Block) (err error) {
+func (c *Client) AcceptBlock(b siatypes.Block) (err error) {
 	err = c.c.POST("/consensus/acceptblock", b, nil)
 	return
 }
@@ -51,24 +52,24 @@ func (c *Client) ConsensusState() (resp ConsensusState, err error) {
 }
 
 // TransactionPool returns the transactions currently in the pool.
-func (c *Client) TransactionPool() (txns []types.Transaction, err error) {
+func (c *Client) TransactionPool() (txns []siatypes.Transaction, err error) {
 	err = c.c.GET("/txpool/transactions", &txns)
 	return
 }
 
 // BroadcastTransaction broadcasts the transaction set to the network.
-func (c *Client) BroadcastTransaction(txns []types.Transaction) error {
+func (c *Client) BroadcastTransaction(txns []siatypes.Transaction) error {
 	return c.c.POST("/txpool/broadcast", txns, nil)
 }
 
 // WalletBalance returns the current wallet balance.
-func (c *Client) WalletBalance() (bal types.Currency, err error) {
+func (c *Client) WalletBalance() (bal siatypes.Currency, err error) {
 	err = c.c.GET("/wallet/balance", &bal)
 	return
 }
 
 // WalletAddress returns an address controlled by the wallet.
-func (c *Client) WalletAddress() (resp types.UnlockHash, err error) {
+func (c *Client) WalletAddress() (resp siatypes.UnlockHash, err error) {
 	err = c.c.GET("/wallet/address", &resp)
 	return
 }
@@ -86,20 +87,20 @@ func estimatedSiacoinTxnSize(nOutputs uint64) uint64 {
 }
 
 // SendSiacoins is a helper method that sends siacoins to the given outputs.
-func (c *Client) SendSiacoins(scos []types.SiacoinOutput) (err error) {
+func (c *Client) SendSiacoins(scos []siatypes.SiacoinOutput) (err error) {
 	fee, err := c.RecommendedFee()
 	if err != nil {
 		return err
 	}
 	fee = fee.Mul64(estimatedSiacoinTxnSize(uint64(len(scos))))
 
-	var value types.Currency
+	var value siatypes.Currency
 	for _, sco := range scos {
 		value = value.Add(sco.Value)
 	}
-	txn := types.Transaction{
+	txn := siatypes.Transaction{
 		SiacoinOutputs: scos,
-		MinerFees:      []types.Currency{fee},
+		MinerFees:      []siatypes.Currency{fee},
 	}
 	toSign, parents, err := c.WalletFund(&txn, value)
 	if err != nil {
@@ -110,7 +111,7 @@ func (c *Client) SendSiacoins(scos []types.SiacoinOutput) (err error) {
 			_ = c.WalletDiscard(txn)
 		}
 	}()
-	err = c.WalletSign(&txn, toSign, types.FullCoveredFields)
+	err = c.WalletSign(&txn, toSign, siatypes.FullCoveredFields)
 	if err != nil {
 		return err
 	}
@@ -124,7 +125,7 @@ func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Tra
 }
 
 // WalletFund funds txn using inputs controlled by the wallet.
-func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error) {
+func (c *Client) WalletFund(txn *siatypes.Transaction, amount siatypes.Currency) ([]siatypes.OutputID, []siatypes.Transaction, error) {
 	req := WalletFundRequest{
 		Transaction: *txn,
 		Amount:      amount,
@@ -139,7 +140,7 @@ func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]ty
 }
 
 // WalletSign signs txn using the wallet's private key.
-func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error {
+func (c *Client) WalletSign(txn *siatypes.Transaction, toSign []siatypes.OutputID, cf siatypes.CoveredFields) error {
 	req := WalletSignRequest{
 		Transaction:   *txn,
 		ToSign:        toSign,
@@ -150,7 +151,7 @@ func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf 
 
 // WalletRedistribute returns a signed transaction that redistributes the money
 // in the wallet in the desired number of outputs of given amount.
-func (c *Client) WalletRedistribute(outputs int, amount types.Currency) (txn types.Transaction, err error) {
+func (c *Client) WalletRedistribute(outputs int, amount siatypes.Currency) (txn siatypes.Transaction, err error) {
 	req := WalletRedistributeRequest{
 		Amount:  amount,
 		Outputs: outputs,
@@ -162,12 +163,12 @@ func (c *Client) WalletRedistribute(outputs int, amount types.Currency) (txn typ
 
 // WalletDiscard discards the provided txn, make its inputs usable again. This
 // should only be called on transactions that will never be broadcast.
-func (c *Client) WalletDiscard(txn types.Transaction) error {
+func (c *Client) WalletDiscard(txn siatypes.Transaction) error {
 	return c.c.POST("/wallet/discard", txn, nil)
 }
 
 // WalletPrepareForm funds and signs a contract transaction.
-func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
+func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterFunds siatypes.Currency, renterAddress siatypes.UnlockHash, hostCollateral siatypes.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []siatypes.Transaction, err error) {
 	req := WalletPrepareFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -182,7 +183,7 @@ func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, rent
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
+func (c *Client) WalletPrepareRenew(contract siatypes.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds siatypes.Currency, renterAddress siatypes.UnlockHash, hostCollateral siatypes.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]siatypes.Transaction, siatypes.Currency, error) {
 	req := WalletPrepareRenewRequest{
 		Contract:       contract,
 		RenterKey:      renterKey,
@@ -200,7 +201,7 @@ func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterK
 
 // WalletPending returns the txpool transactions that are relevant to the
 // wallet.
-func (c *Client) WalletPending() (resp []types.Transaction, err error) {
+func (c *Client) WalletPending() (resp []siatypes.Transaction, err error) {
 	err = c.c.GET("/wallet/pending", &resp)
 	return
 }
@@ -230,13 +231,13 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 }
 
 // Contracts returns the current set of contracts.
-func (c *Client) Contracts(limit int) (contracts []rhpv2.Contract, err error) {
+func (c *Client) Contracts() (contracts []types.Contract, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
-func (c *Client) Contract(id types.FileContractID) (contract rhpv2.Contract, err error) {
+func (c *Client) Contract(id siatypes.FileContractID) (contract types.Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contracts/%s", id), &contract)
 	return
 }
@@ -248,7 +249,7 @@ func (c *Client) AddContract(contract rhpv2.Contract) (err error) {
 }
 
 // AddRenewedContract adds the provided contract to the current contract set.
-func (c *Client) AddRenewedContract(contract rhpv2.Contract, renewedFrom types.FileContractID) (err error) {
+func (c *Client) AddRenewedContract(contract rhpv2.Contract, renewedFrom siatypes.FileContractID) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/contracts/%s/renewed", contract.ID()), ContractsIDRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
@@ -257,7 +258,7 @@ func (c *Client) AddRenewedContract(contract rhpv2.Contract, renewedFrom types.F
 }
 
 // DeleteContract deletes the contract with the given ID.
-func (c *Client) DeleteContract(id types.FileContractID) (err error) {
+func (c *Client) DeleteContract(id siatypes.FileContractID) (err error) {
 	err = c.c.DELETE(fmt.Sprintf("/contracts/%s", id))
 	return
 }
@@ -269,13 +270,13 @@ func (c *Client) ContractSets() (sets []string, err error) {
 }
 
 // HostSet returns the contracts in the given set.
-func (c *Client) ContractSet(name string) (hosts []types.FileContractID, err error) {
+func (c *Client) ContractSet(name string) (hosts []siatypes.FileContractID, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
 	return
 }
 
 // SetContractSet assigns a name to the given contracts.
-func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
+func (c *Client) SetContractSet(name string, contracts []siatypes.FileContractID) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/contractsets/%s", name), contracts)
 	return
 }
@@ -283,14 +284,14 @@ func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (
 // SetContracts returns the full contract for each contract id in the given set.
 // The ID and HostIP fields may be empty, depending on whether a contract exists
 // and a host announcement is known.
-func (c *Client) SetContracts(name string) (contracts []Contract, err error) {
+func (c *Client) SetContracts(name string) (contracts []types.Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s/contracts", name), &contracts)
 	return
 }
 
 // AcquireContract acquires a contract for a given amount of time unless
 // released manually before that time.
-func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (rev types.FileContractRevision, err error) {
+func (c *Client) AcquireContract(fcid siatypes.FileContractID, d time.Duration) (rev siatypes.FileContractRevision, err error) {
 	var resp ContractAcquireResponse
 	err = c.c.POST(fmt.Sprintf("/contracts/%s/acquire", fcid), ContractAcquireRequest{Duration: d}, &resp)
 	rev = resp.Revision
@@ -298,36 +299,33 @@ func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (re
 }
 
 // ReleaseContract releases a contract that was previously acquired using AcquireContract.
-func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
+func (c *Client) ReleaseContract(fcid siatypes.FileContractID) (err error) {
 	err = c.c.POST(fmt.Sprintf("/contracts/%s/release", fcid), nil, nil)
 	return
 }
 
-func (c *Client) DeleteContracts(ids []types.FileContractID) error {
+func (c *Client) DeleteContracts(ids []siatypes.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) ActiveContracts() ([]Contract, error) {
+func (c *Client) SpendingHistory(siatypes.FileContractID, uint64) ([]types.ContractSpending, error) {
 	panic("unimplemented")
 }
-func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {
+func (c *Client) ContractMetadata(siatypes.FileContractID) (types.ContractMetadata, error) {
 	panic("unimplemented")
 }
-func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error) {
-	panic("unimplemented")
-}
-func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
+func (c *Client) UpdateContractMetadata(siatypes.FileContractID, types.ContractMetadata) error {
 	panic("unimplemented")
 }
 
 // RecommendedFee returns the recommended fee for a txn.
-func (c *Client) RecommendedFee() (fee types.Currency, err error) {
+func (c *Client) RecommendedFee() (fee siatypes.Currency, err error) {
 	err = c.c.GET("/txpool/recommendedfee", &fee)
 	return
 }
 
 // ContractsForSlab returns contracts that can be used to download the provided
 // slab.
-func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract, err error) {
+func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []types.Contract, err error) {
 	panic("unimplemented")
 }
 
@@ -345,7 +343,7 @@ func (c *Client) Object(path string) (o object.Object, entries []string, err err
 }
 
 // AddObject stores the provided object under the given name.
-func (c *Client) AddObject(name string, o object.Object, usedContract map[consensus.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddObject(name string, o object.Object, usedContract map[consensus.PublicKey]siatypes.FileContractID) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), AddObjectRequest{
 		Object:        o,
 		UsedContracts: usedContract,
@@ -371,7 +369,7 @@ func (c *Client) MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error) {
 
 // SlabsForMigration returns up to n slabs which require migration and haven't
 // failed migration since failureCutoff.
-func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error) {
+func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []siatypes.FileContractID) ([]SlabID, error) {
 	values := url.Values{}
 	values.Set("cutoff", paramTime(failureCutoff).String())
 	values.Set("limit", fmt.Sprint(n))
@@ -382,7 +380,7 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 }
 
 // SlabForMigration returns a slab and the contracts its stored on.
-func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error) {
+func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []types.Contract, error) {
 	var resp ObjectsMigrateSlabResponse
 	err := c.c.GET(fmt.Sprintf("/migration/slab/%s", slabID), &resp)
 	return resp.Slab, resp.Contracts, err

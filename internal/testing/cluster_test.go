@@ -3,7 +3,6 @@ package testing
 import (
 	"context"
 	"errors"
-	"math"
 	"testing"
 	"time"
 
@@ -62,7 +61,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	err = Retry(30, time.Second, func() error {
-		contracts, err := b.Contracts(math.MaxInt)
+		contracts, err := b.Contracts()
 		if err != nil {
 			t.Fatal(err)
 		}

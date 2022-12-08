@@ -12,14 +12,15 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/types"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/siad/types"
+	siatypes "go.sia.tech/siad/types"
 )
 
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
-		AcceptBlock(types.Block) error
+		AcceptBlock(siatypes.Block) error
 		Synced() bool
 		TipState() consensus.State
 	}
@@ -29,25 +30,25 @@ type (
 		SyncerAddress() (string, error)
 		Peers() []string
 		Connect(addr string) error
-		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
+		BroadcastTransaction(txn siatypes.Transaction, dependsOn []siatypes.Transaction)
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
-		RecommendedFee() types.Currency
-		Transactions() []types.Transaction
-		AddTransactionSet(txns []types.Transaction) error
-		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
+		RecommendedFee() siatypes.Currency
+		Transactions() []siatypes.Transaction
+		AddTransactionSet(txns []siatypes.Transaction) error
+		UnconfirmedParents(txn siatypes.Transaction) ([]siatypes.Transaction, error)
 	}
 
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
-		Address() types.UnlockHash
-		Balance() types.Currency
-		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
-		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error)
-		ReleaseInputs(txn types.Transaction)
-		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
+		Address() siatypes.UnlockHash
+		Balance() siatypes.Currency
+		FundTransaction(cs consensus.State, txn *siatypes.Transaction, amount siatypes.Currency, pool []siatypes.Transaction) ([]siatypes.OutputID, error)
+		Redistribute(cs consensus.State, outputs int, amount, feePerByte siatypes.Currency, pool []siatypes.Transaction) (siatypes.Transaction, []siatypes.OutputID, error)
+		ReleaseInputs(txn siatypes.Transaction)
+		SignTransaction(cs consensus.State, txn *siatypes.Transaction, toSign []siatypes.OutputID, cf siatypes.CoveredFields) error
 		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
@@ -61,20 +62,20 @@ type (
 
 	// A ContractStore stores contracts.
 	ContractStore interface {
-		AcquireContract(fcid types.FileContractID, duration time.Duration) (types.FileContractRevision, bool, error)
-		ReleaseContract(fcid types.FileContractID) error
-		Contracts() ([]rhpv2.Contract, error)
-		Contract(id types.FileContractID) (rhpv2.Contract, error)
-		AddContract(c rhpv2.Contract) error
-		AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error
-		RemoveContract(id types.FileContractID) error
+		AcquireContract(fcid siatypes.FileContractID, duration time.Duration) (siatypes.FileContractRevision, bool, error)
+		ReleaseContract(fcid siatypes.FileContractID) error
+		Contracts() ([]types.Contract, error)
+		Contract(id siatypes.FileContractID) (types.Contract, error)
+		AddContract(c rhpv2.Contract, totalCost siatypes.Currency) error
+		AddRenewedContract(c rhpv2.Contract, totalCost siatypes.Currency, renewedFrom siatypes.FileContractID) error
+		RemoveContract(id siatypes.FileContractID) error
 	}
 
 	// A ContractSetStore stores contract sets.
 	ContractSetStore interface {
 		ContractSets() ([]string, error)
-		ContractSet(name string) ([]types.FileContractID, error)
-		SetContractSet(name string, contracts []types.FileContractID) error
+		ContractSet(name string) ([]siatypes.FileContractID, error)
+		SetContractSet(name string, contracts []siatypes.FileContractID) error
 	}
 
 	// An ObjectStore stores objects.
@@ -82,10 +83,10 @@ type (
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
 		MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error)
-		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
+		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]siatypes.FileContractID) error
 		Delete(key string) error
-		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
-		SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error)
+		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []siatypes.FileContractID) ([]SlabID, error)
+		SlabForMigration(slabID SlabID) (object.Slab, []types.Contract, error)
 	}
 )
 
@@ -101,7 +102,7 @@ type bus struct {
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
-	var block types.Block
+	var block siatypes.Block
 	if jc.Decode(&block) != nil {
 		return
 	}
@@ -146,7 +147,7 @@ func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
 }
 
 func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
-	var txnSet []types.Transaction
+	var txnSet []siatypes.Transaction
 	if jc.Decode(&txnSet) == nil {
 		jc.Check("couldn't broadcast transaction set", b.tp.AddTransactionSet(txnSet))
 	}
@@ -186,7 +187,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	}
 	txn := wfr.Transaction
 	fee := b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
-	txn.MinerFees = []types.Currency{fee}
+	txn.MinerFees = []siatypes.Currency{fee}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -230,7 +231,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	err = b.w.SignTransaction(cs, &txn, toSign, types.FullCoveredFields)
+	err = b.w.SignTransaction(cs, &txn, toSign, siatypes.FullCoveredFields)
 	if jc.Check("couldn't sign the transaction", err) != nil {
 		return
 	}
@@ -239,7 +240,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 }
 
 func (b *bus) walletDiscardHandler(jc jape.Context) {
-	var txn types.Transaction
+	var txn siatypes.Transaction
 	if jc.Decode(&txn) == nil {
 		b.w.ReleaseInputs(txn)
 	}
@@ -252,10 +253,10 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	}
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
 	cost := rhpv2.ContractFormationCost(fc, wpfr.HostSettings.ContractPrice)
-	txn := types.Transaction{
-		FileContracts: []types.FileContract{fc},
+	txn := siatypes.Transaction{
+		FileContracts: []siatypes.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	txn.MinerFees = []siatypes.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -285,10 +286,10 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {
 		finalPayment = wprr.Contract.ValidRenterPayout()
 	}
-	txn := types.Transaction{
-		FileContracts: []types.FileContract{fc},
+	txn := siatypes.Transaction{
+		FileContracts: []siatypes.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	txn.MinerFees = []siatypes.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -311,7 +312,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 }
 
 func (b *bus) walletPendingHandler(jc jape.Context) {
-	isRelevant := func(txn types.Transaction) bool {
+	isRelevant := func(txn siatypes.Transaction) bool {
 		addr := b.w.Address()
 		for _, sci := range txn.SiacoinInputs {
 			if sci.UnlockConditions.UnlockHash() == addr {
@@ -375,7 +376,7 @@ func (b *bus) contractsHandler(jc jape.Context) {
 }
 
 func (b *bus) contractsAcquireHandler(jc jape.Context) {
-	var id types.FileContractID
+	var id siatypes.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -394,7 +395,7 @@ func (b *bus) contractsAcquireHandler(jc jape.Context) {
 }
 
 func (b *bus) contractsReleaseHandler(jc jape.Context) {
-	var id types.FileContractID
+	var id siatypes.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -404,7 +405,7 @@ func (b *bus) contractsReleaseHandler(jc jape.Context) {
 }
 
 func (b *bus) contractsIDHandlerGET(jc jape.Context) {
-	var id types.FileContractID
+	var id siatypes.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -415,20 +416,20 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
-	var id types.FileContractID
-	var c rhpv2.Contract
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&c) != nil {
+	var id siatypes.FileContractID
+	var req ContractsIDAddRequest
+	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
 	}
-	if c.ID() != id {
+	if req.Contract.ID() != id {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddContract(c))
+	jc.Check("couldn't store contract", b.cs.AddContract(req.Contract, req.TotalCost))
 }
 
 func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
-	var id types.FileContractID
+	var id siatypes.FileContractID
 	var req ContractsIDRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
@@ -437,11 +438,11 @@ func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.RenewedFrom))
+	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.RenewedFrom))
 }
 
 func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
-	var id types.FileContractID
+	var id siatypes.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -465,7 +466,7 @@ func (b *bus) contractSetsNameHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractSetsNameHandlerPUT(jc jape.Context) {
-	var contracts []types.FileContractID
+	var contracts []siatypes.FileContractID
 	if jc.Decode(&contracts) != nil {
 		return
 	}
@@ -477,29 +478,21 @@ func (b *bus) contractSetContractsHandler(jc jape.Context) {
 	if jc.Check("couldn't load host set", err) != nil {
 		return
 	}
+	// TODO: This could be a b.cs.ContractSetContracts method which does a
+	// smart query.
 	all, err := b.cs.Contracts()
 	if jc.Check("couldn't load contracts", err) != nil {
 		return
 	}
-	allMap := make(map[types.FileContractID]*rhpv2.Contract)
+	allMap := make(map[siatypes.FileContractID]types.Contract)
 	for _, c := range all {
-		allMap[c.ID()] = &c
+		allMap[c.ID()] = c
 	}
-	var contracts []Contract
+	var contracts []types.Contract
 	for _, fcid := range setContracts {
 		c, exists := allMap[fcid]
 		if exists {
-			// TODO: The number of contract types we have slowly
-			// grows out of control. We should find a solution for
-			// this.
-			contracts = append(contracts, Contract{
-				ID:               c.ID(),
-				HostKey:          c.HostKey(),
-				HostIP:           "", // TODO
-				StartHeight:      0,  // TODO
-				EndHeight:        c.EndHeight(),
-				ContractMetadata: ContractMetadata{}, // TODO
-			})
+			contracts = append(contracts, c)
 		}
 	}
 	jc.Encode(contracts)
@@ -533,7 +526,7 @@ func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
 func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	var cutoff time.Time
 	var limit int
-	var goodContracts []types.FileContractID
+	var goodContracts []siatypes.FileContractID
 	if jc.DecodeForm("cutoff", (*paramTime)(&cutoff)) != nil {
 		return
 	}

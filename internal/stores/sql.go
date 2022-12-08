@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -23,14 +22,6 @@ type (
 	SQLStore struct {
 		db *gorm.DB
 	}
-)
-
-// Check that the SQLStore implements all the required interfaces.
-var (
-	_ bus.ContractStore    = &SQLStore{}
-	_ bus.HostDB           = &SQLStore{}
-	_ bus.ContractSetStore = &SQLStore{}
-	_ bus.ObjectStore      = &SQLStore{}
 )
 
 // NewEphemeralSQLiteConnection creates a connection to an in-memory SQLite DB.

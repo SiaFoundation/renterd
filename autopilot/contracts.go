@@ -1,8 +1,8 @@
 package autopilot
 
 import (
-	"go.sia.tech/renterd/bus"
-	"go.sia.tech/siad/types"
+	"go.sia.tech/renterd/types"
+	siatypes "go.sia.tech/siad/types"
 )
 
 const (
@@ -10,30 +10,30 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []bus.Contract, deleted []types.FileContractID) error {
+func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []types.Contract, deleted []siatypes.FileContractID) error {
 	// build some maps
-	isDeleted := make(map[types.FileContractID]bool)
+	isDeleted := make(map[siatypes.FileContractID]bool)
 	for _, d := range deleted {
 		isDeleted[d] = true
 	}
-	wasUpForRenewal := make(map[types.FileContractID]bool)
+	wasUpForRenewal := make(map[siatypes.FileContractID]bool)
 	for _, r := range toRenew {
-		wasUpForRenewal[r.ID] = true
+		wasUpForRenewal[r.ID()] = true
 	}
-	isRenewed := make(map[types.FileContractID]bool)
+	isRenewed := make(map[siatypes.FileContractID]bool)
 	for _, r := range renewed {
 		isRenewed[r.ContractMetadata.RenewedFrom] = true
 	}
 
 	// build new contract set
-	var contracts []types.FileContractID
+	var contracts []siatypes.FileContractID
 	for _, c := range append(active, formed...) {
 		// TODO: excluding contracts that are up for renewal but have not been
 		// renewed yet, we probably want the autopilot to manage more than one
 		// set of contracts (e.g. goodForUpload - goodForDownload contracts)
-		upForRenewal := wasUpForRenewal[c.ID] && !isRenewed[c.ID]
-		if !isDeleted[c.ID] && !upForRenewal {
-			contracts = append(contracts, c.ID)
+		upForRenewal := wasUpForRenewal[c.ID()] && !isRenewed[c.ID()]
+		if !isDeleted[c.ID()] && !upForRenewal {
+			contracts = append(contracts, c.ID())
 		}
 	}
 

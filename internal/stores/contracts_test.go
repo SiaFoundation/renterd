@@ -90,7 +90,8 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Insert it.
-	if err := cs.AddContract(c); err != nil {
+	totalCost := types.NewCurrency64(456)
+	if err := cs.AddContract(c, totalCost); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +191,8 @@ func TestContractLocking(t *testing.T) {
 			UnlockConditions: uc,
 		},
 	}
-	if err := cs.AddContract(c); err != nil {
+	totalCost := types.NewCurrency64(654)
+	if err := cs.AddContract(c, totalCost); err != nil {
 		t.Fatal(err)
 	}
 
@@ -261,7 +263,8 @@ func TestRenewedContract(t *testing.T) {
 			UnlockConditions:  uc,
 		},
 	}
-	if err := cs.AddContract(c); err != nil {
+	oldContractTotal := types.NewCurrency64(111)
+	if err := cs.AddContract(c, oldContractTotal); err != nil {
 		t.Fatal(err)
 	}
 
@@ -275,7 +278,8 @@ func TestRenewedContract(t *testing.T) {
 			NewValidProofOutputs:  []types.SiacoinOutput{},
 		},
 	}
-	if err := cs.AddRenewedContract(renewed, fcid); err != nil {
+	newContractTotal := types.NewCurrency64(222)
+	if err := cs.AddRenewedContract(renewed, newContractTotal, fcid); err != nil {
 		t.Fatal(err)
 	}
 

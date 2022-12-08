@@ -10,8 +10,9 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/types"
 	"go.sia.tech/renterd/worker"
-	"go.sia.tech/siad/types"
+	siatypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
 
@@ -22,10 +23,10 @@ type Store interface {
 
 type Bus interface {
 	// wallet
-	WalletAddress() (types.UnlockHash, error)
-	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error)
-	WalletDiscard(txn types.Transaction) error
-	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
+	WalletAddress() (siatypes.UnlockHash, error)
+	WalletFund(txn *siatypes.Transaction, amount siatypes.Currency) ([]siatypes.OutputID, []siatypes.Transaction, error)
+	WalletDiscard(txn siatypes.Transaction) error
+	WalletSign(txn *siatypes.Transaction, toSign []siatypes.OutputID, cf siatypes.CoveredFields) error
 
 	// hostdb
 	AllHosts() ([]hostdb.Host, error)
@@ -35,42 +36,42 @@ type Bus interface {
 
 	// contracts
 	AddContract(c rhpv2.Contract) error
-	AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error
-	ActiveContracts() ([]bus.Contract, error)
-	DeleteContracts(ids []types.FileContractID) error
+	AddRenewedContract(c rhpv2.Contract, renewedFrom siatypes.FileContractID) error
+	DeleteContracts(ids []siatypes.FileContractID) error
 
-	Contract(id types.FileContractID) (contract rhpv2.Contract, err error)
-	ContractMetadata(id types.FileContractID) (bus.ContractMetadata, error)
-	UpdateContractMetadata(id types.FileContractID, metadata bus.ContractMetadata) error
+	Contract(id siatypes.FileContractID) (contract types.Contract, err error)
+	Contracts() ([]types.Contract, error)
+	ContractMetadata(id siatypes.FileContractID) (types.ContractMetadata, error)
+	UpdateContractMetadata(id siatypes.FileContractID, metadata types.ContractMetadata) error
 
-	SpendingHistory(id types.FileContractID, currentPeriod uint64) ([]bus.ContractSpending, error)
+	SpendingHistory(id siatypes.FileContractID, currentPeriod uint64) ([]types.ContractSpending, error)
 
-	AcquireContract(id types.FileContractID, d time.Duration) (types.FileContractRevision, error)
-	ReleaseContract(id types.FileContractID) error
+	AcquireContract(id siatypes.FileContractID, d time.Duration) (siatypes.FileContractRevision, error)
+	ReleaseContract(id siatypes.FileContractID) error
 
 	// contractsets
-	SetContractSet(name string, contracts []types.FileContractID) error
-	SetContracts(name string) ([]bus.Contract, error)
+	SetContractSet(name string, contracts []siatypes.FileContractID) error
+	SetContracts(name string) ([]types.Contract, error)
 
 	// txpool
-	RecommendedFee() (types.Currency, error)
+	RecommendedFee() (siatypes.Currency, error)
 
 	// consensus
 	ConsensusState() (bus.ConsensusState, error)
 
 	// objects
 	MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error)
-	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error)
-	SlabForMigration(slabID bus.SlabID) (object.Slab, []bus.MigrationContract, error)
+	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []siatypes.FileContractID) ([]bus.SlabID, error)
+	SlabForMigration(slabID bus.SlabID) (object.Slab, []types.Contract, error)
 }
 
 type Worker interface {
 	MigrateSlab(s *object.Slab, from, to []worker.Contract, currentHeight uint64) error
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
-	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
-	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
-	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error)
-	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error)
+	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds siatypes.Currency, renterAddress siatypes.UnlockHash, hostCollateral siatypes.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (siatypes.FileContract, siatypes.Currency, error)
+	RHPPrepareRenew(contract siatypes.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds siatypes.Currency, renterAddress siatypes.UnlockHash, hostCollateral siatypes.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (siatypes.FileContract, siatypes.Currency, siatypes.Currency, error)
+	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []siatypes.Transaction) (rhpv2.Contract, []siatypes.Transaction, error)
+	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID siatypes.FileContractID, transactionSet []siatypes.Transaction, finalPayment siatypes.Currency) (rhpv2.Contract, []siatypes.Transaction, error)
 }
 
 type Autopilot struct {
