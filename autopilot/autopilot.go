@@ -12,6 +12,7 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
+	"go.uber.org/zap"
 )
 
 type Store interface {
@@ -73,8 +74,9 @@ type Worker interface {
 }
 
 type Autopilot struct {
-	store  Store
 	bus    Bus
+	logger *zap.SugaredLogger
+	store  Store
 	worker Worker
 
 	c *contractor
@@ -116,13 +118,12 @@ func (ap *Autopilot) Run() error {
 		// fetch consensus state
 		cs, err := ap.bus.ConsensusState()
 		if err != nil {
-			// TODO: log error
+			ap.logger.Errorf("loop interrupted, could not fetch consensus state, err: %v", err)
 			continue
 		}
 
 		// do not continue if we are not synced
 		if !cs.Synced {
-			// TODO: log occurrence
 			continue
 		}
 
@@ -133,10 +134,17 @@ func (ap *Autopilot) Run() error {
 		ap.c.applyConsensusState(cfg, cs)
 
 		// perform maintenance
-		_ = ap.c.performContractMaintenance(cfg) // TODO: handle error
+		err = ap.c.performContractMaintenance(cfg)
+		if err != nil {
+			ap.logger.Errorf("contract maintenance failed, err: %v", err)
+			continue
+		}
 
 		// migration
-		_ = ap.m.UpdateContracts() // TODO: handle error
+		err = ap.m.UpdateContracts()
+		if err != nil {
+			ap.logger.Errorf("update contracts failed, err: %v", err)
+		}
 		ap.m.TryPerformMigrations()
 	}
 }
@@ -171,15 +179,17 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, heartbeat time.Duration) (_ http.Handler, run, cleanup func() error) {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration) (_ http.Handler, run, cleanup func() error) {
 	ap := &Autopilot{
-		store:  store,
 		bus:    bus,
+		logger: logger.Sugar(),
+		store:  store,
 		worker: worker,
 
 		ticker:   time.NewTicker(heartbeat),
 		stopChan: make(chan struct{}),
 	}
+
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap)
 	ap.s = newScanner(
@@ -193,5 +203,5 @@ func New(store Store, bus Bus, worker Worker, heartbeat time.Duration) (_ http.H
 		"GET    /actions": ap.actionsHandler,
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
-	}), ap.Run, ap.Stop
+	}), ap.Run, cleanup
 }

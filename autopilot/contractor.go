@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
+	"go.uber.org/zap"
 )
 
 const (
@@ -21,7 +23,8 @@ const (
 
 type (
 	contractor struct {
-		ap *Autopilot
+		ap     *Autopilot
+		logger *zap.SugaredLogger
 
 		blockHeight   uint64
 		currentPeriod uint64
@@ -30,7 +33,8 @@ type (
 
 func newContractor(ap *Autopilot) *contractor {
 	return &contractor{
-		ap: ap,
+		ap:     ap,
+		logger: ap.logger.Named("contractor"),
 	}
 }
 
@@ -69,13 +73,13 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	// run checks
 	toRenew, toDelete, err := c.runContractChecks(cfg, active)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
 
 	// delete contracts
 	err = c.ap.bus.DeleteContracts(toDelete)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to delete contracts, err: %v", err)
 	}
 
 	// figure out remaining funds
@@ -84,19 +88,19 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	// run renewals
 	renewed, err := c.runContractRenewals(cfg, &remaining, address, toRenew)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to renew contracts, err: %v", err)
 	}
 
 	// run formations
 	formed, err := c.runContractFormations(cfg, &remaining, address)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to form contracts, err: %v", err)
 	}
 
 	// update contract set
 	err = c.ap.updateDefaultContracts(active, toRenew, renewed, formed, toDelete)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to update default contracts, err: %v", err)
 	}
 
 	return nil
@@ -120,13 +124,22 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		// fetch host from hostdb
 		host, err := c.ap.bus.Host(contract.HostKey)
 		if err != nil {
-			continue // TODO: log err
+			c.logger.Errorw(
+				fmt.Sprintf("missing host, err: %v", err),
+				"hk", contract.HostKey,
+			)
+			continue
 		}
 
 		// fetch contract from contract store
 		contractData, err := c.ap.bus.Contract(contract.ID)
 		if err != nil {
-			continue // TODO: log err
+			c.logger.Errorw(
+				fmt.Sprintf("missing contract, err: %v", err),
+				"hk", contract.HostKey,
+				"fcid", contract.ID,
+			)
+			continue
 		}
 
 		// fetch metadata
@@ -136,20 +149,35 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		}
 
 		// decide whether the host is still good
-		usable, _ := isUsableHost(cfg, f, Host{host})
+		usable, reasons := isUsableHost(cfg, f, Host{host})
 		if !usable {
-			toDelete = append(toDelete, contract.ID) // TODO: log reasons
+			c.logger.Infow(
+				"unusable host",
+				"hk", host.PublicKey,
+				"fcid", contract.ID,
+				"reasons", reasons,
+			)
+			toDelete = append(toDelete, contract.ID)
 			continue
 		}
 
 		// decide whether the contract is still good
-		usable, renewable, _ := isUsableContract(cfg, Host{host}, contractData, metadata, c.blockHeight)
-		if !usable && !renewable {
-			toDelete = append(toDelete, contract.ID) // TODO: log reasons
-			continue
-		} else if !usable {
-			renewIndices[contract.ID] = len(toRenew)
-			toRenew = append(toRenew, contract)
+		usable, renewable, reasons := isUsableContract(cfg, Host{host}, contractData, metadata, c.blockHeight)
+		if !usable {
+			c.logger.Infow(
+				"unusable contract",
+				"hk", host.PublicKey,
+				"fcid", contract.ID,
+				"reasons", reasons,
+				"renewable", renewable,
+			)
+			if !renewable {
+				toDelete = append(toDelete, contract.ID)
+				continue
+			} else {
+				renewIndices[contract.ID] = len(toRenew)
+				toRenew = append(toRenew, contract)
+			}
 		}
 
 		// keep track of file size
@@ -180,6 +208,20 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []bus.Contract) ([]bus.Contract, error) {
 	renewed := make([]bus.Contract, 0, len(toRenew))
 
+	// log contracts renewed
+	c.logger.Debugw(
+		"renewing contracts initiated",
+		"torenew", len(toRenew),
+		"budget", budget.HumanString(),
+	)
+	defer func() {
+		c.logger.Debugw(
+			"renewing contracts done",
+			"renewed", len(renewed),
+			"budget", budget.HumanString(),
+		)
+	}()
+
 	// perform the renewals
 	for _, renew := range toRenew {
 		// break if autopilot is stopped
@@ -189,15 +231,21 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 
 		// check our budget
 		renterFunds, err := c.renewFundingEstimate(cfg, renew.ID)
+		if err != nil {
+			return nil, fmt.Errorf("could not get renew funding estimate, err: %v", err)
+		}
 		if budget.Cmp(renterFunds) < 0 {
+			c.logger.Debugw(
+				"insufficient budget",
+				"budget", budget.HumanString(),
+				"needed", renterFunds.HumanString(),
+				"renewal", true,
+			)
 			break
 		}
 
 		// derive the renter key
 		renterKey := c.ap.deriveRenterKey(renew.HostKey)
-		if err != nil {
-			return nil, err
-		}
 
 		var hostCollateral types.Currency // TODO
 		contract, err := c.renewContract(cfg, renew, renterKey, renterAddress, renterFunds, hostCollateral)
@@ -214,6 +262,11 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		// persist the contract
 		err = c.ap.bus.AddRenewedContract(contract, renew.ID)
 		if err != nil {
+			c.logger.Errorw(
+				fmt.Sprintf("renewal failed to persist, err: %v", err),
+				"hk", renew.HostKey,
+				"fcid", renew.ID,
+			)
 			return nil, err
 		}
 
@@ -261,26 +314,48 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	// form missing contracts
 	var formed []bus.Contract
 	missing := int(cfg.Contracts.Hosts) - len(active) // TODO: add leeway so we don't form contracts if we dip slightly under `needed` (?)
-	canidates, _ := c.candidateHosts(cfg, missing)    // TODO: add leeway so we have more than enough canidates
+
+	// log contracts formed
+	c.logger.Debugw(
+		"forming contracts initiated",
+		"active", len(active),
+		"required", cfg.Contracts.Hosts,
+		"missing", missing,
+		"budget", budget.HumanString(),
+	)
+	defer func() {
+		c.logger.Debugw(
+			"forming contracts done",
+			"formed", len(formed),
+			"budget", budget.HumanString(),
+		)
+	}()
+
+	canidates, _ := c.candidateHosts(cfg, missing) // TODO: add leeway so we have more than enough canidates
 	for h := 0; missing > 0 && h < len(canidates); h++ {
 		// break if autopilot is stopped
 		if c.isStopped() {
 			break
 		}
 
-		// fetch host IP
+		// fetch host
 		candidate := canidates[h]
 		host, err := c.ap.bus.Host(candidate)
 		if err != nil {
-			// TODO: log error
+			c.logger.Errorw(
+				fmt.Sprintf("missing host, err: %v", err),
+				"hk", candidate,
+			)
 			continue
 		}
-		hostIP := host.NetAddress()
 
 		// fetch host settings
-		scan, err := c.ap.worker.RHPScan(host.PublicKey, hostIP, 0)
+		scan, err := c.ap.worker.RHPScan(candidate, host.NetAddress(), 0)
 		if err != nil {
-			// TODO: log error
+			c.logger.Debugw(
+				fmt.Sprintf("failed scan, err: %v", err),
+				"hk", candidate,
+			)
 			continue
 		}
 		hostSettings := scan.Settings
@@ -289,17 +364,25 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		txnFee := fee.Mul64(estimatedFileContractTransactionSetSize)
 		renterFunds := c.initialContractFunding(hostSettings, txnFee, minInitialContractFunds, maxInitialContractFunds)
 		if budget.Cmp(renterFunds) < 0 {
+			c.logger.Debugw(
+				"insufficient budget",
+				"budget", budget.HumanString(),
+				"needed", renterFunds.HumanString(),
+				"renewal", false,
+			)
 			break
 		}
 
 		// form contract
 		renterKey := c.ap.deriveRenterKey(candidate)
 		var hostCollateral types.Currency // TODO
-		contract, err := c.formContract(cfg, candidate, hostIP, hostSettings, renterKey, renterAddress, renterFunds, hostCollateral)
+		contract, err := c.formContract(cfg, candidate, host.NetAddress(), hostSettings, renterKey, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
-			// TODO: handle error properly, if the wallet ran out of outputs
-			// here there's no point in forming more contracts until a block
-			// is mined, maybe we could/should wait for pending transactions?
+			// TODO: keep track of consecutive failures and break at some point
+			c.logger.Errorw(
+				fmt.Sprintf("failed contract formation, err : %v", err),
+				"hk", candidate,
+			)
 			continue
 		}
 
@@ -309,7 +392,10 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		// persist contract in store
 		err = c.ap.bus.AddContract(contract)
 		if err != nil {
-			// TODO: log error
+			c.logger.Errorw(
+				fmt.Sprintf("new contract failed to persist, err: %v", err),
+				"hk", candidate,
+			)
 			continue
 		}
 
@@ -322,15 +408,11 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 			return nil, err
 		}
 
-		if err != nil {
-			return nil, err
-		}
-
 		// add contract to contract set
 		formed = append(formed, bus.Contract{
 			ID:               contract.ID(),
 			HostKey:          candidate,
-			HostIP:           hostIP,
+			HostIP:           host.NetAddress(),
 			StartHeight:      c.blockHeight,
 			EndHeight:        contract.EndHeight(),
 			ContractMetadata: metadata,
@@ -353,6 +435,10 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(toRenew.HostKey, toRenew.HostIP, 0)
 	if err != nil {
+		c.logger.Debugw(
+			fmt.Sprintf("failed scan, err: %v", err),
+			"hk", toRenew.HostKey,
+		)
 		return rhpv2.Contract{}, nil
 	}
 
@@ -440,18 +526,31 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	// fetch contract
 	contract, err := c.ap.bus.Contract(id)
 	if err != nil {
+		c.logger.Errorw(
+			fmt.Sprintf("missing contract, err: %v", err),
+			"hk", contract.HostKey,
+			"fcid", contract.ID,
+		)
 		return types.ZeroCurrency, err
 	}
 
 	// fetch host
 	host, err := c.ap.bus.Host(contract.HostKey())
 	if err != nil {
+		c.logger.Errorw(
+			fmt.Sprintf("missing host, err: %v", err),
+			"hk", contract.HostKey,
+		)
 		return types.ZeroCurrency, err
 	}
 
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress(), 0)
 	if err != nil {
+		c.logger.Debugw(
+			fmt.Sprintf("failed scan, err: %v", err),
+			"hk", contract.HostKey(),
+		)
 		return types.ZeroCurrency, err
 	}
 

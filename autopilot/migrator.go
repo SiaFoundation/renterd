@@ -7,10 +7,12 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
+	"go.uber.org/zap"
 )
 
 type migrator struct {
-	ap *Autopilot
+	ap     *Autopilot
+	logger *zap.SugaredLogger
 
 	mu            sync.Mutex
 	goodContracts []worker.Contract
@@ -19,7 +21,8 @@ type migrator struct {
 
 func newMigrator(ap *Autopilot) *migrator {
 	return &migrator{
-		ap: ap,
+		ap:     ap,
+		logger: ap.logger.Named("migrator"),
 	}
 }
 

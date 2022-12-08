@@ -3,7 +3,6 @@ package autopilot
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,8 +10,10 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/internal/utils"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
+	"go.uber.org/zap"
 )
 
 const (
@@ -48,6 +49,7 @@ type (
 
 		pool    *scanPool
 		tracker *tracker
+		logger  *zap.SugaredLogger
 
 		scanMinInterval    time.Duration
 		timeoutMinInterval time.Duration
@@ -140,16 +142,16 @@ func (t *tracker) addDataPoint(duration time.Duration) {
 	t.count += 1
 }
 
-func (t *tracker) timeout() (time.Duration, error) {
+func (t *tracker) timeout() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.count < uint64(t.threshold) {
-		return t.minTimeout, nil
+		return t.minTimeout
 	}
 
 	percentile, err := percentile(t.timings, t.percentile)
 	if err != nil {
-		return t.minTimeout, err
+		return t.minTimeout
 	}
 
 	timeout := time.Duration(percentile) * time.Millisecond
@@ -157,7 +159,7 @@ func (t *tracker) timeout() (time.Duration, error) {
 		timeout = t.minTimeout
 	}
 
-	return timeout, nil
+	return timeout
 }
 
 func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
@@ -170,6 +172,7 @@ func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterv
 			trackerTimeoutPercentile,
 			trackerMinTimeout,
 		),
+		logger: ap.logger.Named("scanner"),
 
 		stopChan: ap.stopChan,
 
@@ -187,6 +190,7 @@ func (s *scanner) tryPerformHostScan() <-chan error {
 		return nil
 	}
 
+	s.logger.Debug("host scan started")
 	s.scanningLastStart = time.Now()
 	s.scanning = true
 	s.mu.Unlock()
@@ -194,10 +198,15 @@ func (s *scanner) tryPerformHostScan() <-chan error {
 	errChan := make(chan error, 1)
 	go func() {
 		defer close(errChan)
+
 		err := s.performHostScans()
+		if err != nil {
+			s.logger.Debug("host scan encountered error: err: %v", err)
+		}
 
 		s.mu.Lock()
 		s.scanning = false
+		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 
 		errChan <- err
@@ -212,13 +221,10 @@ func (s *scanner) tryUpdateTimeout() {
 		return
 	}
 
-	timeout, err := s.tracker.timeout()
-	if err != nil {
-		// TODO: log error
-	}
-
+	prev := s.timeout
+	s.timeout = s.tracker.timeout()
 	s.timeoutLastUpdate = time.Now()
-	s.timeout = timeout
+	s.logger.Debugf("updated timeout %v->%v", prev, s.timeout)
 }
 
 // performHostScans scans every host in our database
@@ -230,6 +236,12 @@ func (s *scanner) performHostScans() error {
 		return err
 	}
 
+	// nothing to do
+	if len(hosts) == 0 {
+		return nil
+	}
+
+	s.logger.Debugf("launching %v host scans", len(hosts))
 	s.pool.launchScans(hosts)
 
 	workerFn := func(resChan chan scanResp) {
@@ -249,9 +261,8 @@ func (s *scanner) performHostScans() error {
 
 	respChan := s.pool.launchThreads(workerFn)
 
-	var errs error
-
 	// handle responses
+	var errs []error
 	inflight := len(hosts)
 	for inflight > 0 {
 		var res scanResp
@@ -263,17 +274,19 @@ func (s *scanner) performHostScans() error {
 		}
 
 		if res.err != nil {
+			s.logger.Debugw(
+				"failed scan",
+				"hk", res.hostKey,
+				"err", res.err,
+			)
 			if err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
 				Timestamp: time.Now(),
 				Type:      "scan",
 				Success:   false,
 				Result:    json.RawMessage(`{"error": "` + res.err.Error() + `"}`),
 			}); err != nil {
-				if errs == nil {
-					errs = err
-				} else {
-					errs = fmt.Errorf("%w; %s", errs, err.Error())
-				}
+				s.logger.Errorf("failed to record scan for host %v", res.hostKey)
+				errs = append(errs, err)
 			}
 		} else {
 			if err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
@@ -282,16 +295,13 @@ func (s *scanner) performHostScans() error {
 				Success:   true,
 				Result:    json.RawMessage(jsonMarshal(res.settings)),
 			}); err != nil {
-				if errs == nil {
-					errs = err
-				} else {
-					errs = fmt.Errorf("%w; %s", errs, err.Error())
-				}
+				s.logger.Errorf("failed to record scan for host %v", res.hostKey)
+				errs = append(errs, err)
 			}
 		}
 	}
 
-	return errs
+	return utils.JoinErrors(errs)
 }
 
 func (s *scanner) isScanRequired() bool {
