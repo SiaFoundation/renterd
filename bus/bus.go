@@ -20,9 +20,6 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// TODO: use ErrSettingsNotFound from the stores package after the import cycle is fixed
-var ErrSettingNotFound = errors.New("setting not found")
-
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
@@ -119,7 +116,7 @@ func (b *bus) loadDefaultSettings() (err error) {
 	rs := DefaultRedundancySettings()
 
 	// check min shards setting
-	if _, err = b.ss.Setting("MinShards"); err == ErrSettingNotFound {
+	if _, err = b.ss.Setting("MinShards"); isErrSettingsNotFound(err) {
 		err = b.ss.UpdateSetting("MinShards", fmt.Sprint(rs.MinShards))
 	}
 	if err != nil {
@@ -127,7 +124,7 @@ func (b *bus) loadDefaultSettings() (err error) {
 	}
 
 	// check total shards setting
-	if _, err = b.ss.Setting("TotalShards"); err == ErrSettingNotFound {
+	if _, err = b.ss.Setting("TotalShards"); isErrSettingsNotFound(err) {
 		err = b.ss.UpdateSetting("TotalShards", fmt.Sprint(rs.TotalShards))
 	}
 	if err != nil {
@@ -620,7 +617,7 @@ func (b *bus) settingsRedundancyHandlerGET(jc jape.Context) {
 	var rs RedundancySettings
 
 	// fetch min shard setting
-	if ms, err := b.ss.Setting("MinShards"); err == ErrSettingNotFound {
+	if ms, err := b.ss.Setting("MinShards"); isErrSettingsNotFound(err) {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if err != nil {
@@ -632,7 +629,7 @@ func (b *bus) settingsRedundancyHandlerGET(jc jape.Context) {
 	}
 
 	// fetch total shards setting
-	if ts, err := b.ss.Setting("TotalShards"); err == ErrSettingNotFound {
+	if ts, err := b.ss.Setting("TotalShards"); isErrSettingsNotFound(err) {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if err != nil {
@@ -653,7 +650,7 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	}
 
 	setting, err := b.ss.Setting(key)
-	if err == ErrSettingNotFound {
+	if isErrSettingsNotFound(err) {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if err != nil {
@@ -677,6 +674,12 @@ func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
 	}
 
 	jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
+}
+
+// TODO: use simple err check against stores.ErrSettingNotFound as soon as the
+// import-cycle is fixed
+func isErrSettingsNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "setting not found")
 }
 
 // New returns a new Bus.
