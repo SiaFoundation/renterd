@@ -251,8 +251,8 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir 
 		return nil, nil, err
 	}
 	cleanup := func() (err error) {
-		a.Stop()
-		err = logger.Sync()
+		err = a.Stop()
+		_ = logger.Sync() // ignore error
 		closeFn()
 		return
 	}
