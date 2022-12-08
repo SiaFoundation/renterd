@@ -22,6 +22,9 @@ const (
 	SettingRedundancy = "redundancy"
 )
 
+// TODO: use ErrSettingsNotFound from the stores package after the import cycle is fixed
+var ErrSettingNotFound = errors.New("setting not found")
+
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
