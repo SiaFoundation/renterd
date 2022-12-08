@@ -14,7 +14,7 @@ type (
 	dbSetting struct {
 		Model
 
-		Key   string `gorm:"unique;index"`
+		Key   string `gorm:"unique;index;NOT NULL"`
 		Value string `gorm:"NOT NULL"`
 	}
 )

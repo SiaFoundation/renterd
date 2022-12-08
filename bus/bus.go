@@ -112,7 +112,7 @@ type bus struct {
 	ss  SettingStore
 }
 
-func (b *bus) loadDefaultSettings() (err error) {
+func (b *bus) ensureRedundancySettings() (err error) {
 	rs := DefaultRedundancySettings()
 
 	// check min shards setting
@@ -696,7 +696,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		ss:  ss,
 	}
 
-	if err := b.loadDefaultSettings(); err != nil {
+	if err := b.ensureRedundancySettings(); err != nil {
 		return nil, err
 	}
 
