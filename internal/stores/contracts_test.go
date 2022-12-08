@@ -306,7 +306,18 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(newContract, renewed) {
+	expected := types.Contract{
+		HostIP:      "",
+		StartHeight: 0,
+		Revision:    newContract.Revision,
+		Signatures:  newContract.Signatures,
+		ContractMetadata: types.ContractMetadata{
+			RenewedFrom: fcid,
+			Spending:    types.ContractSpending{},
+			TotalCost:   newContractTotal,
+		},
+	}
+	if !reflect.DeepEqual(newContract, expected) {
 		t.Fatal("mismatch")
 	}
 
