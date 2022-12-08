@@ -173,7 +173,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	SetContracts(name string) ([]types.Contract, error)
+	ContractSetContracts(name string) ([]types.Contract, error)
 	ContractsForSlab(shards []object.Sector) ([]types.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
@@ -614,7 +614,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[consensus.PublicKey]siatypes.FileContractID)
 	for {
 		// fetch contracts
-		bcs, err := w.bus.SetContracts(up.ContractSet)
+		bcs, err := w.bus.ContractSetContracts(up.ContractSet)
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}

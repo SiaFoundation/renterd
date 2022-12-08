@@ -5,8 +5,7 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// A Contract uniquely identifies a Sia file contract on a host, along with the
-// host's IP.
+// A Contract contains all information about a contract with a host.
 type Contract struct {
 	HostIP      string `json:"hostIP"`
 	StartHeight uint64 `json:"startHeight"`

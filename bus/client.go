@@ -285,10 +285,10 @@ func (c *Client) SetContractSet(name string, contracts []siatypes.FileContractID
 	return
 }
 
-// SetContracts returns the full contract for each contract id in the given set.
-// The ID and HostIP fields may be empty, depending on whether a contract exists
-// and a host announcement is known.
-func (c *Client) SetContracts(name string) (contracts []types.Contract, err error) {
+// ContractSetContracts returns the full contract for each contract id in the
+// given set.  The ID and HostIP fields may be empty, depending on whether a
+// contract exists and a host announcement is known.
+func (c *Client) ContractSetContracts(name string) (contracts []types.Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s/contracts", name), &contracts)
 	return
 }

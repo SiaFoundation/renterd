@@ -49,7 +49,7 @@ func (s *SQLStore) ContractSet(name string) ([]types.FileContractID, error) {
 	return fcids, nil
 }
 
-// SetHostSet implements the bus.ContractSetStore interface.
+// SetContractSet implements the bus.ContractSetStore interface.
 func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
 	contractSetEntries := make([]dbContractSetEntry, len(contracts))
 	for i, fcid := range contracts {
