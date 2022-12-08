@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
@@ -239,13 +240,21 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir 
 	if err != nil {
 		return nil, nil, err
 	}
-	a, err := autopilot.New(store, b, w, autopilotDir, cfg.Heartbeat)
+	autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
+	logger, closeFn, err := utils.NewLogger(autopilotLog)
 	if err != nil {
 		return nil, nil, err
 	}
-	cleanup := func() error {
+
+	a, err := autopilot.New(store, b, w, logger, cfg.Heartbeat)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() (err error) {
 		a.Stop()
-		return nil
+		err = logger.Sync()
+		closeFn()
+		return
 	}
 	return a, cleanup, nil
 }

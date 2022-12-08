@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"path/filepath"
 	"time"
 
 	"go.sia.tech/renterd/bus"
@@ -12,10 +11,6 @@ import (
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
-)
-
-const (
-	logFileName = "autopilot.log"
 )
 
 type Store interface {
@@ -88,9 +83,8 @@ type Autopilot struct {
 
 	masterKey [32]byte
 
-	ticker    *time.Ticker
-	stopChan  chan struct{}
-	onStopFns []func() error
+	ticker   *time.Ticker
+	stopChan chan struct{}
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -156,37 +150,19 @@ func (ap *Autopilot) Run() error {
 func (ap *Autopilot) Stop() error {
 	ap.ticker.Stop()
 	close(ap.stopChan)
-
-	errs := make([]error, len(ap.onStopFns))
-	for i, onStopFn := range ap.onStopFns {
-		errs[i] = onStopFn()
-	}
-	return joinErrors(errs)
+	return nil
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, dir string, heartbeat time.Duration) (*Autopilot, error) {
-	// instantiate the logger
-	logger, closeFn, err := newLogger(filepath.Join(dir, logFileName))
-	if err != nil {
-		return nil, err
-	}
-
-	onStopFn := func() (err error) {
-		err = logger.Sync()
-		closeFn()
-		return
-	}
-
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		bus:    bus,
 		logger: logger.Sugar(),
 		store:  store,
 		worker: worker,
 
-		ticker:    time.NewTicker(heartbeat),
-		stopChan:  make(chan struct{}),
-		onStopFns: []func() error{onStopFn},
+		ticker:   time.NewTicker(heartbeat),
+		stopChan: make(chan struct{}),
 	}
 
 	ap.c = newContractor(ap)

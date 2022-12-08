@@ -1,4 +1,4 @@
-package autopilot
+package utils
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func newLogger(path string) (*zap.Logger, func(), error) {
+func NewLogger(path string) (*zap.Logger, func(), error) {
 	writer, closeFn, err := zap.Open(path)
 	if err != nil {
 		return nil, nil, err
@@ -40,6 +40,6 @@ func newLogger(path string) (*zap.Logger, func(), error) {
 	), closeFn, nil
 }
 
-func newTestLogger() *zap.Logger {
+func NewNopLogger() *zap.Logger {
 	return zap.New(zapcore.NewNopCore())
 }

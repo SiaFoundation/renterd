@@ -3,7 +3,6 @@ package autopilot
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/internal/utils"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
@@ -301,7 +301,7 @@ func (s *scanner) performHostScans() error {
 		}
 	}
 
-	return joinErrors(errs)
+	return utils.JoinErrors(errs)
 }
 
 func (s *scanner) isScanRequired() bool {
@@ -333,27 +333,4 @@ func jsonMarshal(v interface{}) []byte {
 		panic(err)
 	}
 	return js
-}
-
-// TODO: replace with errors.join (Go 1.20)
-func joinErrors(errs []error) error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-
-	switch len(filtered) {
-	case 0:
-		return nil
-	case 1:
-		return filtered[0]
-	default:
-		strs := make([]string, len(filtered))
-		for i := range strs {
-			strs[i] = filtered[i].Error()
-		}
-		return errors.New(strings.Join(strs, ";"))
-	}
 }
