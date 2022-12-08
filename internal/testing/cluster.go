@@ -127,7 +127,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 
 	// Create bus.
 	var cleanups []func(context.Context) error
-	b, cleanup, err := node.NewBus(node.BusConfig{
+	b, bCleanup, err := node.NewBus(node.BusConfig{
 		Bootstrap:   false,
 		GatewayAddr: "127.0.0.1:0",
 		Miner:       miner,
@@ -139,11 +139,11 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	busServer := http.Server{
 		Handler: busAuth(b),
 	}
-	cleanups = append(cleanups, withCtx(cleanup))
+	cleanups = append(cleanups, withCtx(bCleanup))
 	cleanups = append(cleanups, busServer.Shutdown)
 
 	// Create worker.
-	w, cleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
+	w, wCleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
 	if err != nil {
 		return nil, err
 	}
@@ -151,11 +151,11 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	workerServer := http.Server{
 		Handler: workerAuth(w),
 	}
-	cleanups = append(cleanups, withCtx(cleanup))
+	cleanups = append(cleanups, withCtx(wCleanup))
 	cleanups = append(cleanups, workerServer.Shutdown)
 
 	// Create autopilot.
-	ap, run, cleanup, err := node.NewAutopilot(node.AutopilotConfig{
+	ap, run, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
 		Heartbeat: time.Second,
 	}, busClient, workerClient, autopilotDir)
 	if err != nil {
@@ -165,7 +165,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	autopilotServer := http.Server{
 		Handler: autopilotAuth(ap),
 	}
-	cleanups = append(cleanups, withCtx(cleanup))
+	cleanups = append(cleanups, withCtx(aCleanup))
 	cleanups = append(cleanups, autopilotServer.Shutdown)
 
 	cluster := &TestCluster{
