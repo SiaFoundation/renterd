@@ -388,6 +388,7 @@ func (c *TestCluster) Shutdown(ctx context.Context) error {
 			return err
 		}
 	}
+	c.wg.Wait()
 	return nil
 }
 
