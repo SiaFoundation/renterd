@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
@@ -231,17 +232,29 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 }
 
 func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (*autopilot.Autopilot, func() error, error) {
-	store, err := stores.NewJSONAutopilotStore(dir)
+	autopilotDir := filepath.Join(dir, "autopilot")
+	if err := os.MkdirAll(autopilotDir, 0700); err != nil {
+		return nil, nil, err
+	}
+	store, err := stores.NewJSONAutopilotStore(autopilotDir)
 	if err != nil {
 		return nil, nil, err
 	}
-	a, err := autopilot.New(store, b, w, cfg.Heartbeat)
+	autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
+	logger, closeFn, err := utils.NewLogger(autopilotLog)
 	if err != nil {
 		return nil, nil, err
 	}
-	cleanup := func() error {
-		a.Stop()
-		return nil
+
+	a, err := autopilot.New(store, b, w, logger, cfg.Heartbeat)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() (err error) {
+		err = a.Stop()
+		_ = logger.Sync() // ignore error
+		closeFn()
+		return
 	}
 	return a, cleanup, nil
 }

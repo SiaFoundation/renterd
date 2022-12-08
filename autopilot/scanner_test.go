@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/worker"
 	"lukechampine.com/frand"
 )
@@ -185,6 +186,7 @@ func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	s := &scanner{
 		bus:    b,
 		worker: w,
+		logger: utils.NewNopLogger().Sugar(),
 		tracker: newTracker(
 			trackerMinDataPoints,
 			trackerNumDataPoints,

@@ -23,24 +23,24 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 	var reasons []string
 
 	if !cfg.isWhitelisted(h) {
-		reasons = append(reasons, "host is not on whitelist")
+		reasons = append(reasons, "not whitelisted")
 	}
 	if cfg.isBlacklisted(h) {
-		reasons = append(reasons, "host is on blacklist")
+		reasons = append(reasons, "blacklisted")
 	}
 	if !h.IsOnline() {
-		reasons = append(reasons, "host is not online")
+		reasons = append(reasons, "offline")
 	}
 	if f.isRedundantIP(h) {
-		reasons = append(reasons, "host IP is redundant")
+		reasons = append(reasons, "redundant IP")
 	}
 	if bad, reason := hasBadSettings(cfg, h); bad {
-		reasons = append(reasons, fmt.Sprintf("host has bad settings, %v", reason))
+		reasons = append(reasons, fmt.Sprintf("bad settings: %v", reason))
 	}
 
 	// sanity check - should never happen but this would cause a zero score
 	if len(h.Announcements) == 0 {
-		reasons = append(reasons, "host is not announced")
+		reasons = append(reasons, "not announced")
 	}
 
 	return len(reasons) == 0, reasons
@@ -53,13 +53,13 @@ func isUsableContract(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetada
 	renewable := true
 
 	if isOutOfFunds(cfg, h, c, m) {
-		reasons = append(reasons, "contract is out of funds")
+		reasons = append(reasons, "out of funds")
 	}
 	if isUpForRenewal(cfg, c, bh) {
-		reasons = append(reasons, "contract is up for renewal")
+		reasons = append(reasons, "up for renewal")
 	}
 	if isMaxRevision(c) {
-		reasons = append(reasons, "contract reached max revision number")
+		reasons = append(reasons, "max revision number")
 		renewable = false
 	}
 
@@ -94,7 +94,7 @@ func isUpForRenewal(cfg Config, c rhpv2.Contract, blockHeight uint64) bool {
 func hasBadSettings(cfg Config, h Host) (bool, string) {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
-		return true, "no settings found"
+		return true, "no settings"
 	}
 	if !settings.AcceptingContracts {
 		return true, "not accepting contracts"
