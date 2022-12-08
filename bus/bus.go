@@ -2,7 +2,10 @@ package bus
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +19,9 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
 )
+
+// TODO: use ErrSettingsNotFound from the stores package after the import cycle is fixed
+var ErrSettingNotFound = errors.New("setting not found")
 
 type (
 	// A ChainManager manages blockchain state.
@@ -88,6 +94,13 @@ type (
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
 		SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error)
 	}
+
+	// A SettingStore stores settings.
+	SettingStore interface {
+		Settings() ([]string, error)
+		Setting(key string) (string, error)
+		UpdateSetting(key, value string) error
+	}
 )
 
 type bus struct {
@@ -99,6 +112,28 @@ type bus struct {
 	cs  ContractStore
 	css ContractSetStore
 	os  ObjectStore
+	ss  SettingStore
+}
+
+func (b *bus) loadDefaultSettings() (err error) {
+	rs := DefaultRedundancySettings()
+
+	// check min shards setting
+	if _, err = b.ss.Setting("MinShards"); err == ErrSettingNotFound {
+		err = b.ss.UpdateSetting("MinShards", fmt.Sprint(rs.MinShards))
+	}
+	if err != nil {
+		return
+	}
+
+	// check total shards setting
+	if _, err = b.ss.Setting("TotalShards"); err == ErrSettingNotFound {
+		err = b.ss.UpdateSetting("TotalShards", fmt.Sprint(rs.TotalShards))
+	}
+	if err != nil {
+		return err
+	}
+	return
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -573,8 +608,79 @@ func (b *bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) settingsHandlerGET(jc jape.Context) {
+	settings, err := b.ss.Settings()
+	if jc.Check("couldn't load settings", err) != nil {
+		return
+	}
+	jc.Encode(settings)
+}
+
+func (b *bus) settingsRedundancyHandlerGET(jc jape.Context) {
+	var rs RedundancySettings
+
+	// fetch min shard setting
+	if ms, err := b.ss.Setting("MinShards"); err == ErrSettingNotFound {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	} else if rs.MinShards, err = strconv.Atoi(ms); err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	// fetch total shards setting
+	if ts, err := b.ss.Setting("TotalShards"); err == ErrSettingNotFound {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	} else if rs.TotalShards, err = strconv.Atoi(ts); err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(rs)
+}
+
+func (b *bus) settingKeyHandlerGET(jc jape.Context) {
+	var key string
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	setting, err := b.ss.Setting(key)
+	if err == ErrSettingNotFound {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(setting)
+}
+
+func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
+	var key, value string
+	if jc.DecodeParam("key", &key) != nil || jc.DecodeParam("value", &value) != nil {
+		return
+	}
+
+	var err error
+	value, err = url.QueryUnescape(value)
+	if jc.Check("could not decode value", err) != nil {
+		return
+	}
+
+	jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
+}
+
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) http.Handler {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore) (http.Handler, error) {
 	b := &bus{
 		s:   s,
 		cm:  cm,
@@ -584,7 +690,13 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		cs:  cs,
 		css: css,
 		os:  os,
+		ss:  ss,
 	}
+
+	if err := b.loadDefaultSettings(); err != nil {
+		return nil, err
+	}
+
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
@@ -632,5 +744,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /migration/slabs":    b.objectsMigrationSlabsHandlerGET,
 		"GET    /migration/slab/:id": b.objectsMigrationSlabHandlerGET,
 		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
-	})
+
+		"GET    /settings":            b.settingsHandlerGET,
+		"GET    /settings/redundancy": b.settingsRedundancyHandlerGET,
+		"GET    /setting/:key":        b.settingKeyHandlerGET,
+		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
+	}), nil
 }

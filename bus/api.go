@@ -168,3 +168,14 @@ type UploadParams struct {
 	TotalShards   uint8
 	ContractSet   string
 }
+
+type RedundancySettings struct {
+	MinShards   int
+	TotalShards int
+}
+
+func DefaultRedundancySettings() (rs RedundancySettings) {
+	rs.MinShards = 10
+	rs.TotalShards = 30
+	return
+}

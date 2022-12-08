@@ -324,6 +324,29 @@ func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []renterd.C
 	panic("unimplemented")
 }
 
+// Setting returns the value for the setting with given key.
+func (c *Client) Setting(key string) (setting string, err error) {
+	err = c.c.GET(fmt.Sprintf("/setting/%s", key), &setting)
+	return
+}
+
+// Settings returns the keys of all settings in the store.
+func (c *Client) Settings() (settings []string, err error) {
+	err = c.c.GET("/settings", &settings)
+	return
+}
+
+// UpdateSetting will update or insert the setting for given key with the given value.
+func (c *Client) UpdateSetting(key, value string) error {
+	return c.c.POST(fmt.Sprintf("/setting/%s/%s", key, value), nil, nil)
+}
+
+// RedundancySettings returns the configured redundancy settings.
+func (c *Client) RedundancySettings() (rs RedundancySettings, err error) {
+	err = c.c.GET("/settings/redundancy", &rs)
+	return
+}
+
 // Object returns the object at the given path, or, if path ends in '/', the
 // entries under that path.
 func (c *Client) Object(path string) (o object.Object, entries []string, err error) {
