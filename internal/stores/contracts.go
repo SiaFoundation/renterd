@@ -380,7 +380,7 @@ func (c dbContract) convert() (types.Contract, error) {
 		Signatures:  signatures,
 		ContractMetadata: types.ContractMetadata{
 			RenewedFrom: c.RenewedFrom,
-			TotalCost:   siatypes.ZeroCurrency,    // TODO
+			TotalCost:   siatypes.NewCurrency(c.TotalCost),
 			Spending:    types.ContractSpending{}, // TODO
 		},
 	}, nil
