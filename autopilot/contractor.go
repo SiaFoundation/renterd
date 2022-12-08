@@ -261,7 +261,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *siatypes.Currency, 
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		err = c.ap.bus.AddRenewedContract(contract, renew.ID())
+		err = c.ap.bus.AddRenewedContract(contract, renterFunds, renew.ID())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed to persist, err: %v", err),
@@ -271,16 +271,11 @@ func (c *contractor) runContractRenewals(cfg Config, budget *siatypes.Currency, 
 			return nil, err
 		}
 
-		// persist the metadata
-		// TODO: instead of updating the metadata separately,
-		// AddRenewedContract should do that.
-		metadata := types.ContractMetadata{RenewedFrom: renew.ID(), TotalCost: renterFunds}
-		err = c.ap.bus.UpdateContractMetadata(contract.ID(), metadata)
+		// fetch full contract from db.
+		renewedContract, err := c.ap.bus.Contract(contract.ID())
 		if err != nil {
 			return nil, err
 		}
-
-		var renewedContract types.Contract
 
 		// add to renewed set
 		renewed = append(renewed, renewedContract)
@@ -386,22 +381,13 @@ func (c *contractor) runContractFormations(cfg Config, budget *siatypes.Currency
 		*budget = budget.Sub(renterFunds)
 
 		// persist contract in store
-		err = c.ap.bus.AddContract(contract)
+		err = c.ap.bus.AddContract(contract, renterFunds)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("new contract failed to persist, err: %v", err),
 				"hk", candidate,
 			)
 			continue
-		}
-
-		// persist the metadata
-		// TODO: Instead of doing a separate metadata update,
-		// AddContract should already save the metadata.
-		metadata := types.ContractMetadata{TotalCost: renterFunds}
-		err = c.ap.bus.UpdateContractMetadata(contract.ID(), metadata)
-		if err != nil {
-			return nil, err
 		}
 
 		// fetch full contract from db.
