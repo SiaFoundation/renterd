@@ -204,5 +204,5 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		"GET    /actions": ap.actionsHandler,
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
-	}), ap.Run, cleanup
+	}), ap.Run, ap.Stop
 }

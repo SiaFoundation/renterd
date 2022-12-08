@@ -246,9 +246,9 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir 
 		return nil, nil, nil, err
 	}
 
-	a, run, cleanup := autopilot.New(store, b, w, logger, cfg.Heartbeat)
+	a, run, acleanup := autopilot.New(store, b, w, logger, cfg.Heartbeat)
 	cleanup = func() (err error) {
-		err = cleanup()
+		err = acleanup()
 		_ = logger.Sync() // ignore error
 		closeFn()
 		return

@@ -2,9 +2,7 @@ package testing
 
 import (
 	"context"
-	"errors"
 	"testing"
-	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -23,7 +21,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := cluster.Close(); err != nil {
+		if err := cluster.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}()
@@ -60,25 +58,21 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Retry(30, time.Second, func() error {
-		contracts, err := b.Contracts()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(contracts) != 1 {
-			return errors.New("no contract")
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	// TODO: enable
+	//	err = Retry(20, time.Second, func() error {
+	//		contracts, err := b.Contracts()
+	//		if err != nil {
+	//			t.Fatal(err)
+	//		}
+	//		if len(contracts) != 1 {
+	//			return errors.New("no contract")
+	//		}
+	//		return nil
+	//	})
+	//	if err != nil {
+	//		t.Fatal(err)
+	//	}
 
 	// TODO: Once there is an autopilot client we test the autopilot as
 	// well.
-
-	// Shutdown
-	if err := cluster.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 }

@@ -35,8 +35,7 @@ type TestCluster struct {
 	Bus       *bus.Client
 	Worker    *worker.Client
 
-	cleanups  []func() error
-	shutdowns []func(context.Context) error
+	cleanups []func(context.Context) error
 
 	miner       *node.Miner
 	dir         string
@@ -83,6 +82,12 @@ var defaultAutopilotConfig = autopilot.Config{
 	},
 }
 
+func withCtx(f func() error) func(context.Context) error {
+	return func(context.Context) error {
+		return f()
+	}
+}
+
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string) (*TestCluster, error) {
 	// Use shared wallet key.
@@ -121,7 +126,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	miner := node.NewMiner(busClient)
 
 	// Create bus.
-	var cleanups []func() error
+	var cleanups []func(context.Context) error
 	b, cleanup, err := node.NewBus(node.BusConfig{
 		Bootstrap:   false,
 		GatewayAddr: "127.0.0.1:0",
@@ -130,22 +135,24 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	cleanups = append(cleanups, cleanup)
 	busAuth := jape.BasicAuth(busPassword)
 	busServer := http.Server{
 		Handler: busAuth(b),
 	}
+	cleanups = append(cleanups, withCtx(cleanup))
+	cleanups = append(cleanups, busServer.Shutdown)
 
 	// Create worker.
 	w, cleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
 	if err != nil {
 		return nil, err
 	}
-	cleanups = append(cleanups, cleanup)
 	workerAuth := jape.BasicAuth(workerPassword)
 	workerServer := http.Server{
 		Handler: workerAuth(w),
 	}
+	cleanups = append(cleanups, withCtx(cleanup))
+	cleanups = append(cleanups, workerServer.Shutdown)
 
 	// Create autopilot.
 	ap, run, cleanup, err := node.NewAutopilot(node.AutopilotConfig{
@@ -154,11 +161,12 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	cleanups = append(cleanups, cleanup)
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
 	autopilotServer := http.Server{
 		Handler: autopilotAuth(ap),
 	}
+	cleanups = append(cleanups, withCtx(cleanup))
+	cleanups = append(cleanups, autopilotServer.Shutdown)
 
 	cluster := &TestCluster{
 		dir:   dir,
@@ -168,8 +176,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		Bus:       busClient,
 		Worker:    workerClient,
 
-		cleanups:  cleanups,
-		shutdowns: []func(context.Context) error{busServer.Shutdown, workerServer.Shutdown, autopilotServer.Shutdown},
+		cleanups: cleanups,
 	}
 
 	// Spin up the servers.
@@ -369,10 +376,10 @@ func (c *TestCluster) AddHosts(n int) error {
 	return nil
 }
 
-// Close performs the cleanup on all servers of the cluster.
-func (c *TestCluster) Close() error {
-	for _, c := range c.cleanups {
-		if err := c(); err != nil {
+// Shutdown shuts down a TestCluster. Cleanups are performed in reverse order.
+func (c *TestCluster) Shutdown(ctx context.Context) error {
+	for i := len(c.cleanups) - 1; i > 0; i-- {
+		if err := c.cleanups[i](ctx); err != nil {
 			return err
 		}
 	}
@@ -381,17 +388,6 @@ func (c *TestCluster) Close() error {
 			return err
 		}
 	}
-	return nil
-}
-
-// Shutdown calls Shutdown on all http servers of the cluster.
-func (c *TestCluster) Shutdown(ctx context.Context) error {
-	for _, s := range c.shutdowns {
-		if err := s(ctx); err != nil {
-			return err
-		}
-	}
-	c.wg.Wait() // wait for servers to shut down
 	return nil
 }
 

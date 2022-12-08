@@ -78,9 +78,11 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// delete contracts
-	err = c.ap.bus.DeleteContracts(toDelete)
-	if err != nil {
-		return fmt.Errorf("failed to delete contracts, err: %v", err)
+	if len(toDelete) > 0 {
+		err = c.ap.bus.DeleteContracts(toDelete)
+		if err != nil {
+			return fmt.Errorf("failed to delete contracts, err: %v", err)
+		}
 	}
 
 	// figure out remaining funds
@@ -660,7 +662,7 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 
 	// select hosts
 	var selected []consensus.PublicKey
-	for len(selected) < wanted {
+	for len(selected) < wanted && len(scored) > 0 {
 		i := randSelectByWeight(scores)
 		selected = append(selected, scored[i].PublicKey)
 
