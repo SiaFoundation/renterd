@@ -19,7 +19,7 @@ func TestSQLSettingStore(t *testing.T) {
 	}
 
 	// add a setting
-	if err = ss.UpdateSetting("foo", "bar"); err != nil {
+	if err := ss.UpdateSetting("foo", "bar"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -40,7 +40,7 @@ func TestSQLSettingStore(t *testing.T) {
 	}
 
 	// assert we can update the setting
-	if err = ss.UpdateSetting("foo", "barbaz"); err != nil {
+	if err := ss.UpdateSetting("foo", "barbaz"); err != nil {
 		t.Fatal(err)
 	} else if value, err := ss.Setting("foo"); err != nil {
 		t.Fatal(err)

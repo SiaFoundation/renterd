@@ -350,14 +350,15 @@ func (c *Client) UpdateSetting(key string, value interface{}) error {
 	return c.c.POST(fmt.Sprintf("/setting/%s/%s", key, url.QueryEscape(string(v))), nil, nil)
 }
 
-func (c *Client) UpdateRedundancySettings(rs RedundancySettings) error {
-	return c.UpdateSetting(SettingRedundancy, rs)
-}
-
-// RedundancySettings returns the configured redundancy settings.
+// RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings() (rs RedundancySettings, err error) {
 	err = c.Setting(SettingRedundancy, &rs)
 	return
+}
+
+// UpdateRedundancySettings allows configuring the redundancy.
+func (c *Client) UpdateRedundancySettings(rs RedundancySettings) error {
+	return c.UpdateSetting(SettingRedundancy, rs)
 }
 
 // Object returns the object at the given path, or, if path ends in '/', the
