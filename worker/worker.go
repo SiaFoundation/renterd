@@ -86,7 +86,7 @@ func parseRange(s string, size int64) (offset, length int64, _ error) {
 }
 
 type WorkerInteractionResult struct {
-	Error error `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type ScanResult struct {
@@ -99,7 +99,7 @@ func IsSuccessfulInteraction(i hostdb.Interaction) bool {
 	if err := json.Unmarshal(i.Result, &result); err != nil {
 		return false
 	}
-	return result.Error == nil
+	return result.Error == ""
 }
 
 type ephemeralMetricsRecorder struct {
@@ -151,16 +151,15 @@ func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.
 
 func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	transform := func(timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
-		b, _ := json.Marshal(WorkerInteractionResult{Error: err})
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		b, _ := json.Marshal(WorkerInteractionResult{Error: errStr})
 		hi := hostdb.Interaction{
 			Timestamp: timestamp,
 			Type:      typ,
 			Result:    json.RawMessage(b),
-		}
-		if err == nil {
-			hi.Result, _ = json.Marshal(res)
-		} else {
-			hi.Result = []byte(`"` + err.Error() + `"`)
 		}
 		return hi, true
 	}
@@ -209,24 +208,20 @@ type worker struct {
 }
 
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
-	b, err := json.Marshal(ScanResult{
-		Settings: settings,
-		WorkerInteractionResult: WorkerInteractionResult{
-			Error: err,
-		},
-	})
-	if err != nil {
-		return err
-	}
 	hi := hostdb.Interaction{
 		Timestamp: time.Now(),
 		Type:      "scan",
-		Result:    json.RawMessage(b),
 	}
 	if err == nil {
-		hi.Result, _ = json.Marshal(settings)
+		hi.Result, _ = json.Marshal(ScanResult{
+			Settings: settings,
+		})
 	} else {
-		hi.Result = []byte(`"` + err.Error() + `"`)
+		hi.Result, _ = json.Marshal(ScanResult{
+			WorkerInteractionResult: WorkerInteractionResult{
+				Error: err.Error(),
+			},
+		})
 	}
 	return w.bus.RecordHostInteraction(hostKey, hi)
 }

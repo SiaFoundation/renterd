@@ -144,12 +144,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []renterd.Contract)
 			)
 			continue
 		}
-
-		// fetch metadata
-		metadata, err := c.ap.bus.ContractMetadata(contract.ID())
-		if err != nil {
-			continue // TODO: log err
-		}
+		metadata := contractData.ContractMetadata
 
 		// decide whether the host is still good
 		usable, reasons := isUsableHost(cfg, f, Host{host})
