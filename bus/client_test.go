@@ -17,6 +17,11 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 )
 
+var defaultSettings = bus.RedundancySettings{
+	MinShards:   10,
+	TotalShards: 30,
+}
+
 func TestClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -33,15 +38,14 @@ func TestClient(t *testing.T) {
 	go serveFn()
 
 	// assert setting 'foo' is not found
-	err = c.Setting("foo", nil)
-	if err == nil || !strings.Contains(err.Error(), "setting not found") {
+	if err := c.Setting("foo", nil); err == nil || !strings.Contains(err.Error(), "setting not found") {
 		t.Fatal("unexpected err", err)
 	}
 
-	// update setting 'foo' to some random type
+	// update setting 'foo'
 	want := bus.RedundancySettings{
-		MinShards:   10,
-		TotalShards: 30,
+		MinShards:   2,
+		TotalShards: 5,
 	}
 	if err := c.UpdateSetting("foo", want); err != nil {
 		t.Fatal(err)
@@ -51,11 +55,17 @@ func TestClient(t *testing.T) {
 	var got bus.RedundancySettings
 	if err := c.Setting("foo", &got); err != nil {
 		t.Fatal("unexpected err", err)
-	}
-	if got.MinShards != want.MinShards || got.TotalShards != want.TotalShards {
+	} else if got.MinShards != want.MinShards || got.TotalShards != want.TotalShards {
 		wb, _ := json.Marshal(want)
 		gb, _ := json.Marshal(got)
 		t.Fatal("unexpected result", string(wb), string(gb))
+	}
+
+	// fetch redundancy settings and assert they're configured to the default values
+	if rs, err := c.RedundancySettings(); err != nil {
+		t.Fatal(err)
+	} else if rs.MinShards != defaultSettings.MinShards || rs.TotalShards != defaultSettings.TotalShards {
+		t.Fatal("unexpected redundancy settings", rs)
 	}
 }
 
@@ -70,9 +80,10 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 	client := bus.NewClient("http://"+l.Addr().String(), "test")
 
 	b, cleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:   false,
-		GatewayAddr: "127.0.0.1:0",
-		Miner:       node.NewMiner(client),
+		Bootstrap:          false,
+		GatewayAddr:        "127.0.0.1:0",
+		Miner:              node.NewMiner(client),
+		RedundancySettings: defaultSettings,
 	}, filepath.Join(dir, "bus"), consensus.GeneratePrivateKey())
 	if err != nil {
 		return nil, nil, nil, err
