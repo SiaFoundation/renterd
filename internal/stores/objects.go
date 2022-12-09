@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/types"
-	siatypes "go.sia.tech/siad/types"
+	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -435,7 +435,7 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]siatypes.FileContractID) error {
+func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
@@ -569,7 +569,7 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 // SlabsForMigration returns up to n IDs of slabs which require repair. Only
 // slabs are considered which haven't failed since failureCutoff.
 // TODO: consider that we don't want to migrate slabs above a given health.
-func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []siatypes.FileContractID) ([]bus.SlabID, error) {
+func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error) {
 	// Serialize contract ids.
 	var fcids [][]byte
 	for _, fcid := range goodContracts {
@@ -604,7 +604,7 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 
 // SlabForMigration returns all the info about a s lab necessary for migrating
 // it to better hosts/contracts.
-func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []types.Contract, error) {
+func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.Contract, error) {
 	var dSlab dbSlab
 	tx := s.db.Where(&dbSlab{Model: Model{ID: uint(slabID)}}).
 		Preload("Shards.DBSector.Contracts.Host").
@@ -618,8 +618,8 @@ func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []types.Con
 	}
 
 	// Return all contracts that have ever stored any shard of the slab.
-	addedContracts := make(map[siatypes.FileContractID]struct{})
-	var contracts []types.Contract
+	addedContracts := make(map[types.FileContractID]struct{})
+	var contracts []renterd.Contract
 	for _, shard := range dSlab.Shards {
 		for _, c := range shard.DBSector.Contracts {
 			if _, exists := addedContracts[c.FCID]; exists {

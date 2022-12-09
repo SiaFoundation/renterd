@@ -1,4 +1,4 @@
-package types
+package renterd
 
 import (
 	"go.sia.tech/renterd/internal/consensus"
@@ -10,8 +10,8 @@ type Contract struct {
 	HostIP      string `json:"hostIP"`
 	StartHeight uint64 `json:"startHeight"`
 
-	Revision   types.FileContractRevision
-	Signatures [2]types.TransactionSignature
+	Revision   types.FileContractRevision    `json:"revision"`
+	Signatures [2]types.TransactionSignature `json:"signatures"`
 
 	ContractMetadata
 }

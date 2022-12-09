@@ -231,27 +231,27 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 	return w, func() error { return nil }, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (_ http.Handler, run, cleanup func() error, _ error) {
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
 	autopilotDir := filepath.Join(dir, "autopilot")
 	if err := os.MkdirAll(autopilotDir, 0700); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	store, err := stores.NewJSONAutopilotStore(autopilotDir)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
 	logger, closeFn, err := utils.NewLogger(autopilotLog)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	a, run, acleanup := autopilot.New(store, b, w, logger, cfg.Heartbeat)
+	ap := autopilot.New(store, b, w, logger, cfg.Heartbeat)
 	cleanup = func() (err error) {
-		err = acleanup()
+		err = ap.Stop()
 		_ = logger.Sync() // ignore error
 		closeFn()
 		return
 	}
-	return a, run, cleanup, nil
+	return ap, cleanup, nil
 }

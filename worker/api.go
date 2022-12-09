@@ -4,12 +4,12 @@ import (
 	"strconv"
 	"time"
 
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/renterd/types"
-	siatypes "go.sia.tech/siad/types"
+	"go.sia.tech/siad/types"
 )
 
 // exported types from internal/consensus
@@ -55,92 +55,92 @@ type RHPScanResponse struct {
 
 // RHPPrepareFormRequest is the request type for the /rhp/prepare/form endpoint.
 type RHPPrepareFormRequest struct {
-	RenterKey      PrivateKey          `json:"renterKey"`
-	HostKey        PublicKey           `json:"hostKey"`
-	RenterFunds    siatypes.Currency   `json:"renterFunds"`
-	RenterAddress  siatypes.UnlockHash `json:"renterAddress"`
-	HostCollateral siatypes.Currency   `json:"hostCollateral"`
-	EndHeight      uint64              `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings  `json:"hostSettings"`
+	RenterKey      PrivateKey         `json:"renterKey"`
+	HostKey        PublicKey          `json:"hostKey"`
+	RenterFunds    types.Currency     `json:"renterFunds"`
+	RenterAddress  types.UnlockHash   `json:"renterAddress"`
+	HostCollateral types.Currency     `json:"hostCollateral"`
+	EndHeight      uint64             `json:"endHeight"`
+	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
 }
 
 // RHPPrepareFormResponse is the response type for the /rhp/prepare/form
 // endpoint.
 type RHPPrepareFormResponse struct {
-	Contract siatypes.FileContract `json:"contract"`
-	Cost     siatypes.Currency     `json:"cost"`
+	Contract types.FileContract `json:"contract"`
+	Cost     types.Currency     `json:"cost"`
 }
 
 // RHPFormRequest is the request type for the /rhp/form endpoint.
 type RHPFormRequest struct {
-	RenterKey      PrivateKey             `json:"renterKey"`
-	HostKey        PublicKey              `json:"hostKey"`
-	HostIP         string                 `json:"hostIP"`
-	TransactionSet []siatypes.Transaction `json:"transactionSet"`
+	RenterKey      PrivateKey          `json:"renterKey"`
+	HostKey        PublicKey           `json:"hostKey"`
+	HostIP         string              `json:"hostIP"`
+	TransactionSet []types.Transaction `json:"transactionSet"`
 }
 
 // RHPFormResponse is the response type for the /rhp/form endpoint.
 type RHPFormResponse struct {
-	ContractID     siatypes.FileContractID `json:"contractID"`
-	Contract       rhpv2.Contract          `json:"contract"`
-	TransactionSet []siatypes.Transaction  `json:"transactionSet"`
+	ContractID     types.FileContractID `json:"contractID"`
+	Contract       rhpv2.Contract       `json:"contract"`
+	TransactionSet []types.Transaction  `json:"transactionSet"`
 }
 
 // RHPPrepareRenewRequest is the request type for the /rhp/prepare/renew
 // endpoint.
 type RHPPrepareRenewRequest struct {
-	Contract       siatypes.FileContractRevision `json:"contract"`
-	RenterKey      PrivateKey                    `json:"renterKey"`
-	HostKey        PublicKey                     `json:"hostKey"`
-	RenterFunds    siatypes.Currency             `json:"renterFunds"`
-	RenterAddress  siatypes.UnlockHash           `json:"renterAddress"`
-	HostCollateral siatypes.Currency             `json:"hostCollateral"`
-	EndHeight      uint64                        `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings            `json:"hostSettings"`
+	Contract       types.FileContractRevision `json:"contract"`
+	RenterKey      PrivateKey                 `json:"renterKey"`
+	HostKey        PublicKey                  `json:"hostKey"`
+	RenterFunds    types.Currency             `json:"renterFunds"`
+	RenterAddress  types.UnlockHash           `json:"renterAddress"`
+	HostCollateral types.Currency             `json:"hostCollateral"`
+	EndHeight      uint64                     `json:"endHeight"`
+	HostSettings   rhpv2.HostSettings         `json:"hostSettings"`
 }
 
 // RHPPrepareRenewResponse is the response type for the /rhp/prepare/renew
 // endpoint.
 type RHPPrepareRenewResponse struct {
-	Contract     siatypes.FileContract `json:"contract"`
-	Cost         siatypes.Currency     `json:"cost"`
-	FinalPayment siatypes.Currency     `json:"finalPayment"`
+	Contract     types.FileContract `json:"contract"`
+	Cost         types.Currency     `json:"cost"`
+	FinalPayment types.Currency     `json:"finalPayment"`
 }
 
 // RHPRenewRequest is the request type for the /rhp/renew endpoint.
 type RHPRenewRequest struct {
-	RenterKey      PrivateKey              `json:"renterKey"`
-	HostKey        PublicKey               `json:"hostKey"`
-	HostIP         string                  `json:"hostIP"`
-	ContractID     siatypes.FileContractID `json:"contractID"`
-	TransactionSet []siatypes.Transaction  `json:"transactionSet"`
-	FinalPayment   siatypes.Currency       `json:"finalPayment"`
+	RenterKey      PrivateKey           `json:"renterKey"`
+	HostKey        PublicKey            `json:"hostKey"`
+	HostIP         string               `json:"hostIP"`
+	ContractID     types.FileContractID `json:"contractID"`
+	TransactionSet []types.Transaction  `json:"transactionSet"`
+	FinalPayment   types.Currency       `json:"finalPayment"`
 }
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.
 type RHPRenewResponse struct {
-	ContractID     siatypes.FileContractID `json:"contractID"`
-	Contract       rhpv2.Contract          `json:"contract"`
-	TransactionSet []siatypes.Transaction  `json:"transactionSet"`
+	ContractID     types.FileContractID `json:"contractID"`
+	Contract       rhpv2.Contract       `json:"contract"`
+	TransactionSet []types.Transaction  `json:"transactionSet"`
 }
 
 // RHPFundRequest is the request type for the /rhp/fund endpoint.
 type RHPFundRequest struct {
-	Contract  siatypes.FileContractRevision `json:"contract"`
-	RenterKey PrivateKey                    `json:"renterKey"`
-	HostKey   PublicKey                     `json:"hostKey"`
-	HostIP    string                        `json:"hostIP"`
-	Account   rhpv3.Account                 `json:"account"`
-	Amount    siatypes.Currency             `json:"amount"`
+	Contract  types.FileContractRevision `json:"contract"`
+	RenterKey PrivateKey                 `json:"renterKey"`
+	HostKey   PublicKey                  `json:"hostKey"`
+	HostIP    string                     `json:"hostIP"`
+	Account   rhpv3.Account              `json:"account"`
+	Amount    types.Currency             `json:"amount"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
 // endpoint.
 type RHPPreparePaymentRequest struct {
-	Account    rhpv3.Account     `json:"account"`
-	Amount     siatypes.Currency `json:"amount"`
-	Expiry     uint64            `json:"expiry"`
-	AccountKey PrivateKey        `json:"accountKey"`
+	Account    rhpv3.Account  `json:"account"`
+	Amount     types.Currency `json:"amount"`
+	Expiry     uint64         `json:"expiry"`
+	AccountKey PrivateKey     `json:"accountKey"`
 }
 
 // RHPRegistryReadRequest is the request type for the /rhp/registry/read
@@ -165,7 +165,7 @@ type RHPRegistryUpdateRequest struct {
 // A Contract contains all the information necessary to access and revise an
 // existing file contract.
 type Contract struct {
-	types.Contract
+	renterd.Contract
 	RenterKey PrivateKey `json:"renterKey"`
 }
 

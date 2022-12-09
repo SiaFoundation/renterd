@@ -155,7 +155,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	cleanups = append(cleanups, workerServer.Shutdown)
 
 	// Create autopilot.
-	ap, run, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
+	ap, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
 		Heartbeat: time.Second,
 	}, busClient, workerClient, autopilotDir)
 	if err != nil {
@@ -163,7 +163,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
 	autopilotServer := http.Server{
-		Handler: autopilotAuth(ap),
+		Handler: autopilotAuth(autopilot.NewServer(ap)),
 	}
 	cleanups = append(cleanups, withCtx(aCleanup))
 	cleanups = append(cleanups, autopilotServer.Shutdown)
@@ -197,7 +197,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	}()
 	cluster.wg.Add(1)
 	go func() {
-		_ = run()
+		_ = ap.Run()
 		cluster.wg.Done()
 	}()
 

@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/types"
 	"go.sia.tech/renterd/worker"
-	siatypes "go.sia.tech/siad/types"
+	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
 
@@ -24,10 +24,10 @@ type Store interface {
 
 type Bus interface {
 	// wallet
-	WalletAddress() (siatypes.UnlockHash, error)
-	WalletFund(txn *siatypes.Transaction, amount siatypes.Currency) ([]siatypes.OutputID, []siatypes.Transaction, error)
-	WalletDiscard(txn siatypes.Transaction) error
-	WalletSign(txn *siatypes.Transaction, toSign []siatypes.OutputID, cf siatypes.CoveredFields) error
+	WalletAddress() (types.UnlockHash, error)
+	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error)
+	WalletDiscard(txn types.Transaction) error
+	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
 
 	// hostdb
 	AllHosts() ([]hostdb.Host, error)
@@ -36,43 +36,43 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	// contracts
-	AddContract(c rhpv2.Contract, totalCost siatypes.Currency) error
-	AddRenewedContract(c rhpv2.Contract, totalCost siatypes.Currency, renewedFrom siatypes.FileContractID) error
-	DeleteContracts(ids []siatypes.FileContractID) error
+	AddContract(c rhpv2.Contract, totalCost types.Currency) error
+	AddRenewedContract(c rhpv2.Contract, totalCost types.Currency, renewedFrom types.FileContractID) error
+	DeleteContracts(ids []types.FileContractID) error
 
-	Contract(id siatypes.FileContractID) (contract types.Contract, err error)
-	Contracts() ([]types.Contract, error)
-	ContractMetadata(id siatypes.FileContractID) (types.ContractMetadata, error)
-	UpdateContractMetadata(id siatypes.FileContractID, metadata types.ContractMetadata) error
+	Contract(id types.FileContractID) (contract renterd.Contract, err error)
+	Contracts() ([]renterd.Contract, error)
+	ContractMetadata(id types.FileContractID) (renterd.ContractMetadata, error)
+	UpdateContractMetadata(id types.FileContractID, metadata renterd.ContractMetadata) error
 
-	SpendingHistory(id siatypes.FileContractID, currentPeriod uint64) ([]types.ContractSpending, error)
+	SpendingHistory(id types.FileContractID, currentPeriod uint64) ([]renterd.ContractSpending, error)
 
-	AcquireContract(id siatypes.FileContractID, d time.Duration) (siatypes.FileContractRevision, error)
-	ReleaseContract(id siatypes.FileContractID) error
+	AcquireContract(id types.FileContractID, d time.Duration) (types.FileContractRevision, error)
+	ReleaseContract(id types.FileContractID) error
 
 	// contractsets
-	SetContractSet(name string, contracts []siatypes.FileContractID) error
-	ContractSetContracts(name string) ([]types.Contract, error)
+	SetContractSet(name string, contracts []types.FileContractID) error
+	ContractSetContracts(name string) ([]renterd.Contract, error)
 
 	// txpool
-	RecommendedFee() (siatypes.Currency, error)
+	RecommendedFee() (types.Currency, error)
 
 	// consensus
 	ConsensusState() (bus.ConsensusState, error)
 
 	// objects
 	MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error)
-	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []siatypes.FileContractID) ([]bus.SlabID, error)
-	SlabForMigration(slabID bus.SlabID) (object.Slab, []types.Contract, error)
+	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error)
+	SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.Contract, error)
 }
 
 type Worker interface {
 	MigrateSlab(s *object.Slab, from, to []worker.Contract, currentHeight uint64) error
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
-	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds siatypes.Currency, renterAddress siatypes.UnlockHash, hostCollateral siatypes.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (siatypes.FileContract, siatypes.Currency, error)
-	RHPPrepareRenew(contract siatypes.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds siatypes.Currency, renterAddress siatypes.UnlockHash, hostCollateral siatypes.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (siatypes.FileContract, siatypes.Currency, siatypes.Currency, error)
-	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []siatypes.Transaction) (rhpv2.Contract, []siatypes.Transaction, error)
-	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID siatypes.FileContractID, transactionSet []siatypes.Transaction, finalPayment siatypes.Currency) (rhpv2.Contract, []siatypes.Transaction, error)
+	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
+	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
+	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error)
+	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error)
 }
 
 type Autopilot struct {
@@ -184,8 +184,16 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 }
 
+func NewServer(ap *Autopilot) http.Handler {
+	return jape.Mux(map[string]jape.Handler{
+		"GET    /actions": ap.actionsHandler,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+	})
+}
+
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration) (_ http.Handler, run, cleanup func() error) {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration) *Autopilot {
 	ap := &Autopilot{
 		bus:    bus,
 		logger: logger.Sugar(),
@@ -205,9 +213,5 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		scannerTimeoutInterval,
 	)
 
-	return jape.Mux(map[string]jape.Handler{
-		"GET    /actions": ap.actionsHandler,
-		"GET    /config":  ap.configHandlerGET,
-		"PUT    /config":  ap.configHandlerPUT,
-	}), ap.Run, ap.Stop
+	return ap
 }

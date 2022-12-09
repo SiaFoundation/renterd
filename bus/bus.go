@@ -8,19 +8,19 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/types"
 	"go.sia.tech/renterd/wallet"
-	siatypes "go.sia.tech/siad/types"
+	"go.sia.tech/siad/types"
 )
 
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
-		AcceptBlock(siatypes.Block) error
+		AcceptBlock(types.Block) error
 		Synced() bool
 		TipState() consensus.State
 	}
@@ -30,25 +30,25 @@ type (
 		SyncerAddress() (string, error)
 		Peers() []string
 		Connect(addr string) error
-		BroadcastTransaction(txn siatypes.Transaction, dependsOn []siatypes.Transaction)
+		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
-		RecommendedFee() siatypes.Currency
-		Transactions() []siatypes.Transaction
-		AddTransactionSet(txns []siatypes.Transaction) error
-		UnconfirmedParents(txn siatypes.Transaction) ([]siatypes.Transaction, error)
+		RecommendedFee() types.Currency
+		Transactions() []types.Transaction
+		AddTransactionSet(txns []types.Transaction) error
+		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
-		Address() siatypes.UnlockHash
-		Balance() siatypes.Currency
-		FundTransaction(cs consensus.State, txn *siatypes.Transaction, amount siatypes.Currency, pool []siatypes.Transaction) ([]siatypes.OutputID, error)
-		Redistribute(cs consensus.State, outputs int, amount, feePerByte siatypes.Currency, pool []siatypes.Transaction) (siatypes.Transaction, []siatypes.OutputID, error)
-		ReleaseInputs(txn siatypes.Transaction)
-		SignTransaction(cs consensus.State, txn *siatypes.Transaction, toSign []siatypes.OutputID, cf siatypes.CoveredFields) error
+		Address() types.UnlockHash
+		Balance() types.Currency
+		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
+		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error)
+		ReleaseInputs(txn types.Transaction)
+		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
 		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
@@ -62,20 +62,20 @@ type (
 
 	// A ContractStore stores contracts.
 	ContractStore interface {
-		AcquireContract(fcid siatypes.FileContractID, duration time.Duration) (siatypes.FileContractRevision, bool, error)
-		ReleaseContract(fcid siatypes.FileContractID) error
-		Contracts() ([]types.Contract, error)
-		Contract(id siatypes.FileContractID) (types.Contract, error)
-		AddContract(c rhpv2.Contract, totalCost siatypes.Currency) error
-		AddRenewedContract(c rhpv2.Contract, totalCost siatypes.Currency, renewedFrom siatypes.FileContractID) error
-		RemoveContract(id siatypes.FileContractID) error
+		AcquireContract(fcid types.FileContractID, duration time.Duration) (types.FileContractRevision, bool, error)
+		ReleaseContract(fcid types.FileContractID) error
+		Contracts() ([]renterd.Contract, error)
+		Contract(id types.FileContractID) (renterd.Contract, error)
+		AddContract(c rhpv2.Contract, totalCost types.Currency) error
+		AddRenewedContract(c rhpv2.Contract, totalCost types.Currency, renewedFrom types.FileContractID) error
+		RemoveContract(id types.FileContractID) error
 	}
 
 	// A ContractSetStore stores contract sets.
 	ContractSetStore interface {
 		ContractSets() ([]string, error)
-		ContractSet(name string) ([]siatypes.FileContractID, error)
-		SetContractSet(name string, contracts []siatypes.FileContractID) error
+		ContractSet(name string) ([]types.FileContractID, error)
+		SetContractSet(name string, contracts []types.FileContractID) error
 	}
 
 	// An ObjectStore stores objects.
@@ -83,10 +83,10 @@ type (
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
 		MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error)
-		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]siatypes.FileContractID) error
+		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
-		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []siatypes.FileContractID) ([]SlabID, error)
-		SlabForMigration(slabID SlabID) (object.Slab, []types.Contract, error)
+		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
+		SlabForMigration(slabID SlabID) (object.Slab, []renterd.Contract, error)
 	}
 )
 
@@ -102,7 +102,7 @@ type bus struct {
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
-	var block siatypes.Block
+	var block types.Block
 	if jc.Decode(&block) != nil {
 		return
 	}
@@ -147,7 +147,7 @@ func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
 }
 
 func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
-	var txnSet []siatypes.Transaction
+	var txnSet []types.Transaction
 	if jc.Decode(&txnSet) == nil {
 		jc.Check("couldn't broadcast transaction set", b.tp.AddTransactionSet(txnSet))
 	}
@@ -187,7 +187,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	}
 	txn := wfr.Transaction
 	fee := b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
-	txn.MinerFees = []siatypes.Currency{fee}
+	txn.MinerFees = []types.Currency{fee}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -231,7 +231,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	err = b.w.SignTransaction(cs, &txn, toSign, siatypes.FullCoveredFields)
+	err = b.w.SignTransaction(cs, &txn, toSign, types.FullCoveredFields)
 	if jc.Check("couldn't sign the transaction", err) != nil {
 		return
 	}
@@ -240,7 +240,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 }
 
 func (b *bus) walletDiscardHandler(jc jape.Context) {
-	var txn siatypes.Transaction
+	var txn types.Transaction
 	if jc.Decode(&txn) == nil {
 		b.w.ReleaseInputs(txn)
 	}
@@ -253,10 +253,10 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	}
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
 	cost := rhpv2.ContractFormationCost(fc, wpfr.HostSettings.ContractPrice)
-	txn := siatypes.Transaction{
-		FileContracts: []siatypes.FileContract{fc},
+	txn := types.Transaction{
+		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []siatypes.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -286,10 +286,10 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {
 		finalPayment = wprr.Contract.ValidRenterPayout()
 	}
-	txn := siatypes.Transaction{
-		FileContracts: []siatypes.FileContract{fc},
+	txn := types.Transaction{
+		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []siatypes.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -312,7 +312,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 }
 
 func (b *bus) walletPendingHandler(jc jape.Context) {
-	isRelevant := func(txn siatypes.Transaction) bool {
+	isRelevant := func(txn types.Transaction) bool {
 		addr := b.w.Address()
 		for _, sci := range txn.SiacoinInputs {
 			if sci.UnlockConditions.UnlockHash() == addr {
@@ -376,7 +376,7 @@ func (b *bus) contractsHandler(jc jape.Context) {
 }
 
 func (b *bus) contractsAcquireHandler(jc jape.Context) {
-	var id siatypes.FileContractID
+	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -395,7 +395,7 @@ func (b *bus) contractsAcquireHandler(jc jape.Context) {
 }
 
 func (b *bus) contractsReleaseHandler(jc jape.Context) {
-	var id siatypes.FileContractID
+	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -405,7 +405,7 @@ func (b *bus) contractsReleaseHandler(jc jape.Context) {
 }
 
 func (b *bus) contractsIDHandlerGET(jc jape.Context) {
-	var id siatypes.FileContractID
+	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -416,7 +416,7 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
-	var id siatypes.FileContractID
+	var id types.FileContractID
 	var req ContractsIDAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
@@ -429,7 +429,7 @@ func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
-	var id siatypes.FileContractID
+	var id types.FileContractID
 	var req ContractsIDRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
@@ -442,7 +442,7 @@ func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
-	var id siatypes.FileContractID
+	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -466,7 +466,7 @@ func (b *bus) contractSetsNameHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractSetsNameHandlerPUT(jc jape.Context) {
-	var contracts []siatypes.FileContractID
+	var contracts []types.FileContractID
 	if jc.Decode(&contracts) != nil {
 		return
 	}
@@ -484,11 +484,11 @@ func (b *bus) contractSetContractsHandler(jc jape.Context) {
 	if jc.Check("couldn't load contracts", err) != nil {
 		return
 	}
-	allMap := make(map[siatypes.FileContractID]types.Contract)
+	allMap := make(map[types.FileContractID]renterd.Contract)
 	for _, c := range all {
 		allMap[c.ID()] = c
 	}
-	var contracts []types.Contract
+	var contracts []renterd.Contract
 	for _, fcid := range setContracts {
 		c, exists := allMap[fcid]
 		if exists {
@@ -526,7 +526,7 @@ func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
 func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	var cutoff time.Time
 	var limit int
-	var goodContracts []siatypes.FileContractID
+	var goodContracts []types.FileContractID
 	if jc.DecodeForm("cutoff", (*paramTime)(&cutoff)) != nil {
 		return
 	}
