@@ -20,6 +20,10 @@ type (
 	PrivateKey = consensus.PrivateKey
 	// A Signature is an Ed25519 signature.
 	Signature = consensus.Signature
+	// A BlockID uniquely identifies a block.
+	BlockID = consensus.BlockID
+	// A ChainIndex pairs a block's height with its ID.
+	ChainIndex = consensus.ChainIndex
 	// ConsensusState represents the full state of the chain as of a particular block.
 	ConsensusState = consensus.State
 )
