@@ -2,7 +2,6 @@ package autopilot
 
 import (
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -24,9 +23,6 @@ var (
 
 type mockBus struct {
 	hosts []hostdb.Host
-
-	mu   sync.Mutex
-	itxs []hostdb.Interaction
 }
 
 func (b *mockBus) AllHosts() ([]hostdb.Host, error) { return b.hosts, nil }
@@ -34,28 +30,7 @@ func (b *mockBus) ConsensusState() (bus.ConsensusState, error) {
 	return bus.ConsensusState{BlockHeight: 0, Synced: true}, nil
 }
 func (b *mockBus) RecordHostInteraction(hostKey consensus.PublicKey, itx hostdb.Interaction) error {
-	if hostKey == testHost3 {
-		return errRecordHostInteractionFailed
-	}
-
-	b.mu.Lock()
-	b.itxs = append(b.itxs, itx)
-	b.mu.Unlock()
-
-	return nil
-}
-
-func (b *mockBus) counts() (success int, failed int) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, itx := range b.itxs {
-		if worker.IsSuccessfulInteraction(itx) {
-			success++
-		} else {
-			failed++
-		}
-	}
-	return
+	panic("never called")
 }
 
 type mockWorker struct {
@@ -115,12 +90,6 @@ func TestScanner(t *testing.T) {
 		t.Fatal("scan took longer than expected")
 	}
 
-	// assert interactions were properly recorded
-	success, fail := b.counts()
-	if success != 8 || fail != 2 {
-		t.Fatal("unexpected", success, fail)
-	}
-
 	// assert we prevent starting a host scan immediately after a scan was done
 	if s.tryPerformHostScan() != nil {
 		t.Fatal("unexpected")
@@ -155,30 +124,6 @@ func TestScanner(t *testing.T) {
 	// assert scanner is no longer scanning
 	if s.isScanning() {
 		t.Fatal("unexpected")
-	}
-
-	// reset the scanner and bus
-	b.hosts[0] = newTestHost(testHost3, settings)
-	w = &mockWorker{blockChan: make(chan struct{})}
-	s = newTestScanner(b, w)
-
-	// start another scan
-	if errChan = s.tryPerformHostScan(); errChan == nil {
-		t.Fatal("unexpected")
-	}
-	if !s.isScanning() {
-		t.Fatal("unexpected")
-	}
-	close(w.blockChan) // we have to block on a channel to avoid an NDF on the isScanning check
-
-	// wait until the scan is done
-	select {
-	case err := <-errChan:
-		if err != errRecordHostInteractionFailed {
-			t.Fatal("unexpected error", err)
-		}
-	case <-time.After(time.Second): // avoid test deadlock
-		t.Fatal("scan took longer than expected")
 	}
 }
 
