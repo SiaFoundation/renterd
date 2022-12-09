@@ -29,6 +29,8 @@ type BusConfig struct {
 	Bootstrap   bool
 	GatewayAddr string
 	Miner       *Miner
+
+	bus.RedundancySettings
 }
 
 type AutopilotConfig struct {
@@ -222,7 +224,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		return nil
 	}
 
-	b, err := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore)
+	b, err := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.RedundancySettings)
 	if err != nil {
 		return nil, nil, err
 	}

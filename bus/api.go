@@ -170,12 +170,6 @@ type UploadParams struct {
 }
 
 type RedundancySettings struct {
-	MinShards   int
-	TotalShards int
-}
-
-func DefaultRedundancySettings() (rs RedundancySettings) {
-	rs.MinShards = 10
-	rs.TotalShards = 30
-	return
+	MinShards   uint64
+	TotalShards uint64
 }

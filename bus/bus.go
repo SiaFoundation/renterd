@@ -1,11 +1,10 @@
 package bus
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +17,10 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
+)
+
+const (
+	SettingRedundancy = "redundancy"
 )
 
 type (
@@ -110,27 +113,6 @@ type bus struct {
 	css ContractSetStore
 	os  ObjectStore
 	ss  SettingStore
-}
-
-func (b *bus) ensureRedundancySettings() (err error) {
-	rs := DefaultRedundancySettings()
-
-	// check min shards setting
-	if _, err = b.ss.Setting("MinShards"); isErrSettingsNotFound(err) {
-		err = b.ss.UpdateSetting("MinShards", fmt.Sprint(rs.MinShards))
-	}
-	if err != nil {
-		return
-	}
-
-	// check total shards setting
-	if _, err = b.ss.Setting("TotalShards"); isErrSettingsNotFound(err) {
-		err = b.ss.UpdateSetting("TotalShards", fmt.Sprint(rs.TotalShards))
-	}
-	if err != nil {
-		return err
-	}
-	return
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -613,43 +595,8 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 	jc.Encode(settings)
 }
 
-func (b *bus) settingsRedundancyHandlerGET(jc jape.Context) {
-	var rs RedundancySettings
-
-	// fetch min shard setting
-	if ms, err := b.ss.Setting("MinShards"); isErrSettingsNotFound(err) {
-		jc.Error(err, http.StatusBadRequest)
-		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else if rs.MinShards, err = strconv.Atoi(ms); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-
-	// fetch total shards setting
-	if ts, err := b.ss.Setting("TotalShards"); isErrSettingsNotFound(err) {
-		jc.Error(err, http.StatusBadRequest)
-		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else if rs.TotalShards, err = strconv.Atoi(ts); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-
-	jc.Encode(rs)
-}
-
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
-	var key string
-	if jc.DecodeParam("key", &key) != nil {
-		return
-	}
-
-	setting, err := b.ss.Setting(key)
+	setting, err := b.ss.Setting(jc.PathParam("key"))
 	if isErrSettingsNotFound(err) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -657,23 +604,31 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-
 	jc.Encode(setting)
 }
 
 func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
-	var key, value string
-	if jc.DecodeParam("key", &key) != nil || jc.DecodeParam("value", &value) != nil {
-		return
-	}
-
 	var err error
-	value, err = url.QueryUnescape(value)
-	if jc.Check("could not decode value", err) != nil {
-		return
+	var key, value string
+
+	// validate params
+	if key = jc.PathParam("key"); key == "" {
+		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+	} else if value = jc.PathParam("value"); value == "" {
+		jc.Error(errors.New("param 'value' can not be empty"), http.StatusBadRequest)
+	} else if value, err = url.QueryUnescape(value); err != nil {
+		jc.Error(errors.New("could not unescape 'value'"), http.StatusBadRequest)
 	}
 
 	jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
+}
+
+func (b *bus) setRedundancySettings(rs RedundancySettings) (err error) {
+	js, err := json.Marshal(rs)
+	if err != nil {
+		return err
+	}
+	return b.ss.UpdateSetting(SettingRedundancy, string(js))
 }
 
 // TODO: use simple err check against stores.ErrSettingNotFound as soon as the
@@ -683,7 +638,7 @@ func isErrSettingsNotFound(err error) bool {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore, rs RedundancySettings) (http.Handler, error) {
 	b := &bus{
 		s:   s,
 		cm:  cm,
@@ -696,7 +651,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		ss:  ss,
 	}
 
-	if err := b.ensureRedundancySettings(); err != nil {
+	if err := b.setRedundancySettings(rs); err != nil {
 		return nil, err
 	}
 
@@ -749,7 +704,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
 
 		"GET    /settings":            b.settingsHandlerGET,
-		"GET    /settings/redundancy": b.settingsRedundancyHandlerGET,
 		"GET    /setting/:key":        b.settingKeyHandlerGET,
 		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
 	}), nil

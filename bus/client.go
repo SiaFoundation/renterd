@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"time"
@@ -325,9 +326,12 @@ func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []renterd.C
 }
 
 // Setting returns the value for the setting with given key.
-func (c *Client) Setting(key string) (setting string, err error) {
-	err = c.c.GET(fmt.Sprintf("/setting/%s", key), &setting)
-	return
+func (c *Client) Setting(key string, resp interface{}) (err error) {
+	var value string
+	if err := c.c.GET(fmt.Sprintf("/setting/%s", key), &value); err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(value), &resp)
 }
 
 // Settings returns the keys of all settings in the store.
@@ -337,13 +341,22 @@ func (c *Client) Settings() (settings []string, err error) {
 }
 
 // UpdateSetting will update or insert the setting for given key with the given value.
-func (c *Client) UpdateSetting(key, value string) error {
-	return c.c.POST(fmt.Sprintf("/setting/%s/%s", key, value), nil, nil)
+func (c *Client) UpdateSetting(key string, value interface{}) error {
+	v, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("unable to marshal given setting, err: %v", err)
+	}
+
+	return c.c.POST(fmt.Sprintf("/setting/%s/%s", key, url.QueryEscape(string(v))), nil, nil)
+}
+
+func (c *Client) UpdateRedundancySettings(rs RedundancySettings) error {
+	return c.UpdateSetting(SettingRedundancy, rs)
 }
 
 // RedundancySettings returns the configured redundancy settings.
 func (c *Client) RedundancySettings() (rs RedundancySettings, err error) {
-	err = c.c.GET("/settings/redundancy", &rs)
+	err = c.Setting(SettingRedundancy, &rs)
 	return
 }
 

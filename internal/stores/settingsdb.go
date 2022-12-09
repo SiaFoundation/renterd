@@ -2,6 +2,7 @@ package stores
 
 import (
 	"errors"
+	"fmt"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -28,7 +29,7 @@ func (s *SQLStore) Setting(key string) (string, error) {
 	err := s.db.Where(&dbSetting{Key: key}).
 		Take(&entry).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", ErrSettingNotFound
+		return "", fmt.Errorf("key '%s' err: %w", key, ErrSettingNotFound)
 	} else if err != nil {
 		return "", err
 	}
