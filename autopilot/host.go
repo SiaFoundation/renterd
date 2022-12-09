@@ -60,7 +60,7 @@ func (h *Host) LastKnownSettings() (rhpv2.HostSettings, time.Time, bool) {
 		if err := json.Unmarshal(h.Interactions[i].Result, &sr); err != nil {
 			continue
 		}
-		if sr.Error != "" {
+		if sr.Error != nil {
 			continue
 		}
 		return sr.Settings, h.Interactions[i].Timestamp, true

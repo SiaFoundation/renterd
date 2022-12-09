@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -91,7 +92,7 @@ func newTestScan(settings *rhpv2.HostSettings, success bool) hostdb.Interaction 
 		sr.Settings = *settings
 	}
 	if !success {
-		sr.Error = "failure"
+		sr.Error = errors.New("failure")
 	}
 	b, err := json.Marshal(sr)
 	if err != nil {
