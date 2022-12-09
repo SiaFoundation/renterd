@@ -588,47 +588,41 @@ func (b *bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) settingsHandlerGET(jc jape.Context) {
-	settings, err := b.ss.Settings()
-	if jc.Check("couldn't load settings", err) != nil {
-		return
+	if settings, err := b.ss.Settings(); jc.Check("couldn't load settings", err) == nil {
+		jc.Encode(settings)
 	}
-	jc.Encode(settings)
 }
 
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
-	setting, err := b.ss.Setting(jc.PathParam("key"))
-	if isErrSettingsNotFound(err) {
-		jc.Error(err, http.StatusBadRequest)
-		return
+	if key := jc.PathParam("key"); key == "" {
+		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+	} else if setting, err := b.ss.Setting(jc.PathParam("key")); isErrSettingsNotFound(err) {
+		jc.Error(err, http.StatusNotFound)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
-		return
+	} else {
+		jc.Encode(setting)
 	}
-	jc.Encode(setting)
 }
 
 func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
-	var err error
-	var key, value string
-
-	// validate params
-	if key = jc.PathParam("key"); key == "" {
+	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if value = jc.PathParam("value"); value == "" {
+	} else if value := jc.PathParam("value"); value == "" {
 		jc.Error(errors.New("param 'value' can not be empty"), http.StatusBadRequest)
-	} else if value, err = url.QueryUnescape(value); err != nil {
+	} else if value, err := url.QueryUnescape(value); err != nil {
 		jc.Error(errors.New("could not unescape 'value'"), http.StatusBadRequest)
+	} else {
+		jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
 	}
-
-	jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
 }
 
-func (b *bus) setRedundancySettings(rs RedundancySettings) (err error) {
-	js, err := json.Marshal(rs)
-	if err != nil {
+func (b *bus) setRedundancySettings(rs RedundancySettings) error {
+	if js, err := json.Marshal(rs); err != nil {
 		return err
+	} else {
+		return b.ss.UpdateSetting(SettingRedundancy, string(js))
 	}
-	return b.ss.UpdateSetting(SettingRedundancy, string(js))
 }
 
 // TODO: use simple err check against stores.ErrSettingNotFound as soon as the
