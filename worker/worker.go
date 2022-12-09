@@ -85,17 +85,17 @@ func parseRange(s string, size int64) (offset, length int64, _ error) {
 	return offset, length, nil
 }
 
-type WorkerInteractionResult struct {
+type InteractionResult struct {
 	Error error `json:"error,omitempty"`
 }
 
 type ScanResult struct {
-	WorkerInteractionResult
+	InteractionResult
 	Settings rhpv2.HostSettings `json:"settings,omitempty"`
 }
 
 func IsSuccessfulInteraction(i hostdb.Interaction) bool {
-	var result WorkerInteractionResult
+	var result InteractionResult
 	if err := json.Unmarshal(i.Result, &result); err != nil {
 		return false
 	}
@@ -151,7 +151,7 @@ func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.
 
 func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	transform := func(timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
-		b, _ := json.Marshal(WorkerInteractionResult{Error: err})
+		b, _ := json.Marshal(InteractionResult{Error: err})
 		hi := hostdb.Interaction{
 			Timestamp: timestamp,
 			Type:      typ,
@@ -214,7 +214,7 @@ func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSett
 		})
 	} else {
 		hi.Result, _ = json.Marshal(ScanResult{
-			WorkerInteractionResult: WorkerInteractionResult{
+			InteractionResult: InteractionResult{
 				Error: err,
 			},
 		})

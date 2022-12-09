@@ -58,7 +58,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for the contract to form.
+	//  TODO: Wait for the contract to form.
 	//	err = Retry(20, time.Second, func() error {
 	//		contracts, err := b.Contracts()
 	//		if err != nil {
