@@ -75,7 +75,7 @@ func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency,
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := RHPFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -88,7 +88,7 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error) {
+func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := RHPRenewRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,

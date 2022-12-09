@@ -16,7 +16,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.Contract, types.Currency) {
+func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.ContractRevision, types.Currency) {
 	uc := types.UnlockConditions{
 		PublicKeys:         make([]types.SiaPublicKey, 2),
 		SignaturesRequired: 2,
@@ -25,7 +25,7 @@ func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.Contr
 	uc.PublicKeys[1].Key = hk[:]
 
 	totalCost := types.NewCurrency64(frand.Uint64n(1000))
-	return rhp.Contract{
+	return rhp.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:         id,
 			UnlockConditions: uc,

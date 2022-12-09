@@ -162,7 +162,7 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 }
 
 // RPCFormContract forms a contract with a host.
-func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, txnSet []types.Transaction) (_ Contract, _ []types.Transaction, err error) {
+func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, txnSet []types.Transaction) (_ ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
 
 	hostKey := t.HostKey()
@@ -181,12 +181,12 @@ func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, txnS
 		},
 	}
 	if err := t.WriteRequest(RPCFormContractID, req); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 
 	var resp RPCFormContractAdditions
 	if err := t.ReadResponse(&resp, 65536); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 
 	// merge host additions with txn
@@ -228,18 +228,18 @@ func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, txnS
 		RevisionSignature:  renterRevisionSig,
 	}
 	if err := t.WriteResponse(renterSigs); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 
 	// read the host's signatures and merge them with our own
 	var hostSigs RPCFormContractSignatures
 	if err := t.ReadResponse(&hostSigs, 4096); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 	txn.TransactionSignatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
-	return Contract{
+	return ContractRevision{
 		Revision: initRevision,
 		Signatures: [2]types.TransactionSignature{
 			renterRevisionSig,
@@ -251,7 +251,7 @@ func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, txnS
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host. The old contract is "cleared," reverting its
 // filesize to zero.
-func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, finalPayment types.Currency) (_ Contract, _ []types.Transaction, err error) {
+func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, finalPayment types.Currency) (_ ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 
 	// strip our signatures before sending
@@ -274,12 +274,12 @@ func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, f
 		FinalMissedProofValues: newValid,
 	}
 	if err := s.transport.WriteRequest(RPCRenewClearContractID, req); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 
 	var resp RPCFormContractAdditions
 	if err := s.transport.ReadResponse(&resp, 65536); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 
 	// merge host additions with txn
@@ -317,18 +317,18 @@ func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, f
 		FinalRevisionSignature: finalRevSig,
 	}
 	if err := s.transport.WriteResponse(renterSigs); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 
 	// read the host signatures and merge them with our own
 	var hostSigs RPCRenewAndClearContractSignatures
 	if err := s.transport.ReadResponse(&hostSigs, 4096); err != nil {
-		return Contract{}, nil, err
+		return ContractRevision{}, nil, err
 	}
 	txn.TransactionSignatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
-	return Contract{
+	return ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
 	}, signedTxnSet, nil

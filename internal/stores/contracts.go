@@ -46,15 +46,15 @@ func (fcid fileContractID) gob() []byte {
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
 type EphemeralContractStore struct {
 	mu        sync.Mutex
-	contracts map[types.FileContractID]rhpv2.Contract
+	contracts map[types.FileContractID]rhpv2.ContractRevision
 	hostSets  map[string][]consensus.PublicKey
 }
 
 // Contracts implements api.ContractStore.
-func (s *EphemeralContractStore) Contracts() ([]rhpv2.Contract, error) {
+func (s *EphemeralContractStore) Contracts() ([]rhpv2.ContractRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var cs []rhpv2.Contract
+	var cs []rhpv2.ContractRevision
 	for _, c := range s.contracts {
 		cs = append(cs, c)
 	}
@@ -62,18 +62,18 @@ func (s *EphemeralContractStore) Contracts() ([]rhpv2.Contract, error) {
 }
 
 // Contract implements api.ContractStore.
-func (s *EphemeralContractStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
+func (s *EphemeralContractStore) Contract(id types.FileContractID) (rhpv2.ContractRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.contracts[id]
 	if !ok {
-		return rhpv2.Contract{}, ErrContractNotFound
+		return rhpv2.ContractRevision{}, ErrContractNotFound
 	}
 	return c, nil
 }
 
 // AddContract implements api.ContractStore.
-func (s *EphemeralContractStore) AddContract(c rhpv2.Contract) error {
+func (s *EphemeralContractStore) AddContract(c rhpv2.ContractRevision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.contracts[c.ID()] = c
@@ -121,7 +121,7 @@ func (s *EphemeralContractStore) SetHostSet(name string, hosts []consensus.Publi
 // NewEphemeralContractStore returns a new EphemeralContractStore.
 func NewEphemeralContractStore() *EphemeralContractStore {
 	return &EphemeralContractStore{
-		contracts: make(map[types.FileContractID]rhpv2.Contract),
+		contracts: make(map[types.FileContractID]rhpv2.ContractRevision),
 	}
 }
 
@@ -132,7 +132,7 @@ type JSONContractStore struct {
 }
 
 type jsonContractsPersistData struct {
-	Contracts []rhpv2.Contract
+	Contracts []rhpv2.ContractRevision
 	HostSets  map[string][]consensus.PublicKey
 }
 
@@ -182,7 +182,7 @@ func (s *JSONContractStore) load() error {
 }
 
 // AddContract implements api.ContractStore.
-func (s *JSONContractStore) AddContract(c rhpv2.Contract) error {
+func (s *JSONContractStore) AddContract(c rhpv2.ContractRevision) error {
 	s.EphemeralContractStore.AddContract(c)
 	return s.save()
 }
@@ -442,7 +442,7 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 }
 
 // addContract implements the bus.ContractStore interface.
-func addContract(tx *gorm.DB, c rhpv2.Contract, totalCost types.Currency, renewedFrom types.FileContractID) error {
+func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -495,7 +495,7 @@ func addContract(tx *gorm.DB, c rhpv2.Contract, totalCost types.Currency, renewe
 }
 
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.Contract, totalCost types.Currency) error {
+func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		return addContract(tx, c, totalCost, types.FileContractID{})
 	})
@@ -505,7 +505,7 @@ func (s *SQLStore) AddContract(c rhpv2.Contract, totalCost types.Currency) error
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(c rhpv2.Contract, totalCost types.Currency, renewedFrom types.FileContractID) error {
+func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, renewedFrom)

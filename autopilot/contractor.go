@@ -407,11 +407,11 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.Contract, error) {
+func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	revision, err := c.ap.bus.AcquireContract(toRenew.ID(), contractLockingDurationRenew)
 	if err != nil {
-		return rhpv2.Contract{}, nil
+		return rhpv2.ContractRevision{}, nil
 	}
 	defer c.ap.bus.ReleaseContract(toRenew.ID())
 
@@ -422,14 +422,14 @@ func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterK
 			fmt.Sprintf("failed scan, err: %v", err),
 			"hk", toRenew.HostKey(),
 		)
-		return rhpv2.Contract{}, nil
+		return rhpv2.ContractRevision{}, nil
 	}
 
 	// prepare the renewal
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
 	if err != nil {
-		return rhpv2.Contract{}, nil
+		return rhpv2.ContractRevision{}, nil
 	}
 
 	// fund the transaction
@@ -437,14 +437,14 @@ func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterK
 	toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// sign the transaction
 	err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// renew the contract
@@ -452,17 +452,17 @@ func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterK
 	renewed, _, err := c.ap.worker.RHPRenew(renterKey, toRenew.HostKey(), toRenew.HostIP, toRenew.ID(), txnSet, finalPayment)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 	return renewed, nil
 }
 
-func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.Contract, error) {
+func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// prepare contract formation
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	fc, cost, err := c.ap.worker.RHPPrepareForm(renterKey, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
 	if err != nil {
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// fund the transaction
@@ -470,21 +470,21 @@ func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostI
 	toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// sign the transaction
 	err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// form the contract
 	contract, _, err := c.ap.worker.RHPForm(renterKey, hostKey, hostIP, append(parents, txn))
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	return contract, nil

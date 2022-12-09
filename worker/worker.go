@@ -373,7 +373,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	var cs consensus.State
 	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
 
-	var contract rhpv2.Contract
+	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	err := w.withTransportV2(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
 		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, rfr.RenterKey, rfr.TransactionSet)
@@ -397,7 +397,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	var cs consensus.State
 	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
 
-	var contract rhpv2.Contract
+	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	err := w.withTransportV2(jc.Request.Context(), rrr.HostIP, rrr.HostKey, func(t *rhpv2.Transport) error {
 		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rrr.ContractID, rrr.RenterKey, 5*time.Second)

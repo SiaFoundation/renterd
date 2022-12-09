@@ -81,9 +81,9 @@ type RHPFormRequest struct {
 
 // RHPFormResponse is the response type for the /rhp/form endpoint.
 type RHPFormResponse struct {
-	ContractID     types.FileContractID `json:"contractID"`
-	Contract       rhpv2.Contract       `json:"contract"`
-	TransactionSet []types.Transaction  `json:"transactionSet"`
+	ContractID     types.FileContractID   `json:"contractID"`
+	Contract       rhpv2.ContractRevision `json:"contract"`
+	TransactionSet []types.Transaction    `json:"transactionSet"`
 }
 
 // RHPPrepareRenewRequest is the request type for the /rhp/prepare/renew
@@ -119,9 +119,9 @@ type RHPRenewRequest struct {
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.
 type RHPRenewResponse struct {
-	ContractID     types.FileContractID `json:"contractID"`
-	Contract       rhpv2.Contract       `json:"contract"`
-	TransactionSet []types.Transaction  `json:"transactionSet"`
+	ContractID     types.FileContractID   `json:"contractID"`
+	Contract       rhpv2.ContractRevision `json:"contract"`
+	TransactionSet []types.Transaction    `json:"transactionSet"`
 }
 
 // RHPFundRequest is the request type for the /rhp/fund endpoint.

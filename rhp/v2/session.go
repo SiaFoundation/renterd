@@ -128,7 +128,7 @@ func RPCDeleteCost(settings HostSettings, n int) types.Currency {
 // Contract.
 type Session struct {
 	transport   *Transport
-	contract    Contract
+	contract    ContractRevision
 	key         PrivateKey
 	appendRoots []Hash256
 }
@@ -140,7 +140,7 @@ func (s *Session) Transport() *Transport { return s.transport }
 func (s *Session) HostKey() PublicKey { return s.contract.HostKey() }
 
 // Contract returns the current revision of the contract.
-func (s *Session) Contract() Contract { return s.contract }
+func (s *Session) Contract() ContractRevision { return s.contract }
 
 func (s *Session) isRevisable() bool {
 	return s.contract.Revision.NewRevisionNumber < math.MaxUint64
@@ -154,7 +154,7 @@ func (s *Session) sufficientCollateral(collateral types.Currency) bool {
 	return s.contract.Revision.NewMissedProofOutputs[1].Value.Cmp(collateral) >= 0
 }
 
-func recordRPC(ctx context.Context, t *Transport, c Contract, id Specifier, err *error) func() {
+func recordRPC(ctx context.Context, t *Transport, c ContractRevision, id Specifier, err *error) func() {
 	startTime := time.Now()
 	contractID := c.ID()
 	var startFunds types.Currency
@@ -555,7 +555,7 @@ func (s *Session) Delete(ctx context.Context, sectorIndices []uint64, price type
 // host will do so automatically when the connection closes.
 func (s *Session) Unlock() (err error) {
 	defer wrapErr(&err, "Unlock")
-	s.contract = Contract{}
+	s.contract = ContractRevision{}
 	s.key = nil
 	return s.transport.WriteRequest(RPCUnlockID, nil)
 }
@@ -569,7 +569,7 @@ func (s *Session) Close() (err error) {
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
 func RPCSettings(ctx context.Context, t *Transport) (settings HostSettings, err error) {
 	defer wrapErr(&err, "Settings")
-	defer recordRPC(ctx, t, Contract{}, RPCSettingsID, &err)()
+	defer recordRPC(ctx, t, ContractRevision{}, RPCSettingsID, &err)()
 	var resp RPCSettingsResponse
 	if err := t.Call(RPCSettingsID, nil, &resp); err != nil {
 		return HostSettings{}, err
@@ -587,7 +587,7 @@ func RPCSettings(ctx context.Context, t *Transport) (settings HostSettings, err 
 // contract is unlocked at the moment the host receives the RPC.)
 func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key PrivateKey, timeout time.Duration) (_ *Session, err error) {
 	defer wrapErr(&err, "Lock")
-	defer recordRPC(ctx, t, Contract{}, RPCLockID, &err)()
+	defer recordRPC(ctx, t, ContractRevision{}, RPCLockID, &err)()
 	req := &RPCLockRequest{
 		ContractID: id,
 		Signature:  t.SignChallenge(key),
@@ -614,7 +614,7 @@ func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key Pri
 	}
 	return &Session{
 		transport: t,
-		contract: Contract{
+		contract: ContractRevision{
 			Revision:   resp.Revision,
 			Signatures: [2]types.TransactionSignature{resp.Signatures[0], resp.Signatures[1]},
 		},

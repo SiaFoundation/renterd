@@ -30,36 +30,36 @@ func wrapErr(err *error, fnName string) {
 	}
 }
 
-// A Contract pairs a file contract with its signatures.
-type Contract struct {
+// A ContractRevision pairs a file contract with its signatures.
+type ContractRevision struct {
 	Revision   types.FileContractRevision
 	Signatures [2]types.TransactionSignature
 }
 
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
-func (c Contract) EndHeight() uint64 {
+func (c ContractRevision) EndHeight() uint64 {
 	return uint64(c.Revision.NewWindowStart)
 }
 
 // ID returns the ID of the original FileContract.
-func (c Contract) ID() types.FileContractID {
+func (c ContractRevision) ID() types.FileContractID {
 	return c.Revision.ParentID
 }
 
 // HostKey returns the public key of the host.
-func (c Contract) HostKey() (pk PublicKey) {
+func (c ContractRevision) HostKey() (pk PublicKey) {
 	copy(pk[:], c.Revision.UnlockConditions.PublicKeys[1].Key)
 	return
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.
-func (c Contract) RenterFunds() types.Currency {
+func (c ContractRevision) RenterFunds() types.Currency {
 	return c.Revision.NewValidProofOutputs[0].Value
 }
 
 // NumSectors returns the number of sectors covered by the contract.
-func (c Contract) NumSectors() uint64 {
+func (c ContractRevision) NumSectors() uint64 {
 	return c.Revision.NewFileSize / SectorSize
 }
 

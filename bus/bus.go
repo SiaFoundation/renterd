@@ -66,8 +66,8 @@ type (
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]renterd.Contract, error)
 		Contract(id types.FileContractID) (renterd.Contract, error)
-		AddContract(c rhpv2.Contract, totalCost types.Currency) error
-		AddRenewedContract(c rhpv2.Contract, totalCost types.Currency, renewedFrom types.FileContractID) error
+		AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error
+		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
 	}
 

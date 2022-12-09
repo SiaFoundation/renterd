@@ -57,11 +57,11 @@ type ContractAcquireRequest struct {
 	Duration time.Duration
 }
 type ContractsIDAddRequest struct {
-	Contract  rhpv2.Contract `json:"contract"`
+	Contract  rhpv2.ContractRevision `json:"contract"`
 	TotalCost types.Currency
 }
 type ContractsIDRenewedRequest struct {
-	Contract    rhpv2.Contract `json:"contract"`
+	Contract    rhpv2.ContractRevision `json:"contract"`
 	RenewedFrom types.FileContractID
 	TotalCost   types.Currency
 }

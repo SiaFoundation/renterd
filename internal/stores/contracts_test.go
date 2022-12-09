@@ -36,7 +36,7 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Create a contract and set all fields.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.Contract{
+	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:          fcid,
 			UnlockConditions:  uc,
@@ -197,7 +197,7 @@ func TestContractLocking(t *testing.T) {
 
 	// Insert a contract.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.Contract{
+	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:         fcid,
 			UnlockConditions: uc,
@@ -265,7 +265,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Insert a contract.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.Contract{
+	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			NewFileSize:       1,
 			NewWindowStart:    2,
@@ -282,7 +282,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Renew it.
 	fcid2 := types.FileContractID{2, 2, 2, 2, 2}
-	renewed := rhpv2.Contract{
+	renewed := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:              fcid2,
 			UnlockConditions:      uc,
