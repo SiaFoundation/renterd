@@ -268,10 +268,10 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []Contract, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []ExtendedSlabLocation, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(ctx, c.HostKey(), c.HostIP, c.ID(), c.RenterKey))
+		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
 	}
 	done := make(chan struct{})
 	go func() {
@@ -488,7 +488,7 @@ func (w *worker) slabsUploadHandler(jc jape.Context) {
 	r := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
 	w.pool.setCurrentHeight(sur.CurrentHeight)
 	var slab object.Slab
-	err := w.withHosts(jc.Request.Context(), sur.Contracts, func(hosts []sectorStore) (err error) {
+	err := w.withHosts(jc.Request.Context(), sur.Locations, func(hosts []sectorStore) (err error) {
 		slab, _, err = uploadSlab(jc.Request.Context(), r, sur.MinShards, sur.TotalShards, hosts)
 		return err
 	})
@@ -506,7 +506,7 @@ func (w *worker) slabsDownloadHandler(jc jape.Context) {
 		return
 	}
 
-	err := w.withHosts(jc.Request.Context(), sdr.Contracts, func(hosts []sectorStore) error {
+	err := w.withHosts(jc.Request.Context(), sdr.Locations, func(hosts []sectorStore) error {
 		return downloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, hosts)
 	})
 	if jc.Check("couldn't download slabs", err) != nil {
@@ -538,7 +538,7 @@ func (w *worker) slabsDeleteHandler(jc jape.Context) {
 	if jc.Decode(&sdr) != nil {
 		return
 	}
-	err := w.withHosts(jc.Request.Context(), sdr.Contracts, func(hosts []sectorStore) error {
+	err := w.withHosts(jc.Request.Context(), sdr.Locations, func(hosts []sectorStore) error {
 		return deleteSlabs(jc.Request.Context(), sdr.Slabs, hosts)
 	})
 	if jc.Check("couldn't delete slabs", err) != nil {
@@ -582,11 +582,11 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			_ = err // NOTE: can't write error because we may have already written to the response
 			return
 		}
-		cs := make([]Contract, len(contracts))
+		cs := make([]ExtendedSlabLocation, len(contracts))
 		for i, c := range contracts {
-			cs[i] = Contract{
-				Contract:  c,
-				RenterKey: nil, // TODO
+			cs[i] = ExtendedSlabLocation{
+				SlabLocation: c.Location(),
+				RenterKey:    nil, // TODO
 			}
 		}
 		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
@@ -618,11 +618,11 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		contracts := make([]Contract, len(bcs))
+		contracts := make([]ExtendedSlabLocation, len(bcs))
 		for i, c := range bcs {
-			contracts[i] = Contract{
-				Contract:  c,
-				RenterKey: nil, // TODO
+			contracts[i] = ExtendedSlabLocation{
+				SlabLocation: c.Location(),
+				RenterKey:    nil, // TODO
 			}
 		}
 
@@ -647,8 +647,8 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		for _, ss := range s.Shards {
 			if _, ok := usedContracts[ss.Host]; !ok {
 				for _, c := range contracts {
-					if c.HostKey() == ss.Host {
-						usedContracts[ss.Host] = c.ID()
+					if c.HostKey == ss.Host {
+						usedContracts[ss.Host] = c.ID
 						break
 					}
 				}

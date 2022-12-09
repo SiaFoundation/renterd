@@ -151,8 +151,8 @@ type ObjectsMigrateSlabsResponse struct {
 }
 
 type ObjectsMigrateSlabResponse struct {
-	Contracts []renterd.Contract `json:"contracts"`
-	Slab      object.Slab        `json:"slab"`
+	Locations []renterd.SlabLocation `json:"locations"`
+	Slab      object.Slab            `json:"slab"`
 }
 
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.

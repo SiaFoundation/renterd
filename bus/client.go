@@ -384,10 +384,10 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 }
 
 // SlabForMigration returns a slab and the contracts its stored on.
-func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []renterd.Contract, error) {
+func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error) {
 	var resp ObjectsMigrateSlabResponse
 	err := c.c.GET(fmt.Sprintf("/migration/slab/%s", slabID), &resp)
-	return resp.Slab, resp.Contracts, err
+	return resp.Slab, resp.Locations, err
 }
 
 // UploadParams returns parameters used for uploading slabs.

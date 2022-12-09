@@ -63,11 +63,11 @@ type Bus interface {
 	// objects
 	MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error)
 	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error)
-	SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.Contract, error)
+	SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.SlabLocation, error)
 }
 
 type Worker interface {
-	MigrateSlab(s *object.Slab, from, to []worker.Contract, currentHeight uint64) error
+	MigrateSlab(s *object.Slab, from, to []worker.ExtendedSlabLocation, currentHeight uint64) error
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
 	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
 	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)

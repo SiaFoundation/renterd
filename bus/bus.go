@@ -86,7 +86,7 @@ type (
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
-		SlabForMigration(slabID SlabID) (object.Slab, []renterd.Contract, error)
+		SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error)
 	}
 )
 
@@ -550,12 +550,12 @@ func (b *bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("id", &slabID) != nil {
 		return
 	}
-	slab, contracts, err := b.os.SlabForMigration(slabID)
+	slab, locations, err := b.os.SlabForMigration(slabID)
 	if jc.Check("couldn't fetch slab for migration", err) != nil {
 		return
 	}
 	jc.Encode(ObjectsMigrateSlabResponse{
-		Contracts: contracts,
+		Locations: locations,
 		Slab:      slab,
 	})
 }

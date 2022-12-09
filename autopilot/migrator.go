@@ -15,7 +15,7 @@ type migrator struct {
 	logger *zap.SugaredLogger
 
 	mu            sync.Mutex
-	goodContracts []worker.Contract
+	goodContracts []worker.ExtendedSlabLocation
 	running       bool
 }
 
@@ -40,9 +40,9 @@ func (m *migrator) UpdateContracts() error {
 	m.goodContracts = m.goodContracts[:0]
 	for _, c := range contracts {
 		// TODO: filter out contracts that are not good.
-		m.goodContracts = append(m.goodContracts, worker.Contract{
-			Contract:  c,
-			RenterKey: m.ap.deriveRenterKey(c.HostKey()),
+		m.goodContracts = append(m.goodContracts, worker.ExtendedSlabLocation{
+			SlabLocation: c.Location(),
+			RenterKey:    m.ap.deriveRenterKey(c.HostKey()),
 		})
 	}
 	return nil
@@ -70,29 +70,28 @@ func (m *migrator) TryPerformMigrations() {
 func (m *migrator) fetchSlabsForMigration() ([]bus.SlabID, error) {
 	goodContracts := make([]types.FileContractID, len(m.goodContracts))
 	for i := range m.goodContracts {
-		goodContracts[i] = m.goodContracts[i].ID()
+		goodContracts[i] = m.goodContracts[i].ID
 	}
 	return m.ap.bus.SlabsForMigration(10, time.Now().Add(-time.Hour), goodContracts)
 }
 
 func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
 	// Fetch slab data.
-	slab, contracts, err := m.ap.bus.SlabForMigration(slabID)
+	slab, locations, err := m.ap.bus.SlabForMigration(slabID)
 	if err != nil {
 		return false, err
 	}
-
-	oldContracts := make([]worker.Contract, len(contracts))
-	for i, c := range contracts {
-		oldContracts[i] = worker.Contract{
-			Contract:  c,
-			RenterKey: m.ap.deriveRenterKey(c.HostKey()),
+	oldContracts := make([]worker.ExtendedSlabLocation, len(locations))
+	for i, c := range locations {
+		oldContracts[i] = worker.ExtendedSlabLocation{
+			SlabLocation: c,
+			RenterKey:    m.ap.deriveRenterKey(c.HostKey),
 		}
 	}
 
 	// Copy contracts to release lock before starting migration.
 	m.mu.Lock()
-	goodContracts := append([]worker.Contract{}, m.goodContracts...)
+	goodContracts := append([]worker.ExtendedSlabLocation{}, m.goodContracts...)
 	m.mu.Unlock()
 
 	// Fetch the current consensus height.

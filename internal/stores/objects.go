@@ -604,8 +604,10 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 
 // SlabForMigration returns all the info about a s lab necessary for migrating
 // it to better hosts/contracts.
-func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.Contract, error) {
+func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.SlabLocation, error) {
 	var dSlab dbSlab
+	// TODO: This could be slightly more efficient by not fetching whole
+	// contracts.
 	tx := s.db.Where(&dbSlab{Model: Model{ID: uint(slabID)}}).
 		Preload("Shards.DBSector.Contracts.Host").
 		Take(&dSlab)
@@ -619,7 +621,7 @@ func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.C
 
 	// Return all contracts that have ever stored any shard of the slab.
 	addedContracts := make(map[types.FileContractID]struct{})
-	var contracts []renterd.Contract
+	var locations []renterd.SlabLocation
 	for _, shard := range dSlab.Shards {
 		for _, c := range shard.DBSector.Contracts {
 			if _, exists := addedContracts[c.FCID]; exists {
@@ -631,10 +633,10 @@ func (s *SQLStore) SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.C
 			if err != nil {
 				return object.Slab{}, nil, err
 			}
-			contracts = append(contracts, contract)
+			locations = append(locations, contract.Location())
 		}
 	}
-	return slab, contracts, nil
+	return slab, locations, nil
 }
 
 // MarkSlabsMigrationFailure sets the last_failure field for the given slabs to

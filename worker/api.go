@@ -162,37 +162,37 @@ type RHPRegistryUpdateRequest struct {
 	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
 }
 
-// A Contract contains all the information necessary to access and revise an
-// existing file contract.
-type Contract struct {
-	renterd.Contract
+// ExtendedSlabLocation contains information about a host that a slab was
+// uploaded to and the key to decrypt it.
+type ExtendedSlabLocation struct {
+	renterd.SlabLocation
 	RenterKey PrivateKey `json:"renterKey"`
 }
 
 // SlabsUploadRequest is the request type for the /slabs/upload endpoint.
 type SlabsUploadRequest struct {
-	MinShards     uint8      `json:"minShards"`
-	TotalShards   uint8      `json:"totalShards"`
-	Contracts     []Contract `json:"contracts"`
-	CurrentHeight uint64     `json:"currentHeight"`
+	MinShards     uint8                  `json:"minShards"`
+	TotalShards   uint8                  `json:"totalShards"`
+	Locations     []ExtendedSlabLocation `json:"locations"`
+	CurrentHeight uint64                 `json:"currentHeight"`
 }
 
 // SlabsDownloadRequest is the request type for the /slabs/download endpoint.
 type SlabsDownloadRequest struct {
-	Slab      object.SlabSlice `json:"slab"`
-	Contracts []Contract       `json:"contracts"`
+	Slab      object.SlabSlice       `json:"slab"`
+	Locations []ExtendedSlabLocation `json:"locations"`
 }
 
 // SlabsDeleteRequest is the request type for the /slabs/delete endpoint.
 type SlabsDeleteRequest struct {
-	Slabs     []object.Slab `json:"slabs"`
-	Contracts []Contract    `json:"contracts"`
+	Slabs     []object.Slab          `json:"slabs"`
+	Locations []ExtendedSlabLocation `json:"locations"`
 }
 
 // SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
 type SlabsMigrateRequest struct {
-	Slab          object.Slab `json:"slab"`
-	From          []Contract  `json:"from"`
-	To            []Contract  `json:"to"`
-	CurrentHeight uint64      `json:"currentHeight"`
+	Slab          object.Slab            `json:"slab"`
+	From          []ExtendedSlabLocation `json:"from"`
+	To            []ExtendedSlabLocation `json:"to"`
+	CurrentHeight uint64                 `json:"currentHeight"`
 }

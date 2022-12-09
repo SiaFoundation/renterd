@@ -47,7 +47,24 @@ func (c Contract) HostKey() (pk consensus.PublicKey) {
 	return
 }
 
+// Locations extracts a SlabLocation from a contract.
+func (c Contract) Location() SlabLocation {
+	return SlabLocation{
+		HostKey: c.HostKey(),
+		HostIP:  c.HostIP,
+		ID:      c.ID(),
+	}
+}
+
 // RenterFunds returns the funds remaining in the contract's Renter payout.
 func (c Contract) RenterFunds() types.Currency {
 	return c.Revision.NewValidProofOutputs[0].Value
+}
+
+// SlabLocation contains information about where a sector of a slab can be
+// located on the network.
+type SlabLocation struct {
+	HostKey consensus.PublicKey  `json:"hostKey"`
+	HostIP  string               `json:"hostIP"`
+	ID      types.FileContractID `json:"id"`
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -142,13 +143,13 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
-func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts []Contract) (s object.Slab, err error) {
+func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (s object.Slab, err error) {
 	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
 
 	js, _ := json.Marshal(SlabsUploadRequest{
 		MinShards:     m,
 		TotalShards:   n,
-		Contracts:     contracts,
+		Locations:     locations,
 		CurrentHeight: height,
 	})
 	body := io.MultiReader(bytes.NewReader(js), io.LimitReader(src, int64(m)*rhpv2.SectorSize))
@@ -173,12 +174,12 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, contracts 
 }
 
 // DownloadSlab downloads data from a set of hosts.
-func (c *Client) DownloadSlab(dst io.Writer, s object.SlabSlice, contracts []Contract) (err error) {
+func (c *Client) DownloadSlab(dst io.Writer, s object.SlabSlice, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (err error) {
 	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
 
 	js, _ := json.Marshal(SlabsDownloadRequest{
 		Slab:      s,
-		Contracts: contracts,
+		Locations: locations,
 	})
 	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/download"), bytes.NewReader(js))
 	if err != nil {
@@ -202,7 +203,7 @@ func (c *Client) DownloadSlab(dst io.Writer, s object.SlabSlice, contracts []Con
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *object.Slab, from, to []Contract, currentHeight uint64) error {
+func (c *Client) MigrateSlab(s *object.Slab, from, to []ExtendedSlabLocation, currentHeight uint64) error {
 	req := SlabsMigrateRequest{
 		Slab:          *s,
 		From:          from,
@@ -213,10 +214,10 @@ func (c *Client) MigrateSlab(s *object.Slab, from, to []Contract, currentHeight 
 }
 
 // DeleteSlabs deletes the specified slabs.
-func (c *Client) DeleteSlabs(slabs []object.Slab, contracts []Contract) (err error) {
+func (c *Client) DeleteSlabs(slabs []object.Slab, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (err error) {
 	req := SlabsDeleteRequest{
 		Slabs:     slabs,
-		Contracts: contracts,
+		Locations: locations,
 	}
 	err = c.c.POST("/slabs/delete", req, nil)
 	return
