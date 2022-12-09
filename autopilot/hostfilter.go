@@ -30,7 +30,7 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 	if !h.IsOnline() {
 		reasons = append(reasons, "offline")
 	}
-	if f.isRedundantIP(h) {
+	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
 		reasons = append(reasons, "redundant IP")
 	}
 	if bad, reason := hasBadSettings(cfg, h); bad {

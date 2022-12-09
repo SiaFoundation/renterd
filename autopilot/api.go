@@ -13,9 +13,10 @@ type (
 		DefragThreshold uint64
 	}
 	HostsConfig struct {
-		Whitelist      []string
-		Blacklist      []string
-		ScoreOverrides map[consensus.PublicKey]float64
+		Blacklist          []string
+		IgnoreRedundantIPs bool
+		ScoreOverrides     map[consensus.PublicKey]float64
+		Whitelist          []string
 	}
 	ContractsConfig struct {
 		Allowance   types.Currency

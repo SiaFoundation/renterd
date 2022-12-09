@@ -85,6 +85,23 @@ func parseRange(s string, size int64) (offset, length int64, _ error) {
 	return offset, length, nil
 }
 
+type WorkerInteractionResult struct {
+	Error error `json:"error,omitempty"`
+}
+
+type ScanResult struct {
+	WorkerInteractionResult
+	Settings rhpv2.HostSettings `json:"settings,omitempty"`
+}
+
+func IsSuccessfulInteraction(i hostdb.Interaction) bool {
+	var result WorkerInteractionResult
+	if err := json.Unmarshal(i.Result, &result); err != nil {
+		return false
+	}
+	return result.Error == nil
+}
+
 type ephemeralMetricsRecorder struct {
 	ms []metrics.Metric
 	mu sync.Mutex
@@ -134,10 +151,11 @@ func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.
 
 func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	transform := func(timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
+		b, _ := json.Marshal(WorkerInteractionResult{Error: err})
 		hi := hostdb.Interaction{
 			Timestamp: timestamp,
 			Type:      typ,
-			Success:   err == nil,
+			Result:    json.RawMessage(b),
 		}
 		if err == nil {
 			hi.Result, _ = json.Marshal(res)
@@ -190,19 +208,27 @@ type worker struct {
 	pool *sessionPool
 }
 
-func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) {
+func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
+	b, err := json.Marshal(ScanResult{
+		Settings: settings,
+		WorkerInteractionResult: WorkerInteractionResult{
+			Error: err,
+		},
+	})
+	if err != nil {
+		return err
+	}
 	hi := hostdb.Interaction{
 		Timestamp: time.Now(),
 		Type:      "scan",
-		Success:   err == nil,
+		Result:    json.RawMessage(b),
 	}
 	if err == nil {
 		hi.Result, _ = json.Marshal(settings)
 	} else {
 		hi.Result = []byte(`"` + err.Error() + `"`)
 	}
-	// TODO: handle error
-	_ = w.bus.RecordHostInteraction(hostKey, hi)
+	return w.bus.RecordHostInteraction(hostKey, hi)
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {

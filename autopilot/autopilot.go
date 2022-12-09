@@ -193,7 +193,7 @@ func NewServer(ap *Autopilot) http.Handler {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration) *Autopilot {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scanInterval time.Duration) *Autopilot {
 	ap := &Autopilot{
 		bus:    bus,
 		logger: logger.Sugar(),
@@ -209,7 +209,7 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 	ap.s = newScanner(
 		ap,
 		scannerNumThreads,
-		scannerScanInterval,
+		scanInterval,
 		scannerTimeoutInterval,
 	)
 

@@ -106,6 +106,7 @@ func main() {
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", time.Minute, "interval at which autopilot loop runs")
+	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 10*time.Minute, "interval at which hosts are scanned")
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")

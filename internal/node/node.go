@@ -32,7 +32,8 @@ type BusConfig struct {
 }
 
 type AutopilotConfig struct {
-	Heartbeat time.Duration
+	Heartbeat       time.Duration
+	ScannerInterval time.Duration
 }
 
 type chainManager struct {
@@ -246,7 +247,7 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir 
 		return nil, nil, err
 	}
 
-	ap := autopilot.New(store, b, w, logger, cfg.Heartbeat)
+	ap := autopilot.New(store, b, w, logger, cfg.Heartbeat, cfg.ScannerInterval)
 	cleanup = func() (err error) {
 		err = ap.Stop()
 		_ = logger.Sync() // ignore error

@@ -8,6 +8,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/worker"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -37,30 +38,32 @@ func (h *Host) IsHost(host string) bool {
 }
 
 func (h *Host) IsOnline() bool {
-	switch scans := h.LatestHostScans(2); len(scans) {
-	case 0:
+	scans := h.LatestHostScans(2)
+	if len(scans) == 0 {
 		return false
-	case 1:
-		return scans[0].Success
-	default:
-		return scans[0].Success || scans[1].Success
 	}
+	for _, s := range scans {
+		if worker.IsSuccessfulInteraction(s) {
+			return true
+		}
+	}
+	return false
 }
 
 // LastKnownSettings returns the host's last settings
 func (h *Host) LastKnownSettings() (rhpv2.HostSettings, time.Time, bool) {
 	for i := len(h.Interactions) - 1; i >= 0; i-- {
-		if !h.Interactions[i].Success {
-			continue
-		}
 		if h.Interactions[i].Type != "scan" {
 			continue
 		}
-		var settings rhpv2.HostSettings
-		if err := json.Unmarshal(h.Interactions[i].Result, &settings); err != nil {
+		var sr worker.ScanResult
+		if err := json.Unmarshal(h.Interactions[i].Result, &sr); err != nil {
 			continue
 		}
-		return settings, h.Interactions[i].Timestamp, true
+		if sr.Error != nil {
+			continue
+		}
+		return sr.Settings, h.Interactions[i].Timestamp, true
 	}
 	return rhpv2.HostSettings{}, time.Time{}, false
 }

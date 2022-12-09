@@ -80,6 +80,9 @@ var defaultAutopilotConfig = autopilot.Config{
 		MinShards:   2,
 		TotalShards: 2,
 	},
+	Hosts: autopilot.HostsConfig{
+		IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.
+	},
 }
 
 func withCtx(f func() error) func(context.Context) error {
@@ -156,7 +159,8 @@ func newTestCluster(dir string) (*TestCluster, error) {
 
 	// Create autopilot.
 	ap, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
-		Heartbeat: time.Second,
+		Heartbeat:       time.Second,
+		ScannerInterval: 2 * time.Second,
 	}, busClient, workerClient, autopilotDir)
 	if err != nil {
 		return nil, err

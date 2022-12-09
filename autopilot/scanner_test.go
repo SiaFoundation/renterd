@@ -49,7 +49,7 @@ func (b *mockBus) counts() (success int, failed int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, itx := range b.itxs {
-		if itx.Success {
+		if worker.IsSuccessfulInteraction(itx) {
 			success++
 		} else {
 			failed++
