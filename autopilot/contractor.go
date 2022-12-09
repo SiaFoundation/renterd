@@ -536,19 +536,11 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	dataStored := contract.Revision.ToTransaction().FileContractRevisions[0].NewFileSize
 	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice)
 
-	// loop over the contract history to figure out the amount of money spent
-	var prevUploadSpending types.Currency
-	var prevDownloadSpending types.Currency
-	var prevFundAccountSpending types.Currency
-	spendingHistory, err := c.ap.bus.SpendingHistory(id, c.currentPeriod)
-	if err != nil {
-		return types.ZeroCurrency, err
-	}
-	for _, spending := range spendingHistory {
-		prevUploadSpending = prevUploadSpending.Add(spending.Uploads)
-		prevDownloadSpending = prevUploadSpending.Add(spending.Downloads)
-		prevFundAccountSpending = prevUploadSpending.Add(spending.FundAccount)
-	}
+	// fetch the spending of the contract we want to renew.
+	oldSpending := contract.ContractMetadata.Spending
+	prevUploadSpending := oldSpending.Uploads
+	prevDownloadSpending := oldSpending.Downloads
+	prevFundAccountSpending := oldSpending.FundAccount
 
 	// estimate the amount of data uploaded, sanity check with data stored
 	//

@@ -311,15 +311,6 @@ func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]renterd.ContractSpending, error) {
-	panic("unimplemented")
-}
-func (c *Client) ContractMetadata(types.FileContractID) (renterd.ContractMetadata, error) {
-	panic("unimplemented")
-}
-func (c *Client) UpdateContractMetadata(types.FileContractID, renterd.ContractMetadata) error {
-	panic("unimplemented")
-}
 
 // RecommendedFee returns the recommended fee for a txn.
 func (c *Client) RecommendedFee() (fee types.Currency, err error) {

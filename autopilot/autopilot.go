@@ -42,10 +42,6 @@ type Bus interface {
 
 	Contract(id types.FileContractID) (contract renterd.Contract, err error)
 	Contracts() ([]renterd.Contract, error)
-	ContractMetadata(id types.FileContractID) (renterd.ContractMetadata, error)
-	UpdateContractMetadata(id types.FileContractID, metadata renterd.ContractMetadata) error
-
-	SpendingHistory(id types.FileContractID, currentPeriod uint64) ([]renterd.ContractSpending, error)
 
 	AcquireContract(id types.FileContractID, d time.Duration) (types.FileContractRevision, error)
 	ReleaseContract(id types.FileContractID) error
