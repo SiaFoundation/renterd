@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	SettingGouging    = "gouging"
 	SettingRedundancy = "redundancy"
 )
 

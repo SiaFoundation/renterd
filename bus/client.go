@@ -351,6 +351,17 @@ func (c *Client) UpdateSetting(key string, value interface{}) error {
 	return c.c.POST(fmt.Sprintf("/setting/%s/%s", key, url.QueryEscape(string(v))), nil, nil)
 }
 
+// GougingSettings returns the gouging settings.
+func (c *Client) GougingSettings() (gs GougingSettings, err error) {
+	err = c.Setting(SettingGouging, &gs)
+	return
+}
+
+// UpdateGougingSettings allows configuring the gouging settings.
+func (c *Client) UpdateGougingSettings(gs GougingSettings) error {
+	return c.UpdateSetting(SettingGouging, gs)
+}
+
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings() (rs RedundancySettings, err error) {
 	err = c.Setting(SettingRedundancy, &rs)

@@ -31,6 +31,7 @@ type BusConfig struct {
 	GatewayAddr string
 	Miner       *Miner
 
+	bus.GougingSettings
 	bus.RedundancySettings
 }
 

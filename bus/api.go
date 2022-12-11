@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
@@ -21,6 +22,9 @@ type (
 
 	// ChainState represents the full state of the chain as of a particular block.
 	ChainState = consensus.State
+
+	// GougingSettings contain a list of settings used in price gouging.
+	GougingSettings = gouging.GougingSettings
 
 	SlabID uint
 )

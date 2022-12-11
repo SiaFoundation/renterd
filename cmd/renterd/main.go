@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/siad/types"
 	"golang.org/x/term"
 )
 
@@ -101,9 +102,13 @@ func main() {
 	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service")
 	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service")
 	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
+	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
 	flag.Uint64Var(&busCfg.MinShards, "bus.minShards", 10, "min amount of shards needed to reconstruct the slab")
 	flag.Uint64Var(&busCfg.TotalShards, "bus.totalShards", 30, "total amount of shards for each slab")
-	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
+	flag.Func("bus.maxRPCPrice", "max allowed base price for RPCs (per million)", priceVarFn(&busCfg.MaxRPCPrice))
+	flag.Func("bus.maxContractPrice", "max allowed price to form a contract", priceVarFn(&busCfg.MaxContractPrice))
+	flag.Func("bus.maxDownloadPrice", "max allowed price to download 1TiB of data", priceVarFn(&busCfg.MaxDownloadPrice))
+	flag.Func("bus.maxUploadPrice", "max allowed price to upload 1TiB of data", priceVarFn(&busCfg.MaxUploadPrice))
 	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
@@ -120,6 +125,10 @@ func main() {
 
 	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
 		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
+	}
+
+	if !busCfg.MaxRPCPrice.IsZero() {
+		busCfg.MaxRPCPrice = busCfg.MaxRPCPrice.Div64(1e6) // base rpc price is expressed per 1M
 	}
 
 	// create listener first, so that we know the actual apiAddr if the user
@@ -192,5 +201,19 @@ func main() {
 		srv.Shutdown(context.Background())
 	case err := <-autopilotErr:
 		log.Fatalln("Fatal autopilot error:", err)
+	}
+}
+
+func priceVarFn(price *types.Currency) func(currency string) error {
+	return func(currency string) error {
+		priceStr, err := types.ParseCurrency(currency)
+		if err != nil {
+			return fmt.Errorf("could not parse currency, err: %v", err)
+		}
+		_, err = fmt.Sscan(priceStr, &price)
+		if err != nil {
+			return fmt.Errorf("could not read currency, err: %v", err)
+		}
+		return nil
 	}
 }
