@@ -312,7 +312,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 	expected := renterd.Contract{
 		HostIP:      "",
-		StartHeight: 0,
+		StartHeight: newContractStartHeight,
 		Revision:    newContract.Revision,
 		Signatures:  newContract.Signatures,
 		ContractMetadata: renterd.ContractMetadata{
