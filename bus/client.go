@@ -265,7 +265,13 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 
 // DeleteContracts deletes the contracts with the given IDs.
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
-	panic("unimplemented")
+	// TODO: batch delete
+	for _, id := range ids {
+		if err := c.DeleteContract(id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteContract deletes the contract with the given ID.

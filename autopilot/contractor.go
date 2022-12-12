@@ -603,6 +603,11 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 }
 
 func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (types.Currency, error) {
+	contracts, err := c.ap.bus.Contracts()
+	if err != nil {
+		return types.Currency{}, nil
+	}
+
 	// fetch contract
 	contract, err := c.ap.bus.Contract(id)
 	if err != nil {
@@ -639,7 +644,15 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice)
 
 	// fetch the spending of the contract we want to renew.
-	prevSpending := contract.ContractMetadata.Spending
+	prevSpending, err := c.contractSpending(id, contracts)
+	if err != nil {
+		c.logger.Errorw(
+			fmt.Sprintf("could not retrieve contract spending, err: %v", err),
+			"hk", contract.HostKey,
+			"fcid", contract.ID(),
+		)
+		return types.ZeroCurrency, err
+	}
 
 	// estimate the amount of data uploaded, sanity check with data stored
 	//
