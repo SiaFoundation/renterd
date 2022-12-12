@@ -68,21 +68,6 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cs, err := b.ConsensusState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	height := cs.BlockHeight
-
-	locations, err := cluster.Locations()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = w.UploadSlab(bytes.NewReader(frand.Bytes(10)), 1, 1, height, locations)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	//  Wait for the contract to form.
 	err = Retry(20, time.Second, func() error {
 		contracts, err := b.Contracts()
@@ -96,5 +81,32 @@ func TestNewTestCluster(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Upload a slab.
+	cs, err := b.ConsensusState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	height := cs.BlockHeight
+
+	locations, err := cluster.Locations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabLen := 10
+	slabData := frand.Bytes(slabLen)
+	slab, err := w.UploadSlab(bytes.NewReader(slabData), 1, 1, height, locations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Download the slab.
+	buf := bytes.NewBuffer(nil)
+	if err := w.DownloadSlab(buf, object.SlabSlice{Slab: slab, Offset: 0, Length: uint32(slabLen)}, locations); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(slabData, buf.Bytes()) {
+		t.Fatal("wrong data")
 	}
 }

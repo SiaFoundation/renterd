@@ -174,7 +174,7 @@ func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, locations 
 }
 
 // DownloadSlab downloads data from a set of hosts.
-func (c *Client) DownloadSlab(dst io.Writer, s object.SlabSlice, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (err error) {
+func (c *Client) DownloadSlab(dst io.Writer, s object.SlabSlice, locations []ExtendedSlabLocation) (err error) {
 	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
 
 	js, _ := json.Marshal(SlabsDownloadRequest{
