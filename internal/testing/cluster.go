@@ -76,10 +76,6 @@ var defaultAutopilotConfig = autopilot.Config{
 		Upload:   modules.SectorSize * 500,
 		Storage:  modules.SectorSize * 5e3,
 	},
-	Objects: autopilot.ObjectsConfig{
-		MinShards:   2,
-		TotalShards: 2,
-	},
 	Hosts: autopilot.HostsConfig{
 		IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.
 	},
