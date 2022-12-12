@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
-	"go.sia.tech/renterd/internal/utils"
 )
 
 var defaultSettings = bus.RedundancySettings{
@@ -101,10 +100,8 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 	}
 
 	shutdownFn := func(ctx context.Context) error {
-		return utils.JoinErrors(
-			cleanup(),
-			server.Shutdown(ctx),
-		)
+		server.Shutdown(ctx)
+		return cleanup()
 	}
 	return client, serveFn, shutdownFn, nil
 }

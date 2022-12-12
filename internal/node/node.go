@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/stores"
-	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
@@ -19,6 +18,8 @@ import (
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
 	"go.sia.tech/siad/types"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -237,6 +238,39 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 	return w, func() error { return nil }, nil
 }
 
+func newLogger(path string) (*zap.Logger, func(), error) {
+	writer, closeFn, err := zap.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// console
+	config := zap.NewProductionEncoderConfig()
+	config.EncodeTime = zapcore.RFC3339TimeEncoder
+	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	consoleEncoder := zapcore.NewConsoleEncoder(config)
+
+	// file
+	config = zap.NewProductionEncoderConfig()
+	config.EncodeTime = zapcore.RFC3339TimeEncoder
+	config.CallerKey = ""     // hide
+	config.StacktraceKey = "" // hide
+	config.NameKey = "component"
+	config.TimeKey = "date"
+	fileEncoder := zapcore.NewJSONEncoder(config)
+
+	core := zapcore.NewTee(
+		zapcore.NewCore(fileEncoder, writer, zapcore.DebugLevel),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel),
+	)
+
+	return zap.New(
+		core,
+		zap.AddCaller(),
+		zap.AddStacktrace(zapcore.ErrorLevel),
+	), closeFn, nil
+}
+
 func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
 	autopilotDir := filepath.Join(dir, "autopilot")
 	if err := os.MkdirAll(autopilotDir, 0700); err != nil {
@@ -247,7 +281,7 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir 
 		return nil, nil, err
 	}
 	autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
-	logger, closeFn, err := utils.NewLogger(autopilotLog)
+	logger, closeFn, err := newLogger(autopilotLog)
 	if err != nil {
 		return nil, nil, err
 	}
