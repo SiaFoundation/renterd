@@ -222,6 +222,7 @@ type (
 		RenewedFrom types.FileContractID   `gorm:"index,type:bytes;serializer:gob"`
 		Revision    dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
 		Sectors     []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
+		StartHeight uint64                 `gorm:"NOT NULL"`
 		TotalCost   *big.Int               `gorm:"type:bytes;serializer:gob"`
 	}
 
@@ -375,7 +376,7 @@ func (c dbContract) convert() (renterd.Contract, error) {
 	}
 	return renterd.Contract{
 		HostIP:      c.Host.NetAddress(),
-		StartHeight: 0, // TODO
+		StartHeight: c.StartHeight,
 		Revision:    revision,
 		Signatures:  signatures,
 		ContractMetadata: renterd.ContractMetadata{
@@ -402,7 +403,8 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 		// Get revision.
 		err := tx.Model(&dbContract{}).
 			Where("fcid", fcidGob.Bytes()).
-			Preload("Revision").
+			Preload("Revision.NewValidProofOutputs").
+			Preload("Revision.NewMissedProofOutputs").
 			Take(&contract).
 			Error
 		if err != nil {
@@ -442,7 +444,7 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 }
 
 // addContract implements the bus.ContractStore interface.
-func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error {
+func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -490,14 +492,15 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 			HostID:      host.ID,
 			RenewedFrom: renewedFrom,
 			Revision:    revision,
+			StartHeight: startHeight,
 			TotalCost:   totalCost.Big(),
 		}).Error
 }
 
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error {
+func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		return addContract(tx, c, totalCost, types.FileContractID{})
+		return addContract(tx, c, totalCost, startHeight, types.FileContractID{})
 	})
 }
 
@@ -505,7 +508,7 @@ func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currenc
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error {
+func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, renewedFrom)
@@ -535,7 +538,7 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 		}
 
 		// Add the new contract.
-		return addContract(tx, c, totalCost, renewedFrom)
+		return addContract(tx, c, totalCost, startHeight, renewedFrom)
 	})
 }
 
@@ -606,6 +609,7 @@ func (s *SQLStore) contracts() ([]dbContract, error) {
 	err := s.db.Model(&dbContract{}).
 		Preload("Revision.NewValidProofOutputs").
 		Preload("Revision.NewMissedProofOutputs").
+		Preload("Host.Announcements").
 		Find(&contracts).Error
 	return contracts, err
 }

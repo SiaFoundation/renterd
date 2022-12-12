@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
@@ -287,6 +288,25 @@ func (c *TestCluster) synced(hosts []*siatest.TestNode) (bool, error) {
 	return true, nil
 }
 
+func (c *TestCluster) Locations(rk consensus.PrivateKey) ([]worker.ExtendedSlabLocation, error) {
+	contracts, err := c.Bus.Contracts()
+	if err != nil {
+		return nil, err
+	}
+	var locations []worker.ExtendedSlabLocation
+	for _, c := range contracts {
+		locations = append(locations, worker.ExtendedSlabLocation{
+			SlabLocation: renterd.SlabLocation{
+				HostKey: c.HostKey(),
+				HostIP:  c.HostIP,
+				ID:      c.ID(),
+			},
+			RenterKey: rk,
+		})
+	}
+	return locations, nil
+}
+
 // MineBlocks uses the bus' miner to mine n blocks.
 func (c *TestCluster) MineBlocks(n int) error {
 	addr, err := c.Bus.WalletAddress()
@@ -377,7 +397,30 @@ func (c *TestCluster) AddHosts(n int) error {
 			return err
 		}
 	}
-	return nil
+
+	//  Wait for the contracts to form.
+	hostsWithContracts := make(map[string]struct{})
+	return Retry(20, time.Second, func() error {
+		contracts, err := c.Bus.Contracts()
+		if err != nil {
+			return err
+		}
+		for _, c := range contracts {
+			hostsWithContracts[c.HostKey().String()] = struct{}{}
+		}
+		for _, h := range newHosts {
+			hpk, err := h.HostPublicKey()
+			if err != nil {
+				return err
+			}
+			_, exists := hostsWithContracts[hpk.String()]
+			if !exists {
+				return fmt.Errorf("missing contract for host %v", hpk.String())
+			}
+			return nil
+		}
+		return nil
+	})
 }
 
 // Shutdown shuts down a TestCluster. Cleanups are performed in reverse order.

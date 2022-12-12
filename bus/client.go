@@ -243,19 +243,21 @@ func (c *Client) Contract(id types.FileContractID) (contract renterd.Contract, e
 }
 
 // AddContract adds the provided contract to the current contract set.
-func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency) (err error) {
+func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/contracts/%s/new", contract.ID()), ContractsIDAddRequest{
-		Contract:  contract,
-		TotalCost: totalCost,
+		Contract:    contract,
+		StartHeight: startHeight,
+		TotalCost:   totalCost,
 	})
 	return
 }
 
 // AddRenewedContract adds the provided contract to the current contract set.
-func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) (err error) {
+func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/contracts/%s/renewed", contract.ID()), ContractsIDRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
+		StartHeight: startHeight,
 		TotalCost:   totalCost,
 	})
 	return

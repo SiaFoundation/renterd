@@ -92,7 +92,8 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Insert it.
 	totalCost := types.NewCurrency64(456)
-	if err := cs.AddContract(c, totalCost); err != nil {
+	startHeight := uint64(100)
+	if err := cs.AddContract(c, totalCost, startHeight); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +104,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 	expected := renterd.Contract{
 		HostIP:      "",
-		StartHeight: 0,
+		StartHeight: 100,
 		Revision:    c.Revision,
 		Signatures:  c.Signatures,
 		ContractMetadata: renterd.ContractMetadata{
@@ -204,7 +205,8 @@ func TestContractLocking(t *testing.T) {
 		},
 	}
 	totalCost := types.NewCurrency64(654)
-	if err := cs.AddContract(c, totalCost); err != nil {
+	startHeight := uint64(100)
+	if err := cs.AddContract(c, totalCost, startHeight); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,7 +278,8 @@ func TestRenewedContract(t *testing.T) {
 		},
 	}
 	oldContractTotal := types.NewCurrency64(111)
-	if err := cs.AddContract(c, oldContractTotal); err != nil {
+	oldContractStartHeight := uint64(100)
+	if err := cs.AddContract(c, oldContractTotal, oldContractStartHeight); err != nil {
 		t.Fatal(err)
 	}
 
@@ -291,7 +294,8 @@ func TestRenewedContract(t *testing.T) {
 		},
 	}
 	newContractTotal := types.NewCurrency64(222)
-	if err := cs.AddRenewedContract(renewed, newContractTotal, fcid); err != nil {
+	newContractStartHeight := uint64(200)
+	if err := cs.AddRenewedContract(renewed, newContractTotal, newContractStartHeight, fcid); err != nil {
 		t.Fatal(err)
 	}
 

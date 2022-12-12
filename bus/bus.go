@@ -66,8 +66,8 @@ type (
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]renterd.Contract, error)
 		Contract(id types.FileContractID) (renterd.Contract, error)
-		AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error
-		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
+		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error
+		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
 	}
 
@@ -425,7 +425,7 @@ func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddContract(req.Contract, req.TotalCost))
+	jc.Check("couldn't store contract", b.cs.AddContract(req.Contract, req.TotalCost, req.StartHeight))
 }
 
 func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
@@ -438,7 +438,7 @@ func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.RenewedFrom))
+	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom))
 }
 
 func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {

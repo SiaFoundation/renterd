@@ -258,7 +258,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		err = c.ap.bus.AddRenewedContract(contract, renterFunds, renew.ID())
+		err = c.ap.bus.AddRenewedContract(contract, renterFunds, c.blockHeight, renew.ID())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed to persist, err: %v", err),
@@ -378,7 +378,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		*budget = budget.Sub(renterFunds)
 
 		// persist contract in store
-		err = c.ap.bus.AddContract(contract, renterFunds)
+		err = c.ap.bus.AddContract(contract, renterFunds, c.blockHeight)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("new contract failed to persist, err: %v", err),

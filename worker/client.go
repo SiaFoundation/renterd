@@ -143,7 +143,7 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 
 // UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
 // read from src.
-func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (s object.Slab, err error) {
+func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, locations []ExtendedSlabLocation) (s object.Slab, err error) {
 	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
 
 	js, _ := json.Marshal(SlabsUploadRequest{

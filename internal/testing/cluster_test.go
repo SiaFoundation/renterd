@@ -1,6 +1,7 @@
 package testing
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
+	"lukechampine.com/frand"
 )
 
 // TestNewTestCluster is a smoke test for creating a cluster of Nodes for
@@ -60,6 +62,28 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// See if autopilot is running by fetching the config.
+	_, err = cluster.Autopilot.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cs, err := b.ConsensusState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	height := cs.BlockHeight
+
+	rk := consensus.GeneratePrivateKey()
+	locations, err := cluster.Locations(rk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = w.UploadSlab(bytes.NewReader(frand.Bytes(10)), 1, 1, height, locations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	//  Wait for the contract to form.
 	err = Retry(20, time.Second, func() error {
 		contracts, err := b.Contracts()
@@ -74,7 +98,4 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// TODO: Once there is an autopilot client we test the autopilot as
-	// well.
 }
