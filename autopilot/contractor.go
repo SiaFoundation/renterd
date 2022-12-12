@@ -422,7 +422,7 @@ func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterK
 
 	// prepare the renewal
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, endHeight, scan.Settings)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil
 	}

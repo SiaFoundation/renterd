@@ -338,7 +338,7 @@ func (w *worker) rhpPrepareRenewHandler(jc jape.Context) {
 	if jc.Decode(&rprr) != nil {
 		return
 	}
-	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
+	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
 	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
 	finalPayment := rprr.HostSettings.BaseRPCPrice
 	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
