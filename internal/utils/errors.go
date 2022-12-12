@@ -6,7 +6,7 @@ import (
 )
 
 // TODO: replace with errors.join (Go 1.20)
-func JoinErrors(errs []error) error {
+func JoinErrors(errs ...error) error {
 	filtered := errs[:0]
 	for _, err := range errs {
 		if err != nil {

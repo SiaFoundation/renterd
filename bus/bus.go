@@ -1,8 +1,10 @@
 package bus
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,6 +17,10 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
+)
+
+const (
+	SettingRedundancy = "redundancy"
 )
 
 type (
@@ -88,6 +94,13 @@ type (
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
 		SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error)
 	}
+
+	// A SettingStore stores settings.
+	SettingStore interface {
+		Settings() ([]string, error)
+		Setting(key string) (string, error)
+		UpdateSetting(key, value string) error
+	}
 )
 
 type bus struct {
@@ -99,6 +112,7 @@ type bus struct {
 	cs  ContractStore
 	css ContractSetStore
 	os  ObjectStore
+	ss  SettingStore
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -573,8 +587,52 @@ func (b *bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) settingsHandlerGET(jc jape.Context) {
+	if settings, err := b.ss.Settings(); jc.Check("couldn't load settings", err) == nil {
+		jc.Encode(settings)
+	}
+}
+
+func (b *bus) settingKeyHandlerGET(jc jape.Context) {
+	if key := jc.PathParam("key"); key == "" {
+		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+	} else if setting, err := b.ss.Setting(jc.PathParam("key")); isErrSettingsNotFound(err) {
+		jc.Error(err, http.StatusNotFound)
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+	} else {
+		jc.Encode(setting)
+	}
+}
+
+func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
+	if key := jc.PathParam("key"); key == "" {
+		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+	} else if value := jc.PathParam("value"); value == "" {
+		jc.Error(errors.New("param 'value' can not be empty"), http.StatusBadRequest)
+	} else if value, err := url.QueryUnescape(value); err != nil {
+		jc.Error(errors.New("could not unescape 'value'"), http.StatusBadRequest)
+	} else {
+		jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
+	}
+}
+
+func (b *bus) setRedundancySettings(rs RedundancySettings) error {
+	if js, err := json.Marshal(rs); err != nil {
+		return err
+	} else {
+		return b.ss.UpdateSetting(SettingRedundancy, string(js))
+	}
+}
+
+// TODO: use simple err check against stores.ErrSettingNotFound as soon as the
+// import-cycle is fixed
+func isErrSettingsNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "setting not found")
+}
+
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore) http.Handler {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore, rs RedundancySettings) (http.Handler, error) {
 	b := &bus{
 		s:   s,
 		cm:  cm,
@@ -584,7 +642,13 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		cs:  cs,
 		css: css,
 		os:  os,
+		ss:  ss,
 	}
+
+	if err := b.setRedundancySettings(rs); err != nil {
+		return nil, err
+	}
+
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
@@ -632,5 +696,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /migration/slabs":    b.objectsMigrationSlabsHandlerGET,
 		"GET    /migration/slab/:id": b.objectsMigrationSlabHandlerGET,
 		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
-	})
+
+		"GET    /settings":            b.settingsHandlerGET,
+		"GET    /setting/:key":        b.settingKeyHandlerGET,
+		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
+	}), nil
 }

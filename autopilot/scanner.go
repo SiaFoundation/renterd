@@ -281,7 +281,7 @@ func (s *scanner) performHostScans() error {
 		}
 	}
 
-	return utils.JoinErrors(errs)
+	return utils.JoinErrors(errs...)
 }
 
 func (s *scanner) isScanRequired() bool {

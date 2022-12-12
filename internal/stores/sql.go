@@ -72,6 +72,9 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 			&dbSlab{},
 			&dbSector{},
 			&dbShard{},
+
+			// bus.SettingStore tables
+			&dbSetting{},
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err

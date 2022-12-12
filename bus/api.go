@@ -168,3 +168,8 @@ type UploadParams struct {
 	TotalShards   uint8
 	ContractSet   string
 }
+
+type RedundancySettings struct {
+	MinShards   uint64
+	TotalShards uint64
+}
