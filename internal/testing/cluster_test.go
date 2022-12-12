@@ -74,8 +74,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 	height := cs.BlockHeight
 
-	rk := consensus.GeneratePrivateKey()
-	locations, err := cluster.Locations(rk)
+	locations, err := cluster.Locations()
 	if err != nil {
 		t.Fatal(err)
 	}

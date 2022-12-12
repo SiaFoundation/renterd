@@ -288,18 +288,23 @@ func (c *TestCluster) synced(hosts []*siatest.TestNode) (bool, error) {
 	return true, nil
 }
 
-func (c *TestCluster) Locations(rk consensus.PrivateKey) ([]worker.ExtendedSlabLocation, error) {
+// Locations returns a slab location for each host in the cluster.
+func (c *TestCluster) Locations() ([]worker.ExtendedSlabLocation, error) {
 	contracts, err := c.Bus.Contracts()
 	if err != nil {
 		return nil, err
 	}
 	var locations []worker.ExtendedSlabLocation
-	for _, c := range contracts {
+	for _, contract := range contracts {
+		rk, err := c.Autopilot.RenterKey(contract.HostKey())
+		if err != nil {
+			return nil, err
+		}
 		locations = append(locations, worker.ExtendedSlabLocation{
 			SlabLocation: renterd.SlabLocation{
-				HostKey: c.HostKey(),
-				HostIP:  c.HostIP,
-				ID:      c.ID(),
+				HostKey: contract.HostKey(),
+				HostIP:  contract.HostIP,
+				ID:      contract.ID(),
 			},
 			RenterKey: rk,
 		})
