@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"gitlab.com/NebulousLabs/errors"
+	"go.sia.tech/renterd/internal/utils"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
@@ -17,14 +18,9 @@ var (
 
 type (
 	GougingResults struct {
-		Download     GougingResult
-		FormContract GougingResult
-		Upload       GougingResult
-	}
-
-	GougingResult interface {
-		IsGouging() bool
-		error
+		downloadErr     error
+		formContractErr error
+		uploadErr       error
 	}
 
 	GougingSettings struct {
@@ -33,28 +29,31 @@ type (
 		MaxDownloadPrice types.Currency // per TiB
 		MaxUploadPrice   types.Currency // per TiB
 	}
-
-	check struct {
-		err error
-	}
 )
 
-func (c *check) IsGouging() bool {
-	return c.err != nil
+func (gr GougingResults) CanDownload() (errs []error) {
+	return utils.FilterErrors(
+		gr.downloadErr,
+	)
 }
 
-func (c *check) Error() string {
-	if c.err != nil {
-		return c.err.Error()
-	}
-	return ""
+func (gr GougingResults) CanForm() []error {
+	return gr.CanUpload() // same conditions apply
+}
+
+func (gr GougingResults) CanUpload() (errs []error) {
+	return utils.FilterErrors(
+		gr.downloadErr,
+		gr.uploadErr,
+		gr.formContractErr,
+	)
 }
 
 func PerformGougingChecks(gs GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
 	return GougingResults{
-		Download:     &check{err: checkDownloadGouging(gs, hs, redundancy)},
-		FormContract: &check{err: checkFormContractGouging(gs, hs)},
-		Upload:       &check{err: checkUploadGouging(gs, hs, period, redundancy)},
+		downloadErr:     checkDownloadGouging(gs, hs, redundancy),
+		formContractErr: checkFormContractGouging(gs, hs),
+		uploadErr:       checkUploadGouging(gs, hs, period, redundancy),
 	}
 }
 
