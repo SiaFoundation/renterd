@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
@@ -97,6 +98,11 @@ func main() {
 		node.AutopilotConfig
 	}
 
+	// NOTE: the flag package does not offer a nice way to parse currencies with
+	// a fallback to a default value, flag.TextVar would work but that was added
+	// in Go1.19
+	var flagg utils.CurrencyFlags
+
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
 	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service")
@@ -105,16 +111,17 @@ func main() {
 	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
 	flag.Uint64Var(&busCfg.MinShards, "bus.minShards", 10, "min amount of shards needed to reconstruct the slab")
 	flag.Uint64Var(&busCfg.TotalShards, "bus.totalShards", 30, "total amount of shards for each slab")
-	flag.Func("bus.maxRPCPrice", "max allowed base price for RPCs (per million)", priceVarFn(&busCfg.MaxRPCPrice))
-	flag.Func("bus.maxContractPrice", "max allowed price to form a contract", priceVarFn(&busCfg.MaxContractPrice))
-	flag.Func("bus.maxDownloadPrice", "max allowed price to download one TiB of data", priceVarFn(&busCfg.MaxDownloadPrice))
-	flag.Func("bus.maxUploadPrice", "max allowed price to upload one TiB of data", priceVarFn(&busCfg.MaxUploadPrice))
+	flagg.CurrencyVar(&busCfg.MaxRPCPrice, "bus.maxRPCPrice", types.SiacoinPrecision, "max allowed base price for RPCs (per million)")
+	flagg.CurrencyVar(&busCfg.MaxContractPrice, "bus.maxContractPrice", types.SiacoinPrecision, "max allowed price to form a contract")
+	flagg.CurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.SiacoinPrecision.Mul64(2500), "max allowed price to download one TiB")
+	flagg.CurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.SiacoinPrecision.Mul64(1000), "max allowed price to upload one TiB")
 	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", time.Minute, "interval at which autopilot loop runs")
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 10*time.Minute, "interval at which hosts are scanned")
 	flag.Parse()
+	flagg.Parse()
 
 	log.Println("renterd v0.1.0")
 	if flag.Arg(0) == "version" {
@@ -201,19 +208,5 @@ func main() {
 		srv.Shutdown(context.Background())
 	case err := <-autopilotErr:
 		log.Fatalln("Fatal autopilot error:", err)
-	}
-}
-
-func priceVarFn(price *types.Currency) func(currency string) error {
-	return func(currency string) error {
-		priceStr, err := types.ParseCurrency(currency)
-		if err != nil {
-			return fmt.Errorf("could not parse currency, err: %v", err)
-		}
-		_, err = fmt.Sscan(priceStr, &price)
-		if err != nil {
-			return fmt.Errorf("could not read currency, err: %v", err)
-		}
-		return nil
 	}
 }
