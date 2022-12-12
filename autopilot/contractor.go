@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -65,7 +66,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts()
+	active, err := c.ap.bus.Contracts()
 	if err != nil {
 		return err
 	}
@@ -77,9 +78,11 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// delete contracts
-	err = c.ap.bus.DeleteContracts(toDelete)
-	if err != nil {
-		return fmt.Errorf("failed to delete contracts, err: %v", err)
+	if len(toDelete) > 0 {
+		err = c.ap.bus.DeleteContracts(toDelete)
+		if err != nil {
+			return fmt.Errorf("failed to delete contracts, err: %v", err)
+		}
 	}
 
 	// figure out remaining funds
@@ -106,10 +109,10 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]bus.Contract, []types.FileContractID, error) {
+func (c *contractor) runContractChecks(cfg Config, contracts []renterd.Contract) ([]renterd.Contract, []types.FileContractID, error) {
 	// collect contracts to renew and to delete
 	toDelete := make([]types.FileContractID, 0, len(contracts))
-	toRenew := make([]bus.Contract, 0, len(contracts))
+	toRenew := make([]renterd.Contract, 0, len(contracts))
 
 	// create a new ip filter
 	f := newIPFilter()
@@ -122,7 +125,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 	// check every active contract
 	for _, contract := range contracts {
 		// fetch host from hostdb
-		host, err := c.ap.bus.Host(contract.HostKey)
+		host, err := c.ap.bus.Host(contract.HostKey())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("missing host, err: %v", err),
@@ -132,21 +135,16 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		}
 
 		// fetch contract from contract store
-		contractData, err := c.ap.bus.Contract(contract.ID)
+		contractData, err := c.ap.bus.Contract(contract.ID())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("missing contract, err: %v", err),
 				"hk", contract.HostKey,
-				"fcid", contract.ID,
+				"fcid", contract.ID(),
 			)
 			continue
 		}
-
-		// fetch metadata
-		metadata, err := c.ap.bus.ContractMetadata(contract.ID)
-		if err != nil {
-			continue // TODO: log err
-		}
+		metadata := contractData.ContractMetadata
 
 		// decide whether the host is still good
 		usable, reasons := isUsableHost(cfg, f, Host{host})
@@ -154,10 +152,10 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 			c.logger.Infow(
 				"unusable host",
 				"hk", host.PublicKey,
-				"fcid", contract.ID,
+				"fcid", contract.ID(),
 				"reasons", reasons,
 			)
-			toDelete = append(toDelete, contract.ID)
+			toDelete = append(toDelete, contract.ID())
 			continue
 		}
 
@@ -167,22 +165,22 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 			c.logger.Infow(
 				"unusable contract",
 				"hk", host.PublicKey,
-				"fcid", contract.ID,
+				"fcid", contract.ID(),
 				"reasons", reasons,
 				"renewable", renewable,
 			)
 			if !renewable {
-				toDelete = append(toDelete, contract.ID)
+				toDelete = append(toDelete, contract.ID())
 				continue
 			} else {
-				renewIndices[contract.ID] = len(toRenew)
+				renewIndices[contract.ID()] = len(toRenew)
 				toRenew = append(toRenew, contract)
 			}
 		}
 
 		// keep track of file size
-		contractIds = append(contractIds, contract.ID)
-		contractSizes[contract.ID] = contractData.Revision.NewFileSize
+		contractIds = append(contractIds, contract.ID())
+		contractSizes[contract.ID()] = contractData.Revision.NewFileSize
 	}
 
 	// apply active contract limit
@@ -205,8 +203,8 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 	return toRenew, toDelete, nil
 }
 
-func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []bus.Contract) ([]bus.Contract, error) {
-	renewed := make([]bus.Contract, 0, len(toRenew))
+func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []renterd.Contract) ([]renterd.Contract, error) {
+	renewed := make([]renterd.Contract, 0, len(toRenew))
 
 	// log contracts renewed
 	c.logger.Debugw(
@@ -230,7 +228,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		}
 
 		// check our budget
-		renterFunds, err := c.renewFundingEstimate(cfg, renew.ID)
+		renterFunds, err := c.renewFundingEstimate(cfg, renew.ID())
 		if err != nil {
 			return nil, fmt.Errorf("could not get renew funding estimate, err: %v", err)
 		}
@@ -245,7 +243,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		}
 
 		// derive the renter key
-		renterKey := c.ap.deriveRenterKey(renew.HostKey)
+		renterKey := c.ap.deriveRenterKey(renew.HostKey())
 
 		var hostCollateral types.Currency // TODO
 		contract, err := c.renewContract(cfg, renew, renterKey, renterAddress, renterFunds, hostCollateral)
@@ -260,42 +258,32 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		err = c.ap.bus.AddRenewedContract(contract, renew.ID)
+		err = c.ap.bus.AddRenewedContract(contract, renterFunds, renew.ID())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed to persist, err: %v", err),
-				"hk", renew.HostKey,
-				"fcid", renew.ID,
+				"hk", renew.HostKey(),
+				"fcid", renew.ID(),
 			)
 			return nil, err
 		}
 
-		// persist the metadata
-		// TODO: instead of updating the metadata separately,
-		// AddRenewedContract should do that.
-		metadata := bus.ContractMetadata{RenewedFrom: renew.ID, TotalCost: renterFunds}
-		err = c.ap.bus.UpdateContractMetadata(contract.ID(), metadata)
+		// fetch full contract from db.
+		renewedContract, err := c.ap.bus.Contract(contract.ID())
 		if err != nil {
 			return nil, err
 		}
 
 		// add to renewed set
-		renewed = append(renewed, bus.Contract{
-			ID:               contract.ID(),
-			HostKey:          renew.HostKey,
-			HostIP:           renew.HostIP,
-			StartHeight:      c.blockHeight,
-			EndHeight:        contract.EndHeight(),
-			ContractMetadata: metadata,
-		})
+		renewed = append(renewed, renewedContract)
 	}
 
 	return renewed, nil
 }
 
-func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, renterAddress types.UnlockHash) ([]bus.Contract, error) {
+func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, renterAddress types.UnlockHash) ([]renterd.Contract, error) {
 	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts()
+	active, err := c.ap.bus.Contracts()
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +300,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	minInitialContractFunds := allowance.Div64(20) // TODO: arbitrary divisor
 
 	// form missing contracts
-	var formed []bus.Contract
+	var formed []renterd.Contract
 	missing := int(cfg.Contracts.Hosts) - len(active) // TODO: add leeway so we don't form contracts if we dip slightly under `needed` (?)
 
 	// log contracts formed
@@ -390,7 +378,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		*budget = budget.Sub(renterFunds)
 
 		// persist contract in store
-		err = c.ap.bus.AddContract(contract)
+		err = c.ap.bus.AddContract(contract, renterFunds)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("new contract failed to persist, err: %v", err),
@@ -399,24 +387,14 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 			continue
 		}
 
-		// persist the metadata
-		// TODO: Instead of doing a separate metadata update,
-		// AddContract should already save the metadata.
-		metadata := bus.ContractMetadata{TotalCost: renterFunds}
-		err = c.ap.bus.UpdateContractMetadata(contract.ID(), metadata)
+		// fetch full contract from db.
+		formedContract, err := c.ap.bus.Contract(contract.ID())
 		if err != nil {
 			return nil, err
 		}
 
 		// add contract to contract set
-		formed = append(formed, bus.Contract{
-			ID:               contract.ID(),
-			HostKey:          candidate,
-			HostIP:           host.NetAddress(),
-			StartHeight:      c.blockHeight,
-			EndHeight:        contract.EndHeight(),
-			ContractMetadata: metadata,
-		})
+		formed = append(formed, formedContract)
 
 		missing--
 	}
@@ -424,29 +402,29 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.Contract, error) {
+func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// handle contract locking
-	revision, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
+	revision, err := c.ap.bus.AcquireContract(toRenew.ID(), contractLockingDurationRenew)
 	if err != nil {
-		return rhpv2.Contract{}, nil
+		return rhpv2.ContractRevision{}, nil
 	}
-	defer c.ap.bus.ReleaseContract(toRenew.ID)
+	defer c.ap.bus.ReleaseContract(toRenew.ID())
 
 	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(toRenew.HostKey, toRenew.HostIP, 0)
+	scan, err := c.ap.worker.RHPScan(toRenew.HostKey(), toRenew.HostIP, 0)
 	if err != nil {
 		c.logger.Debugw(
 			fmt.Sprintf("failed scan, err: %v", err),
-			"hk", toRenew.HostKey,
+			"hk", toRenew.HostKey(),
 		)
-		return rhpv2.Contract{}, nil
+		return rhpv2.ContractRevision{}, nil
 	}
 
 	// prepare the renewal
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey, renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
 	if err != nil {
-		return rhpv2.Contract{}, nil
+		return rhpv2.ContractRevision{}, nil
 	}
 
 	// fund the transaction
@@ -454,32 +432,32 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 	toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// sign the transaction
 	err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// renew the contract
 	txnSet := append(parents, txn)
-	renewed, _, err := c.ap.worker.RHPRenew(renterKey, toRenew.HostKey, toRenew.HostIP, toRenew.ID, txnSet, finalPayment)
+	renewed, _, err := c.ap.worker.RHPRenew(renterKey, toRenew.HostKey(), toRenew.HostIP, toRenew.ID(), txnSet, finalPayment)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 	return renewed, nil
 }
 
-func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.Contract, error) {
+func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// prepare contract formation
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	fc, cost, err := c.ap.worker.RHPPrepareForm(renterKey, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
 	if err != nil {
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// fund the transaction
@@ -487,21 +465,21 @@ func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostI
 	toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// sign the transaction
 	err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	// form the contract
 	contract, _, err := c.ap.worker.RHPForm(renterKey, hostKey, hostIP, append(parents, txn))
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.Contract{}, err
+		return rhpv2.ContractRevision{}, err
 	}
 
 	return contract, nil
@@ -529,7 +507,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 		c.logger.Errorw(
 			fmt.Sprintf("missing contract, err: %v", err),
 			"hk", contract.HostKey,
-			"fcid", contract.ID,
+			"fcid", contract.ID(),
 		)
 		return types.ZeroCurrency, err
 	}
@@ -558,19 +536,11 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	dataStored := contract.Revision.ToTransaction().FileContractRevisions[0].NewFileSize
 	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice)
 
-	// loop over the contract history to figure out the amount of money spent
-	var prevUploadSpending types.Currency
-	var prevDownloadSpending types.Currency
-	var prevFundAccountSpending types.Currency
-	spendingHistory, err := c.ap.bus.SpendingHistory(id, c.currentPeriod)
-	if err != nil {
-		return types.ZeroCurrency, err
-	}
-	for _, spending := range spendingHistory {
-		prevUploadSpending = prevUploadSpending.Add(spending.Uploads)
-		prevDownloadSpending = prevUploadSpending.Add(spending.Downloads)
-		prevFundAccountSpending = prevUploadSpending.Add(spending.FundAccount)
-	}
+	// fetch the spending of the contract we want to renew.
+	oldSpending := contract.ContractMetadata.Spending
+	prevUploadSpending := oldSpending.Uploads
+	prevDownloadSpending := oldSpending.Downloads
+	prevFundAccountSpending := oldSpending.FundAccount
 
 	// estimate the amount of data uploaded, sanity check with data stored
 	//
@@ -626,7 +596,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 
 func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicKey, error) {
 	// fetch all contracts
-	active, err := c.ap.bus.ActiveContracts()
+	active, err := c.ap.bus.Contracts()
 	if err != nil {
 		return nil, err
 	}
@@ -634,7 +604,7 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 	// build a map
 	used := make(map[string]bool)
 	for _, contract := range active {
-		used[contract.HostKey.String()] = true
+		used[contract.HostKey().String()] = true
 	}
 
 	// create IP filter
@@ -679,7 +649,7 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 
 	// select hosts
 	var selected []consensus.PublicKey
-	for len(selected) < wanted {
+	for len(selected) < wanted && len(scored) > 0 {
 		i := randSelectByWeight(scores)
 		selected = append(selected, scored[i].PublicKey)
 

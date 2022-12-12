@@ -58,7 +58,6 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 type Interaction struct {
 	Timestamp time.Time
 	Type      string
-	Success   bool
 	Result    json.RawMessage
 }
 

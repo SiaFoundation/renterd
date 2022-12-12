@@ -5,8 +5,7 @@ import (
 	"math"
 	"math/big"
 
-	"go.sia.tech/renterd/bus"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
@@ -31,7 +30,7 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 	if !h.IsOnline() {
 		reasons = append(reasons, "offline")
 	}
-	if f.isRedundantIP(h) {
+	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
 		reasons = append(reasons, "redundant IP")
 	}
 	if bad, reason := hasBadSettings(cfg, h); bad {
@@ -48,7 +47,7 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata, bh uint64) (bool, bool, []string) {
+func isUsableContract(cfg Config, h Host, c renterd.Contract, m renterd.ContractMetadata, bh uint64) (bool, bool, []string) {
 	var reasons []string
 	renewable := true
 
@@ -66,11 +65,11 @@ func isUsableContract(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetada
 	return len(reasons) == 0, renewable, reasons
 }
 
-func isMaxRevision(c rhpv2.Contract) bool {
+func isMaxRevision(c renterd.Contract) bool {
 	return c.Revision.NewRevisionNumber == math.MaxUint64
 }
 
-func isOutOfFunds(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata) bool {
+func isOutOfFunds(cfg Config, h Host, c renterd.Contract, m renterd.ContractMetadata) bool {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return false
@@ -87,7 +86,7 @@ func isOutOfFunds(cfg Config, h Host, c rhpv2.Contract, m bus.ContractMetadata) 
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func isUpForRenewal(cfg Config, c rhpv2.Contract, blockHeight uint64) bool {
+func isUpForRenewal(cfg Config, c renterd.Contract, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
 }
 

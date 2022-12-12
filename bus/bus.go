@@ -8,6 +8,7 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -63,10 +64,10 @@ type (
 	ContractStore interface {
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (types.FileContractRevision, bool, error)
 		ReleaseContract(fcid types.FileContractID) error
-		Contracts() ([]rhpv2.Contract, error)
-		Contract(id types.FileContractID) (rhpv2.Contract, error)
-		AddContract(c rhpv2.Contract) error
-		AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error
+		Contracts() ([]renterd.Contract, error)
+		Contract(id types.FileContractID) (renterd.Contract, error)
+		AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error
+		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
 	}
 
@@ -85,7 +86,7 @@ type (
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
-		SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error)
+		SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error)
 	}
 )
 
@@ -416,15 +417,15 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 
 func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
 	var id types.FileContractID
-	var c rhpv2.Contract
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&c) != nil {
+	var req ContractsIDAddRequest
+	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
 	}
-	if c.ID() != id {
+	if req.Contract.ID() != id {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddContract(c))
+	jc.Check("couldn't store contract", b.cs.AddContract(req.Contract, req.TotalCost))
 }
 
 func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
@@ -437,7 +438,7 @@ func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.RenewedFrom))
+	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.RenewedFrom))
 }
 
 func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
@@ -477,29 +478,21 @@ func (b *bus) contractSetContractsHandler(jc jape.Context) {
 	if jc.Check("couldn't load host set", err) != nil {
 		return
 	}
+	// TODO: This could be a b.cs.ContractSetContracts method which does a
+	// smart query.
 	all, err := b.cs.Contracts()
 	if jc.Check("couldn't load contracts", err) != nil {
 		return
 	}
-	allMap := make(map[types.FileContractID]*rhpv2.Contract)
+	allMap := make(map[types.FileContractID]renterd.Contract)
 	for _, c := range all {
-		allMap[c.ID()] = &c
+		allMap[c.ID()] = c
 	}
-	var contracts []Contract
+	var contracts []renterd.Contract
 	for _, fcid := range setContracts {
 		c, exists := allMap[fcid]
 		if exists {
-			// TODO: The number of contract types we have slowly
-			// grows out of control. We should find a solution for
-			// this.
-			contracts = append(contracts, Contract{
-				ID:               c.ID(),
-				HostKey:          c.HostKey(),
-				HostIP:           "", // TODO
-				StartHeight:      0,  // TODO
-				EndHeight:        c.EndHeight(),
-				ContractMetadata: ContractMetadata{}, // TODO
-			})
+			contracts = append(contracts, c)
 		}
 	}
 	jc.Encode(contracts)
@@ -557,12 +550,12 @@ func (b *bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("id", &slabID) != nil {
 		return
 	}
-	slab, contracts, err := b.os.SlabForMigration(slabID)
+	slab, locations, err := b.os.SlabForMigration(slabID)
 	if jc.Check("couldn't fetch slab for migration", err) != nil {
 		return
 	}
 	jc.Encode(ObjectsMigrateSlabResponse{
-		Contracts: contracts,
+		Locations: locations,
 		Slab:      slab,
 	})
 }

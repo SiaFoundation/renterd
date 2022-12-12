@@ -32,7 +32,8 @@ type BusConfig struct {
 }
 
 type AutopilotConfig struct {
-	Heartbeat time.Duration
+	Heartbeat       time.Duration
+	ScannerInterval time.Duration
 }
 
 type chainManager struct {
@@ -231,7 +232,7 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 	return w, func() error { return nil }, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (*autopilot.Autopilot, func() error, error) {
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
 	autopilotDir := filepath.Join(dir, "autopilot")
 	if err := os.MkdirAll(autopilotDir, 0700); err != nil {
 		return nil, nil, err
@@ -246,15 +247,12 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir 
 		return nil, nil, err
 	}
 
-	a, err := autopilot.New(store, b, w, logger, cfg.Heartbeat)
-	if err != nil {
-		return nil, nil, err
-	}
-	cleanup := func() (err error) {
-		err = a.Stop()
+	ap := autopilot.New(store, b, w, logger, cfg.Heartbeat, cfg.ScannerInterval)
+	cleanup = func() (err error) {
+		err = ap.Stop()
 		_ = logger.Sync() // ignore error
 		closeFn()
 		return
 	}
-	return a, cleanup, nil
+	return ap, cleanup, nil
 }

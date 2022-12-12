@@ -19,7 +19,6 @@ import (
 const (
 	// TODO: we could make these configurable
 	scannerNumThreads      = 5
-	scannerScanInterval    = 10 * time.Minute
 	scannerTimeoutInterval = 10 * time.Minute
 
 	trackerMinTimeout = time.Second * 30
@@ -279,25 +278,6 @@ func (s *scanner) performHostScans() error {
 				"hk", res.hostKey,
 				"err", res.err,
 			)
-			if err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
-				Timestamp: time.Now(),
-				Type:      "scan",
-				Success:   false,
-				Result:    json.RawMessage(`{"error": "` + res.err.Error() + `"}`),
-			}); err != nil {
-				s.logger.Errorf("failed to record scan for host %v", res.hostKey)
-				errs = append(errs, err)
-			}
-		} else {
-			if err := s.bus.RecordHostInteraction(res.hostKey, hostdb.Interaction{
-				Timestamp: time.Now(),
-				Type:      "scan",
-				Success:   true,
-				Result:    json.RawMessage(jsonMarshal(res.settings)),
-			}); err != nil {
-				s.logger.Errorf("failed to record scan for host %v", res.hostKey)
-				errs = append(errs, err)
-			}
 		}
 	}
 

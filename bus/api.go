@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"time"
 
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -55,9 +56,14 @@ func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).Unmar
 type ContractAcquireRequest struct {
 	Duration time.Duration
 }
+type ContractsIDAddRequest struct {
+	Contract  rhpv2.ContractRevision `json:"contract"`
+	TotalCost types.Currency
+}
 type ContractsIDRenewedRequest struct {
-	Contract    rhpv2.Contract `json:"contract"`
+	Contract    rhpv2.ContractRevision `json:"contract"`
 	RenewedFrom types.FileContractID
+	TotalCost   types.Currency
 }
 
 // ContractAcquireResponse is the response type for the /contracts/:id/acquire
@@ -145,50 +151,14 @@ type ObjectsMigrateSlabsResponse struct {
 }
 
 type ObjectsMigrateSlabResponse struct {
-	Contracts []MigrationContract `json:"contracts"`
-	Slab      object.Slab         `json:"slab"`
+	Locations []renterd.SlabLocation `json:"locations"`
+	Slab      object.Slab            `json:"slab"`
 }
 
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.
 type AddObjectRequest struct {
 	Object        object.Object                                `json:"object"`
 	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
-}
-
-// A Contract uniquely identifies a Sia file contract on a host, along with the
-// host's IP.
-type Contract struct {
-	ID          types.FileContractID `json:"id"`
-	HostKey     PublicKey            `json:"hostKey"`
-	HostIP      string               `json:"hostIP"`
-	StartHeight uint64               `json:"startHeight"`
-	EndHeight   uint64               `json:"endHeight"`
-	ContractMetadata
-}
-
-// ContractMetadata contains all metadata for a contract.
-type ContractMetadata struct {
-	RenewedFrom types.FileContractID `json:"renewedFrom"`
-	Spending    ContractSpending     `json:"spending"`
-	TotalCost   types.Currency       `json:"totalCost"`
-}
-
-// ContractSpending contains all spending details for a contract.
-type ContractSpending struct {
-	Uploads     types.Currency `json:"uploads"`
-	Downloads   types.Currency `json:"downloads"`
-	FundAccount types.Currency `json:"fundAccount"`
-}
-
-// A MigrationContract contains all the information necessary to access and revise an
-// existing file contract.
-// NOTE: This is essentially a copy of the worker.Contract minus the renter key
-// but since we can't import that within the bus it's redeclared here. A better
-// way to do this could be to migrate all API types to their own package.
-type MigrationContract struct {
-	HostKey PublicKey            `json:"hostKey"`
-	HostIP  string               `json:"hostIP"`
-	ID      types.FileContractID `json:"id"`
 }
 
 // UploadParams contains the metadata needed by a worker to upload an object.

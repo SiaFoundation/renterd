@@ -106,6 +106,7 @@ func main() {
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", time.Minute, "interval at which autopilot loop runs")
+	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 10*time.Minute, "interval at which hosts are scanned")
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")
@@ -168,13 +169,13 @@ func main() {
 
 	autopilotErr := make(chan error, 1)
 	if autopilotCfg.enabled {
-		a, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, *dir)
+		ap, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, *dir)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer cleanup()
-		go func() { autopilotErr <- a.Run() }()
-		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(a))}
+		go func() { autopilotErr <- ap.Run() }()
+		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}
 	}
 
 	srv := &http.Server{Handler: mux}

@@ -49,7 +49,7 @@ func (s *SQLStore) ContractSet(name string) ([]types.FileContractID, error) {
 	return fcids, nil
 }
 
-// SetHostSet implements the bus.ContractSetStore interface.
+// SetContractSet implements the bus.ContractSetStore interface.
 func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
 	contractSetEntries := make([]dbContractSetEntry, len(contracts))
 	for i, fcid := range contracts {
@@ -57,8 +57,17 @@ func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID)
 			FCID: fcid,
 		}
 	}
-	return s.db.Create(&dbContractSet{
-		Name:      name,
-		Contracts: contractSetEntries,
-	}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Model(&dbContractSet{}).
+			Where("name", name).
+			Delete(&dbContractSet{}).
+			Error
+		if err != nil {
+			return err
+		}
+		return tx.Create(&dbContractSet{
+			Name:      name,
+			Contracts: contractSetEntries,
+		}).Error
+	})
 }

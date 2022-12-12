@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -230,28 +231,32 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 }
 
 // Contracts returns the current set of contracts.
-func (c *Client) Contracts(orderBy string, limit int) (contracts []rhpv2.Contract, err error) {
+func (c *Client) Contracts() (contracts []renterd.Contract, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
-func (c *Client) Contract(id types.FileContractID) (contract rhpv2.Contract, err error) {
+func (c *Client) Contract(id types.FileContractID) (contract renterd.Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contracts/%s", id), &contract)
 	return
 }
 
 // AddContract adds the provided contract to the current contract set.
-func (c *Client) AddContract(contract rhpv2.Contract) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contracts/%s/new", contract.ID()), contract)
+func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/contracts/%s/new", contract.ID()), ContractsIDAddRequest{
+		Contract:  contract,
+		TotalCost: totalCost,
+	})
 	return
 }
 
 // AddRenewedContract adds the provided contract to the current contract set.
-func (c *Client) AddRenewedContract(contract rhpv2.Contract, renewedFrom types.FileContractID) (err error) {
+func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/contracts/%s/renewed", contract.ID()), ContractsIDRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
+		TotalCost:   totalCost,
 	})
 	return
 }
@@ -280,10 +285,10 @@ func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (
 	return
 }
 
-// SetContracts returns the full contract for each contract id in the given set.
-// The ID and HostIP fields may be empty, depending on whether a contract exists
-// and a host announcement is known.
-func (c *Client) SetContracts(name string) (contracts []Contract, err error) {
+// ContractSetContracts returns the full contract for each contract id in the
+// given set.  The ID and HostIP fields may be empty, depending on whether a
+// contract exists and a host announcement is known.
+func (c *Client) ContractSetContracts(name string) (contracts []renterd.Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s/contracts", name), &contracts)
 	return
 }
@@ -306,18 +311,6 @@ func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 	panic("unimplemented")
 }
-func (c *Client) ActiveContracts() ([]Contract, error) {
-	panic("unimplemented")
-}
-func (c *Client) SpendingHistory(types.FileContractID, uint64) ([]ContractSpending, error) {
-	panic("unimplemented")
-}
-func (c *Client) ContractMetadata(types.FileContractID) (ContractMetadata, error) {
-	panic("unimplemented")
-}
-func (c *Client) UpdateContractMetadata(types.FileContractID, ContractMetadata) error {
-	panic("unimplemented")
-}
 
 // RecommendedFee returns the recommended fee for a txn.
 func (c *Client) RecommendedFee() (fee types.Currency, err error) {
@@ -327,7 +320,7 @@ func (c *Client) RecommendedFee() (fee types.Currency, err error) {
 
 // ContractsForSlab returns contracts that can be used to download the provided
 // slab.
-func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract, err error) {
+func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []renterd.Contract, err error) {
 	panic("unimplemented")
 }
 
@@ -382,10 +375,10 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 }
 
 // SlabForMigration returns a slab and the contracts its stored on.
-func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []MigrationContract, error) {
+func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error) {
 	var resp ObjectsMigrateSlabResponse
 	err := c.c.GET(fmt.Sprintf("/migration/slab/%s", slabID), &resp)
-	return resp.Slab, resp.Contracts, err
+	return resp.Slab, resp.Locations, err
 }
 
 // UploadParams returns parameters used for uploading slabs.

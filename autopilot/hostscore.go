@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/build"
 	"lukechampine.com/frand"
 )
@@ -116,7 +117,7 @@ func collateralScore(cfg Config, h Host) float64 {
 func interactionScore(h Host) float64 {
 	success, fail := 30.0, 1.0
 	for _, hi := range h.Interactions {
-		if hi.Success {
+		if worker.IsSuccessfulInteraction(hi) {
 			success++
 		} else {
 			fail++
@@ -128,7 +129,7 @@ func interactionScore(h Host) float64 {
 }
 
 func uptimeScore(h Host) float64 {
-	sorted := append([]hostdb.Interaction(nil), h.Interactions...)
+	sorted := append([]hostdb.Interaction{}, h.Interactions...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Timestamp.Before(sorted[j].Timestamp)
 	})
@@ -139,15 +140,15 @@ func uptimeScore(h Host) float64 {
 	case 0:
 		weight = 0.25
 	case 1:
-		if sorted[0].Success {
+		if worker.IsSuccessfulInteraction(sorted[0]) {
 			weight = 0.75
 		} else {
 			weight = 0.25
 		}
 	case 2:
-		if sorted[0].Success && sorted[1].Success {
+		if worker.IsSuccessfulInteraction(sorted[0]) && worker.IsSuccessfulInteraction(sorted[1]) {
 			weight = 0.85
-		} else if sorted[0].Success || sorted[1].Success {
+		} else if worker.IsSuccessfulInteraction(sorted[0]) || worker.IsSuccessfulInteraction(sorted[1]) {
 			weight = 0.5
 		} else {
 			weight = 0.05
@@ -163,7 +164,7 @@ func uptimeScore(h Host) float64 {
 	for i := 1; i < len(sorted); i++ {
 		prev, cur := sorted[i-1], sorted[i]
 		interval := cur.Timestamp.Sub(prev.Timestamp)
-		if prev.Success {
+		if worker.IsSuccessfulInteraction(prev) {
 			uptime += interval
 		} else {
 			downtime += interval
@@ -172,7 +173,7 @@ func uptimeScore(h Host) float64 {
 	// account for the interval between the most recent interaction and the
 	// current time
 	finalInterval := time.Since(sorted[len(sorted)-1].Timestamp)
-	if sorted[len(sorted)-1].Success {
+	if worker.IsSuccessfulInteraction(sorted[len(sorted)-1]) {
 		uptime += finalInterval
 	} else {
 		downtime += finalInterval

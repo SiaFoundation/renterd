@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd"
 	"go.sia.tech/siad/crypto"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -45,15 +46,15 @@ func (fcid fileContractID) gob() []byte {
 // EphemeralContractStore implements api.ContractStore and api.HostSetStore in memory.
 type EphemeralContractStore struct {
 	mu        sync.Mutex
-	contracts map[types.FileContractID]rhpv2.Contract
+	contracts map[types.FileContractID]rhpv2.ContractRevision
 	hostSets  map[string][]consensus.PublicKey
 }
 
 // Contracts implements api.ContractStore.
-func (s *EphemeralContractStore) Contracts() ([]rhpv2.Contract, error) {
+func (s *EphemeralContractStore) Contracts() ([]rhpv2.ContractRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var cs []rhpv2.Contract
+	var cs []rhpv2.ContractRevision
 	for _, c := range s.contracts {
 		cs = append(cs, c)
 	}
@@ -61,18 +62,18 @@ func (s *EphemeralContractStore) Contracts() ([]rhpv2.Contract, error) {
 }
 
 // Contract implements api.ContractStore.
-func (s *EphemeralContractStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
+func (s *EphemeralContractStore) Contract(id types.FileContractID) (rhpv2.ContractRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.contracts[id]
 	if !ok {
-		return rhpv2.Contract{}, ErrContractNotFound
+		return rhpv2.ContractRevision{}, ErrContractNotFound
 	}
 	return c, nil
 }
 
 // AddContract implements api.ContractStore.
-func (s *EphemeralContractStore) AddContract(c rhpv2.Contract) error {
+func (s *EphemeralContractStore) AddContract(c rhpv2.ContractRevision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.contracts[c.ID()] = c
@@ -120,7 +121,7 @@ func (s *EphemeralContractStore) SetHostSet(name string, hosts []consensus.Publi
 // NewEphemeralContractStore returns a new EphemeralContractStore.
 func NewEphemeralContractStore() *EphemeralContractStore {
 	return &EphemeralContractStore{
-		contracts: make(map[types.FileContractID]rhpv2.Contract),
+		contracts: make(map[types.FileContractID]rhpv2.ContractRevision),
 	}
 }
 
@@ -131,7 +132,7 @@ type JSONContractStore struct {
 }
 
 type jsonContractsPersistData struct {
-	Contracts []rhpv2.Contract
+	Contracts []rhpv2.ContractRevision
 	HostSets  map[string][]consensus.PublicKey
 }
 
@@ -181,7 +182,7 @@ func (s *JSONContractStore) load() error {
 }
 
 // AddContract implements api.ContractStore.
-func (s *JSONContractStore) AddContract(c rhpv2.Contract) error {
+func (s *JSONContractStore) AddContract(c rhpv2.ContractRevision) error {
 	s.EphemeralContractStore.AddContract(c)
 	return s.save()
 }
@@ -221,6 +222,7 @@ type (
 		RenewedFrom types.FileContractID   `gorm:"index,type:bytes;serializer:gob"`
 		Revision    dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
 		Sectors     []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
+		TotalCost   *big.Int               `gorm:"type:bytes;serializer:gob"`
 	}
 
 	dbArchivedContract struct {
@@ -353,14 +355,14 @@ func (r dbFileContractRevision) convert(fcid types.FileContractID) types.FileCon
 }
 
 // convert converts a dbContractRHPv2 to a rhpv2.Contract type.
-func (c dbContract) convert() (rhpv2.Contract, error) {
+func (c dbContract) convert() (renterd.Contract, error) {
 	// Prepare revision.
 	revision := c.Revision.convert(c.FCID)
 
 	// Prepare signatures.
 	var signatures [2]types.TransactionSignature
 	if len(c.Revision.Signatures) != len(signatures) {
-		return rhpv2.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Revision.Signatures), len(signatures))
+		return renterd.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Revision.Signatures), len(signatures))
 	}
 	for i, sig := range c.Revision.Signatures {
 		signatures[i] = types.TransactionSignature{
@@ -371,10 +373,16 @@ func (c dbContract) convert() (rhpv2.Contract, error) {
 			Signature:      sig.Signature,
 		}
 	}
-
-	return rhpv2.Contract{
-		Revision:   revision,
-		Signatures: signatures,
+	return renterd.Contract{
+		HostIP:      c.Host.NetAddress(),
+		StartHeight: 0, // TODO
+		Revision:    revision,
+		Signatures:  signatures,
+		ContractMetadata: renterd.ContractMetadata{
+			RenewedFrom: c.RenewedFrom,
+			TotalCost:   types.NewCurrency(c.TotalCost),
+			Spending:    renterd.ContractSpending{}, // TODO
+		},
 	}, nil
 }
 
@@ -434,7 +442,7 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 }
 
 // addContract implements the bus.ContractStore interface.
-func addContract(tx *gorm.DB, c rhpv2.Contract, renewedFrom types.FileContractID) error {
+func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -482,13 +490,14 @@ func addContract(tx *gorm.DB, c rhpv2.Contract, renewedFrom types.FileContractID
 			HostID:      host.ID,
 			RenewedFrom: renewedFrom,
 			Revision:    revision,
+			TotalCost:   totalCost.Big(),
 		}).Error
 }
 
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.Contract) error {
+func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		return addContract(tx, c, types.FileContractID{})
+		return addContract(tx, c, totalCost, types.FileContractID{})
 	})
 }
 
@@ -496,7 +505,7 @@ func (s *SQLStore) AddContract(c rhpv2.Contract) error {
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error {
+func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, renewedFrom)
@@ -526,27 +535,27 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileCo
 		}
 
 		// Add the new contract.
-		return addContract(tx, c, renewedFrom)
+		return addContract(tx, c, totalCost, renewedFrom)
 	})
 }
 
 // Contract implements the bus.ContractStore interface.
-func (s *SQLStore) Contract(id types.FileContractID) (rhpv2.Contract, error) {
+func (s *SQLStore) Contract(id types.FileContractID) (renterd.Contract, error) {
 	// Fetch contract.
 	contract, err := s.contract(id)
 	if err != nil {
-		return rhpv2.Contract{}, err
+		return renterd.Contract{}, err
 	}
 	return contract.convert()
 }
 
 // Contracts implements the bus.ContractStore interface.
-func (s *SQLStore) Contracts() ([]rhpv2.Contract, error) {
+func (s *SQLStore) Contracts() ([]renterd.Contract, error) {
 	dbContracts, err := s.contracts()
 	if err != nil {
 		return nil, err
 	}
-	contracts := make([]rhpv2.Contract, len(dbContracts))
+	contracts := make([]renterd.Contract, len(dbContracts))
 	for i, c := range dbContracts {
 		contract, err := c.convert()
 		if err != nil {

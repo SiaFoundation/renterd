@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
@@ -84,6 +85,23 @@ func parseRange(s string, size int64) (offset, length int64, _ error) {
 	return offset, length, nil
 }
 
+type InteractionResult struct {
+	Error error `json:"error,omitempty"`
+}
+
+type ScanResult struct {
+	InteractionResult
+	Settings rhpv2.HostSettings `json:"settings,omitempty"`
+}
+
+func IsSuccessfulInteraction(i hostdb.Interaction) bool {
+	var result InteractionResult
+	if err := json.Unmarshal(i.Result, &result); err != nil {
+		return false
+	}
+	return result.Error == nil
+}
+
 type ephemeralMetricsRecorder struct {
 	ms []metrics.Metric
 	mu sync.Mutex
@@ -133,15 +151,11 @@ func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.
 
 func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	transform := func(timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
+		b, _ := json.Marshal(InteractionResult{Error: err})
 		hi := hostdb.Interaction{
 			Timestamp: timestamp,
 			Type:      typ,
-			Success:   err == nil,
-		}
-		if err == nil {
-			hi.Result, _ = json.Marshal(res)
-		} else {
-			hi.Result = []byte(`"` + err.Error() + `"`)
+			Result:    json.RawMessage(b),
 		}
 		return hi, true
 	}
@@ -172,8 +186,8 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	SetContracts(name string) ([]bus.Contract, error)
-	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
+	ContractSetContracts(name string) ([]renterd.Contract, error)
+	ContractsForSlab(shards []object.Sector) ([]renterd.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
 
@@ -189,19 +203,23 @@ type worker struct {
 	pool *sessionPool
 }
 
-func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) {
+func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
 	hi := hostdb.Interaction{
 		Timestamp: time.Now(),
 		Type:      "scan",
-		Success:   err == nil,
 	}
 	if err == nil {
-		hi.Result, _ = json.Marshal(settings)
+		hi.Result, _ = json.Marshal(ScanResult{
+			Settings: settings,
+		})
 	} else {
-		hi.Result = []byte(`"` + err.Error() + `"`)
+		hi.Result, _ = json.Marshal(ScanResult{
+			InteractionResult: InteractionResult{
+				Error: err,
+			},
+		})
 	}
-	// TODO: handle error
-	_ = w.bus.RecordHostInteraction(hostKey, hi)
+	return w.bus.RecordHostInteraction(hostKey, hi)
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
@@ -267,7 +285,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []Contract, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []ExtendedSlabLocation, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
@@ -372,7 +390,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	var cs consensus.State
 	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
 
-	var contract rhpv2.Contract
+	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	err := w.withTransportV2(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
 		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, rfr.RenterKey, rfr.TransactionSet)
@@ -396,7 +414,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	var cs consensus.State
 	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
 
-	var contract rhpv2.Contract
+	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	err := w.withTransportV2(jc.Request.Context(), rrr.HostIP, rrr.HostKey, func(t *rhpv2.Transport) error {
 		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rrr.ContractID, rrr.RenterKey, 5*time.Second)
@@ -487,7 +505,7 @@ func (w *worker) slabsUploadHandler(jc jape.Context) {
 	r := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
 	w.pool.setCurrentHeight(sur.CurrentHeight)
 	var slab object.Slab
-	err := w.withHosts(jc.Request.Context(), sur.Contracts, func(hosts []sectorStore) (err error) {
+	err := w.withHosts(jc.Request.Context(), sur.Locations, func(hosts []sectorStore) (err error) {
 		slab, _, err = uploadSlab(jc.Request.Context(), r, sur.MinShards, sur.TotalShards, hosts)
 		return err
 	})
@@ -505,7 +523,7 @@ func (w *worker) slabsDownloadHandler(jc jape.Context) {
 		return
 	}
 
-	err := w.withHosts(jc.Request.Context(), sdr.Contracts, func(hosts []sectorStore) error {
+	err := w.withHosts(jc.Request.Context(), sdr.Locations, func(hosts []sectorStore) error {
 		return downloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, hosts)
 	})
 	if jc.Check("couldn't download slabs", err) != nil {
@@ -537,7 +555,7 @@ func (w *worker) slabsDeleteHandler(jc jape.Context) {
 	if jc.Decode(&sdr) != nil {
 		return
 	}
-	err := w.withHosts(jc.Request.Context(), sdr.Contracts, func(hosts []sectorStore) error {
+	err := w.withHosts(jc.Request.Context(), sdr.Locations, func(hosts []sectorStore) error {
 		return deleteSlabs(jc.Request.Context(), sdr.Slabs, hosts)
 	})
 	if jc.Check("couldn't delete slabs", err) != nil {
@@ -581,13 +599,11 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			_ = err // NOTE: can't write error because we may have already written to the response
 			return
 		}
-		cs := make([]Contract, len(contracts))
+		cs := make([]ExtendedSlabLocation, len(contracts))
 		for i, c := range contracts {
-			cs[i] = Contract{
-				HostKey:   c.HostKey,
-				HostIP:    c.HostIP,
-				ID:        c.ID,
-				RenterKey: nil, // TODO
+			cs[i] = ExtendedSlabLocation{
+				SlabLocation: c.Location(),
+				RenterKey:    nil, // TODO
 			}
 		}
 		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
@@ -615,17 +631,15 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
 	for {
 		// fetch contracts
-		bcs, err := w.bus.SetContracts(up.ContractSet)
+		bcs, err := w.bus.ContractSetContracts(up.ContractSet)
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		contracts := make([]Contract, len(bcs))
+		contracts := make([]ExtendedSlabLocation, len(bcs))
 		for i, c := range bcs {
-			contracts[i] = Contract{
-				HostKey:   c.HostKey,
-				HostIP:    c.HostIP,
-				ID:        c.ID,
-				RenterKey: nil, // TODO
+			contracts[i] = ExtendedSlabLocation{
+				SlabLocation: c.Location(),
+				RenterKey:    nil, // TODO
 			}
 		}
 

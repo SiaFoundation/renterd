@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
@@ -35,7 +36,7 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Create a contract and set all fields.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.Contract{
+	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:          fcid,
 			UnlockConditions:  uc,
@@ -90,7 +91,8 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Insert it.
-	if err := cs.AddContract(c); err != nil {
+	totalCost := types.NewCurrency64(456)
+	if err := cs.AddContract(c, totalCost); err != nil {
 		t.Fatal(err)
 	}
 
@@ -99,7 +101,18 @@ func TestSQLContractStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fetched, c) {
+	expected := renterd.Contract{
+		HostIP:      "",
+		StartHeight: 0,
+		Revision:    c.Revision,
+		Signatures:  c.Signatures,
+		ContractMetadata: renterd.ContractMetadata{
+			RenewedFrom: types.FileContractID{},
+			Spending:    renterd.ContractSpending{},
+			TotalCost:   totalCost,
+		},
+	}
+	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
 	}
 	contracts, err = cs.Contracts()
@@ -109,7 +122,7 @@ func TestSQLContractStore(t *testing.T) {
 	if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if !reflect.DeepEqual(contracts[0], c) {
+	if !reflect.DeepEqual(contracts[0], expected) {
 		t.Fatal("contract mismatch")
 	}
 
@@ -184,13 +197,14 @@ func TestContractLocking(t *testing.T) {
 
 	// Insert a contract.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.Contract{
+	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:         fcid,
 			UnlockConditions: uc,
 		},
 	}
-	if err := cs.AddContract(c); err != nil {
+	totalCost := types.NewCurrency64(654)
+	if err := cs.AddContract(c, totalCost); err != nil {
 		t.Fatal(err)
 	}
 
@@ -251,7 +265,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Insert a contract.
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.Contract{
+	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			NewFileSize:       1,
 			NewWindowStart:    2,
@@ -261,13 +275,14 @@ func TestRenewedContract(t *testing.T) {
 			UnlockConditions:  uc,
 		},
 	}
-	if err := cs.AddContract(c); err != nil {
+	oldContractTotal := types.NewCurrency64(111)
+	if err := cs.AddContract(c, oldContractTotal); err != nil {
 		t.Fatal(err)
 	}
 
 	// Renew it.
 	fcid2 := types.FileContractID{2, 2, 2, 2, 2}
-	renewed := rhpv2.Contract{
+	renewed := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:              fcid2,
 			UnlockConditions:      uc,
@@ -275,7 +290,8 @@ func TestRenewedContract(t *testing.T) {
 			NewValidProofOutputs:  []types.SiacoinOutput{},
 		},
 	}
-	if err := cs.AddRenewedContract(renewed, fcid); err != nil {
+	newContractTotal := types.NewCurrency64(222)
+	if err := cs.AddRenewedContract(renewed, newContractTotal, fcid); err != nil {
 		t.Fatal(err)
 	}
 
@@ -290,7 +306,18 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(newContract, renewed) {
+	expected := renterd.Contract{
+		HostIP:      "",
+		StartHeight: 0,
+		Revision:    newContract.Revision,
+		Signatures:  newContract.Signatures,
+		ContractMetadata: renterd.ContractMetadata{
+			RenewedFrom: fcid,
+			Spending:    renterd.ContractSpending{},
+			TotalCost:   newContractTotal,
+		},
+	}
+	if !reflect.DeepEqual(newContract, expected) {
 		t.Fatal("mismatch")
 	}
 

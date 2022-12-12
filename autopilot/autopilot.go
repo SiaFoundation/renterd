@@ -1,8 +1,12 @@
 package autopilot
 
 import (
+	"net/http"
+	"sync"
 	"time"
 
+	"go.sia.tech/jape"
+	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
@@ -32,23 +36,19 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	// contracts
-	AddContract(c rhpv2.Contract) error
-	AddRenewedContract(c rhpv2.Contract, renewedFrom types.FileContractID) error
-	ActiveContracts() ([]bus.Contract, error)
+	AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error
+	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
 	DeleteContracts(ids []types.FileContractID) error
 
-	Contract(id types.FileContractID) (contract rhpv2.Contract, err error)
-	ContractMetadata(id types.FileContractID) (bus.ContractMetadata, error)
-	UpdateContractMetadata(id types.FileContractID, metadata bus.ContractMetadata) error
-
-	SpendingHistory(id types.FileContractID, currentPeriod uint64) ([]bus.ContractSpending, error)
+	Contract(id types.FileContractID) (contract renterd.Contract, err error)
+	Contracts() ([]renterd.Contract, error)
 
 	AcquireContract(id types.FileContractID, d time.Duration) (types.FileContractRevision, error)
 	ReleaseContract(id types.FileContractID) error
 
 	// contractsets
 	SetContractSet(name string, contracts []types.FileContractID) error
-	SetContracts(name string) ([]bus.Contract, error)
+	ContractSetContracts(name string) ([]renterd.Contract, error)
 
 	// txpool
 	RecommendedFee() (types.Currency, error)
@@ -59,16 +59,16 @@ type Bus interface {
 	// objects
 	MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error)
 	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error)
-	SlabForMigration(slabID bus.SlabID) (object.Slab, []bus.MigrationContract, error)
+	SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.SlabLocation, error)
 }
 
 type Worker interface {
-	MigrateSlab(s *object.Slab, from, to []worker.Contract, currentHeight uint64) error
+	MigrateSlab(s *object.Slab, from, to []worker.ExtendedSlabLocation, currentHeight uint64) error
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
 	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
 	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
-	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.Contract, []types.Transaction, error)
-	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.Contract, []types.Transaction, error)
+	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 }
 
 type Autopilot struct {
@@ -85,6 +85,7 @@ type Autopilot struct {
 
 	ticker   *time.Ticker
 	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -103,6 +104,8 @@ func (ap *Autopilot) SetConfig(c Config) error {
 }
 
 func (ap *Autopilot) Run() error {
+	ap.wg.Add(1)
+	defer ap.wg.Done()
 	for {
 		select {
 		case <-ap.stopChan:
@@ -150,11 +153,43 @@ func (ap *Autopilot) Run() error {
 func (ap *Autopilot) Stop() error {
 	ap.ticker.Stop()
 	close(ap.stopChan)
+	ap.wg.Wait()
 	return nil
 }
 
+func (ap *Autopilot) actionsHandler(jc jape.Context) {
+	var since time.Time
+	max := -1
+	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+		return
+	}
+	jc.Encode(ap.Actions(since, max))
+}
+
+func (ap *Autopilot) configHandlerGET(jc jape.Context) {
+	jc.Encode(ap.Config())
+}
+
+func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
+	var c Config
+	if jc.Decode(&c) != nil {
+		return
+	}
+	if jc.Check("failed to set config", ap.SetConfig(c)) != nil {
+		return
+	}
+}
+
+func NewServer(ap *Autopilot) http.Handler {
+	return jape.Mux(map[string]jape.Handler{
+		"GET    /actions": ap.actionsHandler,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+	})
+}
+
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration) (*Autopilot, error) {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scanInterval time.Duration) *Autopilot {
 	ap := &Autopilot{
 		bus:    bus,
 		logger: logger.Sugar(),
@@ -170,8 +205,9 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 	ap.s = newScanner(
 		ap,
 		scannerNumThreads,
-		scannerScanInterval,
+		scanInterval,
 		scannerTimeoutInterval,
 	)
-	return ap, nil
+
+	return ap
 }

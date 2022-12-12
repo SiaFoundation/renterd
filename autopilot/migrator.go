@@ -15,7 +15,7 @@ type migrator struct {
 	logger *zap.SugaredLogger
 
 	mu            sync.Mutex
-	goodContracts []worker.Contract
+	goodContracts []worker.ExtendedSlabLocation
 	running       bool
 }
 
@@ -31,7 +31,7 @@ func newMigrator(ap *Autopilot) *migrator {
 func (m *migrator) UpdateContracts() error {
 	bus := m.ap.bus
 
-	contracts, err := bus.ActiveContracts()
+	contracts, err := bus.Contracts()
 	if err != nil {
 		return err
 	}
@@ -40,11 +40,9 @@ func (m *migrator) UpdateContracts() error {
 	m.goodContracts = m.goodContracts[:0]
 	for _, c := range contracts {
 		// TODO: filter out contracts that are not good.
-		m.goodContracts = append(m.goodContracts, worker.Contract{
-			ID:        c.ID,
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			RenterKey: m.ap.deriveRenterKey(c.HostKey),
+		m.goodContracts = append(m.goodContracts, worker.ExtendedSlabLocation{
+			SlabLocation: c.Location(),
+			RenterKey:    m.ap.deriveRenterKey(c.HostKey()),
 		})
 	}
 	return nil
@@ -79,24 +77,21 @@ func (m *migrator) fetchSlabsForMigration() ([]bus.SlabID, error) {
 
 func (m *migrator) migrateSlab(slabID bus.SlabID) (bool, error) {
 	// Fetch slab data.
-	slab, contracts, err := m.ap.bus.SlabForMigration(slabID)
+	slab, locations, err := m.ap.bus.SlabForMigration(slabID)
 	if err != nil {
 		return false, err
 	}
-
-	oldContracts := make([]worker.Contract, len(contracts))
-	for i, c := range contracts {
-		oldContracts[i] = worker.Contract{
-			ID:        c.ID,
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			RenterKey: m.ap.deriveRenterKey(c.HostKey),
+	oldContracts := make([]worker.ExtendedSlabLocation, len(locations))
+	for i, c := range locations {
+		oldContracts[i] = worker.ExtendedSlabLocation{
+			SlabLocation: c,
+			RenterKey:    m.ap.deriveRenterKey(c.HostKey),
 		}
 	}
 
 	// Copy contracts to release lock before starting migration.
 	m.mu.Lock()
-	goodContracts := append([]worker.Contract{}, m.goodContracts...)
+	goodContracts := append([]worker.ExtendedSlabLocation{}, m.goodContracts...)
 	m.mu.Unlock()
 
 	// Fetch the current consensus height.
