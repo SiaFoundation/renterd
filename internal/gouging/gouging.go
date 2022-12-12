@@ -33,8 +33,8 @@ type (
 	GougingSettings struct {
 		MaxRPCPrice      types.Currency
 		MaxContractPrice types.Currency
-		MaxDownloadPrice types.Currency // per 1TiB
-		MaxUploadPrice   types.Currency // per 1TiB
+		MaxDownloadPrice types.Currency // per TiB
+		MaxUploadPrice   types.Currency // per TiB
 	}
 
 	check struct {
