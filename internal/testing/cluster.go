@@ -20,6 +20,7 @@ import (
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
 	"go.sia.tech/siad/types"
+	"go.uber.org/zap"
 
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/siatest"
@@ -88,7 +89,7 @@ func withCtx(f func() error) func(context.Context) error {
 }
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
-func newTestCluster(dir string) (*TestCluster, error) {
+func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	// Use shared wallet key.
 	wk := consensus.GeneratePrivateKey()
 
@@ -161,7 +162,7 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	ap, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
 		Heartbeat:       time.Second,
 		ScannerInterval: 2 * time.Second,
-	}, busClient, workerClient, autopilotDir)
+	}, busClient, workerClient, logger, autopilotDir)
 	if err != nil {
 		return nil, err
 	}

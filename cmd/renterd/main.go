@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -202,11 +203,20 @@ func main() {
 
 	autopilotErr := make(chan error, 1)
 	if autopilotCfg.enabled {
-		ap, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, *dir)
+		autopilotLog := filepath.Join(*dir, "autopilot.log")
+		logger, closeFn, err := node.NewLogger(autopilotLog)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanup()
+		ap, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, logger, *dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer func() {
+			cleanup()
+			_ = logger.Sync() // ignore error
+			closeFn()
+		}()
 		go func() { autopilotErr <- ap.Run() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}
 	}

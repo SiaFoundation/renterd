@@ -208,13 +208,13 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// fetch redundancy settings
 	rs, err := c.ap.bus.RedundancySettings()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// check every active contract
