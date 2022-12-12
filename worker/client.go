@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -141,86 +139,9 @@ func (c *Client) RHPUpdateRegistry(hostKey PublicKey, hostIP string, key rhpv3.R
 	return
 }
 
-// UploadSlab uploads data to a set of hosts. At most m*SectorSize bytes will be
-// read from src.
-func (c *Client) UploadSlab(src io.Reader, m, n uint8, height uint64, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (s object.Slab, err error) {
-	c.c.Custom("POST", "/slabs/upload", []byte{}, &s)
-
-	js, _ := json.Marshal(SlabsUploadRequest{
-		MinShards:     m,
-		TotalShards:   n,
-		Locations:     locations,
-		CurrentHeight: height,
-	})
-	body := io.MultiReader(bytes.NewReader(js), io.LimitReader(src, int64(m)*rhpv2.SectorSize))
-	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/upload"), body)
-	if err != nil {
-		panic(err)
-	}
-	req.SetBasicAuth("", c.c.Password)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return object.Slab{}, err
-	}
-	defer io.Copy(ioutil.Discard, resp.Body)
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(resp.Body)
-		return object.Slab{}, errors.New(string(err))
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&s)
-	return
-}
-
-// DownloadSlab downloads data from a set of hosts.
-func (c *Client) DownloadSlab(dst io.Writer, s object.SlabSlice, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (err error) {
-	c.c.Custom("POST", "/slabs/download", SlabsDownloadRequest{}, (*[]byte)(nil))
-
-	js, _ := json.Marshal(SlabsDownloadRequest{
-		Slab:      s,
-		Locations: locations,
-	})
-	req, err := http.NewRequest("POST", fmt.Sprintf("%v%v", c.c.BaseURL, "/slabs/download"), bytes.NewReader(js))
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.SetBasicAuth("", c.c.Password)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer io.Copy(ioutil.Discard, resp.Body)
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(resp.Body)
-		return errors.New(string(err))
-	}
-
-	_, err = io.Copy(dst, resp.Body)
-	return
-}
-
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(s *object.Slab, from, to []ExtendedSlabLocation, currentHeight uint64) error {
-	req := SlabsMigrateRequest{
-		Slab:          *s,
-		From:          from,
-		To:            to,
-		CurrentHeight: currentHeight,
-	}
-	return c.c.POST("/slabs/migrate", req, s)
-}
-
-// DeleteSlabs deletes the specified slabs.
-func (c *Client) DeleteSlabs(slabs []object.Slab, rk consensus.PrivateKey, locations []ExtendedSlabLocation) (err error) {
-	req := SlabsDeleteRequest{
-		Slabs:     slabs,
-		Locations: locations,
-	}
-	err = c.c.POST("/slabs/delete", req, nil)
-	return
+func (c *Client) MigrateSlab(slab object.Slab) error {
+	return c.c.POST("/slabs/migrate", slab, nil)
 }
 
 // UploadObject uploads the data in r, creating an object with the given name.

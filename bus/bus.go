@@ -10,7 +10,6 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -70,8 +69,8 @@ type (
 	ContractStore interface {
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (types.FileContractRevision, bool, error)
 		ReleaseContract(fcid types.FileContractID) error
-		Contracts() ([]renterd.Contract, error)
-		Contract(id types.FileContractID) (renterd.Contract, error)
+		Contracts() ([]Contract, error)
+		Contract(id types.FileContractID) (Contract, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
@@ -88,11 +87,9 @@ type (
 	ObjectStore interface {
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
-		MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error)
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
-		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error)
-		SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error)
+		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
 	}
 
 	// A SettingStore stores settings.
@@ -498,11 +495,11 @@ func (b *bus) contractSetContractsHandler(jc jape.Context) {
 	if jc.Check("couldn't load contracts", err) != nil {
 		return
 	}
-	allMap := make(map[types.FileContractID]renterd.Contract)
+	allMap := make(map[types.FileContractID]Contract)
 	for _, c := range all {
 		allMap[c.ID()] = c
 	}
-	var contracts []renterd.Contract
+	var contracts []Contract
 	for _, fcid := range setContracts {
 		c, exists := allMap[fcid]
 		if exists {
@@ -550,41 +547,11 @@ func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("goodContracts", &goodContracts) != nil {
 		return
 	}
-	slabIDs, err := b.os.SlabsForMigration(limit, time.Time(cutoff), goodContracts)
+	slabs, err := b.os.SlabsForMigration(limit, time.Time(cutoff), goodContracts)
 	if jc.Check("couldn't fetch slabs for migration", err) != nil {
 		return
 	}
-	jc.Encode(ObjectsMigrateSlabsResponse{
-		SlabIDs: slabIDs,
-	})
-}
-
-func (b *bus) objectsMigrationSlabHandlerGET(jc jape.Context) {
-	var slabID SlabID
-	if jc.DecodeParam("id", &slabID) != nil {
-		return
-	}
-	slab, locations, err := b.os.SlabForMigration(slabID)
-	if jc.Check("couldn't fetch slab for migration", err) != nil {
-		return
-	}
-	jc.Encode(ObjectsMigrateSlabResponse{
-		Locations: locations,
-		Slab:      slab,
-	})
-}
-
-func (b *bus) objectsMarkSlabMigrationFailureHandlerPOST(jc jape.Context) {
-	var req ObjectsMarkSlabMigrationFailureRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	updates, err := b.os.MarkSlabsMigrationFailure(req.SlabIDs)
-	if jc.Check("couldn't mark slab migration failure", err) == nil {
-		jc.Encode(ObjectsMarkSlabMigrationFailureResponse{
-			Updates: updates,
-		})
-	}
+	jc.Encode(slabs)
 }
 
 func (b *bus) settingsHandlerGET(jc jape.Context) {
@@ -690,12 +657,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /contractsets/:name/contracts": b.contractSetContractsHandler,
 		"PUT    /contractsets/:name":           b.contractSetsNameHandlerPUT,
 
-		"GET    /objects/*key":       b.objectsKeyHandlerGET,
-		"PUT    /objects/*key":       b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key":       b.objectsKeyHandlerDELETE,
-		"GET    /migration/slabs":    b.objectsMigrationSlabsHandlerGET,
-		"GET    /migration/slab/:id": b.objectsMigrationSlabHandlerGET,
-		"POST   /migration/failed":   b.objectsMarkSlabMigrationFailureHandlerPOST,
+		"GET    /objects/*key":    b.objectsKeyHandlerGET,
+		"PUT    /objects/*key":    b.objectsKeyHandlerPUT,
+		"DELETE /objects/*key":    b.objectsKeyHandlerDELETE,
+		"GET    /migration/slabs": b.objectsMigrationSlabsHandlerGET,
 
 		"GET    /settings":            b.settingsHandlerGET,
 		"GET    /setting/:key":        b.settingKeyHandlerGET,

@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/renterd"
 	"go.sia.tech/siad/crypto"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
@@ -355,14 +355,14 @@ func (r dbFileContractRevision) convert(fcid types.FileContractID) types.FileCon
 }
 
 // convert converts a dbContractRHPv2 to a rhpv2.Contract type.
-func (c dbContract) convert() (renterd.Contract, error) {
+func (c dbContract) convert() (bus.Contract, error) {
 	// Prepare revision.
 	revision := c.Revision.convert(c.FCID)
 
 	// Prepare signatures.
 	var signatures [2]types.TransactionSignature
 	if len(c.Revision.Signatures) != len(signatures) {
-		return renterd.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Revision.Signatures), len(signatures))
+		return bus.Contract{}, fmt.Errorf("contract in db got %v signatures but expected %v", len(c.Revision.Signatures), len(signatures))
 	}
 	for i, sig := range c.Revision.Signatures {
 		signatures[i] = types.TransactionSignature{
@@ -373,15 +373,15 @@ func (c dbContract) convert() (renterd.Contract, error) {
 			Signature:      sig.Signature,
 		}
 	}
-	return renterd.Contract{
+	return bus.Contract{
 		HostIP:      c.Host.NetAddress(),
 		StartHeight: 0, // TODO
 		Revision:    revision,
 		Signatures:  signatures,
-		ContractMetadata: renterd.ContractMetadata{
+		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: c.RenewedFrom,
 			TotalCost:   types.NewCurrency(c.TotalCost),
-			Spending:    renterd.ContractSpending{}, // TODO
+			Spending:    bus.ContractSpending{}, // TODO
 		},
 	}, nil
 }
@@ -540,22 +540,22 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 }
 
 // Contract implements the bus.ContractStore interface.
-func (s *SQLStore) Contract(id types.FileContractID) (renterd.Contract, error) {
+func (s *SQLStore) Contract(id types.FileContractID) (bus.Contract, error) {
 	// Fetch contract.
 	contract, err := s.contract(id)
 	if err != nil {
-		return renterd.Contract{}, err
+		return bus.Contract{}, err
 	}
 	return contract.convert()
 }
 
 // Contracts implements the bus.ContractStore interface.
-func (s *SQLStore) Contracts() ([]renterd.Contract, error) {
+func (s *SQLStore) Contracts() ([]bus.Contract, error) {
 	dbContracts, err := s.contracts()
 	if err != nil {
 		return nil, err
 	}
-	contracts := make([]renterd.Contract, len(dbContracts))
+	contracts := make([]bus.Contract, len(dbContracts))
 	for i, c := range dbContracts {
 		contract, err := c.convert()
 		if err != nil {

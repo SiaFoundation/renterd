@@ -1,7 +1,7 @@
 package autopilot
 
 import (
-	"go.sia.tech/renterd"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/siad/types"
 )
 
@@ -10,7 +10,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []renterd.Contract, deleted []types.FileContractID) error {
+func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []bus.Contract, deleted []types.FileContractID) error {
 	// build some maps
 	isDeleted := make(map[types.FileContractID]bool)
 	for _, d := range deleted {

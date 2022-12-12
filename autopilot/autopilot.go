@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
@@ -40,15 +39,15 @@ type Bus interface {
 	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
 	DeleteContracts(ids []types.FileContractID) error
 
-	Contract(id types.FileContractID) (contract renterd.Contract, err error)
-	Contracts() ([]renterd.Contract, error)
+	Contract(id types.FileContractID) (contract bus.Contract, err error)
+	Contracts() ([]bus.Contract, error)
 
 	AcquireContract(id types.FileContractID, d time.Duration) (types.FileContractRevision, error)
 	ReleaseContract(id types.FileContractID) error
 
 	// contractsets
 	SetContractSet(name string, contracts []types.FileContractID) error
-	ContractSetContracts(name string) ([]renterd.Contract, error)
+	ContractSetContracts(name string) ([]bus.Contract, error)
 
 	// txpool
 	RecommendedFee() (types.Currency, error)
@@ -57,18 +56,16 @@ type Bus interface {
 	ConsensusState() (bus.ConsensusState, error)
 
 	// objects
-	MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error)
-	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]bus.SlabID, error)
-	SlabForMigration(slabID bus.SlabID) (object.Slab, []renterd.SlabLocation, error)
+	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
 }
 
 type Worker interface {
-	MigrateSlab(s *object.Slab, from, to []worker.ExtendedSlabLocation, currentHeight uint64) error
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
 	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
 	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
 	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	MigrateSlab(s object.Slab) error
 }
 
 type Autopilot struct {

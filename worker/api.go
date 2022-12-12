@@ -4,9 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
@@ -160,39 +158,4 @@ type RHPRegistryUpdateRequest struct {
 	RegistryKey   rhpv3.RegistryKey                  `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue                `json:"registryValue"`
 	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
-}
-
-// ExtendedSlabLocation contains information about a host that a slab was
-// uploaded to and the key to decrypt it.
-type ExtendedSlabLocation struct {
-	renterd.SlabLocation
-	RenterKey PrivateKey `json:"renterKey"`
-}
-
-// SlabsUploadRequest is the request type for the /slabs/upload endpoint.
-type SlabsUploadRequest struct {
-	MinShards     uint8                  `json:"minShards"`
-	TotalShards   uint8                  `json:"totalShards"`
-	Locations     []ExtendedSlabLocation `json:"locations"`
-	CurrentHeight uint64                 `json:"currentHeight"`
-}
-
-// SlabsDownloadRequest is the request type for the /slabs/download endpoint.
-type SlabsDownloadRequest struct {
-	Slab      object.SlabSlice       `json:"slab"`
-	Locations []ExtendedSlabLocation `json:"locations"`
-}
-
-// SlabsDeleteRequest is the request type for the /slabs/delete endpoint.
-type SlabsDeleteRequest struct {
-	Slabs     []object.Slab          `json:"slabs"`
-	Locations []ExtendedSlabLocation `json:"locations"`
-}
-
-// SlabsMigrateRequest is the request type for the /slabs/migrate endpoint.
-type SlabsMigrateRequest struct {
-	Slab          object.Slab            `json:"slab"`
-	From          []ExtendedSlabLocation `json:"from"`
-	To            []ExtendedSlabLocation `json:"to"`
-	CurrentHeight uint64                 `json:"currentHeight"`
 }

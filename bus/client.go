@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -232,13 +231,13 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 }
 
 // Contracts returns the current set of contracts.
-func (c *Client) Contracts() (contracts []renterd.Contract, err error) {
+func (c *Client) Contracts() (contracts []Contract, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
-func (c *Client) Contract(id types.FileContractID) (contract renterd.Contract, err error) {
+func (c *Client) Contract(id types.FileContractID) (contract Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contracts/%s", id), &contract)
 	return
 }
@@ -289,7 +288,7 @@ func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (
 // ContractSetContracts returns the full contract for each contract id in the
 // given set.  The ID and HostIP fields may be empty, depending on whether a
 // contract exists and a host announcement is known.
-func (c *Client) ContractSetContracts(name string) (contracts []renterd.Contract, err error) {
+func (c *Client) ContractSetContracts(name string) (contracts []Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s/contracts", name), &contracts)
 	return
 }
@@ -321,7 +320,7 @@ func (c *Client) RecommendedFee() (fee types.Currency, err error) {
 
 // ContractsForSlab returns contracts that can be used to download the provided
 // slab.
-func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []renterd.Contract, err error) {
+func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract, err error) {
 	panic("unimplemented")
 }
 
@@ -389,37 +388,24 @@ func (c *Client) DeleteObject(name string) (err error) {
 	return
 }
 
-// MarkSlabsMigrationFailure updates the latest failure time of the given slabs
-// to the current time.
-func (c *Client) MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error) {
-	var resp ObjectsMarkSlabMigrationFailureResponse
-	err := c.c.POST("/migration/failed", ObjectsMarkSlabMigrationFailureRequest{
-		SlabIDs: slabIDs,
-	}, &resp)
-	return resp.Updates, err
-}
-
 // SlabsForMigration returns up to n slabs which require migration and haven't
 // failed migration since failureCutoff.
-func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]SlabID, error) {
+func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) (slabs []object.Slab, err error) {
 	values := url.Values{}
 	values.Set("cutoff", paramTime(failureCutoff).String())
 	values.Set("limit", fmt.Sprint(n))
 	values.Set("goodContracts", fmt.Sprint(goodContracts))
-	var resp ObjectsMigrateSlabsResponse
-	err := c.c.GET("/migration/slabs?"+values.Encode(), &resp)
-	return resp.SlabIDs, err
-}
-
-// SlabForMigration returns a slab and the contracts its stored on.
-func (c *Client) SlabForMigration(slabID SlabID) (object.Slab, []renterd.SlabLocation, error) {
-	var resp ObjectsMigrateSlabResponse
-	err := c.c.GET(fmt.Sprintf("/migration/slab/%s", slabID), &resp)
-	return resp.Slab, resp.Locations, err
+	err = c.c.GET("/migration/slabs?"+values.Encode(), &slabs)
+	return
 }
 
 // UploadParams returns parameters used for uploading slabs.
 func (c *Client) UploadParams() (up UploadParams, err error) {
+	panic("unimplemented")
+}
+
+// MigrateParams returns parameters used for migrating a slab.
+func (c *Client) MigrateParams(slab object.Slab) (up MigrateParams, err error) {
 	panic("unimplemented")
 }
 

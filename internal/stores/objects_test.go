@@ -1,13 +1,12 @@
 package stores
 
 import (
+	"encoding/json"
 	"fmt"
-	"math"
 	"reflect"
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/rhp/v2"
@@ -589,31 +588,27 @@ func TestSlabsForRepair(t *testing.T) {
 	}
 
 	// Make sure the slab IDs are returned in the right order.
-	// 6 first since it doesn't have any good sectors
-	// 2 last since it only got 1 bad sector
-	// 1, 3, 4, 5 in the middle since they all have 2 bad sectors.
-	expectedSlabIDs := []bus.SlabID{6, 1, 3, 4, 5, 2}
-	for i := 0; i < len(expectedSlabIDs); i++ {
+	// 5 first since it doesn't have any good sectors
+	// 1 last since it only got 1 bad sector
+	// 0, 2, 3, 4 in the middle since they all have 2 bad sectors.
+	expectedSlabs := []object.Slab{
+		obj.Slabs[5].Slab,
+		obj.Slabs[0].Slab,
+		obj.Slabs[2].Slab,
+		obj.Slabs[3].Slab,
+		obj.Slabs[4].Slab,
+		obj.Slabs[1].Slab,
+	}
+	for i := range expectedSlabs {
 		// Check the i worst slabs.
-		slabIDs, err := os.SlabsForMigration(i+1, time.Now(), goodContracts)
+		slabs, err := os.SlabsForMigration(i+1, time.Now(), goodContracts)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(slabIDs, expectedSlabIDs[:i+1]) {
-			t.Fatalf("wrong IDs returned: %v != %v", slabIDs, expectedSlabIDs[:i+1])
+		got, _ := json.MarshalIndent(slabs, "", "  ")
+		exp, _ := json.MarshalIndent(expectedSlabs[:i+1], "", "  ")
+		if string(got) != string(exp) {
+			t.Fatalf("wrong slabs returned: %v != %v", string(got), string(exp))
 		}
-	}
-
-	// Mark the second half of the slabs as failed. Only the first half should be
-	// returned then.
-	if updates, err := os.MarkSlabsMigrationFailure(expectedSlabIDs[3:]); err != nil || updates != 3 {
-		t.Fatalf("marking slabs for failure failed: %v %v", err, updates)
-	}
-	slabIDs, err := os.SlabsForMigration(math.MaxInt, time.Now().Add(-time.Minute), goodContracts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(slabIDs, expectedSlabIDs[:3]) {
-		t.Fatalf("wrong IDs returned: %v != %v", slabIDs, expectedSlabIDs[:3])
 	}
 }
