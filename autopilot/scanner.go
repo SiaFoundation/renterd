@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -45,10 +44,10 @@ type (
 			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
 		}
 
-		pool    *scanPool
 		tracker *tracker
 		logger  *zap.SugaredLogger
 
+		scanThreads        uint64
 		scanMinInterval    time.Duration
 		timeoutMinInterval time.Duration
 
@@ -72,13 +71,6 @@ type (
 		err      error
 	}
 
-	scanPool struct {
-		s           *scanner
-		numThreads  uint64
-		liveThreads uint64
-		scanQueue   chan scanReq
-	}
-
 	tracker struct {
 		threshold  uint64
 		percentile float64
@@ -89,35 +81,6 @@ type (
 		timings []float64
 	}
 )
-
-func newScanPool(s *scanner, threads uint64) *scanPool {
-	return &scanPool{numThreads: threads, s: s}
-}
-
-func (p *scanPool) launchScans(hosts []hostdb.Host) {
-	p.scanQueue = make(chan scanReq, len(hosts))
-	for _, h := range hosts {
-		p.scanQueue <- scanReq{
-			hostKey: h.PublicKey,
-			hostIP:  h.NetAddress(),
-		}
-	}
-	close(p.scanQueue)
-}
-
-func (p *scanPool) launchThreads(workerFn func(chan scanResp)) chan scanResp {
-	respChan := make(chan scanResp, p.numThreads)
-	atomic.AddUint64(&p.liveThreads, p.numThreads)
-	for i := uint64(0); i < p.numThreads; i++ {
-		go func() {
-			workerFn(respChan)
-			if atomic.AddUint64(&p.liveThreads, ^uint64(0)) == 0 {
-				close(respChan)
-			}
-		}()
-	}
-	return respChan
-}
 
 func newTracker(threshold, total uint64, percentile float64, minTimeout time.Duration) *tracker {
 	return &tracker{
@@ -161,7 +124,7 @@ func (t *tracker) timeout() time.Duration {
 }
 
 func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
-	s := &scanner{
+	return &scanner{
 		bus:    ap.bus,
 		worker: ap.worker,
 		tracker: newTracker(
@@ -174,11 +137,10 @@ func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterv
 
 		stopChan: ap.stopChan,
 
+		scanThreads:        threads,
 		scanMinInterval:    scanMinInterval,
 		timeoutMinInterval: timeoutMinInterval,
 	}
-	s.pool = newScanPool(s, threads)
-	return s
 }
 
 func (s *scanner) tryPerformHostScan() <-chan error {
@@ -240,24 +202,39 @@ func (s *scanner) performHostScans() error {
 	}
 
 	s.logger.Debugf("launching %v host scans", len(hosts))
-	s.pool.launchScans(hosts)
 
-	workerFn := func(resChan chan scanResp) {
-		for req := range s.pool.scanQueue {
-			if s.isStopped() {
-				return
-			}
-
-			scan, err := s.worker.RHPScan(req.hostKey, req.hostIP, s.currentTimeout())
-			resChan <- scanResp{req.hostKey, scan.Settings, err}
-
-			if err == nil {
-				s.tracker.addDataPoint(time.Duration(scan.Ping))
-			}
+	// add all hosts to a scan queue
+	reqChan := make(chan scanReq, len(hosts))
+	for _, h := range hosts {
+		reqChan <- scanReq{
+			hostKey: h.PublicKey,
+			hostIP:  h.NetAddress(),
 		}
 	}
+	close(reqChan)
 
-	respChan := s.pool.launchThreads(workerFn)
+	// launch workers
+	liveThreads := s.scanThreads
+	respChan := make(chan scanResp, s.scanThreads)
+	for i := uint64(0); i < s.scanThreads; i++ {
+		go func() {
+			for req := range reqChan {
+				if s.isStopped() {
+					break
+				}
+
+				scan, err := s.worker.RHPScan(req.hostKey, req.hostIP, s.currentTimeout())
+				respChan <- scanResp{req.hostKey, scan.Settings, err}
+
+				if err == nil {
+					s.tracker.addDataPoint(time.Duration(scan.Ping))
+				}
+			}
+			if atomic.AddUint64(&liveThreads, ^uint64(0)) == 0 {
+				close(respChan)
+			}
+		}()
+	}
 
 	// handle responses
 	inflight := len(hosts)
@@ -302,12 +279,4 @@ func (s *scanner) currentTimeout() time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.timeout
-}
-
-func jsonMarshal(v interface{}) []byte {
-	js, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return js
 }

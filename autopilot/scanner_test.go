@@ -127,7 +127,7 @@ func TestScanner(t *testing.T) {
 }
 
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
-	s := &scanner{
+	return &scanner{
 		bus:    b,
 		worker: w,
 		logger: zap.New(zapcore.NewNopCore()).Sugar(),
@@ -138,8 +138,7 @@ func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 			trackerMinTimeout,
 		),
 		stopChan:        make(chan struct{}),
+		scanThreads:     3,
 		scanMinInterval: time.Second,
 	}
-	s.pool = &scanPool{numThreads: 3, s: s}
-	return s
 }
