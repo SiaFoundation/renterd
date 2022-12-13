@@ -260,7 +260,6 @@ func (s *scanner) performHostScans() error {
 	respChan := s.pool.launchThreads(workerFn)
 
 	// handle responses
-	var errs worker.HostErrorSet
 	inflight := len(hosts)
 	for inflight > 0 {
 		var res scanResp
@@ -277,11 +276,7 @@ func (s *scanner) performHostScans() error {
 				"hk", res.hostKey,
 				"err", res.err,
 			)
-			errs = append(errs, &worker.HostError{HostKey: res.hostKey, Err: res.err})
 		}
-	}
-	if len(errs) > 0 {
-		return errs
 	}
 	return nil
 }
