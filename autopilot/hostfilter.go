@@ -6,7 +6,7 @@ import (
 	"math/big"
 
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
@@ -101,7 +101,7 @@ func isGouging(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings, h 
 	}
 
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
-	return gouging.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
+	return worker.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
 }
 
 func hasBadSettings(cfg Config, h Host) (bool, string) {

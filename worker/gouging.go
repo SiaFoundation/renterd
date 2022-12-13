@@ -1,9 +1,10 @@
-package gouging
+package worker
 
 import (
 	"fmt"
 	"strings"
 
+	"go.sia.tech/renterd/bus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
@@ -14,13 +15,6 @@ type (
 		downloadErr     error
 		formContractErr error
 		uploadErr       error
-	}
-
-	GougingSettings struct {
-		MaxRPCPrice      types.Currency
-		MaxContractPrice types.Currency
-		MaxDownloadPrice types.Currency // per TiB
-		MaxUploadPrice   types.Currency // per TiB
 	}
 )
 
@@ -59,7 +53,7 @@ func (gr GougingResults) CanUpload() (errs []error) {
 	)
 }
 
-func PerformGougingChecks(gs GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
+func PerformGougingChecks(gs bus.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
 	return GougingResults{
 		downloadErr:     checkDownloadGouging(gs, hs, redundancy),
 		formContractErr: checkFormContractGouging(gs, hs),
@@ -67,7 +61,7 @@ func PerformGougingChecks(gs GougingSettings, hs rhpv2.HostSettings, period uint
 	}
 }
 
-func checkDownloadGouging(gs GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {
+func checkDownloadGouging(gs bus.GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -82,7 +76,7 @@ func checkDownloadGouging(gs GougingSettings, hs rhpv2.HostSettings, redundancy 
 	return nil
 }
 
-func checkUploadGouging(gs GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) error {
+func checkUploadGouging(gs bus.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -97,7 +91,7 @@ func checkUploadGouging(gs GougingSettings, hs rhpv2.HostSettings, period uint64
 	return nil
 }
 
-func checkFormContractGouging(gs GougingSettings, hs rhpv2.HostSettings) error {
+func checkFormContractGouging(gs bus.GougingSettings, hs rhpv2.HostSettings) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
