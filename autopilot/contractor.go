@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -403,9 +404,12 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 
 func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// handle contract locking
-	revision, err := c.ap.bus.AcquireContract(toRenew.ID(), contractLockingDurationRenew)
+	locked, err := c.ap.bus.AcquireContract(toRenew.ID(), contractLockingDurationRenew)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil
+	}
+	if !locked {
+		return rhpv2.ContractRevision{}, errors.New("contract is currently locked")
 	}
 	defer c.ap.bus.ReleaseContract(toRenew.ID())
 
@@ -420,34 +424,33 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 	}
 
 	// prepare the renewal
+	signingFn := func(fc types.FileContract, cost types.Currency) ([]types.Transaction, func() error, error) {
+		// fund the transaction
+		txn := types.Transaction{FileContracts: []types.FileContract{fc}}
+		toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
+		if err != nil {
+			_ = c.ap.bus.WalletDiscard(txn) // ignore error
+			return nil, nil, err
+		}
+
+		// sign the transaction
+		err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
+		if err != nil {
+			_ = c.ap.bus.WalletDiscard(txn) // ignore error
+			return nil, nil, err
+		}
+		cleanup := func() error { return c.ap.bus.WalletDiscard(txn) }
+		return append(parents, txn), cleanup, nil
+
+	}
+
+	// renew the contract
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	renewed, _, err := c.ap.worker.RHPRenew(toRenew.ID(), renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings, signingFn)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil
 	}
 
-	// fund the transaction
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-	toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// sign the transaction
-	err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// renew the contract
-	txnSet := append(parents, txn)
-	renewed, _, err := c.ap.worker.RHPRenew(renterKey, toRenew.HostKey(), toRenew.HostIP, toRenew.ID(), txnSet, finalPayment)
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.ContractRevision{}, err
-	}
 	return renewed, nil
 }
 

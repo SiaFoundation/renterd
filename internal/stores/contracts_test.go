@@ -158,9 +158,6 @@ func TestSQLContractStore(t *testing.T) {
 	if err := tableCountCheck(&dbContract{}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := tableCountCheck(&dbFileContractRevision{}, 0); err != nil {
-		t.Fatal(err)
-	}
 	if err := tableCountCheck(&dbValidSiacoinOutput{}, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -209,19 +206,16 @@ func TestContractLocking(t *testing.T) {
 	}
 
 	// Lock it.
-	rev, acquired, err := cs.AcquireContract(fcid, time.Minute)
+	acquired, err := cs.AcquireContract(fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !acquired {
 		t.Fatal("contract wasn't locked")
 	}
-	if rev.ParentID != fcid {
-		t.Fatalf("wrong parent id %v != %v", rev.ParentID, fcid)
-	}
 
 	// Lock again. Shouldn't work.
-	_, acquired, err = cs.AcquireContract(fcid, time.Minute)
+	acquired, err = cs.AcquireContract(fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +229,7 @@ func TestContractLocking(t *testing.T) {
 	}
 
 	// Acquire again.
-	_, acquired, err = cs.AcquireContract(fcid, time.Minute)
+	acquired, err = cs.AcquireContract(fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

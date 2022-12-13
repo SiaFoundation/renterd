@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -43,23 +44,6 @@ func (c *Client) RHPPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterF
 	return resp.Contract, resp.Cost, err
 }
 
-// RHPPrepareRenew prepares a contract renewal transaction.
-func (c *Client) RHPPrepareRenew(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error) {
-	req := RHPPrepareRenewRequest{
-		Contract:       contract,
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		RenterFunds:    renterFunds,
-		RenterAddress:  renterAddress,
-		HostCollateral: hostCollateral,
-		EndHeight:      endHeight,
-		HostSettings:   hostSettings,
-	}
-	var resp RHPPrepareRenewResponse
-	err := c.c.POST("/rhp/prepare/renew", req, &resp)
-	return resp.Contract, resp.Cost, resp.FinalPayment, err
-}
-
 // RHPPreparePayment prepares an ephemeral account payment.
 func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
 	req := RHPPreparePaymentRequest{
@@ -85,19 +69,60 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 	return resp.Contract, resp.TransactionSet, err
 }
 
-// RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
-	req := RHPRenewRequest{
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		HostIP:         hostIP,
-		ContractID:     contractID,
-		TransactionSet: transactionSet,
-		FinalPayment:   finalPayment,
+func (c *Client) withWS(route string, fn func(conn *websocket.Conn) error) error {
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s%s", c.c.BaseURL, route), http.Header{"Authorization": []string{c.c.Password}})
+	if err != nil {
+		return err
 	}
-	var resp RHPRenewResponse
-	err := c.c.POST("/rhp/renew", req, &resp)
-	return resp.Contract, resp.TransactionSet, err
+	defer conn.Close()
+	return fn(conn)
+}
+
+func (c *Client) RHPRenew(fcid types.FileContractID, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings, fn SigningFn) (rhpv2.ContractRevision, []types.Transaction, error) {
+	var newFCID types.FileContractID
+	var newContract rhpv2.ContractRevision
+	var txnSet []types.Transaction
+	err := c.withWS("/rhp/renew", func(conn *websocket.Conn) error {
+		err := conn.WriteJSON(RHPPrepareRenewRequest{
+			ContractID:     newFCID,
+			RenterKey:      renterKey,
+			HostKey:        hostKey,
+			RenterFunds:    renterFunds,
+			RenterAddress:  renterAddress,
+			HostCollateral: hostCollateral,
+			EndHeight:      endHeight,
+			HostSettings:   hostSettings,
+		})
+		if err != nil {
+			return err
+		}
+		var prrr RHPPrepareRenewResponse
+		if err := conn.ReadJSON(&prrr); err != nil {
+			return err
+		}
+		initialTxns, cleanup, err := fn(prrr.Contract, prrr.Cost)
+		if err != nil {
+			return err
+		}
+		err = conn.WriteJSON(RHPRenewRequest{
+			TransactionSet: initialTxns,
+			FinalPayment:   prrr.FinalPayment,
+		})
+		if err != nil {
+			cleanup()
+			return err
+		}
+		var rrr RHPRenewResponse
+		if err := conn.ReadJSON(&rrr); err != nil {
+			cleanup()
+			return err
+		}
+		newFCID = rrr.ContractID
+		newContract = rrr.Contract
+		txnSet = rrr.TransactionSet
+		return nil
+	})
+	return newContract, txnSet, err
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
