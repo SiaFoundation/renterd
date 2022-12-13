@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
-	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
@@ -101,7 +100,7 @@ func main() {
 	// NOTE: the flag package does not offer a nice way to parse currencies with
 	// a fallback to a default value, flag.TextVar would work but that was added
 	// in Go1.19
-	var flagg utils.CurrencyFlags
+	var flagg CurrencyFlags
 
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")

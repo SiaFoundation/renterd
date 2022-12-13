@@ -587,7 +587,7 @@ func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
 
 func (b *bus) setGougingSettings(gs GougingSettings) error {
 	if js, err := json.Marshal(gs); err != nil {
-		return err
+		panic(err)
 	} else {
 		return b.ss.UpdateSetting(SettingGouging, string(js))
 	}
@@ -595,7 +595,7 @@ func (b *bus) setGougingSettings(gs GougingSettings) error {
 
 func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 	if js, err := json.Marshal(rs); err != nil {
-		return err
+		panic(err)
 	} else {
 		return b.ss.UpdateSetting(SettingRedundancy, string(js))
 	}
