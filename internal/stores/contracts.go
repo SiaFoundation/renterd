@@ -221,7 +221,6 @@ type (
 		LockedUntil time.Time
 		RenewedFrom types.FileContractID   `gorm:"index,type:bytes;serializer:gob"`
 		Revision    dbFileContractRevision `gorm:"constraint:OnDelete:CASCADE;NOT NULL"` // CASCADE to delete revision too
-		Sectors     []dbSector             `gorm:"many2many:contract_sectors;OnDelete:CASCADE"`
 		StartHeight uint64                 `gorm:"NOT NULL"`
 		TotalCost   *big.Int               `gorm:"type:bytes;serializer:gob"`
 	}
@@ -241,6 +240,7 @@ type (
 	dbContractSector struct {
 		DBContractID uint `gorm:"primaryKey"`
 		DBSectorID   uint `gorm:"primaryKey"`
+		HostID       uint `gorm:"index"`
 	}
 
 	dbFileContractRevision struct {
@@ -283,7 +283,7 @@ type (
 func (cs *dbContract) BeforeDelete(tx *gorm.DB) error {
 	return tx.Table("contract_sectors").
 		Where("db_contract_id = ?", cs.ID).
-		Delete(&dbContractSector{}).
+		Update("db_contract_id", nil).
 		Error
 }
 

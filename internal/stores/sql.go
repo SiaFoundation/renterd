@@ -75,6 +75,8 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 
 			// bus.SettingStore tables
 			&dbSetting{},
+
+			&dbContractSector{},
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
@@ -82,6 +84,11 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
 			return nil, modules.ConsensusChangeID{}, res.Error
 		}
+	}
+
+	// Setup custom joint tables.
+	if db.SetupJoinTable(&dbSector{}, "contract_sectors", &dbContractSector{}); err != nil {
+		return nil, modules.ConsensusChangeID{}, err
 	}
 
 	// Get latest consensus change ID or init db.

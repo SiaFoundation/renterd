@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -334,7 +335,7 @@ type (
 	dbSector struct {
 		Model
 
-		Contracts []dbContract      `gorm:"many2many:contract_sectors"`
+		Contracts []dbContract      `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
@@ -531,9 +532,14 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 				}
 
 				// Add the sector-contract link to the
-				// contract_sectors table if it doesn't exist
-				// yet.
-				err = tx.Model(&sector).Association("Contracts").Append(&contract)
+				// contract_sectors table if it doesn't exist yet.
+				err = tx.Table(dbContractSector{}.TableName()).
+					Clauses(clause.OnConflict{DoNothing: true}).
+					Create(dbContractSector{
+						DBContractID: contract.ID,
+						HostID:       contract.HostID,
+						DBSectorID:   sector.ID,
+					}).Error
 				if err != nil {
 					return err
 				}
@@ -615,6 +621,19 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 	return slabs, err
 }
 
+func (s *SQLStore) host(id uint) (dbHost, bool, error) {
+	var h dbHost
+	err := s.db.Where(&dbHost{Model: Model{ID: id}}).
+		Take(&h).
+		Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return dbHost{}, false, nil
+	} else if err != nil {
+		return dbHost{}, false, err
+	}
+	return h, true, nil
+}
+
 // slabForMigration returns all the info about a slab necessary for migrating
 // it to better hosts/contracts.
 func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
@@ -622,7 +641,7 @@ func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
 	// TODO: This could be slightly more efficient by not fetching whole
 	// contracts.
 	tx := s.db.Where(&dbSlab{Model: Model{ID: uint(slabID)}}).
-		Preload("Shards.DBSector.Contracts.Host").
+		Preload("Shards.DBSector").
 		Take(&dSlab)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return object.Slab{}, ErrSlabNotFound
@@ -632,9 +651,24 @@ func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
 		return object.Slab{}, err
 	}
 	for i, shard := range dSlab.Shards {
-		if len(shard.DBSector.Contracts) > 0 {
-			c := shard.DBSector.Contracts[0] // TODO: figure out which contract to use
-			slab.Shards[i].Host = c.Host.PublicKey
+		var css []dbContractSector
+		err := s.db.Model(&dbContractSector{}).
+			Where("db_sector_id", shard.DBSectorID).
+			Find(&css).
+			Error
+		if err != nil {
+			return object.Slab{}, err
+		}
+		for _, cs := range css {
+			h, found, err := s.host(cs.HostID)
+			if err != nil {
+				return object.Slab{}, err
+			}
+			if !found {
+				continue
+			}
+			slab.Shards[i].Host = h.PublicKey
+			break
 		}
 		slab.Shards[i].Root = shard.DBSector.Root
 	}
