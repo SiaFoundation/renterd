@@ -15,8 +15,6 @@ import (
 )
 
 var (
-	errRecordHostInteractionFailed = errors.New("RecordHostInteraction failed")
-
 	testHost1 consensus.PublicKey
 	testHost2 consensus.PublicKey
 	testHost3 consensus.PublicKey
