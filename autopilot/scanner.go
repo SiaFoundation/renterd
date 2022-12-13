@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -249,9 +250,8 @@ func (s *scanner) performHostScans() error {
 
 		if res.err != nil {
 			s.logger.Debugw(
-				"failed scan",
+				fmt.Sprintf("failed scan, err: %v", res.err),
 				"hk", res.hostKey,
-				"err", res.err,
 			)
 		}
 	}
