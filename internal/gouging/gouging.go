@@ -2,6 +2,7 @@ package gouging
 
 import (
 	"fmt"
+	"strings"
 
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
@@ -22,6 +23,23 @@ type (
 		MaxUploadPrice   types.Currency // per TiB
 	}
 )
+
+func (gr GougingResults) IsGouging() (bool, string) {
+	errs := filterErrors(
+		gr.downloadErr,
+		gr.uploadErr,
+		gr.formContractErr,
+	)
+	if len(errs) == 0 {
+		return false, ""
+	}
+
+	var reasons []string
+	for _, err := range errs {
+		reasons = append(reasons, err.Error())
+	}
+	return true, strings.Join(reasons, ", ")
+}
 
 func (gr GougingResults) CanDownload() (errs []error) {
 	return filterErrors(

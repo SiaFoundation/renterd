@@ -57,6 +57,10 @@ type Bus interface {
 
 	// objects
 	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
+
+	// settings
+	GougingSettings() (gs bus.GougingSettings, err error)
+	RedundancySettings() (rs bus.RedundancySettings, err error)
 }
 
 type Worker interface {
