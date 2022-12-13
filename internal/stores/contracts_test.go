@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
@@ -102,14 +102,14 @@ func TestSQLContractStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := renterd.Contract{
+	expected := bus.Contract{
 		HostIP:      "",
 		StartHeight: 100,
 		Revision:    c.Revision,
 		Signatures:  c.Signatures,
-		ContractMetadata: renterd.ContractMetadata{
+		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: types.FileContractID{},
-			Spending:    renterd.ContractSpending{},
+			Spending:    bus.ContractSpending{},
 			TotalCost:   totalCost,
 		},
 	}
@@ -310,14 +310,14 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := renterd.Contract{
+	expected := bus.Contract{
 		HostIP:      "",
 		StartHeight: newContractStartHeight,
 		Revision:    newContract.Revision,
 		Signatures:  newContract.Signatures,
-		ContractMetadata: renterd.ContractMetadata{
+		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: fcid,
-			Spending:    renterd.ContractSpending{},
+			Spending:    bus.ContractSpending{},
 			TotalCost:   newContractTotal,
 		},
 	}

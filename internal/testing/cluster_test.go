@@ -1,7 +1,6 @@
 package testing
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
-	"lukechampine.com/frand"
 )
 
 // TestNewTestCluster is a smoke test for creating a cluster of Nodes for
@@ -81,32 +79,5 @@ func TestNewTestCluster(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// Upload a slab.
-	cs, err := b.ConsensusState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	height := cs.BlockHeight
-
-	locations, err := cluster.Locations()
-	if err != nil {
-		t.Fatal(err)
-	}
-	slabLen := 10
-	slabData := frand.Bytes(slabLen)
-	slab, err := w.UploadSlab(bytes.NewReader(slabData), 1, 1, height, locations)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Download the slab.
-	buf := bytes.NewBuffer(nil)
-	if err := w.DownloadSlab(buf, object.SlabSlice{Slab: slab, Offset: 0, Length: uint32(slabLen)}, locations); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(slabData, buf.Bytes()) {
-		t.Fatal("wrong data")
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"sort"
 	"time"
 
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -109,10 +108,10 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(cfg Config, contracts []renterd.Contract) ([]renterd.Contract, []types.FileContractID, error) {
+func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]bus.Contract, []types.FileContractID, error) {
 	// collect contracts to renew and to delete
 	toDelete := make([]types.FileContractID, 0, len(contracts))
-	toRenew := make([]renterd.Contract, 0, len(contracts))
+	toRenew := make([]bus.Contract, 0, len(contracts))
 
 	// create a new ip filter
 	f := newIPFilter()
@@ -203,8 +202,8 @@ func (c *contractor) runContractChecks(cfg Config, contracts []renterd.Contract)
 	return toRenew, toDelete, nil
 }
 
-func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []renterd.Contract) ([]renterd.Contract, error) {
-	renewed := make([]renterd.Contract, 0, len(toRenew))
+func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []bus.Contract) ([]bus.Contract, error) {
+	renewed := make([]bus.Contract, 0, len(toRenew))
 
 	// log contracts renewed
 	c.logger.Debugw(
@@ -281,7 +280,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 	return renewed, nil
 }
 
-func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, renterAddress types.UnlockHash) ([]renterd.Contract, error) {
+func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, renterAddress types.UnlockHash) ([]bus.Contract, error) {
 	// fetch all active contracts
 	active, err := c.ap.bus.Contracts()
 	if err != nil {
@@ -300,7 +299,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	minInitialContractFunds := allowance.Div64(20) // TODO: arbitrary divisor
 
 	// form missing contracts
-	var formed []renterd.Contract
+	var formed []bus.Contract
 	missing := int(cfg.Contracts.Hosts) - len(active) // TODO: add leeway so we don't form contracts if we dip slightly under `needed` (?)
 
 	// log contracts formed
@@ -402,7 +401,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg Config, toRenew renterd.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
+func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	revision, err := c.ap.bus.AcquireContract(toRenew.ID(), contractLockingDurationRenew)
 	if err != nil {

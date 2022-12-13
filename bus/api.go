@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"time"
 
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -140,23 +139,6 @@ type ObjectsResponse struct {
 	Object  *object.Object `json:"object,omitempty"`
 }
 
-type ObjectsMarkSlabMigrationFailureRequest struct {
-	SlabIDs []SlabID `json:"slabIDs"`
-}
-
-type ObjectsMarkSlabMigrationFailureResponse struct {
-	Updates int `json:"updates"`
-}
-
-type ObjectsMigrateSlabsResponse struct {
-	SlabIDs []SlabID `json:"slabIDs"`
-}
-
-type ObjectsMigrateSlabResponse struct {
-	Locations []renterd.SlabLocation `json:"locations"`
-	Slab      object.Slab            `json:"slab"`
-}
-
 // AddObjectRequest is the request type for the /object/*key PUT endpoint.
 type AddObjectRequest struct {
 	Object        object.Object                                `json:"object"`
@@ -169,4 +151,16 @@ type UploadParams struct {
 	MinShards     uint8
 	TotalShards   uint8
 	ContractSet   string
+}
+
+// MigrateParams contains the metadata needed by a worker to migrate a slab.
+type MigrateParams struct {
+	CurrentHeight uint64
+	FromContracts string
+	ToContracts   string
+}
+
+type RedundancySettings struct {
+	MinShards   uint64
+	TotalShards uint64
 }

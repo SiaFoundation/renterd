@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
@@ -190,13 +189,21 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	}
 }
 
+type contractCapability struct {
+	HostKey   consensus.PublicKey
+	HostIP    string
+	ID        types.FileContractID
+	RenterKey consensus.PrivateKey
+}
+
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	ContractSetContracts(name string) ([]renterd.Contract, error)
-	ContractsForSlab(shards []object.Sector) ([]renterd.Contract, error)
+	ContractSetContracts(name string) ([]bus.Contract, error)
+	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
+	MigrateParams(slab object.Slab) (bus.MigrateParams, error)
 
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
@@ -292,7 +299,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []ExtendedSlabLocation, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []contractCapability, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
@@ -499,75 +506,53 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	}
 }
 
-func (w *worker) slabsUploadHandler(jc jape.Context) {
-	jc.Custom((*[]byte)(nil), object.Slab{})
-
-	var sur SlabsUploadRequest
-	dec := json.NewDecoder(jc.Request.Body)
-	if err := dec.Decode(&sur); err != nil {
-		http.Error(jc.ResponseWriter, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	r := io.LimitReader(io.MultiReader(dec.Buffered(), jc.Request.Body), int64(sur.MinShards)*rhpv2.SectorSize)
-	w.pool.setCurrentHeight(sur.CurrentHeight)
-	var slab object.Slab
-	err := w.withHosts(jc.Request.Context(), sur.Locations, func(hosts []sectorStore) (err error) {
-		slab, _, err = uploadSlab(jc.Request.Context(), r, sur.MinShards, sur.TotalShards, hosts)
-		return err
-	})
-	if jc.Check("couldn't upload slab", err) != nil {
-		return
-	}
-	jc.Encode(slab)
-}
-
-func (w *worker) slabsDownloadHandler(jc jape.Context) {
-	jc.Custom(&SlabsDownloadRequest{}, []byte{})
-
-	var sdr SlabsDownloadRequest
-	if jc.Decode(&sdr) != nil {
-		return
-	}
-
-	err := w.withHosts(jc.Request.Context(), sdr.Locations, func(hosts []sectorStore) error {
-		return downloadSlab(jc.Request.Context(), jc.ResponseWriter, sdr.Slab, hosts)
-	})
-	if jc.Check("couldn't download slabs", err) != nil {
-		return
-	}
-}
-
 func (w *worker) slabsMigrateHandler(jc jape.Context) {
-	var smr SlabsMigrateRequest
-	if jc.Decode(&smr) != nil {
+	var slab object.Slab
+	if jc.Decode(&slab) != nil {
 		return
 	}
 
-	w.pool.setCurrentHeight(smr.CurrentHeight)
-	err := w.withHosts(jc.Request.Context(), append(smr.From, smr.To...), func(hosts []sectorStore) error {
-		return migrateSlab(jc.Request.Context(), &smr.Slab, hosts[:len(smr.From)], hosts[len(smr.From):])
+	mp, err := w.bus.MigrateParams(slab)
+	if jc.Check("couldn't fetch migration parameters from bus", err) != nil {
+		return
+	}
+
+	bFrom, err := w.bus.ContractSetContracts(mp.FromContracts)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+	from := make([]contractCapability, len(bFrom))
+	for i, c := range bFrom {
+		from[i] = contractCapability{
+			HostKey:   c.HostKey(),
+			HostIP:    c.HostIP,
+			ID:        c.ID(),
+			RenterKey: nil, // TODO
+		}
+	}
+	bTo, err := w.bus.ContractSetContracts(mp.ToContracts)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+	to := make([]contractCapability, len(bTo))
+	for i, c := range bTo {
+		to[i] = contractCapability{
+			HostKey:   c.HostKey(),
+			HostIP:    c.HostIP,
+			ID:        c.ID(),
+			RenterKey: nil, // TODO
+		}
+	}
+
+	w.pool.setCurrentHeight(mp.CurrentHeight)
+	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
+		return migrateSlab(jc.Request.Context(), &slab, hosts[:len(from)], hosts[len(from):])
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
 
 	// TODO: After migration, we need to notify the bus of the changes to the slab.
-
-	jc.Encode(smr.Slab)
-}
-
-func (w *worker) slabsDeleteHandler(jc jape.Context) {
-	var sdr SlabsDeleteRequest
-	if jc.Decode(&sdr) != nil {
-		return
-	}
-	err := w.withHosts(jc.Request.Context(), sdr.Locations, func(hosts []sectorStore) error {
-		return deleteSlabs(jc.Request.Context(), sdr.Slabs, hosts)
-	})
-	if jc.Check("couldn't delete slabs", err) != nil {
-		return
-	}
 }
 
 func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
@@ -606,11 +591,13 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			_ = err // NOTE: can't write error because we may have already written to the response
 			return
 		}
-		cs := make([]ExtendedSlabLocation, len(contracts))
+		cs := make([]contractCapability, len(contracts))
 		for i, c := range contracts {
-			cs[i] = ExtendedSlabLocation{
-				SlabLocation: c.Location(),
-				RenterKey:    nil, // TODO
+			cs[i] = contractCapability{
+				HostKey:   c.HostKey(),
+				HostIP:    c.HostIP,
+				ID:        c.ID(),
+				RenterKey: nil, // TODO
 			}
 		}
 		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
@@ -642,18 +629,20 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		contracts := make([]ExtendedSlabLocation, len(bcs))
+		cs := make([]contractCapability, len(bcs))
 		for i, c := range bcs {
-			contracts[i] = ExtendedSlabLocation{
-				SlabLocation: c.Location(),
-				RenterKey:    nil, // TODO
+			cs[i] = contractCapability{
+				HostKey:   c.HostKey(),
+				HostIP:    c.HostIP,
+				ID:        c.ID(),
+				RenterKey: nil, // TODO
 			}
 		}
 
 		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
 		var s object.Slab
 		var length int
-		err = w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) (err error) {
+		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) (err error) {
 			s, length, err = uploadSlab(jc.Request.Context(), r, up.MinShards, up.TotalShards, hosts)
 			return err
 		})
@@ -670,7 +659,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 
 		for _, ss := range s.Shards {
 			if _, ok := usedContracts[ss.Host]; !ok {
-				for _, c := range contracts {
+				for _, c := range cs {
 					if c.HostKey == ss.Host {
 						usedContracts[ss.Host] = c.ID
 						break
@@ -706,10 +695,7 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
 
-		"POST   /slabs/upload":   w.slabsUploadHandler,
-		"POST   /slabs/download": w.slabsDownloadHandler,
-		"POST   /slabs/migrate":  w.slabsMigrateHandler,
-		"POST   /slabs/delete":   w.slabsDeleteHandler,
+		"POST   /slabs/migrate": w.slabsMigrateHandler,
 
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,

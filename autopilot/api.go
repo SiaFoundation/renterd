@@ -27,10 +27,6 @@ type (
 		Upload      uint64
 		Storage     uint64
 	}
-	ObjectsConfig struct {
-		MinShards   uint8
-		TotalShards uint8
-	}
 )
 
 // Config contains all autopilot configuration parameters.
@@ -38,7 +34,6 @@ type Config struct {
 	Wallet    WalletConfig
 	Hosts     HostsConfig
 	Contracts ContractsConfig
-	Objects   ObjectsConfig
 }
 
 func DefaultConfig() (c Config) {
@@ -51,8 +46,6 @@ func DefaultConfig() (c Config) {
 	c.Contracts.Upload = 1 << 40          // 1 TiB
 	c.Contracts.Download = 1 << 40        // 1 TiB
 	c.Contracts.Storage = 1 << 42         // 4 TiB
-	c.Objects.MinShards = 10
-	c.Objects.TotalShards = 30
 	return
 }
 

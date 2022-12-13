@@ -10,7 +10,6 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/renterd/internal/utils"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
@@ -261,7 +260,7 @@ func (s *scanner) performHostScans() error {
 	respChan := s.pool.launchThreads(workerFn)
 
 	// handle responses
-	var errs []error
+	var errs worker.HostErrorSet
 	inflight := len(hosts)
 	for inflight > 0 {
 		var res scanResp
@@ -278,10 +277,13 @@ func (s *scanner) performHostScans() error {
 				"hk", res.hostKey,
 				"err", res.err,
 			)
+			errs = append(errs, &worker.HostError{HostKey: res.hostKey, Err: res.err})
 		}
 	}
-
-	return utils.JoinErrors(errs)
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
 }
 
 func (s *scanner) isScanRequired() bool {

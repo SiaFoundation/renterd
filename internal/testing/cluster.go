@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
@@ -76,10 +75,6 @@ var defaultAutopilotConfig = autopilot.Config{
 		Download: modules.SectorSize * 500,
 		Upload:   modules.SectorSize * 500,
 		Storage:  modules.SectorSize * 5e3,
-	},
-	Objects: autopilot.ObjectsConfig{
-		MinShards:   2,
-		TotalShards: 2,
 	},
 	Hosts: autopilot.HostsConfig{
 		IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.
@@ -286,30 +281,6 @@ func (c *TestCluster) synced(hosts []*siatest.TestNode) (bool, error) {
 		}
 	}
 	return true, nil
-}
-
-// Locations returns a slab location for each host in the cluster.
-func (c *TestCluster) Locations() ([]worker.ExtendedSlabLocation, error) {
-	contracts, err := c.Bus.Contracts()
-	if err != nil {
-		return nil, err
-	}
-	var locations []worker.ExtendedSlabLocation
-	for _, contract := range contracts {
-		rk, err := c.Autopilot.RenterKey(contract.HostKey())
-		if err != nil {
-			return nil, err
-		}
-		locations = append(locations, worker.ExtendedSlabLocation{
-			SlabLocation: renterd.SlabLocation{
-				HostKey: contract.HostKey(),
-				HostIP:  contract.HostIP,
-				ID:      contract.ID(),
-			},
-			RenterKey: rk,
-		})
-	}
-	return locations, nil
 }
 
 // MineBlocks uses the bus' miner to mine n blocks.
