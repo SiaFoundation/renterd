@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var (
@@ -336,6 +335,7 @@ type (
 		Model
 
 		Contracts []dbContract      `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
+		Hosts     []dbHost          `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
@@ -521,27 +521,41 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 				}
 
 				// Look for the contract referenced by the shard.
+				contractFound := true
 				var contract dbContract
 				err = tx.Model(&dbContract{}).
 					Where(&dbContract{FCID: fcid}).
 					Take(&contract).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					continue // don't set contract
+					contractFound = false
 				} else if err != nil {
 					return err
 				}
 
-				// Add the sector-contract link to the
-				// contract_sectors table if it doesn't exist yet.
-				err = tx.Table(dbContractSector{}.TableName()).
-					Clauses(clause.OnConflict{DoNothing: true}).
-					Create(dbContractSector{
-						DBContractID: contract.ID,
-						HostID:       contract.HostID,
-						DBSectorID:   sector.ID,
-					}).Error
-				if err != nil {
+				// Look for the host referenced by the shard.
+				hostFound := true
+				var host dbHost
+				err = tx.Model(&dbHost{}).
+					Where(&dbHost{PublicKey: shard.Host}).
+					Take(&host).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					hostFound = false
+				} else if err != nil {
 					return err
+				}
+
+				// Add contract and host to join tables.
+				if contractFound {
+					err = tx.Model(&sector).Association("Contracts").Append(&contract)
+					if err != nil {
+						return err
+					}
+				}
+				if hostFound {
+					err = tx.Model(&sector).Association("Hosts").Append(&host)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -641,7 +655,8 @@ func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
 	// TODO: This could be slightly more efficient by not fetching whole
 	// contracts.
 	tx := s.db.Where(&dbSlab{Model: Model{ID: uint(slabID)}}).
-		Preload("Shards.DBSector").
+		Preload("Shards.DBSector.Contracts.Host").
+		Preload("Shards.DBSector.Hosts").
 		Take(&dSlab)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return object.Slab{}, ErrSlabNotFound
@@ -651,24 +666,12 @@ func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
 		return object.Slab{}, err
 	}
 	for i, shard := range dSlab.Shards {
-		var css []dbContractSector
-		err := s.db.Model(&dbContractSector{}).
-			Where("db_sector_id", shard.DBSectorID).
-			Find(&css).
-			Error
-		if err != nil {
-			return object.Slab{}, err
-		}
-		for _, cs := range css {
-			h, found, err := s.host(cs.HostID)
-			if err != nil {
-				return object.Slab{}, err
-			}
-			if !found {
-				continue
-			}
-			slab.Shards[i].Host = h.PublicKey
-			break
+		// Check contracts first for a valid host key. We prefer hosts
+		// that we have contracts with.
+		if len(shard.DBSector.Contracts) > 0 {
+			slab.Shards[i].Host = shard.DBSector.Contracts[0].Host.PublicKey
+		} else if len(shard.DBSector.Hosts) > 0 {
+			slab.Shards[i].Host = shard.DBSector.Hosts[0].PublicKey
 		}
 		slab.Shards[i].Root = shard.DBSector.Root
 	}

@@ -3,7 +3,6 @@ package stores
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -613,5 +612,97 @@ func TestSlabsForRepair(t *testing.T) {
 		if string(got) != string(exp) {
 			t.Fatalf("wrong slabs returned: %v != %v", string(got), string(exp))
 		}
+	}
+}
+
+// TestContractSectors is a test for the contract_sectors join table. It
+// verifies that deleting contracts or sectors also cleans up the join table.
+func TestContractSectors(t *testing.T) {
+	os, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a host, contract and sector to upload to that host into the
+	// given contract.
+	hk1 := consensus.PublicKey{1}
+	fcid1 := types.FileContractID{1}
+	err = os.addTestHost(hk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.AddContract(newTestContract(fcid1, hk1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sectorGood := object.Sector{
+		Host: hk1,
+		Root: consensus.Hash256{1},
+	}
+
+	// Prepare used contracts.
+	usedContracts := map[consensus.PublicKey]types.FileContractID{
+		hk1: fcid1,
+	}
+
+	// Create object.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorGood,
+					},
+				},
+			},
+		},
+	}
+	if err := os.Put("foo", obj, usedContracts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the contract.
+	err = os.RemoveContract(fcid1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check the join table. Should be empty.
+	var css []dbContractSector
+	if err := os.db.Find(&css).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(css) != 0 {
+		t.Fatal("table should be empty", len(css))
+	}
+
+	// Add the contract back.
+	err = os.AddContract(newTestContract(fcid1, hk1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add the object again.
+	if err := os.Put("foo", obj, usedContracts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the object.
+	if err := os.Delete("foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the sector.
+	if err := os.db.Delete(&dbSector{Model: Model{ID: 1}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := os.db.Find(&css).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(css) != 0 {
+		t.Fatal("table should be empty")
 	}
 }

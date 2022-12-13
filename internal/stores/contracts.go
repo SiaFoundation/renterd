@@ -240,7 +240,6 @@ type (
 	dbContractSector struct {
 		DBContractID uint `gorm:"primaryKey"`
 		DBSectorID   uint `gorm:"primaryKey"`
-		HostID       uint `gorm:"index"`
 	}
 
 	dbFileContractRevision struct {
@@ -275,17 +274,6 @@ type (
 		Value      *big.Int         `gorm:"type:bytes;serializer:gob"`
 	}
 )
-
-// BeforeDelete implements a deletion hook for dbContract. This is necessary
-// because we can't delete a contract without first removing the corresponding
-// entry from the contract_sectors since that table potentially keeps a
-// reference to the contract..
-func (cs *dbContract) BeforeDelete(tx *gorm.DB) error {
-	return tx.Table("contract_sectors").
-		Where("db_contract_id = ?", cs.ID).
-		Update("db_contract_id", nil).
-		Error
-}
 
 // TableName implements the gorm.Tabler interface.
 func (dbArchivedContract) TableName() string { return "archived_contracts" }
