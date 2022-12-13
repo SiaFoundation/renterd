@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
@@ -571,7 +572,9 @@ func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostI
 	}
 
 	// sign the transaction
-	err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
+	//
+	// TODO: types.FullCoveredFields throws an invalid signature error
+	err = c.ap.bus.WalletSign(&txn, toSign, wallet.ExplicitCoveredFields(txn))
 	if err != nil {
 		_ = c.ap.bus.WalletDiscard(txn) // ignore error
 		return rhpv2.ContractRevision{}, err
