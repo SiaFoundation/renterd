@@ -10,7 +10,6 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
@@ -525,31 +524,15 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 
 	// prepare the renewal
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, endHeight, scan.Settings)
+	txnSet, finalPayment, err := c.ap.bus.WalletPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil
 	}
 
-	// fund the transaction
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-	toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// sign the transaction
-	err = c.ap.bus.WalletSign(&txn, toSign, types.FullCoveredFields)
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.ContractRevision{}, err
-	}
-
 	// renew the contract
-	txnSet := append(parents, txn)
 	renewed, _, err := c.ap.worker.RHPRenew(renterKey, toRenew.HostKey(), toRenew.HostIP, toRenew.ID(), txnSet, finalPayment)
 	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
+		_ = c.ap.bus.WalletDiscard(txnSet[len(txnSet)-1]) // ignore error
 		return rhpv2.ContractRevision{}, err
 	}
 	return renewed, nil
@@ -558,32 +541,15 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// prepare contract formation
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	fc, cost, err := c.ap.worker.RHPPrepareForm(renterKey, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
+	txns, err := c.ap.bus.WalletPrepareForm(renterKey, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
 	if err != nil {
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// fund the transaction
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-	toSign, parents, err := c.ap.bus.WalletFund(&txn, cost)
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// sign the transaction
-	//
-	// TODO: types.FullCoveredFields throws an invalid signature error
-	err = c.ap.bus.WalletSign(&txn, toSign, wallet.ExplicitCoveredFields(txn))
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
 		return rhpv2.ContractRevision{}, err
 	}
 
 	// form the contract
-	contract, _, err := c.ap.worker.RHPForm(renterKey, hostKey, hostIP, append(parents, txn))
+	contract, _, err := c.ap.worker.RHPForm(renterKey, hostKey, hostIP, txns)
 	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txn) // ignore error
+		_ = c.ap.bus.WalletDiscard(txns[len(txns)-1]) // ignore error
 		return rhpv2.ContractRevision{}, err
 	}
 
