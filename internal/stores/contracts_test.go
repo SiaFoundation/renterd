@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
@@ -25,6 +26,12 @@ func TestSQLContractStore(t *testing.T) {
 	// Create a host for the contract.
 	hk := consensus.GeneratePrivateKey().PublicKey()
 	err = cs.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an announcement.
+	err = insertAnnouncement(cs.db, hk, hostdb.Announcement{NetAddress: "address"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +110,9 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := bus.Contract{
-		HostIP:      "",
+		ID:          fcid,
+		HostIP:      "address",
+		HostKey:     hk,
 		StartHeight: 100,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: types.FileContractID{},
@@ -155,9 +164,6 @@ func TestSQLContractStore(t *testing.T) {
 		return nil
 	}
 	if err := tableCountCheck(&dbContract{}, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := tableCountCheck(&dbValidSiacoinOutput{}, 0); err != nil {
 		t.Fatal(err)
 	}
 

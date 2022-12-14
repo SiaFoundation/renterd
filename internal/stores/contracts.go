@@ -238,22 +238,6 @@ type (
 		DBContractID uint `gorm:"primaryKey"`
 		DBSectorID   uint `gorm:"primaryKey"`
 	}
-
-	dbValidSiacoinOutput struct {
-		Model
-		DBFileContractRevisionID uint `gorm:"index"`
-
-		UnlockHash types.UnlockHash `gorm:"index;type:bytes;serializer:gob"`
-		Value      *big.Int         `gorm:"type:bytes;serializer:gob"`
-	}
-
-	dbMissedSiacoinOutput struct {
-		Model
-		DBFileContractRevisionID uint `gorm:"index"`
-
-		UnlockHash types.UnlockHash `gorm:"index;type:bytes;serializer:gob"`
-		Value      *big.Int         `gorm:"type:bytes;serializer:gob"`
-	}
 )
 
 // TableName implements the gorm.Tabler interface.
@@ -264,12 +248,6 @@ func (dbContractSector) TableName() string { return "contract_sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContract) TableName() string { return "contracts" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbValidSiacoinOutput) TableName() string { return "siacoin_valid_outputs" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbMissedSiacoinOutput) TableName() string { return "siacoin_missed_outputs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
