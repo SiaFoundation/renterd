@@ -481,7 +481,6 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 			)
 			continue
 		}
-		missing--
 
 		// update the budget
 		*budget = budget.Sub(renterFunds)

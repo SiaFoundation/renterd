@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
@@ -203,20 +204,32 @@ func main() {
 
 	autopilotErr := make(chan error, 1)
 	if autopilotCfg.enabled {
-		autopilotLog := filepath.Join(*dir, "autopilot.log")
-		logger, closeFn, err := node.NewLogger(autopilotLog)
+		autopilotDir := filepath.Join(*dir, "autopilot")
+		if err := os.MkdirAll(autopilotDir, 0700); err != nil {
+			log.Fatal(err)
+		}
+
+		autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
+		l, closeFn, err := node.NewLogger(autopilotLog)
 		if err != nil {
 			log.Fatal(err)
 		}
-		ap, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, wc, logger, *dir)
+
+		s, err := stores.NewJSONAutopilotStore(autopilotDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		ap, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, l)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer func() {
 			cleanup()
-			_ = logger.Sync() // ignore error
+			_ = l.Sync() // ignore error
 			closeFn()
 		}()
+
 		go func() { autopilotErr <- ap.Run() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}
 	}

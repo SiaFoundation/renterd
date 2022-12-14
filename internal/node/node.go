@@ -239,16 +239,8 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 	return w, func() error { return nil }, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, logger *zap.Logger, dir string) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
-	autopilotDir := filepath.Join(dir, "autopilot")
-	if err := os.MkdirAll(autopilotDir, 0700); err != nil {
-		return nil, nil, err
-	}
-	store, err := stores.NewJSONAutopilotStore(autopilotDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	ap := autopilot.New(store, b, w, logger, cfg.Heartbeat, cfg.ScannerInterval)
+func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
+	ap := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval)
 	return ap, ap.Stop, nil
 }
 
