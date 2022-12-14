@@ -258,6 +258,12 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Add an announcement.
+	err = insertAnnouncement(cs.db, hk, hostdb.Announcement{NetAddress: "address"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Create random unlock conditions for the host.
 	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
 	uc.PublicKeys[1].Key = hk[:]
@@ -309,7 +315,9 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := bus.Contract{
-		HostIP:      "",
+		ID:          fcid2,
+		HostIP:      "address",
+		HostKey:     hk,
 		StartHeight: newContractStartHeight,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: fcid,
@@ -333,14 +341,10 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:           fcid,
-		FileSize:       c.Revision.NewFileSize,
-		Host:           c.HostKey(),
-		RenewedTo:      fcid2,
-		Reason:         archivalReasonRenewed,
-		RevisionNumber: c.Revision.NewRevisionNumber,
-		WindowStart:    c.Revision.NewWindowStart,
-		WindowEnd:      c.Revision.NewWindowEnd,
+		FCID:      fcid,
+		Host:      c.HostKey(),
+		RenewedTo: fcid2,
+		Reason:    archivalReasonRenewed,
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
 		fmt.Println(ac)

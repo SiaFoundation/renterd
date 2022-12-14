@@ -224,14 +224,10 @@ type (
 
 	dbArchivedContract struct {
 		Model
-		FCID           types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
-		FileSize       uint64
-		Host           consensus.PublicKey  `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		RenewedTo      types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob"`
-		Reason         string
-		RevisionNumber uint64
-		WindowStart    types.BlockHeight
-		WindowEnd      types.BlockHeight
+		FCID      types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
+		Host      consensus.PublicKey  `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
+		RenewedTo types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob"`
+		Reason    string
 	}
 
 	dbContractSector struct {
