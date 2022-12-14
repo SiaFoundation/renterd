@@ -258,10 +258,17 @@ func (c *Client) DeleteObject(name string) (err error) {
 }
 
 func (c *Client) Revisions(rk [32]byte, contracts []bus.Contract) (revisions []rhpv2.ContractRevision, err error) {
-	err = c.c.POST("/rhp/revisions", &RHPRevisionsRequest{
+	err = c.c.POST("/rhp/revisions", RHPRevisionsRequest{
 		Contracts: contracts,
 		RenterKey: rk,
 	}, &revisions)
+	return
+}
+
+// _Renew is satisfiying the jape check.
+// TODO: remove
+func (c *Client) _Renew() (resp struct{}, err error) {
+	err = c.c.GET("/rhp/renew", &resp)
 	return
 }
 

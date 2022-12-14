@@ -718,6 +718,9 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		c.WriteJSON(struct{ Error string }{Error: err.Error()})
 		return
 	}
+
+	// TODO: Nothign to see here. Just fighting jape. Remove this.
+	jc.Encode(struct{}{})
 }
 
 func (w *worker) rhpRevisionsHandler(jc jape.Context) {
