@@ -10,9 +10,9 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, renewed, formed, toRenew, toArchive, toDelete []bus.Contract) error {
+func (ap *Autopilot) updateDefaultContracts(active, renewed, formed, toRenew, toIgnore, toDelete []bus.Contract) error {
 	// build some maps
-	isArchived := contractMapBool(toArchive)
+	isIgnored := contractMapBool(toIgnore)
 	isDeleted := contractMapBool(toDelete)
 	isUpForRenew := contractMapBool(toRenew)
 
@@ -25,8 +25,8 @@ func (ap *Autopilot) updateDefaultContracts(active, renewed, formed, toRenew, to
 	// build new contract set
 	var contracts []types.FileContractID
 	for _, c := range append(active, append(renewed, formed...)...) {
-		if isArchived[c.ID()] {
-			continue // exclude archived contracts
+		if isIgnored[c.ID()] {
+			continue // exclude ignored contracts (contracts that became unusable)
 		}
 		if isDeleted[c.ID()] {
 			continue // exclude archived contracts

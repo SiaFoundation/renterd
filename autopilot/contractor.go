@@ -142,7 +142,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// run checks
-	toRenew, toArchive, toDelete, err := c.runContractChecks(cfg, active)
+	toRenew, toIgnore, toDelete, err := c.runContractChecks(cfg, active)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -180,7 +180,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// update contract set
-	err = c.ap.updateDefaultContracts(active, renewed, formed, toRenew, toArchive, toDelete)
+	err = c.ap.updateDefaultContracts(active, renewed, formed, toRenew, toIgnore, toDelete)
 	if err != nil {
 		return fmt.Errorf("failed to update default contracts, err: %v", err)
 	}
@@ -191,8 +191,8 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 // runContractChecks performs a series of checks on the given contracts and
 // splits them over three buckets, contracts to renew, archive or delete
 func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]bus.Contract, []bus.Contract, []bus.Contract, error) {
-	// collect contracts to renew and to delete
-	toArchive := make([]bus.Contract, 0, len(contracts))
+	// create contract buckets
+	toIgnore := make([]bus.Contract, 0, len(contracts))
 	toDelete := make([]bus.Contract, 0, len(contracts))
 	toRenew := make([]bus.Contract, 0, len(contracts))
 
@@ -249,7 +249,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 				"fcid", contract.ID(),
 				"reasons", reasons,
 			)
-			toArchive = append(toArchive, contract)
+			toIgnore = append(toIgnore, contract)
 			continue
 		}
 
@@ -279,24 +279,24 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 	}
 
 	// apply active contract limit
-	numContractsTooMany := len(contracts) - len(toArchive) - len(toDelete) - int(cfg.Contracts.Hosts)
+	numContractsTooMany := len(contracts) - len(toIgnore) - len(toDelete) - int(cfg.Contracts.Hosts)
 	if numContractsTooMany > 0 {
 		// sort by contract size
 		sort.Slice(contractIds, func(i, j int) bool {
 			return contractSizes[contractIds[i]] < contractSizes[contractIds[j]]
 		})
 
-		// remove superfluous contract from renewal list and add to archive list
+		// remove superfluous contract from renewal list and add to ignore list
 		for _, id := range contractIds[:numContractsTooMany] {
 			if index, exists := renewIndices[id]; exists {
 				toRenew[index] = toRenew[len(toRenew)-1]
 				toRenew = toRenew[:len(toRenew)-1]
 			}
-			toArchive = append(toArchive, contractMap[id])
+			toIgnore = append(toIgnore, contractMap[id])
 		}
 	}
 
-	return toRenew, toArchive, toDelete, nil
+	return toRenew, toIgnore, toDelete, nil
 }
 
 func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []bus.Contract) ([]bus.Contract, error) {
