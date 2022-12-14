@@ -1,16 +1,20 @@
 package worker
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -70,7 +74,16 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 }
 
 func (c *Client) withWS(route string, fn func(conn *websocket.Conn) error) error {
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s%s", c.c.BaseURL, route), http.Header{"Authorization": []string{c.c.Password}})
+	baseURL := strings.TrimPrefix(c.c.BaseURL, "http://") // TODO: cleanup
+	h := http.Header{}
+	if c.c.Password != "" {
+		pw := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(":%s", c.c.Password)))
+		h.Set("Authorization", "Basic "+pw)
+	}
+	conn, resp, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s%s", baseURL, route), h)
+	if err == websocket.ErrBadHandshake {
+		log.Printf("handshake failed with status %d", resp.StatusCode)
+	}
 	if err != nil {
 		return err
 	}
@@ -79,12 +92,11 @@ func (c *Client) withWS(route string, fn func(conn *websocket.Conn) error) error
 }
 
 func (c *Client) RHPRenew(fcid types.FileContractID, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings, fn SigningFn) (rhpv2.ContractRevision, []types.Transaction, error) {
-	var newFCID types.FileContractID
 	var newContract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	err := c.withWS("/rhp/renew", func(conn *websocket.Conn) error {
 		err := conn.WriteJSON(RHPPrepareRenewRequest{
-			ContractID:     newFCID,
+			ContractID:     fcid,
 			RenterKey:      renterKey,
 			HostKey:        hostKey,
 			RenterFunds:    renterFunds,
@@ -99,6 +111,9 @@ func (c *Client) RHPRenew(fcid types.FileContractID, renterKey PrivateKey, hostK
 		var prrr RHPPrepareRenewResponse
 		if err := conn.ReadJSON(&prrr); err != nil {
 			return err
+		}
+		if prrr.Error != "" {
+			return errors.New(prrr.Error)
 		}
 		initialTxns, cleanup, err := fn(prrr.Contract, prrr.Cost)
 		if err != nil {
@@ -117,11 +132,18 @@ func (c *Client) RHPRenew(fcid types.FileContractID, renterKey PrivateKey, hostK
 			cleanup()
 			return err
 		}
-		newFCID = rrr.ContractID
+		if rrr.Error != "" {
+			cleanup()
+			return errors.New(rrr.Error)
+		}
 		newContract = rrr.Contract
 		txnSet = rrr.TransactionSet
 		return nil
 	})
+	if err != nil && websocket.IsUnexpectedCloseError(err) {
+		msg := err.(*websocket.CloseError).Text
+		err = fmt.Errorf("connection was closed unexpectedly: %s; %w", msg, err)
+	}
 	return newContract, txnSet, err
 }
 
@@ -233,6 +255,14 @@ func (c *Client) DownloadObject(w io.Writer, path string) (err error) {
 // DeleteObject deletes the object with the given name.
 func (c *Client) DeleteObject(name string) (err error) {
 	err = c.c.DELETE(fmt.Sprintf("/objects/%s", name))
+	return
+}
+
+func (c *Client) Revisions(rk [32]byte, contracts []bus.Contract) (revisions []rhpv2.ContractRevision, err error) {
+	err = c.c.POST("/rhp/revisions", &RHPRevisionsRequest{
+		Contracts: contracts,
+		RenterKey: rk,
+	}, &revisions)
 	return
 }
 

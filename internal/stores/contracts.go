@@ -291,7 +291,9 @@ func (dbContractSetEntry) TableName() string { return "contract_set_entries" }
 // convert converts a dbContractRHPv2 to a rhpv2.Contract type.
 func (c dbContract) convert() (bus.Contract, error) {
 	return bus.Contract{
+		ID:          c.FCID,
 		HostIP:      c.Host.NetAddress(),
+		HostKey:     c.Host.PublicKey,
 		StartHeight: 0, // TODO
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: c.RenewedFrom,
@@ -317,7 +319,6 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 		// Get revision.
 		err := tx.Model(&dbContract{}).
 			Where("fcid", fcidGob.Bytes()).
-			Preload("Revision").
 			Take(&contract).
 			Error
 		if err != nil {
@@ -359,22 +360,6 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 // addContract implements the bus.ContractStore interface.
 func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error {
 	fcid := c.ID()
-
-	// Prepare valid and missed outputs.
-	newValidOutputs := make([]dbValidSiacoinOutput, len(c.Revision.NewValidProofOutputs))
-	for i, sco := range c.Revision.NewValidProofOutputs {
-		newValidOutputs[i] = dbValidSiacoinOutput{
-			UnlockHash: sco.UnlockHash,
-			Value:      sco.Value.Big(),
-		}
-	}
-	newMissedOutputs := make([]dbMissedSiacoinOutput, len(c.Revision.NewMissedProofOutputs))
-	for i, sco := range c.Revision.NewMissedProofOutputs {
-		newMissedOutputs[i] = dbMissedSiacoinOutput{
-			UnlockHash: sco.UnlockHash,
-			Value:      sco.Value.Big(),
-		}
-	}
 
 	// Find host.
 	var host dbHost
@@ -483,9 +468,7 @@ func (s *SQLStore) RemoveContract(id types.FileContractID) error {
 func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {
 	var contract dbContract
 	err := tx.Where(&dbContract{FCID: id}).
-		Preload("Revision.NewValidProofOutputs").
-		Preload("Revision.NewMissedProofOutputs").
-		Preload("Host").
+		Preload("Host.Announcements").
 		Take(&contract).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return contract, ErrContractNotFound
@@ -500,8 +483,7 @@ func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
 func (s *SQLStore) contracts() ([]dbContract, error) {
 	var contracts []dbContract
 	err := s.db.Model(&dbContract{}).
-		Preload("Revision.NewValidProofOutputs").
-		Preload("Revision.NewMissedProofOutputs").
+		Preload("Host.Announcements").
 		Find(&contracts).Error
 	return contracts, err
 }

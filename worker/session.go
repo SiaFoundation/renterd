@@ -130,6 +130,15 @@ func (s *session) PublicKey() consensus.PublicKey {
 	return s.hostKey
 }
 
+func (s *session) Revision() (rhpv2.ContractRevision, error) {
+	ss, err := s.pool.acquire(s.ctx, s)
+	if err != nil {
+		return rhpv2.ContractRevision{}, err
+	}
+	defer s.pool.release(ss)
+	return ss.sess.Contract(), nil
+}
+
 func (s *session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	currentHeight := s.pool.currentHeight()
 	if currentHeight == 0 {

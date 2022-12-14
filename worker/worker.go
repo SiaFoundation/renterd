@@ -23,6 +23,7 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
+	"golang.org/x/crypto/blake2b"
 )
 
 type SigningFn func(fc types.FileContract, cost types.Currency) ([]types.Transaction, func() error, error)
@@ -204,6 +205,22 @@ type Bus interface {
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
+}
+
+// TODO: deriving the renter key from the host key using the master key only
+// works if we persist a hash of the renter's master key in the database and
+// compare it on startup, otherwise there's no way of knowing the derived key is
+// usuable
+//
+// TODO: instead of deriving a renter key use a randomly generated salt so we're
+// not limited to one key per host
+func deriveRenterKey(masterKey [32]byte, hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(masterKey[:], hostKey[:]...))
+	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }
 
 // A worker talks to Sia hosts to perform contract and storage operations within
@@ -474,9 +491,9 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 	from := make([]contractCapability, len(bFrom))
 	for i, c := range bFrom {
 		from[i] = contractCapability{
-			HostKey:   c.HostKey(),
+			HostKey:   c.HostKey,
 			HostIP:    c.HostIP,
-			ID:        c.ID(),
+			ID:        c.ID,
 			RenterKey: nil, // TODO
 		}
 	}
@@ -487,9 +504,9 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 	to := make([]contractCapability, len(bTo))
 	for i, c := range bTo {
 		to[i] = contractCapability{
-			HostKey:   c.HostKey(),
+			HostKey:   c.HostKey,
 			HostIP:    c.HostIP,
-			ID:        c.ID(),
+			ID:        c.ID,
 			RenterKey: nil, // TODO
 		}
 	}
@@ -547,9 +564,9 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		cs := make([]contractCapability, len(contracts))
 		for i, c := range contracts {
 			cs[i] = contractCapability{
-				HostKey:   c.HostKey(),
+				HostKey:   c.HostKey,
 				HostIP:    c.HostIP,
-				ID:        c.ID(),
+				ID:        c.ID,
 				RenterKey: nil, // TODO
 			}
 		}
@@ -585,9 +602,9 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		cs := make([]contractCapability, len(bcs))
 		for i, c := range bcs {
 			cs[i] = contractCapability{
-				HostKey:   c.HostKey(),
+				HostKey:   c.HostKey,
 				HostIP:    c.HostIP,
-				ID:        c.ID(),
+				ID:        c.ID,
 				RenterKey: nil, // TODO
 			}
 		}
@@ -633,9 +650,8 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-var upgrader = websocket.Upgrader{} // use default options
-
 func (w *worker) rhpRenewHandler(jc jape.Context) {
+	var upgrader = websocket.Upgrader{} // use default options
 	c, err := upgrader.Upgrade(jc.ResponseWriter, jc.Request, nil)
 	if err != nil {
 		return
@@ -653,6 +669,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
+		defer session.Close()
 		revision := session.Contract().Revision
 
 		// Prepare renewal.
@@ -691,10 +708,42 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		})
 	})
 	if err != nil {
-		c.WriteControl(websocket.CloseInternalServerErr, []byte(err.Error()), time.Now().Add(5*time.Second))
+		c.WriteJSON(struct{ Error string }{Error: err.Error()})
+		return
+	}
+}
+
+func (w *worker) rhpRevisionsHandler(jc jape.Context) {
+	var req RHPRevisionsRequest
+	if jc.Decode(&req) != nil {
 		return
 	}
 
+	cc := make([]contractCapability, len(req.Contracts))
+	for i, c := range req.Contracts {
+		cc[i] = contractCapability{
+			HostKey:   c.HostKey,
+			HostIP:    c.HostIP,
+			ID:        c.ID,
+			RenterKey: deriveRenterKey(req.RenterKey, c.HostKey),
+		}
+	}
+
+	var revisions []rhpv2.ContractRevision
+	err := w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
+		for _, store := range ss {
+			rev, err := store.(*session).Revision()
+			if err != nil {
+				return err
+			}
+			revisions = append(revisions, rev)
+		}
+		return nil
+	})
+	if jc.Check("failed to fetch revisions", err) != nil {
+		return
+	}
+	jc.Encode(revisions)
 }
 
 // New returns an HTTP handler that serves the worker API.
@@ -708,8 +757,9 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
-		"POST   /rhp/renew":           w.rhpRenewHandler,
+		"GET    /rhp/renew":           w.rhpRenewHandler,
 		"POST   /rhp/fund":            w.rhpFundHandler,
+		"POST   /rhp/revisions":       w.rhpRevisionsHandler,
 		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
 

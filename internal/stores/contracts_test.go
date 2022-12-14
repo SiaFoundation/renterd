@@ -104,8 +104,6 @@ func TestSQLContractStore(t *testing.T) {
 	expected := bus.Contract{
 		HostIP:      "",
 		StartHeight: 0,
-		Revision:    c.Revision,
-		Signatures:  c.Signatures,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: types.FileContractID{},
 			Spending:    bus.ContractSpending{},
@@ -303,8 +301,6 @@ func TestRenewedContract(t *testing.T) {
 	expected := bus.Contract{
 		HostIP:      "",
 		StartHeight: 0,
-		Revision:    newContract.Revision,
-		Signatures:  newContract.Signatures,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: fcid,
 			Spending:    bus.ContractSpending{},

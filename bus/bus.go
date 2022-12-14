@@ -496,7 +496,7 @@ func (b *bus) contractSetContractsHandler(jc jape.Context) {
 	}
 	allMap := make(map[types.FileContractID]Contract)
 	for _, c := range all {
-		allMap[c.ID()] = c
+		allMap[c.ID] = c
 	}
 	var contracts []Contract
 	for _, fcid := range setContracts {

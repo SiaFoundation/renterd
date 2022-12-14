@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"go.sia.tech/renterd/bus"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
@@ -47,7 +48,7 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg Config, h Host, c bus.Contract, m bus.ContractMetadata, bh uint64) (bool, bool, []string) {
+func isUsableContract(cfg Config, h Host, c rhpv2.ContractRevision, m bus.ContractMetadata, bh uint64) (bool, bool, []string) {
 	var reasons []string
 	renewable := true
 
@@ -65,11 +66,11 @@ func isUsableContract(cfg Config, h Host, c bus.Contract, m bus.ContractMetadata
 	return len(reasons) == 0, renewable, reasons
 }
 
-func isMaxRevision(c bus.Contract) bool {
+func isMaxRevision(c rhpv2.ContractRevision) bool {
 	return c.Revision.NewRevisionNumber == math.MaxUint64
 }
 
-func isOutOfFunds(cfg Config, h Host, c bus.Contract, m bus.ContractMetadata) bool {
+func isOutOfFunds(cfg Config, h Host, c rhpv2.ContractRevision, m bus.ContractMetadata) bool {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return false
@@ -86,7 +87,7 @@ func isOutOfFunds(cfg Config, h Host, c bus.Contract, m bus.ContractMetadata) bo
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func isUpForRenewal(cfg Config, c bus.Contract, blockHeight uint64) bool {
+func isUpForRenewal(cfg Config, c rhpv2.ContractRevision, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
 }
 

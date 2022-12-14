@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -88,7 +89,7 @@ type RHPFormResponse struct {
 // endpoint.
 type RHPPrepareRenewRequest struct {
 	ContractID     types.FileContractID `json:"contractID"`
-	RenterKey      PrivateKey           `json:"renterKey"`
+	RenterKey      consensus.PrivateKey `json:"renterKey"`
 	HostKey        PublicKey            `json:"hostKey"`
 	RenterFunds    types.Currency       `json:"renterFunds"`
 	RenterAddress  types.UnlockHash     `json:"renterAddress"`
@@ -100,6 +101,7 @@ type RHPPrepareRenewRequest struct {
 // RHPPrepareRenewResponse is the response type for the /rhp/prepare/renew
 // endpoint.
 type RHPPrepareRenewResponse struct {
+	Error        string             `json:"error"`
 	Contract     types.FileContract `json:"contract"`
 	Cost         types.Currency     `json:"cost"`
 	FinalPayment types.Currency     `json:"finalPayment"`
@@ -113,6 +115,7 @@ type RHPRenewRequest struct {
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.
 type RHPRenewResponse struct {
+	Error          string                 `json:"error"`
 	ContractID     types.FileContractID   `json:"contractID"`
 	Contract       rhpv2.ContractRevision `json:"contract"`
 	TransactionSet []types.Transaction    `json:"transactionSet"`
@@ -154,4 +157,9 @@ type RHPRegistryUpdateRequest struct {
 	RegistryKey   rhpv3.RegistryKey                  `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue                `json:"registryValue"`
 	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
+}
+
+type RHPRevisionsRequest struct {
+	Contracts []bus.Contract
+	RenterKey [32]byte
 }

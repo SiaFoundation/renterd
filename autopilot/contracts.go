@@ -1,7 +1,7 @@
 package autopilot
 
 import (
-	"go.sia.tech/renterd/bus"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
 
@@ -10,7 +10,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []bus.Contract, deleted []types.FileContractID) error {
+func (ap *Autopilot) updateDefaultContracts(toRenew []renewalCandidate, active, renewed, formed []rhpv2.ContractRevision, isRenewed map[types.FileContractID]bool, deleted []types.FileContractID) error {
 	// build some maps
 	isDeleted := make(map[types.FileContractID]bool)
 	for _, d := range deleted {
@@ -19,10 +19,6 @@ func (ap *Autopilot) updateDefaultContracts(active, toRenew, renewed, formed []b
 	wasUpForRenewal := make(map[types.FileContractID]bool)
 	for _, r := range toRenew {
 		wasUpForRenewal[r.ID()] = true
-	}
-	isRenewed := make(map[types.FileContractID]bool)
-	for _, r := range renewed {
-		isRenewed[r.ContractMetadata.RenewedFrom] = true
 	}
 
 	// build new contract set
