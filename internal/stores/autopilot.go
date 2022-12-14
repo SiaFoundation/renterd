@@ -100,6 +100,10 @@ func (s *JSONAutopilotStore) SetConfig(c autopilot.Config) error {
 
 // NewJSONAutopilotStore returns a new JSONAutopilotStore.
 func NewJSONAutopilotStore(dir string) (*JSONAutopilotStore, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+
 	s := &JSONAutopilotStore{
 		EphemeralAutopilotStore: NewEphemeralAutopilotStore(),
 		dir:                     dir,
