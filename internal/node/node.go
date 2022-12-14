@@ -31,6 +31,7 @@ type BusConfig struct {
 	GatewayAddr string
 	Miner       *Miner
 
+	bus.GougingSettings
 	bus.RedundancySettings
 }
 
@@ -225,7 +226,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		return nil
 	}
 
-	b, err := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.RedundancySettings)
+	b, err := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings)
 	if err != nil {
 		return nil, nil, err
 	}

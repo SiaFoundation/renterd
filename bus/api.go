@@ -160,6 +160,15 @@ type MigrateParams struct {
 	ToContracts   string
 }
 
+// GougingSettings contain some price settings used in price gouging.
+type GougingSettings struct {
+	MaxRPCPrice      types.Currency
+	MaxContractPrice types.Currency
+	MaxDownloadPrice types.Currency // per TiB
+	MaxUploadPrice   types.Currency // per TiB
+}
+
+// RedundancySettings contain settings that dictate an object's redundancy.
 type RedundancySettings struct {
 	MinShards   uint64
 	TotalShards uint64
