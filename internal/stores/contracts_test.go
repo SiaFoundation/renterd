@@ -369,9 +369,10 @@ func TestRenewedContract(t *testing.T) {
 		},
 	}
 	newContractTotal = types.NewCurrency64(333)
+	newContractStartHeight = uint64(300)
 
 	// Assert the renewed contract is returned
-	renewedContract, err := cs.AddRenewedContract(renewed, newContractTotal, fcid2)
+	renewedContract, err := cs.AddRenewedContract(renewed, newContractTotal, newContractStartHeight, fcid2)
 	if err != nil {
 		t.Fatal(err)
 	}

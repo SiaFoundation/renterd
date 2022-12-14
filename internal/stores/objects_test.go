@@ -631,7 +631,7 @@ func TestContractSectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(newTestContract(fcid1, hk1))
+	_, err = os.AddContract(newTestContract(fcid1, hk1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -680,7 +680,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the contract back.
-	err = os.AddContract(newTestContract(fcid1, hk1))
+	_, err = os.AddContract(newTestContract(fcid1, hk1))
 	if err != nil {
 		t.Fatal(err)
 	}

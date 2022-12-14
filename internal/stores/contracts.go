@@ -479,6 +479,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		HostID:      host.ID,
 		RenewedFrom: renewedFrom,
 		Revision:    revision,
+		StartHeight: startHeight,
 		TotalCost:   totalCost.Big(),
 	}
 
