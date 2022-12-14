@@ -95,7 +95,7 @@ func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) type
 }
 
 // PrepareContractRenewal constructs a contract renewal transaction.
-func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
+func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterPayout types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
 	// calculate "base" price and collateral -- the storage cost and collateral
 	// contribution for the amount of data already in contract. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.

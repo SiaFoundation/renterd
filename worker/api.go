@@ -88,14 +88,13 @@ type RHPFormResponse struct {
 // RHPPrepareRenewRequest is the request type for the /rhp/prepare/renew
 // endpoint.
 type RHPPrepareRenewRequest struct {
-	ContractID     types.FileContractID `json:"contractID"`
-	RenterKey      consensus.PrivateKey `json:"renterKey"`
-	HostKey        PublicKey            `json:"hostKey"`
-	RenterFunds    types.Currency       `json:"renterFunds"`
-	RenterAddress  types.UnlockHash     `json:"renterAddress"`
-	HostCollateral types.Currency       `json:"hostCollateral"`
-	EndHeight      uint64               `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings   `json:"hostSettings"`
+	ContractID    types.FileContractID `json:"contractID"`
+	RenterKey     consensus.PrivateKey `json:"renterKey"`
+	HostKey       PublicKey            `json:"hostKey"`
+	RenterFunds   types.Currency       `json:"renterFunds"`
+	RenterAddress types.UnlockHash     `json:"renterAddress"`
+	EndHeight     uint64               `json:"endHeight"`
+	HostSettings  rhpv2.HostSettings   `json:"hostSettings"`
 }
 
 // RHPPrepareRenewResponse is the response type for the /rhp/prepare/renew

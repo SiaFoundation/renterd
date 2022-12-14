@@ -71,8 +71,8 @@ type (
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]Contract, error)
 		Contract(id types.FileContractID) (Contract, error)
-		AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error
-		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
+		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error
+		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
 	}
 
@@ -291,7 +291,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	if jc.Decode(&wprr) != nil {
 		return
 	}
-	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.HostCollateral, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)
+	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)
 	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice)
 	finalPayment := wprr.HostSettings.BaseRPCPrice
 	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {
@@ -435,7 +435,7 @@ func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddContract(req.Contract, req.TotalCost))
+	jc.Check("couldn't store contract", b.cs.AddContract(req.Contract, req.TotalCost, req.StartHeight))
 }
 
 func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
@@ -448,7 +448,7 @@ func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.RenewedFrom))
+	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom))
 }
 
 func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {

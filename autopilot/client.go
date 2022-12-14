@@ -1,6 +1,11 @@
 package autopilot
 
-import "go.sia.tech/jape"
+import (
+	"fmt"
+
+	"go.sia.tech/jape"
+	"go.sia.tech/renterd/internal/consensus"
+)
 
 // A Client provides methods for interacting with a renterd API server.
 type Client struct {
@@ -22,5 +27,11 @@ func (c *Client) SetConfig(cfg Config) error {
 
 func (c *Client) Config() (cfg Config, err error) {
 	err = c.c.GET("/config", &cfg)
+	return
+}
+
+// RenterKey returns the renter's private key for a given host's public key.
+func (c *Client) RenterKey(hostKey consensus.PublicKey) (rk consensus.PrivateKey, err error) {
+	err = c.c.GET(fmt.Sprintf("/renterkey/%s", hostKey), &rk)
 	return
 }

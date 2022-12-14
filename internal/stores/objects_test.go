@@ -15,7 +15,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.ContractRevision, types.Currency) {
+func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.ContractRevision, types.Currency, uint64) {
 	uc := types.UnlockConditions{
 		PublicKeys:         make([]types.SiaPublicKey, 2),
 		SignaturesRequired: 2,
@@ -29,7 +29,7 @@ func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.Contr
 			ParentID:         id,
 			UnlockConditions: uc,
 		},
-	}, totalCost
+	}, totalCost, frand.Uint64n(100)
 }
 
 func TestList(t *testing.T) {
@@ -145,13 +145,13 @@ func TestSQLObjectStore(t *testing.T) {
 	// Create a file contract for the object to avoid the foreign key
 	// constraint failing.
 	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
-	c1, totalCost1 := newTestContract(fcid1, hk1)
-	c2, totalCost2 := newTestContract(fcid2, hk2)
-	err = os.AddContract(c1, totalCost1)
+	c1, totalCost1, startHeight1 := newTestContract(fcid1, hk1)
+	c2, totalCost2, startHeight2 := newTestContract(fcid2, hk2)
+	err = os.AddContract(c1, totalCost1, startHeight1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(c2, totalCost2)
+	err = os.AddContract(c2, totalCost2, startHeight2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,8 +262,9 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk1,
 										},
-										FCID:      fcid1,
-										TotalCost: totalCost1.Big(),
+										FCID:        fcid1,
+										StartHeight: startHeight1,
+										TotalCost:   totalCost1.Big(),
 									},
 								},
 							},
@@ -291,8 +292,9 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk2,
 										},
-										FCID:      fcid2,
-										TotalCost: totalCost2.Big(),
+										FCID:        fcid2,
+										StartHeight: startHeight2,
+										TotalCost:   totalCost2.Big(),
 									},
 								},
 							},
@@ -610,5 +612,97 @@ func TestSlabsForRepair(t *testing.T) {
 		if string(got) != string(exp) {
 			t.Fatalf("wrong slabs returned: %v != %v", string(got), string(exp))
 		}
+	}
+}
+
+// TestContractSectors is a test for the contract_sectors join table. It
+// verifies that deleting contracts or sectors also cleans up the join table.
+func TestContractSectors(t *testing.T) {
+	os, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a host, contract and sector to upload to that host into the
+	// given contract.
+	hk1 := consensus.PublicKey{1}
+	fcid1 := types.FileContractID{1}
+	err = os.addTestHost(hk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.AddContract(newTestContract(fcid1, hk1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sectorGood := object.Sector{
+		Host: hk1,
+		Root: consensus.Hash256{1},
+	}
+
+	// Prepare used contracts.
+	usedContracts := map[consensus.PublicKey]types.FileContractID{
+		hk1: fcid1,
+	}
+
+	// Create object.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						sectorGood,
+					},
+				},
+			},
+		},
+	}
+	if err := os.Put("foo", obj, usedContracts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the contract.
+	err = os.RemoveContract(fcid1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check the join table. Should be empty.
+	var css []dbContractSector
+	if err := os.db.Find(&css).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(css) != 0 {
+		t.Fatal("table should be empty", len(css))
+	}
+
+	// Add the contract back.
+	err = os.AddContract(newTestContract(fcid1, hk1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add the object again.
+	if err := os.Put("foo", obj, usedContracts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the object.
+	if err := os.Delete("foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the sector.
+	if err := os.db.Delete(&dbSector{Model: Model{ID: 1}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := os.db.Find(&css).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(css) != 0 {
+		t.Fatal("table should be empty")
 	}
 }

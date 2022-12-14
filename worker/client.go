@@ -96,14 +96,13 @@ func (c *Client) RHPRenew(fcid types.FileContractID, renterKey PrivateKey, hostK
 	var txnSet []types.Transaction
 	err := c.withWS("/rhp/renew", func(conn *websocket.Conn) error {
 		err := conn.WriteJSON(RHPPrepareRenewRequest{
-			ContractID:     fcid,
-			RenterKey:      renterKey,
-			HostKey:        hostKey,
-			RenterFunds:    renterFunds,
-			RenterAddress:  renterAddress,
-			HostCollateral: hostCollateral,
-			EndHeight:      endHeight,
-			HostSettings:   hostSettings,
+			ContractID:    fcid,
+			RenterKey:     renterKey,
+			HostKey:       hostKey,
+			RenterFunds:   renterFunds,
+			RenterAddress: renterAddress,
+			EndHeight:     endHeight,
+			HostSettings:  hostSettings,
 		})
 		if err != nil {
 			return err
