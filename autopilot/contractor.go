@@ -59,7 +59,10 @@ func (c *contractor) applyConsensusState(cfg Config, state bus.ConsensusState) {
 	}
 }
 
-func (c *contractor) contractSpending(id types.FileContractID, contracts []bus.Contract) (bus.ContractSpending, error) {
+func (c *contractor) contractSpending(contract bus.Contract) (bus.ContractSpending, error) {
+	// TODO: fetch contract hierarchy
+	var contracts []bus.Contract
+
 	// build a map
 	cmap := make(map[string]bus.Contract)
 	for _, contract := range contracts {
@@ -67,9 +70,9 @@ func (c *contractor) contractSpending(id types.FileContractID, contracts []bus.C
 	}
 
 	// fetch contract chain
-	curr, exists := cmap[id.String()]
+	curr, exists := cmap[contract.ID().String()]
 	if !exists {
-		return bus.ContractSpending{}, fmt.Errorf("contract with id '%v' not found", id)
+		return bus.ContractSpending{}, fmt.Errorf("contract with id '%v' not found", contract.ID().String())
 	}
 
 	// no history
@@ -326,7 +329,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		}
 
 		// check our budget
-		renterFunds, err := c.renewFundingEstimate(cfg, renew.ID())
+		renterFunds, err := c.renewFundingEstimate(cfg, renew)
 		if err != nil {
 			return nil, fmt.Errorf("could not get renew funding estimate, err: %v", err)
 		}
@@ -572,23 +575,7 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (types.Currency, error) {
-	contracts, err := c.ap.bus.Contracts()
-	if err != nil {
-		return types.Currency{}, nil
-	}
-
-	// fetch contract
-	contract, err := c.ap.bus.Contract(id)
-	if err != nil {
-		c.logger.Errorw(
-			fmt.Sprintf("missing contract, err: %v", err),
-			"hk", contract.HostKey,
-			"fcid", contract.ID(),
-		)
-		return types.ZeroCurrency, err
-	}
-
+func (c *contractor) renewFundingEstimate(cfg Config, contract bus.Contract) (types.Currency, error) {
 	// fetch host
 	host, err := c.ap.bus.Host(contract.HostKey())
 	if err != nil {
@@ -614,7 +601,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, id types.FileContractID) (
 	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice)
 
 	// fetch the spending of the contract we want to renew.
-	prevSpending, err := c.contractSpending(id, contracts)
+	prevSpending, err := c.contractSpending(contract)
 	if err != nil {
 		c.logger.Errorw(
 			fmt.Sprintf("could not retrieve contract spending, err: %v", err),
