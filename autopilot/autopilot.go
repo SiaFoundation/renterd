@@ -35,8 +35,8 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	// contracts
-	AddContract(c rhpv2.ContractRevision, totalCost types.Currency) error
-	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, renewedFrom types.FileContractID) error
+	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error
+	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error
 	DeleteContracts(ids []types.FileContractID) error
 
 	Contract(id types.FileContractID) (contract bus.Contract, err error)
@@ -62,7 +62,7 @@ type Bus interface {
 type Worker interface {
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
 	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
-	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
+	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
 	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
@@ -177,11 +177,20 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (ap *Autopilot) renterKeyHandlerGET(jc jape.Context) {
+	var hk consensus.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	jc.Encode(ap.deriveRenterKey(hk))
+}
+
 func NewServer(ap *Autopilot) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /actions": ap.actionsHandler,
-		"GET    /config":  ap.configHandlerGET,
-		"PUT    /config":  ap.configHandlerPUT,
+		"GET    /renterkey/:hostkey": ap.renterKeyHandlerGET,
+		"GET    /actions":            ap.actionsHandler,
+		"GET    /config":             ap.configHandlerGET,
+		"PUT    /config":             ap.configHandlerPUT,
 	})
 }
 

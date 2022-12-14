@@ -373,7 +373,30 @@ func (c *TestCluster) AddHosts(n int) error {
 			return err
 		}
 	}
-	return nil
+
+	//  Wait for the contracts to form.
+	hostsWithContracts := make(map[string]struct{})
+	return Retry(20, time.Second, func() error {
+		contracts, err := c.Bus.Contracts()
+		if err != nil {
+			return err
+		}
+		for _, c := range contracts {
+			hostsWithContracts[c.HostKey().String()] = struct{}{}
+		}
+		for _, h := range newHosts {
+			hpk, err := h.HostPublicKey()
+			if err != nil {
+				return err
+			}
+			_, exists := hostsWithContracts[hpk.String()]
+			if !exists {
+				return fmt.Errorf("missing contract for host %v", hpk.String())
+			}
+			return nil
+		}
+		return nil
+	})
 }
 
 // Shutdown shuts down a TestCluster. Cleanups are performed in reverse order.

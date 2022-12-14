@@ -84,8 +84,15 @@ func parseRange(s string, size int64) (offset, length int64, _ error) {
 	return offset, length, nil
 }
 
+func errToStr(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 type InteractionResult struct {
-	Error error `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type ScanResult struct {
@@ -98,7 +105,7 @@ func IsSuccessfulInteraction(i hostdb.Interaction) bool {
 	if err := json.Unmarshal(i.Result, &result); err != nil {
 		return false
 	}
-	return result.Error == nil
+	return result.Error == ""
 }
 
 type ephemeralMetricsRecorder struct {
@@ -150,7 +157,7 @@ func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.
 
 func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	transform := func(timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
-		b, _ := json.Marshal(InteractionResult{Error: err})
+		b, _ := json.Marshal(InteractionResult{Error: errToStr(err)})
 		hi := hostdb.Interaction{
 			Timestamp: timestamp,
 			Type:      typ,
@@ -222,7 +229,7 @@ func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSett
 	} else {
 		hi.Result, _ = json.Marshal(ScanResult{
 			InteractionResult: InteractionResult{
-				Error: err,
+				Error: errToStr(err),
 			},
 		})
 	}
@@ -338,7 +345,7 @@ func (w *worker) rhpPrepareRenewHandler(jc jape.Context) {
 	if jc.Decode(&rprr) != nil {
 		return
 	}
-	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.HostCollateral, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
+	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
 	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
 	finalPayment := rprr.HostSettings.BaseRPCPrice
 	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {

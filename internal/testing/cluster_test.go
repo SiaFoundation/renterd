@@ -60,6 +60,12 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// See if autopilot is running by fetching the config.
+	_, err = cluster.Autopilot.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	//  Wait for the contract to form.
 	err = Retry(20, time.Second, func() error {
 		contracts, err := b.Contracts()
@@ -74,7 +80,4 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// TODO: Once there is an autopilot client we test the autopilot as
-	// well.
 }

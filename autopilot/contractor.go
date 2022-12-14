@@ -257,7 +257,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		err = c.ap.bus.AddRenewedContract(contract, renterFunds, renew.ID())
+		err = c.ap.bus.AddRenewedContract(contract, renterFunds, c.blockHeight, renew.ID())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed to persist, err: %v", err),
@@ -377,7 +377,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		*budget = budget.Sub(renterFunds)
 
 		// persist contract in store
-		err = c.ap.bus.AddContract(contract, renterFunds)
+		err = c.ap.bus.AddContract(contract, renterFunds, c.blockHeight)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("new contract failed to persist, err: %v", err),
@@ -421,7 +421,7 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 
 	// prepare the renewal
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	fc, cost, finalPayment, err := c.ap.worker.RHPPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, endHeight, scan.Settings)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil
 	}
