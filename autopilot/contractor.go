@@ -24,13 +24,13 @@ const (
 
 	// leewayPctCandidateHosts is the leeway we apply when fetching candidate
 	// hosts, we fetch ~10% more than required
-	leewayPctCandidateHosts = .1
+	leewayPctCandidateHosts = 1.1
 
 	// leewayPctRequiredContracts is the leeway we apply on the amount of
-	// contracts the config dictates we should have, this leeway is negative
-	// which means that we'll only form new contracts if the number of active
-	// contracts dips below 87.5% of the required contracts
-	leewayPctRequiredContracts = -.125
+	// contracts the config dictates we should have, we'll only form new
+	// contracts if the number of active contracts dips below 87.5% of the
+	// required contracts
+	leewayPctRequiredContracts = 0.875
 )
 
 type (
@@ -52,7 +52,9 @@ func newContractor(ap *Autopilot) *contractor {
 
 func (c *contractor) applyConsensusState(cfg Config, state bus.ConsensusState) {
 	c.blockHeight = state.BlockHeight
-	if c.blockHeight > c.currentPeriod+cfg.Contracts.Period {
+	if c.currentPeriod == 0 {
+		c.currentPeriod = state.BlockHeight
+	} else if c.blockHeight > c.currentPeriod+cfg.Contracts.Period {
 		c.currentPeriod += cfg.Contracts.Period
 	}
 }
@@ -189,7 +191,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 }
 
 // runContractChecks performs a series of checks on the given contracts and
-// splits them over three buckets, contracts to renew, archive or delete
+// splits them over three buckets, contracts to renew, ignore or delete
 func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]bus.Contract, []bus.Contract, []bus.Contract, error) {
 	// create contract buckets
 	toIgnore := make([]bus.Contract, 0, len(contracts))
@@ -391,7 +393,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	}
 
 	// fetch candidate hosts
-	canidates, _ := c.candidateHosts(cfg, addLeeway(uint64(missing), leewayPctCandidateHosts))
+	candidates, _ := c.candidateHosts(cfg, addLeeway(uint64(missing), leewayPctCandidateHosts))
 
 	// calculate min/max contract funds
 	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
@@ -417,14 +419,14 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		)
 	}()
 
-	for h := 0; missing > 0 && h < len(canidates); h++ {
+	for h := 0; missing > 0 && h < len(candidates); h++ {
 		// break if the contractor was stopped
 		if c.isStopped() {
 			break
 		}
 
 		// fetch host
-		candidate := canidates[h]
+		candidate := candidates[h]
 		host, err := c.ap.bus.Host(candidate)
 		if err != nil {
 			c.logger.Errorw(
@@ -779,8 +781,8 @@ func calculateHostCollateral(cfg Config, settings rhpv2.HostSettings, renterFund
 }
 
 func addLeeway(n uint64, pct float64) uint64 {
-	if pct < -1 || pct > 1 {
-		panic("given leeway percent is out of bounds")
+	if pct < 0 {
+		panic("given leeway percent has to be positive")
 	}
-	return uint64(float64(n) + math.Ceil(float64(n)*pct))
+	return uint64(math.Ceil(float64(n) * pct))
 }
