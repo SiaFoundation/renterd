@@ -35,8 +35,8 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	// contracts
-	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error
-	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error
+	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (bus.Contract, error)
+	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (bus.Contract, error)
 	DeleteContracts(ids []types.FileContractID) error
 
 	Contract(id types.FileContractID) (contract bus.Contract, err error)

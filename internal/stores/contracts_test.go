@@ -93,7 +93,7 @@ func TestSQLContractStore(t *testing.T) {
 	// Insert it.
 	totalCost := types.NewCurrency64(456)
 	startHeight := uint64(100)
-	if err := cs.AddContract(c, totalCost, startHeight); err != nil {
+	if _, err := cs.AddContract(c, totalCost, startHeight); err != nil {
 		t.Fatal(err)
 	}
 
@@ -206,7 +206,7 @@ func TestContractLocking(t *testing.T) {
 	}
 	totalCost := types.NewCurrency64(654)
 	startHeight := uint64(100)
-	if err := cs.AddContract(c, totalCost, startHeight); err != nil {
+	if _, err := cs.AddContract(c, totalCost, startHeight); err != nil {
 		t.Fatal(err)
 	}
 
@@ -279,8 +279,14 @@ func TestRenewedContract(t *testing.T) {
 	}
 	oldContractTotal := types.NewCurrency64(111)
 	oldContractStartHeight := uint64(100)
-	if err := cs.AddContract(c, oldContractTotal, oldContractStartHeight); err != nil {
+	added, err := cs.AddContract(c, oldContractTotal, oldContractStartHeight)
+	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Assert the contract is returned.
+	if added.Revision.ParentID != fcid || added.RenewedFrom != (types.FileContractID{}) {
+		t.Fatal("unexpected")
 	}
 
 	// Renew it.
@@ -295,7 +301,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 	newContractTotal := types.NewCurrency64(222)
 	newContractStartHeight := uint64(200)
-	if err := cs.AddRenewedContract(renewed, newContractTotal, newContractStartHeight, fcid); err != nil {
+	if _, err := cs.AddRenewedContract(renewed, newContractTotal, newContractStartHeight, fcid); err != nil {
 		t.Fatal(err)
 	}
 
@@ -350,5 +356,27 @@ func TestRenewedContract(t *testing.T) {
 		fmt.Println(ac)
 		fmt.Println(expectedContract)
 		t.Fatal("mismatch")
+	}
+
+	// Renew it once more.
+	fcid3 := types.FileContractID{3, 3, 3, 3, 3}
+	renewed = rhpv2.ContractRevision{
+		Revision: types.FileContractRevision{
+			ParentID:              fcid3,
+			UnlockConditions:      uc,
+			NewMissedProofOutputs: []types.SiacoinOutput{},
+			NewValidProofOutputs:  []types.SiacoinOutput{},
+		},
+	}
+	newContractTotal = types.NewCurrency64(333)
+	newContractStartHeight = uint64(300)
+
+	// Assert the renewed contract is returned
+	renewedContract, err := cs.AddRenewedContract(renewed, newContractTotal, newContractStartHeight, fcid2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewedContract.Revision.ParentID != fcid3 || renewedContract.RenewedFrom != fcid2 {
+		t.Fatal("unexpected")
 	}
 }

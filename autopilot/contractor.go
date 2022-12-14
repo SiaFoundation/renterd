@@ -269,19 +269,13 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		err = c.ap.bus.AddRenewedContract(contract, renterFunds, c.blockHeight, renew.ID())
+		renewedContract, err := c.ap.bus.AddRenewedContract(contract, renterFunds, c.blockHeight, renew.ID())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed to persist, err: %v", err),
 				"hk", renew.HostKey(),
 				"fcid", renew.ID(),
 			)
-			return nil, err
-		}
-
-		// fetch full contract from db.
-		renewedContract, err := c.ap.bus.Contract(contract.ID())
-		if err != nil {
 			return nil, err
 		}
 
@@ -389,19 +383,13 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		*budget = budget.Sub(renterFunds)
 
 		// persist contract in store
-		err = c.ap.bus.AddContract(contract, renterFunds, c.blockHeight)
+		formedContract, err := c.ap.bus.AddContract(contract, renterFunds, c.blockHeight)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("new contract failed to persist, err: %v", err),
 				"hk", candidate,
 			)
 			continue
-		}
-
-		// fetch full contract from db.
-		formedContract, err := c.ap.bus.Contract(contract.ID())
-		if err != nil {
-			return nil, err
 		}
 
 		// add contract to contract set
