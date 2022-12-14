@@ -144,7 +144,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// run checks
-	toRenew, toIgnore, toDelete, err := c.runContractChecks(cfg, active)
+	toDelete, toIgnore, toRenew, err := c.runContractChecks(cfg, active)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -182,7 +182,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// update contract set
-	err = c.ap.updateDefaultContracts(active, renewed, formed, toRenew, toIgnore, toDelete)
+	err = c.ap.updateDefaultContracts(active, renewed, formed, toDelete, toIgnore, toRenew)
 	if err != nil {
 		return fmt.Errorf("failed to update default contracts, err: %v", err)
 	}
@@ -191,11 +191,11 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 }
 
 // runContractChecks performs a series of checks on the given contracts and
-// splits them over three buckets, contracts to renew, ignore or delete
+// splits them over three buckets, contracts to delete, ignore or renew
 func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]bus.Contract, []bus.Contract, []bus.Contract, error) {
 	// create contract buckets
-	toIgnore := make([]bus.Contract, 0, len(contracts))
 	toDelete := make([]bus.Contract, 0, len(contracts))
+	toIgnore := make([]bus.Contract, 0, len(contracts))
 	toRenew := make([]bus.Contract, 0, len(contracts))
 
 	// create a new ip filter
@@ -298,7 +298,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []bus.Contract) ([]
 		}
 	}
 
-	return toRenew, toIgnore, toDelete, nil
+	return toDelete, toIgnore, toRenew, nil
 }
 
 func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []bus.Contract) ([]bus.Contract, error) {
