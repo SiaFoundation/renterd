@@ -95,8 +95,8 @@ func TestScanner(t *testing.T) {
 	}
 
 	// reset the scanner
-	w = &mockWorker{blockChan: make(chan struct{})}
-	s = newTestScanner(b, w)
+	w.blockChan = make(chan struct{})
+	s.scanningLastStart = time.Time{}
 
 	// start another scan
 	if errChan = s.tryPerformHostScan(); errChan == nil {
