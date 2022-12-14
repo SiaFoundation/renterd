@@ -71,8 +71,8 @@ type (
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]Contract, error)
 		Contract(id types.FileContractID) (Contract, error)
-		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error
-		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error
+		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (Contract, error)
+		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (Contract, error)
 		RemoveContract(id types.FileContractID) error
 	}
 
@@ -426,7 +426,7 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
+func (b *bus) contractsIDNewHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req ContractsIDAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -436,10 +436,14 @@ func (b *bus) contractsIDNewHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddContract(req.Contract, req.TotalCost, req.StartHeight))
+
+	a, err := b.cs.AddContract(req.Contract, req.TotalCost, req.StartHeight)
+	if jc.Check("couldn't store contract", err) == nil {
+		jc.Encode(a)
+	}
 }
 
-func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
+func (b *bus) contractsIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req ContractsIDRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -449,7 +453,11 @@ func (b *bus) contractsIDRenewedHandlerPUT(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store contract", b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom))
+
+	r, err := b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
+	if jc.Check("couldn't store contract", err) == nil {
+		jc.Encode(r)
+	}
 }
 
 func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
@@ -646,8 +654,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 
 		"GET    /contracts":             b.contractsHandler,
 		"GET    /contracts/:id":         b.contractsIDHandlerGET,
-		"PUT    /contracts/:id/new":     b.contractsIDNewHandlerPUT,
-		"PUT    /contracts/:id/renewed": b.contractsIDRenewedHandlerPUT,
+		"POST   /contracts/:id/new":     b.contractsIDNewHandlerPOST,
+		"POST   /contracts/:id/renewed": b.contractsIDRenewedHandlerPOST,
 		"DELETE /contracts/:id":         b.contractsIDHandlerDELETE,
 		"POST   /contracts/:id/acquire": b.contractsAcquireHandler,
 		"POST   /contracts/:id/release": b.contractsReleaseHandler,

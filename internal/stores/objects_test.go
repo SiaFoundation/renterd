@@ -147,11 +147,11 @@ func TestSQLObjectStore(t *testing.T) {
 	fcid1, fcid2 := types.FileContractID{1}, types.FileContractID{2}
 	c1, totalCost1, startHeight1 := newTestContract(fcid1, hk1)
 	c2, totalCost2, startHeight2 := newTestContract(fcid2, hk2)
-	err = os.AddContract(c1, totalCost1, startHeight1)
+	_, err = os.AddContract(c1, totalCost1, startHeight1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(c2, totalCost2, startHeight2)
+	_, err = os.AddContract(c2, totalCost2, startHeight2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,15 +456,15 @@ func TestSlabsForRepair(t *testing.T) {
 	// - one that is part of a good contract
 	// - one that is part of a bad contract
 	// - one that is part of no contract (because it failed to renew etc.)
-	err = os.AddContract(newTestContract(fcidGood, hkGood))
+	_, err = os.AddContract(newTestContract(fcidGood, hkGood))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(newTestContract(fcidBad, hkBad))
+	_, err = os.AddContract(newTestContract(fcidBad, hkBad))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = os.AddContract(newTestContract(fcidDeleted, hkDeleted))
+	_, err = os.AddContract(newTestContract(fcidDeleted, hkDeleted))
 	if err != nil {
 		t.Fatal(err)
 	}

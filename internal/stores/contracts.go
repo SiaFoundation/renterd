@@ -432,7 +432,7 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 }
 
 // addContract implements the bus.ContractStore interface.
-func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error {
+func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
 	fcid := c.ID()
 
 	// Prepare valid and missed outputs.
@@ -470,34 +470,50 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	err := tx.Where(&dbHost{PublicKey: c.HostKey()}).
 		Take(&host).Error
 	if err != nil {
-		return err
+		return dbContract{}, err
+	}
+
+	// Create contract.
+	contract := dbContract{
+		FCID:        fcid,
+		HostID:      host.ID,
+		RenewedFrom: renewedFrom,
+		Revision:    revision,
+		TotalCost:   totalCost.Big(),
 	}
 
 	// Insert contract.
-	return tx.Where(&dbHost{PublicKey: c.HostKey()}).
-		Create(&dbContract{
-			FCID:        fcid,
-			HostID:      host.ID,
-			RenewedFrom: renewedFrom,
-			Revision:    revision,
-			StartHeight: startHeight,
-			TotalCost:   totalCost.Big(),
-		}).Error
+	err = tx.
+		Where(&dbHost{PublicKey: c.HostKey()}).
+		Create(&contract).Error
+	if err != nil {
+		return dbContract{}, err
+	}
+	return contract, nil
 }
 
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		return addContract(tx, c, totalCost, startHeight, types.FileContractID{})
-	})
+func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ bus.Contract, err error) {
+	var added dbContract
+
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		added, err = addContract(tx, c, totalCost, startHeight, types.FileContractID{})
+		return err
+	}); err != nil {
+		return bus.Contract{}, err
+	}
+
+	return added.convert()
 }
 
 // AddRenewedContract adds a new contract which was created as the result of a renewal to the store.
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (bus.Contract, error) {
+	var renewed dbContract
+
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, renewedFrom)
 		if err != nil {
@@ -526,8 +542,13 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 		}
 
 		// Add the new contract.
-		return addContract(tx, c, totalCost, startHeight, renewedFrom)
-	})
+		renewed, err = addContract(tx, c, totalCost, startHeight, renewedFrom)
+		return err
+	}); err != nil {
+		return bus.Contract{}, err
+	}
+
+	return renewed.convert()
 }
 
 // Contract implements the bus.ContractStore interface.

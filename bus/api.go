@@ -58,13 +58,13 @@ type ContractAcquireRequest struct {
 type ContractsIDAddRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
 	StartHeight uint64                 `json:"startHeight"`
-	TotalCost   types.Currency
+	TotalCost   types.Currency         `json:"totalCost"`
 }
 type ContractsIDRenewedRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
-	RenewedFrom types.FileContractID
-	StartHeight uint64 `json:"startHeight"`
-	TotalCost   types.Currency
+	RenewedFrom types.FileContractID   `json:"renewedFrom"`
+	StartHeight uint64                 `json:"startHeight"`
+	TotalCost   types.Currency         `json:"totalCost"`
 }
 
 // ContractAcquireResponse is the response type for the /contracts/:id/acquire
