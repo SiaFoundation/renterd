@@ -334,17 +334,13 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 			break
 		}
 
-		// check our budget
-		var err error
-		var renterFunds types.Currency
-		if isRefresh {
-			renterFunds, err = c.refreshFundingEstimate(cfg, contract)
-		} else {
-			renterFunds, err = c.renewFundingEstimate(cfg, contract)
-		}
+		// calculate the renter funds
+		renterFunds, err := c.renterFundsEstimate(cfg, contract, isRefresh)
 		if err != nil {
-			return nil, fmt.Errorf("could not get renew funding estimate, err: %v", err)
+			continue
 		}
+
+		// check our budget
 		if budget.Cmp(renterFunds) < 0 {
 			c.logger.Debugw(
 				"insufficient budget",
@@ -356,14 +352,8 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 			break
 		}
 
-		// a refresh uses the current contract's end height rather than extending into the next period
-		endHeight := c.endHeight(cfg)
-		if isRefresh {
-			endHeight = contract.EndHeight()
-		}
-
 		// derive the renter key
-		newRev, err := c.renewContract(cfg, renew, renterAddress, renterFunds)
+		newRevision, err := c.renewContract(cfg, contract, renterAddress, renterFunds, isRefresh)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			// TODO: log error
@@ -522,7 +512,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, endHeight uint64) (rhpv2.ContractRevision, error) {
+func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
@@ -541,6 +531,12 @@ func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterAd
 			"hk", toRenew.HostKey(),
 		)
 		return rhpv2.ContractRevision{}, nil
+	}
+
+	// if we are refreshing the contract we use the contract's end height
+	endHeight := c.endHeight(cfg)
+	if isRefresh {
+		endHeight = toRenew.EndHeight()
 	}
 
 	// renew the contract
@@ -575,6 +571,29 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 		return max
 	}
 	return funding
+}
+
+func (c *contractor) renterFundsEstimate(cfg Config, contract worker.Contract, isRefresh bool) (estimate types.Currency, err error) {
+	if isRefresh {
+		estimate, err = c.refreshFundingEstimate(cfg, contract)
+		if err != nil {
+			c.logger.Errorw(
+				fmt.Sprintf("could not get refresh funding estimate, err: %v", err),
+				"hk", contract.HostKey(),
+				"fcid", contract.ID,
+			)
+		}
+	} else {
+		estimate, err = c.renewFundingEstimate(cfg, contract)
+		if err != nil {
+			c.logger.Errorw(
+				fmt.Sprintf("could not get renew funding estimate, err: %v", err),
+				"hk", contract.HostKey(),
+				"fcid", contract.ID,
+			)
+		}
+	}
+	return
 }
 
 func (c *contractor) refreshFundingEstimate(cfg Config, contract worker.Contract) (types.Currency, error) {
