@@ -1,6 +1,8 @@
 package stores
 
 import (
+	"bytes"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"reflect"
@@ -334,7 +336,7 @@ func TestRenewedContract(t *testing.T) {
 	// Archived contract should exist.
 	var ac dbArchivedContract
 	err = cs.db.Model(&dbArchivedContract{}).
-		Where("fcid", fileContractID(fcid).gob()).
+		Where("fcid", gobEncode(fcid)).
 		Take(&ac).
 		Error
 	if err != nil {
@@ -379,4 +381,12 @@ func TestRenewedContract(t *testing.T) {
 	if renewedContract.Revision.ParentID != fcid3 || renewedContract.RenewedFrom != fcid2 {
 		t.Fatal("unexpected")
 	}
+}
+
+func gobEncode(fcid types.FileContractID) []byte {
+	buf := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(buf).Encode(fcid); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
 }
