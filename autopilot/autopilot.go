@@ -35,8 +35,8 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	// contracts
-	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) error
-	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) error
+	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (bus.Contract, error)
+	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (bus.Contract, error)
 	DeleteContracts(ids []types.FileContractID) error
 
 	Contract(id types.FileContractID) (contract bus.Contract, err error)
@@ -57,6 +57,10 @@ type Bus interface {
 
 	// objects
 	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
+
+	// settings
+	GougingSettings() (gs bus.GougingSettings, err error)
+	RedundancySettings() (rs bus.RedundancySettings, err error)
 }
 
 type Worker interface {
@@ -178,20 +182,11 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (ap *Autopilot) renterKeyHandlerGET(jc jape.Context) {
-	var hk consensus.PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
-		return
-	}
-	jc.Encode(ap.deriveRenterKey(hk))
-}
-
 func NewServer(ap *Autopilot) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /renterkey/:hostkey": ap.renterKeyHandlerGET,
-		"GET    /actions":            ap.actionsHandler,
-		"GET    /config":             ap.configHandlerGET,
-		"PUT    /config":             ap.configHandlerPUT,
+		"GET    /actions": ap.actionsHandler,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
 	})
 }
 

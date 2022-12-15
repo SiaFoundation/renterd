@@ -130,6 +130,10 @@ func newTestCluster(dir string) (*TestCluster, error) {
 		Bootstrap:   false,
 		GatewayAddr: "127.0.0.1:0",
 		Miner:       miner,
+		RedundancySettings: bus.RedundancySettings{
+			MinShards:   10,
+			TotalShards: 30,
+		},
 	}, busDir, wk)
 	if err != nil {
 		return nil, err

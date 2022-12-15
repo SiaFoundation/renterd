@@ -139,6 +139,18 @@ func (c *contractor) runContractChecks(cfg Config, contracts []rhpv2.ContractRev
 	contractSizes := make(map[types.FileContractID]uint64)
 	renewIndices := make(map[types.FileContractID]int)
 
+	// fetch gouging settings
+	gs, err := c.ap.bus.GougingSettings()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// fetch redundancy settings
+	rs, err := c.ap.bus.RedundancySettings()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// check every active contract
 	for _, contract := range contracts {
 		// fetch host from hostdb
@@ -164,7 +176,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []rhpv2.ContractRev
 		metadata := contractData.ContractMetadata
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, f, Host{host})
+		usable, reasons := isUsableHost(cfg, gs, rs, f, Host{host})
 		if !usable {
 			c.logger.Infow(
 				"unusable host",
@@ -278,7 +290,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		err = c.ap.bus.AddRenewedContract(contract, renterFunds, c.blockHeight, renew.ID())
+		_, err = c.ap.bus.AddRenewedContract(contract, renterFunds, c.blockHeight, renew.ID())
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed to persist, err: %v", err),
@@ -391,7 +403,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		*budget = budget.Sub(renterFunds)
 
 		// persist contract in store
-		err = c.ap.bus.AddContract(contract, renterFunds, c.blockHeight)
+		formedContract, err := c.ap.bus.AddContract(contract, renterFunds, c.blockHeight)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("new contract failed to persist, err: %v", err),
@@ -609,6 +621,18 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 		return nil, err
 	}
 
+	// fetch gouging settings
+	gs, err := c.ap.bus.GougingSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	// fetch redundancy settings
+	rs, err := c.ap.bus.RedundancySettings()
+	if err != nil {
+		return nil, err
+	}
+
 	// build a map
 	used := make(map[string]bool)
 	for _, contract := range active {
@@ -631,7 +655,7 @@ func (c *contractor) candidateHosts(cfg Config, wanted int) ([]consensus.PublicK
 			continue
 		}
 
-		if usable, _ := isUsableHost(cfg, ipFilter, Host{h}); usable {
+		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h}); usable {
 			filtered = append(filtered, h)
 		}
 	}

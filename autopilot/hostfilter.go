@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/renterd/bus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
@@ -19,7 +20,7 @@ const (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
+func isUsableHost(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
 	var reasons []string
 
 	if !cfg.isWhitelisted(h) {
@@ -36,6 +37,9 @@ func isUsableHost(cfg Config, f *ipFilter, h Host) (bool, []string) {
 	}
 	if bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Sprintf("bad settings: %v", reason))
+	}
+	if gouging, reason := isGouging(cfg, gs, rs, h); gouging {
+		reasons = append(reasons, fmt.Sprintf("price gouging: %v", reason))
 	}
 
 	// sanity check - should never happen but this would cause a zero score
@@ -89,6 +93,16 @@ func isOutOfFunds(cfg Config, h Host, c rhpv2.ContractRevision, m bus.ContractMe
 
 func isUpForRenewal(cfg Config, c rhpv2.ContractRevision, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
+}
+
+func isGouging(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings, h Host) (bool, string) {
+	settings, _, found := h.LastKnownSettings()
+	if !found {
+		return true, "no settings"
+	}
+
+	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
+	return worker.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
 }
 
 func hasBadSettings(cfg Config, h Host) (bool, string) {

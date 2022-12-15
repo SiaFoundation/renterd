@@ -58,13 +58,13 @@ type ContractAcquireRequest struct {
 type ContractsIDAddRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
 	StartHeight uint64                 `json:"startHeight"`
-	TotalCost   types.Currency
+	TotalCost   types.Currency         `json:"totalCost"`
 }
 type ContractsIDRenewedRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
-	RenewedFrom types.FileContractID
-	StartHeight uint64 `json:"startHeight"`
-	TotalCost   types.Currency
+	RenewedFrom types.FileContractID   `json:"renewedFrom"`
+	StartHeight uint64                 `json:"startHeight"`
+	TotalCost   types.Currency         `json:"totalCost"`
 }
 
 // ContractAcquireResponse is the response type for the /contracts/:id/acquire
@@ -159,6 +159,15 @@ type MigrateParams struct {
 	ToContracts   string
 }
 
+// GougingSettings contain some price settings used in price gouging.
+type GougingSettings struct {
+	MaxRPCPrice      types.Currency
+	MaxContractPrice types.Currency
+	MaxDownloadPrice types.Currency // per TiB
+	MaxUploadPrice   types.Currency // per TiB
+}
+
+// RedundancySettings contain settings that dictate an object's redundancy.
 type RedundancySettings struct {
 	MinShards   uint64
 	TotalShards uint64

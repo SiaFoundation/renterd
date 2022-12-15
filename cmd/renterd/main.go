@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"go.sia.tech/jape"
@@ -18,6 +20,7 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/siad/types"
 	"golang.org/x/term"
 )
 
@@ -78,6 +81,30 @@ func getWalletKey() consensus.PrivateKey {
 	return *walletKey
 }
 
+type currencyVar types.Currency
+
+func newCurrencyVar(c *types.Currency, d types.Currency) *currencyVar {
+	*c = d
+	return (*currencyVar)(c)
+}
+
+func (c *currencyVar) Set(s string) error {
+	hastings, err := types.ParseCurrency(s)
+	if err != nil {
+		return errors.New("invalid currency format")
+	}
+	_, err = fmt.Sscan(hastings, (*types.Currency)(c))
+	return err
+}
+
+func (c *currencyVar) String() string {
+	return strings.Replace((*types.Currency)(c).HumanString(), " ", "", -1)
+}
+
+func flagCurrencyVar(c *types.Currency, name string, d types.Currency, usage string) {
+	flag.Var(newCurrencyVar(c, d), name, usage)
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -101,9 +128,13 @@ func main() {
 	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service")
 	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service")
 	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
+	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
 	flag.Uint64Var(&busCfg.MinShards, "bus.minShards", 10, "min amount of shards needed to reconstruct the slab")
 	flag.Uint64Var(&busCfg.TotalShards, "bus.totalShards", 30, "total amount of shards for each slab")
-	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
+	flagCurrencyVar(&busCfg.MaxRPCPrice, "bus.maxRPCPrice", types.SiacoinPrecision, "max allowed base price for RPCs")
+	flagCurrencyVar(&busCfg.MaxContractPrice, "bus.maxContractPrice", types.SiacoinPrecision, "max allowed price to form a contract")
+	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.SiacoinPrecision.Mul64(2500), "max allowed price to download one TiB")
+	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.SiacoinPrecision.Mul64(1000), "max allowed price to upload one TiB")
 	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
