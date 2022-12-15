@@ -67,10 +67,10 @@ type Bus interface {
 
 type Worker interface {
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
-	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, rk consensus.PrivateKey) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPForm(endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
-	Contracts(rk [32]byte) (revisions []worker.Contract, err error)
+	Contracts() (revisions []worker.Contract, err error)
 }
 
 type Autopilot struct {
@@ -82,8 +82,6 @@ type Autopilot struct {
 	c *contractor
 	m *migrator
 	s *scanner
-
-	masterKey [32]byte
 
 	ticker   *time.Ticker
 	stopChan chan struct{}

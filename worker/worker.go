@@ -251,6 +251,7 @@ type Bus interface {
 	DeleteObject(key string) error
 
 	WalletDiscard(txn types.Transaction) error
+	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
 	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
 }
 
@@ -273,8 +274,9 @@ func deriveRenterKey(masterKey [32]byte, hostKey consensus.PublicKey) consensus.
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
-	bus  Bus
-	pool *sessionPool
+	bus       Bus
+	pool      *sessionPool
+	masterKey [32]byte
 }
 
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
@@ -430,13 +432,24 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
-	var cs consensus.State
-	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
+
+	hostSettings, hostKey, renterFunds := rfr.HostSettings, rfr.HostKey, rfr.RenterFunds
+	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
+	rk := deriveRenterKey(w.masterKey, hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	err := w.withTransportV2(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
-		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, rfr.RenterKey, rfr.TransactionSet)
+	err := w.withTransportV2(jc.Request.Context(), hostSettings.NetAddress, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
+		renterTxnSet, err := w.bus.WalletPrepareForm(rk, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
+		if err != nil {
+			return err
+		}
+
+		contract, txnSet, err = rhpv2.RPCFormContract(t, rk, renterTxnSet)
+		if err != nil {
+			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
+			return err
+		}
 		return
 	})
 	if jc.Check("couldn't form contract", err) != nil {
@@ -454,8 +467,9 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Decode(&rrr) != nil {
 		return
 	}
-	hostSettings, hostKey, rk, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.RenterFunds
+	hostSettings, hostKey, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
+	rk := deriveRenterKey(w.masterKey, hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
@@ -691,17 +705,12 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpContractsHandler(jc jape.Context) {
-	var req RHPContractsRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
+func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	busContracts, err := w.bus.Contracts()
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
-	cc := parseContractCapabilities(busContracts, req.RenterKey)
+	cc := parseContractCapabilities(busContracts, w.masterKey)
 
 	var contracts []Contract
 	err = w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
@@ -726,11 +735,12 @@ func (w *worker) rhpContractsHandler(jc jape.Context) {
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, b Bus) http.Handler {
 	w := &worker{
-		bus:  b,
-		pool: newSessionPool(),
+		bus:       b,
+		pool:      newSessionPool(),
+		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"POST   /rhp/contracts":       w.rhpContractsHandler,
+		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
