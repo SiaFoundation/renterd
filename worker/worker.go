@@ -223,14 +223,14 @@ type contractCapability struct {
 	RenterKey consensus.PrivateKey
 }
 
-func parseContractCapabilities(contracts []bus.Contract, masterKey [32]byte) []contractCapability {
+func (w *worker) parseContractCapabilities(contracts []bus.Contract) []contractCapability {
 	ccs := make([]contractCapability, len(contracts))
 	for i, c := range contracts {
 		ccs[i] = contractCapability{
 			HostKey:   c.HostKey,
 			HostIP:    c.HostIP,
 			ID:        c.ID,
-			RenterKey: deriveRenterKey(masterKey, c.HostKey),
+			RenterKey: w.deriveRenterKey(c.HostKey),
 		}
 	}
 	return ccs
@@ -262,8 +262,8 @@ type Bus interface {
 //
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
-func deriveRenterKey(masterKey [32]byte, hostKey consensus.PublicKey) consensus.PrivateKey {
-	seed := blake2b.Sum256(append(masterKey[:], hostKey[:]...))
+func (w *worker) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(w.masterKey[:], hostKey[:]...))
 	pk := consensus.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
 		seed[i] = 0
@@ -435,7 +435,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 	hostSettings, hostKey, renterFunds := rfr.HostSettings, rfr.HostKey, rfr.RenterFunds
 	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
-	rk := deriveRenterKey(w.masterKey, hostKey)
+	rk := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
@@ -469,7 +469,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	}
 	hostSettings, hostKey, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
-	rk := deriveRenterKey(w.masterKey, hostKey)
+	rk := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
@@ -507,7 +507,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
-	rk := deriveRenterKey(w.masterKey, rfr.HostKey)
+	rk := w.deriveRenterKey(rfr.HostKey)
 	err := w.withTransportV3(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 		// The FundAccount RPC requires a SettingsID, which we also have to pay
 		// for. To simplify things, we pay for the SettingsID using the full
@@ -576,13 +576,13 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	from := parseContractCapabilities(bFrom, [32]byte{}) // TODO
+	from := w.parseContractCapabilities(bFrom)
 
 	bTo, err := w.bus.ContractSetContracts(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	to := parseContractCapabilities(bTo, [32]byte{}) // TODO
+	to := w.parseContractCapabilities(bTo)
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
 	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
@@ -632,8 +632,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return
 		}
 
-		// TODO: Lock contracts
-		cs := parseContractCapabilities(contracts, [32]byte{}) // TODO
+		cs := w.parseContractCapabilities(contracts)
 		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
 			return downloadSlab(jc.Request.Context(), cw, ss, hosts)
 		})
@@ -663,9 +662,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		cs := parseContractCapabilities(bcs, [32]byte{}) // TODO
-
-		// TODO: Lock contracts
+		cs := w.parseContractCapabilities(bcs)
 
 		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
 		var s object.Slab
@@ -711,7 +708,7 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
-	cc := parseContractCapabilities(busContracts, w.masterKey)
+	cc := w.parseContractCapabilities(busContracts)
 
 	var contracts []Contract
 	err = w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
