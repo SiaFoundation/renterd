@@ -327,37 +327,6 @@ func (w *worker) withHosts(ctx context.Context, contracts []contractCapability, 
 	return err
 }
 
-func (w *worker) rhpPrepareFormHandler(jc jape.Context) {
-	var rpfr RHPPrepareFormRequest
-	if jc.Decode(&rpfr) != nil {
-		return
-	}
-	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
-	cost := rhpv2.ContractFormationCost(fc, rpfr.HostSettings.ContractPrice)
-	jc.Encode(RHPPrepareFormResponse{
-		Contract: fc,
-		Cost:     cost,
-	})
-}
-
-func (w *worker) rhpPrepareRenewHandler(jc jape.Context) {
-	var rprr RHPPrepareRenewRequest
-	if jc.Decode(&rprr) != nil {
-		return
-	}
-	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
-	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
-	finalPayment := rprr.HostSettings.BaseRPCPrice
-	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
-		finalPayment = rprr.Contract.ValidRenterPayout()
-	}
-	jc.Encode(RHPPrepareRenewResponse{
-		Contract:     fc,
-		Cost:         cost,
-		FinalPayment: finalPayment,
-	})
-}
-
 func (w *worker) rhpPreparePaymentHandler(jc jape.Context) {
 	var rppr RHPPreparePaymentRequest
 	if jc.Decode(&rppr) == nil {
@@ -685,8 +654,6 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		pool: newSessionPool(),
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"POST   /rhp/prepare/form":    w.rhpPrepareFormHandler,
-		"POST   /rhp/prepare/renew":   w.rhpPrepareRenewHandler,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
