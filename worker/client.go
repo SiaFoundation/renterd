@@ -28,22 +28,6 @@ func (c *Client) RHPScan(hostKey PublicKey, hostIP string, timeout time.Duration
 	return
 }
 
-// RHPPrepareForm prepares a contract formation transaction.
-func (c *Client) RHPPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error) {
-	req := RHPPrepareFormRequest{
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		RenterFunds:    renterFunds,
-		RenterAddress:  renterAddress,
-		HostCollateral: hostCollateral,
-		EndHeight:      endHeight,
-		HostSettings:   hostSettings,
-	}
-	var resp RHPPrepareFormResponse
-	err := c.c.POST("/rhp/prepare/form", req, &resp)
-	return resp.Contract, resp.Cost, err
-}
-
 // RHPPreparePayment prepares an ephemeral account payment.
 func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
 	req := RHPPreparePaymentRequest{

@@ -387,19 +387,6 @@ func (w *worker) withHosts(ctx context.Context, contracts []contractCapability, 
 	return err
 }
 
-func (w *worker) rhpPrepareFormHandler(jc jape.Context) {
-	var rpfr RHPPrepareFormRequest
-	if jc.Decode(&rpfr) != nil {
-		return
-	}
-	fc := rhpv2.PrepareContractFormation(rpfr.RenterKey, rpfr.HostKey, rpfr.RenterFunds, rpfr.HostCollateral, rpfr.EndHeight, rpfr.HostSettings, rpfr.RenterAddress)
-	cost := rhpv2.ContractFormationCost(fc, rpfr.HostSettings.ContractPrice)
-	jc.Encode(RHPPrepareFormResponse{
-		Contract: fc,
-		Cost:     cost,
-	})
-}
-
 func (w *worker) rhpPreparePaymentHandler(jc jape.Context) {
 	var rppr RHPPreparePaymentRequest
 	if jc.Decode(&rppr) == nil {
@@ -704,7 +691,7 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpRevisionsHandler(jc jape.Context) {
+func (w *worker) rhpContractsHandler(jc jape.Context) {
 	var req RHPContractsRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -743,8 +730,7 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		pool: newSessionPool(),
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"POST   /rhp/contracts":       w.rhpRevisionsHandler,
-		"POST   /rhp/prepare/form":    w.rhpPrepareFormHandler,
+		"POST   /rhp/contracts":       w.rhpContractsHandler,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,

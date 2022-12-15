@@ -51,24 +51,6 @@ type RHPScanResponse struct {
 	Ping     Duration           `json:"ping"`
 }
 
-// RHPPrepareFormRequest is the request type for the /rhp/prepare/form endpoint.
-type RHPPrepareFormRequest struct {
-	RenterKey      PrivateKey         `json:"renterKey"`
-	HostKey        PublicKey          `json:"hostKey"`
-	RenterFunds    types.Currency     `json:"renterFunds"`
-	RenterAddress  types.UnlockHash   `json:"renterAddress"`
-	HostCollateral types.Currency     `json:"hostCollateral"`
-	EndHeight      uint64             `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
-}
-
-// RHPPrepareFormResponse is the response type for the /rhp/prepare/form
-// endpoint.
-type RHPPrepareFormResponse struct {
-	Contract types.FileContract `json:"contract"`
-	Cost     types.Currency     `json:"cost"`
-}
-
 // RHPFormRequest is the request type for the /rhp/form endpoint.
 type RHPFormRequest struct {
 	RenterKey      PrivateKey          `json:"renterKey"`

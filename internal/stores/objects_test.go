@@ -15,113 +15,6 @@ import (
 	"lukechampine.com/frand"
 )
 
-func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.ContractRevision, types.Currency, uint64) {
-	uc := types.UnlockConditions{
-		PublicKeys:         make([]types.SiaPublicKey, 2),
-		SignaturesRequired: 2,
-	}
-	uc.PublicKeys[1].Algorithm = types.SignatureEd25519
-	uc.PublicKeys[1].Key = hk[:]
-
-	totalCost := types.NewCurrency64(frand.Uint64n(1000))
-	return rhp.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         id,
-			UnlockConditions: uc,
-		},
-	}, totalCost, frand.Uint64n(100)
-}
-
-func TestList(t *testing.T) {
-	es := NewEphemeralObjectStore()
-	paths := []string{
-		"/foo/bar",
-		"/foo/bat",
-		"/foo/baz/quux",
-		"/foo/baz/quuz",
-		"/gab/guub",
-	}
-	for _, path := range paths {
-		es.Put(path, object.Object{})
-	}
-	tests := []struct {
-		prefix string
-		want   []string
-	}{
-		{"/", []string{"/foo/", "/gab/"}},
-		{"/foo/", []string{"/foo/bar", "/foo/bat", "/foo/baz/"}},
-		{"/foo/baz/", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
-		{"/gab/", []string{"/gab/guub"}},
-	}
-	for _, test := range tests {
-		got := es.List(test.prefix)
-		if !reflect.DeepEqual(got, test.want) {
-			t.Errorf("\nlist: %v\ngot:  %v\nwant: %v", test.prefix, got, test.want)
-		}
-	}
-}
-
-func randomObject() (o object.Object) {
-	n := frand.Intn(10)
-	o.Slabs = make([]object.SlabSlice, n)
-	o.Key = object.GenerateEncryptionKey()
-	for i := range o.Slabs {
-		n := uint8(frand.Uint64n(10) + 1)
-		offset := uint32(frand.Uint64n(1 << 22))
-		length := offset + uint32(frand.Uint64n(1<<22))
-		o.Slabs[i] = object.SlabSlice{
-			Slab: object.Slab{
-				Key:       object.GenerateEncryptionKey(),
-				MinShards: n,
-				Shards:    make([]object.Sector, n*2),
-			},
-			Offset: offset,
-			Length: length,
-		}
-		for j := range o.Slabs[i].Shards {
-			o.Slabs[i].Shards[j].Root = frand.Entropy256()
-			o.Slabs[i].Shards[j].Host = frand.Entropy256()
-		}
-	}
-	return
-}
-
-func TestJSONObjectStore(t *testing.T) {
-	dir := t.TempDir()
-	os, err := NewJSONObjectStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// put an object
-	obj := randomObject()
-	if err := os.Put("foo", obj); err != nil {
-		t.Fatal(err)
-	}
-
-	// get the object
-	got, err := os.Get("foo")
-	if err != nil {
-		t.Fatal("object not found")
-	} else if !reflect.DeepEqual(got, obj) {
-		t.Fatal("objects are not equal")
-	}
-
-	// reload the store
-	os, err = NewJSONObjectStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// get the object
-	got, err = os.Get("foo")
-	if err != nil {
-		t.Fatal("object not found")
-	} else if !reflect.DeepEqual(got, obj) {
-		t.Fatal("objects are not equal")
-	}
-}
-
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
 	os, _, _, err := newTestSQLStore()
@@ -398,9 +291,8 @@ func TestSQLList(t *testing.T) {
 		"/gab/guub",
 	}
 	for _, path := range paths {
-		os.Put(path, object.Object{
-			Key: object.GenerateEncryptionKey(),
-		}, map[consensus.PublicKey]types.FileContractID{})
+		obj, ucs := newTestObject()
+		os.Put(path, obj, ucs)
 	}
 	tests := []struct {
 		prefix string
@@ -705,4 +597,50 @@ func TestContractSectors(t *testing.T) {
 	if len(css) != 0 {
 		t.Fatal("table should be empty")
 	}
+}
+
+func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.ContractRevision, types.Currency, uint64) {
+	uc := types.UnlockConditions{
+		PublicKeys:         make([]types.SiaPublicKey, 2),
+		SignaturesRequired: 2,
+	}
+	uc.PublicKeys[1].Algorithm = types.SignatureEd25519
+	uc.PublicKeys[1].Key = hk[:]
+
+	totalCost := types.NewCurrency64(frand.Uint64n(1000))
+	return rhp.ContractRevision{
+		Revision: types.FileContractRevision{
+			ParentID:         id,
+			UnlockConditions: uc,
+		},
+	}, totalCost, frand.Uint64n(100)
+}
+
+func newTestObject() (object.Object, map[consensus.PublicKey]types.FileContractID) {
+	obj := object.Object{}
+	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+
+	n := frand.Intn(10)
+	obj.Slabs = make([]object.SlabSlice, n)
+	obj.Key = object.GenerateEncryptionKey()
+	for i := range obj.Slabs {
+		n := uint8(frand.Uint64n(10) + 1)
+		offset := uint32(frand.Uint64n(1 << 22))
+		length := offset + uint32(frand.Uint64n(1<<22))
+		obj.Slabs[i] = object.SlabSlice{
+			Slab: object.Slab{
+				Key:       object.GenerateEncryptionKey(),
+				MinShards: n,
+				Shards:    make([]object.Sector, n*2),
+			},
+			Offset: offset,
+			Length: length,
+		}
+		for j := range obj.Slabs[i].Shards {
+			obj.Slabs[i].Shards[j].Root = frand.Entropy256()
+			obj.Slabs[i].Shards[j].Host = frand.Entropy256()
+			usedContracts[obj.Slabs[i].Shards[j].Host] = types.FileContractID{}
+		}
+	}
+	return obj, usedContracts
 }
