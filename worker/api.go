@@ -68,16 +68,18 @@ type RHPFormResponse struct {
 
 // RHPRenewRequest is the request type for the /rhp/renew endpoint.
 type RHPRenewRequest struct {
-	RenterKey      PrivateKey           `json:"renterKey"`
-	HostKey        PublicKey            `json:"hostKey"`
-	HostIP         string               `json:"hostIP"`
-	ContractID     types.FileContractID `json:"contractID"`
-	TransactionSet []types.Transaction  `json:"transactionSet"`
-	FinalPayment   types.Currency       `json:"finalPayment"`
+	ContractID    types.FileContractID `json:"contractID"`
+	EndHeight     uint64               `json:"endHeight"`
+	HostKey       PublicKey            `json:"hostKey"`
+	HostSettings  rhpv2.HostSettings   `json:"hostSettings"`
+	RenterAddress types.UnlockHash     `json:"renterAddress"`
+	RenterFunds   types.Currency       `json:"renterFunds"`
+	RenterKey     consensus.PrivateKey `json:"renterKey"`
 }
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.
 type RHPRenewResponse struct {
+	Error          string                 `json:"error"`
 	ContractID     types.FileContractID   `json:"contractID"`
 	Contract       rhpv2.ContractRevision `json:"contract"`
 	TransactionSet []types.Transaction    `json:"transactionSet"`
@@ -119,4 +121,8 @@ type RHPRegistryUpdateRequest struct {
 	RegistryKey   rhpv3.RegistryKey                  `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue                `json:"registryValue"`
 	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
+}
+
+type RHPContractsRequest struct {
+	RenterKey [32]byte
 }

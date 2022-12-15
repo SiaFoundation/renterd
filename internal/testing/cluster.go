@@ -395,7 +395,7 @@ func (c *TestCluster) AddHosts(n int) error {
 			return err
 		}
 		for _, c := range contracts {
-			hostsWithContracts[c.HostKey().String()] = struct{}{}
+			hostsWithContracts[c.HostKey.String()] = struct{}{}
 		}
 		for _, h := range newHosts {
 			hpk, err := h.HostPublicKey()
@@ -406,7 +406,6 @@ func (c *TestCluster) AddHosts(n int) error {
 			if !exists {
 				return fmt.Errorf("missing contract for host %v", hpk.String())
 			}
-			return nil
 		}
 		return nil
 	})

@@ -39,7 +39,7 @@ func (m *migrator) UpdateContracts() error {
 	m.goodContracts = m.goodContracts[:0]
 	for _, c := range contracts {
 		// TODO: filter out contracts that are not good.
-		m.goodContracts = append(m.goodContracts, c.ID())
+		m.goodContracts = append(m.goodContracts, c.ID)
 	}
 	return nil
 }

@@ -70,8 +70,7 @@ type ContractsIDRenewedRequest struct {
 // ContractAcquireResponse is the response type for the /contracts/:id/acquire
 // endpoint.
 type ContractAcquireResponse struct {
-	Locked   bool                       `json:"locked"`
-	Revision types.FileContractRevision `json:"revision,omitempty"`
+	Locked bool `json:"locked"`
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.

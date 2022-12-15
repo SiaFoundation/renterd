@@ -44,7 +44,7 @@ type Bus interface {
 	Contract(id types.FileContractID) (contract bus.Contract, err error)
 	Contracts() ([]bus.Contract, error)
 
-	AcquireContract(id types.FileContractID, d time.Duration) (types.FileContractRevision, error)
+	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
 	ReleaseContract(id types.FileContractID) error
 
 	// contractsets
@@ -68,8 +68,9 @@ type Bus interface {
 type Worker interface {
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
 	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, rk consensus.PrivateKey) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
+	Contracts(rk [32]byte) (revisions []worker.Contract, err error)
 }
 
 type Autopilot struct {

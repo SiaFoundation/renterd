@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -10,7 +11,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, renewed, formed, toDelete, toIgnore, toRenew []bus.Contract) error {
+func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRenew []types.FileContractID, renewed []bus.Contract) error {
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
@@ -18,26 +19,28 @@ func (ap *Autopilot) updateDefaultContracts(active, renewed, formed, toDelete, t
 
 	// renewed map is special case since we need renewed from
 	isRenewed := make(map[types.FileContractID]bool)
+	renewedIDs := make([]types.FileContractID, len(renewed))
 	for _, c := range renewed {
 		isRenewed[c.RenewedFrom] = true
+		renewedIDs = append(renewedIDs, c.ID)
 	}
 
 	// build new contract set
 	var contracts []types.FileContractID
-	for _, c := range append(active, append(renewed, formed...)...) {
-		if isDeleted[c.ID()] {
+	for _, fcid := range append(active, append(renewedIDs, formed...)...) {
+		if isDeleted[fcid] {
 			continue // exclude deleted contracts
 		}
-		if isIgnored[c.ID()] {
+		if isIgnored[fcid] {
 			continue // exclude ignored contracts (contracts that became unusable)
 		}
-		if isRenewed[c.ID()] {
+		if isRenewed[fcid] {
 			continue // exclude (effectively) renewed contracts
 		}
-		if isUpForRenew[c.ID()] && !isRenewed[c.ID()] {
+		if isUpForRenew[fcid] && !isRenewed[fcid] {
 			continue // exclude contracts that were up for renewal but failed to renew
 		}
-		contracts = append(contracts, c.ID())
+		contracts = append(contracts, fcid)
 	}
 
 	// TODO: contracts that are up for renewal could be used for dl, not ul
@@ -47,18 +50,18 @@ func (ap *Autopilot) updateDefaultContracts(active, renewed, formed, toDelete, t
 	return ap.bus.SetContractSet(defaultSetName, contracts)
 }
 
-func contractIds(contracts []bus.Contract) []types.FileContractID {
+func contractIds(contracts []worker.Contract) []types.FileContractID {
 	ids := make([]types.FileContractID, len(contracts))
 	for i, c := range contracts {
-		ids[i] = c.ID()
+		ids[i] = c.ID
 	}
 	return ids
 }
 
-func contractMapBool(contracts []bus.Contract) map[types.FileContractID]bool {
+func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]bool {
 	cmap := make(map[types.FileContractID]bool)
-	for _, c := range contracts {
-		cmap[c.ID()] = true
+	for _, fcid := range contracts {
+		cmap[fcid] = true
 	}
 	return cmap
 }

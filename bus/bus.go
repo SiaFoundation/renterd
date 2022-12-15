@@ -68,7 +68,7 @@ type (
 
 	// A ContractStore stores contracts.
 	ContractStore interface {
-		AcquireContract(fcid types.FileContractID, duration time.Duration) (types.FileContractRevision, bool, error)
+		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]Contract, error)
 		Contract(id types.FileContractID) (Contract, error)
@@ -396,13 +396,12 @@ func (b *bus) contractsAcquireHandler(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	rev, locked, err := b.cs.AcquireContract(id, req.Duration)
+	locked, err := b.cs.AcquireContract(id, req.Duration)
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}
 	jc.Encode(ContractAcquireResponse{
-		Locked:   locked,
-		Revision: rev,
+		Locked: locked,
 	})
 }
 
@@ -506,7 +505,7 @@ func (b *bus) contractSetContractsHandler(jc jape.Context) {
 	}
 	allMap := make(map[types.FileContractID]Contract)
 	for _, c := range all {
-		allMap[c.ID()] = c
+		allMap[c.ID] = c
 	}
 	var contracts []Contract
 	for _, fcid := range setContracts {

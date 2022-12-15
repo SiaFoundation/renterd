@@ -23,7 +23,7 @@ require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
-	github.com/gorilla/websocket v1.4.2 // indirect
+	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hanwen/go-fuse/v2 v2.1.0 // indirect
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect

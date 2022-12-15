@@ -251,7 +251,7 @@ func RPCFormContract(t *Transport, cs ConsensusState, renterKey PrivateKey, txnS
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host. The old contract is "cleared," reverting its
 // filesize to zero.
-func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, finalPayment types.Currency) (_ ContractRevision, _ []types.Transaction, err error) {
+func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.Currency) (_ ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 
 	// strip our signatures before sending
@@ -260,7 +260,7 @@ func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, f
 	txnSet[len(txnSet)-1].TransactionSignatures = nil
 
 	// construct the final revision of the old contract
-	finalOldRevision := s.contract.Revision
+	finalOldRevision := s.revision.Revision
 	newValid, _ := updateRevisionOutputs(&finalOldRevision, finalPayment, types.ZeroCurrency)
 	finalOldRevision.NewMissedProofOutputs = finalOldRevision.NewValidProofOutputs
 	finalOldRevision.NewFileSize = 0
@@ -269,7 +269,7 @@ func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, f
 
 	req := &RPCRenewAndClearContractRequest{
 		Transactions:           txnSet,
-		RenterKey:              s.contract.Revision.UnlockConditions.PublicKeys[0],
+		RenterKey:              s.revision.Revision.UnlockConditions.PublicKeys[0],
 		FinalValidProofValues:  newValid,
 		FinalMissedProofValues: newValid,
 	}
@@ -290,7 +290,7 @@ func (s *Session) RenewContract(cs ConsensusState, txnSet []types.Transaction, f
 	fc := txn.FileContracts[0]
 	initRevision := types.FileContractRevision{
 		ParentID:          txn.FileContractID(0),
-		UnlockConditions:  s.contract.Revision.UnlockConditions,
+		UnlockConditions:  s.revision.Revision.UnlockConditions,
 		NewRevisionNumber: 1,
 
 		NewFileSize:           fc.FileSize,

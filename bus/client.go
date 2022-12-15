@@ -307,10 +307,10 @@ func (c *Client) ContractSetContracts(name string) (contracts []Contract, err er
 
 // AcquireContract acquires a contract for a given amount of time unless
 // released manually before that time.
-func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (rev types.FileContractRevision, err error) {
+func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (locked bool, err error) {
 	var resp ContractAcquireResponse
 	err = c.c.POST(fmt.Sprintf("/contracts/%s/acquire", fcid), ContractAcquireRequest{Duration: d}, &resp)
-	rev = resp.Revision
+	locked = resp.Locked
 	return
 }
 

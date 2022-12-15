@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -53,14 +54,15 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, rk consensus.PrivateKey) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := RHPRenewRequest{
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		HostIP:         hostIP,
-		ContractID:     contractID,
-		TransactionSet: transactionSet,
-		FinalPayment:   finalPayment,
+		ContractID:    fcid,
+		EndHeight:     endHeight,
+		HostKey:       hk,
+		HostSettings:  hs,
+		RenterAddress: renterAddress,
+		RenterFunds:   renterFunds,
+		RenterKey:     rk,
 	}
 	var resp RHPRenewResponse
 	err := c.c.POST("/rhp/renew", req, &resp)
@@ -175,6 +177,13 @@ func (c *Client) DownloadObject(w io.Writer, path string) (err error) {
 // DeleteObject deletes the object with the given name.
 func (c *Client) DeleteObject(name string) (err error) {
 	err = c.c.DELETE(fmt.Sprintf("/objects/%s", name))
+	return
+}
+
+func (c *Client) Contracts(rk [32]byte) (revisions []Contract, err error) {
+	err = c.c.POST("/rhp/contracts", RHPContractsRequest{
+		RenterKey: rk,
+	}, &revisions)
 	return
 }
 

@@ -22,7 +22,34 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
+	"golang.org/x/crypto/blake2b"
 )
+
+type Contract struct {
+	bus.Contract `json:"contract"`
+	Revision     rhpv2.ContractRevision `json:"revision"`
+}
+
+// EndHeight returns the height at which the host is no longer obligated to
+// store contract data.
+func (c Contract) EndHeight() uint64 {
+	return uint64(c.Revision.EndHeight())
+}
+
+// FileSize returns the current Size of the contract.
+func (c Contract) FileSize() uint64 {
+	return c.Revision.Revision.NewFileSize
+}
+
+// HostKey returns the public key of the host.
+func (c Contract) HostKey() (pk PublicKey) {
+	return c.Revision.HostKey()
+}
+
+// RenterFunds returns the funds remaining in the contract's Renter payout.
+func (c Contract) RenterFunds() types.Currency {
+	return c.Revision.RenterFunds()
+}
 
 // parseRange parses a Range header string as per RFC 7233. Only the first range
 // is returned. If no range is specified, parseRange returns 0, size.
@@ -196,11 +223,25 @@ type contractCapability struct {
 	RenterKey consensus.PrivateKey
 }
 
+func parseContractCapabilities(contracts []bus.Contract, masterKey [32]byte) []contractCapability {
+	ccs := make([]contractCapability, len(contracts))
+	for i, c := range contracts {
+		ccs[i] = contractCapability{
+			HostKey:   c.HostKey,
+			HostIP:    c.HostIP,
+			ID:        c.ID,
+			RenterKey: deriveRenterKey(masterKey, c.HostKey),
+		}
+	}
+	return ccs
+}
+
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	ContractSetContracts(name string) ([]bus.Contract, error)
 	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
+	Contracts() ([]bus.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
 	MigrateParams(slab object.Slab) (bus.MigrateParams, error)
@@ -208,6 +249,25 @@ type Bus interface {
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
+
+	WalletDiscard(txn types.Transaction) error
+	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+}
+
+// TODO: deriving the renter key from the host key using the master key only
+// works if we persist a hash of the renter's master key in the database and
+// compare it on startup, otherwise there's no way of knowing the derived key is
+// usuable
+//
+// TODO: instead of deriving a renter key use a randomly generated salt so we're
+// not limited to one key per host
+func deriveRenterKey(masterKey [32]byte, hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(masterKey[:], hostKey[:]...))
+	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }
 
 // A worker talks to Sia hosts to perform contract and storage operations within
@@ -394,18 +454,29 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Decode(&rrr) != nil {
 		return
 	}
-	var cs consensus.State
-	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
+	hostSettings, hostKey, rk, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.RenterFunds
+	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	err := w.withTransportV2(jc.Request.Context(), rrr.HostIP, rrr.HostKey, func(t *rhpv2.Transport) error {
-		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rrr.ContractID, rrr.RenterKey, 5*time.Second)
+	err := w.withTransportV2(jc.Request.Context(), hostSettings.NetAddress, hostKey, func(t *rhpv2.Transport) error {
+		session, err := rhpv2.RPCLock(jc.Request.Context(), t, toRenewID, rk, 5*time.Second)
 		if err != nil {
 			return err
 		}
-		contract, txnSet, err = session.RenewContract(cs, rrr.TransactionSet, rrr.FinalPayment)
-		return err
+		rev := session.Revision()
+
+		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, rk, hostKey, renterFunds, renterAddress, endHeight, hostSettings)
+		if err != nil {
+			return err
+		}
+
+		contract, txnSet, err = session.RenewContract(renterTxnSet, finalPayment)
+		if err != nil {
+			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
+			return err
+		}
+		return nil
 	})
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
@@ -490,28 +561,13 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	from := make([]contractCapability, len(bFrom))
-	for i, c := range bFrom {
-		from[i] = contractCapability{
-			HostKey:   c.HostKey(),
-			HostIP:    c.HostIP,
-			ID:        c.ID(),
-			RenterKey: nil, // TODO
-		}
-	}
+	from := parseContractCapabilities(bFrom, [32]byte{}) // TODO
+
 	bTo, err := w.bus.ContractSetContracts(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	to := make([]contractCapability, len(bTo))
-	for i, c := range bTo {
-		to[i] = contractCapability{
-			HostKey:   c.HostKey(),
-			HostIP:    c.HostIP,
-			ID:        c.ID(),
-			RenterKey: nil, // TODO
-		}
-	}
+	to := parseContractCapabilities(bTo, [32]byte{}) // TODO
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
 	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
@@ -560,15 +616,9 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			_ = err // NOTE: can't write error because we may have already written to the response
 			return
 		}
-		cs := make([]contractCapability, len(contracts))
-		for i, c := range contracts {
-			cs[i] = contractCapability{
-				HostKey:   c.HostKey(),
-				HostIP:    c.HostIP,
-				ID:        c.ID(),
-				RenterKey: nil, // TODO
-			}
-		}
+
+		// TODO: Lock contracts
+		cs := parseContractCapabilities(contracts, [32]byte{}) // TODO
 		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
 			return downloadSlab(jc.Request.Context(), cw, ss, hosts)
 		})
@@ -598,15 +648,9 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		cs := make([]contractCapability, len(bcs))
-		for i, c := range bcs {
-			cs[i] = contractCapability{
-				HostKey:   c.HostKey(),
-				HostIP:    c.HostIP,
-				ID:        c.ID(),
-				RenterKey: nil, // TODO
-			}
-		}
+		cs := parseContractCapabilities(bcs, [32]byte{}) // TODO
+
+		// TODO: Lock contracts
 
 		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
 		var s object.Slab
@@ -647,6 +691,38 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
+func (w *worker) rhpContractsHandler(jc jape.Context) {
+	var req RHPContractsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	busContracts, err := w.bus.Contracts()
+	if jc.Check("failed to fetch contracts from bus", err) != nil {
+		return
+	}
+	cc := parseContractCapabilities(busContracts, req.RenterKey)
+
+	var contracts []Contract
+	err = w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
+		for i, store := range ss {
+			rev, err := store.(*session).Revision()
+			if err != nil {
+				return err
+			}
+			contracts = append(contracts, Contract{
+				Contract: busContracts[i],
+				Revision: rev,
+			})
+		}
+		return nil
+	})
+	if jc.Check("failed to fetch contracts", err) != nil {
+		return
+	}
+	jc.Encode(contracts)
+}
+
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, b Bus) http.Handler {
 	w := &worker{
@@ -654,6 +730,7 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		pool: newSessionPool(),
 	}
 	return jape.Mux(map[string]jape.Handler{
+		"POST   /rhp/contracts":       w.rhpContractsHandler,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,

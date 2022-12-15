@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
@@ -27,6 +28,12 @@ func TestSQLContractStore(t *testing.T) {
 	// Create a host for the contract.
 	hk := consensus.GeneratePrivateKey().PublicKey()
 	err = cs.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an announcement.
+	err = insertAnnouncement(cs.db, hk, hostdb.Announcement{NetAddress: "address"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,10 +112,10 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := bus.Contract{
-		HostIP:      "",
+		ID:          fcid,
+		HostIP:      "address",
+		HostKey:     hk,
 		StartHeight: 100,
-		Revision:    c.Revision,
-		Signatures:  c.Signatures,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: types.FileContractID{},
 			Spending:    bus.ContractSpending{},
@@ -161,12 +168,6 @@ func TestSQLContractStore(t *testing.T) {
 	if err := tableCountCheck(&dbContract{}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := tableCountCheck(&dbFileContractRevision{}, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := tableCountCheck(&dbValidSiacoinOutput{}, 0); err != nil {
-		t.Fatal(err)
-	}
 
 	// Check join table count as well.
 	var count int64
@@ -213,19 +214,16 @@ func TestContractLocking(t *testing.T) {
 	}
 
 	// Lock it.
-	rev, acquired, err := cs.AcquireContract(fcid, time.Minute)
+	acquired, err := cs.AcquireContract(fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !acquired {
 		t.Fatal("contract wasn't locked")
 	}
-	if rev.ParentID != fcid {
-		t.Fatalf("wrong parent id %v != %v", rev.ParentID, fcid)
-	}
 
 	// Lock again. Shouldn't work.
-	_, acquired, err = cs.AcquireContract(fcid, time.Minute)
+	acquired, err = cs.AcquireContract(fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +237,7 @@ func TestContractLocking(t *testing.T) {
 	}
 
 	// Acquire again.
-	_, acquired, err = cs.AcquireContract(fcid, time.Minute)
+	acquired, err = cs.AcquireContract(fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,6 +256,12 @@ func TestRenewedContract(t *testing.T) {
 	// Create a host for the contract.
 	hk := consensus.GeneratePrivateKey().PublicKey()
 	err = cs.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an announcement.
+	err = insertAnnouncement(cs.db, hk, hostdb.Announcement{NetAddress: "address"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +291,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Assert the contract is returned.
-	if added.Revision.ParentID != fcid || added.RenewedFrom != (types.FileContractID{}) {
+	if added.RenewedFrom != (types.FileContractID{}) {
 		t.Fatal("unexpected")
 	}
 
@@ -319,10 +323,10 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := bus.Contract{
-		HostIP:      "",
+		ID:          fcid2,
+		HostIP:      "address",
+		HostKey:     hk,
 		StartHeight: newContractStartHeight,
-		Revision:    newContract.Revision,
-		Signatures:  newContract.Signatures,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: fcid,
 			Spending:    bus.ContractSpending{},
@@ -345,14 +349,10 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:           fcid,
-		FileSize:       c.Revision.NewFileSize,
-		Host:           c.HostKey(),
-		RenewedTo:      fcid2,
-		Reason:         archivalReasonRenewed,
-		RevisionNumber: c.Revision.NewRevisionNumber,
-		WindowStart:    c.Revision.NewWindowStart,
-		WindowEnd:      c.Revision.NewWindowEnd,
+		FCID:      fcid,
+		Host:      c.HostKey(),
+		RenewedTo: fcid2,
+		Reason:    archivalReasonRenewed,
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
 		fmt.Println(ac)
@@ -378,7 +378,7 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if renewedContract.Revision.ParentID != fcid3 || renewedContract.RenewedFrom != fcid2 {
+	if renewedContract.RenewedFrom != fcid2 {
 		t.Fatal("unexpected")
 	}
 }
