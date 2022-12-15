@@ -223,6 +223,19 @@ type contractCapability struct {
 	RenterKey consensus.PrivateKey
 }
 
+func parseContractCapabilities(contracts []bus.Contract, masterKey [32]byte) []contractCapability {
+	ccs := make([]contractCapability, len(contracts))
+	for i, c := range contracts {
+		ccs[i] = contractCapability{
+			HostKey:   c.HostKey,
+			HostIP:    c.HostIP,
+			ID:        c.ID,
+			RenterKey: deriveRenterKey(masterKey, c.HostKey),
+		}
+	}
+	return ccs
+}
+
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
@@ -464,17 +477,14 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
-		rev := session.Contract()
+		rev := session.Revision()
 
 		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, rk, hostKey, renterFunds, renterAddress, endHeight, hostSettings)
 		if err != nil {
 			return err
 		}
 
-		var cs consensus.State
-		cs.Index.Height = uint64(renterTxnSet[len(renterTxnSet)-1].FileContracts[0].WindowStart)
-
-		contract, txnSet, err = session.RenewContract(cs, renterTxnSet, finalPayment)
+		contract, txnSet, err = session.RenewContract(renterTxnSet, finalPayment)
 		if err != nil {
 			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
 			return err
@@ -564,28 +574,13 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	from := make([]contractCapability, len(bFrom))
-	for i, c := range bFrom {
-		from[i] = contractCapability{
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			ID:        c.ID,
-			RenterKey: nil, // TODO
-		}
-	}
+	from := parseContractCapabilities(bFrom, [32]byte{}) // TODO
+
 	bTo, err := w.bus.ContractSetContracts(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	to := make([]contractCapability, len(bTo))
-	for i, c := range bTo {
-		to[i] = contractCapability{
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			ID:        c.ID,
-			RenterKey: nil, // TODO
-		}
-	}
+	to := parseContractCapabilities(bTo, [32]byte{}) // TODO
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
 	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
@@ -636,16 +631,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		}
 
 		// TODO: Lock contracts
-
-		cs := make([]contractCapability, len(contracts))
-		for i, c := range contracts {
-			cs[i] = contractCapability{
-				HostKey:   c.HostKey,
-				HostIP:    c.HostIP,
-				ID:        c.ID,
-				RenterKey: nil, // TODO
-			}
-		}
+		cs := parseContractCapabilities(contracts, [32]byte{}) // TODO
 		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
 			return downloadSlab(jc.Request.Context(), cw, ss, hosts)
 		})
@@ -675,15 +661,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		cs := make([]contractCapability, len(bcs))
-		for i, c := range bcs {
-			cs[i] = contractCapability{
-				HostKey:   c.HostKey,
-				HostIP:    c.HostIP,
-				ID:        c.ID,
-				RenterKey: nil, // TODO
-			}
-		}
+		cs := parseContractCapabilities(bcs, [32]byte{}) // TODO
 
 		// TODO: Lock contracts
 
@@ -736,16 +714,7 @@ func (w *worker) rhpRevisionsHandler(jc jape.Context) {
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
-
-	cc := make([]contractCapability, len(busContracts))
-	for i, c := range busContracts {
-		cc[i] = contractCapability{
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			ID:        c.ID,
-			RenterKey: deriveRenterKey(req.RenterKey, c.HostKey),
-		}
-	}
+	cc := parseContractCapabilities(busContracts, req.RenterKey)
 
 	var contracts []Contract
 	err = w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {

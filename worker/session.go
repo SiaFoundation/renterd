@@ -54,10 +54,10 @@ type sharedSession struct {
 }
 
 func (s *sharedSession) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, currentHeight uint64) (consensus.Hash256, error) {
-	if currentHeight > uint64(s.sess.Contract().Revision.NewWindowStart) {
+	if currentHeight > uint64(s.sess.Revision().Revision.NewWindowStart) {
 		return consensus.Hash256{}, fmt.Errorf("contract has expired")
 	}
-	storageDuration := uint64(s.sess.Contract().Revision.NewWindowStart) - currentHeight
+	storageDuration := uint64(s.sess.Revision().Revision.NewWindowStart) - currentHeight
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
 	return s.sess.Append(ctx, sector, price, collateral)
 }
@@ -74,7 +74,7 @@ func (s *sharedSession) readSector(ctx context.Context, w io.Writer, root consen
 
 func (s *sharedSession) deleteSectors(ctx context.Context, roots []consensus.Hash256) error {
 	// download the full set of SectorRoots
-	contractSectors := s.sess.Contract().NumSectors()
+	contractSectors := s.sess.Revision().NumSectors()
 	rootIndices := make(map[consensus.Hash256]uint64, contractSectors)
 	for offset := uint64(0); offset < contractSectors; {
 		n := uint64(130000) // a little less than 4MiB of roots
@@ -136,7 +136,7 @@ func (s *session) Revision() (rhpv2.ContractRevision, error) {
 		return rhpv2.ContractRevision{}, err
 	}
 	defer s.pool.release(ss)
-	return ss.sess.Contract(), nil
+	return ss.sess.Revision(), nil
 }
 
 func (s *session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
@@ -204,8 +204,8 @@ func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSessio
 				goto reconnect
 			}
 		}
-		if ss.sess.Contract().ID() != s.contractID {
-			if ss.sess.Contract().ID() != (types.FileContractID{}) {
+		if ss.sess.Revision().ID() != s.contractID {
+			if ss.sess.Revision().ID() != (types.FileContractID{}) {
 				if err := ss.sess.Unlock(); err != nil {
 					t.Close()
 					goto reconnect
@@ -285,7 +285,7 @@ func (sp *sessionPool) unlockContract(s *session) {
 	}
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-	if ss.sess != nil && ss.sess.Contract().ID() == s.contractID {
+	if ss.sess != nil && ss.sess.Revision().ID() == s.contractID {
 		ss.sess.Unlock()
 	}
 }
