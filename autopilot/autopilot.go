@@ -70,7 +70,7 @@ type Worker interface {
 	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, rk consensus.PrivateKey) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
-	Revisions(rk [32]byte, contracts []bus.Contract) (revisions []rhpv2.ContractRevision, err error)
+	Contracts(rk [32]byte) (revisions []worker.Contract, err error)
 }
 
 type Autopilot struct {

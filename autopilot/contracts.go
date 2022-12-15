@@ -1,6 +1,8 @@
 package autopilot
 
 import (
+	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 )
 
@@ -9,7 +11,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRenew []types.FileContractID, renewed []contract) error {
+func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRenew []types.FileContractID, renewed []bus.Contract) error {
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
@@ -17,13 +19,15 @@ func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, 
 
 	// renewed map is special case since we need renewed from
 	isRenewed := make(map[types.FileContractID]bool)
+	renewedIDs := make([]types.FileContractID, len(renewed))
 	for _, c := range renewed {
 		isRenewed[c.RenewedFrom] = true
+		renewedIDs = append(renewedIDs, c.ID)
 	}
 
 	// build new contract set
 	var contracts []types.FileContractID
-	for _, fcid := range append(active, append(contractIds(renewed), formed...)...) {
+	for _, fcid := range append(active, append(renewedIDs, formed...)...) {
 		if isDeleted[fcid] {
 			continue // exclude deleted contracts
 		}
@@ -46,10 +50,10 @@ func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, 
 	return ap.bus.SetContractSet(defaultSetName, contracts)
 }
 
-func contractIds(contracts []contract) []types.FileContractID {
+func contractIds(contracts []worker.Contract) []types.FileContractID {
 	ids := make([]types.FileContractID, len(contracts))
 	for i, c := range contracts {
-		ids[i] = c.Contract.ID
+		ids[i] = c.ID
 	}
 	return ids
 }

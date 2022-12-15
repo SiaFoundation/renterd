@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"time"
 
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -142,7 +141,6 @@ type RHPRegistryUpdateRequest struct {
 	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
 }
 
-type RHPRevisionsRequest struct {
-	Contracts []bus.Contract
+type RHPContractsRequest struct {
 	RenterKey [32]byte
 }

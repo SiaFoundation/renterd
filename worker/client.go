@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -197,9 +196,8 @@ func (c *Client) DeleteObject(name string) (err error) {
 	return
 }
 
-func (c *Client) Revisions(rk [32]byte, contracts []bus.Contract) (revisions []rhpv2.ContractRevision, err error) {
-	err = c.c.POST("/rhp/revisions", RHPRevisionsRequest{
-		Contracts: contracts,
+func (c *Client) Contracts(rk [32]byte) (revisions []Contract, err error) {
+	err = c.c.POST("/rhp/contracts", RHPContractsRequest{
 		RenterKey: rk,
 	}, &revisions)
 	return

@@ -25,7 +25,31 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-type SigningFn func(fc types.FileContract, cost types.Currency) ([]types.Transaction, func() error, error)
+type Contract struct {
+	bus.Contract `json:"contract"`
+	Revision     rhpv2.ContractRevision `json:"revision"`
+}
+
+// EndHeight returns the height at which the host is no longer obligated to
+// store contract data.
+func (c Contract) EndHeight() uint64 {
+	return uint64(c.Revision.EndHeight())
+}
+
+// FileSize returns the current Size of the contract.
+func (c Contract) FileSize() uint64 {
+	return c.Revision.Revision.NewFileSize
+}
+
+// HostKey returns the public key of the host.
+func (c Contract) HostKey() (pk PublicKey) {
+	return c.Revision.HostKey()
+}
+
+// RenterFunds returns the funds remaining in the contract's Renter payout.
+func (c Contract) RenterFunds() types.Currency {
+	return c.Revision.RenterFunds()
+}
 
 // parseRange parses a Range header string as per RFC 7233. Only the first range
 // is returned. If no range is specified, parseRange returns 0, size.
@@ -204,6 +228,7 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	ContractSetContracts(name string) ([]bus.Contract, error)
 	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
+	Contracts() ([]bus.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
 	MigrateParams(slab object.Slab) (bus.MigrateParams, error)
@@ -702,13 +727,18 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 }
 
 func (w *worker) rhpRevisionsHandler(jc jape.Context) {
-	var req RHPRevisionsRequest
+	var req RHPContractsRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
 
-	cc := make([]contractCapability, len(req.Contracts))
-	for i, c := range req.Contracts {
+	busContracts, err := w.bus.Contracts()
+	if jc.Check("failed to fetch contracts from bus", err) != nil {
+		return
+	}
+
+	cc := make([]contractCapability, len(busContracts))
+	for i, c := range busContracts {
 		cc[i] = contractCapability{
 			HostKey:   c.HostKey,
 			HostIP:    c.HostIP,
@@ -717,21 +747,24 @@ func (w *worker) rhpRevisionsHandler(jc jape.Context) {
 		}
 	}
 
-	var revisions []rhpv2.ContractRevision
-	err := w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
-		for _, store := range ss {
+	var contracts []Contract
+	err = w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
+		for i, store := range ss {
 			rev, err := store.(*session).Revision()
 			if err != nil {
 				return err
 			}
-			revisions = append(revisions, rev)
+			contracts = append(contracts, Contract{
+				Contract: busContracts[i],
+				Revision: rev,
+			})
 		}
 		return nil
 	})
-	if jc.Check("failed to fetch revisions", err) != nil {
+	if jc.Check("failed to fetch contracts", err) != nil {
 		return
 	}
-	jc.Encode(revisions)
+	jc.Encode(contracts)
 }
 
 // New returns an HTTP handler that serves the worker API.
@@ -741,13 +774,13 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		pool: newSessionPool(),
 	}
 	return jape.Mux(map[string]jape.Handler{
+		"POST   /rhp/contracts":       w.rhpRevisionsHandler,
 		"POST   /rhp/prepare/form":    w.rhpPrepareFormHandler,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
 		"POST   /rhp/renew":           w.rhpRenewHandler,
 		"POST   /rhp/fund":            w.rhpFundHandler,
-		"POST   /rhp/revisions":       w.rhpRevisionsHandler,
 		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
 
