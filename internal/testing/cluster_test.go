@@ -9,6 +9,8 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // TestNewTestCluster is a smoke test for creating a cluster of Nodes for
@@ -18,7 +20,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster, err := newTestCluster(t.TempDir())
+	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		t.Fatal(err)
 	}

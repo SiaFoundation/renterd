@@ -30,6 +30,14 @@ type ContractSpending struct {
 	FundAccount types.Currency `json:"fundAccount"`
 }
 
+// Add returns the sum of the current and given contract spending.
+func (x ContractSpending) Add(y ContractSpending) (s ContractSpending) {
+	s.Uploads = x.Uploads.Add(y.Uploads)
+	s.Downloads = x.Downloads.Add(y.Downloads)
+	s.FundAccount = x.FundAccount.Add(y.FundAccount)
+	return
+}
+
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
 func (c Contract) EndHeight() uint64 {

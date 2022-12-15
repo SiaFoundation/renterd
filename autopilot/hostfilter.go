@@ -51,18 +51,22 @@ func isUsableHost(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings,
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg Config, h Host, c bus.Contract, m bus.ContractMetadata, bh uint64) (bool, bool, []string) {
+func isUsableContract(cfg Config, h Host, c bus.Contract, bh uint64) (bool, bool, []string) {
 	var reasons []string
 	renewable := true
 
-	if isOutOfFunds(cfg, h, c, m) {
+	if isOutOfFunds(cfg, h, c) {
 		reasons = append(reasons, "out of funds")
 	}
 	if isUpForRenewal(cfg, c, bh) {
 		reasons = append(reasons, "up for renewal")
 	}
-	if isMaxRevision(c) {
+	if c.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
+		renewable = false
+	}
+	if bh > c.EndHeight() {
+		reasons = append(reasons, "expired")
 		renewable = false
 	}
 
@@ -73,7 +77,7 @@ func isMaxRevision(c bus.Contract) bool {
 	return c.Revision.NewRevisionNumber == math.MaxUint64
 }
 
-func isOutOfFunds(cfg Config, h Host, c bus.Contract, m bus.ContractMetadata) bool {
+func isOutOfFunds(cfg Config, h Host, c bus.Contract) bool {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return false
@@ -85,7 +89,7 @@ func isOutOfFunds(cfg Config, h Host, c bus.Contract, m bus.ContractMetadata) bo
 	sectorDownloadBandwidthPrice := settings.DownloadBandwidthPrice.Mul64(modules.SectorSize)
 	sectorBandwidthPrice := sectorUploadBandwidthPrice.Add(sectorDownloadBandwidthPrice)
 	sectorPrice := sectorStoragePrice.Add(sectorBandwidthPrice)
-	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), m.TotalCost.Big()).Float64()
+	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.TotalCost.Big()).Float64()
 
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }

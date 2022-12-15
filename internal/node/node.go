@@ -239,7 +239,12 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 	return w, func() error { return nil }, nil
 }
 
-func newLogger(path string) (*zap.Logger, func(), error) {
+func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
+	ap := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval)
+	return ap, ap.Stop, nil
+}
+
+func NewLogger(path string) (*zap.Logger, func(), error) {
 	writer, closeFn, err := zap.Open(path)
 	if err != nil {
 		return nil, nil, err
@@ -270,29 +275,4 @@ func newLogger(path string) (*zap.Logger, func(), error) {
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	), closeFn, nil
-}
-
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, w autopilot.Worker, dir string) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
-	autopilotDir := filepath.Join(dir, "autopilot")
-	if err := os.MkdirAll(autopilotDir, 0700); err != nil {
-		return nil, nil, err
-	}
-	store, err := stores.NewJSONAutopilotStore(autopilotDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
-	logger, closeFn, err := newLogger(autopilotLog)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	ap := autopilot.New(store, b, w, logger, cfg.Heartbeat, cfg.ScannerInterval)
-	cleanup = func() (err error) {
-		err = ap.Stop()
-		_ = logger.Sync() // ignore error
-		closeFn()
-		return
-	}
-	return ap, cleanup, nil
 }
