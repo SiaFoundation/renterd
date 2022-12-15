@@ -507,12 +507,13 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
+	rk := deriveRenterKey(w.masterKey, rfr.HostKey)
 	err := w.withTransportV3(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 		// The FundAccount RPC requires a SettingsID, which we also have to pay
 		// for. To simplify things, we pay for the SettingsID using the full
 		// amount, with the "refund" going to the desired account; we then top
 		// up the account to cover the cost of the two RPCs.
-		payment, ok := rhpv3.PayByContract(&rfr.Contract, rfr.Amount, rfr.Account, rfr.RenterKey)
+		payment, ok := rhpv3.PayByContract(&rfr.Contract, rfr.Amount, rfr.Account, rk)
 		if !ok {
 			return errors.New("insufficient funds")
 		}
@@ -520,7 +521,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
-		payment, ok = rhpv3.PayByContract(&rfr.Contract, priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost), rhpv3.ZeroAccount, rfr.RenterKey)
+		payment, ok = rhpv3.PayByContract(&rfr.Contract, priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost), rhpv3.ZeroAccount, rk)
 		if !ok {
 			return errors.New("insufficient funds")
 		}

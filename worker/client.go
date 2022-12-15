@@ -71,14 +71,13 @@ func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consen
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
+func (c *Client) RHPFund(contract types.FileContractRevision, hostKey PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
 	req := RHPFundRequest{
-		Contract:  contract,
-		RenterKey: renterKey,
-		HostKey:   hostKey,
-		HostIP:    hostIP,
-		Account:   account,
-		Amount:    amount,
+		Contract: contract,
+		HostKey:  hostKey,
+		HostIP:   hostIP,
+		Account:  account,
+		Amount:   amount,
 	}
 	err = c.c.POST("/rhp/fund", req, nil)
 	return

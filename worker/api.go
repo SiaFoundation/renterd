@@ -88,12 +88,11 @@ type RHPRenewResponse struct {
 
 // RHPFundRequest is the request type for the /rhp/fund endpoint.
 type RHPFundRequest struct {
-	Contract  types.FileContractRevision `json:"contract"`
-	RenterKey PrivateKey                 `json:"renterKey"`
-	HostKey   PublicKey                  `json:"hostKey"`
-	HostIP    string                     `json:"hostIP"`
-	Account   rhpv3.Account              `json:"account"`
-	Amount    types.Currency             `json:"amount"`
+	Contract types.FileContractRevision `json:"contract"`
+	HostKey  PublicKey                  `json:"hostKey"`
+	HostIP   string                     `json:"hostIP"`
+	Account  rhpv3.Account              `json:"account"`
+	Amount   types.Currency             `json:"amount"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
