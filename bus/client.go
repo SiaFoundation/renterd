@@ -183,16 +183,15 @@ func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, rent
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
+func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
 	req := WalletPrepareRenewRequest{
-		Contract:       contract,
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		RenterFunds:    renterFunds,
-		RenterAddress:  renterAddress,
-		HostCollateral: hostCollateral,
-		EndHeight:      endHeight,
-		HostSettings:   hostSettings,
+		Contract:      contract,
+		RenterKey:     renterKey,
+		HostKey:       hostKey,
+		RenterFunds:   renterFunds,
+		RenterAddress: renterAddress,
+		EndHeight:     endHeight,
+		HostSettings:  hostSettings,
 	}
 	var resp WalletPrepareRenewResponse
 	err := c.c.POST("/wallet/prepare/renew", req, &resp)

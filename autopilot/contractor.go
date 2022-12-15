@@ -345,9 +345,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 
 		// derive the renter key
 		renterKey := c.ap.deriveRenterKey(renew.HostKey())
-
-		var hostCollateral types.Currency // TODO
-		contract, err := c.renewContract(cfg, renew, renterKey, renterAddress, renterFunds, hostCollateral)
+		contract, err := c.renewContract(cfg, renew, renterKey, renterAddress, renterFunds)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			// TODO: log error
@@ -508,7 +506,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
+func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	revision, err := c.ap.bus.AcquireContract(toRenew.ID(), contractLockingDurationRenew)
 	if err != nil {
@@ -528,7 +526,7 @@ func (c *contractor) renewContract(cfg Config, toRenew bus.Contract, renterKey c
 
 	// prepare the renewal
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	txnSet, finalPayment, err := c.ap.bus.WalletPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, hostCollateral, endHeight, scan.Settings)
+	txnSet, finalPayment, err := c.ap.bus.WalletPrepareRenew(revision, renterKey, toRenew.HostKey(), renterFunds, renterAddress, endHeight, scan.Settings)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil
 	}
