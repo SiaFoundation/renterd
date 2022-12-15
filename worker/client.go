@@ -11,6 +11,7 @@ import (
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -44,22 +45,6 @@ func (c *Client) RHPPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterF
 	return resp.Contract, resp.Cost, err
 }
 
-// RHPPrepareRenew prepares a contract renewal transaction.
-func (c *Client) RHPPrepareRenew(fcid types.FileContractID, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error) {
-	req := RHPPrepareRenewRequest{
-		ContractID:    fcid,
-		RenterKey:     renterKey,
-		HostKey:       hostKey,
-		RenterFunds:   renterFunds,
-		RenterAddress: renterAddress,
-		EndHeight:     endHeight,
-		HostSettings:  hostSettings,
-	}
-	var resp RHPPrepareRenewResponse
-	err := c.c.POST("/rhp/prepare/renew", req, &resp)
-	return resp.Contract, resp.Cost, resp.FinalPayment, err
-}
-
 // RHPPreparePayment prepares an ephemeral account payment.
 func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
 	req := RHPPreparePaymentRequest{
@@ -86,10 +71,15 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, rk consensus.PrivateKey) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := RHPRenewRequest{
-		TransactionSet: transactionSet,
-		FinalPayment:   finalPayment,
+		ContractID:    fcid,
+		EndHeight:     endHeight,
+		HostKey:       hk,
+		HostSettings:  hs,
+		RenterAddress: renterAddress,
+		RenterFunds:   renterFunds,
+		RenterKey:     rk,
 	}
 	var resp RHPRenewResponse
 	err := c.c.POST("/rhp/renew", req, &resp)

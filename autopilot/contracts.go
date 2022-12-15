@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
 
@@ -10,33 +9,55 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(toRenew []renewalCandidate, active, renewed, formed []rhpv2.ContractRevision, deleted []types.FileContractID) error {
+func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRenew []types.FileContractID, renewed []contract) error {
 	// build some maps
-	isDeleted := make(map[types.FileContractID]bool)
-	for _, d := range deleted {
-		isDeleted[d] = true
-	}
-	wasUpForRenewal := make(map[types.FileContractID]bool)
-	for _, r := range toRenew {
-		wasUpForRenewal[r.ID()] = true
-	}
+	isDeleted := contractMapBool(toDelete)
+	isIgnored := contractMapBool(toIgnore)
+	isUpForRenew := contractMapBool(toRenew)
+
+	// renewed map is special case since we need renewed from
 	isRenewed := make(map[types.FileContractID]bool)
-	for _, r := range renewed {
-		isRenewed[r.ID()] = true
+	for _, c := range renewed {
+		isRenewed[c.RenewedFrom] = true
 	}
 
 	// build new contract set
 	var contracts []types.FileContractID
-	for _, c := range append(active, formed...) {
-		// TODO: excluding contracts that are up for renewal but have not been
-		// renewed yet, we probably want the autopilot to manage more than one
-		// set of contracts (e.g. goodForUpload - goodForDownload contracts)
-		upForRenewal := wasUpForRenewal[c.ID()] && !isRenewed[c.ID()]
-		if !isDeleted[c.ID()] && !upForRenewal {
-			contracts = append(contracts, c.ID())
+	for _, fcid := range append(active, append(contractIds(renewed), formed...)...) {
+		if isDeleted[fcid] {
+			continue // exclude deleted contracts
 		}
+		if isIgnored[fcid] {
+			continue // exclude ignored contracts (contracts that became unusable)
+		}
+		if isRenewed[fcid] {
+			continue // exclude (effectively) renewed contracts
+		}
+		if isUpForRenew[fcid] && !isRenewed[fcid] {
+			continue // exclude contracts that were up for renewal but failed to renew
+		}
+		contracts = append(contracts, fcid)
 	}
+
+	// TODO: contracts that are up for renewal could be used for dl, not ul
+	// TODO: contracts should be sorted according to host score
 
 	// update contract set
 	return ap.bus.SetContractSet(defaultSetName, contracts)
+}
+
+func contractIds(contracts []contract) []types.FileContractID {
+	ids := make([]types.FileContractID, len(contracts))
+	for i, c := range contracts {
+		ids[i] = c.Contract.ID
+	}
+	return ids
+}
+
+func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]bool {
+	cmap := make(map[types.FileContractID]bool)
+	for _, fcid := range contracts {
+		cmap[fcid] = true
+	}
+	return cmap
 }

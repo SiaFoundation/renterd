@@ -289,7 +289,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Assert the contract is returned.
-	if added.Revision.ParentID != fcid || added.RenewedFrom != (types.FileContractID{}) {
+	if added.RenewedFrom != (types.FileContractID{}) {
 		t.Fatal("unexpected")
 	}
 
@@ -376,7 +376,7 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if renewedContract.Revision.ParentID != fcid3 || renewedContract.RenewedFrom != fcid2 {
+	if renewedContract.RenewedFrom != fcid2 {
 		t.Fatal("unexpected")
 	}
 }

@@ -85,31 +85,15 @@ type RHPFormResponse struct {
 	TransactionSet []types.Transaction    `json:"transactionSet"`
 }
 
-// RHPPrepareRenewRequest is the request type for the /rhp/prepare/renew
-// endpoint.
-type RHPPrepareRenewRequest struct {
-	ContractID    types.FileContractID `json:"contractID"`
-	RenterKey     consensus.PrivateKey `json:"renterKey"`
-	HostKey       PublicKey            `json:"hostKey"`
-	RenterFunds   types.Currency       `json:"renterFunds"`
-	RenterAddress types.UnlockHash     `json:"renterAddress"`
-	EndHeight     uint64               `json:"endHeight"`
-	HostSettings  rhpv2.HostSettings   `json:"hostSettings"`
-}
-
-// RHPPrepareRenewResponse is the response type for the /rhp/prepare/renew
-// endpoint.
-type RHPPrepareRenewResponse struct {
-	Error        string             `json:"error"`
-	Contract     types.FileContract `json:"contract"`
-	Cost         types.Currency     `json:"cost"`
-	FinalPayment types.Currency     `json:"finalPayment"`
-}
-
 // RHPRenewRequest is the request type for the /rhp/renew endpoint.
 type RHPRenewRequest struct {
-	TransactionSet []types.Transaction `json:"transactionSet"`
-	FinalPayment   types.Currency      `json:"finalPayment"`
+	ContractID    types.FileContractID `json:"contractID"`
+	EndHeight     uint64               `json:"endHeight"`
+	HostKey       PublicKey            `json:"hostKey"`
+	HostSettings  rhpv2.HostSettings   `json:"hostSettings"`
+	RenterAddress types.UnlockHash     `json:"renterAddress"`
+	RenterFunds   types.Currency       `json:"renterFunds"`
+	RenterKey     consensus.PrivateKey `json:"renterKey"`
 }
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.

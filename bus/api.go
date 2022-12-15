@@ -115,14 +115,13 @@ type WalletPrepareFormRequest struct {
 // WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
 // endpoint.
 type WalletPrepareRenewRequest struct {
-	Contract       types.FileContractRevision `json:"contract"`
-	RenterKey      PrivateKey                 `json:"renterKey"`
-	HostKey        PublicKey                  `json:"hostKey"`
-	RenterFunds    types.Currency             `json:"renterFunds"`
-	RenterAddress  types.UnlockHash           `json:"renterAddress"`
-	HostCollateral types.Currency             `json:"hostCollateral"`
-	EndHeight      uint64                     `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings         `json:"hostSettings"`
+	Contract      types.FileContractRevision `json:"contract"`
+	RenterKey     PrivateKey                 `json:"renterKey"`
+	HostKey       PublicKey                  `json:"hostKey"`
+	RenterFunds   types.Currency             `json:"renterFunds"`
+	RenterAddress types.UnlockHash           `json:"renterAddress"`
+	EndHeight     uint64                     `json:"endHeight"`
+	HostSettings  rhpv2.HostSettings         `json:"hostSettings"`
 }
 
 // WalletPrepareRenewResponse is the response type for the /wallet/prepare/renew

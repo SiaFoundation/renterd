@@ -24,8 +24,10 @@ type Store interface {
 type Bus interface {
 	// wallet
 	WalletAddress() (types.UnlockHash, error)
-	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error)
 	WalletDiscard(txn types.Transaction) error
+	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error)
+	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
+	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
 	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
 
 	// hostdb
@@ -65,10 +67,8 @@ type Bus interface {
 
 type Worker interface {
 	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
-	RHPPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, error)
-	RHPPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error)
 	RHPForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPRenew(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, rk consensus.PrivateKey) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
 	Revisions(rk [32]byte, contracts []bus.Contract) (revisions []rhpv2.ContractRevision, err error)
 }
@@ -134,6 +134,8 @@ func (ap *Autopilot) Run() error {
 		cfg := ap.store.Config()
 
 		// update contractor's internal state of consensus
+		//
+		// TODO: this should be done through a pub/sub mechanism on the bus
 		ap.c.applyConsensusState(cfg, cs)
 
 		// perform maintenance
@@ -182,6 +184,7 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 }
 
+// NewServer returns an HTTP handler that serves the renterd autopilot API.
 func NewServer(ap *Autopilot) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /actions": ap.actionsHandler,

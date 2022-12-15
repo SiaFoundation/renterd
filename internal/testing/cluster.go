@@ -16,10 +16,12 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/siad/modules"
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
 	"go.sia.tech/siad/types"
+	"go.uber.org/zap"
 
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/siatest"
@@ -88,13 +90,14 @@ func withCtx(f func() error) func(context.Context) error {
 }
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
-func newTestCluster(dir string) (*TestCluster, error) {
+func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	// Use shared wallet key.
 	wk := consensus.GeneratePrivateKey()
 
 	// Prepare individual dirs.
 	busDir := filepath.Join(dir, "bus")
 	autopilotDir := filepath.Join(dir, "autopilot")
+
 	// Generate API passwords.
 	busPassword := randomPassword()
 	workerPassword := randomPassword()
@@ -157,11 +160,17 @@ func newTestCluster(dir string) (*TestCluster, error) {
 	cleanups = append(cleanups, withCtx(wCleanup))
 	cleanups = append(cleanups, workerServer.Shutdown)
 
+	// Create autopilot store.
+	autopilotStore, err := stores.NewJSONAutopilotStore(autopilotDir)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create autopilot.
 	ap, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
 		Heartbeat:       time.Second,
 		ScannerInterval: 2 * time.Second,
-	}, busClient, workerClient, autopilotDir)
+	}, autopilotStore, busClient, workerClient, logger)
 	if err != nil {
 		return nil, err
 	}

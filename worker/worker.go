@@ -211,6 +211,9 @@ type Bus interface {
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
+
+	WalletDiscard(txn types.Transaction) error
+	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
 }
 
 // TODO: deriving the renter key from the host key using the master key only
@@ -359,24 +362,6 @@ func (w *worker) rhpPrepareFormHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) rhpPrepareRenewHandler(jc jape.Context) {
-	var rprr RHPPrepareRenewRequest
-	if jc.Decode(&rprr) != nil {
-		return
-	}
-	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
-	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
-	finalPayment := rprr.HostSettings.BaseRPCPrice
-	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
-		finalPayment = rprr.Contract.ValidRenterPayout()
-	}
-	jc.Encode(RHPPrepareRenewResponse{
-		Contract:     fc,
-		Cost:         cost,
-		FinalPayment: finalPayment,
-	})
-}
-
 func (w *worker) rhpPreparePaymentHandler(jc jape.Context) {
 	var rppr RHPPreparePaymentRequest
 	if jc.Decode(&rppr) == nil {
@@ -444,18 +429,32 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Decode(&rrr) != nil {
 		return
 	}
-	var cs consensus.State
-	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
+	hostSettings, hostKey, rk, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.RenterFunds
+	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	err := w.withTransportV2(jc.Request.Context(), rrr.HostIP, rrr.HostKey, func(t *rhpv2.Transport) error {
-		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rrr.ContractID, rrr.RenterKey, 5*time.Second)
+	err := w.withTransportV2(jc.Request.Context(), hostSettings.NetAddress, hostKey, func(t *rhpv2.Transport) error {
+		session, err := rhpv2.RPCLock(jc.Request.Context(), t, toRenewID, rk, 5*time.Second)
 		if err != nil {
 			return err
 		}
-		contract, txnSet, err = session.RenewContract(cs, rrr.TransactionSet, rrr.FinalPayment)
-		return err
+		rev := session.Contract()
+
+		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, rk, hostKey, renterFunds, renterAddress, endHeight, hostSettings)
+		if err != nil {
+			return err
+		}
+
+		var cs consensus.State
+		cs.Index.Height = uint64(renterTxnSet[len(renterTxnSet)-1].FileContracts[0].WindowStart)
+
+		contract, txnSet, err = session.RenewContract(cs, renterTxnSet, finalPayment)
+		if err != nil {
+			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
+			return err
+		}
+		return nil
 	})
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
@@ -743,7 +742,6 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 	}
 	return jape.Mux(map[string]jape.Handler{
 		"POST   /rhp/prepare/form":    w.rhpPrepareFormHandler,
-		"POST   /rhp/prepare/renew":   w.rhpPrepareRenewHandler,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,

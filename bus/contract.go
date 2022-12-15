@@ -28,3 +28,11 @@ type ContractSpending struct {
 	Downloads   types.Currency `json:"downloads"`
 	FundAccount types.Currency `json:"fundAccount"`
 }
+
+// Add returns the sum of the current and given contract spending.
+func (x ContractSpending) Add(y ContractSpending) (s ContractSpending) {
+	s.Uploads = x.Uploads.Add(y.Uploads)
+	s.Downloads = x.Downloads.Add(y.Downloads)
+	s.FundAccount = x.FundAccount.Add(y.FundAccount)
+	return
+}
