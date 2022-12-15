@@ -216,26 +216,6 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	}
 }
 
-type contractCapability struct {
-	HostKey   consensus.PublicKey
-	HostIP    string
-	ID        types.FileContractID
-	RenterKey consensus.PrivateKey
-}
-
-func (w *worker) parseContractCapabilities(contracts []bus.Contract) []contractCapability {
-	ccs := make([]contractCapability, len(contracts))
-	for i, c := range contracts {
-		ccs[i] = contractCapability{
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			ID:        c.ID,
-			RenterKey: w.deriveRenterKey(c.HostKey),
-		}
-	}
-	return ccs
-}
-
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
@@ -366,10 +346,10 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []contractCapability, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []bus.Contract, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
+		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
 	go func() {
@@ -577,17 +557,15 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	bFrom, err := w.bus.ContractSetContracts(mp.FromContracts)
+	from, err := w.bus.ContractSetContracts(mp.FromContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	from := w.parseContractCapabilities(bFrom)
 
-	bTo, err := w.bus.ContractSetContracts(mp.ToContracts)
+	to, err := w.bus.ContractSetContracts(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	to := w.parseContractCapabilities(bTo)
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
 	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
@@ -637,8 +615,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return
 		}
 
-		cs := w.parseContractCapabilities(contracts)
-		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
+		err = w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) error {
 			return downloadSlab(jc.Request.Context(), cw, ss, hosts)
 		})
 		if err != nil {
@@ -667,12 +644,11 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		cs := w.parseContractCapabilities(bcs)
 
 		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
 		var s object.Slab
 		var length int
-		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) (err error) {
+		err = w.withHosts(jc.Request.Context(), bcs, func(hosts []sectorStore) (err error) {
 			s, length, err = uploadSlab(jc.Request.Context(), r, up.MinShards, up.TotalShards, hosts)
 			return err
 		})
@@ -689,7 +665,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 
 		for _, ss := range s.Shards {
 			if _, ok := usedContracts[ss.Host]; !ok {
-				for _, c := range cs {
+				for _, c := range bcs {
 					if c.HostKey == ss.Host {
 						usedContracts[ss.Host] = c.ID
 						break
@@ -713,10 +689,9 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
-	cc := w.parseContractCapabilities(busContracts)
 
 	var contracts []Contract
-	err = w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
+	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
 		for i, store := range ss {
 			rev, err := store.(*session).Revision()
 			if err != nil {
