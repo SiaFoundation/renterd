@@ -259,6 +259,11 @@ type Bus interface {
 // works if we persist a hash of the renter's master key in the database and
 // compare it on startup, otherwise there's no way of knowing the derived key is
 // usuable
+// NOTE: Instead of hashing the masterkey and comparing, we could use random
+// bytes + the HMAC thereof as the salt. e.g. 32 bytes + 32 bytes HMAC. Then
+// whenever we read a specific salt we can verify that is was created with a
+// given key. That would eventually allow different masterkeys to coexist in the
+// same bus.
 //
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
