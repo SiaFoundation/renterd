@@ -548,13 +548,10 @@ func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterAd
 }
 
 func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
-	// prepare contract formation
-	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	contract, _, err := c.ap.worker.RHPForm(endHeight, hostKey, hostSettings, renterAddress, renterFunds, hostCollateral)
+	contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg), hostKey, hostSettings, renterAddress, renterFunds, hostCollateral)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
-
 	return contract, nil
 }
 
