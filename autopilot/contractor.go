@@ -106,7 +106,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	remaining := c.remainingFunds(cfg)
 
 	// run renewals
-	renewed, isRenewed, err := c.runContractRenewals(cfg, &remaining, address, toRenew)
+	renewed, err := c.runContractRenewals(cfg, &remaining, address, toRenew)
 	if err != nil {
 		return fmt.Errorf("failed to renew contracts, err: %v", err)
 	}
@@ -118,7 +118,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// update contract set
-	err = c.ap.updateDefaultContracts(toRenew, active, renewed, formed, isRenewed, toDelete)
+	err = c.ap.updateDefaultContracts(toRenew, active, renewed, formed, toDelete)
 	if err != nil {
 		return fmt.Errorf("failed to update default contracts, err: %v", err)
 	}
@@ -223,7 +223,7 @@ func (c *contractor) runContractChecks(cfg Config, contracts []rhpv2.ContractRev
 	return toRenew, toDelete, nil
 }
 
-func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []renewalCandidate) ([]rhpv2.ContractRevision, map[types.FileContractID]bool, error) {
+func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, renterAddress types.UnlockHash, toRenew []renewalCandidate) ([]rhpv2.ContractRevision, error) {
 	renewed := make([]rhpv2.ContractRevision, 0, len(toRenew))
 
 	// log contracts renewed
@@ -241,7 +241,6 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 	}()
 
 	// perform the renewals
-	isRenewed := make(map[types.FileContractID]bool)
 	for _, renew := range toRenew {
 		// break if autopilot is stopped
 		if c.isStopped() {
@@ -251,7 +250,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		// check our budget
 		renterFunds, err := c.renewFundingEstimate(cfg, renew.revision)
 		if err != nil {
-			return nil, nil, fmt.Errorf("could not get renew funding estimate, err: %v", err)
+			return nil, fmt.Errorf("could not get renew funding estimate, err: %v", err)
 		}
 		if budget.Cmp(renterFunds) < 0 {
 			c.logger.Debugw(
@@ -272,7 +271,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 			// TODO: handle error properly, if the wallet ran out of outputs
 			// here there's no point in renewing more contracts until a
 			// block is mined, maybe we could/should wait for pending transactions?
-			return nil, nil, err
+			return nil, err
 		}
 
 		// update the budget
@@ -286,14 +285,13 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 				"hk", renew.HostKey,
 				"fcid", renew.ID,
 			)
-			return nil, nil, err
+			return nil, err
 		}
 		// add to renewed set
 		renewed = append(renewed, contract)
-		isRenewed[renew.ID()] = true
 	}
 
-	return renewed, isRenewed, nil
+	return renewed, nil
 }
 
 func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, renterAddress types.UnlockHash) ([]rhpv2.ContractRevision, error) {

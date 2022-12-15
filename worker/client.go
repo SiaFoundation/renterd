@@ -1,18 +1,14 @@
 package worker
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/object"
@@ -48,6 +44,22 @@ func (c *Client) RHPPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterF
 	return resp.Contract, resp.Cost, err
 }
 
+// RHPPrepareRenew prepares a contract renewal transaction.
+func (c *Client) RHPPrepareRenew(fcid types.FileContractID, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) (types.FileContract, types.Currency, types.Currency, error) {
+	req := RHPPrepareRenewRequest{
+		ContractID:    fcid,
+		RenterKey:     renterKey,
+		HostKey:       hostKey,
+		RenterFunds:   renterFunds,
+		RenterAddress: renterAddress,
+		EndHeight:     endHeight,
+		HostSettings:  hostSettings,
+	}
+	var resp RHPPrepareRenewResponse
+	err := c.c.POST("/rhp/prepare/renew", req, &resp)
+	return resp.Contract, resp.Cost, resp.FinalPayment, err
+}
+
 // RHPPreparePayment prepares an ephemeral account payment.
 func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
 	req := RHPPreparePaymentRequest{
@@ -73,77 +85,15 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 	return resp.Contract, resp.TransactionSet, err
 }
 
-func (c *Client) withWS(route string, fn func(conn *websocket.Conn) error) error {
-	baseURL := strings.TrimPrefix(c.c.BaseURL, "http://") // TODO: cleanup
-	h := http.Header{}
-	if c.c.Password != "" {
-		pw := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(":%s", c.c.Password)))
-		h.Set("Authorization", "Basic "+pw)
+// RHPRenew renews an existing contract with a host.
+func (c *Client) RHPRenew(renterKey PrivateKey, hostKey PublicKey, hostIP string, contractID types.FileContractID, transactionSet []types.Transaction, finalPayment types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+	req := RHPRenewRequest{
+		TransactionSet: transactionSet,
+		FinalPayment:   finalPayment,
 	}
-	conn, resp, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s%s", baseURL, route), h)
-	if err == websocket.ErrBadHandshake {
-		log.Printf("handshake failed with status %d", resp.StatusCode)
-	}
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	return fn(conn)
-}
-
-func (c *Client) RHPRenew(fcid types.FileContractID, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings, fn SigningFn) (rhpv2.ContractRevision, []types.Transaction, error) {
-	var newContract rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	err := c.withWS("/rhp/renew", func(conn *websocket.Conn) error {
-		err := conn.WriteJSON(RHPPrepareRenewRequest{
-			ContractID:    fcid,
-			RenterKey:     renterKey,
-			HostKey:       hostKey,
-			RenterFunds:   renterFunds,
-			RenterAddress: renterAddress,
-			EndHeight:     endHeight,
-			HostSettings:  hostSettings,
-		})
-		if err != nil {
-			return err
-		}
-		var prrr RHPPrepareRenewResponse
-		if err := conn.ReadJSON(&prrr); err != nil {
-			return err
-		}
-		if prrr.Error != "" {
-			return errors.New(prrr.Error)
-		}
-		initialTxns, cleanup, err := fn(prrr.Contract, prrr.Cost)
-		if err != nil {
-			return err
-		}
-		err = conn.WriteJSON(RHPRenewRequest{
-			TransactionSet: initialTxns,
-			FinalPayment:   prrr.FinalPayment,
-		})
-		if err != nil {
-			cleanup()
-			return err
-		}
-		var rrr RHPRenewResponse
-		if err := conn.ReadJSON(&rrr); err != nil {
-			cleanup()
-			return err
-		}
-		if rrr.Error != "" {
-			cleanup()
-			return errors.New(rrr.Error)
-		}
-		newContract = rrr.Contract
-		txnSet = rrr.TransactionSet
-		return nil
-	})
-	if err != nil && websocket.IsUnexpectedCloseError(err) {
-		msg := err.(*websocket.CloseError).Text
-		err = fmt.Errorf("connection was closed unexpectedly: %s; %w", msg, err)
-	}
-	return newContract, txnSet, err
+	var resp RHPRenewResponse
+	err := c.c.POST("/rhp/renew", req, &resp)
+	return resp.Contract, resp.TransactionSet, err
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
@@ -262,13 +212,6 @@ func (c *Client) Revisions(rk [32]byte, contracts []bus.Contract) (revisions []r
 		Contracts: contracts,
 		RenterKey: rk,
 	}, &revisions)
-	return
-}
-
-// _Renew is satisfiying the jape check.
-// TODO: remove
-func (c *Client) _Renew() (resp struct{}, err error) {
-	err = c.c.GET("/rhp/renew", &resp)
 	return
 }
 

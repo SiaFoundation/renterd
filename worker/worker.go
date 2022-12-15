@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
@@ -360,6 +359,24 @@ func (w *worker) rhpPrepareFormHandler(jc jape.Context) {
 	})
 }
 
+func (w *worker) rhpPrepareRenewHandler(jc jape.Context) {
+	var rprr RHPPrepareRenewRequest
+	if jc.Decode(&rprr) != nil {
+		return
+	}
+	fc := rhpv2.PrepareContractRenewal(rprr.Contract, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
+	cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
+	finalPayment := rprr.HostSettings.BaseRPCPrice
+	if finalPayment.Cmp(rprr.Contract.ValidRenterPayout()) > 0 {
+		finalPayment = rprr.Contract.ValidRenterPayout()
+	}
+	jc.Encode(RHPPrepareRenewResponse{
+		Contract:     fc,
+		Cost:         cost,
+		FinalPayment: finalPayment,
+	})
+}
+
 func (w *worker) rhpPreparePaymentHandler(jc jape.Context) {
 	var rppr RHPPreparePaymentRequest
 	if jc.Decode(&rppr) == nil {
@@ -416,6 +433,34 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(RHPFormResponse{
+		ContractID:     contract.ID(),
+		Contract:       contract,
+		TransactionSet: txnSet,
+	})
+}
+
+func (w *worker) rhpRenewHandler(jc jape.Context) {
+	var rrr RHPRenewRequest
+	if jc.Decode(&rrr) != nil {
+		return
+	}
+	var cs consensus.State
+	cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
+
+	var contract rhpv2.ContractRevision
+	var txnSet []types.Transaction
+	err := w.withTransportV2(jc.Request.Context(), rrr.HostIP, rrr.HostKey, func(t *rhpv2.Transport) error {
+		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rrr.ContractID, rrr.RenterKey, 5*time.Second)
+		if err != nil {
+			return err
+		}
+		contract, txnSet, err = session.RenewContract(cs, rrr.TransactionSet, rrr.FinalPayment)
+		return err
+	})
+	if jc.Check("couldn't renew contract", err) != nil {
+		return
+	}
+	jc.Encode(RHPRenewResponse{
 		ContractID:     contract.ID(),
 		Contract:       contract,
 		TransactionSet: txnSet,
@@ -657,72 +702,6 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpRenewHandler(jc jape.Context) {
-	var upgrader = websocket.Upgrader{} // use default options
-	c, err := upgrader.Upgrade(jc.ResponseWriter, jc.Request, nil)
-	if err != nil {
-		return
-	}
-	defer c.Close()
-
-	var rprr RHPPrepareRenewRequest
-	if err := c.ReadJSON(&rprr); err != nil {
-		return
-	}
-
-	err = w.withTransportV2(jc.Request.Context(), rprr.HostSettings.NetAddress, rprr.HostKey, func(t *rhpv2.Transport) error {
-		// Start session.
-		session, err := rhpv2.RPCLock(jc.Request.Context(), t, rprr.ContractID, rprr.RenterKey, 10*time.Second)
-		if err != nil {
-			return err
-		}
-		defer session.Close()
-		revision := session.Contract().Revision
-
-		// Prepare renewal.
-		fc := rhpv2.PrepareContractRenewal(revision, rprr.RenterKey, rprr.HostKey, rprr.RenterFunds, rprr.EndHeight, rprr.HostSettings, rprr.RenterAddress)
-		cost := rhpv2.ContractRenewalCost(fc, rprr.HostSettings.ContractPrice)
-		finalPayment := rprr.HostSettings.BaseRPCPrice
-		if finalPayment.Cmp(revision.ValidRenterPayout()) > 0 {
-			finalPayment = revision.ValidRenterPayout()
-		}
-
-		err = c.WriteJSON(RHPPrepareRenewResponse{
-			Contract:     fc,
-			Cost:         cost,
-			FinalPayment: finalPayment,
-		})
-		if err != nil {
-			return err
-		}
-
-		var rrr RHPRenewRequest
-		if err := c.ReadJSON(&rrr); err != nil {
-			return err
-		}
-
-		// Renew.
-		var cs consensus.State
-		cs.Index.Height = uint64(rrr.TransactionSet[len(rrr.TransactionSet)-1].FileContracts[0].WindowStart)
-		contract, txnSet, err := session.RenewContract(cs, rrr.TransactionSet, rrr.FinalPayment)
-		if err != nil {
-			return err
-		}
-		return c.WriteJSON(RHPRenewResponse{
-			ContractID:     contract.ID(),
-			Contract:       contract,
-			TransactionSet: txnSet,
-		})
-	})
-	if err != nil {
-		c.WriteJSON(struct{ Error string }{Error: err.Error()})
-		return
-	}
-
-	// TODO: Nothign to see here. Just fighting jape. Remove this.
-	jc.Encode(struct{}{})
-}
-
 func (w *worker) rhpRevisionsHandler(jc jape.Context) {
 	var req RHPRevisionsRequest
 	if jc.Decode(&req) != nil {
@@ -764,10 +743,11 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 	}
 	return jape.Mux(map[string]jape.Handler{
 		"POST   /rhp/prepare/form":    w.rhpPrepareFormHandler,
+		"POST   /rhp/prepare/renew":   w.rhpPrepareRenewHandler,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
-		"GET    /rhp/renew":           w.rhpRenewHandler,
+		"POST   /rhp/renew":           w.rhpRenewHandler,
 		"POST   /rhp/fund":            w.rhpFundHandler,
 		"POST   /rhp/revisions":       w.rhpRevisionsHandler,
 		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,

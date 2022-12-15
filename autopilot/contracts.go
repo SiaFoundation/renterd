@@ -10,7 +10,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(toRenew []renewalCandidate, active, renewed, formed []rhpv2.ContractRevision, isRenewed map[types.FileContractID]bool, deleted []types.FileContractID) error {
+func (ap *Autopilot) updateDefaultContracts(toRenew []renewalCandidate, active, renewed, formed []rhpv2.ContractRevision, deleted []types.FileContractID) error {
 	// build some maps
 	isDeleted := make(map[types.FileContractID]bool)
 	for _, d := range deleted {
@@ -19,6 +19,10 @@ func (ap *Autopilot) updateDefaultContracts(toRenew []renewalCandidate, active, 
 	wasUpForRenewal := make(map[types.FileContractID]bool)
 	for _, r := range toRenew {
 		wasUpForRenewal[r.ID()] = true
+	}
+	isRenewed := make(map[types.FileContractID]bool)
+	for _, r := range renewed {
+		isRenewed[r.ID()] = true
 	}
 
 	// build new contract set
