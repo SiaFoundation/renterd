@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -71,9 +71,9 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	//  Wait for the contract to form.
-	var contract bus.Contract
+	var contract worker.Contract
 	err = Retry(20, time.Second, func() error {
-		contracts, err := b.Contracts()
+		contracts, err := w.Contracts()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,11 +87,19 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Slowly mine up to a full period of blocks until the contract renews.
-	err = Retry(int(defaultAutopilotConfig.Contracts.Period), 100*time.Millisecond, func() error {
-		if err := cluster.MineBlocks(1); err != nil {
-			t.Fatal(err)
-		}
+	// Mine blocks until we are in the middle of the renew window.
+	cs, err := b.ConsensusState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewWindow := contract.EndHeight() - defaultAutopilotConfig.Contracts.RenewWindow/2
+	toMine := renewWindow - cs.BlockHeight
+	if err := cluster.MineBlocks(int(toMine)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the contract to be renewed.
+	err = Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := b.Contracts()
 		if err != nil {
 			t.Fatal(err)
