@@ -73,7 +73,8 @@ func (c *contractor) contractSpending(contract worker.Contract) (bus.ContractSpe
 	// fetch contract chain
 	curr, exists := cmap[contract.ID]
 	if !exists {
-		return bus.ContractSpending{}, fmt.Errorf("contract with id '%v' not found", contract.ID)
+		// TODO: return error here once fetching the history is implemented.
+		return bus.ContractSpending{}, nil // fmt.Errorf("contract with id '%v' not found", contract.ID)
 	}
 
 	// no history
@@ -516,7 +517,7 @@ func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterAd
 	// handle contract locking
 	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil
+		return rhpv2.ContractRevision{}, err
 	}
 	if !locked {
 		return rhpv2.ContractRevision{}, errors.New("contract is currently locked")

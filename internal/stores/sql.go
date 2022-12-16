@@ -45,7 +45,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
-
 	if migrate {
 		// Create the tables.
 		tables := []interface{}{
