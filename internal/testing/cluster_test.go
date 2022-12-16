@@ -15,8 +15,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// TestNewTestCluster is a smoke test for creating a cluster of Nodes for
-// testing and shutting them down.
+// TestNewTestCluster is a test for creating a cluster of Nodes for testing,
+// making sure that it forms contracts, renews contracts and shuts down.
 func TestNewTestCluster(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
@@ -75,7 +75,7 @@ func TestNewTestCluster(t *testing.T) {
 	err = Retry(20, time.Second, func() error {
 		contracts, err := w.Contracts()
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if len(contracts) != 1 {
 			return errors.New("no contract")
@@ -87,6 +87,19 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Verify startHeight and endHeight of the contract.
+	currentPeriod, err := cluster.Autopilot.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := cluster.Autopilot.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.EndHeight() != currentPeriod+cfg.Contracts.Period+cfg.Contracts.RenewWindow {
+		t.Fatal("wrong endHeight")
+	}
+
 	// Mine blocks until contracts start renewing.
 	if err := cluster.MineToRenewWindow(); err != nil {
 		t.Fatal(err)
@@ -94,15 +107,18 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Wait for the contract to be renewed.
 	err = Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts()
+		contracts, err := w.Contracts()
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if len(contracts) != 1 {
 			return errors.New("no renewed contract")
 		}
 		if contracts[0].RenewedFrom != contract.ID {
 			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
+		}
+		if contracts[0].EndHeight() != contract.EndHeight()+cfg.Contracts.Period {
+			t.Fatal("wrong endHeight")
 		}
 		return nil
 	})

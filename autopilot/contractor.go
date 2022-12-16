@@ -59,7 +59,7 @@ func (c *contractor) ApplyConsensusState(cfg Config, state bus.ConsensusState) {
 	c.blockHeight = state.BlockHeight
 	if c.currentPeriod == 0 {
 		c.currentPeriod = state.BlockHeight
-	} else if c.blockHeight > c.currentPeriod+cfg.Contracts.Period {
+	} else if c.blockHeight >= c.currentPeriod+cfg.Contracts.Period {
 		c.currentPeriod += cfg.Contracts.Period
 	}
 }
@@ -134,13 +134,13 @@ func (c *contractor) PerformContractMaintenance(cfg Config) error {
 	}
 
 	// run renewals + refreshes
-	renewed, err := c.runContractRenewals(cfg, blockHeight, &remaining, address, toRefresh, toRenew)
+	renewed, err := c.runContractRenewals(cfg, blockHeight, currentPeriod, &remaining, address, toRefresh, toRenew)
 	if err != nil {
 		return fmt.Errorf("failed to renew contracts, err: %v", err)
 	}
 
 	// run formations
-	formed, err := c.runContractFormations(cfg, blockHeight, &remaining, address)
+	formed, err := c.runContractFormations(cfg, blockHeight, currentPeriod, &remaining, address)
 	if err != nil {
 		return fmt.Errorf("failed to form contracts, err: %v", err)
 	}
@@ -321,7 +321,7 @@ func (c *contractor) runContractChecks(cfg Config, blockHeight uint64, gs bus.Go
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractRenewals(cfg Config, blockHeight uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []worker.Contract) ([]bus.Contract, error) {
+func (c *contractor) runContractRenewals(cfg Config, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []worker.Contract) ([]bus.Contract, error) {
 	renewed := make([]bus.Contract, 0, len(toRenew)+len(toRefresh))
 
 	// log contracts renewed
@@ -373,7 +373,7 @@ func (c *contractor) runContractRenewals(cfg Config, blockHeight uint64, budget 
 		}
 
 		// derive the renter key
-		newRevision, err := c.renewContract(cfg, blockHeight, contract, renterAddress, renterFunds, isRefresh)
+		newRevision, err := c.renewContract(cfg, currentPeriod, contract, renterAddress, renterFunds, isRefresh)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			// TODO: log error
@@ -400,7 +400,7 @@ func (c *contractor) runContractRenewals(cfg Config, blockHeight uint64, budget 
 	return renewed, nil
 }
 
-func (c *contractor) runContractFormations(cfg Config, blockHeight uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(cfg Config, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
 	// fetch all active contracts
 	active, err := c.ap.bus.Contracts()
 	if err != nil {
@@ -500,7 +500,7 @@ func (c *contractor) runContractFormations(cfg Config, blockHeight uint64, budge
 		}
 
 		// form contract
-		contract, err := c.formContract(cfg, blockHeight, candidate, host.NetAddress(), settings, renterAddress, renterFunds, hostCollateral)
+		contract, err := c.formContract(cfg, currentPeriod, candidate, host.NetAddress(), settings, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			c.logger.Errorw(
@@ -532,7 +532,7 @@ func (c *contractor) runContractFormations(cfg Config, blockHeight uint64, budge
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg Config, blockHeight uint64, toRenew worker.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
+func (c *contractor) renewContract(cfg Config, currentPeriod uint64, toRenew worker.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
@@ -554,7 +554,7 @@ func (c *contractor) renewContract(cfg Config, blockHeight uint64, toRenew worke
 	}
 
 	// if we are refreshing the contract we use the contract's end height
-	endHeight := c.endHeight(cfg, blockHeight)
+	endHeight := c.endHeight(cfg, currentPeriod)
 	if isRefresh {
 		endHeight = toRenew.EndHeight()
 	}
@@ -567,8 +567,8 @@ func (c *contractor) renewContract(cfg Config, blockHeight uint64, toRenew worke
 	return renewed, nil
 }
 
-func (c *contractor) formContract(cfg Config, blockHeight uint64, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
-	contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, blockHeight), hostKey, hostSettings, renterAddress, renterFunds, hostCollateral)
+func (c *contractor) formContract(cfg Config, currentPeriod uint64, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
+	contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), hostKey, hostSettings, renterAddress, renterFunds, hostCollateral)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
