@@ -215,7 +215,6 @@ func (c *contractor) runContractChecks(cfg Config, gs bus.GougingSettings, rs bu
 	contractSizes := make(map[types.FileContractID]uint64)
 	contractMap := make(map[types.FileContractID]bus.Contract)
 	renewIndices := make(map[types.FileContractID]int)
-	refreshIndices := make(map[types.FileContractID]int)
 
 	// check every active contract
 	for _, contract := range contracts {
@@ -264,12 +263,11 @@ func (c *contractor) runContractChecks(cfg Config, gs bus.GougingSettings, rs bu
 				"refresh", refresh,
 				"renew", renew,
 			)
-			if refresh {
-				refreshIndices[contract.ID] = len(toRefresh)
-				toRefresh = append(toRefresh, contract)
-			} else if renew {
+			if renew {
 				renewIndices[contract.ID] = len(toRenew)
 				toRenew = append(toRenew, contract)
+			} else if refresh {
+				toRefresh = append(toRefresh, contract)
 			} else {
 				toDelete = append(toDelete, contract.ID)
 				continue
@@ -292,10 +290,6 @@ func (c *contractor) runContractChecks(cfg Config, gs bus.GougingSettings, rs bu
 
 		// remove superfluous contract from renewal list and add to ignore list
 		for _, id := range contractIds[:numContractsTooMany] {
-			if index, exists := refreshIndices[id]; exists {
-				toRefresh[index] = toRefresh[len(toRefresh)-1]
-				toRefresh = toRefresh[:len(toRefresh)-1]
-			}
 			if index, exists := renewIndices[id]; exists {
 				toRenew[index] = toRenew[len(toRenew)-1]
 				toRenew = toRenew[:len(toRenew)-1]
@@ -337,6 +331,12 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		// calculate the renter funds
 		renterFunds, err := c.renterFundsEstimate(cfg, contract, isRefresh)
 		if err != nil {
+			c.logger.Errorw(
+				fmt.Sprintf("could not get refresh funding estimate, err: %v", err),
+				"hk", contract.HostKey(),
+				"fcid", contract.ID,
+				"refresh", isRefresh,
+			)
 			continue
 		}
 
@@ -570,27 +570,11 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) renterFundsEstimate(cfg Config, contract worker.Contract, isRefresh bool) (estimate types.Currency, err error) {
+func (c *contractor) renterFundsEstimate(cfg Config, contract worker.Contract, isRefresh bool) (types.Currency, error) {
 	if isRefresh {
-		estimate, err = c.refreshFundingEstimate(cfg, contract)
-		if err != nil {
-			c.logger.Errorw(
-				fmt.Sprintf("could not get refresh funding estimate, err: %v", err),
-				"hk", contract.HostKey(),
-				"fcid", contract.ID,
-			)
-		}
-	} else {
-		estimate, err = c.renewFundingEstimate(cfg, contract)
-		if err != nil {
-			c.logger.Errorw(
-				fmt.Sprintf("could not get renew funding estimate, err: %v", err),
-				"hk", contract.HostKey(),
-				"fcid", contract.ID,
-			)
-		}
+		return c.refreshFundingEstimate(cfg, contract)
 	}
-	return
+	return c.renewFundingEstimate(cfg, contract)
 }
 
 func (c *contractor) refreshFundingEstimate(cfg Config, contract worker.Contract) (types.Currency, error) {

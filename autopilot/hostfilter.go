@@ -60,6 +60,7 @@ func isUsableContract(cfg Config, h Host, c worker.Contract, bh uint64) (usable 
 	if isUpForRenewal(cfg, c.Revision, bh) {
 		reasons = append(reasons, "up for renewal")
 		renew = true
+		refresh = false
 	}
 	if c.Revision.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
@@ -69,10 +70,6 @@ func isUsableContract(cfg Config, h Host, c worker.Contract, bh uint64) (usable 
 	}
 	usable = len(reasons) == 0
 	return
-}
-
-func isMaxRevision(c rhpv2.ContractRevision) bool {
-	return c.Revision.NewRevisionNumber == math.MaxUint64
 }
 
 func isOutOfFunds(cfg Config, h Host, c worker.Contract) bool {
