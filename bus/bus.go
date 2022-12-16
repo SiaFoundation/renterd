@@ -80,7 +80,7 @@ type (
 	// A ContractSetStore stores contract sets.
 	ContractSetStore interface {
 		ContractSets() ([]string, error)
-		ContractSet(name string) ([]types.FileContractID, error)
+		ContractSet(name string) ([]Contract, error)
 		SetContractSet(name string, contracts []types.FileContractID) error
 	}
 
@@ -492,31 +492,6 @@ func (b *bus) contractSetsNameHandlerPUT(jc jape.Context) {
 	jc.Check("couldn't store host set", b.css.SetContractSet(jc.PathParam("name"), contracts))
 }
 
-func (b *bus) contractSetContractsHandler(jc jape.Context) {
-	setContracts, err := b.css.ContractSet(jc.PathParam("name"))
-	if jc.Check("couldn't load host set", err) != nil {
-		return
-	}
-	// TODO: This could be a b.cs.ContractSetContracts method which does a
-	// smart query.
-	all, err := b.cs.Contracts()
-	if jc.Check("couldn't load contracts", err) != nil {
-		return
-	}
-	allMap := make(map[types.FileContractID]Contract)
-	for _, c := range all {
-		allMap[c.ID] = c
-	}
-	var contracts []Contract
-	for _, fcid := range setContracts {
-		c, exists := allMap[fcid]
-		if exists {
-			contracts = append(contracts, c)
-		}
-	}
-	jc.Encode(contracts)
-}
-
 func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
 		keys, err := b.os.List(jc.PathParam("key"))
@@ -674,10 +649,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /contracts/:id/acquire": b.contractsAcquireHandler,
 		"POST   /contracts/:id/release": b.contractsReleaseHandler,
 
-		"GET    /contractsets":                 b.contractSetHandler,
-		"GET    /contractsets/:name":           b.contractSetsNameHandlerGET,
-		"GET    /contractsets/:name/contracts": b.contractSetContractsHandler,
-		"PUT    /contractsets/:name":           b.contractSetsNameHandlerPUT,
+		"GET    /contractsets":       b.contractSetHandler,
+		"GET    /contractsets/:name": b.contractSetsNameHandlerGET,
+		"PUT    /contractsets/:name": b.contractSetsNameHandlerPUT,
 
 		"GET    /objects/*key":    b.objectsKeyHandlerGET,
 		"PUT    /objects/*key":    b.objectsKeyHandlerPUT,

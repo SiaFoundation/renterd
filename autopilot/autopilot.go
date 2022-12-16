@@ -49,7 +49,7 @@ type Bus interface {
 
 	// contractsets
 	SetContractSet(name string, contracts []types.FileContractID) error
-	ContractSetContracts(name string) ([]bus.Contract, error)
+	ContractSet(name string) ([]bus.Contract, error)
 
 	// txpool
 	RecommendedFee() (types.Currency, error)

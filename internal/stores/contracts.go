@@ -66,9 +66,6 @@ func (dbContract) TableName() string { return "contracts" }
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
 
-// TableName implements the gorm.Tabler interface.
-func (dbContractSetEntry) TableName() string { return "contract_set_entries" }
-
 // convert converts a dbContractRHPv2 to a rhpv2.Contract type.
 func (c dbContract) convert() (bus.Contract, error) {
 	return bus.Contract{

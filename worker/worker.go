@@ -219,9 +219,9 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	ContractSetContracts(name string) ([]bus.Contract, error)
 	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
 	Contracts() ([]bus.Contract, error)
+	ContractSet(name string) ([]bus.Contract, error)
 
 	UploadParams() (bus.UploadParams, error)
 	MigrateParams(slab object.Slab) (bus.MigrateParams, error)
@@ -557,12 +557,12 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	from, err := w.bus.ContractSetContracts(mp.FromContracts)
+	from, err := w.bus.ContractSet(mp.FromContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
-	to, err := w.bus.ContractSetContracts(mp.ToContracts)
+	to, err := w.bus.ContractSet(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -640,7 +640,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
 	for {
 		// fetch contracts
-		bcs, err := w.bus.ContractSetContracts(up.ContractSet)
+		bcs, err := w.bus.ContractSet(up.ContractSet)
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
