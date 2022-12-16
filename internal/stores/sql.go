@@ -39,11 +39,14 @@ func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
 // NewSQLiteConnection opens a sqlite db at the given path.
 //
 //	_busy_timeout: set to prevent concurrent transactions from failing and
-//	instead have them block
+//	  instead have them block
 //	_foreign_keys: enforce foreign_key relations
-//	_journal_mode: set to truncate instead of delete since it's usually faster
+//	_journal_mode: set to WAL instead of delete since it's usually the fastest.
+//	  Only downside is that the db won't work on network drives. In that case this
+//	  should be made configurable and set to TRUNCATE or any of the other options.
+//	  For reference see https://github.com/mattn/go-sqlite3#connection-string.
 func NewSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=5000&_foreign_keys=1&_journal_mode=TRUNCATE", path))
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=5000&_foreign_keys=1&_journal_mode=WAL", path))
 }
 
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
