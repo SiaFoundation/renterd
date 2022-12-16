@@ -132,7 +132,7 @@ func (ap *Autopilot) Run() error {
 		cfg := ap.store.Config()
 
 		// perform maintenance
-		err = ap.c.PerformContractMaintenance(cfg, cs)
+		err = ap.c.performContractMaintenance(cfg, cs)
 		if err != nil {
 			ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			continue
@@ -179,7 +179,7 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 	jc.Encode(autopilotStatusResponseGET{
-		CurrentPeriod: ap.c.CurrentPeriod(),
+		CurrentPeriod: ap.c.currentPeriod(),
 	})
 }
 
