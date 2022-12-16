@@ -1,6 +1,7 @@
 package testing
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,10 +10,12 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"lukechampine.com/frand"
 )
 
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
@@ -124,5 +127,79 @@ func TestNewTestCluster(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestDownload is an integration test that verifies objects can be uploaded and
+// download correctly.
+func TestDownload(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if defaultAutopilotConfig.Contracts.Hosts < defaultRedundancy.MinShards {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	rs := defaultRedundancy
+	apcfg := defaultAutopilotConfig
+
+	// add hosts
+	if err := cluster.AddHosts(int(rs.TotalShards)); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the contract to form.
+	if err := Retry(20, time.Second, func() error {
+		if contracts, err := b.Contracts(); err != nil {
+			t.Fatal(err)
+		} else if uint64(len(contracts)) != apcfg.Contracts.Hosts {
+			return fmt.Errorf("%d contracts missing", apcfg.Contracts.Hosts-uint64(len(contracts)))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare two files, a small one and a large one
+	small := make([]byte, rhpv2.SectorSize/12)
+	large := make([]byte, rhpv2.SectorSize*3)
+
+	for _, data := range [][]byte{small, large} {
+		// prepare some data - make sure it's more than one sector
+		if _, err := frand.Read(data); err != nil {
+			t.Fatal(err)
+		}
+
+		// upload the data
+		name := fmt.Sprintf("data_%v", len(data))
+		if err := w.UploadObject(bytes.NewReader(data), name); err != nil {
+			t.Fatal(err)
+		}
+
+		// download the data
+		var buffer bytes.Buffer
+		if err := w.DownloadObject(&buffer, name); err != nil {
+			t.Fatal(err)
+		}
+
+		// assert it matches
+		if !bytes.Equal(data, buffer.Bytes()) {
+			t.Fatal("unexpected")
+		}
 	}
 }

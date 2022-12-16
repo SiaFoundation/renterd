@@ -285,7 +285,7 @@ func (c *Client) ContractSets() (sets []string, err error) {
 	return
 }
 
-// HostSet returns the contracts in the given set.
+// ContractSet returns the contracts in the given set.
 func (c *Client) ContractSet(name string) (hosts []Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
 	return
@@ -320,8 +320,42 @@ func (c *Client) RecommendedFee() (fee types.Currency, err error) {
 
 // ContractsForSlab returns contracts that can be used to download the provided
 // slab.
-func (c *Client) ContractsForSlab(shards []object.Sector) (contracts []Contract, err error) {
-	panic("unimplemented")
+func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string) ([]Contract, error) {
+	// fetch all contracts from the set
+	contractIds, err := c.ContractSet(contractSetName)
+	if err != nil {
+		return nil, err
+	}
+
+	// build two maps that indicate whether a contract is needed or usable, a
+	// contract is needed when there are shards located on its host, a contract
+	// is only usable if its in the contract set
+	isNeeded := make(map[string]struct{})
+	for _, shard := range shards {
+		isNeeded[shard.Host.String()] = struct{}{}
+	}
+	isUsable := make(map[types.FileContractID]struct{})
+	for _, contractId := range contractIds {
+		isUsable[contractId.ID] = struct{}{}
+	}
+
+	// fetch all contracts and filter them
+	contracts, err := c.Contracts()
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := contracts[:0]
+	for _, contract := range contracts {
+		if _, usable := isUsable[contract.ID]; !usable {
+			continue
+		}
+		if _, needed := isNeeded[contract.HostKey.String()]; !needed {
+			continue
+		}
+		filtered = append(filtered, contract)
+	}
+	return filtered, nil
 }
 
 // Setting returns the value for the setting with given key.
@@ -410,9 +444,31 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 	return
 }
 
+// DownloadParams returns parameters used for downloading slabs.
+func (c *Client) DownloadParams() (dp DownloadParams, err error) {
+	return DownloadParams{
+		ContractSet: "autopilot", // TODO
+	}, nil
+}
+
 // UploadParams returns parameters used for uploading slabs.
 func (c *Client) UploadParams() (up UploadParams, err error) {
-	panic("unimplemented")
+	rs, err := c.RedundancySettings()
+	if err != nil {
+		return UploadParams{}, err
+	}
+
+	cs, err := c.ConsensusState()
+	if err != nil {
+		return UploadParams{}, err
+	}
+
+	return UploadParams{
+		CurrentHeight: cs.BlockHeight,
+		MinShards:     uint8(rs.MinShards),   // TODO
+		TotalShards:   uint8(rs.TotalShards), // TODO
+		ContractSet:   "autopilot",           // TODO
+	}, nil
 }
 
 // MigrateParams returns parameters used for migrating a slab.
