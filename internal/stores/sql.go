@@ -61,7 +61,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 
 			// bus.ContractSetStore tables
 			&dbContractSet{},
-			&dbContractSetEntry{},
 
 			// bus.ObjectStore tables
 			&dbObject{},

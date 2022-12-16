@@ -286,7 +286,7 @@ func (c *Client) ContractSets() (sets []string, err error) {
 }
 
 // HostSet returns the contracts in the given set.
-func (c *Client) ContractSet(name string) (hosts []types.FileContractID, err error) {
+func (c *Client) ContractSet(name string) (hosts []Contract, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
 	return
 }
@@ -294,14 +294,6 @@ func (c *Client) ContractSet(name string) (hosts []types.FileContractID, err err
 // SetContractSet assigns a name to the given contracts.
 func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/contractsets/%s", name), contracts)
-	return
-}
-
-// ContractSetContracts returns the full contract for each contract id in the
-// given set.  The ID and HostIP fields may be empty, depending on whether a
-// contract exists and a host announcement is known.
-func (c *Client) ContractSetContracts(name string) (contracts []Contract, err error) {
-	err = c.c.GET(fmt.Sprintf("/contractsets/%s/contracts", name), &contracts)
 	return
 }
 
