@@ -41,7 +41,6 @@ type (
 		logger *zap.SugaredLogger
 
 		mu            sync.Mutex
-		blockHeight   uint64
 		currentPeriod uint64
 	}
 )
@@ -53,28 +52,26 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) ApplyConsensusState(cfg Config, state bus.ConsensusState) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.blockHeight = state.BlockHeight
-	if c.currentPeriod == 0 {
-		c.currentPeriod = state.BlockHeight
-	} else if c.blockHeight >= c.currentPeriod+cfg.Contracts.Period {
-		c.currentPeriod += cfg.Contracts.Period
-	}
-}
-
 func (c *contractor) CurrentPeriod() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.currentPeriod
 }
 
-func (c *contractor) PerformContractMaintenance(cfg Config) error {
-	// Fetch the consensus dependent fields. We want them to be consistent
-	// throughout the maintennace.
+func (c *contractor) PerformContractMaintenance(cfg Config, cs bus.ConsensusState) error {
+	// No maintenance when syncing.
+	if !cs.Synced {
+		return nil
+	}
+
+	// Update the current period.
 	c.mu.Lock()
-	blockHeight := c.blockHeight
+	blockHeight := cs.BlockHeight
+	if c.currentPeriod == 0 {
+		c.currentPeriod = blockHeight
+	} else if blockHeight >= c.currentPeriod+cfg.Contracts.Period {
+		c.currentPeriod += cfg.Contracts.Period
+	}
 	currentPeriod := c.currentPeriod
 	c.mu.Unlock()
 

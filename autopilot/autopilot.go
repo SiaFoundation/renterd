@@ -131,13 +131,8 @@ func (ap *Autopilot) Run() error {
 		// fetch config to ensure its not updated during maintenance
 		cfg := ap.store.Config()
 
-		// update contractor's internal state of consensus
-		//
-		// TODO: this should be done through a pub/sub mechanism on the bus
-		ap.c.ApplyConsensusState(cfg, cs)
-
 		// perform maintenance
-		err = ap.c.PerformContractMaintenance(cfg)
+		err = ap.c.PerformContractMaintenance(cfg, cs)
 		if err != nil {
 			ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			continue
