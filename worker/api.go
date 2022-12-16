@@ -53,10 +53,12 @@ type RHPScanResponse struct {
 
 // RHPFormRequest is the request type for the /rhp/form endpoint.
 type RHPFormRequest struct {
-	RenterKey      PrivateKey          `json:"renterKey"`
-	HostKey        PublicKey           `json:"hostKey"`
-	HostIP         string              `json:"hostIP"`
-	TransactionSet []types.Transaction `json:"transactionSet"`
+	EndHeight      uint64             `json:"endHeight"`
+	HostCollateral types.Currency     `json:"hostCollateral"`
+	HostKey        PublicKey          `json:"hostKey"`
+	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
+	RenterFunds    types.Currency     `json:"renterFunds"`
+	RenterAddress  types.UnlockHash   `json:"renterAddress"`
 }
 
 // RHPFormResponse is the response type for the /rhp/form endpoint.
@@ -74,7 +76,6 @@ type RHPRenewRequest struct {
 	HostSettings  rhpv2.HostSettings   `json:"hostSettings"`
 	RenterAddress types.UnlockHash     `json:"renterAddress"`
 	RenterFunds   types.Currency       `json:"renterFunds"`
-	RenterKey     consensus.PrivateKey `json:"renterKey"`
 }
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.
@@ -87,12 +88,11 @@ type RHPRenewResponse struct {
 
 // RHPFundRequest is the request type for the /rhp/fund endpoint.
 type RHPFundRequest struct {
-	Contract  types.FileContractRevision `json:"contract"`
-	RenterKey PrivateKey                 `json:"renterKey"`
-	HostKey   PublicKey                  `json:"hostKey"`
-	HostIP    string                     `json:"hostIP"`
-	Account   rhpv3.Account              `json:"account"`
-	Amount    types.Currency             `json:"amount"`
+	Contract types.FileContractRevision `json:"contract"`
+	HostKey  PublicKey                  `json:"hostKey"`
+	HostIP   string                     `json:"hostIP"`
+	Account  rhpv3.Account              `json:"account"`
+	Amount   types.Currency             `json:"amount"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
@@ -121,8 +121,4 @@ type RHPRegistryUpdateRequest struct {
 	RegistryKey   rhpv3.RegistryKey                  `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue                `json:"registryValue"`
 	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
-}
-
-type RHPContractsRequest struct {
-	RenterKey [32]byte
 }

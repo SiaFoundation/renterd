@@ -41,12 +41,14 @@ func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency,
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string, transactionSet []types.Transaction) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := RHPFormRequest{
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		HostIP:         hostIP,
-		TransactionSet: transactionSet,
+		EndHeight:      endHeight,
+		HostCollateral: hostCollateral,
+		HostKey:        hk,
+		HostSettings:   hs,
+		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
 	}
 	var resp RHPFormResponse
 	err := c.c.POST("/rhp/form", req, &resp)
@@ -54,7 +56,7 @@ func (c *Client) RHPForm(renterKey PrivateKey, hostKey PublicKey, hostIP string,
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, rk consensus.PrivateKey) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := RHPRenewRequest{
 		ContractID:    fcid,
 		EndHeight:     endHeight,
@@ -62,7 +64,6 @@ func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consen
 		HostSettings:  hs,
 		RenterAddress: renterAddress,
 		RenterFunds:   renterFunds,
-		RenterKey:     rk,
 	}
 	var resp RHPRenewResponse
 	err := c.c.POST("/rhp/renew", req, &resp)
@@ -70,14 +71,13 @@ func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consen
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
+func (c *Client) RHPFund(contract types.FileContractRevision, hostKey PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
 	req := RHPFundRequest{
-		Contract:  contract,
-		RenterKey: renterKey,
-		HostKey:   hostKey,
-		HostIP:    hostIP,
-		Account:   account,
-		Amount:    amount,
+		Contract: contract,
+		HostKey:  hostKey,
+		HostIP:   hostIP,
+		Account:  account,
+		Amount:   amount,
 	}
 	err = c.c.POST("/rhp/fund", req, nil)
 	return
@@ -180,10 +180,9 @@ func (c *Client) DeleteObject(name string) (err error) {
 	return
 }
 
-func (c *Client) Contracts(rk [32]byte) (revisions []Contract, err error) {
-	err = c.c.POST("/rhp/contracts", RHPContractsRequest{
-		RenterKey: rk,
-	}, &revisions)
+// Contracts returns all contracts from the worker.
+func (c *Client) Contracts() (revisions []Contract, err error) {
+	err = c.c.GET("/rhp/contracts", &revisions)
 	return
 }
 

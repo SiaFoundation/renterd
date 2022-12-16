@@ -142,7 +142,7 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	// fetch all active contracts and their latest revisions.
-	contracts, err := c.ap.worker.Contracts(c.ap.masterKey)
+	contracts, err := c.ap.worker.Contracts()
 	if err != nil {
 		return err
 	}
@@ -338,8 +338,7 @@ func (c *contractor) runContractRenewals(cfg Config, budget *types.Currency, ren
 		}
 
 		// derive the renter key
-		renterKey := c.ap.deriveRenterKey(renew.HostKey())
-		newRev, err := c.renewContract(cfg, renew, renterKey, renterAddress, renterFunds)
+		newRev, err := c.renewContract(cfg, renew, renterAddress, renterFunds)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			// TODO: log error
@@ -466,8 +465,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 		}
 
 		// form contract
-		renterKey := c.ap.deriveRenterKey(candidate)
-		contract, err := c.formContract(cfg, candidate, host.NetAddress(), settings, renterKey, renterAddress, renterFunds, hostCollateral)
+		contract, err := c.formContract(cfg, candidate, host.NetAddress(), settings, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			c.logger.Errorw(
@@ -499,7 +497,7 @@ func (c *contractor) runContractFormations(cfg Config, budget *types.Currency, r
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, error) {
+func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
@@ -522,25 +520,18 @@ func (c *contractor) renewContract(cfg Config, toRenew worker.Contract, renterKe
 
 	// renew the contract
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	renewed, _, err := c.ap.worker.RHPRenew(toRenew.ID, endHeight, toRenew.HostKey(), scan.Settings, renterAddress, renterFunds, renterKey)
+	renewed, _, err := c.ap.worker.RHPRenew(toRenew.ID, endHeight, toRenew.HostKey(), scan.Settings, renterAddress, renterFunds)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
 	return renewed, nil
 }
 
-func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterKey consensus.PrivateKey, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
+func (c *contractor) formContract(cfg Config, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	// prepare contract formation
 	endHeight := c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	txns, err := c.ap.bus.WalletPrepareForm(renterKey, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
+	contract, _, err := c.ap.worker.RHPForm(endHeight, hostKey, hostSettings, renterAddress, renterFunds, hostCollateral)
 	if err != nil {
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// form the contract
-	contract, _, err := c.ap.worker.RHPForm(renterKey, hostKey, hostIP, txns)
-	if err != nil {
-		_ = c.ap.bus.WalletDiscard(txns[len(txns)-1]) // ignore error
 		return rhpv2.ContractRevision{}, err
 	}
 

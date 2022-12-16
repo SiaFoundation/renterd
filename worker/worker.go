@@ -216,26 +216,6 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	}
 }
 
-type contractCapability struct {
-	HostKey   consensus.PublicKey
-	HostIP    string
-	ID        types.FileContractID
-	RenterKey consensus.PrivateKey
-}
-
-func parseContractCapabilities(contracts []bus.Contract, masterKey [32]byte) []contractCapability {
-	ccs := make([]contractCapability, len(contracts))
-	for i, c := range contracts {
-		ccs[i] = contractCapability{
-			HostKey:   c.HostKey,
-			HostIP:    c.HostIP,
-			ID:        c.ID,
-			RenterKey: deriveRenterKey(masterKey, c.HostKey),
-		}
-	}
-	return ccs
-}
-
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
@@ -251,6 +231,7 @@ type Bus interface {
 	DeleteObject(key string) error
 
 	WalletDiscard(txn types.Transaction) error
+	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
 	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
 }
 
@@ -258,11 +239,16 @@ type Bus interface {
 // works if we persist a hash of the renter's master key in the database and
 // compare it on startup, otherwise there's no way of knowing the derived key is
 // usuable
+// NOTE: Instead of hashing the masterkey and comparing, we could use random
+// bytes + the HMAC thereof as the salt. e.g. 32 bytes + 32 bytes HMAC. Then
+// whenever we read a specific salt we can verify that is was created with a
+// given key. That would eventually allow different masterkeys to coexist in the
+// same bus.
 //
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
-func deriveRenterKey(masterKey [32]byte, hostKey consensus.PublicKey) consensus.PrivateKey {
-	seed := blake2b.Sum256(append(masterKey[:], hostKey[:]...))
+func (w *worker) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(w.masterKey[:], hostKey[:]...))
 	pk := consensus.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
 		seed[i] = 0
@@ -273,8 +259,9 @@ func deriveRenterKey(masterKey [32]byte, hostKey consensus.PublicKey) consensus.
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
-	bus  Bus
-	pool *sessionPool
+	bus       Bus
+	pool      *sessionPool
+	masterKey [32]byte
 }
 
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
@@ -359,10 +346,10 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []contractCapability, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []bus.Contract, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, c.RenterKey))
+		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
 	go func() {
@@ -430,13 +417,24 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
-	var cs consensus.State
-	cs.Index.Height = uint64(rfr.TransactionSet[len(rfr.TransactionSet)-1].FileContracts[0].WindowStart)
+
+	hostSettings, hostKey, renterFunds := rfr.HostSettings, rfr.HostKey, rfr.RenterFunds
+	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
+	rk := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	err := w.withTransportV2(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
-		contract, txnSet, err = rhpv2.RPCFormContract(t, cs, rfr.RenterKey, rfr.TransactionSet)
+	err := w.withTransportV2(jc.Request.Context(), hostSettings.NetAddress, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
+		renterTxnSet, err := w.bus.WalletPrepareForm(rk, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
+		if err != nil {
+			return err
+		}
+
+		contract, txnSet, err = rhpv2.RPCFormContract(t, rk, renterTxnSet)
+		if err != nil {
+			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
+			return err
+		}
 		return
 	})
 	if jc.Check("couldn't form contract", err) != nil {
@@ -454,8 +452,9 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Decode(&rrr) != nil {
 		return
 	}
-	hostSettings, hostKey, rk, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.RenterKey, rrr.ContractID, rrr.RenterFunds
+	hostSettings, hostKey, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
+	rk := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
@@ -493,12 +492,13 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
+	rk := w.deriveRenterKey(rfr.HostKey)
 	err := w.withTransportV3(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 		// The FundAccount RPC requires a SettingsID, which we also have to pay
 		// for. To simplify things, we pay for the SettingsID using the full
 		// amount, with the "refund" going to the desired account; we then top
 		// up the account to cover the cost of the two RPCs.
-		payment, ok := rhpv3.PayByContract(&rfr.Contract, rfr.Amount, rfr.Account, rfr.RenterKey)
+		payment, ok := rhpv3.PayByContract(&rfr.Contract, rfr.Amount, rfr.Account, rk)
 		if !ok {
 			return errors.New("insufficient funds")
 		}
@@ -506,7 +506,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
-		payment, ok = rhpv3.PayByContract(&rfr.Contract, priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost), rhpv3.ZeroAccount, rfr.RenterKey)
+		payment, ok = rhpv3.PayByContract(&rfr.Contract, priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost), rhpv3.ZeroAccount, rk)
 		if !ok {
 			return errors.New("insufficient funds")
 		}
@@ -557,17 +557,15 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	bFrom, err := w.bus.ContractSetContracts(mp.FromContracts)
+	from, err := w.bus.ContractSetContracts(mp.FromContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	from := parseContractCapabilities(bFrom, [32]byte{}) // TODO
 
-	bTo, err := w.bus.ContractSetContracts(mp.ToContracts)
+	to, err := w.bus.ContractSetContracts(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	to := parseContractCapabilities(bTo, [32]byte{}) // TODO
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
 	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
@@ -617,9 +615,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return
 		}
 
-		// TODO: Lock contracts
-		cs := parseContractCapabilities(contracts, [32]byte{}) // TODO
-		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) error {
+		err = w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) error {
 			return downloadSlab(jc.Request.Context(), cw, ss, hosts)
 		})
 		if err != nil {
@@ -648,14 +644,11 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if jc.Check("couldn't fetch contracts from bus", err) != nil {
 			return
 		}
-		cs := parseContractCapabilities(bcs, [32]byte{}) // TODO
-
-		// TODO: Lock contracts
 
 		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
 		var s object.Slab
 		var length int
-		err = w.withHosts(jc.Request.Context(), cs, func(hosts []sectorStore) (err error) {
+		err = w.withHosts(jc.Request.Context(), bcs, func(hosts []sectorStore) (err error) {
 			s, length, err = uploadSlab(jc.Request.Context(), r, up.MinShards, up.TotalShards, hosts)
 			return err
 		})
@@ -672,7 +665,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 
 		for _, ss := range s.Shards {
 			if _, ok := usedContracts[ss.Host]; !ok {
-				for _, c := range cs {
+				for _, c := range bcs {
 					if c.HostKey == ss.Host {
 						usedContracts[ss.Host] = c.ID
 						break
@@ -691,20 +684,14 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpContractsHandler(jc jape.Context) {
-	var req RHPContractsRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
+func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	busContracts, err := w.bus.Contracts()
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
-	cc := parseContractCapabilities(busContracts, req.RenterKey)
 
 	var contracts []Contract
-	err = w.withHosts(jc.Request.Context(), cc, func(ss []sectorStore) error {
+	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
 		for i, store := range ss {
 			rev, err := store.(*session).Revision()
 			if err != nil {
@@ -726,11 +713,12 @@ func (w *worker) rhpContractsHandler(jc jape.Context) {
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, b Bus) http.Handler {
 	w := &worker{
-		bus:  b,
-		pool: newSessionPool(),
+		bus:       b,
+		pool:      newSessionPool(),
+		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"POST   /rhp/contracts":       w.rhpContractsHandler,
+		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
