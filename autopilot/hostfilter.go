@@ -52,30 +52,24 @@ func isUsableHost(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings,
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg Config, h Host, c worker.Contract, bh uint64) (bool, bool, []string) {
-	var reasons []string
-	renewable := true
-
+func isUsableContract(cfg Config, h Host, c worker.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
 	if isOutOfFunds(cfg, h, c) {
 		reasons = append(reasons, "out of funds")
+		refresh = true
 	}
 	if isUpForRenewal(cfg, c.Revision, bh) {
 		reasons = append(reasons, "up for renewal")
+		renew = true
+		refresh = false
 	}
 	if c.Revision.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
-		renewable = false
 	}
 	if bh > c.Revision.EndHeight() {
 		reasons = append(reasons, "expired")
-		renewable = false
 	}
-
-	return len(reasons) == 0, renewable, reasons
-}
-
-func isMaxRevision(c rhpv2.ContractRevision) bool {
-	return c.Revision.NewRevisionNumber == math.MaxUint64
+	usable = len(reasons) == 0
+	return
 }
 
 func isOutOfFunds(cfg Config, h Host, c worker.Contract) bool {

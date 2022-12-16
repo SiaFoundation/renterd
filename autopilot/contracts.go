@@ -11,11 +11,11 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRenew []types.FileContractID, renewed []bus.Contract) error {
+func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []bus.Contract) error {
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
-	isUpForRenew := contractMapBool(toRenew)
+	isUpForRenew := contractMapBool(append(toRefresh, toRenew...))
 
 	// renewed map is special case since we need renewed from
 	isRenewed := make(map[types.FileContractID]bool)

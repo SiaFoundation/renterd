@@ -229,7 +229,7 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 	return
 }
 
-// Contracts returns the current set of contracts.
+// Contracts returns all contracts in the contract store.
 func (c *Client) Contracts() (contracts []Contract, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
@@ -241,7 +241,7 @@ func (c *Client) Contract(id types.FileContractID) (contract Contract, err error
 	return
 }
 
-// AddContract adds the provided contract to the current contract set.
+// AddContract adds the provided contract to the contract store.
 func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added Contract, err error) {
 	err = c.c.POST(fmt.Sprintf("/contracts/%s/new", contract.ID()), ContractsIDAddRequest{
 		Contract:    contract,
@@ -251,7 +251,7 @@ func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Cu
 	return
 }
 
-// AddRenewedContract adds the provided contract to the current contract set.
+// AddRenewedContract adds the provided contract to the contract store.
 func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed Contract, err error) {
 	err = c.c.POST(fmt.Sprintf("/contracts/%s/renewed", contract.ID()), ContractsIDRenewedRequest{
 		Contract:    contract,
