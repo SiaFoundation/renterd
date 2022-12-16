@@ -30,6 +30,12 @@ func (c *Client) Config() (cfg Config, err error) {
 	return
 }
 
+func (c *Client) Status() (uint64, error) {
+	var resp autopilotStatusResponseGET
+	err := c.c.GET("/status", &resp)
+	return resp.CurrentPeriod, err
+}
+
 // RenterKey returns the renter's private key for a given host's public key.
 func (c *Client) RenterKey(hostKey consensus.PublicKey) (rk consensus.PrivateKey, err error) {
 	err = c.c.GET(fmt.Sprintf("/renterkey/%s", hostKey), &rk)

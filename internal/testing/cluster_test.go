@@ -87,14 +87,8 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Mine blocks until we are in the middle of the renew window.
-	cs, err := b.ConsensusState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	renewWindow := contract.EndHeight() - defaultAutopilotConfig.Contracts.RenewWindow/2
-	toMine := renewWindow - cs.BlockHeight
-	if err := cluster.MineBlocks(int(toMine)); err != nil {
+	// Mine blocks until contracts start renewing.
+	if err := cluster.MineToRenewWindow(); err != nil {
 		t.Fatal(err)
 	}
 

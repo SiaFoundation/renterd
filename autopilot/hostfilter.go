@@ -90,7 +90,7 @@ func isOutOfFunds(cfg Config, h Host, c worker.Contract) bool {
 }
 
 func isUpForRenewal(cfg Config, c rhpv2.ContractRevision, blockHeight uint64) bool {
-	return blockHeight+cfg.Contracts.RenewWindow/2 >= c.EndHeight()
+	return blockHeight+cfg.Contracts.RenewWindow >= c.EndHeight()
 }
 
 func isGouging(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings, h Host) (bool, string) {

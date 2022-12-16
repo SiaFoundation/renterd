@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	"go.sia.tech/renterd/bus"
@@ -39,7 +40,9 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		blockHeight   uint64
+		blockHeight uint64
+
+		mu            sync.Mutex
 		currentPeriod uint64
 	}
 )
@@ -51,7 +54,9 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) applyConsensusState(cfg Config, state bus.ConsensusState) {
+func (c *contractor) ApplyConsensusState(cfg Config, state bus.ConsensusState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.blockHeight = state.BlockHeight
 	if c.currentPeriod == 0 {
 		c.currentPeriod = state.BlockHeight
@@ -60,77 +65,13 @@ func (c *contractor) applyConsensusState(cfg Config, state bus.ConsensusState) {
 	}
 }
 
-func (c *contractor) contractSpending(contract worker.Contract) (bus.ContractSpending, error) {
-	// TODO: fetch contract hierarchy
-	var contracts []bus.Contract
-
-	// build a map
-	cmap := make(map[types.FileContractID]bus.Contract)
-	for _, contract := range contracts {
-		cmap[contract.ID] = contract
-	}
-
-	// fetch contract chain
-	curr, exists := cmap[contract.ID]
-	if !exists {
-		// TODO: return error here once fetching the history is implemented.
-		return bus.ContractSpending{}, nil // fmt.Errorf("contract with id '%v' not found", contract.ID)
-	}
-
-	// no history
-	if curr.RenewedFrom == (types.FileContractID{}) {
-		return curr.Spending, nil
-	}
-
-	// compute total spending
-	total := curr.Spending
-	for exists {
-		if curr, exists = cmap[curr.RenewedFrom]; exists {
-			total = total.Add(curr.Spending)
-		}
-	}
-	return total, nil
+func (c *contractor) CurrentPeriod() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.currentPeriod
 }
 
-func (c *contractor) currentPeriodSpending(contracts []worker.Contract) (types.Currency, error) {
-	totalCosts := make(map[types.FileContractID]types.Currency)
-	for _, c := range contracts {
-		totalCosts[c.ID] = c.TotalCost
-	}
-
-	// filter contracts in the current period
-	var filtered []worker.Contract
-	for _, rev := range contracts {
-		if rev.EndHeight() <= c.currentPeriod {
-			filtered = append(filtered, rev)
-		}
-	}
-
-	// calculate the money spent
-	var spent types.Currency
-	for _, rev := range filtered {
-		remaining := rev.RenterFunds()
-		totalCost := totalCosts[rev.ID]
-		if remaining.Cmp(totalCost) <= 0 {
-			spent = spent.Add(totalCost.Sub(remaining))
-		} else {
-			c.logger.DPanicw("sanity check failed", "remaining", remaining, "totalcost", totalCost)
-		}
-	}
-
-	return spent, nil
-}
-
-func (c *contractor) isStopped() bool {
-	select {
-	case <-c.ap.stopChan:
-		return true
-	default:
-		return false
-	}
-}
-
-func (c *contractor) performContractMaintenance(cfg Config) error {
+func (c *contractor) PerformContractMaintenance(cfg Config) error {
 	// return early if no hosts are requested
 	if cfg.Contracts.Hosts == 0 {
 		return nil
@@ -205,6 +146,78 @@ func (c *contractor) performContractMaintenance(cfg Config) error {
 	}
 
 	return nil
+}
+
+func (c *contractor) contractSpending(contract worker.Contract) (bus.ContractSpending, error) {
+	// TODO: fetch contract hierarchy
+	var contracts []bus.Contract
+
+	// build a map
+	cmap := make(map[types.FileContractID]bus.Contract)
+	for _, contract := range contracts {
+		cmap[contract.ID] = contract
+	}
+
+	// fetch contract chain
+	curr, exists := cmap[contract.ID]
+	if !exists {
+		// TODO: return error here once fetching the history is implemented.
+		return bus.ContractSpending{}, nil // fmt.Errorf("contract with id '%v' not found", contract.ID)
+	}
+
+	// no history
+	if curr.RenewedFrom == (types.FileContractID{}) {
+		return curr.Spending, nil
+	}
+
+	// compute total spending
+	total := curr.Spending
+	for exists {
+		if curr, exists = cmap[curr.RenewedFrom]; exists {
+			total = total.Add(curr.Spending)
+		}
+	}
+	return total, nil
+}
+
+func (c *contractor) currentPeriodSpending(contracts []worker.Contract) (types.Currency, error) {
+	totalCosts := make(map[types.FileContractID]types.Currency)
+	for _, c := range contracts {
+		totalCosts[c.ID] = c.TotalCost
+	}
+
+	// filter contracts in the current period
+	var filtered []worker.Contract
+	c.mu.Lock()
+	for _, rev := range contracts {
+		if rev.EndHeight() <= c.currentPeriod {
+			filtered = append(filtered, rev)
+		}
+	}
+	c.mu.Unlock()
+
+	// calculate the money spent
+	var spent types.Currency
+	for _, rev := range filtered {
+		remaining := rev.RenterFunds()
+		totalCost := totalCosts[rev.ID]
+		if remaining.Cmp(totalCost) <= 0 {
+			spent = spent.Add(totalCost.Sub(remaining))
+		} else {
+			c.logger.DPanicw("sanity check failed", "remaining", remaining, "totalcost", totalCost)
+		}
+	}
+
+	return spent, nil
+}
+
+func (c *contractor) isStopped() bool {
+	select {
+	case <-c.ap.stopChan:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *contractor) runContractChecks(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings, contracts []worker.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []worker.Contract, _ error) {
@@ -787,6 +800,8 @@ func (c *contractor) candidateHosts(cfg Config, wanted uint64) ([]consensus.Publ
 }
 
 func (c *contractor) endHeight(cfg Config) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 }
 
