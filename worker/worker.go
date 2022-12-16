@@ -668,8 +668,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 			return err
 		}); err == io.EOF {
 			break
-		} else if err != nil && err != io.ErrUnexpectedEOF {
-			jc.Error(err, http.StatusInternalServerError)
+		} else if jc.Check("couldn't upload slab", err); err != nil {
 			return
 		}
 
