@@ -169,14 +169,14 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
 	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Create a host if it doesn't exist yet.
-		var host dbHost
-		if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
-			return err
-		}
+		//		var host dbHost
+		//		if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
+		//			return err
+		//		}
 
 		// Create an interaction.
 		return tx.Create(&dbInteraction{
-			DBHostID:  host.ID,
+			DBHostID:  0,
 			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
 			Type:      hi.Type,
 			Result:    hi.Result,
