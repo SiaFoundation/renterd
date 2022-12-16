@@ -34,7 +34,7 @@ func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
 
 // NewSQLiteConnection opens a sqlite db at the given path.
 func NewSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(path)
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=5000", path))
 }
 
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only

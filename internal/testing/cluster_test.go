@@ -88,7 +88,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Slowly mine up to a full period of blocks until the contract renews.
-	err = Retry(int(defaultAutopilotConfig.Contracts.Period), 50*time.Millisecond, func() error {
+	err = Retry(int(defaultAutopilotConfig.Contracts.Period), 100*time.Millisecond, func() error {
 		if err := cluster.MineBlocks(1); err != nil {
 			t.Fatal(err)
 		}
