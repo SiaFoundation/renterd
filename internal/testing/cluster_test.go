@@ -35,11 +35,7 @@ func TestNewTestCluster(t *testing.T) {
 		}
 	}()
 
-	// Add a host.
 	b := cluster.Bus
-	if err := cluster.AddHosts(1); err != nil {
-		t.Fatal(err)
-	}
 
 	// Try talking to the bus API by adding an object.
 	err = b.AddObject("/foo", object.Object{
@@ -130,9 +126,9 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
-// TestDownload is an integration test that verifies objects can be uploaded and
-// download correctly.
-func TestDownload(t *testing.T) {
+// TestUploadDownload is an integration test that verifies objects can be
+// uploaded and download correctly.
+func TestUploadDownload(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -153,25 +149,11 @@ func TestDownload(t *testing.T) {
 		}
 	}()
 
-	b := cluster.Bus
 	w := cluster.Worker
 	rs := defaultRedundancy
-	apcfg := defaultAutopilotConfig
 
 	// add hosts
 	if err := cluster.AddHosts(int(rs.TotalShards)); err != nil {
-		t.Fatal(err)
-	}
-
-	// wait for the contract to form.
-	if err := Retry(20, time.Second, func() error {
-		if contracts, err := b.Contracts(); err != nil {
-			t.Fatal(err)
-		} else if uint64(len(contracts)) != apcfg.Contracts.Hosts {
-			return fmt.Errorf("%d contracts missing", apcfg.Contracts.Hosts-uint64(len(contracts)))
-		}
-		return nil
-	}); err != nil {
 		t.Fatal(err)
 	}
 
