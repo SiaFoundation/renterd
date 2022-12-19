@@ -400,7 +400,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	}
 
 	gp, err := w.bus.GougingParams()
-	if jc.Check("could not get gouging parameters", err); err != nil {
+	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 
@@ -450,7 +450,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	}
 
 	gp, err := w.bus.GougingParams()
-	if jc.Check("could not get gouging parameters", err); err != nil {
+	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 
