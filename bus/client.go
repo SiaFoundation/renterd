@@ -322,38 +322,23 @@ func (c *Client) RecommendedFee() (fee types.Currency, err error) {
 // slab.
 func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string) ([]Contract, error) {
 	// fetch all contracts from the set
-	contractIds, err := c.ContractSet(contractSetName)
+	contracts, err := c.ContractSet(contractSetName)
 	if err != nil {
 		return nil, err
 	}
 
-	// build two maps that indicate whether a contract is needed or usable, a
-	// contract is needed when there are shards located on its host, a contract
-	// is only usable if its in the contract set
-	isNeeded := make(map[string]struct{})
+	// build hosts map
+	hosts := make(map[string]struct{})
 	for _, shard := range shards {
-		isNeeded[shard.Host.String()] = struct{}{}
-	}
-	isUsable := make(map[types.FileContractID]struct{})
-	for _, contractId := range contractIds {
-		isUsable[contractId.ID] = struct{}{}
+		hosts[shard.Host.String()] = struct{}{}
 	}
 
-	// fetch all contracts and filter them
-	contracts, err := c.Contracts()
-	if err != nil {
-		return nil, err
-	}
-
+	// filter contracts
 	filtered := contracts[:0]
 	for _, contract := range contracts {
-		if _, usable := isUsable[contract.ID]; !usable {
-			continue
+		if _, ok := hosts[contract.HostKey.String()]; ok {
+			filtered = append(filtered, contract)
 		}
-		if _, needed := isNeeded[contract.HostKey.String()]; !needed {
-			continue
-		}
-		filtered = append(filtered, contract)
 	}
 	return filtered, nil
 }
