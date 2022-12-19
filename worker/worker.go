@@ -569,6 +569,9 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// attach gouging checker to the context
+	ctx := WithGougingChecker(jc.Request.Context(), mp.GougingParams)
+
 	from, err := w.bus.Contracts(mp.FromContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
@@ -580,8 +583,8 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
-	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
-		return migrateSlab(jc.Request.Context(), &slab, hosts[:len(from)], hosts[len(from):])
+	err = w.withHosts(ctx, append(from, to...), func(hosts []sectorStore) error {
+		return migrateSlab(ctx, &slab, hosts[:len(from)], hosts[len(from):])
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -660,6 +663,9 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	}
 	rs := up.RedundancySettings
 
+	// attach gouging checker to the context
+	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
+
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
 	}
@@ -678,8 +684,8 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		var length int
 
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
-		if err := w.withHosts(jc.Request.Context(), bcs, func(hosts []sectorStore) (err error) {
-			s, length, err = uploadSlab(jc.Request.Context(), lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts)
+		if err := w.withHosts(ctx, bcs, func(hosts []sectorStore) (err error) {
+			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts)
 			return err
 		}); err == io.EOF {
 			break
