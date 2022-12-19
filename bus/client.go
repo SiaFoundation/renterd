@@ -321,16 +321,16 @@ func (c *Client) RecommendedFee() (fee types.Currency, err error) {
 // ContractsForSlab returns contracts that can be used to download the provided
 // slab.
 func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string) ([]Contract, error) {
-	// fetch all contracts from the set
-	contracts, err := c.ContractSet(contractSetName)
-	if err != nil {
-		return nil, err
-	}
-
 	// build hosts map
 	hosts := make(map[string]struct{})
 	for _, shard := range shards {
 		hosts[shard.Host.String()] = struct{}{}
+	}
+
+	// fetch all contracts from the set
+	contracts, err := c.ContractSet(contractSetName)
+	if err != nil {
+		return nil, err
 	}
 
 	// filter contracts
