@@ -261,6 +261,28 @@ func announceHosts(hosts []*siatest.TestNode) error {
 	return nil
 }
 
+// MineToRenewWindow is a helper which mines enough blocks for the autopilot to
+// reach its renew window.
+func (c *TestCluster) MineToRenewWindow() error {
+	cs, err := c.Bus.ConsensusState()
+	if err != nil {
+		return err
+	}
+	cfg, err := c.Autopilot.Config()
+	if err != nil {
+		return err
+	}
+	currentPeriod, err := c.Autopilot.Status()
+	if err != nil {
+		return err
+	}
+	renewWindowStart := currentPeriod + cfg.Contracts.Period
+	if cs.BlockHeight >= renewWindowStart {
+		return fmt.Errorf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, currentPeriod, cfg.Contracts.Period, renewWindowStart)
+	}
+	return c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
+}
+
 // sync blocks until the cluster is synced.
 func (c *TestCluster) sync(hosts []*siatest.TestNode) error {
 	return Retry(100, 100*time.Millisecond, func() error {

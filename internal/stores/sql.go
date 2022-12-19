@@ -28,13 +28,25 @@ type (
 // NOTE: Use simple names such as a random hex identifier or the filepath.Base
 // of a test's name. Certain symbols will break the cfg string and cause a file
 // to be created on disk.
+//
+//	mode: set to memory for in-memory database
+//	cache: set to shared which is required for in-memory databases
+//	_foreign_keys: enforce foreign_key relations
 func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", name))
+	return sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=1", name))
 }
 
 // NewSQLiteConnection opens a sqlite db at the given path.
+//
+//	_busy_timeout: set to prevent concurrent transactions from failing and
+//	  instead have them block
+//	_foreign_keys: enforce foreign_key relations
+//	_journal_mode: set to WAL instead of delete since it's usually the fastest.
+//	  Only downside is that the db won't work on network drives. In that case this
+//	  should be made configurable and set to TRUNCATE or any of the other options.
+//	  For reference see https://github.com/mattn/go-sqlite3#connection-string.
 func NewSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(path)
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=5000&_foreign_keys=1&_journal_mode=WAL", path))
 }
 
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
@@ -45,7 +57,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
-
 	if migrate {
 		// Create the tables.
 		tables := []interface{}{
@@ -74,9 +85,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
-		}
-		if res := db.Exec("PRAGMA foreign_keys = ON", nil); res.Error != nil {
-			return nil, modules.ConsensusChangeID{}, res.Error
 		}
 	}
 

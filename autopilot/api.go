@@ -29,6 +29,10 @@ type (
 	}
 )
 
+type autopilotStatusResponseGET struct {
+	CurrentPeriod uint64 `json:"currentPeriod"`
+}
+
 // Config contains all autopilot configuration parameters.
 type Config struct {
 	Wallet    WalletConfig

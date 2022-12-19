@@ -131,13 +131,8 @@ func (ap *Autopilot) Run() error {
 		// fetch config to ensure its not updated during maintenance
 		cfg := ap.store.Config()
 
-		// update contractor's internal state of consensus
-		//
-		// TODO: this should be done through a pub/sub mechanism on the bus
-		ap.c.applyConsensusState(cfg, cs)
-
 		// perform maintenance
-		err = ap.c.performContractMaintenance(cfg)
+		err = ap.c.performContractMaintenance(cfg, cs)
 		if err != nil {
 			ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			continue
@@ -182,12 +177,19 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
+	jc.Encode(autopilotStatusResponseGET{
+		CurrentPeriod: ap.c.currentPeriod(),
+	})
+}
+
 // NewServer returns an HTTP handler that serves the renterd autopilot API.
 func NewServer(ap *Autopilot) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /actions": ap.actionsHandler,
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
+		"GET    /status":  ap.statusHandlerGET,
 	})
 }
 
