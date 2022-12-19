@@ -143,6 +143,11 @@ type AddObjectRequest struct {
 	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
+// DownloadParams contains the metadata needed by a worker to download an object.
+type DownloadParams struct {
+	ContractSet string
+}
+
 // UploadParams contains the metadata needed by a worker to upload an object.
 type UploadParams struct {
 	CurrentHeight uint64

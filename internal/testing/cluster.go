@@ -28,6 +28,31 @@ import (
 	"lukechampine.com/frand"
 )
 
+var (
+	// defaultAutopilotConfig is the autopilot used for testing unless a
+	// different one is explicitly set.
+	defaultAutopilotConfig = autopilot.Config{
+		Contracts: autopilot.ContractsConfig{
+			Allowance:   types.SiacoinPrecision.Mul64(1e3),
+			Hosts:       5,
+			Period:      50,
+			RenewWindow: 24,
+
+			Download: modules.SectorSize * 500,
+			Upload:   modules.SectorSize * 500,
+			Storage:  modules.SectorSize * 5e3,
+		},
+		Hosts: autopilot.HostsConfig{
+			IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.
+		},
+	}
+
+	defaultRedundancy = bus.RedundancySettings{
+		MinShards:   2,
+		TotalShards: 5,
+	}
+)
+
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
@@ -39,10 +64,9 @@ type TestCluster struct {
 
 	cleanups []func(context.Context) error
 
-	miner       *node.Miner
-	dir         string
-	gatewayAddr string
-	wg          sync.WaitGroup
+	miner *node.Miner
+	dir   string
+	wg    sync.WaitGroup
 }
 
 // randomPassword creates a random 32 byte password encoded as a string.
@@ -63,24 +87,6 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 		time.Sleep(durationBetweenAttempts)
 	}
 	return fn()
-}
-
-// defaultAutopilotConfig is the autopilot used for testing unless a different
-// one is explicitly set.
-var defaultAutopilotConfig = autopilot.Config{
-	Contracts: autopilot.ContractsConfig{
-		Allowance:   types.SiacoinPrecision.Mul64(1e3),
-		Hosts:       5,
-		Period:      50,
-		RenewWindow: 24,
-
-		Download: modules.SectorSize * 500,
-		Upload:   modules.SectorSize * 500,
-		Storage:  modules.SectorSize * 5e3,
-	},
-	Hosts: autopilot.HostsConfig{
-		IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.
-	},
 }
 
 func withCtx(f func() error) func(context.Context) error {
@@ -130,13 +136,10 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	// Create bus.
 	var cleanups []func(context.Context) error
 	b, bCleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:   false,
-		GatewayAddr: "127.0.0.1:0",
-		Miner:       miner,
-		RedundancySettings: bus.RedundancySettings{
-			MinShards:   10,
-			TotalShards: 30,
-		},
+		Bootstrap:          false,
+		GatewayAddr:        "127.0.0.1:0",
+		Miner:              miner,
+		RedundancySettings: defaultRedundancy,
 	}, busDir, wk)
 	if err != nil {
 		return nil, err
@@ -216,12 +219,6 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 
 	// Fund the bus by mining beyond the foundation hardfork height.
 	if err := cluster.MineBlocks(10 + int(types.FoundationHardforkHeight)); err != nil {
-		return nil, err
-	}
-
-	// Get gateway address.
-	cluster.gatewayAddr, err = busClient.SyncerAddress()
-	if err != nil {
 		return nil, err
 	}
 

@@ -219,10 +219,11 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	ContractsForSlab(shards []object.Sector) ([]bus.Contract, error)
+	ContractsForSlab(shards []object.Sector, contractSetName string) ([]bus.Contract, error)
 	Contracts() ([]bus.Contract, error)
 	ContractSet(name string) ([]bus.Contract, error)
 
+	DownloadParams() (bus.DownloadParams, error)
 	UploadParams() (bus.UploadParams, error)
 	MigrateParams(slab object.Slab) (bus.MigrateParams, error)
 
@@ -590,6 +591,11 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		return
 	}
 
+	dp, err := w.bus.DownloadParams()
+	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
+		return
+	}
+
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
 	// straightforward fashion, we would need one (or more!) RHP RPCs for each
@@ -609,9 +615,15 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
 	for _, ss := range slabsForDownload(o.Slabs, offset, length) {
-		contracts, err := w.bus.ContractsForSlab(ss.Shards)
+		contracts, err := w.bus.ContractsForSlab(ss.Shards, dp.ContractSet)
 		if err != nil {
 			_ = err // NOTE: can't write error because we may have already written to the response
+			return
+		}
+
+		if len(contracts) < int(ss.MinShards) {
+			err = fmt.Errorf("not enough contracts to download the slab, %d<%d", len(contracts), ss.MinShards)
+			_ = err // TODO: can we do better UX wise (?) could ask the DB before initiating the first download
 			return
 		}
 
@@ -638,25 +650,28 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	}
 	w.pool.setCurrentHeight(up.CurrentHeight)
 	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+
+	// fetch contracts
+	bcs, err := w.bus.ContractSet(up.ContractSet)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
+	cr := o.Key.Encrypt(jc.Request.Body)
 	for {
-		// fetch contracts
-		bcs, err := w.bus.ContractSet(up.ContractSet)
-		if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		var s object.Slab
+		var length int
+
+		lr := io.LimitReader(cr, int64(up.MinShards)*rhpv2.SectorSize)
+		if err := w.withHosts(jc.Request.Context(), bcs, func(hosts []sectorStore) (err error) {
+			s, length, err = uploadSlab(jc.Request.Context(), lr, up.MinShards, up.TotalShards, hosts)
+			return err
+		}); err == io.EOF {
+			break
+		} else if jc.Check("couldn't upload slab", err); err != nil {
 			return
 		}
 
-		r := io.LimitReader(jc.Request.Body, int64(up.MinShards)*rhpv2.SectorSize)
-		var s object.Slab
-		var length int
-		err = w.withHosts(jc.Request.Context(), bcs, func(hosts []sectorStore) (err error) {
-			s, length, err = uploadSlab(jc.Request.Context(), r, up.MinShards, up.TotalShards, hosts)
-			return err
-		})
-		if err == io.EOF {
-			break
-		} else if jc.Check("couldn't upload slab", err) != nil {
-			return
-		}
 		o.Slabs = append(o.Slabs, object.SlabSlice{
 			Slab:   s,
 			Offset: 0,
