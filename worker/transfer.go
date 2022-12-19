@@ -16,8 +16,8 @@ import (
 type sectorStore interface {
 	Contract() types.FileContractID
 	PublicKey() consensus.PublicKey
-	UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
-	DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
+	DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error
 	DeleteSectors(roots []consensus.Hash256) error
 }
 
@@ -40,7 +40,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	respChan := make(chan resp, len(shards))
 	worker := func() {
 		for req := range reqChan {
-			root, err := req.host.UploadSector((*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+			root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
 			respChan <- resp{req, root, err}
 		}
 	}
@@ -137,7 +137,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			}
 			offset, length := ss.SectorRegion()
 			var buf bytes.Buffer
-			err := h.DownloadSector(&buf, shard.Root, offset, length)
+			err := h.DownloadSector(ctx, &buf, shard.Root, offset, length)
 			respChan <- resp{req, buf.Bytes(), err}
 		}
 	}
@@ -308,7 +308,7 @@ outer:
 	respChan := make(chan resp, len(shardIndices))
 	worker := func() {
 		for req := range reqChan {
-			root, err := req.host.UploadSector((*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+			root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
 			respChan <- resp{req, root, err}
 		}
 	}

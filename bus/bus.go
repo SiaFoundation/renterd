@@ -626,55 +626,72 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 }
 
 func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(SettingGouging); jc.Check("could not find gouging settings", err) == nil {
-		if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-			panic(err)
-		}
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
 	}
 
 	jc.Encode(api.DownloadParams{
-		ContractSet:     "autopilot", // TODO
-		GougingSettings: gs,
+		ContractSet:   "autopilot", // TODO
+		GougingParams: gp,
 	})
 }
 
 func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(SettingGouging); jc.Check("could not find gouging settings", err) == nil {
-		if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-			panic(err)
-		}
-	}
-
-	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(SettingRedundancy); jc.Check("could not find redundancy settings", err) == nil {
-		if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-			panic(err)
-		}
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:        "autopilot", // TODO
-		CurrentHeight:      b.cm.TipState().Index.Height,
-		GougingSettings:    gs,
-		RedundancySettings: rs,
+		ContractSet:   "autopilot", // TODO
+		CurrentHeight: b.cm.TipState().Index.Height,
+		GougingParams: gp,
 	})
 }
 
 func (b *bus) paramsHandlerMigrateGET(jc jape.Context) {
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(SettingGouging); jc.Check("could not find gouging settings", err) == nil {
-		if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-			panic(err)
-		}
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
 	}
 
 	jc.Encode(api.MigrateParams{
 		CurrentHeight: b.cm.TipState().Index.Height,
 		FromContracts: "", // TODO
 		ToContracts:   "", // TODO
+		GougingParams: gp,
 	})
+}
+
+func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	jc.Encode(gp)
+}
+
+func (b *bus) gougingParams() (api.GougingParams, error) {
+	var gs api.GougingSettings
+	if gss, err := b.ss.Setting(SettingGouging); err != nil {
+		return api.GougingParams{}, err
+	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
+		panic(err)
+	}
+
+	var rs api.RedundancySettings
+	if rss, err := b.ss.Setting(SettingRedundancy); err != nil {
+		return api.GougingParams{}, err
+	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
+		panic(err)
+	}
+
+	return api.GougingParams{
+		GougingSettings:    gs,
+		RedundancySettings: rs,
+		Period:             144 * 7 * 6, // TODO
+	}, nil
 }
 
 // TODO: use simple err check against stores.ErrSettingNotFound as soon as the
@@ -758,6 +775,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/migrate":  b.paramsHandlerMigrateGET,
+		"GET    /params/gouging":  b.paramsHandlerGougingGET,
 	}), nil
 }
 

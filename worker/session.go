@@ -139,7 +139,7 @@ func (s *session) Revision() (rhpv2.ContractRevision, error) {
 	return ss.sess.Revision(), nil
 }
 
-func (s *session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+func (s *session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	currentHeight := s.pool.currentHeight()
 	if currentHeight == 0 {
 		panic("cannot upload without knowing current height") // developer error
@@ -149,15 +149,21 @@ func (s *session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash25
 		return consensus.Hash256{}, err
 	}
 	defer s.pool.release(ss)
+	if errs := PerformGougingChecks(ctx, ss.settings).CanUpload(); len(errs) > 0 {
+		return consensus.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
+	}
 	return ss.appendSector(s.ctx, sector, currentHeight)
 }
 
-func (s *session) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (s *session) DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	ss, err := s.pool.acquire(s.ctx, s)
 	if err != nil {
 		return err
 	}
 	defer s.pool.release(ss)
+	if errs := PerformGougingChecks(ctx, ss.settings).CanDownload(); len(errs) > 0 {
+		return fmt.Errorf("failed to download sector, gouging check failed: %v", errs)
+	}
 	return ss.readSector(s.ctx, w, root, offset, length)
 }
 

@@ -46,12 +46,12 @@ func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency,
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
 		HostKey:        hk,
-		HostSettings:   hs,
+		HostIP:         hostIP,
 		RenterFunds:    renterFunds,
 		RenterAddress:  renterAddress,
 	}
@@ -61,12 +61,12 @@ func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hs rhpv2.Host
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPRenewRequest{
 		ContractID:    fcid,
 		EndHeight:     endHeight,
 		HostKey:       hk,
-		HostSettings:  hs,
+		HostIP:        hostIP,
 		RenterAddress: renterAddress,
 		RenterFunds:   renterFunds,
 	}

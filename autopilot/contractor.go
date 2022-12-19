@@ -494,7 +494,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		}
 
 		// form contract
-		contract, err := c.formContract(cfg, currentPeriod, candidate, host.NetAddress, settings, renterAddress, renterFunds, hostCollateral)
+		contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), candidate, host.NetAddress, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			c.logger.Errorw(
@@ -537,13 +537,6 @@ func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64
 	}
 	defer c.ap.bus.ReleaseContract(toRenew.ID)
 
-	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(toRenew.HostKey(), toRenew.HostIP, 0)
-	if err != nil {
-		c.logger.Debugw(err.Error(), "hk", toRenew.HostKey())
-		return rhpv2.ContractRevision{}, nil
-	}
-
 	// if we are refreshing the contract we use the contract's end height
 	endHeight := c.endHeight(cfg, currentPeriod)
 	if isRefresh {
@@ -551,19 +544,11 @@ func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64
 	}
 
 	// renew the contract
-	renewed, _, err := c.ap.worker.RHPRenew(toRenew.ID, endHeight, toRenew.HostKey(), scan.Settings, renterAddress, renterFunds)
+	renewed, _, err := c.ap.worker.RHPRenew(toRenew.ID, endHeight, toRenew.HostKey(), toRenew.HostIP, renterAddress, renterFunds)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
 	return renewed, nil
-}
-
-func (c *contractor) formContract(cfg api.AutopilotConfig, currentPeriod uint64, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
-	contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), hostKey, hostSettings, renterAddress, renterFunds, hostCollateral)
-	if err != nil {
-		return rhpv2.ContractRevision{}, err
-	}
-	return contract, nil
 }
 
 func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {

@@ -459,6 +459,12 @@ func (c *Client) MigrateParams(slab object.Slab) (mp api.MigrateParams, err erro
 	return
 }
 
+// GougingParams returns parameters used for performing gouging checks.
+func (c *Client) GougingParams() (gp api.GougingParams, err error) {
+	err = c.c.GET("/params/gouging", &gp)
+	return
+}
+
 // NewClient returns a client that communicates with a renterd store server
 // listening on the specified address.
 func NewClient(addr, password string) *Client {

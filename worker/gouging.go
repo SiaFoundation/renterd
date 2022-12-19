@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,13 +11,51 @@ import (
 	"go.sia.tech/siad/types"
 )
 
+const keyGougingChecker contextKey = "GougingChecker"
+
 type (
+	GougingChecker interface {
+		Check(rhpv2.HostSettings) GougingResults
+	}
+
 	GougingResults struct {
 		downloadErr     error
 		formContractErr error
 		uploadErr       error
 	}
+
+	gougingChecker struct {
+		settings   api.GougingSettings
+		redundancy float64
+		period     uint64
+	}
+
+	contextKey string
 )
+
+func PerformGougingChecks(ctx context.Context, hs rhpv2.HostSettings) GougingResults {
+	if gc, ok := ctx.Value(keyGougingChecker).(GougingChecker); ok {
+		return gc.Check(hs)
+	}
+	panic("no gouging checker attached to the context") // developer error
+}
+
+func PerformGougingChecksCustom(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
+	return GougingResults{
+		downloadErr:     checkDownloadGouging(gs, hs, redundancy),
+		formContractErr: checkFormContractGouging(gs, hs),
+		uploadErr:       checkUploadGouging(gs, hs, period, redundancy),
+	}
+}
+
+func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Context {
+	rs := gp.RedundancySettings
+	return context.WithValue(ctx, keyGougingChecker, gougingChecker{
+		settings:   gp.GougingSettings,
+		redundancy: float64(rs.TotalShards) / float64(rs.MinShards),
+		period:     gp.Period,
+	})
+}
 
 func (gr GougingResults) IsGouging() (bool, string) {
 	errs := filterErrors(
@@ -51,14 +90,6 @@ func (gr GougingResults) CanUpload() (errs []error) {
 		gr.uploadErr,
 		gr.formContractErr,
 	)
-}
-
-func PerformGougingChecks(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
-	return GougingResults{
-		downloadErr:     checkDownloadGouging(gs, hs, redundancy),
-		formContractErr: checkFormContractGouging(gs, hs),
-		uploadErr:       checkUploadGouging(gs, hs, period, redundancy),
-	}
 }
 
 func checkDownloadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {

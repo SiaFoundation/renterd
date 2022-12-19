@@ -93,7 +93,7 @@ func isGouging(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redundanc
 	}
 
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
-	return worker.PerformGougingChecks(gs, *settings, cfg.Contracts.Period, redundancy).IsGouging()
+	return worker.PerformGougingChecksCustom(gs, *settings, cfg.Contracts.Period, redundancy).IsGouging()
 }
 
 func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {

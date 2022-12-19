@@ -128,16 +128,15 @@ type UpdateBlocklistRequest struct {
 
 // DownloadParams contains the metadata needed by a worker to download an object.
 type DownloadParams struct {
-	ContractSet     string
-	GougingSettings GougingSettings
+	ContractSet string
+	GougingParams
 }
 
 // UploadParams contains the metadata needed by a worker to upload an object.
 type UploadParams struct {
-	ContractSet        string
-	CurrentHeight      uint64
-	GougingSettings    GougingSettings
-	RedundancySettings RedundancySettings
+	CurrentHeight uint64
+	ContractSet   string
+	GougingParams
 }
 
 // MigrateParams contains the metadata needed by a worker to migrate a slab.
@@ -145,6 +144,15 @@ type MigrateParams struct {
 	CurrentHeight uint64
 	FromContracts string
 	ToContracts   string
+	GougingParams
+}
+
+// GougingParams contains the metadata needed by a worker to perform gouging
+// checks.
+type GougingParams struct {
+	Period             uint64
+	GougingSettings    GougingSettings
+	RedundancySettings RedundancySettings
 }
 
 // GougingSettings contain some price settings used in price gouging.
