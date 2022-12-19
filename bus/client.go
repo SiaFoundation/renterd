@@ -443,34 +443,20 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 
 // DownloadParams returns parameters used for downloading slabs.
 func (c *Client) DownloadParams() (dp api.DownloadParams, err error) {
-	return api.DownloadParams{
-		ContractSet: "autopilot", // TODO
-	}, nil
+	err = c.c.GET("/params/download", &dp)
+	return
 }
 
 // UploadParams returns parameters used for uploading slabs.
 func (c *Client) UploadParams() (up api.UploadParams, err error) {
-	rs, err := c.RedundancySettings()
-	if err != nil {
-		return api.UploadParams{}, err
-	}
-
-	cs, err := c.ConsensusState()
-	if err != nil {
-		return api.UploadParams{}, err
-	}
-
-	return api.UploadParams{
-		CurrentHeight: cs.BlockHeight,
-		MinShards:     uint8(rs.MinShards),   // TODO
-		TotalShards:   uint8(rs.TotalShards), // TODO
-		ContractSet:   "autopilot",           // TODO
-	}, nil
+	err = c.c.GET("/params/upload", &up)
+	return
 }
 
 // MigrateParams returns parameters used for migrating a slab.
-func (c *Client) MigrateParams(slab object.Slab) (up api.MigrateParams, err error) {
-	panic("unimplemented")
+func (c *Client) MigrateParams(slab object.Slab) (mp api.MigrateParams, err error) {
+	err = c.c.GET("/params/migrate", &mp)
+	return
 }
 
 // NewClient returns a client that communicates with a renterd store server

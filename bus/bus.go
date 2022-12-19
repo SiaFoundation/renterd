@@ -625,6 +625,58 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	jc.Encode(ancestors)
 }
 
+func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
+	var gs api.GougingSettings
+	if gss, err := b.ss.Setting(SettingGouging); jc.Check("could not find gouging settings", err) == nil {
+		if err := json.Unmarshal([]byte(gss), &gs); err != nil {
+			panic(err)
+		}
+	}
+
+	jc.Encode(api.DownloadParams{
+		ContractSet:     "autopilot", // TODO
+		GougingSettings: gs,
+	})
+}
+
+func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
+	var gs api.GougingSettings
+	if gss, err := b.ss.Setting(SettingGouging); jc.Check("could not find gouging settings", err) == nil {
+		if err := json.Unmarshal([]byte(gss), &gs); err != nil {
+			panic(err)
+		}
+	}
+
+	var rs api.RedundancySettings
+	if rss, err := b.ss.Setting(SettingRedundancy); jc.Check("could not find redundancy settings", err) == nil {
+		if err := json.Unmarshal([]byte(rss), &rs); err != nil {
+			panic(err)
+		}
+	}
+
+	jc.Encode(api.UploadParams{
+		ContractSet:        "autopilot", // TODO
+		CurrentHeight:      b.cm.TipState().Index.Height,
+		GougingSettings:    gs,
+		RedundancySettings: rs,
+	})
+}
+
+func (b *bus) paramsHandlerMigrateGET(jc jape.Context) {
+	var gs api.GougingSettings
+	if gss, err := b.ss.Setting(SettingGouging); jc.Check("could not find gouging settings", err) == nil {
+		if err := json.Unmarshal([]byte(gss), &gs); err != nil {
+			panic(err)
+		}
+	}
+
+	jc.Encode(api.MigrateParams{
+		CurrentHeight: b.cm.TipState().Index.Height,
+		FromContracts: "", // TODO
+		ToContracts:   "", // TODO
+	})
+}
+
 // TODO: use simple err check against stores.ErrSettingNotFound as soon as the
 // import-cycle is fixed
 func isErrSettingsNotFound(err error) bool {
@@ -702,6 +754,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /settings":            b.settingsHandlerGET,
 		"GET    /setting/:key":        b.settingKeyHandlerGET,
 		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
+
+		"GET    /params/download": b.paramsHandlerDownloadGET,
+		"GET    /params/upload":   b.paramsHandlerUploadGET,
+		"GET    /params/migrate":  b.paramsHandlerMigrateGET,
 	}), nil
 }
 

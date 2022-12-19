@@ -623,6 +623,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
+	rs := up.RedundancySettings
 
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -641,9 +642,9 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		var s object.Slab
 		var length int
 
-		lr := io.LimitReader(cr, int64(up.MinShards)*rhpv2.SectorSize)
+		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
 		if err := w.withHosts(jc.Request.Context(), bcs, func(hosts []sectorStore) (err error) {
-			s, length, err = uploadSlab(jc.Request.Context(), lr, up.MinShards, up.TotalShards, hosts)
+			s, length, err = uploadSlab(jc.Request.Context(), lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts)
 			return err
 		}); err == io.EOF {
 			break
