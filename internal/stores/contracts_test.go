@@ -118,9 +118,9 @@ func TestSQLContractStore(t *testing.T) {
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: types.FileContractID{},
 			Spending: bus.ContractSpending{
-				Uploads:     types.SiacoinPrecision,
-				Downloads:   types.SiacoinPrecision.Mul64(2),
-				FundAccount: types.SiacoinPrecision.Mul64(3),
+				Uploads:     types.ZeroCurrency,
+				Downloads:   types.ZeroCurrency,
+				FundAccount: types.ZeroCurrency,
 			},
 			TotalCost: totalCost,
 		},
@@ -360,6 +360,7 @@ func TestRenewedContract(t *testing.T) {
 		Host:                c.HostKey(),
 		RenewedTo:           fcid2,
 		Reason:              archivalReasonRenewed,
+		StartHeight:         100,
 		UploadSpending:      big.NewInt(0),
 		DownloadSpending:    big.NewInt(0),
 		FundAccountSpending: big.NewInt(0),

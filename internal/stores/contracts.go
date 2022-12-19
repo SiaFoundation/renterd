@@ -35,7 +35,7 @@ type (
 		HostID              uint                 `gorm:"index"`
 		Host                dbHost
 		LockedUntil         time.Time
-		RenewedFrom         types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob"`
+		RenewedFrom         types.FileContractID `gorm:"index;type:bytes;serializer:gob"`
 		StartHeight         uint64               `gorm:"index;NOT NULL"`
 		TotalCost           *big.Int             `gorm:"type:bytes;serializer:gob"`
 		UploadSpending      *big.Int             `gorm:"type:bytes;serializer:gob"`

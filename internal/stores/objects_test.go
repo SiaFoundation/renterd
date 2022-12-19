@@ -3,6 +3,7 @@ package stores
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 	"testing"
 	"time"
@@ -155,9 +156,12 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk1,
 										},
-										FCID:        fcid1,
-										StartHeight: startHeight1,
-										TotalCost:   totalCost1.Big(),
+										FCID:                fcid1,
+										StartHeight:         startHeight1,
+										TotalCost:           totalCost1.Big(),
+										UploadSpending:      big.NewInt(0),
+										DownloadSpending:    big.NewInt(0),
+										FundAccountSpending: big.NewInt(0),
 									},
 								},
 							},
@@ -185,9 +189,12 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk2,
 										},
-										FCID:        fcid2,
-										StartHeight: startHeight2,
-										TotalCost:   totalCost2.Big(),
+										FCID:                fcid2,
+										StartHeight:         startHeight2,
+										TotalCost:           totalCost2.Big(),
+										UploadSpending:      big.NewInt(0),
+										DownloadSpending:    big.NewInt(0),
+										FundAccountSpending: big.NewInt(0),
 									},
 								},
 							},
