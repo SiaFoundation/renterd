@@ -588,11 +588,11 @@ func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 
 func (b *bus) contractsAncestorsHandlerGet(jc jape.Context) {
 	var fcid types.FileContractID
-	if err := jc.DecodeParam("id", &fcid); err != nil {
+	if jc.DecodeParam("id", &fcid) != nil {
 		return
 	}
 	var minStartHeight uint64
-	if err := jc.DecodeForm("startHeight", &minStartHeight); err != nil {
+	if jc.DecodeForm("startHeight", &minStartHeight) != nil {
 		return
 	}
 	ancestors, err := b.cs.AncestorContracts(fcid, minStartHeight)

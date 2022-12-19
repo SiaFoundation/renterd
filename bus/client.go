@@ -266,7 +266,7 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []ArchivedContract, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
-	err = c.c.GET(fmt.Sprintf("/contracts/%s/ancestors?%s", fcid, values.Encode()), &contracts)
+	err = c.c.GET(fmt.Sprintf("/contracts/%s/ancestors?"+values.Encode(), fcid), &contracts)
 	return
 }
 
