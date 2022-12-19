@@ -262,6 +262,15 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 	return
 }
 
+// AncestorContracts returns any ancestors of a given active contract.
+func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []ArchivedContract, err error) {
+	err = c.c.POST("/contractsets/ancestors", ContractsAncestorsRequest{
+		ID:             fcid,
+		MinStartHeight: minStartHeight,
+	}, &contracts)
+	return
+}
+
 // DeleteContracts deletes the contracts with the given IDs.
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 	// TODO: batch delete

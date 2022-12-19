@@ -1,10 +1,9 @@
 package stores
 
 import (
-	"bytes"
-	"encoding/gob"
 	"errors"
 	"fmt"
+	"math/big"
 	"reflect"
 	"testing"
 	"time"
@@ -118,8 +117,12 @@ func TestSQLContractStore(t *testing.T) {
 		StartHeight: 100,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: types.FileContractID{},
-			Spending:    bus.ContractSpending{},
-			TotalCost:   totalCost,
+			Spending: bus.ContractSpending{
+				Uploads:     types.SiacoinPrecision,
+				Downloads:   types.SiacoinPrecision.Mul64(2),
+				FundAccount: types.SiacoinPrecision.Mul64(3),
+			},
+			TotalCost: totalCost,
 		},
 	}
 	if !reflect.DeepEqual(fetched, expected) {
@@ -329,8 +332,12 @@ func TestRenewedContract(t *testing.T) {
 		StartHeight: newContractStartHeight,
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: fcid,
-			Spending:    bus.ContractSpending{},
-			TotalCost:   newContractTotal,
+			Spending: bus.ContractSpending{
+				Uploads:     types.ZeroCurrency,
+				Downloads:   types.ZeroCurrency,
+				FundAccount: types.ZeroCurrency,
+			},
+			TotalCost: newContractTotal,
 		},
 	}
 	if !reflect.DeepEqual(newContract, expected) {
@@ -349,10 +356,13 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:      fcid,
-		Host:      c.HostKey(),
-		RenewedTo: fcid2,
-		Reason:    archivalReasonRenewed,
+		FCID:                fcid,
+		Host:                c.HostKey(),
+		RenewedTo:           fcid2,
+		Reason:              archivalReasonRenewed,
+		UploadSpending:      big.NewInt(0),
+		DownloadSpending:    big.NewInt(0),
+		FundAccountSpending: big.NewInt(0),
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
 		fmt.Println(ac)
@@ -383,10 +393,56 @@ func TestRenewedContract(t *testing.T) {
 	}
 }
 
+// TestAncestorsContracts verifies that AncestorContracts returns the right
+// ancestors in the correct order.
+func TestAncestorsContracts(t *testing.T) {
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hk := consensus.PublicKey{1, 2, 3}
+	if err := cs.addTestHost(hk); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a chain of 4 contracts.
+	// Their start heights are 0, 1, 2, 3.
+	fcids := []types.FileContractID{{1}, {2}, {3}, {4}}
+	if _, err := cs.addTestContract(fcids[0], hk); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(fcids); i++ {
+		if _, err := cs.addTestRenewedContract(fcids[i], fcids[i-1], hk, uint64(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch the ancestors but only the ones with a startHeight >= 1. That
+	// should return 2 contracts. The active one with height 3 isn't
+	// returned and the one with height 0 is also not returned.
+	contracts, err := cs.AncestorContracts(fcids[len(fcids)-1], 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != len(fcids)-2 {
+		t.Fatal("wrong number of contracts returned", len(contracts))
+	}
+	for i := 0; i < len(contracts)-1; i++ {
+		if !reflect.DeepEqual(contracts[i], bus.ArchivedContract{
+			ID:        fcids[len(fcids)-2-i],
+			HostKey:   hk,
+			RenewedTo: fcids[len(fcids)-1-i],
+		}) {
+			t.Fatal("wrong contract", i)
+		}
+	}
+}
+
 func gobEncode(fcid types.FileContractID) []byte {
-	buf := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(buf).Encode(fcid); err != nil {
+	fcidGob, err := gobFCID(fcid)
+	if err != nil {
 		panic(err)
 	}
-	return buf.Bytes()
+	return fcidGob
 }

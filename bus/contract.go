@@ -7,10 +7,10 @@ import (
 
 // A Contract contains all information about a contract with a host.
 type Contract struct {
-	ID          types.FileContractID
-	HostIP      string `json:"hostIP"`
-	HostKey     consensus.PublicKey
-	StartHeight uint64 `json:"startHeight"`
+	ID          types.FileContractID `jsin:"id"`
+	HostIP      string               `json:"hostIP"`
+	HostKey     consensus.PublicKey  `json:"hostKey"`
+	StartHeight uint64               `json:"startHeight"`
 
 	ContractMetadata
 }
@@ -35,4 +35,13 @@ func (x ContractSpending) Add(y ContractSpending) (s ContractSpending) {
 	s.Downloads = x.Downloads.Add(y.Downloads)
 	s.FundAccount = x.FundAccount.Add(y.FundAccount)
 	return
+}
+
+// An ArchivedContract contains all information about a contract with a host
+// that has been moved to the archive either due to expiring or being renewed.
+type ArchivedContract struct {
+	ID        types.FileContractID `json:"id"`
+	HostKey   consensus.PublicKey  `json:"hostKey"`
+	RenewedTo types.FileContractID `json:"renewedTo"`
+	Spending  ContractSpending     `json:"spending"`
 }

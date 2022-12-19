@@ -11,11 +11,11 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (bus.Contract, error) {
+func testContractRevision(fcid types.FileContractID, hk consensus.PublicKey) rhpv2.ContractRevision {
 	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
-	rev := rhpv2.ContractRevision{
+	return rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:          fcid,
 			UnlockConditions:  uc,
@@ -55,7 +55,16 @@ func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.Publi
 			},
 		},
 	}
+}
+
+func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (bus.Contract, error) {
+	rev := testContractRevision(fcid, hk)
 	return s.AddContract(rev, types.ZeroCurrency, 0)
+}
+
+func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (bus.Contract, error) {
+	rev := testContractRevision(fcid, hk)
+	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
 }
 
 // TestSQLContractSetStore tests the bus.ContractSetStore methods on the SQLContractStore.

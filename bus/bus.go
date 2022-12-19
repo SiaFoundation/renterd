@@ -69,6 +69,7 @@ type (
 	// A ContractStore stores contracts.
 	ContractStore interface {
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
+		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]ArchivedContract, error)
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]Contract, error)
 		Contract(id types.FileContractID) (Contract, error)
@@ -585,6 +586,18 @@ func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 	}
 }
 
+func (b *bus) contractsAncestorsHandlerGet(jc jape.Context) {
+	var req ContractsAncestorsRequest
+	if err := jc.Decode(&req); err != nil {
+		return
+	}
+	ancestors, err := b.cs.AncestorContracts(req.ID, req.MinStartHeight)
+	if jc.Check("failed to fetch ancestor contracts", err) != nil {
+		return
+	}
+	jc.Encode(ancestors)
+}
+
 // TODO: use simple err check against stores.ErrSettingNotFound as soon as the
 // import-cycle is fixed
 func isErrSettingsNotFound(err error) bool {
@@ -642,6 +655,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
 		"GET    /contracts":             b.contractsHandler,
+		"POST   /contracts/ancestors":   b.contractsAncestorsHandlerGet,
 		"GET    /contracts/:id":         b.contractsIDHandlerGET,
 		"POST   /contracts/:id/new":     b.contractsIDNewHandlerPOST,
 		"POST   /contracts/:id/renewed": b.contractsIDRenewedHandlerPOST,
