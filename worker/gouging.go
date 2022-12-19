@@ -57,6 +57,15 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 	})
 }
 
+func (gc gougingChecker) Check(hs rhpv2.HostSettings) GougingResults {
+	return PerformGougingChecksCustom(
+		gc.settings,
+		hs,
+		gc.period,
+		gc.redundancy,
+	)
+}
+
 func (gr GougingResults) IsGouging() (bool, string) {
 	errs := filterErrors(
 		gr.downloadErr,
