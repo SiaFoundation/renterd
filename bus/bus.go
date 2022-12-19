@@ -72,17 +72,12 @@ type (
 		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]ArchivedContract, error)
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]Contract, error)
+		ContractSet(name string) ([]Contract, error)
+		SetContractSet(name string, contracts []types.FileContractID) error
 		Contract(id types.FileContractID) (Contract, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (Contract, error)
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (Contract, error)
 		RemoveContract(id types.FileContractID) error
-	}
-
-	// A ContractSetStore stores contract sets.
-	ContractSetStore interface {
-		ContractSets() ([]string, error)
-		ContractSet(name string) ([]Contract, error)
-		SetContractSet(name string, contracts []types.FileContractID) error
 	}
 
 	// An ObjectStore stores objects.
@@ -109,7 +104,6 @@ type bus struct {
 	w   Wallet
 	hdb HostDB
 	cs  ContractStore
-	css ContractSetStore
 	os  ObjectStore
 	ss  SettingStore
 }
@@ -469,16 +463,8 @@ func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contract", b.cs.RemoveContract(id))
 }
 
-func (b *bus) contractSetHandler(jc jape.Context) {
-	contractSets, err := b.css.ContractSets()
-	if jc.Check("couldn't load contract sets", err) != nil {
-		return
-	}
-	jc.Encode(contractSets)
-}
-
 func (b *bus) contractSetsNameHandlerGET(jc jape.Context) {
-	hostSet, err := b.css.ContractSet(jc.PathParam("name"))
+	hostSet, err := b.cs.ContractSet(jc.PathParam("name"))
 	if jc.Check("couldn't load host set", err) != nil {
 		return
 	}
@@ -490,7 +476,7 @@ func (b *bus) contractSetsNameHandlerPUT(jc jape.Context) {
 	if jc.Decode(&contracts) != nil {
 		return
 	}
-	jc.Check("couldn't store host set", b.css.SetContractSet(jc.PathParam("name"), contracts))
+	jc.Check("couldn't store host set", b.cs.SetContractSet(jc.PathParam("name"), contracts))
 }
 
 func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
@@ -609,7 +595,7 @@ func isErrSettingsNotFound(err error) bool {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore, gs GougingSettings, rs RedundancySettings) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs GougingSettings, rs RedundancySettings) (http.Handler, error) {
 	b := &bus{
 		s:   s,
 		cm:  cm,
@@ -617,7 +603,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		w:   w,
 		hdb: hdb,
 		cs:  cs,
-		css: css,
 		os:  os,
 		ss:  ss,
 	}
@@ -667,7 +652,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /contracts/:id/acquire":   b.contractsAcquireHandler,
 		"POST   /contracts/:id/release":   b.contractsReleaseHandler,
 
-		"GET    /contractsets":       b.contractSetHandler,
 		"GET    /contractsets/:name": b.contractSetsNameHandlerGET,
 		"PUT    /contractsets/:name": b.contractSetsNameHandlerPUT,
 

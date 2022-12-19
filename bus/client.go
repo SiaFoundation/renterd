@@ -270,6 +270,18 @@ func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uin
 	return
 }
 
+// ContractSet returns the contracts in the given set.
+func (c *Client) ContractSet(name string) (hosts []Contract, err error) {
+	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
+	return
+}
+
+// SetContractSet assigns a name to the given contracts.
+func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/contractsets/%s", name), contracts)
+	return
+}
+
 // DeleteContracts deletes the contracts with the given IDs.
 func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 	// TODO: batch delete
@@ -284,24 +296,6 @@ func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 	err = c.c.DELETE(fmt.Sprintf("/contracts/%s", id))
-	return
-}
-
-// ContractSets returns the names of all host sets.
-func (c *Client) ContractSets() (sets []string, err error) {
-	err = c.c.GET("/contractsets", &sets)
-	return
-}
-
-// ContractSet returns the contracts in the given set.
-func (c *Client) ContractSet(name string) (hosts []Contract, err error) {
-	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
-	return
-}
-
-// SetContractSet assigns a name to the given contracts.
-func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contractsets/%s", name), contracts)
 	return
 }
 

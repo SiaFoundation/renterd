@@ -43,6 +43,18 @@ type (
 		FundAccountSpending *big.Int             `gorm:"type:bytes;serializer:gob"`
 	}
 
+	dbContractSet struct {
+		Model
+
+		Name      string       `gorm:"unique;index"`
+		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
+	}
+
+	dbContractSetContract struct {
+		DBContractID    uint `gorm:"primaryKey"`
+		DBContractSetID uint `gorm:"primaryKey"`
+	}
+
 	dbArchivedContract struct {
 		Model
 		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
@@ -72,6 +84,9 @@ func (dbContract) TableName() string { return "contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbContractSetContract) TableName() string { return "contract_set_contracts" }
 
 // convert converts a dbContract to a bus.Contract type.
 func (c dbContract) convert() bus.Contract {
@@ -276,6 +291,57 @@ func (s *SQLStore) Contracts() ([]bus.Contract, error) {
 		contracts[i] = c.convert()
 	}
 	return contracts, nil
+}
+func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
+	var hostSet dbContractSet
+	err := s.db.Where(&dbContractSet{Name: name}).
+		Preload("Contracts.Host.Announcements").
+		Take(&hostSet).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrContractSetNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	contracts := make([]bus.Contract, len(hostSet.Contracts))
+	for i, c := range hostSet.Contracts {
+		contracts[i] = c.convert()
+	}
+	return contracts, nil
+}
+
+// SetContractSet implements the bus.ContractSetStore interface.
+func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
+	contractIDs := make([][]byte, len(contracts))
+	for i, fcid := range contracts {
+		fcidGob := bytes.NewBuffer(nil)
+		if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
+			return err
+		}
+		contractIDs[i] = fcidGob.Bytes()
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Delete existing set.
+		err := tx.Model(&dbContractSet{}).
+			Where("name", name).
+			Delete(&dbContractSet{}).
+			Error
+		if err != nil {
+			return err
+		}
+		// Fetch contracts.
+		var dbContracts []dbContract
+		err = tx.Model(&dbContract{}).
+			Where("fcid in ?", contractIDs).
+			Find(&dbContracts).Error
+		if err != nil {
+			return err
+		}
+		// Create set.
+		return tx.Create(&dbContractSet{
+			Name:      name,
+			Contracts: dbContracts,
+		}).Error
+	})
 }
 
 // removeContract implements the bus.ContractStore interface.
