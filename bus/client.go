@@ -264,11 +264,25 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 
 // AncestorContracts returns any ancestors of a given active contract.
 func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []ArchivedContract, err error) {
-	err = c.c.POST("/contractsets/ancestors", ContractsAncestorsRequest{
-		ID:             fcid,
-		MinStartHeight: minStartHeight,
-	}, &contracts)
+	values := url.Values{}
+	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
+	err = c.c.GET(fmt.Sprintf("/contracts/%s/ancestors?%s", fcid, values.Encode()), &contracts)
 	return
+}
+
+// HistoricalContractSpending returns the spending of the contract and all the
+// contracts in its ancestry that have been formed at or after minStartHeight.
+func (c *Client) HistoricalContractSpending(contract Contract, minStartHeight uint64) (ContractSpending, error) {
+	ancestors, err := c.AncestorContracts(contract.ID, minStartHeight)
+	if err != nil {
+		return ContractSpending{}, err
+	}
+	// compute total spending
+	total := contract.Spending
+	for _, ancestor := range ancestors {
+		total = total.Add(ancestor.Spending)
+	}
+	return total, nil
 }
 
 // DeleteContracts deletes the contracts with the given IDs.

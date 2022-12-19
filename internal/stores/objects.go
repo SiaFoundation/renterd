@@ -328,11 +328,7 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 	// Serialize contract ids.
 	var fcids [][]byte
 	for _, fcid := range goodContracts {
-		fcidGob, err := gobFCID(fcid)
-		if err != nil {
-			return nil, err
-		}
-		fcids = append(fcids, fcidGob)
+		fcids = append(fcids, gobEncode(fcid))
 	}
 	failureQuery := s.db.Model(&dbSlab{}).
 		Select("id as slab_id").

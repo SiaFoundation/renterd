@@ -56,11 +56,7 @@ func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
 func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
 	contractIDs := make([][]byte, len(contracts))
 	for i, fcid := range contracts {
-		fcidGob, err := gobFCID(fcid)
-		if err != nil {
-			return err
-		}
-		contractIDs[i] = fcidGob
+		contractIDs[i] = gobEncode(fcid)
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Delete existing set.

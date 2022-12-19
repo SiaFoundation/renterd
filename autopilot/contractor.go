@@ -59,22 +59,7 @@ func (c *contractor) currentPeriod() uint64 {
 }
 
 func (c *contractor) contractSpending(contract worker.Contract, currentPeriod uint64) (bus.ContractSpending, error) {
-	// Fetch past contracts in contract's history up until the start of the
-	// current period.
-	ancestors, err := c.ap.bus.AncestorContracts(contract.ID, currentPeriod)
-	if err != nil {
-		return bus.ContractSpending{}, err
-	}
-	// no history
-	if len(ancestors) == 0 {
-		return contract.Spending, nil
-	}
-	// compute total spending
-	total := contract.Spending
-	for _, ancestor := range ancestors {
-		total = total.Add(ancestor.Spending)
-	}
-	return total, nil
+	return c.ap.bus.HistoricalContractSpending(contract.Contract, currentPeriod)
 }
 
 func (c *contractor) currentPeriodSpending(contracts []worker.Contract, currentPeriod uint64) (types.Currency, error) {

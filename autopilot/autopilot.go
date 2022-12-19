@@ -46,6 +46,7 @@ type Bus interface {
 
 	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]bus.ArchivedContract, error)
 	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
+	HistoricalContractSpending(contract bus.Contract, minStartHeight uint64) (bus.ContractSpending, error)
 	ReleaseContract(id types.FileContractID) error
 
 	// contractsets

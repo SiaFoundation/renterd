@@ -66,10 +66,6 @@ type ContractsIDRenewedRequest struct {
 	StartHeight uint64                 `json:"startHeight"`
 	TotalCost   types.Currency         `json:"totalCost"`
 }
-type ContractsAncestorsRequest struct {
-	ID             types.FileContractID `json:"id"`
-	MinStartHeight uint64               `json:"minStartHeight"`
-}
 
 // ContractAcquireResponse is the response type for the /contracts/:id/acquire
 // endpoint.

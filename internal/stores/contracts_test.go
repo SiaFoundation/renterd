@@ -438,11 +438,3 @@ func TestAncestorsContracts(t *testing.T) {
 		}
 	}
 }
-
-func gobEncode(fcid types.FileContractID) []byte {
-	fcidGob, err := gobFCID(fcid)
-	if err != nil {
-		panic(err)
-	}
-	return fcidGob
-}

@@ -587,11 +587,15 @@ func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 }
 
 func (b *bus) contractsAncestorsHandlerGet(jc jape.Context) {
-	var req ContractsAncestorsRequest
-	if err := jc.Decode(&req); err != nil {
+	var fcid types.FileContractID
+	if err := jc.DecodeParam("id", &fcid); err != nil {
 		return
 	}
-	ancestors, err := b.cs.AncestorContracts(req.ID, req.MinStartHeight)
+	var minStartHeight uint64
+	if err := jc.DecodeForm("startHeight", &minStartHeight); err != nil {
+		return
+	}
+	ancestors, err := b.cs.AncestorContracts(fcid, minStartHeight)
 	if jc.Check("failed to fetch ancestor contracts", err) != nil {
 		return
 	}
@@ -654,14 +658,14 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":             b.contractsHandler,
-		"POST   /contracts/ancestors":   b.contractsAncestorsHandlerGet,
-		"GET    /contracts/:id":         b.contractsIDHandlerGET,
-		"POST   /contracts/:id/new":     b.contractsIDNewHandlerPOST,
-		"POST   /contracts/:id/renewed": b.contractsIDRenewedHandlerPOST,
-		"DELETE /contracts/:id":         b.contractsIDHandlerDELETE,
-		"POST   /contracts/:id/acquire": b.contractsAcquireHandler,
-		"POST   /contracts/:id/release": b.contractsReleaseHandler,
+		"GET    /contracts":               b.contractsHandler,
+		"GET    /contracts/:id":           b.contractsIDHandlerGET,
+		"GET    /contracts/:id/ancestors": b.contractsAncestorsHandlerGet,
+		"POST   /contracts/:id/new":       b.contractsIDNewHandlerPOST,
+		"POST   /contracts/:id/renewed":   b.contractsIDRenewedHandlerPOST,
+		"DELETE /contracts/:id":           b.contractsIDHandlerDELETE,
+		"POST   /contracts/:id/acquire":   b.contractsAcquireHandler,
+		"POST   /contracts/:id/release":   b.contractsReleaseHandler,
 
 		"GET    /contractsets":       b.contractSetHandler,
 		"GET    /contractsets/:name": b.contractSetsNameHandlerGET,

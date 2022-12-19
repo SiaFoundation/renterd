@@ -31,12 +31,12 @@ type (
 	dbContract struct {
 		Model
 
-		FCID                types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
+		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
 		HostID              uint                 `gorm:"index"`
 		Host                dbHost
 		LockedUntil         time.Time
-		RenewedFrom         types.FileContractID `gorm:"index,type:bytes;serializer:gob"`
-		StartHeight         uint64               `gorm:"NOT NULL"`
+		RenewedFrom         types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob"`
+		StartHeight         uint64               `gorm:"index;NOT NULL"`
 		TotalCost           *big.Int             `gorm:"type:bytes;serializer:gob"`
 		UploadSpending      *big.Int             `gorm:"type:bytes;serializer:gob"`
 		DownloadSpending    *big.Int             `gorm:"type:bytes;serializer:gob"`
@@ -45,14 +45,14 @@ type (
 
 	dbArchivedContract struct {
 		Model
-		FCID                types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
+		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
 		Host                consensus.PublicKey  `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		RenewedTo           types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob"`
+		RenewedTo           types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob"`
 		Reason              string
 		UploadSpending      *big.Int `gorm:"type:bytes;serializer:gob"`
 		DownloadSpending    *big.Int `gorm:"type:bytes;serializer:gob"`
 		FundAccountSpending *big.Int `gorm:"type:bytes;serializer:gob"`
-		StartHeight         uint64
+		StartHeight         uint64   `gorm:"index;NOT NULL"`
 	}
 
 	dbContractSector struct {
@@ -107,12 +107,12 @@ func (c dbArchivedContract) convert() bus.ArchivedContract {
 	}
 }
 
-func gobFCID(fcid types.FileContractID) ([]byte, error) {
+func gobEncode(i interface{}) []byte {
 	fcidGob := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
-		return nil, err
+	if err := gob.NewEncoder(fcidGob).Encode(i); err != nil {
+		panic(err)
 	}
-	return fcidGob.Bytes(), nil
+	return fcidGob.Bytes()
 }
 
 // AcquireContract acquires a contract assuming that the contract exists and
@@ -122,15 +122,10 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 	var contract dbContract
 	var locked bool
 
-	fcidGob, err := gobFCID(fcid)
-	if err != nil {
-		return false, err
-	}
-
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		// Get revision.
 		err := tx.Model(&dbContract{}).
-			Where("fcid", fcidGob).
+			Where("fcid", gobEncode(fcid)).
 			Take(&contract).
 			Error
 		if err != nil {
@@ -144,7 +139,7 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 
 		// Update lock.
 		return tx.Model(&dbContract{}).
-			Where("fcid", fcidGob).
+			Where("fcid", gobEncode(fcid)).
 			Update("locked_until", time.Now().Add(duration).UTC()).
 			Error
 	})
@@ -159,12 +154,8 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 
 // ReleaseContract releases a contract by setting its locked_until field to 0.
 func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
-	fcidGob, err := gobFCID(fcid)
-	if err != nil {
-		return err
-	}
 	return s.db.Model(&dbContract{}).
-		Where("fcid", fcidGob).
+		Where("fcid", gobEncode(fcid)).
 		Update("locked_until", time.Time{}).
 		Error
 }
@@ -329,12 +320,8 @@ func (s *SQLStore) contracts() ([]dbContract, error) {
 }
 
 func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]bus.ArchivedContract, error) {
-	fcidGob, err := gobFCID(id)
-	if err != nil {
-		return nil, err
-	}
 	var ancestors []dbArchivedContract
-	err = s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fcidGob, startHeight).
+	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", gobEncode(id), startHeight).
 		Scan(&ancestors).
 		Error
 	if err != nil {
