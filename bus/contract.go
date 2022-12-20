@@ -7,7 +7,7 @@ import (
 
 // A Contract contains all information about a contract with a host.
 type Contract struct {
-	ID          types.FileContractID `jsin:"id"`
+	ID          types.FileContractID `json:"id"`
 	HostIP      string               `json:"hostIP"`
 	HostKey     consensus.PublicKey  `json:"hostKey"`
 	StartHeight uint64               `json:"startHeight"`
