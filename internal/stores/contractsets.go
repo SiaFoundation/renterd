@@ -1,8 +1,6 @@
 package stores
 
 import (
-	"bytes"
-	"encoding/gob"
 	"errors"
 
 	"go.sia.tech/renterd/bus"
@@ -49,10 +47,7 @@ func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
 	}
 	contracts := make([]bus.Contract, len(hostSet.Contracts))
 	for i, c := range hostSet.Contracts {
-		contracts[i], err = c.convert()
-		if err != nil {
-			return nil, err
-		}
+		contracts[i] = c.convert()
 	}
 	return contracts, nil
 }
@@ -61,11 +56,7 @@ func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
 func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
 	contractIDs := make([][]byte, len(contracts))
 	for i, fcid := range contracts {
-		fcidGob := bytes.NewBuffer(nil)
-		if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
-			return err
-		}
-		contractIDs[i] = fcidGob.Bytes()
+		contractIDs[i] = gobEncode(fcid)
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Delete existing set.

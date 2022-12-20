@@ -44,6 +44,7 @@ type Bus interface {
 	Contract(id types.FileContractID) (contract bus.Contract, err error)
 	Contracts() ([]bus.Contract, error)
 
+	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]bus.ArchivedContract, error)
 	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
 	ReleaseContract(id types.FileContractID) error
 

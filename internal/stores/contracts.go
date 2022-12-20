@@ -31,21 +31,28 @@ type (
 	dbContract struct {
 		Model
 
-		FCID        types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
-		HostID      uint                 `gorm:"index"`
-		Host        dbHost
-		LockedUntil time.Time
-		RenewedFrom types.FileContractID `gorm:"index,type:bytes;serializer:gob"`
-		StartHeight uint64               `gorm:"NOT NULL"`
-		TotalCost   *big.Int             `gorm:"type:bytes;serializer:gob"`
+		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
+		HostID              uint                 `gorm:"index"`
+		Host                dbHost
+		LockedUntil         time.Time
+		RenewedFrom         types.FileContractID `gorm:"index;type:bytes;serializer:gob"`
+		StartHeight         uint64               `gorm:"index;NOT NULL"`
+		TotalCost           *big.Int             `gorm:"type:bytes;serializer:gob"`
+		UploadSpending      *big.Int             `gorm:"type:bytes;serializer:gob"`
+		DownloadSpending    *big.Int             `gorm:"type:bytes;serializer:gob"`
+		FundAccountSpending *big.Int             `gorm:"type:bytes;serializer:gob"`
 	}
 
 	dbArchivedContract struct {
 		Model
-		FCID      types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob;NOT NULL;column:fcid"`
-		Host      consensus.PublicKey  `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		RenewedTo types.FileContractID `gorm:"unique;index,type:bytes;serializer:gob"`
-		Reason    string
+		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
+		Host                consensus.PublicKey  `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
+		RenewedTo           types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob"`
+		Reason              string
+		UploadSpending      *big.Int `gorm:"type:bytes;serializer:gob"`
+		DownloadSpending    *big.Int `gorm:"type:bytes;serializer:gob"`
+		FundAccountSpending *big.Int `gorm:"type:bytes;serializer:gob"`
+		StartHeight         uint64   `gorm:"index;NOT NULL"`
 	}
 
 	dbContractSector struct {
@@ -66,8 +73,8 @@ func (dbContract) TableName() string { return "contracts" }
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
 
-// convert converts a dbContractRHPv2 to a rhpv2.Contract type.
-func (c dbContract) convert() (bus.Contract, error) {
+// convert converts a dbContract to a bus.Contract type.
+func (c dbContract) convert() bus.Contract {
 	return bus.Contract{
 		ID:          c.FCID,
 		HostIP:      c.Host.NetAddress(),
@@ -76,9 +83,36 @@ func (c dbContract) convert() (bus.Contract, error) {
 		ContractMetadata: bus.ContractMetadata{
 			RenewedFrom: c.RenewedFrom,
 			TotalCost:   types.NewCurrency(c.TotalCost),
-			Spending:    bus.ContractSpending{}, // TODO
+			Spending: bus.ContractSpending{
+				Uploads:     types.NewCurrency(c.UploadSpending),
+				Downloads:   types.NewCurrency(c.DownloadSpending),
+				FundAccount: types.NewCurrency(c.FundAccountSpending),
+			},
 		},
-	}, nil
+	}
+}
+
+// convert converts a dbContract to a bus.ArchivedContract.
+func (c dbArchivedContract) convert() bus.ArchivedContract {
+	return bus.ArchivedContract{
+		ID:        c.FCID,
+		HostKey:   c.Host,
+		RenewedTo: c.RenewedTo,
+
+		Spending: bus.ContractSpending{
+			Uploads:     types.NewCurrency(c.UploadSpending),
+			Downloads:   types.NewCurrency(c.DownloadSpending),
+			FundAccount: types.NewCurrency(c.FundAccountSpending),
+		},
+	}
+}
+
+func gobEncode(i interface{}) []byte {
+	buf := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(buf).Encode(i); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
 }
 
 // AcquireContract acquires a contract assuming that the contract exists and
@@ -88,15 +122,10 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 	var contract dbContract
 	var locked bool
 
-	fcidGob := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
-		return false, err
-	}
-
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		// Get revision.
 		err := tx.Model(&dbContract{}).
-			Where("fcid", fcidGob.Bytes()).
+			Where("fcid", gobEncode(fcid)).
 			Take(&contract).
 			Error
 		if err != nil {
@@ -110,7 +139,7 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 
 		// Update lock.
 		return tx.Model(&dbContract{}).
-			Where("fcid", fcidGob.Bytes()).
+			Where("fcid", gobEncode(fcid)).
 			Update("locked_until", time.Now().Add(duration).UTC()).
 			Error
 	})
@@ -125,12 +154,8 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 
 // ReleaseContract releases a contract by setting its locked_until field to 0.
 func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
-	fcidGob := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
-		return err
-	}
 	return s.db.Model(&dbContract{}).
-		Where("fcid", fcidGob.Bytes()).
+		Where("fcid", gobEncode(fcid)).
 		Update("locked_until", time.Time{}).
 		Error
 }
@@ -154,6 +179,11 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		RenewedFrom: renewedFrom,
 		StartHeight: startHeight,
 		TotalCost:   totalCost.Big(),
+
+		// Spending starts at 0.
+		UploadSpending:      big.NewInt(0),
+		DownloadSpending:    big.NewInt(0),
+		FundAccountSpending: big.NewInt(0),
 	}
 
 	// Insert contract.
@@ -176,7 +206,7 @@ func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currenc
 		return bus.Contract{}, err
 	}
 
-	return added.convert()
+	return added.convert(), nil
 }
 
 // AddRenewedContract adds a new contract which was created as the result of a renewal to the store.
@@ -195,10 +225,15 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 
 		// Create copy in archive.
 		err = tx.Create(&dbArchivedContract{
-			FCID:      oldContract.FCID,
-			Host:      oldContract.Host.PublicKey,
-			Reason:    archivalReasonRenewed,
-			RenewedTo: c.ID(),
+			FCID:        oldContract.FCID,
+			Host:        oldContract.Host.PublicKey,
+			Reason:      archivalReasonRenewed,
+			RenewedTo:   c.ID(),
+			StartHeight: oldContract.StartHeight,
+
+			UploadSpending:      oldContract.UploadSpending,
+			DownloadSpending:    oldContract.DownloadSpending,
+			FundAccountSpending: oldContract.FundAccountSpending,
 		}).Error
 		if err != nil {
 			return err
@@ -217,7 +252,7 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 		return bus.Contract{}, err
 	}
 
-	return renewed.convert()
+	return renewed.convert(), nil
 }
 
 // Contract implements the bus.ContractStore interface.
@@ -227,7 +262,7 @@ func (s *SQLStore) Contract(id types.FileContractID) (bus.Contract, error) {
 	if err != nil {
 		return bus.Contract{}, err
 	}
-	return contract.convert()
+	return contract.convert(), nil
 }
 
 // Contracts implements the bus.ContractStore interface.
@@ -238,11 +273,7 @@ func (s *SQLStore) Contracts() ([]bus.Contract, error) {
 	}
 	contracts := make([]bus.Contract, len(dbContracts))
 	for i, c := range dbContracts {
-		contract, err := c.convert()
-		if err != nil {
-			return nil, err
-		}
-		contracts[i] = contract
+		contracts[i] = c.convert()
 	}
 	return contracts, nil
 }
@@ -286,4 +317,19 @@ func (s *SQLStore) contracts() ([]dbContract, error) {
 		Preload("Host.Announcements").
 		Find(&contracts).Error
 	return contracts, err
+}
+
+func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]bus.ArchivedContract, error) {
+	var ancestors []dbArchivedContract
+	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", gobEncode(id), startHeight).
+		Scan(&ancestors).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	contracts := make([]bus.ArchivedContract, len(ancestors))
+	for i, ancestor := range ancestors {
+		contracts[i] = ancestor.convert()
+	}
+	return contracts, nil
 }

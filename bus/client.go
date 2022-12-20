@@ -243,7 +243,7 @@ func (c *Client) Contract(id types.FileContractID) (contract Contract, err error
 
 // AddContract adds the provided contract to the contract store.
 func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added Contract, err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/new", contract.ID()), ContractsIDAddRequest{
+	err = c.c.POST(fmt.Sprintf("/contracts/%s", contract.ID()), ContractsIDAddRequest{
 		Contract:    contract,
 		StartHeight: startHeight,
 		TotalCost:   totalCost,
@@ -259,6 +259,14 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 		StartHeight: startHeight,
 		TotalCost:   totalCost,
 	}, &renewed)
+	return
+}
+
+// AncestorContracts returns any ancestors of a given active contract.
+func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []ArchivedContract, err error) {
+	values := url.Values{}
+	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
+	err = c.c.GET(fmt.Sprintf("/contracts/%s/ancestors?"+values.Encode(), fcid), &contracts)
 	return
 }
 

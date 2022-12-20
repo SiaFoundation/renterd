@@ -1,8 +1,6 @@
 package stores
 
 import (
-	"bytes"
-	"encoding/gob"
 	"errors"
 	"fmt"
 	"strings"
@@ -330,12 +328,7 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 	// Serialize contract ids.
 	var fcids [][]byte
 	for _, fcid := range goodContracts {
-		buf := bytes.NewBuffer(nil)
-		enc := gob.NewEncoder(buf)
-		if err := enc.Encode(fcid); err != nil {
-			return nil, err
-		}
-		fcids = append(fcids, buf.Bytes())
+		fcids = append(fcids, gobEncode(fcid))
 	}
 	failureQuery := s.db.Model(&dbSlab{}).
 		Select("id as slab_id").

@@ -69,6 +69,7 @@ type (
 	// A ContractStore stores contracts.
 	ContractStore interface {
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
+		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]ArchivedContract, error)
 		ReleaseContract(fcid types.FileContractID) error
 		Contracts() ([]Contract, error)
 		Contract(id types.FileContractID) (Contract, error)
@@ -426,7 +427,7 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDNewHandlerPOST(jc jape.Context) {
+func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req ContractsIDAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -585,6 +586,22 @@ func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 	}
 }
 
+func (b *bus) contractsAncestorsHandler(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+	var minStartHeight uint64
+	if jc.DecodeForm("startHeight", &minStartHeight) != nil {
+		return
+	}
+	ancestors, err := b.cs.AncestorContracts(fcid, minStartHeight)
+	if jc.Check("failed to fetch ancestor contracts", err) != nil {
+		return
+	}
+	jc.Encode(ancestors)
+}
+
 // TODO: use simple err check against stores.ErrSettingNotFound as soon as the
 // import-cycle is fixed
 func isErrSettingsNotFound(err error) bool {
@@ -641,13 +658,14 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":             b.contractsHandler,
-		"GET    /contracts/:id":         b.contractsIDHandlerGET,
-		"POST   /contracts/:id/new":     b.contractsIDNewHandlerPOST,
-		"POST   /contracts/:id/renewed": b.contractsIDRenewedHandlerPOST,
-		"DELETE /contracts/:id":         b.contractsIDHandlerDELETE,
-		"POST   /contracts/:id/acquire": b.contractsAcquireHandler,
-		"POST   /contracts/:id/release": b.contractsReleaseHandler,
+		"GET    /contracts":               b.contractsHandler,
+		"GET    /contracts/:id":           b.contractsIDHandlerGET,
+		"GET    /contracts/:id/ancestors": b.contractsAncestorsHandler,
+		"POST   /contracts/:id":           b.contractsIDHandlerPOST,
+		"POST   /contracts/:id/renewed":   b.contractsIDRenewedHandlerPOST,
+		"DELETE /contracts/:id":           b.contractsIDHandlerDELETE,
+		"POST   /contracts/:id/acquire":   b.contractsAcquireHandler,
+		"POST   /contracts/:id/release":   b.contractsReleaseHandler,
 
 		"GET    /contractsets":       b.contractSetHandler,
 		"GET    /contractsets/:name": b.contractSetsNameHandlerGET,
