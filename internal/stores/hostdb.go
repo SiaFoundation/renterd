@@ -136,24 +136,16 @@ func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	// Filter all hosts for the ones that have not been updated since a
 	// given time.
-	var foundHosts [][]byte
+	var fullHosts []dbHost
 	err := db.db.Table("hosts").
 		Joins("LEFT JOIN host_interactions ON host_interactions.db_host_id = hosts.ID").
-		Select("Public_key").
 		Group("Public_Key").
 		Having("IFNULL(MAX(Timestamp), 0) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
 		Limit(max).
-		Find(&foundHosts).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	// Fetch the full host information for all the keys.
-	var fullHosts []dbHost
-	err = db.db.Where("public_key IN ?", foundHosts).
 		Preload("Interactions").
 		Preload("Announcements").
-		Find(&fullHosts).Error
+		Find(&fullHosts).
+		Error
 	if err != nil {
 		return nil, err
 	}
