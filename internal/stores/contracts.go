@@ -15,7 +15,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const archivalReasonRenewed = "renewed"
+const (
+	archivalReasonRenewed = "renewed"
+)
 
 var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from the
@@ -41,6 +43,8 @@ type (
 		UploadSpending      *big.Int             `gorm:"type:bytes;serializer:gob"`
 		DownloadSpending    *big.Int             `gorm:"type:bytes;serializer:gob"`
 		FundAccountSpending *big.Int             `gorm:"type:bytes;serializer:gob"`
+
+		Sets []dbContractSet `gorm:"many2many:contract_set_contracts"`
 	}
 
 	dbContractSet struct {
@@ -281,8 +285,8 @@ func (s *SQLStore) Contract(id types.FileContractID) (bus.Contract, error) {
 }
 
 // Contracts implements the bus.ContractStore interface.
-func (s *SQLStore) Contracts() ([]bus.Contract, error) {
-	dbContracts, err := s.contracts()
+func (s *SQLStore) Contracts(set string) ([]bus.Contract, error) {
+	dbContracts, err := s.contracts(set)
 	if err != nil {
 		return nil, err
 	}
@@ -292,33 +296,14 @@ func (s *SQLStore) Contracts() ([]bus.Contract, error) {
 	}
 	return contracts, nil
 }
-func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
-	var hostSet dbContractSet
-	err := s.db.Where(&dbContractSet{Name: name}).
-		Preload("Contracts.Host.Announcements").
-		Take(&hostSet).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrContractSetNotFound
-	} else if err != nil {
-		return nil, err
-	}
-	contracts := make([]bus.Contract, len(hostSet.Contracts))
-	for i, c := range hostSet.Contracts {
-		contracts[i] = c.convert()
-	}
-	return contracts, nil
-}
 
-// SetContractSet implements the bus.ContractSetStore interface.
-func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
-	contractIDs := make([][]byte, len(contracts))
-	for i, fcid := range contracts {
-		fcidGob := bytes.NewBuffer(nil)
-		if err := gob.NewEncoder(fcidGob).Encode(fcid); err != nil {
-			return err
-		}
-		contractIDs[i] = fcidGob.Bytes()
+// SetContractSet implements the bus.ContractStore interface.
+func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
+	encIds := make([][]byte, len(contractIds))
+	for i, fcid := range contractIds {
+		encIds[i] = gobEncode(fcid)
 	}
+
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Delete existing set.
 		err := tx.Model(&dbContractSet{}).
@@ -331,11 +316,12 @@ func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID)
 		// Fetch contracts.
 		var dbContracts []dbContract
 		err = tx.Model(&dbContract{}).
-			Where("fcid in ?", contractIDs).
+			Where("fcid in ?", encIds).
 			Find(&dbContracts).Error
 		if err != nil {
 			return err
 		}
+
 		// Create set.
 		return tx.Create(&dbContractSet{
 			Name:      name,
@@ -377,12 +363,20 @@ func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
 	return contract(s.db, id)
 }
 
-func (s *SQLStore) contracts() ([]dbContract, error) {
-	var contracts []dbContract
-	err := s.db.Model(&dbContract{}).
-		Preload("Host.Announcements").
-		Find(&contracts).Error
-	return contracts, err
+func (s *SQLStore) contracts(set string) (contracts []dbContract, err error) {
+	tx := s.db.
+		Model(&dbContract{}).
+		Preload("Host.Announcements")
+
+	if set != "all" {
+		tx = tx.
+			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
+			Where("cs.name = ?", set)
+	}
+
+	err = tx.Find(&contracts).Error
+	return
 }
 
 func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]bus.ArchivedContract, error) {

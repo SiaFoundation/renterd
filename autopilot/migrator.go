@@ -30,7 +30,7 @@ func newMigrator(ap *Autopilot) *migrator {
 func (m *migrator) UpdateContracts() error {
 	bus := m.ap.bus
 
-	contracts, err := bus.Contracts()
+	contracts, err := bus.Contracts("all")
 	if err != nil {
 		return err
 	}

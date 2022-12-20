@@ -42,15 +42,12 @@ type Bus interface {
 	DeleteContracts(ids []types.FileContractID) error
 
 	Contract(id types.FileContractID) (contract bus.Contract, err error)
-	Contracts() ([]bus.Contract, error)
+	Contracts(set string) ([]bus.Contract, error)
+	SetContractSet(set string, contracts []types.FileContractID) error
 
 	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]bus.ArchivedContract, error)
 	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
 	ReleaseContract(id types.FileContractID) error
-
-	// contractsets
-	SetContractSet(name string, contracts []types.FileContractID) error
-	ContractSet(name string) ([]bus.Contract, error)
 
 	// txpool
 	RecommendedFee() (types.Currency, error)

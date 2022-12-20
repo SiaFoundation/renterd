@@ -71,9 +71,8 @@ type (
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
 		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]ArchivedContract, error)
 		ReleaseContract(fcid types.FileContractID) error
-		Contracts() ([]Contract, error)
-		ContractSet(name string) ([]Contract, error)
-		SetContractSet(name string, contracts []types.FileContractID) error
+		Contracts(set string) ([]Contract, error)
+		SetContractSet(set string, contracts []types.FileContractID) error
 		Contract(id types.FileContractID) (Contract, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (Contract, error)
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (Contract, error)
@@ -375,14 +374,23 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsHandler(jc jape.Context) {
-	cs, err := b.cs.Contracts()
+func (b *bus) contractsHandlerGET(jc jape.Context) {
+	cs, err := b.cs.Contracts(jc.Request.FormValue("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
 }
 
-func (b *bus) contractsAcquireHandler(jc jape.Context) {
+func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
+	var contractIds []types.FileContractID
+	if set := jc.PathParam("set"); set == "" {
+		jc.Error(errors.New("param 'set' can not be empty"), http.StatusBadRequest)
+	} else if jc.Decode(&contractIds) == nil {
+		jc.Check("could not add contracts to set", b.cs.SetContractSet(set, contractIds))
+	}
+}
+
+func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -400,7 +408,7 @@ func (b *bus) contractsAcquireHandler(jc jape.Context) {
 	})
 }
 
-func (b *bus) contractsReleaseHandler(jc jape.Context) {
+func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -410,7 +418,7 @@ func (b *bus) contractsReleaseHandler(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDHandlerGET(jc jape.Context) {
+func (b *bus) contractIDHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -421,7 +429,7 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
+func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req ContractsIDAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -438,7 +446,7 @@ func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDRenewedHandlerPOST(jc jape.Context) {
+func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req ContractsIDRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -455,28 +463,12 @@ func (b *bus) contractsIDRenewedHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
+func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
 	jc.Check("couldn't remove contract", b.cs.RemoveContract(id))
-}
-
-func (b *bus) contractSetsNameHandlerGET(jc jape.Context) {
-	hostSet, err := b.cs.ContractSet(jc.PathParam("name"))
-	if jc.Check("couldn't load host set", err) != nil {
-		return
-	}
-	jc.Encode(hostSet)
-}
-
-func (b *bus) contractSetsNameHandlerPUT(jc jape.Context) {
-	var contracts []types.FileContractID
-	if jc.Decode(&contracts) != nil {
-		return
-	}
-	jc.Check("couldn't store host set", b.cs.SetContractSet(jc.PathParam("name"), contracts))
 }
 
 func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
@@ -572,7 +564,7 @@ func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 	}
 }
 
-func (b *bus) contractsAncestorsHandler(jc jape.Context) {
+func (b *bus) contractAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
@@ -643,17 +635,15 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":               b.contractsHandler,
-		"GET    /contracts/:id":           b.contractsIDHandlerGET,
-		"GET    /contracts/:id/ancestors": b.contractsAncestorsHandler,
-		"POST   /contracts/:id":           b.contractsIDHandlerPOST,
-		"POST   /contracts/:id/renewed":   b.contractsIDRenewedHandlerPOST,
-		"DELETE /contracts/:id":           b.contractsIDHandlerDELETE,
-		"POST   /contracts/:id/acquire":   b.contractsAcquireHandler,
-		"POST   /contracts/:id/release":   b.contractsReleaseHandler,
-
-		"GET    /contractsets/:name": b.contractSetsNameHandlerGET,
-		"PUT    /contractsets/:name": b.contractSetsNameHandlerPUT,
+		"GET    /contracts":              b.contractsHandlerGET,
+		"PUT    /contracts/:set":         b.contractsSetHandlerPUT,
+		"GET    /contract/:id":           b.contractIDHandlerGET,
+		"POST   /contract/:id":           b.contractIDHandlerPOST,
+		"GET    /contract/:id/ancestors": b.contractAncestorsHandler,
+		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
+		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
+		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
 		"GET    /objects/*key":    b.objectsKeyHandlerGET,
 		"PUT    /objects/*key":    b.objectsKeyHandlerPUT,

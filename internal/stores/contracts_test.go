@@ -90,7 +90,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := cs.Contracts()
+	contracts, err := cs.Contracts("all")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
 	}
-	contracts, err = cs.Contracts()
+	contracts, err = cs.Contracts("all")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +137,21 @@ func TestSQLContractStore(t *testing.T) {
 	}
 	if !reflect.DeepEqual(contracts[0], expected) {
 		t.Fatal("contract mismatch")
+	}
+
+	// Add a contract set with our contract and assert we can fetch it using the set name
+	if err := cs.SetContractSet("foo", []types.FileContractID{contracts[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if contracts, err := cs.Contracts("foo"); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatalf("should have 1 contracts but got %v", len(contracts))
+	}
+	if contracts, err := cs.Contracts("bar"); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatalf("should have 0 contracts but got %v", len(contracts))
 	}
 
 	// Delete the contract.
@@ -149,7 +164,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = cs.Contracts()
+	contracts, err = cs.Contracts("all")
 	if err != nil {
 		t.Fatal(err)
 	}

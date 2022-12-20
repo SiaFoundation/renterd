@@ -230,14 +230,16 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 }
 
 // Contracts returns all contracts in the contract store.
-func (c *Client) Contracts() (contracts []Contract, err error) {
-	err = c.c.GET("/contracts", &contracts)
+func (c *Client) Contracts(set string) (contracts []Contract, err error) {
+	values := url.Values{}
+	values.Set("set", set)
+	err = c.c.GET("/contracts?"+values.Encode(), &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
 func (c *Client) Contract(id types.FileContractID) (contract Contract, err error) {
-	err = c.c.GET(fmt.Sprintf("/contracts/%s", id), &contract)
+	err = c.c.GET(fmt.Sprintf("/contract/%s", id), &contract)
 	return
 }
 
@@ -253,7 +255,7 @@ func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Cu
 
 // AddRenewedContract adds the provided contract to the contract store.
 func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed Contract, err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/renewed", contract.ID()), ContractsIDRenewedRequest{
+	err = c.c.POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), ContractsIDRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
 		StartHeight: startHeight,
@@ -270,15 +272,9 @@ func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uin
 	return
 }
 
-// ContractSet returns the contracts in the given set.
-func (c *Client) ContractSet(name string) (hosts []Contract, err error) {
-	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
-	return
-}
-
 // SetContractSet assigns a name to the given contracts.
 func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contractsets/%s", name), contracts)
+	err = c.c.PUT(fmt.Sprintf("/contracts/%s", name), contracts)
 	return
 }
 
@@ -295,7 +291,7 @@ func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(id types.FileContractID) (err error) {
-	err = c.c.DELETE(fmt.Sprintf("/contracts/%s", id))
+	err = c.c.DELETE(fmt.Sprintf("/contract/%s", id))
 	return
 }
 
@@ -303,14 +299,14 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 // released manually before that time.
 func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (locked bool, err error) {
 	var resp ContractAcquireResponse
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/acquire", fcid), ContractAcquireRequest{Duration: d}, &resp)
+	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), ContractAcquireRequest{Duration: d}, &resp)
 	locked = resp.Locked
 	return
 }
 
 // ReleaseContract releases a contract that was previously acquired using AcquireContract.
 func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/release", fcid), nil, nil)
+	err = c.c.POST(fmt.Sprintf("/contract/%s/release", fcid), nil, nil)
 	return
 }
 
@@ -330,7 +326,7 @@ func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string
 	}
 
 	// fetch all contracts from the set
-	contracts, err := c.ContractSet(contractSetName)
+	contracts, err := c.Contracts(contractSetName)
 	if err != nil {
 		return nil, err
 	}

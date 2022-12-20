@@ -220,8 +220,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]bus.Contract, error)
-	Contracts() ([]bus.Contract, error)
-	ContractSet(name string) ([]bus.Contract, error)
+	Contracts(set string) ([]bus.Contract, error)
 
 	DownloadParams() (bus.DownloadParams, error)
 	UploadParams() (bus.UploadParams, error)
@@ -558,12 +557,12 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	from, err := w.bus.ContractSet(mp.FromContracts)
+	from, err := w.bus.Contracts(mp.FromContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
-	to, err := w.bus.ContractSet(mp.ToContracts)
+	to, err := w.bus.Contracts(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -652,7 +651,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
 
 	// fetch contracts
-	bcs, err := w.bus.ContractSet(up.ContractSet)
+	bcs, err := w.bus.Contracts(up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -700,7 +699,7 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 }
 
 func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
-	busContracts, err := w.bus.Contracts()
+	busContracts, err := w.bus.Contracts("all")
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}

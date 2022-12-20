@@ -50,7 +50,7 @@ type paramTime time.Time
 func (t paramTime) String() string                { return url.QueryEscape((time.Time)(t).Format(time.RFC3339)) }
 func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
-// ContractAcquireRequest is the request type for the /contracts/:id/acquire
+// ContractAcquireRequest is the request type for the /contract/:id/acquire
 // endpoint.
 type ContractAcquireRequest struct {
 	Duration time.Duration
@@ -67,7 +67,7 @@ type ContractsIDRenewedRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
-// ContractAcquireResponse is the response type for the /contracts/:id/acquire
+// ContractAcquireResponse is the response type for the /contract/:id/acquire
 // endpoint.
 type ContractAcquireResponse struct {
 	Locked bool `json:"locked"`
