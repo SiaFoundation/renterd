@@ -40,14 +40,6 @@ func PerformGougingChecks(ctx context.Context, hs rhpv2.HostSettings) GougingRes
 	panic("no gouging checker attached to the context") // developer error
 }
 
-func PerformGougingChecksCustom(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
-	return GougingResults{
-		downloadErr:     checkDownloadGouging(gs, hs, redundancy),
-		formContractErr: checkFormContractGouging(gs, hs),
-		uploadErr:       checkUploadGouging(gs, hs, period, redundancy),
-	}
-}
-
 func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Context {
 	rs := gp.RedundancySettings
 	return context.WithValue(ctx, keyGougingChecker, gougingChecker{
@@ -57,20 +49,11 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 	})
 }
 
-func (gc gougingChecker) Check(hs rhpv2.HostSettings) GougingResults {
-	return PerformGougingChecksCustom(
-		gc.settings,
-		hs,
-		gc.period,
-		gc.redundancy,
-	)
-}
-
-func (gr GougingResults) IsGouging() (bool, string) {
+func IsGouging(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) (bool, string) {
 	errs := filterErrors(
-		gr.downloadErr,
-		gr.uploadErr,
-		gr.formContractErr,
+		checkDownloadGouging(gs, hs, redundancy),
+		checkFormContractGouging(gs, hs),
+		checkUploadGouging(gs, hs, period, redundancy),
 	)
 	if len(errs) == 0 {
 		return false, ""
@@ -81,6 +64,14 @@ func (gr GougingResults) IsGouging() (bool, string) {
 		reasons = append(reasons, err.Error())
 	}
 	return true, strings.Join(reasons, ", ")
+}
+
+func (gc gougingChecker) Check(hs rhpv2.HostSettings) GougingResults {
+	return GougingResults{
+		downloadErr:     checkDownloadGouging(gc.settings, hs, gc.redundancy),
+		formContractErr: checkFormContractGouging(gc.settings, hs),
+		uploadErr:       checkUploadGouging(gc.settings, hs, gc.period, gc.redundancy),
+	}
 }
 
 func (gr GougingResults) CanDownload() (errs []error) {
