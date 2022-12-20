@@ -15,9 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	archivalReasonRenewed = "renewed"
-)
+const archivalReasonRenewed = "renewed"
 
 var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from the

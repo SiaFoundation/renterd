@@ -272,9 +272,9 @@ func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uin
 	return
 }
 
-// SetContractSet assigns a name to the given contracts.
-func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contracts/%s", name), contracts)
+// SetContractSet adds the given contracts to the given set.
+func (c *Client) SetContractSet(set string, contracts []types.FileContractID) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/contracts/%s", set), contracts)
 	return
 }
 
