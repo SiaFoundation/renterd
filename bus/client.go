@@ -243,7 +243,7 @@ func (c *Client) Contract(id types.FileContractID) (contract Contract, err error
 
 // AddContract adds the provided contract to the contract store.
 func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added Contract, err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/new", contract.ID()), ContractsIDAddRequest{
+	err = c.c.POST(fmt.Sprintf("/contracts/%s", contract.ID()), ContractsIDAddRequest{
 		Contract:    contract,
 		StartHeight: startHeight,
 		TotalCost:   totalCost,
