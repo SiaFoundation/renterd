@@ -10,22 +10,22 @@ import (
 
 type (
 	WalletConfig struct {
-		DefragThreshold uint64
+		DefragThreshold uint64 `json:"defragThreshold"`
 	}
 	HostsConfig struct {
-		Blacklist          []string
-		IgnoreRedundantIPs bool
-		ScoreOverrides     map[consensus.PublicKey]float64
-		Whitelist          []string
+		Blacklist          []string                        `json:"blacklist"`
+		IgnoreRedundantIPs bool                            `json:"ignoreRedundantIPs"`
+		ScoreOverrides     map[consensus.PublicKey]float64 `json:"scoreOverrides"`
+		Whitelist          []string                        `json:"whitelist"`
 	}
 	ContractsConfig struct {
-		Allowance   types.Currency
-		Hosts       uint64
-		Period      uint64
-		RenewWindow uint64
-		Download    uint64
-		Upload      uint64
-		Storage     uint64
+		Allowance   types.Currency `json:"allowance"`
+		Hosts       uint64         `json:"hosts"`
+		Period      uint64         `json:"period"`
+		RenewWindow uint64         `json:"renewWindow"`
+		Download    uint64         `json:"download"`
+		Upload      uint64         `json:"upload"`
+		Storage     uint64         `json:"storage"`
 	}
 )
 
@@ -35,9 +35,9 @@ type autopilotStatusResponseGET struct {
 
 // Config contains all autopilot configuration parameters.
 type Config struct {
-	Wallet    WalletConfig
-	Hosts     HostsConfig
-	Contracts ContractsConfig
+	Wallet    WalletConfig    `json:"wallet"`
+	Hosts     HostsConfig     `json:"hosts"`
+	Contracts ContractsConfig `json:"contracts"`
 }
 
 func DefaultConfig() (c Config) {
