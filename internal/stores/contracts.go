@@ -108,11 +108,11 @@ func (c dbArchivedContract) convert() bus.ArchivedContract {
 }
 
 func gobEncode(i interface{}) []byte {
-	fcidGob := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(fcidGob).Encode(i); err != nil {
+	buf := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(buf).Encode(i); err != nil {
 		panic(err)
 	}
-	return fcidGob.Bytes()
+	return buf.Bytes()
 }
 
 // AcquireContract acquires a contract assuming that the contract exists and
