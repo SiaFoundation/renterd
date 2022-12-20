@@ -427,7 +427,7 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDNewHandlerPOST(jc jape.Context) {
+func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req ContractsIDAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -586,7 +586,7 @@ func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 	}
 }
 
-func (b *bus) contractsAncestorsHandlerGet(jc jape.Context) {
+func (b *bus) contractsAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
@@ -660,8 +660,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 
 		"GET    /contracts":               b.contractsHandler,
 		"GET    /contracts/:id":           b.contractsIDHandlerGET,
-		"GET    /contracts/:id/ancestors": b.contractsAncestorsHandlerGet,
-		"POST   /contracts/:id/new":       b.contractsIDNewHandlerPOST,
+		"GET    /contracts/:id/ancestors": b.contractsAncestorsHandler,
+		"POST   /contracts/:id":           b.contractsIDHandlerPOST,
 		"POST   /contracts/:id/renewed":   b.contractsIDRenewedHandlerPOST,
 		"DELETE /contracts/:id":           b.contractsIDHandlerDELETE,
 		"POST   /contracts/:id/acquire":   b.contractsAcquireHandler,
