@@ -180,12 +180,6 @@ func main() {
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
 		busPassword = getAPIPassword()
-
-		syncerAddress, err := bus.NewClient(busAddr, busPassword).SyncerAddress()
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println("bus: Listening on", syncerAddress)
 	}
 	bc := bus.NewClient(busAddr, busPassword)
 
@@ -237,6 +231,12 @@ func main() {
 	srv := &http.Server{Handler: mux}
 	go srv.Serve(l)
 	log.Println("api: Listening on", l.Addr())
+
+	syncerAddress, err := bc.SyncerAddress()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("bus: Listening on", syncerAddress)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
