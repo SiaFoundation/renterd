@@ -374,14 +374,6 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsAllHandlerGET(jc jape.Context) {
-	// TODO: use stores.SetNameAll if import cycle is fixed
-	cs, err := b.cs.Contracts("all")
-	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(cs)
-	}
-}
-
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {
 	cs, err := b.cs.Contracts(jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
@@ -644,7 +636,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts/all":          b.contractsAllHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"GET    /contract/:id":           b.contractIDHandlerGET,

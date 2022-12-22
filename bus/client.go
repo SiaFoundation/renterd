@@ -231,8 +231,8 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 
 // AllContracts returns all contracts in the contract store.
 func (c *Client) AllContracts() (contracts []Contract, err error) {
-	err = c.c.GET("/contracts/all", &contracts)
-	return
+	// TODO: use stores.SetNameAll when import cycle is fixed
+	return c.Contracts("all")
 }
 
 // Contracts returns the contracts for the given set from the contract store.
