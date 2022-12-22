@@ -140,11 +140,6 @@ func gobEncode(i interface{}) []byte {
 	return buf.Bytes()
 }
 
-// IsReservedSetName returns whether the given set name is reserved.
-func IsReservedSetName(name string) bool {
-	return name == SetNameAll
-}
-
 // AcquireContract acquires a contract assuming that the contract exists and
 // that it isn't locked right now. The returned bool indicates whether locking
 // the contract was successful.
@@ -285,6 +280,21 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 	return renewed.convert(), nil
 }
 
+func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]bus.ArchivedContract, error) {
+	var ancestors []dbArchivedContract
+	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", gobEncode(id), startHeight).
+		Scan(&ancestors).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	contracts := make([]bus.ArchivedContract, len(ancestors))
+	for i, ancestor := range ancestors {
+		contracts[i] = ancestor.convert()
+	}
+	return contracts, nil
+}
+
 // Contract implements the bus.ContractStore interface.
 func (s *SQLStore) Contract(id types.FileContractID) (bus.Contract, error) {
 	// Fetch contract.
@@ -310,7 +320,7 @@ func (s *SQLStore) Contracts(set string) ([]bus.Contract, error) {
 
 // SetContractSet implements the bus.ContractStore interface.
 func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
-	if IsReservedSetName(name) {
+	if isReservedSetName(name) {
 		return ErrReservedSetName
 	}
 
@@ -345,22 +355,31 @@ func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractI
 	})
 }
 
-// removeContract implements the bus.ContractStore interface.
-func removeContract(tx *gorm.DB, id types.FileContractID) error {
-	var contract dbContract
-	if err := tx.Where(&dbContract{FCID: id}).
-		Take(&contract).Error; err != nil {
-		return err
-	}
-	return tx.Where(&dbContract{Model: Model{ID: contract.ID}}).
-		Delete(&contract).Error
-}
-
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		return removeContract(tx, id)
 	})
+}
+
+func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
+	return contract(s.db, id)
+}
+
+func (s *SQLStore) contracts(set string) (contracts []dbContract, err error) {
+	tx := s.db.
+		Model(&dbContract{}).
+		Preload("Host.Announcements")
+
+	if set != SetNameAll {
+		tx = tx.
+			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
+			Where("cs.name = ?", set)
+	}
+
+	err = tx.Find(&contracts).Error
+	return
 }
 
 func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {
@@ -374,37 +393,17 @@ func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {
 	return contract, err
 }
 
-func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
-	return contract(s.db, id)
+func removeContract(tx *gorm.DB, id types.FileContractID) error {
+	var contract dbContract
+	if err := tx.Where(&dbContract{FCID: id}).
+		Take(&contract).Error; err != nil {
+		return err
+	}
+	return tx.Where(&dbContract{Model: Model{ID: contract.ID}}).
+		Delete(&contract).Error
 }
 
-func (s *SQLStore) contracts(set string) (contracts []dbContract, err error) {
-	tx := s.db.
-		Model(&dbContract{}).
-		Preload("Host.Announcements")
-
-	if set != "all" {
-		tx = tx.
-			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-			Where("cs.name = ?", set)
-	}
-
-	err = tx.Find(&contracts).Error
-	return
-}
-
-func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]bus.ArchivedContract, error) {
-	var ancestors []dbArchivedContract
-	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", gobEncode(id), startHeight).
-		Scan(&ancestors).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	contracts := make([]bus.ArchivedContract, len(ancestors))
-	for i, ancestor := range ancestors {
-		contracts[i] = ancestor.convert()
-	}
-	return contracts, nil
+// isReservedSetName returns whether the given set name is reserved.
+func isReservedSetName(name string) bool {
+	return name == SetNameAll
 }

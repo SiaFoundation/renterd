@@ -375,6 +375,7 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) contractsAllHandlerGET(jc jape.Context) {
+	// TODO: use stores.SetNameAll if import cycle is fixed
 	cs, err := b.cs.Contracts("all")
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
@@ -389,6 +390,7 @@ func (b *bus) contractsSetHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
+	// TODO: check err stores.ErrReservedSetName if import cycle is fixed
 	var contractIds []types.FileContractID
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("param 'set' can not be empty"), http.StatusBadRequest)
