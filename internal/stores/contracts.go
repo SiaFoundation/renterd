@@ -15,7 +15,11 @@ import (
 	"gorm.io/gorm"
 )
 
-const archivalReasonRenewed = "renewed"
+const (
+	SetNameAll = "all"
+
+	archivalReasonRenewed = "renewed"
+)
 
 var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from the
@@ -25,6 +29,10 @@ var (
 	// ErrContractSetNotFound is returned when a contract can't be retrieved from the
 	// database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
+
+	// ErrReservedSetName is returned when a set of contracts is set using one
+	// of the reserved set names.
+	ErrReservedSetName = errors.New("set name is reserved")
 )
 
 type (
@@ -130,6 +138,11 @@ func gobEncode(i interface{}) []byte {
 		panic(err)
 	}
 	return buf.Bytes()
+}
+
+// IsReservedSetName returns whether the given set name is reserved.
+func IsReservedSetName(name string) bool {
+	return name == SetNameAll
 }
 
 // AcquireContract acquires a contract assuming that the contract exists and
@@ -297,6 +310,10 @@ func (s *SQLStore) Contracts(set string) ([]bus.Contract, error) {
 
 // SetContractSet implements the bus.ContractStore interface.
 func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
+	if IsReservedSetName(name) {
+		return ErrReservedSetName
+	}
+
 	encIds := make([][]byte, len(contractIds))
 	for i, fcid := range contractIds {
 		encIds[i] = gobEncode(fcid)

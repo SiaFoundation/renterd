@@ -374,8 +374,15 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsHandlerGET(jc jape.Context) {
-	cs, err := b.cs.Contracts(jc.Request.FormValue("set"))
+func (b *bus) contractsAllHandlerGET(jc jape.Context) {
+	cs, err := b.cs.Contracts("all")
+	if jc.Check("couldn't load contracts", err) == nil {
+		jc.Encode(cs)
+	}
+}
+
+func (b *bus) contractsSetHandlerGET(jc jape.Context) {
+	cs, err := b.cs.Contracts(jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
@@ -564,7 +571,7 @@ func (b *bus) setRedundancySettings(rs RedundancySettings) error {
 	}
 }
 
-func (b *bus) contractAncestorsHandler(jc jape.Context) {
+func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
@@ -635,11 +642,12 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":              b.contractsHandlerGET,
-		"PUT    /contracts/:set":         b.contractsSetHandlerPUT,
+		"GET    /contracts/all":          b.contractsAllHandlerGET,
+		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
+		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
-		"GET    /contract/:id/ancestors": b.contractAncestorsHandler,
+		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,

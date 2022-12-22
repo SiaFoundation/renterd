@@ -218,9 +218,10 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
-	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	ContractsForSlab(shards []object.Sector, contractSetName string) ([]bus.Contract, error)
+	AllContracts() ([]bus.Contract, error)
 	Contracts(set string) ([]bus.Contract, error)
+	ContractsForSlab(shards []object.Sector, contractSetName string) ([]bus.Contract, error)
+	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	DownloadParams() (bus.DownloadParams, error)
 	UploadParams() (bus.UploadParams, error)
@@ -698,8 +699,8 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
-	busContracts, err := w.bus.Contracts("all")
+func (w *worker) rhpAllContractsHandlerGET(jc jape.Context) {
+	busContracts, err := w.bus.AllContracts()
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
@@ -732,7 +733,7 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
+		"GET    /rhp/contracts/all":   w.rhpAllContractsHandlerGET,
 		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,

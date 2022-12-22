@@ -140,7 +140,7 @@ func (c *contractor) performContractMaintenance(cfg Config, cs bus.ConsensusStat
 	}
 
 	// fetch all active contracts and their latest revisions.
-	contracts, err := c.ap.worker.Contracts()
+	contracts, err := c.ap.worker.AllContracts()
 	if err != nil {
 		return err
 	}
@@ -380,7 +380,7 @@ func (c *contractor) runContractRenewals(cfg Config, blockHeight, currentPeriod 
 
 func (c *contractor) runContractFormations(cfg Config, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
 	// fetch all active contracts
-	active, err := c.ap.bus.Contracts("all")
+	active, err := c.ap.bus.AllContracts()
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +707,7 @@ func (c *contractor) renewFundingEstimate(cfg Config, currentPeriod, blockHeight
 
 func (c *contractor) candidateHosts(cfg Config, wanted uint64) ([]consensus.PublicKey, error) {
 	// fetch all contracts
-	active, err := c.ap.bus.Contracts("all")
+	active, err := c.ap.bus.AllContracts()
 	if err != nil {
 		return nil, err
 	}

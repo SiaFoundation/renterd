@@ -229,11 +229,15 @@ func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) 
 	return
 }
 
-// Contracts returns all contracts in the contract store.
+// AllContracts returns all contracts in the contract store.
+func (c *Client) AllContracts() (contracts []Contract, err error) {
+	err = c.c.GET("/contracts/all", &contracts)
+	return
+}
+
+// Contracts returns the contracts for the given set from the contract store.
 func (c *Client) Contracts(set string) (contracts []Contract, err error) {
-	values := url.Values{}
-	values.Set("set", set)
-	err = c.c.GET("/contracts?"+values.Encode(), &contracts)
+	err = c.c.GET(fmt.Sprintf("/contracts/set/%s", set), &contracts)
 	return
 }
 
@@ -245,7 +249,7 @@ func (c *Client) Contract(id types.FileContractID) (contract Contract, err error
 
 // AddContract adds the provided contract to the contract store.
 func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added Contract, err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s", contract.ID()), ContractsIDAddRequest{
+	err = c.c.POST(fmt.Sprintf("/contract/%s", contract.ID()), ContractsIDAddRequest{
 		Contract:    contract,
 		StartHeight: startHeight,
 		TotalCost:   totalCost,
@@ -268,13 +272,13 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []ArchivedContract, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
-	err = c.c.GET(fmt.Sprintf("/contracts/%s/ancestors?"+values.Encode(), fcid), &contracts)
+	err = c.c.GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), fcid), &contracts)
 	return
 }
 
 // SetContractSet adds the given contracts to the given set.
 func (c *Client) SetContractSet(set string, contracts []types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contracts/%s", set), contracts)
+	err = c.c.PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)
 	return
 }
 

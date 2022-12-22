@@ -90,7 +90,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := cs.Contracts("all")
+	contracts, err := cs.Contracts(SetNameAll)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
 	}
-	contracts, err = cs.Contracts("all")
+	contracts, err = cs.Contracts(SetNameAll)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = cs.Contracts("all")
+	contracts, err = cs.Contracts(SetNameAll)
 	if err != nil {
 		t.Fatal(err)
 	}

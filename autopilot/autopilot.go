@@ -43,6 +43,7 @@ type Bus interface {
 
 	Contract(id types.FileContractID) (contract bus.Contract, err error)
 	Contracts(set string) ([]bus.Contract, error)
+	AllContracts() (contracts []bus.Contract, err error)
 	SetContractSet(set string, contracts []types.FileContractID) error
 
 	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]bus.ArchivedContract, error)
@@ -68,7 +69,7 @@ type Worker interface {
 	RHPForm(endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
-	Contracts() (revisions []worker.Contract, err error)
+	AllContracts() (revisions []worker.Contract, err error)
 }
 
 type Autopilot struct {
