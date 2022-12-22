@@ -1,11 +1,11 @@
 package bus
 
 import (
-	"fmt"
 	"net/url"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
@@ -22,21 +22,22 @@ type (
 	// ChainState represents the full state of the chain as of a particular block.
 	ChainState = consensus.State
 
-	SlabID uint
+	// A Contract contains all information about a contract with a host.
+	Contract = stores.Contract
+
+	// ContractMetadata contains all metadata for a contract.
+	ContractMetadata = stores.ContractMetadata
+
+	// ContractSpending contains all spending details for a contract.
+	ContractSpending = stores.ContractSpending
+
+	// An ArchivedContract contains all information about a contract with a host
+	// that has been moved to the archive either due to expiring or being renewed.
+	ArchivedContract = stores.ArchivedContract
+
+	// SlabID uniquely identifies a slab in the database.
+	SlabID = stores.SlabID
 )
-
-// LoadString is implemented for jape's DecodeParam.
-func (sid *SlabID) LoadString(s string) (err error) {
-	var slabID uint
-	_, err = fmt.Sscan(s, &slabID)
-	*sid = SlabID(slabID)
-	return
-}
-
-// String encodes the SlabID as a string.
-func (sid SlabID) String() string {
-	return fmt.Sprint(uint8(sid))
-}
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {

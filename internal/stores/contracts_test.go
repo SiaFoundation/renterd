@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -110,14 +109,14 @@ func TestSQLContractStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := bus.Contract{
+	expected := Contract{
 		ID:          fcid,
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: 100,
-		ContractMetadata: bus.ContractMetadata{
+		ContractMetadata: ContractMetadata{
 			RenewedFrom: types.FileContractID{},
-			Spending: bus.ContractSpending{
+			Spending: ContractSpending{
 				Uploads:     types.ZeroCurrency,
 				Downloads:   types.ZeroCurrency,
 				FundAccount: types.ZeroCurrency,
@@ -325,14 +324,14 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := bus.Contract{
+	expected := Contract{
 		ID:          fcid2,
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
-		ContractMetadata: bus.ContractMetadata{
+		ContractMetadata: ContractMetadata{
 			RenewedFrom: fcid,
-			Spending: bus.ContractSpending{
+			Spending: ContractSpending{
 				Uploads:     types.ZeroCurrency,
 				Downloads:   types.ZeroCurrency,
 				FundAccount: types.ZeroCurrency,
@@ -430,7 +429,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal("wrong number of contracts returned", len(contracts))
 	}
 	for i := 0; i < len(contracts)-1; i++ {
-		if !reflect.DeepEqual(contracts[i], bus.ArchivedContract{
+		if !reflect.DeepEqual(contracts[i], ArchivedContract{
 			ID:        fcids[len(fcids)-2-i],
 			HostKey:   hk,
 			RenewedTo: fcids[len(fcids)-1-i],

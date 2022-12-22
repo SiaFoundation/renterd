@@ -3,7 +3,6 @@ package stores
 import (
 	"errors"
 
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
@@ -25,7 +24,7 @@ type (
 // TableName implements the gorm.Tabler interface.
 func (dbContractSetContract) TableName() string { return "contract_set_contracts" }
 
-// ContractSets implements the bus.ContractSetStore interface.
+// ContractSets implements the ContractSetStore interface.
 func (s *SQLStore) ContractSets() ([]string, error) {
 	var setNames []string
 	tx := s.db.Model(&dbContractSet{}).
@@ -34,8 +33,8 @@ func (s *SQLStore) ContractSets() ([]string, error) {
 	return setNames, tx.Error
 }
 
-// HostSet implements the bus.ContractSetStore interface.
-func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
+// HostSet implements the ContractSetStore interface.
+func (s *SQLStore) ContractSet(name string) ([]Contract, error) {
 	var hostSet dbContractSet
 	err := s.db.Where(&dbContractSet{Name: name}).
 		Preload("Contracts.Host.Announcements").
@@ -45,14 +44,14 @@ func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	contracts := make([]bus.Contract, len(hostSet.Contracts))
+	contracts := make([]Contract, len(hostSet.Contracts))
 	for i, c := range hostSet.Contracts {
 		contracts[i] = c.convert()
 	}
 	return contracts, nil
 }
 
-// SetContractSet implements the bus.ContractSetStore interface.
+// SetContractSet implements the ContractSetStore interface.
 func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
 	contractIDs := make([][]byte, len(contracts))
 	for i, fcid := range contracts {
