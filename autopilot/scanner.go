@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api/worker"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
 

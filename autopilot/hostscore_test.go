@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	api "go.sia.tech/renterd/api/autopilot"
 	"go.sia.tech/renterd/hostdb"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestHostScore(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := api.DefaultConfig()
 	day := 24 * time.Hour
 
 	newHost := func(s *rhpv2.HostSettings) Host { return Host{newTestHost(randomHostKey(), s)} }

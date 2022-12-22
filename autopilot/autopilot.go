@@ -6,19 +6,21 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/bus"
+	apiutils "go.sia.tech/renterd/api"
+	api "go.sia.tech/renterd/api/autopilot"
+	"go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api/worker"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
 
 type Store interface {
-	Config() Config
-	SetConfig(c Config) error
+	Config() api.Config
+	SetConfig(c api.Config) error
 }
 
 type Bus interface {
@@ -90,17 +92,17 @@ type Autopilot struct {
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
-func (ap *Autopilot) Actions(since time.Time, max int) []Action {
+func (ap *Autopilot) Actions(since time.Time, max int) []api.Action {
 	panic("unimplemented")
 }
 
 // Config returns the autopilot's current configuration.
-func (ap *Autopilot) Config() Config {
+func (ap *Autopilot) Config() api.Config {
 	return ap.store.Config()
 }
 
 // SetConfig updates the autopilot's configuration.
-func (ap *Autopilot) SetConfig(c Config) error {
+func (ap *Autopilot) SetConfig(c api.Config) error {
 	return ap.store.SetConfig(c)
 }
 
@@ -158,7 +160,7 @@ func (ap *Autopilot) Stop() error {
 func (ap *Autopilot) actionsHandler(jc jape.Context) {
 	var since time.Time
 	max := -1
-	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("since", (*apiutils.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
 	jc.Encode(ap.Actions(since, max))
@@ -169,7 +171,7 @@ func (ap *Autopilot) configHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
-	var c Config
+	var c api.Config
 	if jc.Decode(&c) != nil {
 		return
 	}
@@ -179,7 +181,7 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 }
 
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
-	jc.Encode(autopilotStatusResponseGET{
+	jc.Encode(api.AutopilotStatusResponseGET{
 		CurrentPeriod: ap.c.currentPeriod(),
 	})
 }

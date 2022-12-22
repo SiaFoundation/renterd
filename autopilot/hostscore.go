@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	api "go.sia.tech/renterd/api/autopilot"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/build"
@@ -29,7 +30,7 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
-func hostScore(cfg Config, h Host) float64 {
+func hostScore(cfg api.Config, h Host) float64 {
 	// TODO: priceAdjustmentScore
 	// TODO: storageRemainingScore
 	return ageScore(h) *
@@ -72,7 +73,7 @@ func ageScore(h Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg Config, h Host) float64 {
+func collateralScore(cfg api.Config, h Host) float64 {
 	// sanity check - host should have been filtered
 	settings, _, ok := h.LastKnownSettings()
 	if !ok {

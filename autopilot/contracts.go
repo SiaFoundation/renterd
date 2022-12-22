@@ -1,8 +1,8 @@
 package autopilot
 
 import (
-	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api/worker"
 	"go.sia.tech/siad/types"
 )
 

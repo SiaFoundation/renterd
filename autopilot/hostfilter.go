@@ -5,9 +5,11 @@ import (
 	"math"
 	"math/big"
 
-	"go.sia.tech/renterd/bus"
+	api "go.sia.tech/renterd/api/autopilot"
+	"go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api/worker"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/worker"
+	w "go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
@@ -20,13 +22,13 @@ const (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
+func isUsableHost(cfg api.Config, gs bus.GougingSettings, rs bus.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
 	var reasons []string
 
-	if !cfg.isWhitelisted(h) {
+	if !isWhitelisted(cfg, h) {
 		reasons = append(reasons, "not whitelisted")
 	}
-	if cfg.isBlacklisted(h) {
+	if isBlacklisted(cfg, h) {
 		reasons = append(reasons, "blacklisted")
 	}
 	if !h.IsOnline() {
@@ -52,7 +54,7 @@ func isUsableHost(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings,
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg Config, h Host, c worker.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
+func isUsableContract(cfg api.Config, h Host, c worker.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
 	if isOutOfFunds(cfg, h, c) {
 		reasons = append(reasons, "out of funds")
 		refresh = true
@@ -72,7 +74,7 @@ func isUsableContract(cfg Config, h Host, c worker.Contract, bh uint64) (usable 
 	return
 }
 
-func isOutOfFunds(cfg Config, h Host, c worker.Contract) bool {
+func isOutOfFunds(cfg api.Config, h Host, c worker.Contract) bool {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return false
@@ -89,21 +91,21 @@ func isOutOfFunds(cfg Config, h Host, c worker.Contract) bool {
 	return c.Revision.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func isUpForRenewal(cfg Config, c rhpv2.ContractRevision, blockHeight uint64) bool {
+func isUpForRenewal(cfg api.Config, c rhpv2.ContractRevision, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow >= c.EndHeight()
 }
 
-func isGouging(cfg Config, gs bus.GougingSettings, rs bus.RedundancySettings, h Host) (bool, string) {
+func isGouging(cfg api.Config, gs bus.GougingSettings, rs bus.RedundancySettings, h Host) (bool, string) {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return true, "no settings"
 	}
 
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
-	return worker.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
+	return w.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
 }
 
-func hasBadSettings(cfg Config, h Host) (bool, string) {
+func hasBadSettings(cfg api.Config, h Host) (bool, string) {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return true, "no settings"
@@ -125,7 +127,7 @@ func hasBadSettings(cfg Config, h Host) (bool, string) {
 	return false, ""
 }
 
-func (cfg Config) isBlacklisted(h Host) bool {
+func isBlacklisted(cfg api.Config, h Host) bool {
 	for _, host := range cfg.Hosts.Blacklist {
 		if h.IsHost(host) {
 			return true
@@ -134,7 +136,7 @@ func (cfg Config) isBlacklisted(h Host) bool {
 	return false
 }
 
-func (cfg Config) isWhitelisted(h Host) bool {
+func isWhitelisted(cfg api.Config, h Host) bool {
 	if len(cfg.Hosts.Whitelist) > 0 {
 		var found bool
 		for _, host := range cfg.Hosts.Whitelist {

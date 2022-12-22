@@ -10,6 +10,8 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/jape"
+	apiutils "go.sia.tech/renterd/api"
+	api "go.sia.tech/renterd/api/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -69,19 +71,19 @@ type (
 	// A ContractStore stores contracts.
 	ContractStore interface {
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
-		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]ArchivedContract, error)
+		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ReleaseContract(fcid types.FileContractID) error
-		Contracts() ([]Contract, error)
-		Contract(id types.FileContractID) (Contract, error)
-		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (Contract, error)
-		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (Contract, error)
+		Contracts() ([]api.Contract, error)
+		Contract(id types.FileContractID) (api.Contract, error)
+		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.Contract, error)
+		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.Contract, error)
 		RemoveContract(id types.FileContractID) error
 	}
 
 	// A ContractSetStore stores contract sets.
 	ContractSetStore interface {
 		ContractSets() ([]string, error)
-		ContractSet(name string) ([]Contract, error)
+		ContractSet(name string) ([]api.Contract, error)
 		SetContractSet(name string, contracts []types.FileContractID) error
 	}
 
@@ -144,7 +146,7 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 }
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
-	jc.Encode(ConsensusState{
+	jc.Encode(api.ConsensusState{
 		BlockHeight: b.cm.TipState().Index.Height,
 		Synced:      b.cm.Synced(),
 	})
@@ -177,7 +179,7 @@ func (b *bus) walletAddressHandler(jc jape.Context) {
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	var since time.Time
 	max := -1
-	if jc.DecodeForm("since", (*paramTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("since", (*apiutils.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
 	txns, err := b.w.Transactions(since, max)
@@ -194,7 +196,7 @@ func (b *bus) walletOutputsHandler(jc jape.Context) {
 }
 
 func (b *bus) walletFundHandler(jc jape.Context) {
-	var wfr WalletFundRequest
+	var wfr api.WalletFundRequest
 	if jc.Decode(&wfr) != nil {
 		return
 	}
@@ -210,7 +212,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		b.w.ReleaseInputs(txn)
 		return
 	}
-	jc.Encode(WalletFundResponse{
+	jc.Encode(api.WalletFundResponse{
 		Transaction: txn,
 		ToSign:      toSign,
 		DependsOn:   parents,
@@ -218,7 +220,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 }
 
 func (b *bus) walletSignHandler(jc jape.Context) {
-	var wsr WalletSignRequest
+	var wsr api.WalletSignRequest
 	if jc.Decode(&wsr) != nil {
 		return
 	}
@@ -229,7 +231,7 @@ func (b *bus) walletSignHandler(jc jape.Context) {
 }
 
 func (b *bus) walletRedistributeHandler(jc jape.Context) {
-	var wfr WalletRedistributeRequest
+	var wfr api.WalletRedistributeRequest
 	if jc.Decode(&wfr) != nil {
 		return
 	}
@@ -260,7 +262,7 @@ func (b *bus) walletDiscardHandler(jc jape.Context) {
 }
 
 func (b *bus) walletPrepareFormHandler(jc jape.Context) {
-	var wpfr WalletPrepareFormRequest
+	var wpfr api.WalletPrepareFormRequest
 	if jc.Decode(&wpfr) != nil {
 		return
 	}
@@ -289,7 +291,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 }
 
 func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
-	var wprr WalletPrepareRenewRequest
+	var wprr api.WalletPrepareRenewRequest
 	if jc.Decode(&wprr) != nil {
 		return
 	}
@@ -318,7 +320,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		b.w.ReleaseInputs(txn)
 		return
 	}
-	jc.Encode(WalletPrepareRenewResponse{
+	jc.Encode(api.WalletPrepareRenewResponse{
 		TransactionSet: append(parents, txn),
 		FinalPayment:   finalPayment,
 	})
@@ -353,7 +355,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 func (b *bus) hostsHandler(jc jape.Context) {
 	var notSince time.Time
 	max := -1
-	if jc.DecodeForm("notSince", (*paramTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("notSince", (*apiutils.ParamTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
 	hosts, err := b.hdb.Hosts(notSince, max)
@@ -363,7 +365,7 @@ func (b *bus) hostsHandler(jc jape.Context) {
 }
 
 func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
-	var hostKey PublicKey
+	var hostKey consensus.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
@@ -375,7 +377,7 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var hi hostdb.Interaction
-	var hostKey PublicKey
+	var hostKey consensus.PublicKey
 	if jc.Decode(&hi) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
 		jc.Check("couldn't record interaction", b.hdb.RecordInteraction(hostKey, hi))
 	}
@@ -393,7 +395,7 @@ func (b *bus) contractsAcquireHandler(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	var req ContractAcquireRequest
+	var req api.ContractAcquireRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
@@ -401,7 +403,7 @@ func (b *bus) contractsAcquireHandler(jc jape.Context) {
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}
-	jc.Encode(ContractAcquireResponse{
+	jc.Encode(api.ContractAcquireResponse{
 		Locked: locked,
 	})
 }
@@ -429,7 +431,7 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 
 func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
-	var req ContractsIDAddRequest
+	var req api.ContractsIDAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
 	}
@@ -446,7 +448,7 @@ func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
 
 func (b *bus) contractsIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
-	var req ContractsIDRenewedRequest
+	var req api.ContractsIDRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
 	}
@@ -497,18 +499,18 @@ func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
 		keys, err := b.os.List(jc.PathParam("key"))
 		if jc.Check("couldn't list objects", err) == nil {
-			jc.Encode(ObjectsResponse{Entries: keys})
+			jc.Encode(api.ObjectsResponse{Entries: keys})
 		}
 		return
 	}
 	o, err := b.os.Get(jc.PathParam("key"))
 	if jc.Check("couldn't load object", err) == nil {
-		jc.Encode(ObjectsResponse{Object: &o})
+		jc.Encode(api.ObjectsResponse{Object: &o})
 	}
 }
 
 func (b *bus) objectsKeyHandlerPUT(jc jape.Context) {
-	var aor AddObjectRequest
+	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
 		jc.Check("couldn't store object", b.os.Put(jc.PathParam("key"), aor.Object, aor.UsedContracts))
 	}
@@ -522,7 +524,7 @@ func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	var cutoff time.Time
 	var limit int
 	var goodContracts []types.FileContractID
-	if jc.DecodeForm("cutoff", (*paramTime)(&cutoff)) != nil {
+	if jc.DecodeForm("cutoff", (*apiutils.ParamTime)(&cutoff)) != nil {
 		return
 	}
 	if jc.DecodeForm("limit", &limit) != nil {
@@ -568,7 +570,7 @@ func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) setGougingSettings(gs GougingSettings) error {
+func (b *bus) setGougingSettings(gs api.GougingSettings) error {
 	if js, err := json.Marshal(gs); err != nil {
 		panic(err)
 	} else {
@@ -576,7 +578,7 @@ func (b *bus) setGougingSettings(gs GougingSettings) error {
 	}
 }
 
-func (b *bus) setRedundancySettings(rs RedundancySettings) error {
+func (b *bus) setRedundancySettings(rs api.RedundancySettings) error {
 	if js, err := json.Marshal(rs); err != nil {
 		panic(err)
 	} else if rs.MinShards == 0 || rs.MinShards >= rs.TotalShards {
@@ -609,7 +611,7 @@ func isErrSettingsNotFound(err error) bool {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore, gs GougingSettings, rs RedundancySettings) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, error) {
 	b := &bus{
 		s:   s,
 		cm:  cm,

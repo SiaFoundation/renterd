@@ -3,6 +3,7 @@ package stores
 import (
 	"errors"
 
+	bus "go.sia.tech/renterd/api/bus"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
@@ -34,7 +35,7 @@ func (s *SQLStore) ContractSets() ([]string, error) {
 }
 
 // HostSet implements the ContractSetStore interface.
-func (s *SQLStore) ContractSet(name string) ([]Contract, error) {
+func (s *SQLStore) ContractSet(name string) ([]bus.Contract, error) {
 	var hostSet dbContractSet
 	err := s.db.Where(&dbContractSet{Name: name}).
 		Preload("Contracts.Host.Announcements").
@@ -44,7 +45,7 @@ func (s *SQLStore) ContractSet(name string) ([]Contract, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	contracts := make([]Contract, len(hostSet.Contracts))
+	contracts := make([]bus.Contract, len(hostSet.Contracts))
 	for i, c := range hostSet.Contracts {
 		contracts[i] = c.convert()
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	bus "go.sia.tech/renterd/api/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
@@ -23,8 +24,6 @@ var (
 )
 
 type (
-	SlabID uint
-
 	// dbObject describes an object.Object in the database.
 	dbObject struct {
 		Model
@@ -76,19 +75,6 @@ type (
 		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 	}
 )
-
-// LoadString is implemented for jape's DecodeParam.
-func (sid *SlabID) LoadString(s string) (err error) {
-	var slabID uint
-	_, err = fmt.Sscan(s, &slabID)
-	*sid = SlabID(slabID)
-	return
-}
-
-// String encodes the SlabID as a string.
-func (sid SlabID) String() string {
-	return fmt.Sprint(uint8(sid))
-}
 
 // TableName implements the gorm.Tabler interface.
 func (dbShard) TableName() string { return "shards" }
@@ -361,7 +347,7 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 		Order("COUNT(slab_id) DESC").
 		Limit(n)
 
-	var slabIDs []SlabID
+	var slabIDs []bus.SlabID
 	err := outer.Select("slab_id").Find(&slabIDs).Error
 	if err != nil {
 		return nil, err
@@ -395,7 +381,7 @@ func (s *SQLStore) host(id uint) (dbHost, bool, error) {
 
 // slabForMigration returns all the info about a slab necessary for migrating
 // it to better hosts/contracts.
-func (s *SQLStore) slabForMigration(slabID SlabID) (object.Slab, error) {
+func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
 	var dSlab dbSlab
 	// TODO: This could be slightly more efficient by not fetching whole
 	// contracts.
@@ -425,7 +411,7 @@ func (s *SQLStore) slabForMigration(slabID SlabID) (object.Slab, error) {
 
 // MarkSlabsMigrationFailure sets the last_failure field for the given slabs to
 // the current time.
-func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs []SlabID) (int, error) {
+func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error) {
 	now := time.Now().UTC()
 	txn := s.db.Model(&dbSlab{}).
 		Where("id in ?", slabIDs).

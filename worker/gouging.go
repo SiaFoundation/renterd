@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/api/bus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"go.sia.tech/jape"
+	api "go.sia.tech/renterd/api/autopilot"
 	"go.sia.tech/renterd/internal/consensus"
 )
 
@@ -21,17 +22,17 @@ func NewClient(addr, password string) *Client {
 	}}
 }
 
-func (c *Client) SetConfig(cfg Config) error {
+func (c *Client) SetConfig(cfg api.Config) error {
 	return c.c.PUT("/config", cfg)
 }
 
-func (c *Client) Config() (cfg Config, err error) {
+func (c *Client) Config() (cfg api.Config, err error) {
 	err = c.c.GET("/config", &cfg)
 	return
 }
 
 func (c *Client) Status() (uint64, error) {
-	var resp autopilotStatusResponseGET
+	var resp api.AutopilotStatusResponseGET
 	err := c.c.GET("/status", &resp)
 	return resp.CurrentPeriod, err
 }

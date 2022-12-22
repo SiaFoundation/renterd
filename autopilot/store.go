@@ -7,24 +7,25 @@ import (
 	"sync"
 	"time"
 
+	api "go.sia.tech/renterd/api/autopilot"
 	"go.sia.tech/siad/modules"
 )
 
 // EphemeralStore implements Store in memory.
 type EphemeralStore struct {
 	mu     sync.Mutex
-	config Config
+	config api.Config
 }
 
 // Config implements Store.
-func (s *EphemeralStore) Config() Config {
+func (s *EphemeralStore) Config() api.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.config
 }
 
 // SetConfig implements Store.
-func (s *EphemeralStore) SetConfig(c Config) error {
+func (s *EphemeralStore) SetConfig(c api.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.config = c
@@ -49,7 +50,7 @@ type JSONStore struct {
 }
 
 type jsonPersistData struct {
-	Config Config
+	Config api.Config
 }
 
 func (s *JSONStore) save() error {
@@ -92,7 +93,7 @@ func (s *JSONStore) load() error {
 }
 
 // SetConfig implements Store.
-func (s *JSONStore) SetConfig(c Config) error {
+func (s *JSONStore) SetConfig(c api.Config) error {
 	s.EphemeralStore.SetConfig(c)
 	return s.save()
 }
