@@ -72,7 +72,7 @@ type (
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		AllContracts() ([]api.ContractMetadata, error)
+		ActiveContracts() ([]api.ContractMetadata, error)
 		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		Contract(id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(set string) ([]api.ContractMetadata, error)
@@ -376,8 +376,8 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsAllHandlerGET(jc jape.Context) {
-	cs, err := b.cs.AllContracts()
+func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
+	cs, err := b.cs.ActiveContracts()
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
@@ -645,7 +645,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts/all":          b.contractsAllHandlerGET,
+		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"GET    /contract/:id":           b.contractIDHandlerGET,

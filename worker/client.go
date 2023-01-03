@@ -185,10 +185,10 @@ func (c *Client) DeleteObject(name string) (err error) {
 	return
 }
 
-// AllContracts returns all contracts from the worker. These contracts decorate
-// a bus contract with the contract's latest revision.
-func (c *Client) AllContracts() (contracts []api.Contract, err error) {
-	err = c.c.GET("/rhp/contracts/all", &contracts)
+// ActiveContracts returns all active contracts from the worker. These contracts
+// decorate a bus contract with the contract's latest revision.
+func (c *Client) ActiveContracts() (contracts []api.Contract, err error) {
+	err = c.c.GET("/rhp/contracts/active", &contracts)
 	return
 }
 

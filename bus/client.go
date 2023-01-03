@@ -230,9 +230,9 @@ func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Int
 	return
 }
 
-// AllContracts returns all contracts in the contract store.
-func (c *Client) AllContracts() (contracts []api.ContractMetadata, err error) {
-	err = c.c.GET("/contracts/all", &contracts)
+// ActiveContracts returns all active contracts in the contract store.
+func (c *Client) ActiveContracts() (contracts []api.ContractMetadata, err error) {
+	err = c.c.GET("/contracts/active", &contracts)
 	return
 }
 

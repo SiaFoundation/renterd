@@ -74,7 +74,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// NOTE: AddHosts implicitly waits for contracts to form so we don't have to
 	// add a retry loop here
-	contracts, err := w.AllContracts()
+	contracts, err := w.ActiveContracts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Wait for the contract to be renewed.
 	err = Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := w.AllContracts()
+		contracts, err := w.ActiveContracts()
 		if err != nil {
 			return err
 		}

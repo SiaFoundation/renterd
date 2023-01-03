@@ -223,14 +223,23 @@ func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currenc
 	return added.convert(), nil
 }
 
-// AllContracts implements the bus.ContractStore interface.
-func (s *SQLStore) AllContracts() (contracts []api.ContractMetadata, err error) {
-	err = s.db.
+// ActiveContracts implements the bus.ContractStore interface.
+func (s *SQLStore) ActiveContracts() ([]api.ContractMetadata, error) {
+	var dbContracts []dbContract
+	err := s.db.
 		Model(&dbContract{}).
 		Preload("Host.Announcements").
-		Find(&contracts).
+		Find(&dbContracts).
 		Error
-	return
+	if err != nil {
+		return nil, err
+	}
+
+	contracts := make([]api.ContractMetadata, len(dbContracts))
+	for i, c := range dbContracts {
+		contracts[i] = c.convert()
+	}
+	return contracts, nil
 }
 
 // AddRenewedContract adds a new contract which was created as the result of a renewal to the store.

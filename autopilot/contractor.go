@@ -139,7 +139,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// fetch all contracts
-	contracts, err := c.ap.worker.AllContracts()
+	contracts, err := c.ap.worker.ActiveContracts()
 	if err != nil {
 		return err
 	}
@@ -379,7 +379,7 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 
 func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
 	// fetch all active contracts
-	active, err := c.ap.bus.AllContracts()
+	active, err := c.ap.bus.ActiveContracts()
 	if err != nil {
 		return nil, err
 	}
@@ -706,7 +706,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 
 func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted uint64) ([]consensus.PublicKey, error) {
 	// fetch all contracts
-	active, err := c.ap.bus.AllContracts()
+	active, err := c.ap.bus.ActiveContracts()
 	if err != nil {
 		return nil, err
 	}
