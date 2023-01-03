@@ -14,18 +14,18 @@ import (
 // EphemeralAutopilotStore implements autopilot.Store in memory.
 type EphemeralAutopilotStore struct {
 	mu     sync.Mutex
-	config api.Config
+	config api.AutopilotConfig
 }
 
 // Config implements autopilot.Store.
-func (s *EphemeralAutopilotStore) Config() api.Config {
+func (s *EphemeralAutopilotStore) Config() api.AutopilotConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.config
 }
 
 // SetConfig implements autopilot.Store.
-func (s *EphemeralAutopilotStore) SetConfig(c api.Config) error {
+func (s *EphemeralAutopilotStore) SetConfig(c api.AutopilotConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.config = c
@@ -50,7 +50,7 @@ type JSONAutopilotStore struct {
 }
 
 type jsonAutopilotPersistData struct {
-	Config api.Config
+	Config api.AutopilotConfig
 }
 
 func (s *JSONAutopilotStore) save() error {
@@ -93,7 +93,7 @@ func (s *JSONAutopilotStore) load() error {
 }
 
 // SetConfig implements autopilot.Store.
-func (s *JSONAutopilotStore) SetConfig(c api.Config) error {
+func (s *JSONAutopilotStore) SetConfig(c api.AutopilotConfig) error {
 	s.EphemeralAutopilotStore.SetConfig(c)
 	return s.save()
 }

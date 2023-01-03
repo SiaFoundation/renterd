@@ -30,7 +30,7 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
-func hostScore(cfg api.Config, h Host) float64 {
+func hostScore(cfg api.AutopilotConfig, h Host) float64 {
 	// TODO: priceAdjustmentScore
 	// TODO: storageRemainingScore
 	return ageScore(h) *
@@ -73,7 +73,7 @@ func ageScore(h Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.Config, h Host) float64 {
+func collateralScore(cfg api.AutopilotConfig, h Host) float64 {
 	// sanity check - host should have been filtered
 	settings, _, ok := h.LastKnownSettings()
 	if !ok {

@@ -22,11 +22,11 @@ func NewClient(addr, password string) *Client {
 	}}
 }
 
-func (c *Client) SetConfig(cfg api.Config) error {
+func (c *Client) SetConfig(cfg api.AutopilotConfig) error {
 	return c.c.PUT("/config", cfg)
 }
 
-func (c *Client) Config() (cfg api.Config, err error) {
+func (c *Client) Config() (cfg api.AutopilotConfig, err error) {
 	err = c.c.GET("/config", &cfg)
 	return
 }

@@ -110,7 +110,7 @@ func (c *contractor) isStopped() bool {
 	}
 }
 
-func (c *contractor) performContractMaintenance(cfg api.Config, cs api.ConsensusState) error {
+func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.ConsensusState) error {
 	// No maintenance when syncing.
 	if !cs.Synced {
 		return nil
@@ -203,7 +203,7 @@ func (c *contractor) performContractMaintenance(cfg api.Config, cs api.Consensus
 	return nil
 }
 
-func (c *contractor) runContractChecks(cfg api.Config, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []api.Contract, _ error) {
+func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []api.Contract, _ error) {
 	// create a new ip filter
 	f := newIPFilter()
 
@@ -298,7 +298,7 @@ func (c *contractor) runContractChecks(cfg api.Config, blockHeight uint64, gs ap
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractRenewals(cfg api.Config, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []api.Contract) ([]api.ContractMetadata, error) {
+func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []api.Contract) ([]api.ContractMetadata, error) {
 	renewed := make([]api.ContractMetadata, 0, len(toRenew)+len(toRefresh))
 
 	// log contracts renewed
@@ -377,7 +377,7 @@ func (c *contractor) runContractRenewals(cfg api.Config, blockHeight, currentPer
 	return renewed, nil
 }
 
-func (c *contractor) runContractFormations(cfg api.Config, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
 	// fetch all active contracts
 	active, err := c.ap.bus.Contracts()
 	if err != nil {
@@ -509,7 +509,7 @@ func (c *contractor) runContractFormations(cfg api.Config, blockHeight, currentP
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg api.Config, currentPeriod uint64, toRenew api.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
+func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64, toRenew api.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
@@ -544,7 +544,7 @@ func (c *contractor) renewContract(cfg api.Config, currentPeriod uint64, toRenew
 	return renewed, nil
 }
 
-func (c *contractor) formContract(cfg api.Config, currentPeriod uint64, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
+func (c *contractor) formContract(cfg api.AutopilotConfig, currentPeriod uint64, hostKey consensus.PublicKey, hostIP string, hostSettings rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, error) {
 	contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), hostKey, hostSettings, renterAddress, renterFunds, hostCollateral)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
@@ -567,14 +567,14 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) renterFundsEstimate(cfg api.Config, currentPeriod, blockHeight uint64, contract api.Contract, isRefresh bool) (types.Currency, error) {
+func (c *contractor) renterFundsEstimate(cfg api.AutopilotConfig, currentPeriod, blockHeight uint64, contract api.Contract, isRefresh bool) (types.Currency, error) {
 	if isRefresh {
 		return c.refreshFundingEstimate(cfg, contract)
 	}
 	return c.renewFundingEstimate(cfg, blockHeight, currentPeriod, contract)
 }
 
-func (c *contractor) refreshFundingEstimate(cfg api.Config, contract api.Contract) (types.Currency, error) {
+func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract) (types.Currency, error) {
 	// refresh with double the funds
 	refreshAmount := contract.TotalCost.Mul64(2)
 
@@ -616,7 +616,7 @@ func (c *contractor) refreshFundingEstimate(cfg api.Config, contract api.Contrac
 	return refreshAmount, nil
 }
 
-func (c *contractor) renewFundingEstimate(cfg api.Config, currentPeriod, blockHeight uint64, contract api.Contract) (types.Currency, error) {
+func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod, blockHeight uint64, contract api.Contract) (types.Currency, error) {
 	// fetch host
 	host, err := c.ap.bus.Host(contract.HostKey())
 	if err != nil {
@@ -704,7 +704,7 @@ func (c *contractor) renewFundingEstimate(cfg api.Config, currentPeriod, blockHe
 	return estimatedCost, nil
 }
 
-func (c *contractor) candidateHosts(cfg api.Config, wanted uint64) ([]consensus.PublicKey, error) {
+func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted uint64) ([]consensus.PublicKey, error) {
 	// fetch all contracts
 	active, err := c.ap.bus.Contracts()
 	if err != nil {
@@ -782,11 +782,11 @@ func (c *contractor) candidateHosts(cfg api.Config, wanted uint64) ([]consensus.
 	return selected, nil
 }
 
-func (c *contractor) endHeight(cfg api.Config, currentPeriod uint64) uint64 {
+func (c *contractor) endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 }
 
-func calculateHostCollateral(cfg api.Config, settings rhpv2.HostSettings, renterFunds, txnFee types.Currency) (types.Currency, error) {
+func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings, renterFunds, txnFee types.Currency) (types.Currency, error) {
 	// check underflow
 	if settings.ContractPrice.Add(txnFee).Cmp(renterFunds) > 0 {
 		return types.ZeroCurrency, errors.New("contract price + fees exceeds funding")

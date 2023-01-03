@@ -20,7 +20,10 @@ type (
 	SlabID uint
 )
 
-func (t ParamTime) String() string                { return url.QueryEscape((time.Time)(t).Format(time.RFC3339)) }
+// String implements fmt.Stringer.
+func (t ParamTime) String() string { return url.QueryEscape((time.Time)(t).Format(time.RFC3339)) }
+
+// UnmarshalText implements encoding.TextUnmarshaler.
 func (t *ParamTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
 // MarshalText implements encoding.TextMarshaler.

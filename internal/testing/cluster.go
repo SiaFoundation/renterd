@@ -32,7 +32,7 @@ import (
 var (
 	// defaultAutopilotConfig is the autopilot used for testing unless a
 	// different one is explicitly set.
-	defaultAutopilotConfig = api.Config{
+	defaultAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
 			Allowance:   types.SiacoinPrecision.Mul64(1e3),
 			Hosts:       5,

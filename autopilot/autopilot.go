@@ -16,8 +16,8 @@ import (
 )
 
 type Store interface {
-	Config() api.Config
-	SetConfig(c api.Config) error
+	Config() api.AutopilotConfig
+	SetConfig(c api.AutopilotConfig) error
 }
 
 type Bus interface {
@@ -94,12 +94,12 @@ func (ap *Autopilot) Actions(since time.Time, max int) []api.Action {
 }
 
 // Config returns the autopilot's current configuration.
-func (ap *Autopilot) Config() api.Config {
+func (ap *Autopilot) Config() api.AutopilotConfig {
 	return ap.store.Config()
 }
 
 // SetConfig updates the autopilot's configuration.
-func (ap *Autopilot) SetConfig(c api.Config) error {
+func (ap *Autopilot) SetConfig(c api.AutopilotConfig) error {
 	return ap.store.SetConfig(c)
 }
 
@@ -168,7 +168,7 @@ func (ap *Autopilot) configHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
-	var c api.Config
+	var c api.AutopilotConfig
 	if jc.Decode(&c) != nil {
 		return
 	}

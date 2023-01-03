@@ -8,15 +8,34 @@ import (
 )
 
 type (
+	// An Action is an autopilot operation.
+	Action struct {
+		Timestamp time.Time
+		Type      string
+		Action    interface{ isAction() }
+	}
+
+	// AutopilotConfig contains all autopilot configuration parameters.
+	AutopilotConfig struct {
+		Wallet    WalletConfig    `json:"wallet"`
+		Hosts     HostsConfig     `json:"hosts"`
+		Contracts ContractsConfig `json:"contracts"`
+	}
+
+	// WalletConfig contains all wallet configuration parameters.
 	WalletConfig struct {
 		DefragThreshold uint64 `json:"defragThreshold"`
 	}
+
+	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
 		Blacklist          []string                        `json:"blacklist"`
 		IgnoreRedundantIPs bool                            `json:"ignoreRedundantIPs"`
 		ScoreOverrides     map[consensus.PublicKey]float64 `json:"scoreOverrides"`
 		Whitelist          []string                        `json:"whitelist"`
 	}
+
+	// ContractsConfig contains all contracts configuration parameters.
 	ContractsConfig struct {
 		Allowance   types.Currency `json:"allowance"`
 		Hosts       uint64         `json:"hosts"`
@@ -26,20 +45,16 @@ type (
 		Upload      uint64         `json:"upload"`
 		Storage     uint64         `json:"storage"`
 	}
+
+	// AutopilotStatusResponseGET is the response type for the /autopilot/status
+	// endpoint.
+	AutopilotStatusResponseGET struct {
+		CurrentPeriod uint64 `json:"currentPeriod"`
+	}
 )
 
-type AutopilotStatusResponseGET struct {
-	CurrentPeriod uint64 `json:"currentPeriod"`
-}
-
-// Config contains all autopilot configuration parameters.
-type Config struct {
-	Wallet    WalletConfig    `json:"wallet"`
-	Hosts     HostsConfig     `json:"hosts"`
-	Contracts ContractsConfig `json:"contracts"`
-}
-
-func DefaultConfig() (c Config) {
+// DefaultConfig returns an autopilot configuration with configured defaults.
+func DefaultConfig() (c AutopilotConfig) {
 	c.Wallet.DefragThreshold = 1000
 	c.Hosts.ScoreOverrides = make(map[consensus.PublicKey]float64)
 	c.Contracts.Allowance = types.SiacoinPrecision.Mul64(1000)
@@ -50,11 +65,4 @@ func DefaultConfig() (c Config) {
 	c.Contracts.Download = 1 << 40        // 1 TiB
 	c.Contracts.Storage = 1 << 42         // 4 TiB
 	return
-}
-
-// An Action is an autopilot operation.
-type Action struct {
-	Timestamp time.Time
-	Type      string
-	Action    interface{ isAction() }
 }

@@ -19,7 +19,7 @@ const (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.Config, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
+func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
 	var reasons []string
 
 	if !isWhitelisted(cfg, h) {
@@ -51,7 +51,7 @@ func isUsableHost(cfg api.Config, gs api.GougingSettings, rs api.RedundancySetti
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.Config, h Host, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
+func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
 	if isOutOfFunds(cfg, h, c) {
 		reasons = append(reasons, "out of funds")
 		refresh = true
@@ -64,14 +64,14 @@ func isUsableContract(cfg api.Config, h Host, c api.Contract, bh uint64) (usable
 	if c.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
 	}
-	if bh > uint64(c.Revision.EndHeight()) {
+	if bh > c.EndHeight() {
 		reasons = append(reasons, "expired")
 	}
 	usable = len(reasons) == 0
 	return
 }
 
-func isOutOfFunds(cfg api.Config, h Host, c api.Contract) bool {
+func isOutOfFunds(cfg api.AutopilotConfig, h Host, c api.Contract) bool {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return false
@@ -88,11 +88,11 @@ func isOutOfFunds(cfg api.Config, h Host, c api.Contract) bool {
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func isUpForRenewal(cfg api.Config, c types.FileContractRevision, blockHeight uint64) bool {
-	return blockHeight+cfg.Contracts.RenewWindow >= uint64(c.EndHeight())
+func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) bool {
+	return blockHeight+cfg.Contracts.RenewWindow >= uint64(r.EndHeight())
 }
 
-func isGouging(cfg api.Config, gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
+func isGouging(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return true, "no settings"
@@ -102,7 +102,7 @@ func isGouging(cfg api.Config, gs api.GougingSettings, rs api.RedundancySettings
 	return worker.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
 }
 
-func hasBadSettings(cfg api.Config, h Host) (bool, string) {
+func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return true, "no settings"
@@ -124,7 +124,7 @@ func hasBadSettings(cfg api.Config, h Host) (bool, string) {
 	return false, ""
 }
 
-func isBlacklisted(cfg api.Config, h Host) bool {
+func isBlacklisted(cfg api.AutopilotConfig, h Host) bool {
 	for _, host := range cfg.Hosts.Blacklist {
 		if h.IsHost(host) {
 			return true
@@ -133,7 +133,7 @@ func isBlacklisted(cfg api.Config, h Host) bool {
 	return false
 }
 
-func isWhitelisted(cfg api.Config, h Host) bool {
+func isWhitelisted(cfg api.AutopilotConfig, h Host) bool {
 	if len(cfg.Hosts.Whitelist) > 0 {
 		var found bool
 		for _, host := range cfg.Hosts.Whitelist {
