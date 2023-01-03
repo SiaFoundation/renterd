@@ -15,9 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	archivalReasonRenewed = "renewed"
-)
+const archivalReasonRenewed = "renewed"
 
 var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from the
@@ -89,7 +87,7 @@ func (dbContract) TableName() string { return "contracts" }
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
 
-// convert converts a dbContract to a bus.Contract type.
+// convert converts a dbContract to a ContractMetadata type.
 func (c dbContract) convert() api.ContractMetadata {
 	return api.ContractMetadata{
 		ID:          c.FCID,
@@ -106,7 +104,7 @@ func (c dbContract) convert() api.ContractMetadata {
 	}
 }
 
-// convert converts a dbContract to a ArchivedContract.
+// convert converts a dbContract to an ArchivedContract.
 func (c dbArchivedContract) convert() api.ArchivedContract {
 	return api.ArchivedContract{
 		ID:        c.FCID,

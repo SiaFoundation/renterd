@@ -391,7 +391,6 @@ func (b *bus) contractsSetHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
-	// TODO: check err stores.ErrReservedSetName if import cycle is fixed
 	var contractIds []types.FileContractID
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("param 'set' can not be empty"), http.StatusBadRequest)
