@@ -87,7 +87,7 @@ func (dbContract) TableName() string { return "contracts" }
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
 
-// convert converts a dbContract to a ContractMetadata type.
+// convert converts a dbContract to a ContractMetadata.
 func (c dbContract) convert() api.ContractMetadata {
 	return api.ContractMetadata{
 		ID:          c.FCID,
