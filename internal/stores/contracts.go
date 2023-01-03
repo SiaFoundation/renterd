@@ -41,8 +41,6 @@ type (
 		UploadSpending      *big.Int             `gorm:"type:bytes;serializer:gob"`
 		DownloadSpending    *big.Int             `gorm:"type:bytes;serializer:gob"`
 		FundAccountSpending *big.Int             `gorm:"type:bytes;serializer:gob"`
-
-		Sets []dbContractSet `gorm:"many2many:contract_set_contracts"`
 	}
 
 	dbContractSet struct {
