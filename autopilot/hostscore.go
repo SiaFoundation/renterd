@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	api "go.sia.tech/renterd/api/autopilot"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/build"

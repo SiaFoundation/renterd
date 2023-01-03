@@ -14,9 +14,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	apiutils "go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/api/bus"
-	api "go.sia.tech/renterd/api/worker"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/metrics"
@@ -195,13 +193,13 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	ContractsForSlab(shards []object.Sector, contractSetName string) ([]bus.Contract, error)
-	Contracts() ([]bus.Contract, error)
-	ContractSet(name string) ([]bus.Contract, error)
+	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.Contract, error)
+	Contracts() ([]api.Contract, error)
+	ContractSet(name string) ([]api.Contract, error)
 
-	DownloadParams() (bus.DownloadParams, error)
-	UploadParams() (bus.UploadParams, error)
-	MigrateParams(slab object.Slab) (bus.MigrateParams, error)
+	DownloadParams() (api.DownloadParams, error)
+	UploadParams() (api.UploadParams, error)
+	MigrateParams(slab object.Slab) (api.MigrateParams, error)
 
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
@@ -323,7 +321,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []bus.Contract, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []api.Contract, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
@@ -385,7 +383,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	}
 	jc.Encode(api.RHPScanResponse{
 		Settings: settings,
-		Ping:     apiutils.Duration(elapsed),
+		Ping:     api.Duration(elapsed),
 	})
 }
 
@@ -681,14 +679,14 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var contracts []api.Contract
+	var contracts []api.Revision
 	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
 		for i, store := range ss {
 			rev, err := store.(*session).Revision()
 			if err != nil {
 				return err
 			}
-			contracts = append(contracts, api.Contract{
+			contracts = append(contracts, api.Revision{
 				Contract: busContracts[i],
 				Revision: rev,
 			})

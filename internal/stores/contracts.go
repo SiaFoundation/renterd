@@ -8,7 +8,7 @@ import (
 	"math/big"
 	"time"
 
-	bus "go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
@@ -74,16 +74,16 @@ func (dbContract) TableName() string { return "contracts" }
 func (dbContractSet) TableName() string { return "contract_sets" }
 
 // convert converts a dbContract to a Contract type.
-func (c dbContract) convert() bus.Contract {
-	return bus.Contract{
+func (c dbContract) convert() api.Contract {
+	return api.Contract{
 		ID:          c.FCID,
 		HostIP:      c.Host.NetAddress(),
 		HostKey:     c.Host.PublicKey,
 		StartHeight: c.StartHeight,
-		ContractMetadata: bus.ContractMetadata{
+		ContractMetadata: api.ContractMetadata{
 			RenewedFrom: c.RenewedFrom,
 			TotalCost:   types.NewCurrency(c.TotalCost),
-			Spending: bus.ContractSpending{
+			Spending: api.ContractSpending{
 				Uploads:     types.NewCurrency(c.UploadSpending),
 				Downloads:   types.NewCurrency(c.DownloadSpending),
 				FundAccount: types.NewCurrency(c.FundAccountSpending),
@@ -93,13 +93,13 @@ func (c dbContract) convert() bus.Contract {
 }
 
 // convert converts a dbContract to a ArchivedContract.
-func (c dbArchivedContract) convert() bus.ArchivedContract {
-	return bus.ArchivedContract{
+func (c dbArchivedContract) convert() api.ArchivedContract {
+	return api.ArchivedContract{
 		ID:        c.FCID,
 		HostKey:   c.Host,
 		RenewedTo: c.RenewedTo,
 
-		Spending: bus.ContractSpending{
+		Spending: api.ContractSpending{
 			Uploads:     types.NewCurrency(c.UploadSpending),
 			Downloads:   types.NewCurrency(c.DownloadSpending),
 			FundAccount: types.NewCurrency(c.FundAccountSpending),
@@ -160,7 +160,7 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 		Error
 }
 
-// addContract implements the bus.ContractStore interface.
+// addContract implements the api.ContractStore interface.
 func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
 	fcid := c.ID()
 
@@ -195,15 +195,15 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	return contract, nil
 }
 
-// AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ bus.Contract, err error) {
+// AddContract implements the api.ContractStore interface.
+func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.Contract, err error) {
 	var added dbContract
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		added, err = addContract(tx, c, totalCost, startHeight, types.FileContractID{})
 		return err
 	}); err != nil {
-		return bus.Contract{}, err
+		return api.Contract{}, err
 	}
 
 	return added.convert(), nil
@@ -213,7 +213,7 @@ func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currenc
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (bus.Contract, error) {
+func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.Contract, error) {
 	var renewed dbContract
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -249,36 +249,36 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 		renewed, err = addContract(tx, c, totalCost, startHeight, renewedFrom)
 		return err
 	}); err != nil {
-		return bus.Contract{}, err
+		return api.Contract{}, err
 	}
 
 	return renewed.convert(), nil
 }
 
-// Contract implements the bus.ContractStore interface.
-func (s *SQLStore) Contract(id types.FileContractID) (bus.Contract, error) {
+// Contract implements the api.ContractStore interface.
+func (s *SQLStore) Contract(id types.FileContractID) (api.Contract, error) {
 	// Fetch contract.
 	contract, err := s.contract(id)
 	if err != nil {
-		return bus.Contract{}, err
+		return api.Contract{}, err
 	}
 	return contract.convert(), nil
 }
 
-// Contracts implements the bus.ContractStore interface.
-func (s *SQLStore) Contracts() ([]bus.Contract, error) {
+// Contracts implements the api.ContractStore interface.
+func (s *SQLStore) Contracts() ([]api.Contract, error) {
 	dbContracts, err := s.contracts()
 	if err != nil {
 		return nil, err
 	}
-	contracts := make([]bus.Contract, len(dbContracts))
+	contracts := make([]api.Contract, len(dbContracts))
 	for i, c := range dbContracts {
 		contracts[i] = c.convert()
 	}
 	return contracts, nil
 }
 
-// removeContract implements the bus.ContractStore interface.
+// removeContract implements the api.ContractStore interface.
 func removeContract(tx *gorm.DB, id types.FileContractID) error {
 	var contract dbContract
 	if err := tx.Where(&dbContract{FCID: id}).
@@ -289,7 +289,7 @@ func removeContract(tx *gorm.DB, id types.FileContractID) error {
 		Delete(&contract).Error
 }
 
-// RemoveContract implements the bus.ContractStore interface.
+// RemoveContract implements the api.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		return removeContract(tx, id)
@@ -319,7 +319,7 @@ func (s *SQLStore) contracts() ([]dbContract, error) {
 	return contracts, err
 }
 
-func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]bus.ArchivedContract, error) {
+func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	var ancestors []dbArchivedContract
 	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", gobEncode(id), startHeight).
 		Scan(&ancestors).
@@ -327,7 +327,7 @@ func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64
 	if err != nil {
 		return nil, err
 	}
-	contracts := make([]bus.ArchivedContract, len(ancestors))
+	contracts := make([]api.ArchivedContract, len(ancestors))
 	for i, ancestor := range ancestors {
 		contracts[i] = ancestor.convert()
 	}

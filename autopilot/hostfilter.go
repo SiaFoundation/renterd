@@ -5,11 +5,9 @@ import (
 	"math"
 	"math/big"
 
-	api "go.sia.tech/renterd/api/autopilot"
-	"go.sia.tech/renterd/api/bus"
-	"go.sia.tech/renterd/api/worker"
+	"go.sia.tech/renterd/api"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	w "go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 )
@@ -22,7 +20,7 @@ const (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.Config, gs bus.GougingSettings, rs bus.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
+func isUsableHost(cfg api.Config, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
 	var reasons []string
 
 	if !isWhitelisted(cfg, h) {
@@ -54,7 +52,7 @@ func isUsableHost(cfg api.Config, gs bus.GougingSettings, rs bus.RedundancySetti
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.Config, h Host, c worker.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
+func isUsableContract(cfg api.Config, h Host, c api.Revision, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
 	if isOutOfFunds(cfg, h, c) {
 		reasons = append(reasons, "out of funds")
 		refresh = true
@@ -74,7 +72,7 @@ func isUsableContract(cfg api.Config, h Host, c worker.Contract, bh uint64) (usa
 	return
 }
 
-func isOutOfFunds(cfg api.Config, h Host, c worker.Contract) bool {
+func isOutOfFunds(cfg api.Config, h Host, c api.Revision) bool {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return false
@@ -95,14 +93,14 @@ func isUpForRenewal(cfg api.Config, c rhpv2.ContractRevision, blockHeight uint64
 	return blockHeight+cfg.Contracts.RenewWindow >= c.EndHeight()
 }
 
-func isGouging(cfg api.Config, gs bus.GougingSettings, rs bus.RedundancySettings, h Host) (bool, string) {
+func isGouging(cfg api.Config, gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
 	settings, _, found := h.LastKnownSettings()
 	if !found {
 		return true, "no settings"
 	}
 
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
-	return w.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
+	return worker.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
 }
 
 func hasBadSettings(cfg api.Config, h Host) (bool, string) {

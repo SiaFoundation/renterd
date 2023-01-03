@@ -6,10 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	apiutils "go.sia.tech/renterd/api"
-	api "go.sia.tech/renterd/api/autopilot"
-	"go.sia.tech/renterd/api/bus"
-	"go.sia.tech/renterd/api/worker"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -39,41 +36,41 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	// contracts
-	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (bus.Contract, error)
-	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (bus.Contract, error)
+	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.Contract, error)
+	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.Contract, error)
 	DeleteContracts(ids []types.FileContractID) error
 
-	Contract(id types.FileContractID) (contract bus.Contract, err error)
-	Contracts() ([]bus.Contract, error)
+	Contract(id types.FileContractID) (contract api.Contract, err error)
+	Contracts() ([]api.Contract, error)
 
-	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]bus.ArchivedContract, error)
+	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
 	ReleaseContract(id types.FileContractID) error
 
 	// contractsets
 	SetContractSet(name string, contracts []types.FileContractID) error
-	ContractSet(name string) ([]bus.Contract, error)
+	ContractSet(name string) ([]api.Contract, error)
 
 	// txpool
 	RecommendedFee() (types.Currency, error)
 
 	// consensus
-	ConsensusState() (bus.ConsensusState, error)
+	ConsensusState() (api.ConsensusState, error)
 
 	// objects
 	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
 
 	// settings
-	GougingSettings() (gs bus.GougingSettings, err error)
-	RedundancySettings() (rs bus.RedundancySettings, err error)
+	GougingSettings() (gs api.GougingSettings, err error)
+	RedundancySettings() (rs api.RedundancySettings, err error)
 }
 
 type Worker interface {
-	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
+	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 	RHPForm(endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
-	Contracts() (revisions []worker.Contract, err error)
+	Contracts() (revisions []api.Revision, err error)
 }
 
 type Autopilot struct {
@@ -160,7 +157,7 @@ func (ap *Autopilot) Stop() error {
 func (ap *Autopilot) actionsHandler(jc jape.Context) {
 	var since time.Time
 	max := -1
-	if jc.DecodeForm("since", (*apiutils.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
 	jc.Encode(ap.Actions(since, max))
@@ -186,7 +183,7 @@ func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 	})
 }
 
-// NewServer returns an HTTP handler that serves the renterd autopilot API.
+// NewServer returns an HTTP handler that serves the renterd autopilot api.
 func NewServer(ap *Autopilot) http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /actions": ap.actionsHandler,

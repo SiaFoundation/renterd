@@ -10,8 +10,7 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/jape"
-	apiutils "go.sia.tech/renterd/api"
-	api "go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -179,7 +178,7 @@ func (b *bus) walletAddressHandler(jc jape.Context) {
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	var since time.Time
 	max := -1
-	if jc.DecodeForm("since", (*apiutils.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
 	txns, err := b.w.Transactions(since, max)
@@ -355,7 +354,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 func (b *bus) hostsHandler(jc jape.Context) {
 	var notSince time.Time
 	max := -1
-	if jc.DecodeForm("notSince", (*apiutils.ParamTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("notSince", (*api.ParamTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
 		return
 	}
 	hosts, err := b.hdb.Hosts(notSince, max)
@@ -524,7 +523,7 @@ func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
 	var cutoff time.Time
 	var limit int
 	var goodContracts []types.FileContractID
-	if jc.DecodeForm("cutoff", (*apiutils.ParamTime)(&cutoff)) != nil {
+	if jc.DecodeForm("cutoff", (*api.ParamTime)(&cutoff)) != nil {
 		return
 	}
 	if jc.DecodeForm("limit", &limit) != nil {

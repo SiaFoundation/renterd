@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	bus "go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
@@ -57,12 +57,12 @@ func testContractRevision(fcid types.FileContractID, hk consensus.PublicKey) rhp
 	}
 }
 
-func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (bus.Contract, error) {
+func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.Contract, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddContract(rev, types.ZeroCurrency, 0)
 }
 
-func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (bus.Contract, error) {
+func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.Contract, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
 }

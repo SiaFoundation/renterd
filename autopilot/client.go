@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"go.sia.tech/jape"
-	api "go.sia.tech/renterd/api/autopilot"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 )
 

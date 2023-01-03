@@ -5,8 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/api/bus"
-	"go.sia.tech/renterd/api/worker"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.uber.org/zap"
@@ -25,8 +24,8 @@ type mockBus struct {
 }
 
 func (b *mockBus) AllHosts() ([]hostdb.Host, error) { return b.hosts, nil }
-func (b *mockBus) ConsensusState() (bus.ConsensusState, error) {
-	return bus.ConsensusState{BlockHeight: 0, Synced: true}, nil
+func (b *mockBus) ConsensusState() (api.ConsensusState, error) {
+	return api.ConsensusState{BlockHeight: 0, Synced: true}, nil
 }
 func (b *mockBus) RecordHostInteraction(hostKey consensus.PublicKey, itx hostdb.Interaction) error {
 	panic("never called")
@@ -36,7 +35,7 @@ type mockWorker struct {
 	blockChan chan struct{}
 }
 
-func (w *mockWorker) RHPScan(hostKey consensus.PublicKey, hostIP string, _ time.Duration) (r worker.RHPScanResponse, e error) {
+func (w *mockWorker) RHPScan(hostKey consensus.PublicKey, hostIP string, _ time.Duration) (r api.RHPScanResponse, e error) {
 	if w.blockChan != nil {
 		<-w.blockChan
 	}

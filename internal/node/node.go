@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	busapi "go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
@@ -32,8 +32,8 @@ type BusConfig struct {
 	GatewayAddr string
 	Miner       *Miner
 
-	busapi.GougingSettings
-	busapi.RedundancySettings
+	api.GougingSettings
+	api.RedundancySettings
 }
 
 type AutopilotConfig struct {

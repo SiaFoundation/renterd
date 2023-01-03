@@ -1,7 +1,8 @@
-package bus
+package api
 
 import (
 	"go.sia.tech/renterd/internal/consensus"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
 
@@ -38,6 +39,11 @@ type (
 		RenewedTo types.FileContractID `json:"renewedTo"`
 		Spending  ContractSpending     `json:"spending"`
 	}
+
+	Revision struct {
+		Contract `json:"contract"`
+		Revision rhpv2.ContractRevision `json:"revision"`
+	}
 )
 
 // Add returns the sum of the current and given contract spending.
@@ -46,4 +52,25 @@ func (x ContractSpending) Add(y ContractSpending) (s ContractSpending) {
 	s.Downloads = x.Downloads.Add(y.Downloads)
 	s.FundAccount = x.FundAccount.Add(y.FundAccount)
 	return
+}
+
+// EndHeight returns the height at which the host is no longer obligated to
+// store contract data.
+func (c Revision) EndHeight() uint64 {
+	return uint64(c.Revision.EndHeight())
+}
+
+// FileSize returns the current Size of the contract.
+func (c Revision) FileSize() uint64 {
+	return c.Revision.Revision.NewFileSize
+}
+
+// HostKey returns the public key of the host.
+func (c Revision) HostKey() (pk consensus.PublicKey) {
+	return c.Revision.HostKey()
+}
+
+// RenterFunds returns the funds remaining in the contract's Renter payout.
+func (c Revision) RenterFunds() types.Currency {
+	return c.Revision.RenterFunds()
 }

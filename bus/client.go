@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	apiutils "go.sia.tech/renterd/api"
-	api "go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -122,7 +121,7 @@ func (c *Client) SendSiacoins(scos []types.SiacoinOutput) (err error) {
 
 // WalletTransactions returns all transactions relevant to the wallet.
 func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Transaction, err error) {
-	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", apiutils.ParamTime(since), max), &resp)
+	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", api.ParamTime(since), max), &resp)
 	return
 }
 
@@ -210,7 +209,7 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
 func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, apiutils.ParamTime(notSince)), &hosts)
+	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, api.ParamTime(notSince)), &hosts)
 	return
 }
 
@@ -432,7 +431,7 @@ func (c *Client) DeleteObject(name string) (err error) {
 // failed migration since failureCutoff.
 func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) (slabs []object.Slab, err error) {
 	values := url.Values{}
-	values.Set("cutoff", apiutils.ParamTime(failureCutoff).String())
+	values.Set("cutoff", api.ParamTime(failureCutoff).String())
 	values.Set("limit", fmt.Sprint(n))
 	values.Set("goodContracts", fmt.Sprint(goodContracts))
 	err = c.c.GET("/migration/slabs?"+values.Encode(), &slabs)

@@ -8,9 +8,7 @@ import (
 	"sync"
 	"time"
 
-	api "go.sia.tech/renterd/api/autopilot"
-	"go.sia.tech/renterd/api/bus"
-	"go.sia.tech/renterd/api/worker"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
@@ -59,10 +57,10 @@ func (c *contractor) currentPeriod() uint64 {
 	return c.currPeriod
 }
 
-func (c *contractor) contractSpending(contract worker.Contract, currentPeriod uint64) (bus.ContractSpending, error) {
+func (c *contractor) contractSpending(contract api.Revision, currentPeriod uint64) (api.ContractSpending, error) {
 	ancestors, err := c.ap.bus.AncestorContracts(contract.ID, currentPeriod)
 	if err != nil {
-		return bus.ContractSpending{}, err
+		return api.ContractSpending{}, err
 	}
 	// compute total spending
 	total := contract.Spending
@@ -72,14 +70,14 @@ func (c *contractor) contractSpending(contract worker.Contract, currentPeriod ui
 	return total, nil
 }
 
-func (c *contractor) currentPeriodSpending(contracts []worker.Contract, currentPeriod uint64) (types.Currency, error) {
+func (c *contractor) currentPeriodSpending(contracts []api.Revision, currentPeriod uint64) (types.Currency, error) {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
 	}
 
 	// filter contracts in the current period
-	var filtered []worker.Contract
+	var filtered []api.Revision
 	c.mu.Lock()
 	for _, rev := range contracts {
 		if rev.EndHeight() <= currentPeriod {
@@ -112,7 +110,7 @@ func (c *contractor) isStopped() bool {
 	}
 }
 
-func (c *contractor) performContractMaintenance(cfg api.Config, cs bus.ConsensusState) error {
+func (c *contractor) performContractMaintenance(cfg api.Config, cs api.ConsensusState) error {
 	// No maintenance when syncing.
 	if !cs.Synced {
 		return nil
@@ -205,14 +203,14 @@ func (c *contractor) performContractMaintenance(cfg api.Config, cs bus.Consensus
 	return nil
 }
 
-func (c *contractor) runContractChecks(cfg api.Config, blockHeight uint64, gs bus.GougingSettings, rs bus.RedundancySettings, contracts []worker.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []worker.Contract, _ error) {
+func (c *contractor) runContractChecks(cfg api.Config, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Revision) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []api.Revision, _ error) {
 	// create a new ip filter
 	f := newIPFilter()
 
 	// state variables
 	contractIds := make([]types.FileContractID, 0, len(contracts))
 	contractSizes := make(map[types.FileContractID]uint64)
-	contractMap := make(map[types.FileContractID]bus.Contract)
+	contractMap := make(map[types.FileContractID]api.Contract)
 	renewIndices := make(map[types.FileContractID]int)
 
 	// check every active contract
@@ -300,8 +298,8 @@ func (c *contractor) runContractChecks(cfg api.Config, blockHeight uint64, gs bu
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractRenewals(cfg api.Config, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []worker.Contract) ([]bus.Contract, error) {
-	renewed := make([]bus.Contract, 0, len(toRenew)+len(toRefresh))
+func (c *contractor) runContractRenewals(cfg api.Config, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []api.Revision) ([]api.Contract, error) {
+	renewed := make([]api.Contract, 0, len(toRenew)+len(toRefresh))
 
 	// log contracts renewed
 	c.logger.Debugw(
@@ -511,7 +509,7 @@ func (c *contractor) runContractFormations(cfg api.Config, blockHeight, currentP
 	return formed, nil
 }
 
-func (c *contractor) renewContract(cfg api.Config, currentPeriod uint64, toRenew worker.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
+func (c *contractor) renewContract(cfg api.Config, currentPeriod uint64, toRenew api.Revision, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
 	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
@@ -569,14 +567,14 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) renterFundsEstimate(cfg api.Config, currentPeriod, blockHeight uint64, contract worker.Contract, isRefresh bool) (types.Currency, error) {
+func (c *contractor) renterFundsEstimate(cfg api.Config, currentPeriod, blockHeight uint64, contract api.Revision, isRefresh bool) (types.Currency, error) {
 	if isRefresh {
 		return c.refreshFundingEstimate(cfg, contract)
 	}
 	return c.renewFundingEstimate(cfg, blockHeight, currentPeriod, contract)
 }
 
-func (c *contractor) refreshFundingEstimate(cfg api.Config, contract worker.Contract) (types.Currency, error) {
+func (c *contractor) refreshFundingEstimate(cfg api.Config, contract api.Revision) (types.Currency, error) {
 	// refresh with double the funds
 	refreshAmount := contract.TotalCost.Mul64(2)
 
@@ -618,7 +616,7 @@ func (c *contractor) refreshFundingEstimate(cfg api.Config, contract worker.Cont
 	return refreshAmount, nil
 }
 
-func (c *contractor) renewFundingEstimate(cfg api.Config, currentPeriod, blockHeight uint64, contract worker.Contract) (types.Currency, error) {
+func (c *contractor) renewFundingEstimate(cfg api.Config, currentPeriod, blockHeight uint64, contract api.Revision) (types.Currency, error) {
 	// fetch host
 	host, err := c.ap.bus.Host(contract.HostKey())
 	if err != nil {

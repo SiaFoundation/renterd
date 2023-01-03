@@ -1,9 +1,8 @@
-package worker
+package api
 
 import (
 	"time"
 
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -20,7 +19,7 @@ type RHPScanRequest struct {
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
 type RHPScanResponse struct {
 	Settings rhpv2.HostSettings `json:"settings"`
-	Ping     api.Duration       `json:"ping"`
+	Ping     Duration           `json:"ping"`
 }
 
 // RHPFormRequest is the request type for the /rhp/form endpoint.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	bus "go.sia.tech/renterd/api/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
@@ -139,7 +139,7 @@ func (o dbObject) convert() (object.Object, error) {
 	return obj, nil
 }
 
-// List implements the bus.ObjectStore interface.
+// List implements the api.ObjectStore interface.
 func (s *SQLStore) List(path string) ([]string, error) {
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
@@ -161,7 +161,7 @@ func (s *SQLStore) List(path string) ([]string, error) {
 	return ids, nil
 }
 
-// Get implements the bus.ObjectStore interface.
+// Get implements the api.ObjectStore interface.
 func (s *SQLStore) Get(key string) (object.Object, error) {
 	obj, err := s.get(key)
 	if err != nil {
@@ -170,7 +170,7 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 	return obj.convert()
 }
 
-// Put implements the bus.ObjectStore interface.
+// Put implements the api.ObjectStore interface.
 func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
@@ -299,7 +299,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 	})
 }
 
-// Delete implements the bus.ObjectStore interface.
+// Delete implements the api.ObjectStore interface.
 func (s *SQLStore) Delete(key string) error {
 	return deleteObject(s.db, key)
 }
@@ -347,7 +347,7 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 		Order("COUNT(slab_id) DESC").
 		Limit(n)
 
-	var slabIDs []bus.SlabID
+	var slabIDs []api.SlabID
 	err := outer.Select("slab_id").Find(&slabIDs).Error
 	if err != nil {
 		return nil, err
@@ -381,7 +381,7 @@ func (s *SQLStore) host(id uint) (dbHost, bool, error) {
 
 // slabForMigration returns all the info about a slab necessary for migrating
 // it to better hosts/contracts.
-func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
+func (s *SQLStore) slabForMigration(slabID api.SlabID) (object.Slab, error) {
 	var dSlab dbSlab
 	// TODO: This could be slightly more efficient by not fetching whole
 	// contracts.
@@ -411,7 +411,7 @@ func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
 
 // MarkSlabsMigrationFailure sets the last_failure field for the given slabs to
 // the current time.
-func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error) {
+func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs []api.SlabID) (int, error) {
 	now := time.Now().UTC()
 	txn := s.db.Model(&dbSlab{}).
 		Where("id in ?", slabIDs).

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	api "go.sia.tech/renterd/api/worker"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -186,7 +186,7 @@ func (c *Client) DeleteObject(name string) (err error) {
 }
 
 // Contracts returns all contracts from the worker.
-func (c *Client) Contracts() (revisions []api.Contract, err error) {
+func (c *Client) Contracts() (revisions []api.Revision, err error) {
 	err = c.c.GET("/rhp/contracts", &revisions)
 	return
 }
