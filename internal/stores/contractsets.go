@@ -25,7 +25,7 @@ type (
 // TableName implements the gorm.Tabler interface.
 func (dbContractSetContract) TableName() string { return "contract_set_contracts" }
 
-// ContractSets implements the api.ContractSetStore interface.
+// ContractSets implements the bus.ContractSetStore interface.
 func (s *SQLStore) ContractSets() ([]string, error) {
 	var setNames []string
 	tx := s.db.Model(&dbContractSet{}).
@@ -34,7 +34,7 @@ func (s *SQLStore) ContractSets() ([]string, error) {
 	return setNames, tx.Error
 }
 
-// HostSet implements the api.ContractSetStore interface.
+// HostSet implements the bus.ContractSetStore interface.
 func (s *SQLStore) ContractSet(name string) ([]api.ContractMetadata, error) {
 	var hostSet dbContractSet
 	err := s.db.Where(&dbContractSet{Name: name}).
@@ -52,7 +52,7 @@ func (s *SQLStore) ContractSet(name string) ([]api.ContractMetadata, error) {
 	return contracts, nil
 }
 
-// SetContractSet implements the api.ContractSetStore interface.
+// SetContractSet implements the bus.ContractSetStore interface.
 func (s *SQLStore) SetContractSet(name string, contracts []types.FileContractID) error {
 	contractIDs := make([][]byte, len(contracts))
 	for i, fcid := range contracts {

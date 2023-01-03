@@ -158,7 +158,7 @@ func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 		Error
 }
 
-// addContract implements the api.ContractStore interface.
+// addContract implements the bus.ContractStore interface.
 func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
 	fcid := c.ID()
 
@@ -193,7 +193,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	return contract, nil
 }
 
-// AddContract implements the api.ContractStore interface.
+// AddContract implements the bus.ContractStore interface.
 func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
 	var added dbContract
 
@@ -253,7 +253,7 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 	return renewed.convert(), nil
 }
 
-// Contract implements the api.ContractStore interface.
+// Contract implements the bus.ContractStore interface.
 func (s *SQLStore) Contract(id types.FileContractID) (api.ContractMetadata, error) {
 	// Fetch contract.
 	contract, err := s.contract(id)
@@ -263,7 +263,7 @@ func (s *SQLStore) Contract(id types.FileContractID) (api.ContractMetadata, erro
 	return contract.convert(), nil
 }
 
-// Contracts implements the api.ContractStore interface.
+// Contracts implements the bus.ContractStore interface.
 func (s *SQLStore) Contracts() ([]api.ContractMetadata, error) {
 	dbContracts, err := s.contracts()
 	if err != nil {
@@ -276,7 +276,7 @@ func (s *SQLStore) Contracts() ([]api.ContractMetadata, error) {
 	return contracts, nil
 }
 
-// removeContract implements the api.ContractStore interface.
+// removeContract implements the bus.ContractStore interface.
 func removeContract(tx *gorm.DB, id types.FileContractID) error {
 	var contract dbContract
 	if err := tx.Where(&dbContract{FCID: id}).
@@ -287,7 +287,7 @@ func removeContract(tx *gorm.DB, id types.FileContractID) error {
 		Delete(&contract).Error
 }
 
-// RemoveContract implements the api.ContractStore interface.
+// RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		return removeContract(tx, id)
