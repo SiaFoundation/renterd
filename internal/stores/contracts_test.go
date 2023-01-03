@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -110,20 +110,18 @@ func TestSQLContractStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := bus.Contract{
+	expected := api.ContractMetadata{
 		ID:          fcid,
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: 100,
-		ContractMetadata: bus.ContractMetadata{
-			RenewedFrom: types.FileContractID{},
-			Spending: bus.ContractSpending{
-				Uploads:     types.ZeroCurrency,
-				Downloads:   types.ZeroCurrency,
-				FundAccount: types.ZeroCurrency,
-			},
-			TotalCost: totalCost,
+		RenewedFrom: types.FileContractID{},
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
 		},
+		TotalCost: totalCost,
 	}
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
@@ -340,20 +338,18 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := bus.Contract{
+	expected := api.ContractMetadata{
 		ID:          fcid2,
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
-		ContractMetadata: bus.ContractMetadata{
-			RenewedFrom: fcid,
-			Spending: bus.ContractSpending{
-				Uploads:     types.ZeroCurrency,
-				Downloads:   types.ZeroCurrency,
-				FundAccount: types.ZeroCurrency,
-			},
-			TotalCost: newContractTotal,
+		RenewedFrom: fcid,
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
 		},
+		TotalCost: newContractTotal,
 	}
 	if !reflect.DeepEqual(newContract, expected) {
 		t.Fatal("mismatch")
@@ -445,7 +441,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal("wrong number of contracts returned", len(contracts))
 	}
 	for i := 0; i < len(contracts)-1; i++ {
-		if !reflect.DeepEqual(contracts[i], bus.ArchivedContract{
+		if !reflect.DeepEqual(contracts[i], api.ArchivedContract{
 			ID:        fcids[len(fcids)-2-i],
 			HostKey:   hk,
 			RenewedTo: fcids[len(fcids)-1-i],
@@ -455,12 +451,12 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 }
 
-func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (bus.Contract, error) {
+func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddContract(rev, types.ZeroCurrency, 0)
 }
 
-func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (bus.Contract, error) {
+func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
 }

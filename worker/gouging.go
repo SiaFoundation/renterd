@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/api"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
@@ -53,7 +53,7 @@ func (gr GougingResults) CanUpload() (errs []error) {
 	)
 }
 
-func PerformGougingChecks(gs bus.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
+func PerformGougingChecks(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) GougingResults {
 	return GougingResults{
 		downloadErr:     checkDownloadGouging(gs, hs, redundancy),
 		formContractErr: checkFormContractGouging(gs, hs),
@@ -61,7 +61,7 @@ func PerformGougingChecks(gs bus.GougingSettings, hs rhpv2.HostSettings, period 
 	}
 }
 
-func checkDownloadGouging(gs bus.GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {
+func checkDownloadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -76,7 +76,7 @@ func checkDownloadGouging(gs bus.GougingSettings, hs rhpv2.HostSettings, redunda
 	return nil
 }
 
-func checkUploadGouging(gs bus.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) error {
+func checkUploadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -91,7 +91,7 @@ func checkUploadGouging(gs bus.GougingSettings, hs rhpv2.HostSettings, period ui
 	return nil
 }
 
-func checkFormContractGouging(gs bus.GougingSettings, hs rhpv2.HostSettings) error {
+func checkFormContractGouging(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)

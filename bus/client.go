@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -46,7 +47,7 @@ func (c *Client) SyncerConnect(addr string) (err error) {
 
 // ConsensusState returns the current block height and whether the node is
 // synced.
-func (c *Client) ConsensusState() (resp ConsensusState, err error) {
+func (c *Client) ConsensusState() (resp api.ConsensusState, err error) {
 	err = c.c.GET("/consensus/state", &resp)
 	return
 }
@@ -120,17 +121,17 @@ func (c *Client) SendSiacoins(scos []types.SiacoinOutput) (err error) {
 
 // WalletTransactions returns all transactions relevant to the wallet.
 func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Transaction, err error) {
-	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", paramTime(since), max), &resp)
+	err = c.c.GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", api.ParamTime(since), max), &resp)
 	return
 }
 
 // WalletFund funds txn using inputs controlled by the wallet.
 func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error) {
-	req := WalletFundRequest{
+	req := api.WalletFundRequest{
 		Transaction: *txn,
 		Amount:      amount,
 	}
-	var resp WalletFundResponse
+	var resp api.WalletFundResponse
 	err := c.c.POST("/wallet/fund", req, &resp)
 	if err != nil {
 		return nil, nil, err
@@ -141,7 +142,7 @@ func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]ty
 
 // WalletSign signs txn using the wallet's private key.
 func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error {
-	req := WalletSignRequest{
+	req := api.WalletSignRequest{
 		Transaction:   *txn,
 		ToSign:        toSign,
 		CoveredFields: cf,
@@ -152,7 +153,7 @@ func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf 
 // WalletRedistribute returns a signed transaction that redistributes the money
 // in the wallet in the desired number of outputs of given amount.
 func (c *Client) WalletRedistribute(outputs int, amount types.Currency) (txn types.Transaction, err error) {
-	req := WalletRedistributeRequest{
+	req := api.WalletRedistributeRequest{
 		Amount:  amount,
 		Outputs: outputs,
 	}
@@ -168,8 +169,8 @@ func (c *Client) WalletDiscard(txn types.Transaction) error {
 }
 
 // WalletPrepareForm funds and signs a contract transaction.
-func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
-	req := WalletPrepareFormRequest{
+func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
+	req := api.WalletPrepareFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
 		RenterFunds:    renterFunds,
@@ -183,8 +184,8 @@ func (c *Client) WalletPrepareForm(renterKey PrivateKey, hostKey PublicKey, rent
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
-	req := WalletPrepareRenewRequest{
+func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
+	req := api.WalletPrepareRenewRequest{
 		Contract:      contract,
 		RenterKey:     renterKey,
 		HostKey:       hostKey,
@@ -193,7 +194,7 @@ func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterK
 		EndHeight:     endHeight,
 		HostSettings:  hostSettings,
 	}
-	var resp WalletPrepareRenewResponse
+	var resp api.WalletPrepareRenewResponse
 	err := c.c.POST("/wallet/prepare/renew", req, &resp)
 	return resp.TransactionSet, resp.FinalPayment, err
 }
@@ -208,7 +209,7 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
 func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, paramTime(notSince)), &hosts)
+	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, api.ParamTime(notSince)), &hosts)
 	return
 }
 
@@ -218,38 +219,38 @@ func (c *Client) AllHosts() (hosts []hostdb.Host, err error) {
 }
 
 // Host returns information about a particular host known to the server.
-func (c *Client) Host(hostKey PublicKey) (h hostdb.Host, err error) {
+func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
 	err = c.c.GET(fmt.Sprintf("/hosts/%s", hostKey), &h)
 	return
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostInteraction(hostKey PublicKey, i hostdb.Interaction) (err error) {
+func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Interaction) (err error) {
 	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), i, nil)
 	return
 }
 
 // AllContracts returns all contracts in the contract store.
-func (c *Client) AllContracts() (contracts []Contract, err error) {
+func (c *Client) AllContracts() (contracts []api.ContractMetadata, err error) {
 	// TODO: use stores.SetNameAll when import cycle is fixed
 	return c.Contracts("all")
 }
 
 // Contracts returns the contracts for the given set from the contract store.
-func (c *Client) Contracts(set string) (contracts []Contract, err error) {
-	err = c.c.GET(fmt.Sprintf("/contracts/set/%s", set), &contracts)
+func (c *Client) Contracts(set string) (contracts []api.ContractMetadata, err error) {
+	err = c.c.GET(fmt.Sprintf("/contracts/%s", set), &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
-func (c *Client) Contract(id types.FileContractID) (contract Contract, err error) {
+func (c *Client) Contract(id types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.GET(fmt.Sprintf("/contract/%s", id), &contract)
 	return
 }
 
 // AddContract adds the provided contract to the contract store.
-func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added Contract, err error) {
-	err = c.c.POST(fmt.Sprintf("/contract/%s", contract.ID()), ContractsIDAddRequest{
+func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
+	err = c.c.POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
 		Contract:    contract,
 		StartHeight: startHeight,
 		TotalCost:   totalCost,
@@ -258,8 +259,8 @@ func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Cu
 }
 
 // AddRenewedContract adds the provided contract to the contract store.
-func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed Contract, err error) {
-	err = c.c.POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), ContractsIDRenewedRequest{
+func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed api.ContractMetadata, err error) {
+	err = c.c.POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
 		StartHeight: startHeight,
@@ -269,7 +270,7 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 }
 
 // AncestorContracts returns any ancestors of a given active contract.
-func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []ArchivedContract, err error) {
+func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
 	err = c.c.GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), fcid), &contracts)
@@ -278,7 +279,7 @@ func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uin
 
 // SetContractSet adds the given contracts to the given set.
 func (c *Client) SetContractSet(set string, contracts []types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)
+	err = c.c.PUT(fmt.Sprintf("/contracts/%s", set), contracts)
 	return
 }
 
@@ -302,8 +303,8 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 // AcquireContract acquires a contract for a given amount of time unless
 // released manually before that time.
 func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (locked bool, err error) {
-	var resp ContractAcquireResponse
-	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), ContractAcquireRequest{Duration: d}, &resp)
+	var resp api.ContractAcquireResponse
+	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{Duration: d}, &resp)
 	locked = resp.Locked
 	return
 }
@@ -322,7 +323,7 @@ func (c *Client) RecommendedFee() (fee types.Currency, err error) {
 
 // ContractsForSlab returns contracts that can be used to download the provided
 // slab.
-func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string) ([]Contract, error) {
+func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error) {
 	// build hosts map
 	hosts := make(map[string]struct{})
 	for _, shard := range shards {
@@ -371,31 +372,31 @@ func (c *Client) UpdateSetting(key string, value interface{}) error {
 }
 
 // GougingSettings returns the gouging settings.
-func (c *Client) GougingSettings() (gs GougingSettings, err error) {
+func (c *Client) GougingSettings() (gs api.GougingSettings, err error) {
 	err = c.Setting(SettingGouging, &gs)
 	return
 }
 
 // UpdateGougingSettings allows configuring the gouging settings.
-func (c *Client) UpdateGougingSettings(gs GougingSettings) error {
+func (c *Client) UpdateGougingSettings(gs api.GougingSettings) error {
 	return c.UpdateSetting(SettingGouging, gs)
 }
 
 // RedundancySettings returns the redundancy settings.
-func (c *Client) RedundancySettings() (rs RedundancySettings, err error) {
+func (c *Client) RedundancySettings() (rs api.RedundancySettings, err error) {
 	err = c.Setting(SettingRedundancy, &rs)
 	return
 }
 
 // UpdateRedundancySettings allows configuring the redundancy.
-func (c *Client) UpdateRedundancySettings(rs RedundancySettings) error {
+func (c *Client) UpdateRedundancySettings(rs api.RedundancySettings) error {
 	return c.UpdateSetting(SettingRedundancy, rs)
 }
 
 // Object returns the object at the given path, or, if path ends in '/', the
 // entries under that path.
 func (c *Client) Object(path string) (o object.Object, entries []string, err error) {
-	var or ObjectsResponse
+	var or api.ObjectsResponse
 	err = c.c.GET(fmt.Sprintf("/objects/%s", path), &or)
 	if or.Object != nil {
 		o = *or.Object
@@ -407,7 +408,7 @@ func (c *Client) Object(path string) (o object.Object, entries []string, err err
 
 // AddObject stores the provided object under the given name.
 func (c *Client) AddObject(name string, o object.Object, usedContract map[consensus.PublicKey]types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), AddObjectRequest{
+	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), api.AddObjectRequest{
 		Object:        o,
 		UsedContracts: usedContract,
 	})
@@ -424,7 +425,7 @@ func (c *Client) DeleteObject(name string) (err error) {
 // failed migration since failureCutoff.
 func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) (slabs []object.Slab, err error) {
 	values := url.Values{}
-	values.Set("cutoff", paramTime(failureCutoff).String())
+	values.Set("cutoff", api.ParamTime(failureCutoff).String())
 	values.Set("limit", fmt.Sprint(n))
 	values.Set("goodContracts", fmt.Sprint(goodContracts))
 	err = c.c.GET("/migration/slabs?"+values.Encode(), &slabs)
@@ -432,25 +433,25 @@ func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts
 }
 
 // DownloadParams returns parameters used for downloading slabs.
-func (c *Client) DownloadParams() (dp DownloadParams, err error) {
-	return DownloadParams{
+func (c *Client) DownloadParams() (dp api.DownloadParams, err error) {
+	return api.DownloadParams{
 		ContractSet: "autopilot", // TODO
 	}, nil
 }
 
 // UploadParams returns parameters used for uploading slabs.
-func (c *Client) UploadParams() (up UploadParams, err error) {
+func (c *Client) UploadParams() (up api.UploadParams, err error) {
 	rs, err := c.RedundancySettings()
 	if err != nil {
-		return UploadParams{}, err
+		return api.UploadParams{}, err
 	}
 
 	cs, err := c.ConsensusState()
 	if err != nil {
-		return UploadParams{}, err
+		return api.UploadParams{}, err
 	}
 
-	return UploadParams{
+	return api.UploadParams{
 		CurrentHeight: cs.BlockHeight,
 		MinShards:     uint8(rs.MinShards),   // TODO
 		TotalShards:   uint8(rs.TotalShards), // TODO
@@ -459,7 +460,7 @@ func (c *Client) UploadParams() (up UploadParams, err error) {
 }
 
 // MigrateParams returns parameters used for migrating a slab.
-func (c *Client) MigrateParams(slab object.Slab) (up MigrateParams, err error) {
+func (c *Client) MigrateParams(slab object.Slab) (up api.MigrateParams, err error) {
 	panic("unimplemented")
 }
 

@@ -7,11 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
 
@@ -38,11 +37,11 @@ type (
 	scanner struct {
 		bus interface {
 			AllHosts() ([]hostdb.Host, error)
-			ConsensusState() (bus.ConsensusState, error)
+			ConsensusState() (api.ConsensusState, error)
 			RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 		}
 		worker interface {
-			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (worker.RHPScanResponse, error)
+			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 		}
 
 		tracker *tracker

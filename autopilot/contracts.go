@@ -1,8 +1,7 @@
 package autopilot
 
 import (
-	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/types"
 )
 
@@ -11,7 +10,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []bus.Contract) error {
+func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) error {
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
@@ -50,7 +49,7 @@ func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, 
 	return ap.bus.SetContractSet(defaultSetName, contracts)
 }
 
-func contractIds(contracts []worker.Contract) []types.FileContractID {
+func contractIds(contracts []api.Contract) []types.FileContractID {
 	ids := make([]types.FileContractID, len(contracts))
 	for i, c := range contracts {
 		ids[i] = c.ID

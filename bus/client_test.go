@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
 )
 
-var defaultSettings = bus.RedundancySettings{
+var defaultSettings = api.RedundancySettings{
 	MinShards:   10,
 	TotalShards: 30,
 }
@@ -42,7 +43,7 @@ func TestClient(t *testing.T) {
 	}
 
 	// update setting 'foo'
-	want := bus.RedundancySettings{
+	want := api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 5,
 	}
@@ -51,7 +52,7 @@ func TestClient(t *testing.T) {
 	}
 
 	// fetch setting 'foo' and assert it matches
-	var got bus.RedundancySettings
+	var got api.RedundancySettings
 	if err := c.Setting("foo", &got); err != nil {
 		t.Fatal("unexpected err", err)
 	} else if got.MinShards != want.MinShards || got.TotalShards != want.TotalShards {
