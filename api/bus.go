@@ -15,16 +15,15 @@ type ConsensusState struct {
 	Synced      bool
 }
 
-// ContractAcquireRequest is the request type for the /contracts/:id/acquire
-// endpoint.
-type ContractAcquireRequest struct {
-	Duration time.Duration
-}
+// ContractsIDAddRequest is the request type for the /contract/:id endpoint.
 type ContractsIDAddRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
 	StartHeight uint64                 `json:"startHeight"`
 	TotalCost   types.Currency         `json:"totalCost"`
 }
+
+// ContractsIDRenewedRequest is the request type for the /contract/:id/renewed
+// endpoint.
 type ContractsIDRenewedRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
 	RenewedFrom types.FileContractID   `json:"renewedFrom"`
@@ -32,7 +31,13 @@ type ContractsIDRenewedRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
-// ContractAcquireResponse is the response type for the /contracts/:id/acquire
+// ContractAcquireRequest is the request type for the /contract/:id/acquire
+// endpoint.
+type ContractAcquireRequest struct {
+	Duration time.Duration
+}
+
+// ContractAcquireResponse is the response type for the /contract/:id/acquire
 // endpoint.
 type ContractAcquireResponse struct {
 	Locked bool `json:"locked"`

@@ -410,7 +410,7 @@ func (c *TestCluster) AddHosts(n int) error {
 	//  Wait for the contracts to form.
 	hostsWithContracts := make(map[string]struct{})
 	return Retry(20, time.Second, func() error {
-		contracts, err := c.Bus.Contracts()
+		contracts, err := c.Bus.ActiveContracts()
 		if err != nil {
 			return err
 		}

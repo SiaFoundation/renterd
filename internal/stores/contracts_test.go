@@ -90,7 +90,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := cs.Contracts()
+	contracts, err := cs.ActiveContracts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
 	}
-	contracts, err = cs.Contracts()
+	contracts, err = cs.ActiveContracts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +135,19 @@ func TestSQLContractStore(t *testing.T) {
 	}
 	if !reflect.DeepEqual(contracts[0], expected) {
 		t.Fatal("contract mismatch")
+	}
+
+	// Add a contract set with our contract and assert we can fetch it using the set name
+	if err := cs.SetContractSet("foo", []types.FileContractID{contracts[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if contracts, err := cs.Contracts("foo"); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatalf("should have 1 contracts but got %v", len(contracts))
+	}
+	if _, err := cs.Contracts("bar"); err != ErrContractSetNotFound {
+		t.Fatal(err)
 	}
 
 	// Delete the contract.
@@ -147,7 +160,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = cs.Contracts()
+	contracts, err = cs.ActiveContracts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,5 +446,61 @@ func TestAncestorsContracts(t *testing.T) {
 		}) {
 			t.Fatal("wrong contract", i)
 		}
+	}
+}
+
+func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.ContractMetadata, error) {
+	rev := testContractRevision(fcid, hk)
+	return s.AddContract(rev, types.ZeroCurrency, 0)
+}
+
+func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
+	rev := testContractRevision(fcid, hk)
+	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
+}
+
+func testContractRevision(fcid types.FileContractID, hk consensus.PublicKey) rhpv2.ContractRevision {
+	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
+	uc.PublicKeys[1].Key = hk[:]
+	uc.Timelock = 192837
+	return rhpv2.ContractRevision{
+		Revision: types.FileContractRevision{
+			ParentID:          fcid,
+			UnlockConditions:  uc,
+			NewRevisionNumber: 200,
+			NewFileSize:       4096,
+			NewFileMerkleRoot: crypto.Hash{222},
+			NewWindowStart:    400,
+			NewWindowEnd:      500,
+			NewValidProofOutputs: []types.SiacoinOutput{
+				{
+					Value:      types.NewCurrency64(121),
+					UnlockHash: types.UnlockHash{2, 1, 2},
+				},
+			},
+			NewMissedProofOutputs: []types.SiacoinOutput{
+				{
+					Value:      types.NewCurrency64(323),
+					UnlockHash: types.UnlockHash{2, 3, 2},
+				},
+			},
+			NewUnlockHash: types.UnlockHash{6, 6, 6},
+		},
+		Signatures: [2]types.TransactionSignature{
+			{
+				ParentID:       crypto.Hash(fcid),
+				PublicKeyIndex: 0,
+				Timelock:       100000,
+				CoveredFields:  types.FullCoveredFields,
+				Signature:      []byte("signature1"),
+			},
+			{
+				ParentID:       crypto.Hash(fcid),
+				PublicKeyIndex: 1,
+				Timelock:       200000,
+				CoveredFields:  types.FullCoveredFields,
+				Signature:      []byte("signature2"),
+			},
+		},
 	}
 }

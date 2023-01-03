@@ -230,21 +230,27 @@ func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Int
 	return
 }
 
-// Contracts returns all contracts in the contract store.
-func (c *Client) Contracts() (contracts []api.ContractMetadata, err error) {
-	err = c.c.GET("/contracts", &contracts)
+// ActiveContracts returns all active contracts in the contract store.
+func (c *Client) ActiveContracts() (contracts []api.ContractMetadata, err error) {
+	err = c.c.GET("/contracts/active", &contracts)
+	return
+}
+
+// Contracts returns the contracts for the given set from the contract store.
+func (c *Client) Contracts(set string) (contracts []api.ContractMetadata, err error) {
+	err = c.c.GET(fmt.Sprintf("/contracts/set/%s", set), &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
 func (c *Client) Contract(id types.FileContractID) (contract api.ContractMetadata, err error) {
-	err = c.c.GET(fmt.Sprintf("/contracts/%s", id), &contract)
+	err = c.c.GET(fmt.Sprintf("/contract/%s", id), &contract)
 	return
 }
 
 // AddContract adds the provided contract to the contract store.
 func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s", contract.ID()), api.ContractsIDAddRequest{
+	err = c.c.POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
 		Contract:    contract,
 		StartHeight: startHeight,
 		TotalCost:   totalCost,
@@ -254,7 +260,7 @@ func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Cu
 
 // AddRenewedContract adds the provided contract to the contract store.
 func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed api.ContractMetadata, err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
+	err = c.c.POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
 		StartHeight: startHeight,
@@ -267,7 +273,13 @@ func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost t
 func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
-	err = c.c.GET(fmt.Sprintf("/contracts/%s/ancestors?"+values.Encode(), fcid), &contracts)
+	err = c.c.GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), fcid), &contracts)
+	return
+}
+
+// SetContractSet adds the given contracts to the given set.
+func (c *Client) SetContractSet(set string, contracts []types.FileContractID) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)
 	return
 }
 
@@ -284,25 +296,7 @@ func (c *Client) DeleteContracts(ids []types.FileContractID) error {
 
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(id types.FileContractID) (err error) {
-	err = c.c.DELETE(fmt.Sprintf("/contracts/%s", id))
-	return
-}
-
-// ContractSets returns the names of all host sets.
-func (c *Client) ContractSets() (sets []string, err error) {
-	err = c.c.GET("/contractsets", &sets)
-	return
-}
-
-// ContractSet returns the contracts in the given set.
-func (c *Client) ContractSet(name string) (hosts []api.ContractMetadata, err error) {
-	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
-	return
-}
-
-// SetContractSet assigns a name to the given contracts.
-func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contractsets/%s", name), contracts)
+	err = c.c.DELETE(fmt.Sprintf("/contract/%s", id))
 	return
 }
 
@@ -310,14 +304,14 @@ func (c *Client) SetContractSet(name string, contracts []types.FileContractID) (
 // released manually before that time.
 func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (locked bool, err error) {
 	var resp api.ContractAcquireResponse
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/acquire", fcid), api.ContractAcquireRequest{Duration: d}, &resp)
+	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{Duration: d}, &resp)
 	locked = resp.Locked
 	return
 }
 
 // ReleaseContract releases a contract that was previously acquired using AcquireContract.
 func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
-	err = c.c.POST(fmt.Sprintf("/contracts/%s/release", fcid), nil, nil)
+	err = c.c.POST(fmt.Sprintf("/contract/%s/release", fcid), nil, nil)
 	return
 }
 
@@ -337,7 +331,7 @@ func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string
 	}
 
 	// fetch all contracts from the set
-	contracts, err := c.ContractSet(contractSetName)
+	contracts, err := c.Contracts(contractSetName)
 	if err != nil {
 		return nil, err
 	}

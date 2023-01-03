@@ -70,20 +70,15 @@ type (
 	// A ContractStore stores contracts.
 	ContractStore interface {
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
-		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
-		ReleaseContract(fcid types.FileContractID) error
-		Contracts() ([]api.ContractMetadata, error)
-		Contract(id types.FileContractID) (api.ContractMetadata, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+		ActiveContracts() ([]api.ContractMetadata, error)
+		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+		Contract(id types.FileContractID) (api.ContractMetadata, error)
+		Contracts(set string) ([]api.ContractMetadata, error)
+		ReleaseContract(fcid types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
-	}
-
-	// A ContractSetStore stores contract sets.
-	ContractSetStore interface {
-		ContractSets() ([]string, error)
-		ContractSet(name string) ([]api.ContractMetadata, error)
-		SetContractSet(name string, contracts []types.FileContractID) error
+		SetContractSet(set string, contracts []types.FileContractID) error
 	}
 
 	// An ObjectStore stores objects.
@@ -110,7 +105,6 @@ type bus struct {
 	w   Wallet
 	hdb HostDB
 	cs  ContractStore
-	css ContractSetStore
 	os  ObjectStore
 	ss  SettingStore
 }
@@ -382,14 +376,30 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsHandler(jc jape.Context) {
-	cs, err := b.cs.Contracts()
+func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
+	cs, err := b.cs.ActiveContracts()
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
 }
 
-func (b *bus) contractsAcquireHandler(jc jape.Context) {
+func (b *bus) contractsSetHandlerGET(jc jape.Context) {
+	cs, err := b.cs.Contracts(jc.PathParam("set"))
+	if jc.Check("couldn't load contracts", err) == nil {
+		jc.Encode(cs)
+	}
+}
+
+func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
+	var contractIds []types.FileContractID
+	if set := jc.PathParam("set"); set == "" {
+		jc.Error(errors.New("param 'set' can not be empty"), http.StatusBadRequest)
+	} else if jc.Decode(&contractIds) == nil {
+		jc.Check("could not add contracts to set", b.cs.SetContractSet(set, contractIds))
+	}
+}
+
+func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -407,7 +417,7 @@ func (b *bus) contractsAcquireHandler(jc jape.Context) {
 	})
 }
 
-func (b *bus) contractsReleaseHandler(jc jape.Context) {
+func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -417,7 +427,7 @@ func (b *bus) contractsReleaseHandler(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDHandlerGET(jc jape.Context) {
+func (b *bus) contractIDHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -428,7 +438,7 @@ func (b *bus) contractsIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
+func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractsIDAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -445,7 +455,7 @@ func (b *bus) contractsIDHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDRenewedHandlerPOST(jc jape.Context) {
+func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractsIDRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -462,36 +472,12 @@ func (b *bus) contractsIDRenewedHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsIDHandlerDELETE(jc jape.Context) {
+func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
 	jc.Check("couldn't remove contract", b.cs.RemoveContract(id))
-}
-
-func (b *bus) contractSetHandler(jc jape.Context) {
-	contractSets, err := b.css.ContractSets()
-	if jc.Check("couldn't load contract sets", err) != nil {
-		return
-	}
-	jc.Encode(contractSets)
-}
-
-func (b *bus) contractSetsNameHandlerGET(jc jape.Context) {
-	hostSet, err := b.css.ContractSet(jc.PathParam("name"))
-	if jc.Check("couldn't load host set", err) != nil {
-		return
-	}
-	jc.Encode(hostSet)
-}
-
-func (b *bus) contractSetsNameHandlerPUT(jc jape.Context) {
-	var contracts []types.FileContractID
-	if jc.Decode(&contracts) != nil {
-		return
-	}
-	jc.Check("couldn't store host set", b.css.SetContractSet(jc.PathParam("name"), contracts))
 }
 
 func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
@@ -587,7 +573,7 @@ func (b *bus) setRedundancySettings(rs api.RedundancySettings) error {
 	}
 }
 
-func (b *bus) contractsAncestorsHandler(jc jape.Context) {
+func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
@@ -610,7 +596,7 @@ func isErrSettingsNotFound(err error) bool {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, css ContractSetStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, error) {
 	b := &bus{
 		s:   s,
 		cm:  cm,
@@ -618,7 +604,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		w:   w,
 		hdb: hdb,
 		cs:  cs,
-		css: css,
 		os:  os,
 		ss:  ss,
 	}
@@ -659,18 +644,16 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts":               b.contractsHandler,
-		"GET    /contracts/:id":           b.contractsIDHandlerGET,
-		"GET    /contracts/:id/ancestors": b.contractsAncestorsHandler,
-		"POST   /contracts/:id":           b.contractsIDHandlerPOST,
-		"POST   /contracts/:id/renewed":   b.contractsIDRenewedHandlerPOST,
-		"DELETE /contracts/:id":           b.contractsIDHandlerDELETE,
-		"POST   /contracts/:id/acquire":   b.contractsAcquireHandler,
-		"POST   /contracts/:id/release":   b.contractsReleaseHandler,
-
-		"GET    /contractsets":       b.contractSetHandler,
-		"GET    /contractsets/:name": b.contractSetsNameHandlerGET,
-		"PUT    /contractsets/:name": b.contractSetsNameHandlerPUT,
+		"GET    /contracts/active":       b.contractsActiveHandlerGET,
+		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
+		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"GET    /contract/:id":           b.contractIDHandlerGET,
+		"POST   /contract/:id":           b.contractIDHandlerPOST,
+		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
+		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
+		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
+		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
 		"GET    /objects/*key":    b.objectsKeyHandlerGET,
 		"PUT    /objects/*key":    b.objectsKeyHandlerPUT,

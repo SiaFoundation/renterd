@@ -192,10 +192,10 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
-	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+	ActiveContracts() ([]api.ContractMetadata, error)
+	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
-	Contracts() ([]api.ContractMetadata, error)
-	ContractSet(name string) ([]api.ContractMetadata, error)
+	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	DownloadParams() (api.DownloadParams, error)
 	UploadParams() (api.UploadParams, error)
@@ -532,12 +532,12 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	from, err := w.bus.ContractSet(mp.FromContracts)
+	from, err := w.bus.Contracts(mp.FromContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
-	to, err := w.bus.ContractSet(mp.ToContracts)
+	to, err := w.bus.Contracts(mp.ToContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -626,7 +626,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
 
 	// fetch contracts
-	bcs, err := w.bus.ContractSet(up.ContractSet)
+	bcs, err := w.bus.Contracts(up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -673,8 +673,8 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
-	busContracts, err := w.bus.Contracts()
+func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
+	busContracts, err := w.bus.ActiveContracts()
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
@@ -707,14 +707,14 @@ func New(masterKey [32]byte, b Bus) http.Handler {
 		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
-		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
-		"POST   /rhp/scan":            w.rhpScanHandler,
-		"POST   /rhp/form":            w.rhpFormHandler,
-		"POST   /rhp/renew":           w.rhpRenewHandler,
-		"POST   /rhp/fund":            w.rhpFundHandler,
-		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
-		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
+		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
+		"POST   /rhp/prepare/payment":  w.rhpPreparePaymentHandler,
+		"POST   /rhp/scan":             w.rhpScanHandler,
+		"POST   /rhp/form":             w.rhpFormHandler,
+		"POST   /rhp/renew":            w.rhpRenewHandler,
+		"POST   /rhp/fund":             w.rhpFundHandler,
+		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
 
 		"POST   /slabs/migrate": w.slabsMigrateHandler,
 

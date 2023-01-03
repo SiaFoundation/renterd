@@ -53,5 +53,6 @@ jobs:
           go install go.sia.tech/jape/japecheck@latest
           $(go env GOPATH)/bin/japecheck ./bus
           $(go env GOPATH)/bin/japecheck ./worker
+          $(go env GOPATH)/bin/japecheck ./autopilot
       - name: Build
         run: go build -o bin/ ./cmd/renterd

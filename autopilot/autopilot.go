@@ -36,20 +36,16 @@ type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
 
 	// contracts
+	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
+	ActiveContracts() (contracts []api.ContractMetadata, err error)
 	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-	DeleteContracts(ids []types.FileContractID) error
-
-	Contract(id types.FileContractID) (contract api.ContractMetadata, err error)
-	Contracts() ([]api.ContractMetadata, error)
-
 	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
-	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
+	Contract(id types.FileContractID) (contract api.ContractMetadata, err error)
+	Contracts(set string) ([]api.ContractMetadata, error)
+	DeleteContracts(ids []types.FileContractID) error
 	ReleaseContract(id types.FileContractID) error
-
-	// contractsets
-	SetContractSet(name string, contracts []types.FileContractID) error
-	ContractSet(name string) ([]api.ContractMetadata, error)
+	SetContractSet(set string, contracts []types.FileContractID) error
 
 	// txpool
 	RecommendedFee() (types.Currency, error)
@@ -70,7 +66,7 @@ type Worker interface {
 	RHPForm(endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hs rhpv2.HostSettings, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
-	Contracts() (contracts []api.Contract, err error)
+	ActiveContracts() (contracts []api.Contract, err error)
 }
 
 type Autopilot struct {
