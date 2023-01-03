@@ -1,4 +1,4 @@
-package autopilot
+package stores
 
 import (
 	"encoding/json"
@@ -11,21 +11,21 @@ import (
 	"go.sia.tech/siad/modules"
 )
 
-// EphemeralStore implements Store in memory.
-type EphemeralStore struct {
+// EphemeralAutopilotStore implements Store in memory.
+type EphemeralAutopilotStore struct {
 	mu     sync.Mutex
 	config api.Config
 }
 
 // Config implements Store.
-func (s *EphemeralStore) Config() api.Config {
+func (s *EphemeralAutopilotStore) Config() api.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.config
 }
 
 // SetConfig implements Store.
-func (s *EphemeralStore) SetConfig(c api.Config) error {
+func (s *EphemeralAutopilotStore) SetConfig(c api.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.config = c
@@ -33,18 +33,18 @@ func (s *EphemeralStore) SetConfig(c api.Config) error {
 }
 
 // ProcessConsensusChange implements chain.Subscriber.
-func (s *EphemeralStore) ProcessConsensusChange(cc modules.ConsensusChange) {
+func (s *EphemeralAutopilotStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	panic("not implemented")
 }
 
-// NewEphemeralStore returns a new EphemeralStore.
-func NewEphemeralStore() *EphemeralStore {
-	return &EphemeralStore{}
+// NewEphemeralAutopilotStore returns a new EphemeralStore.
+func NewEphemeralAutopilotStore() *EphemeralAutopilotStore {
+	return &EphemeralAutopilotStore{}
 }
 
-// JSONStore implements Store in memory, backed by a JSON file.
-type JSONStore struct {
-	*EphemeralStore
+// JSONAutopilotStore implements Store in memory, backed by a JSON file.
+type JSONAutopilotStore struct {
+	*EphemeralAutopilotStore
 	dir      string
 	lastSave time.Time
 }
@@ -53,7 +53,7 @@ type jsonPersistData struct {
 	Config api.Config
 }
 
-func (s *JSONStore) save() error {
+func (s *JSONAutopilotStore) save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var p jsonPersistData
@@ -79,7 +79,7 @@ func (s *JSONStore) save() error {
 	return nil
 }
 
-func (s *JSONStore) load() error {
+func (s *JSONAutopilotStore) load() error {
 	var p jsonPersistData
 	if js, err := os.ReadFile(filepath.Join(s.dir, "json")); os.IsNotExist(err) {
 		return nil
@@ -93,21 +93,21 @@ func (s *JSONStore) load() error {
 }
 
 // SetConfig implements Store.
-func (s *JSONStore) SetConfig(c api.Config) error {
-	s.EphemeralStore.SetConfig(c)
+func (s *JSONAutopilotStore) SetConfig(c api.Config) error {
+	s.EphemeralAutopilotStore.SetConfig(c)
 	return s.save()
 }
 
-// NewJSONStore returns a new JSONStore.
-func NewJSONStore(dir string) (*JSONStore, error) {
+// NewJSONAutopilotStore returns a new JSONStore.
+func NewJSONAutopilotStore(dir string) (*JSONAutopilotStore, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
 
-	s := &JSONStore{
-		EphemeralStore: NewEphemeralStore(),
-		dir:            dir,
-		lastSave:       time.Now(),
+	s := &JSONAutopilotStore{
+		EphemeralAutopilotStore: NewEphemeralAutopilotStore(),
+		dir:                     dir,
+		lastSave:                time.Now(),
 	}
 	err := s.load()
 	if err != nil {

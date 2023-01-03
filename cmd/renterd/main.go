@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
@@ -208,7 +209,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		s, err := autopilot.NewJSONStore(autopilotDir)
+		s, err := stores.NewJSONAutopilotStore(autopilotDir)
 		if err != nil {
 			log.Fatal(err)
 		}

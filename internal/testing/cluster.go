@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/siad/modules"
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
@@ -164,7 +165,7 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	cleanups = append(cleanups, workerServer.Shutdown)
 
 	// Create autopilot store.
-	autopilotStore, err := autopilot.NewJSONStore(autopilotDir)
+	autopilotStore, err := stores.NewJSONAutopilotStore(autopilotDir)
 	if err != nil {
 		return nil, err
 	}
