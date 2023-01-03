@@ -366,16 +366,21 @@ func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
 	return contract(s.db, id)
 }
 
-func (s *SQLStore) contracts(set string) (contracts []dbContract, err error) {
-	err = s.db.
-		Model(&dbContract{}).
-		Preload("Host.Announcements").
-		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-		Where("cs.name = ?", set).
-		Find(&contracts).
+func (s *SQLStore) contracts(set string) ([]dbContract, error) {
+	var cs dbContractSet
+	err := s.db.
+		Where(&dbContractSet{Name: set}).
+		Preload("Contracts.Host.Announcements").
+		Take(&cs).
 		Error
-	return
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrContractSetNotFound
+	} else if err != nil {
+		return nil, err
+	}
+
+	return cs.Contracts, nil
 }
 
 func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {

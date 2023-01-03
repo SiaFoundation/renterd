@@ -146,10 +146,8 @@ func TestSQLContractStore(t *testing.T) {
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if contracts, err := cs.Contracts("bar"); err != nil {
+	if _, err := cs.Contracts("bar"); err != ErrContractSetNotFound {
 		t.Fatal(err)
-	} else if len(contracts) != 0 {
-		t.Fatalf("should have 0 contracts but got %v", len(contracts))
 	}
 
 	// Delete the contract.
