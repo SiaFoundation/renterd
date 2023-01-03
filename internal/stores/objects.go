@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/types"
@@ -347,7 +347,7 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 		Order("COUNT(slab_id) DESC").
 		Limit(n)
 
-	var slabIDs []bus.SlabID
+	var slabIDs []api.SlabID
 	err := outer.Select("slab_id").Find(&slabIDs).Error
 	if err != nil {
 		return nil, err
@@ -381,7 +381,7 @@ func (s *SQLStore) host(id uint) (dbHost, bool, error) {
 
 // slabForMigration returns all the info about a slab necessary for migrating
 // it to better hosts/contracts.
-func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
+func (s *SQLStore) slabForMigration(slabID api.SlabID) (object.Slab, error) {
 	var dSlab dbSlab
 	// TODO: This could be slightly more efficient by not fetching whole
 	// contracts.
@@ -411,7 +411,7 @@ func (s *SQLStore) slabForMigration(slabID bus.SlabID) (object.Slab, error) {
 
 // MarkSlabsMigrationFailure sets the last_failure field for the given slabs to
 // the current time.
-func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs []bus.SlabID) (int, error) {
+func (s *SQLStore) MarkSlabsMigrationFailure(slabIDs []api.SlabID) (int, error) {
 	now := time.Now().UTC()
 	txn := s.db.Model(&dbSlab{}).
 		Where("id in ?", slabIDs).

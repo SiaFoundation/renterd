@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/metrics"
@@ -24,32 +24,6 @@ import (
 	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
 )
-
-type Contract struct {
-	bus.Contract `json:"contract"`
-	Revision     rhpv2.ContractRevision `json:"revision"`
-}
-
-// EndHeight returns the height at which the host is no longer obligated to
-// store contract data.
-func (c Contract) EndHeight() uint64 {
-	return uint64(c.Revision.EndHeight())
-}
-
-// FileSize returns the current Size of the contract.
-func (c Contract) FileSize() uint64 {
-	return c.Revision.Revision.NewFileSize
-}
-
-// HostKey returns the public key of the host.
-func (c Contract) HostKey() (pk PublicKey) {
-	return c.Revision.HostKey()
-}
-
-// RenterFunds returns the funds remaining in the contract's Renter payout.
-func (c Contract) RenterFunds() types.Currency {
-	return c.Revision.RenterFunds()
-}
 
 // parseRange parses a Range header string as per RFC 7233. Only the first range
 // is returned. If no range is specified, parseRange returns 0, size.
@@ -219,13 +193,13 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	ContractsForSlab(shards []object.Sector, contractSetName string) ([]bus.Contract, error)
-	Contracts() ([]bus.Contract, error)
-	ContractSet(name string) ([]bus.Contract, error)
+	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
+	Contracts() ([]api.ContractMetadata, error)
+	ContractSet(name string) ([]api.ContractMetadata, error)
 
-	DownloadParams() (bus.DownloadParams, error)
-	UploadParams() (bus.UploadParams, error)
-	MigrateParams(slab object.Slab) (bus.MigrateParams, error)
+	DownloadParams() (api.DownloadParams, error)
+	UploadParams() (api.UploadParams, error)
+	MigrateParams(slab object.Slab) (api.MigrateParams, error)
 
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
@@ -347,7 +321,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []bus.Contract, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
@@ -376,14 +350,14 @@ func (w *worker) withHosts(ctx context.Context, contracts []bus.Contract, fn fun
 }
 
 func (w *worker) rhpPreparePaymentHandler(jc jape.Context) {
-	var rppr RHPPreparePaymentRequest
+	var rppr api.RHPPreparePaymentRequest
 	if jc.Decode(&rppr) == nil {
 		jc.Encode(rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey))
 	}
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
-	var rsr RHPScanRequest
+	var rsr api.RHPScanRequest
 	if jc.Decode(&rsr) != nil {
 		return
 	}
@@ -407,14 +381,14 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	if jc.Check("couldn't scan host", err) != nil {
 		return
 	}
-	jc.Encode(RHPScanResponse{
+	jc.Encode(api.RHPScanResponse{
 		Settings: settings,
-		Ping:     Duration(elapsed),
+		Ping:     api.Duration(elapsed),
 	})
 }
 
 func (w *worker) rhpFormHandler(jc jape.Context) {
-	var rfr RHPFormRequest
+	var rfr api.RHPFormRequest
 	if jc.Decode(&rfr) != nil {
 		return
 	}
@@ -441,7 +415,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	if jc.Check("couldn't form contract", err) != nil {
 		return
 	}
-	jc.Encode(RHPFormResponse{
+	jc.Encode(api.RHPFormResponse{
 		ContractID:     contract.ID(),
 		Contract:       contract,
 		TransactionSet: txnSet,
@@ -449,7 +423,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpRenewHandler(jc jape.Context) {
-	var rrr RHPRenewRequest
+	var rrr api.RHPRenewRequest
 	if jc.Decode(&rrr) != nil {
 		return
 	}
@@ -481,7 +455,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
 	}
-	jc.Encode(RHPRenewResponse{
+	jc.Encode(api.RHPRenewResponse{
 		ContractID:     contract.ID(),
 		Contract:       contract,
 		TransactionSet: txnSet,
@@ -489,7 +463,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpFundHandler(jc jape.Context) {
-	var rfr RHPFundRequest
+	var rfr api.RHPFundRequest
 	if jc.Decode(&rfr) != nil {
 		return
 	}
@@ -519,7 +493,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
-	var rrrr RHPRegistryReadRequest
+	var rrrr api.RHPRegistryReadRequest
 	if jc.Decode(&rrrr) != nil {
 		return
 	}
@@ -535,7 +509,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
-	var rrur RHPRegistryUpdateRequest
+	var rrur api.RHPRegistryUpdateRequest
 	if jc.Decode(&rrur) != nil {
 		return
 	}
@@ -705,16 +679,16 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var contracts []Contract
+	var contracts []api.Contract
 	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
 		for i, store := range ss {
 			rev, err := store.(*session).Revision()
 			if err != nil {
 				return err
 			}
-			contracts = append(contracts, Contract{
-				Contract: busContracts[i],
-				Revision: rev,
+			contracts = append(contracts, api.Contract{
+				ContractMetadata: busContracts[i],
+				Revision:         rev.Revision,
 			})
 		}
 		return nil

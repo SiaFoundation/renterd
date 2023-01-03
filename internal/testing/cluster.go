@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
@@ -31,8 +32,8 @@ import (
 var (
 	// defaultAutopilotConfig is the autopilot used for testing unless a
 	// different one is explicitly set.
-	defaultAutopilotConfig = autopilot.Config{
-		Contracts: autopilot.ContractsConfig{
+	defaultAutopilotConfig = api.AutopilotConfig{
+		Contracts: api.ContractsConfig{
 			Allowance:   types.SiacoinPrecision.Mul64(1e3),
 			Hosts:       5,
 			Period:      50,
@@ -42,12 +43,12 @@ var (
 			Upload:   modules.SectorSize * 500,
 			Storage:  modules.SectorSize * 5e3,
 		},
-		Hosts: autopilot.HostsConfig{
+		Hosts: api.HostsConfig{
 			IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.
 		},
 	}
 
-	defaultRedundancy = bus.RedundancySettings{
+	defaultRedundancy = api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 5,
 	}

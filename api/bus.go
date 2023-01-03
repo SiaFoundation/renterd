@@ -1,8 +1,6 @@
-package bus
+package api
 
 import (
-	"fmt"
-	"net/url"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -11,44 +9,11 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// exported types from internal/consensus
-type (
-	// A PublicKey is an Ed25519 public key.
-	PublicKey = consensus.PublicKey
-
-	// A PrivateKey is an Ed25519 private key.
-	PrivateKey = consensus.PrivateKey
-
-	// ChainState represents the full state of the chain as of a particular block.
-	ChainState = consensus.State
-
-	SlabID uint
-)
-
-// LoadString is implemented for jape's DecodeParam.
-func (sid *SlabID) LoadString(s string) (err error) {
-	var slabID uint
-	_, err = fmt.Sscan(s, &slabID)
-	*sid = SlabID(slabID)
-	return
-}
-
-// String encodes the SlabID as a string.
-func (sid SlabID) String() string {
-	return fmt.Sprint(uint8(sid))
-}
-
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
 	BlockHeight uint64
 	Synced      bool
 }
-
-// for encoding/decoding time.Time values in API params
-type paramTime time.Time
-
-func (t paramTime) String() string                { return url.QueryEscape((time.Time)(t).Format(time.RFC3339)) }
-func (t *paramTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
 // ContractAcquireRequest is the request type for the /contracts/:id/acquire
 // endpoint.
@@ -103,21 +68,21 @@ type WalletRedistributeRequest struct {
 // WalletPrepareFormRequest is the request type for the /wallet/prepare/form
 // endpoint.
 type WalletPrepareFormRequest struct {
-	RenterKey      PrivateKey         `json:"renterKey"`
-	HostKey        PublicKey          `json:"hostKey"`
-	RenterFunds    types.Currency     `json:"renterFunds"`
-	RenterAddress  types.UnlockHash   `json:"renterAddress"`
-	HostCollateral types.Currency     `json:"hostCollateral"`
-	EndHeight      uint64             `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
+	RenterKey      consensus.PrivateKey `json:"renterKey"`
+	HostKey        consensus.PublicKey  `json:"hostKey"`
+	RenterFunds    types.Currency       `json:"renterFunds"`
+	RenterAddress  types.UnlockHash     `json:"renterAddress"`
+	HostCollateral types.Currency       `json:"hostCollateral"`
+	EndHeight      uint64               `json:"endHeight"`
+	HostSettings   rhpv2.HostSettings   `json:"hostSettings"`
 }
 
 // WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
 // endpoint.
 type WalletPrepareRenewRequest struct {
 	Contract      types.FileContractRevision `json:"contract"`
-	RenterKey     PrivateKey                 `json:"renterKey"`
-	HostKey       PublicKey                  `json:"hostKey"`
+	RenterKey     consensus.PrivateKey       `json:"renterKey"`
+	HostKey       consensus.PublicKey        `json:"hostKey"`
 	RenterFunds   types.Currency             `json:"renterFunds"`
 	RenterAddress types.UnlockHash           `json:"renterAddress"`
 	EndHeight     uint64                     `json:"endHeight"`
