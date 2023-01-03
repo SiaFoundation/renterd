@@ -1,11 +1,8 @@
 package autopilot
 
 import (
-	"fmt"
-
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/consensus"
 )
 
 // A Client provides methods for interacting with a renterd API server.
@@ -22,6 +19,11 @@ func NewClient(addr, password string) *Client {
 	}}
 }
 
+func (c *Client) Actions() (actions []api.Action, err error) {
+	err = c.c.GET("/actions", &actions)
+	return
+}
+
 func (c *Client) SetConfig(cfg api.AutopilotConfig) error {
 	return c.c.PUT("/config", cfg)
 }
@@ -35,10 +37,4 @@ func (c *Client) Status() (uint64, error) {
 	var resp api.AutopilotStatusResponseGET
 	err := c.c.GET("/status", &resp)
 	return resp.CurrentPeriod, err
-}
-
-// RenterKey returns the renter's private key for a given host's public key.
-func (c *Client) RenterKey(hostKey consensus.PublicKey) (rk consensus.PrivateKey, err error) {
-	err = c.c.GET(fmt.Sprintf("/renterkey/%s", hostKey), &rk)
-	return
 }
