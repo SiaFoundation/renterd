@@ -2,23 +2,23 @@ package api
 
 import (
 	"go.sia.tech/renterd/internal/consensus"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
 
 type (
-	// A Contract contains all information about a contract with a host.
+	// A Contract wraps the contract metadata with the latest contract revision.
 	Contract struct {
+		ContractMetadata
+		Revision types.FileContractRevision `json:"revision"`
+	}
+
+	// ContractMetadata contains all metadata for a contract.
+	ContractMetadata struct {
 		ID          types.FileContractID `json:"id"`
 		HostIP      string               `json:"hostIP"`
 		HostKey     consensus.PublicKey  `json:"hostKey"`
 		StartHeight uint64               `json:"startHeight"`
 
-		ContractMetadata
-	}
-
-	// ContractMetadata contains all metadata for a contract.
-	ContractMetadata struct {
 		RenewedFrom types.FileContractID `json:"renewedFrom"`
 		Spending    ContractSpending     `json:"spending"`
 		TotalCost   types.Currency       `json:"totalCost"`
@@ -39,11 +39,6 @@ type (
 		RenewedTo types.FileContractID `json:"renewedTo"`
 		Spending  ContractSpending     `json:"spending"`
 	}
-
-	Revision struct {
-		Contract `json:"contract"`
-		Revision rhpv2.ContractRevision `json:"revision"`
-	}
 )
 
 // Add returns the sum of the current and given contract spending.
@@ -56,21 +51,22 @@ func (x ContractSpending) Add(y ContractSpending) (s ContractSpending) {
 
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
-func (c Revision) EndHeight() uint64 {
+func (c Contract) EndHeight() uint64 {
 	return uint64(c.Revision.EndHeight())
 }
 
 // FileSize returns the current Size of the contract.
-func (c Revision) FileSize() uint64 {
-	return c.Revision.Revision.NewFileSize
+func (c Contract) FileSize() uint64 {
+	return c.Revision.NewFileSize
 }
 
 // HostKey returns the public key of the host.
-func (c Revision) HostKey() (pk consensus.PublicKey) {
-	return c.Revision.HostKey()
+func (c Contract) HostKey() (pk consensus.PublicKey) {
+	copy(pk[:], c.Revision.UnlockConditions.PublicKeys[1].Key)
+	return
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.
-func (c Revision) RenterFunds() types.Currency {
-	return c.Revision.RenterFunds()
+func (c Contract) RenterFunds() types.Currency {
+	return c.Revision.NewValidProofOutputs[0].Value
 }

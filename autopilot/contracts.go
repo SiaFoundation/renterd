@@ -10,7 +10,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.Contract) error {
+func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) error {
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
@@ -49,7 +49,7 @@ func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, 
 	return ap.bus.SetContractSet(defaultSetName, contracts)
 }
 
-func contractIds(contracts []api.Revision) []types.FileContractID {
+func contractIds(contracts []api.Contract) []types.FileContractID {
 	ids := make([]types.FileContractID, len(contracts))
 	for i, c := range contracts {
 		ids[i] = c.ID

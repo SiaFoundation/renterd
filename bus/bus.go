@@ -72,17 +72,17 @@ type (
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
 		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ReleaseContract(fcid types.FileContractID) error
-		Contracts() ([]api.Contract, error)
-		Contract(id types.FileContractID) (api.Contract, error)
-		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.Contract, error)
-		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.Contract, error)
+		Contracts() ([]api.ContractMetadata, error)
+		Contract(id types.FileContractID) (api.ContractMetadata, error)
+		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
+		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		RemoveContract(id types.FileContractID) error
 	}
 
 	// A ContractSetStore stores contract sets.
 	ContractSetStore interface {
 		ContractSets() ([]string, error)
-		ContractSet(name string) ([]api.Contract, error)
+		ContractSet(name string) ([]api.ContractMetadata, error)
 		SetContractSet(name string, contracts []types.FileContractID) error
 	}
 

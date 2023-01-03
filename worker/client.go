@@ -186,7 +186,7 @@ func (c *Client) DeleteObject(name string) (err error) {
 }
 
 // Contracts returns all contracts from the worker.
-func (c *Client) Contracts() (revisions []api.Revision, err error) {
+func (c *Client) Contracts() (revisions []api.Contract, err error) {
 	err = c.c.GET("/rhp/contracts", &revisions)
 	return
 }

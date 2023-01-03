@@ -74,20 +74,18 @@ func (dbContract) TableName() string { return "contracts" }
 func (dbContractSet) TableName() string { return "contract_sets" }
 
 // convert converts a dbContract to a Contract type.
-func (c dbContract) convert() api.Contract {
-	return api.Contract{
+func (c dbContract) convert() api.ContractMetadata {
+	return api.ContractMetadata{
 		ID:          c.FCID,
 		HostIP:      c.Host.NetAddress(),
 		HostKey:     c.Host.PublicKey,
 		StartHeight: c.StartHeight,
-		ContractMetadata: api.ContractMetadata{
-			RenewedFrom: c.RenewedFrom,
-			TotalCost:   types.NewCurrency(c.TotalCost),
-			Spending: api.ContractSpending{
-				Uploads:     types.NewCurrency(c.UploadSpending),
-				Downloads:   types.NewCurrency(c.DownloadSpending),
-				FundAccount: types.NewCurrency(c.FundAccountSpending),
-			},
+		RenewedFrom: c.RenewedFrom,
+		TotalCost:   types.NewCurrency(c.TotalCost),
+		Spending: api.ContractSpending{
+			Uploads:     types.NewCurrency(c.UploadSpending),
+			Downloads:   types.NewCurrency(c.DownloadSpending),
+			FundAccount: types.NewCurrency(c.FundAccountSpending),
 		},
 	}
 }
@@ -196,14 +194,14 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 }
 
 // AddContract implements the api.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.Contract, err error) {
+func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
 	var added dbContract
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		added, err = addContract(tx, c, totalCost, startHeight, types.FileContractID{})
 		return err
 	}); err != nil {
-		return api.Contract{}, err
+		return api.ContractMetadata{}, err
 	}
 
 	return added.convert(), nil
@@ -213,7 +211,7 @@ func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currenc
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.Contract, error) {
+func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
 	var renewed dbContract
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -249,29 +247,29 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 		renewed, err = addContract(tx, c, totalCost, startHeight, renewedFrom)
 		return err
 	}); err != nil {
-		return api.Contract{}, err
+		return api.ContractMetadata{}, err
 	}
 
 	return renewed.convert(), nil
 }
 
 // Contract implements the api.ContractStore interface.
-func (s *SQLStore) Contract(id types.FileContractID) (api.Contract, error) {
+func (s *SQLStore) Contract(id types.FileContractID) (api.ContractMetadata, error) {
 	// Fetch contract.
 	contract, err := s.contract(id)
 	if err != nil {
-		return api.Contract{}, err
+		return api.ContractMetadata{}, err
 	}
 	return contract.convert(), nil
 }
 
 // Contracts implements the api.ContractStore interface.
-func (s *SQLStore) Contracts() ([]api.Contract, error) {
+func (s *SQLStore) Contracts() ([]api.ContractMetadata, error) {
 	dbContracts, err := s.contracts()
 	if err != nil {
 		return nil, err
 	}
-	contracts := make([]api.Contract, len(dbContracts))
+	contracts := make([]api.ContractMetadata, len(dbContracts))
 	for i, c := range dbContracts {
 		contracts[i] = c.convert()
 	}

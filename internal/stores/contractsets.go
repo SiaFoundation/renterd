@@ -35,7 +35,7 @@ func (s *SQLStore) ContractSets() ([]string, error) {
 }
 
 // HostSet implements the api.ContractSetStore interface.
-func (s *SQLStore) ContractSet(name string) ([]api.Contract, error) {
+func (s *SQLStore) ContractSet(name string) ([]api.ContractMetadata, error) {
 	var hostSet dbContractSet
 	err := s.db.Where(&dbContractSet{Name: name}).
 		Preload("Contracts.Host.Announcements").
@@ -45,7 +45,7 @@ func (s *SQLStore) ContractSet(name string) ([]api.Contract, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	contracts := make([]api.Contract, len(hostSet.Contracts))
+	contracts := make([]api.ContractMetadata, len(hostSet.Contracts))
 	for i, c := range hostSet.Contracts {
 		contracts[i] = c.convert()
 	}

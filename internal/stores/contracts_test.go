@@ -110,20 +110,18 @@ func TestSQLContractStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := api.Contract{
+	expected := api.ContractMetadata{
 		ID:          fcid,
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: 100,
-		ContractMetadata: api.ContractMetadata{
-			RenewedFrom: types.FileContractID{},
-			Spending: api.ContractSpending{
-				Uploads:     types.ZeroCurrency,
-				Downloads:   types.ZeroCurrency,
-				FundAccount: types.ZeroCurrency,
-			},
-			TotalCost: totalCost,
+		RenewedFrom: types.FileContractID{},
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
 		},
+		TotalCost: totalCost,
 	}
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
@@ -325,20 +323,18 @@ func TestRenewedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := api.Contract{
+	expected := api.ContractMetadata{
 		ID:          fcid2,
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
-		ContractMetadata: api.ContractMetadata{
-			RenewedFrom: fcid,
-			Spending: api.ContractSpending{
-				Uploads:     types.ZeroCurrency,
-				Downloads:   types.ZeroCurrency,
-				FundAccount: types.ZeroCurrency,
-			},
-			TotalCost: newContractTotal,
+		RenewedFrom: fcid,
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
 		},
+		TotalCost: newContractTotal,
 	}
 	if !reflect.DeepEqual(newContract, expected) {
 		t.Fatal("mismatch")

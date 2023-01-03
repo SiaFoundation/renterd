@@ -193,9 +193,9 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
-	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.Contract, error)
-	Contracts() ([]api.Contract, error)
-	ContractSet(name string) ([]api.Contract, error)
+	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
+	Contracts() ([]api.ContractMetadata, error)
+	ContractSet(name string) ([]api.ContractMetadata, error)
 
 	DownloadParams() (api.DownloadParams, error)
 	UploadParams() (api.UploadParams, error)
@@ -321,7 +321,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []api.Contract, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
@@ -679,16 +679,16 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var contracts []api.Revision
+	var contracts []api.Contract
 	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
 		for i, store := range ss {
 			rev, err := store.(*session).Revision()
 			if err != nil {
 				return err
 			}
-			contracts = append(contracts, api.Revision{
-				Contract: busContracts[i],
-				Revision: rev,
+			contracts = append(contracts, api.Contract{
+				ContractMetadata: busContracts[i],
+				Revision:         rev.Revision,
 			})
 		}
 		return nil

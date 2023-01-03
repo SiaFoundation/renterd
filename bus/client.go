@@ -231,19 +231,19 @@ func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Int
 }
 
 // Contracts returns all contracts in the contract store.
-func (c *Client) Contracts() (contracts []api.Contract, err error) {
+func (c *Client) Contracts() (contracts []api.ContractMetadata, err error) {
 	err = c.c.GET("/contracts", &contracts)
 	return
 }
 
 // Contract returns the contract with the given ID.
-func (c *Client) Contract(id types.FileContractID) (contract api.Contract, err error) {
+func (c *Client) Contract(id types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.GET(fmt.Sprintf("/contracts/%s", id), &contract)
 	return
 }
 
 // AddContract adds the provided contract to the contract store.
-func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.Contract, err error) {
+func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
 	err = c.c.POST(fmt.Sprintf("/contracts/%s", contract.ID()), api.ContractsIDAddRequest{
 		Contract:    contract,
 		StartHeight: startHeight,
@@ -253,7 +253,7 @@ func (c *Client) AddContract(contract rhpv2.ContractRevision, totalCost types.Cu
 }
 
 // AddRenewedContract adds the provided contract to the contract store.
-func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed api.Contract, err error) {
+func (c *Client) AddRenewedContract(contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed api.ContractMetadata, err error) {
 	err = c.c.POST(fmt.Sprintf("/contracts/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
@@ -295,7 +295,7 @@ func (c *Client) ContractSets() (sets []string, err error) {
 }
 
 // ContractSet returns the contracts in the given set.
-func (c *Client) ContractSet(name string) (hosts []api.Contract, err error) {
+func (c *Client) ContractSet(name string) (hosts []api.ContractMetadata, err error) {
 	err = c.c.GET(fmt.Sprintf("/contractsets/%s", name), &hosts)
 	return
 }
@@ -329,7 +329,7 @@ func (c *Client) RecommendedFee() (fee types.Currency, err error) {
 
 // ContractsForSlab returns contracts that can be used to download the provided
 // slab.
-func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.Contract, error) {
+func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error) {
 	// build hosts map
 	hosts := make(map[string]struct{})
 	for _, shard := range shards {

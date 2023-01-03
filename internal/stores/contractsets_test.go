@@ -57,12 +57,12 @@ func testContractRevision(fcid types.FileContractID, hk consensus.PublicKey) rhp
 	}
 }
 
-func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.Contract, error) {
+func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddContract(rev, types.ZeroCurrency, 0)
 }
 
-func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.Contract, error) {
+func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
 }
