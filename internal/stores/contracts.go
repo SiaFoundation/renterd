@@ -16,8 +16,6 @@ import (
 )
 
 const (
-	SetNameAll = "all"
-
 	archivalReasonRenewed = "renewed"
 )
 
@@ -29,10 +27,6 @@ var (
 	// ErrContractSetNotFound is returned when a contract can't be retrieved from the
 	// database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
-
-	// ErrReservedSetName is returned when a set of contracts is set using one
-	// of the reserved set names.
-	ErrReservedSetName = errors.New("set name is reserved")
 )
 
 type (
@@ -229,6 +223,16 @@ func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currenc
 	return added.convert(), nil
 }
 
+// AllContracts implements the bus.ContractStore interface.
+func (s *SQLStore) AllContracts() (contracts []api.ContractMetadata, err error) {
+	err = s.db.
+		Model(&dbContract{}).
+		Preload("Host.Announcements").
+		Find(&contracts).
+		Error
+	return
+}
+
 // AddRenewedContract adds a new contract which was created as the result of a renewal to the store.
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
@@ -315,10 +319,6 @@ func (s *SQLStore) Contracts(set string) ([]api.ContractMetadata, error) {
 
 // SetContractSet implements the bus.ContractStore interface.
 func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
-	if isReservedSetName(name) {
-		return ErrReservedSetName
-	}
-
 	encIds := make([][]byte, len(contractIds))
 	for i, fcid := range contractIds {
 		encIds[i] = gobEncode(fcid)
@@ -362,18 +362,14 @@ func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
 }
 
 func (s *SQLStore) contracts(set string) (contracts []dbContract, err error) {
-	tx := s.db.
+	err = s.db.
 		Model(&dbContract{}).
-		Preload("Host.Announcements")
-
-	if set != SetNameAll {
-		tx = tx.
-			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-			Where("cs.name = ?", set)
-	}
-
-	err = tx.Find(&contracts).Error
+		Preload("Host.Announcements").
+		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
+		Where("cs.name = ?", set).
+		Find(&contracts).
+		Error
 	return
 }
 
@@ -396,9 +392,4 @@ func removeContract(tx *gorm.DB, id types.FileContractID) error {
 	}
 	return tx.Where(&dbContract{Model: Model{ID: contract.ID}}).
 		Delete(&contract).Error
-}
-
-// isReservedSetName returns whether the given set name is reserved.
-func isReservedSetName(name string) bool {
-	return name == SetNameAll
 }

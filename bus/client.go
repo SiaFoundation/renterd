@@ -232,13 +232,13 @@ func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Int
 
 // AllContracts returns all contracts in the contract store.
 func (c *Client) AllContracts() (contracts []api.ContractMetadata, err error) {
-	// TODO: use stores.SetNameAll when import cycle is fixed
-	return c.Contracts("all")
+	err = c.c.GET("/contracts/all", &contracts)
+	return
 }
 
 // Contracts returns the contracts for the given set from the contract store.
 func (c *Client) Contracts(set string) (contracts []api.ContractMetadata, err error) {
-	err = c.c.GET(fmt.Sprintf("/contracts/%s", set), &contracts)
+	err = c.c.GET(fmt.Sprintf("/contracts/set/%s", set), &contracts)
 	return
 }
 
@@ -279,7 +279,7 @@ func (c *Client) AncestorContracts(fcid types.FileContractID, minStartHeight uin
 
 // SetContractSet adds the given contracts to the given set.
 func (c *Client) SetContractSet(set string, contracts []types.FileContractID) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/contracts/%s", set), contracts)
+	err = c.c.PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)
 	return
 }
 

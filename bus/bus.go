@@ -70,14 +70,15 @@ type (
 	// A ContractStore stores contracts.
 	ContractStore interface {
 		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
-		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
-		ReleaseContract(fcid types.FileContractID) error
-		Contracts(set string) ([]api.ContractMetadata, error)
-		SetContractSet(set string, contracts []types.FileContractID) error
-		Contract(id types.FileContractID) (api.ContractMetadata, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+		AllContracts() ([]api.ContractMetadata, error)
+		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+		Contract(id types.FileContractID) (api.ContractMetadata, error)
+		Contracts(set string) ([]api.ContractMetadata, error)
+		ReleaseContract(fcid types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
+		SetContractSet(set string, contracts []types.FileContractID) error
 	}
 
 	// An ObjectStore stores objects.
@@ -375,6 +376,13 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractsAllHandlerGET(jc jape.Context) {
+	cs, err := b.cs.AllContracts()
+	if jc.Check("couldn't load contracts", err) == nil {
+		jc.Encode(cs)
+	}
+}
+
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {
 	cs, err := b.cs.Contracts(jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
@@ -637,8 +645,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
-		"GET    /contracts/:set":         b.contractsSetHandlerGET,
-		"PUT    /contracts/:set":         b.contractsSetHandlerPUT,
+		"GET    /contracts/all":          b.contractsAllHandlerGET,
+		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
+		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
