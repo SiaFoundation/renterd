@@ -11,20 +11,20 @@ import (
 	"go.sia.tech/siad/modules"
 )
 
-// EphemeralAutopilotStore implements Store in memory.
+// EphemeralAutopilotStore implements autopilot.Store in memory.
 type EphemeralAutopilotStore struct {
 	mu     sync.Mutex
 	config api.Config
 }
 
-// Config implements Store.
+// Config implements autopilot.Store.
 func (s *EphemeralAutopilotStore) Config() api.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.config
 }
 
-// SetConfig implements Store.
+// SetConfig implements autopilot.Store.
 func (s *EphemeralAutopilotStore) SetConfig(c api.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -37,26 +37,26 @@ func (s *EphemeralAutopilotStore) ProcessConsensusChange(cc modules.ConsensusCha
 	panic("not implemented")
 }
 
-// NewEphemeralAutopilotStore returns a new EphemeralStore.
+// NewEphemeralAutopilotStore returns a new EphemeralAutopilotStore.
 func NewEphemeralAutopilotStore() *EphemeralAutopilotStore {
 	return &EphemeralAutopilotStore{}
 }
 
-// JSONAutopilotStore implements Store in memory, backed by a JSON file.
+// JSONAutopilotStore implements autopilot.Store in memory, backed by a JSON file.
 type JSONAutopilotStore struct {
 	*EphemeralAutopilotStore
 	dir      string
 	lastSave time.Time
 }
 
-type jsonPersistData struct {
+type jsonAutopilotPersistData struct {
 	Config api.Config
 }
 
 func (s *JSONAutopilotStore) save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var p jsonPersistData
+	var p jsonAutopilotPersistData
 	p.Config = s.config
 	js, _ := json.MarshalIndent(p, "", "  ")
 
@@ -80,8 +80,8 @@ func (s *JSONAutopilotStore) save() error {
 }
 
 func (s *JSONAutopilotStore) load() error {
-	var p jsonPersistData
-	if js, err := os.ReadFile(filepath.Join(s.dir, "json")); os.IsNotExist(err) {
+	var p jsonAutopilotPersistData
+	if js, err := os.ReadFile(filepath.Join(s.dir, "autopilot.json")); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
 		return err
@@ -92,13 +92,13 @@ func (s *JSONAutopilotStore) load() error {
 	return nil
 }
 
-// SetConfig implements Store.
+// SetConfig implements autopilot.Store.
 func (s *JSONAutopilotStore) SetConfig(c api.Config) error {
 	s.EphemeralAutopilotStore.SetConfig(c)
 	return s.save()
 }
 
-// NewJSONAutopilotStore returns a new JSONStore.
+// NewJSONAutopilotStore returns a new JSONAutopilotStore.
 func NewJSONAutopilotStore(dir string) (*JSONAutopilotStore, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
