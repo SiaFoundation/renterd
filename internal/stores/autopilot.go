@@ -61,7 +61,7 @@ func (s *JSONAutopilotStore) save() error {
 	js, _ := json.MarshalIndent(p, "", "  ")
 
 	// atomic save
-	dst := filepath.Join(s.dir, "json")
+	dst := filepath.Join(s.dir, "autopilot.json")
 	f, err := os.OpenFile(dst+"_tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0660)
 	if err != nil {
 		return err

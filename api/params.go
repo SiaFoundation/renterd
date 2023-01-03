@@ -8,12 +8,15 @@ import (
 )
 
 type (
+	// ParamTime aliases time.Time to add marshaling functions that url escape
+	// and format a time in the RFC3339 format.
 	ParamTime time.Time
 
 	// A Duration is the elapsed time between two instants. Durations are encoded as
 	// an integer number of milliseconds.
 	Duration time.Duration
 
+	// A SlabID uniquely identifies a slab.
 	SlabID uint
 )
 
