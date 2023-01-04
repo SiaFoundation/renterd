@@ -39,6 +39,14 @@ func TestHost(t *testing.T) {
 	}
 }
 
+func newTestHosts(n int) []hostdb.Host {
+	hosts := make([]hostdb.Host, n)
+	for i := 0; i < n; i++ {
+		hosts[i] = newTestHost(randomHostKey(), newTestHostSettings())
+	}
+	return hosts
+}
+
 func newTestHost(hk consensus.PublicKey, settings *rhpv2.HostSettings) hostdb.Host {
 	return hostdb.Host{
 		NetAddress: randomIP().String(),

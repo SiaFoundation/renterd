@@ -205,6 +205,7 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 	ap.m = newMigrator(ap)
 	ap.s = newScanner(
 		ap,
+		scannerBatchSize,
 		scannerNumThreads,
 		scanInterval,
 		scannerTimeoutInterval,

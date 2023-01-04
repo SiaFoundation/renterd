@@ -10,6 +10,8 @@ type Host struct {
 	hostdb.Host
 }
 
+// IsHost returns true if the host corresponds with the given identifier. The
+// identifier can be the host's public key, net address or IP address.
 func (h *Host) IsHost(host string) bool {
 	if host == "" {
 		return false

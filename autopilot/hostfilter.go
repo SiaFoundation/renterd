@@ -134,17 +134,16 @@ func isBlacklisted(cfg api.AutopilotConfig, h Host) bool {
 }
 
 func isWhitelisted(cfg api.AutopilotConfig, h Host) bool {
-	if len(cfg.Hosts.Whitelist) > 0 {
-		var found bool
-		for _, host := range cfg.Hosts.Whitelist {
-			if h.IsHost(host) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
+	if len(cfg.Hosts.Whitelist) == 0 {
+		return true
+	}
+
+	var whitelisted bool
+	for _, host := range cfg.Hosts.Whitelist {
+		if h.IsHost(host) {
+			whitelisted = true
+			break
 		}
 	}
-	return true
+	return whitelisted
 }

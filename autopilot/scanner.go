@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -16,6 +15,7 @@ import (
 
 const (
 	// TODO: we could make these configurable
+	scannerBatchSize       = 100
 	scannerNumThreads      = 5
 	scannerTimeoutInterval = 10 * time.Minute
 
@@ -26,10 +26,6 @@ const (
 	trackerTimeoutPercentile = 99
 )
 
-var (
-	errScanInterrupted = errors.New("scan was interrupted")
-)
-
 type (
 	// TODO: use the actual bus and worker interfaces when they've consolidated
 	// a bit, we currently use inline interfaces to avoid having to update the
@@ -37,8 +33,6 @@ type (
 	scanner struct {
 		bus interface {
 			Hosts(offset, limit int) ([]hostdb.Host, error)
-			ConsensusState() (api.ConsensusState, error)
-			RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 		}
 		worker interface {
 			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -47,6 +41,7 @@ type (
 		tracker *tracker
 		logger  *zap.SugaredLogger
 
+		scanBatchSize      uint64
 		scanThreads        uint64
 		scanMinInterval    time.Duration
 		timeoutMinInterval time.Duration
@@ -92,6 +87,10 @@ func newTracker(threshold, total uint64, percentile float64, minTimeout time.Dur
 }
 
 func (t *tracker) addDataPoint(duration time.Duration) {
+	if duration == 0 {
+		return
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -123,7 +122,7 @@ func (t *tracker) timeout() time.Duration {
 	return timeout
 }
 
-func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
+func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
 	return &scanner{
 		bus:    ap.bus,
 		worker: ap.worker,
@@ -137,17 +136,18 @@ func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterv
 
 		stopChan: ap.stopChan,
 
-		scanThreads:        threads,
+		scanBatchSize:      scanBatchSize,
+		scanThreads:        scanThreads,
 		scanMinInterval:    scanMinInterval,
 		timeoutMinInterval: timeoutMinInterval,
 	}
 }
 
-func (s *scanner) tryPerformHostScan(cfg api.AutopilotConfig) <-chan error {
+func (s *scanner) tryPerformHostScan(cfg api.AutopilotConfig) {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
-		return nil
+		return
 	}
 
 	s.logger.Debug("host scan started")
@@ -155,22 +155,21 @@ func (s *scanner) tryPerformHostScan(cfg api.AutopilotConfig) <-chan error {
 	s.scanning = true
 	s.mu.Unlock()
 
-	errChan := make(chan error, 1)
 	go func() {
-		defer close(errChan)
-		err := s.performHostScans(cfg)
-		if err != nil {
-			s.logger.Debugf("host scan encountered error: err: %v", err)
+		for res := range s.launchScanWorkers(s.launchHostScans(cfg)) {
+			if res.err != nil {
+				s.logger.Debugw(
+					fmt.Sprintf("failed scan, err: %v", res.err),
+					"hk", res.hostKey,
+				)
+			}
 		}
 
 		s.mu.Lock()
 		s.scanning = false
 		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
 		s.mu.Unlock()
-
-		errChan <- err
 	}()
-	return errChan
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -186,72 +185,76 @@ func (s *scanner) tryUpdateTimeout() {
 	s.logger.Debugf("updated timeout %v->%v", prev, s.timeout)
 }
 
-// performHostScans scans every host in our database
-func (s *scanner) performHostScans(cfg api.AutopilotConfig) error {
-	hosts, err := s.bus.Hosts(0, -1)
-	if err != nil {
-		return err
-	}
+func (s *scanner) launchHostScans(cfg api.AutopilotConfig) chan scanReq {
+	reqChan := make(chan scanReq, s.scanBatchSize)
+	offset := 0
 
-	// nothing to do
-	if len(hosts) == 0 {
-		return nil
-	}
+	go func() {
+		var exhausted bool
+		for !s.isStopped() && !exhausted {
+			s.logger.Debugf("fetching hosts batch %d-%d", offset, offset+int(s.scanBatchSize))
 
-	s.logger.Debugf("launching %v host scans", len(hosts))
+			// fetch next batch
+			hosts, err := s.bus.Hosts(offset, int(s.scanBatchSize))
+			if err != nil {
+				s.logger.Errorf("could not get hosts, err: %v", err)
+				break
+			}
+			if len(hosts) == 0 {
+				break
+			}
+			if len(hosts) < int(s.scanBatchSize) {
+				exhausted = true
+			}
 
-	// add all hosts to a scan queue
-	reqChan := make(chan scanReq, len(hosts))
-	for _, h := range hosts {
-		reqChan <- scanReq{
-			hostKey: h.PublicKey,
-			hostIP:  h.NetAddress,
+			// filter batch
+			filtered := hosts[:0]
+			for _, host := range hosts {
+				if !isBlacklisted(cfg, Host{host}) && isWhitelisted(cfg, Host{host}) {
+					filtered = append(filtered, host)
+				}
+			}
+
+			// add batch to scan queue
+			s.logger.Debugf("scanning %d hosts in batch %d-%d", len(filtered), offset, offset+int(s.scanBatchSize))
+			for _, h := range filtered {
+				reqChan <- scanReq{
+					hostKey: h.PublicKey,
+					hostIP:  h.NetAddress,
+				}
+			}
+
+			offset += int(s.scanBatchSize)
 		}
-	}
-	close(reqChan)
+		close(reqChan)
+	}()
 
-	// launch workers
-	liveThreads := s.scanThreads
+	return reqChan
+}
+
+func (s *scanner) launchScanWorkers(reqs chan scanReq) chan scanResp {
 	respChan := make(chan scanResp, s.scanThreads)
+	liveThreads := s.scanThreads
+
 	for i := uint64(0); i < s.scanThreads; i++ {
 		go func() {
-			for req := range reqChan {
+			for req := range reqs {
 				if s.isStopped() {
 					break
 				}
 
 				scan, err := s.worker.RHPScan(req.hostKey, req.hostIP, s.currentTimeout())
 				respChan <- scanResp{req.hostKey, scan.Settings, err}
-
-				if err == nil {
-					s.tracker.addDataPoint(time.Duration(scan.Ping))
-				}
+				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}
+
 			if atomic.AddUint64(&liveThreads, ^uint64(0)) == 0 {
 				close(respChan)
 			}
 		}()
 	}
 
-	// handle responses
-	inflight := len(hosts)
-	for inflight > 0 {
-		var res scanResp
-		select {
-		case <-s.stopChan:
-			return errScanInterrupted
-		case res = <-respChan:
-			inflight--
-		}
-
-		if res.err != nil {
-			s.logger.Debugw(
-				fmt.Sprintf("failed scan, err: %v", res.err),
-				"hk", res.hostKey,
-			)
-		}
-	}
-	return nil
+	return respChan
 }
 
 func (s *scanner) isScanRequired() bool {
