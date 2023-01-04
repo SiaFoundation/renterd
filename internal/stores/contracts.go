@@ -89,7 +89,7 @@ func (dbContractSet) TableName() string { return "contract_sets" }
 func (c dbContract) convert() api.ContractMetadata {
 	return api.ContractMetadata{
 		ID:          c.FCID,
-		HostIP:      c.Host.NetAddress(),
+		HostIP:      c.Host.NetAddress,
 		HostKey:     c.Host.PublicKey,
 		StartHeight: c.StartHeight,
 		RenewedFrom: c.RenewedFrom,

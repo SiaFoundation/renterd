@@ -42,7 +42,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	}
 
 	// sanity check - should never happen but this would cause a zero score
-	if len(h.Announcements) == 0 {
+	if h.NetAddress == "" {
 		reasons = append(reasons, "not announced")
 	}
 

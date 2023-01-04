@@ -21,14 +21,14 @@ func (h *Host) IsHost(host string) bool {
 	if h.PublicKey.String() == host {
 		return true
 	}
-	if h.NetAddress() == host {
+	if h.NetAddress == host {
 		return true
 	}
 	_, ipNet, err := net.ParseCIDR(host)
 	if err != nil {
 		return false
 	}
-	ip, err := net.ResolveIPAddr("ip", h.NetAddress())
+	ip, err := net.ResolveIPAddr("ip", h.NetAddress)
 	if err != nil {
 		return false
 	}

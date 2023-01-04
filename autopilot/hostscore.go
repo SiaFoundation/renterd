@@ -41,8 +41,8 @@ func hostScore(cfg api.AutopilotConfig, h Host) float64 {
 }
 
 func ageScore(h Host) float64 {
-	// sanity check to avoid panic - host should have been filtered
-	if len(h.Announcements) == 0 {
+	// sanity check
+	if h.KnownSince.IsZero() {
 		return 0
 	}
 
@@ -61,7 +61,7 @@ func ageScore(h Host) float64 {
 		{1 * day, 3},
 	}
 
-	age := time.Since(h.Announcements[0].Timestamp)
+	age := time.Since(h.KnownSince)
 	weight := 1.0
 	for _, w := range weights {
 		if age >= w.age {

@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // consensusInfoID defines the primary key of the entry in the consensusInfo
@@ -26,19 +27,11 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey     consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
-		Announcements []dbAnnouncement    `gorm:"OnDelete:CASCADE"`
-		Interactions  []dbInteraction     `gorm:"OnDelete:CASCADE"`
-	}
+		PublicKey    consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		Interactions []dbInteraction     `gorm:"OnDelete:CASCADE"`
 
-	dbAnnouncement struct {
-		Model
-		DBHostID uint `gorm:"index"`
-
-		BlockHeight uint64            `gorm:"NOT NULL"`
-		BlockID     consensus.BlockID `gorm:"NOT NULL;type:bytes;serializer:gob"`
-		Timestamp   time.Time         `gorm:"NOT NULL"`
-		NetAddress  string            `gorm:"NOT NULL"`
+		LastAnnouncement time.Time
+		NetAddress       string
 	}
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
@@ -64,49 +57,23 @@ type (
 func (dbHost) TableName() string { return "hosts" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbAnnouncement) TableName() string { return "announcements" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbInteraction) TableName() string { return "host_interactions" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
-// NetAddress returns the latest announced address of a host.
-func (h dbHost) NetAddress() string {
-	if len(h.Announcements) == 0 {
-		return ""
-	}
-	return h.Announcements[len(h.Announcements)-1].NetAddress
-}
-
 // convert converts a host into a hostdb.Host.
 func (h dbHost) convert() hostdb.Host {
 	hdbHost := hostdb.Host{
-		Announcements: make([]hostdb.Announcement, len(h.Announcements)),
-		Interactions:  make([]hostdb.Interaction, len(h.Interactions)),
-		PublicKey:     h.PublicKey,
-	}
-	for i, announcement := range h.Announcements {
-		hdbHost.Announcements[i] = announcement.convert()
+		KnownSince:   h.CreatedAt,
+		NetAddress:   h.NetAddress,
+		Interactions: make([]hostdb.Interaction, len(h.Interactions)),
+		PublicKey:    h.PublicKey,
 	}
 	for i, interaction := range h.Interactions {
 		hdbHost.Interactions[i] = interaction.convert()
 	}
 	return hdbHost
-}
-
-// convert converts a host into a hostdb.Announcement.
-func (a dbAnnouncement) convert() hostdb.Announcement {
-	hostdbAnnouncement := hostdb.Announcement{
-		Index: consensus.ChainIndex{
-			Height: a.BlockHeight,
-			ID:     consensus.BlockID(a.BlockID),
-		},
-		Timestamp:  a.Timestamp,
-		NetAddress: a.NetAddress,
-	}
-	return hostdbAnnouncement
 }
 
 // convert converts an interaction into a hostdb.Interaction.
@@ -123,7 +90,6 @@ func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
 	tx := db.db.Where(&dbHost{PublicKey: hostKey}).
 		Preload("Interactions").
-		Preload("Announcements").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound
@@ -143,7 +109,6 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 		Having("IFNULL(MAX(Timestamp), 0) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
 		Limit(max).
 		Preload("Interactions").
-		Preload("Announcements").
 		Find(&fullHosts).
 		Error
 	if err != nil {
@@ -180,7 +145,6 @@ func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Int
 func (db *SQLStore) hosts() ([]dbHost, error) {
 	var hosts []dbHost
 	tx := db.db.Preload("Interactions").
-		Preload("Announcements").
 		Find(&hosts)
 	if tx.Error != nil {
 		return nil, tx.Error
@@ -222,17 +186,12 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
 	// Create a host if it doesn't exist yet.
-	var host dbHost
-	if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
-		return err
-	}
-
-	// Create the announcement.
-	return tx.Create(&dbAnnouncement{
-		DBHostID:    host.ID,
-		BlockHeight: a.Index.Height,
-		BlockID:     a.Index.ID,
-		Timestamp:   a.Timestamp.UTC(), // explicitly store timestamp as UTC
-		NetAddress:  a.NetAddress,
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "public_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
+	}).Create(&dbHost{
+		PublicKey:        hostKey,
+		LastAnnouncement: a.Timestamp.UTC(),
+		NetAddress:       a.NetAddress,
 	}).Error
 }
