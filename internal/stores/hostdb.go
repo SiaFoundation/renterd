@@ -141,17 +141,6 @@ func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Int
 	})
 }
 
-// hosts returns all hosts int he db.
-func (db *SQLStore) hosts() ([]dbHost, error) {
-	var hosts []dbHost
-	tx := db.db.Preload("Interactions").
-		Find(&hosts)
-	if tx.Error != nil {
-		return nil, tx.Error
-	}
-	return hosts, nil
-}
-
 // ProcessConsensusChange implements consensus.Subscriber.
 func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	height := cc.InitialHeight()

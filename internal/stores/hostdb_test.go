@@ -307,3 +307,15 @@ func TestSQLHosts(t *testing.T) {
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk}).Error
 }
+
+// hosts returns all hosts in the db. Only used in testing since preloading all
+// interactions for all hosts is expensive in production.
+func (db *SQLStore) hosts() ([]dbHost, error) {
+	var hosts []dbHost
+	tx := db.db.Preload("Interactions").
+		Find(&hosts)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return hosts, nil
+}
