@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // consensusInfoID defines the primary key of the entry in the consensusInfo
@@ -218,9 +217,7 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	for _, a := range as {
 		hosts = append(hosts, dbHost{PublicKey: a.hostKey})
 	}
-	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&hosts).
-		Error; err != nil {
+	if err := tx.FirstOrCreate(&hosts).Error; err != nil {
 		return err
 	}
 
