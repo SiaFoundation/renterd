@@ -3,13 +3,13 @@ package stores
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // consensusInfoID defines the primary key of the entry in the consensusInfo
@@ -195,44 +195,54 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height--
 	}
 
-	// Atomically apply ConsensusChange.
-	err := db.db.Transaction(func(tx *gorm.DB) error {
-		var err error
-		for _, b := range cc.AppliedBlocks {
-			hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
-				if err == nil {
-					err = insertAnnouncement(tx, hostKey, ha)
-				}
+	// Fetch announcements and add them to the queue.
+	var announcements []announcement
+	for _, b := range cc.AppliedBlocks {
+		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
+			announcements = append(announcements, announcement{
+				hostKey:      hostKey,
+				announcement: ha,
 			})
-			height++
-		}
-		if err != nil {
-			return err
-		}
-		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-			Model: Model{
-				ID: consensusInfoID,
-			},
-		}).Update("CCID", cc.ID[:]).Error
-	})
-	if err != nil {
-		log.Fatalln("Failed to apply consensus change to hostdb", err)
+		})
+		height++
+	}
+	db.newAnnouncements <- &announcementBatch{
+		announcements: announcements,
+		cc:            cc,
 	}
 }
 
-func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
-	// Create a host if it doesn't exist yet.
-	var host dbHost
-	if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
+func insertAnnouncements(tx *gorm.DB, as []announcement) error {
+	// Create hosts if they don't exist yet.
+	var hosts []dbHost
+	for _, a := range as {
+		hosts = append(hosts, dbHost{PublicKey: a.hostKey})
+	}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&hosts).
+		Error; err != nil {
 		return err
 	}
 
-	// Create the announcement.
-	return tx.Create(&dbAnnouncement{
-		DBHostID:    host.ID,
-		BlockHeight: a.Index.Height,
-		BlockID:     a.Index.ID,
-		Timestamp:   a.Timestamp.UTC(), // explicitly store timestamp as UTC
-		NetAddress:  a.NetAddress,
-	}).Error
+	// Create a map of host key to its id.
+	hostMap := make(map[consensus.PublicKey]uint)
+	for _, host := range hosts {
+		hostMap[host.PublicKey] = host.ID
+	}
+
+	// Create announcements.
+	announcements := make([]dbAnnouncement, len(as))
+	for i, a := range as {
+		announcements[i] = dbAnnouncement{
+			DBHostID:    hostMap[a.hostKey],
+			BlockHeight: a.announcement.Index.Height,
+			BlockID:     a.announcement.Index.ID,
+			Timestamp:   a.announcement.Timestamp.UTC(), // explicitly store timestamp as UTC
+			NetAddress:  a.announcement.NetAddress,
+		}
+	}
+	if err := tx.Create(&announcements).Error; err != nil {
+		return err
+	}
+	return nil
 }

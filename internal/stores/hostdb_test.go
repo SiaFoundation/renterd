@@ -12,6 +12,15 @@ import (
 	"go.sia.tech/siad/modules"
 )
 
+func (s *SQLStore) insertTestAnnouncement(hk consensus.PublicKey, a hostdb.Announcement) error {
+	return insertAnnouncements(s.db, []announcement{
+		{
+			hostKey:      hk,
+			announcement: a,
+		},
+	})
+}
+
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
@@ -103,7 +112,7 @@ func TestSQLHostDB(t *testing.T) {
 		Timestamp:  time.Now().UTC().Round(time.Second),
 		NetAddress: "host.com",
 	}
-	err = insertAnnouncement(hdb.db, hk, a)
+	err = hdb.insertTestAnnouncement(hk, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +162,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert another announcement for an unknown host.
 	unknownKey := consensus.PublicKey{1, 4, 7}
-	err = insertAnnouncement(hdb.db, unknownKey, a)
+	err = hdb.insertTestAnnouncement(unknownKey, a)
 	if err != nil {
 		t.Fatal(err)
 	}
