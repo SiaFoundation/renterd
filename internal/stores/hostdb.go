@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -13,9 +14,24 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// consensusInfoID defines the primary key of the entry in the consensusInfo
-// table.
-const consensusInfoID = 1
+const (
+	// announcementBatchSoftLimit is the limit above which
+	// threadedProcessAnnouncements will stop merging batches of
+	// announcements and apply them to the db.
+	announcementBatchSoftLimit = 1000
+
+	// processAnnouncementRetryInterval is the amount of time after which a
+	// failed insertion of announcements will be retried.
+	processAnnouncementRetryInterval = time.Second
+
+	// processAnnouncementRetryLimit is a limit to the number of retries for
+	// a single announcement insertion.
+	processAnnouncementRetryLimit = 3600 // 1 hour
+
+	// consensusInfoID defines the primary key of the entry in the consensusInfo
+	// table.
+	consensusInfoID = 1
+)
 
 // ErrHostNotFound is returned if a specific host can't be retrieved from the hostdb.
 var ErrHostNotFound = errors.New("host doesn't exist in hostdb")
@@ -58,6 +74,20 @@ type (
 	dbConsensusInfo struct {
 		Model
 		CCID []byte
+	}
+
+	// announcementBatch contains all announcements from a single consensus
+	// change. After applying the announcements to the db, the persisted
+	// consensus change id should be updated to cc.
+	announcementBatch struct {
+		announcements []announcement
+		cc            modules.ConsensusChange
+	}
+
+	// announcement describes a an announcement for a single host.
+	announcement struct {
+		hostKey      consensus.PublicKey
+		announcement hostdb.Announcement
 	}
 )
 
@@ -210,6 +240,80 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	db.newAnnouncements <- &announcementBatch{
 		announcements: announcements,
 		cc:            cc,
+	}
+}
+
+// threadedProcessAnnouncements works through the queue of announcements
+// obtained from ProcessConsensusChange and writes them to the db. Failed
+// insertions will be retried up until a certain limit.
+// Empty batches won't be inserted until persistInterval time has passed since
+// the last successful insertion.
+func (s *SQLStore) threadedProcessAnnouncements(persistInterval time.Duration) {
+	lastInsert := time.Now()
+	for {
+		var announcements []announcement
+		var ccid modules.ConsensusChange
+
+		// Block for next batch.
+		select {
+		case nextBatch := <-s.newAnnouncements:
+			announcements = append(announcements, nextBatch.announcements...)
+			ccid = nextBatch.cc
+		case <-s.ctx.Done():
+			return // shutdown
+		}
+
+		// Try to get a few more batches up to a soft limit of
+		// announcements.
+	ADD_MORE_LOOP:
+		for len(announcements) < announcementBatchSoftLimit {
+			select {
+			case nextBatch := <-s.newAnnouncements:
+				if nextBatch != nil {
+					announcements = append(announcements, nextBatch.announcements...)
+					ccid = nextBatch.cc
+				}
+			default:
+				// No more batches.
+				break ADD_MORE_LOOP
+			}
+		}
+
+		// If there is nothing to insert at all, block again. Unless too
+		// much time has passed since the last insertion. Then we want
+		// to at least update the ccid.
+		if len(announcements) == 0 && time.Since(lastInsert) < persistInterval {
+			continue
+		}
+
+		for numRetries := 0; ; numRetries++ {
+			if numRetries >= processAnnouncementRetryLimit {
+				log.Fatalf("host announcement insertion failed more than %v times - abort", processAnnouncementRetryLimit)
+			}
+			err := s.db.Transaction(func(tx *gorm.DB) error {
+				// Insert announcements.
+				if len(announcements) > 0 {
+					if err := insertAnnouncements(tx, announcements); err != nil {
+						return err
+					}
+				}
+				// Update consensus change id.
+				return updateCCID(tx, ccid)
+			})
+
+			// If the update failed, try again after some time.
+			if err != nil {
+				println("failed to persist host announcements... retrying: " + err.Error()) // TODO: replace with proper logging
+				select {
+				case <-s.ctx.Done():
+					return // shutdown
+				case <-time.After(processAnnouncementRetryInterval):
+				}
+				continue
+			}
+			lastInsert = time.Now()
+			break
+		}
 	}
 }
 
