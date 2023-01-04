@@ -202,7 +202,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// update contract set
-	set, err := c.ap.updateContractSet(contractIds(contracts), formed, toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
+	set, err := c.ap.updateDefaultContracts(contractIds(contracts), formed, toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
 	if err != nil {
 		return fmt.Errorf("failed to update default contracts, err: %v", err)
 	} else if len(set) < int(rs.MinShards) {
@@ -788,6 +788,7 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted int) ([]cons
 
 			scored = append(scored, h)
 			scores = append(scores, score)
+			used[h.PublicKey.String()] = true
 		}
 	}
 

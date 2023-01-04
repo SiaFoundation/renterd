@@ -10,7 +10,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateContractSet(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) ([]types.FileContractID, error) {
+func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) ([]types.FileContractID, error) {
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
