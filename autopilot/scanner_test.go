@@ -23,7 +23,7 @@ type mockBus struct {
 	hosts []hostdb.Host
 }
 
-func (b *mockBus) AllHosts() ([]hostdb.Host, error) { return b.hosts, nil }
+func (b *mockBus) Hosts(int, int) ([]hostdb.Host, error) { return b.hosts, nil }
 func (b *mockBus) ConsensusState() (api.ConsensusState, error) {
 	return api.ConsensusState{BlockHeight: 0, Synced: true}, nil
 }
@@ -52,6 +52,8 @@ func (s *scanner) isScanning() bool {
 }
 
 func TestScanner(t *testing.T) {
+	cfg := api.DefaultAutopilotConfig()
+
 	// init host keys
 	frand.Read(testHost1[:])
 	frand.Read(testHost2[:])
@@ -73,7 +75,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	errChan := s.tryPerformHostScan()
+	errChan := s.tryPerformHostScan(cfg)
 	if errChan == nil {
 		t.Fatal("unexpected")
 	}
@@ -89,7 +91,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	if s.tryPerformHostScan() != nil {
+	if s.tryPerformHostScan(cfg) != nil {
 		t.Fatal("unexpected")
 	}
 
@@ -98,7 +100,7 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// start another scan
-	if errChan = s.tryPerformHostScan(); errChan == nil {
+	if errChan = s.tryPerformHostScan(cfg); errChan == nil {
 		t.Fatal("unexpected")
 	}
 	if !s.isScanning() {

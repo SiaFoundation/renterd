@@ -10,7 +10,7 @@ const (
 	defaultSetName = "autopilot"
 )
 
-func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) error {
+func (ap *Autopilot) updateContractSet(active, formed, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) ([]types.FileContractID, error) {
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
@@ -45,8 +45,22 @@ func (ap *Autopilot) updateDefaultContracts(active, formed, toDelete, toIgnore, 
 	// TODO: contracts that are up for renewal could be used for dl, not ul
 	// TODO: contracts should be sorted according to host score
 
+	ap.logger.Debugw(
+		"updating default contracts",
+		"a", len(active),
+		"f", len(formed),
+		"r", len(renewed),
+		"ti", len(toIgnore),
+		"tref", len(toRefresh),
+		"tren", len(toRenew),
+		"len", len(contracts),
+	)
+
 	// update contract set
-	return ap.bus.SetContractSet(defaultSetName, contracts)
+	if err := ap.bus.SetContractSet(defaultSetName, contracts); err != nil {
+		return nil, err
+	}
+	return contracts, nil
 }
 
 func contractIds(contracts []api.Contract) []types.FileContractID {

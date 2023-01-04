@@ -195,9 +195,11 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// update contract set
-	err = c.ap.updateDefaultContracts(contractIds(contracts), formed, toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
+	set, err := c.ap.updateContractSet(contractIds(contracts), formed, toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
 	if err != nil {
 		return fmt.Errorf("failed to update default contracts, err: %v", err)
+	} else if len(set) < int(rs.MinShards) {
+		c.logger.Warnf("contract set does not have enough contracts to support the min redundancy, %v<%v", len(set), rs.MinShards)
 	}
 
 	return nil
@@ -299,6 +301,9 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 }
 
 func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []api.Contract) ([]api.ContractMetadata, error) {
+	if len(toRenew)+len(toRefresh) == 0 {
+		return nil, nil
+	}
 	renewed := make([]api.ContractMetadata, 0, len(toRenew)+len(toRefresh))
 
 	// log contracts renewed
@@ -398,7 +403,10 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 	}
 
 	// fetch candidate hosts
-	candidates, _ := c.candidateHosts(cfg, addLeeway(uint64(missing), leewayPctCandidateHosts))
+	candidates, err := c.candidateHosts(cfg, addLeeway(uint64(missing), leewayPctCandidateHosts))
+	if err != nil {
+		return nil, err
+	}
 
 	// calculate min/max contract funds
 	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
@@ -732,8 +740,8 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted uint64) ([]c
 	// create IP filter
 	ipFilter := newIPFilter()
 
-	// fetch all hosts
-	hosts, err := c.ap.bus.AllHosts()
+	// fetch hosts
+	hosts, err := c.ap.bus.Hosts(0, -1)
 	if err != nil {
 		return nil, err
 	}

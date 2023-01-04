@@ -12,7 +12,7 @@ import (
 )
 
 func TestHostScore(t *testing.T) {
-	cfg := api.DefaultConfig()
+	cfg := api.DefaultAutopilotConfig()
 	day := 24 * time.Hour
 
 	newHost := func(s *rhpv2.HostSettings) Host { return Host{newTestHost(randomHostKey(), s)} }

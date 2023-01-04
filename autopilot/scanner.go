@@ -36,7 +36,7 @@ type (
 	// scanner tests with every interface change
 	scanner struct {
 		bus interface {
-			AllHosts() ([]hostdb.Host, error)
+			Hosts(offset, limit int) ([]hostdb.Host, error)
 			ConsensusState() (api.ConsensusState, error)
 			RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 		}
@@ -143,7 +143,7 @@ func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterv
 	}
 }
 
-func (s *scanner) tryPerformHostScan() <-chan error {
+func (s *scanner) tryPerformHostScan(cfg api.AutopilotConfig) <-chan error {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
@@ -158,10 +158,9 @@ func (s *scanner) tryPerformHostScan() <-chan error {
 	errChan := make(chan error, 1)
 	go func() {
 		defer close(errChan)
-
-		err := s.performHostScans()
+		err := s.performHostScans(cfg)
 		if err != nil {
-			s.logger.Debug("host scan encountered error: err: %v", err)
+			s.logger.Debugf("host scan encountered error: err: %v", err)
 		}
 
 		s.mu.Lock()
@@ -188,10 +187,8 @@ func (s *scanner) tryUpdateTimeout() {
 }
 
 // performHostScans scans every host in our database
-func (s *scanner) performHostScans() error {
-	// TODO: running a scan on all hosts is not infinitely scalable, this will
-	// need to be updated to be smarter and run on a subset of all hosts
-	hosts, err := s.bus.AllHosts()
+func (s *scanner) performHostScans(cfg api.AutopilotConfig) error {
+	hosts, err := s.bus.Hosts(0, -1)
 	if err != nil {
 		return err
 	}

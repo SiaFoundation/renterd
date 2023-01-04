@@ -30,9 +30,8 @@ type Bus interface {
 	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
 
 	// hostdb
-	AllHosts() ([]hostdb.Host, error)
-	Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+	Hosts(offset, limit int) ([]hostdb.Host, error)
 	RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 
 	// contracts
@@ -109,8 +108,12 @@ func (ap *Autopilot) Run() error {
 		case <-ap.ticker.C:
 		}
 
+		// fetch config to ensure its not updated during maintenance
+		cfg := ap.store.Config()
+
+		// initiate a host scan
 		ap.s.tryUpdateTimeout()
-		ap.s.tryPerformHostScan()
+		ap.s.tryPerformHostScan(cfg)
 
 		// fetch consensus state
 		cs, err := ap.bus.ConsensusState()
@@ -123,9 +126,6 @@ func (ap *Autopilot) Run() error {
 		if !cs.Synced {
 			continue
 		}
-
-		// fetch config to ensure its not updated during maintenance
-		cfg := ap.store.Config()
 
 		// perform maintenance
 		err = ap.c.performContractMaintenance(cfg, cs)
@@ -193,7 +193,7 @@ func NewServer(ap *Autopilot) http.Handler {
 func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scanInterval time.Duration) *Autopilot {
 	ap := &Autopilot{
 		bus:    bus,
-		logger: logger.Sugar(),
+		logger: logger.Sugar().Named("autopilot"),
 		store:  store,
 		worker: worker,
 

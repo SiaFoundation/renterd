@@ -27,8 +27,10 @@ const (
 	consensusInfoID = 1
 )
 
-// ErrHostNotFound is returned if a specific host can't be retrieved from the hostdb.
-var ErrHostNotFound = errors.New("host doesn't exist in hostdb")
+var (
+	ErrHostNotFound   = errors.New("host doesn't exist in hostdb")
+	ErrNegativeOffset = errors.New("offset can not be negative")
+)
 
 type (
 	// dbHost defines a hostdb.Interaction as persisted in the DB.
@@ -230,14 +232,16 @@ func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 
 // Hosts returns up to max hosts that have not been interacted with since
 // the specified time.
-func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
-	// Filter all hosts for the ones that have not been updated since a
-	// given time.
-	var fullHosts []dbHost
+func (db *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	}
+
 	var hosts []hostdb.Host
-	err := db.db.Table("hosts").
-		Limit(max).
-		Find(&fullHosts).
+	var fullHosts []dbHost
+	err := db.db.Model(&dbHost{}).
+		Offset(offset).
+		Limit(limit).
 		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
 			for _, fh := range fullHosts {
 				hosts = append(hosts, fh.convert())

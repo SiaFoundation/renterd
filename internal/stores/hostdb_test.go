@@ -49,7 +49,7 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Assert it's returned
-	allHosts, err := hdb.Hosts(time.Now(), -1)
+	allHosts, err := hdb.Hosts(0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}

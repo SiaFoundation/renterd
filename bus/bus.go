@@ -62,8 +62,8 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+		Hosts(offset, limit int) ([]hostdb.Host, error)
 		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 	}
 
@@ -345,15 +345,13 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *bus) hostsHandler(jc jape.Context) {
-	var notSince time.Time
-	max := -1
-	if jc.DecodeForm("notSince", (*api.ParamTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
-		return
-	}
-	hosts, err := b.hdb.Hosts(notSince, max)
-	if jc.Check("couldn't load hosts", err) == nil {
-		jc.Encode(hosts)
+func (b *bus) hostsHandlerGET(jc jape.Context) {
+	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
+		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
+			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check("couldn't load hosts", err) == nil {
+				jc.Encode(hosts)
+			}
+		}
 	}
 }
 
@@ -640,7 +638,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":          b.hostsHandler,
+		"GET    /hosts":          b.hostsHandlerGET,
 		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
 		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
