@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
@@ -16,6 +17,12 @@ import (
 )
 
 const (
+	// candidateHostsBatchSize is the amount of candidate hosts we fetch in a
+	// single batch
+	candidateHostsBatchSize = 100
+
+	// contractLockingDurationRenew is the amount of time we hold a contract
+	// lock when renewing a contract
 	contractLockingDurationRenew = 30 * time.Second
 
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
@@ -389,12 +396,14 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		return nil, err
 	}
 
-	// calculate how many contracts we are missing
-	required := addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts)
-	missing := int(required) - len(active)
-	if missing <= 0 {
+	// check if we're missing contracts
+	minRequired := addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts)
+	if uint64(len(active)) >= minRequired {
 		return nil, nil
 	}
+
+	// calculate how much we are missing
+	missing := cfg.Contracts.Hosts - uint64(len(active))
 
 	// fetch recommended txn fee
 	fee, err := c.ap.bus.RecommendedFee()
@@ -403,7 +412,8 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 	}
 
 	// fetch candidate hosts
-	candidates, err := c.candidateHosts(cfg, addLeeway(uint64(missing), leewayPctCandidateHosts))
+	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
+	candidates, err := c.candidateHosts(cfg, wanted)
 	if err != nil {
 		return nil, err
 	}
@@ -712,13 +722,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	return estimatedCost, nil
 }
 
-func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted uint64) ([]consensus.PublicKey, error) {
-	// fetch all contracts
-	active, err := c.ap.bus.ActiveContracts()
-	if err != nil {
-		return nil, err
-	}
-
+func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted int) ([]consensus.PublicKey, error) {
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings()
 	if err != nil {
@@ -731,61 +735,80 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted uint64) ([]c
 		return nil, err
 	}
 
-	// build a map
+	// fetch currently active contracts
+	active, err := c.ap.bus.ActiveContracts()
+	if err != nil {
+		return nil, err
+	}
+
+	// create a map of used hosts
 	used := make(map[string]bool)
 	for _, contract := range active {
 		used[contract.HostKey.String()] = true
 	}
 
+	// create a map of unusable hosts to avoid redundant checks
+	unusable := make(map[string]bool)
+
 	// create IP filter
 	ipFilter := newIPFilter()
 
-	// fetch hosts
-	hosts, err := c.ap.bus.Hosts(0, -1)
-	if err != nil {
-		return nil, err
+	// limit the amount of rounds we want to do
+	rounds := 10
+	for rounds*candidateHostsBatchSize < wanted {
+		rounds *= 2
 	}
 
-	// filter unusable hosts
-	filtered := hosts[:0]
-	for _, h := range hosts {
-		if used[h.PublicKey.String()] {
-			continue
+	// fetch random hosts
+	scored := make([]hostdb.Host, 0, wanted)
+	scores := make([]float64, 0, wanted)
+	for r := 0; r < rounds && len(scored) < wanted; r++ {
+		hosts, err := c.ap.bus.RandomHosts(candidateHostsBatchSize)
+		if err != nil {
+			return nil, err
 		}
 
-		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h}); usable {
-			filtered = append(filtered, h)
-		}
-	}
+		for _, h := range hosts {
+			hk := h.PublicKey.String()
+			if used[hk] || unusable[hk] {
+				continue
+			}
 
-	// score each host
-	scores := make([]float64, 0, len(filtered))
-	scored := filtered[:0]
-	for _, host := range filtered {
-		score := hostScore(cfg, Host{host})
-		if score == 0 {
-			c.logger.DPanicw("sanity check failed", "score", score, "hk", host.PublicKey)
-			continue
-		}
+			usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h})
+			if !usable {
+				unusable[h.PublicKey.String()] = true
+				continue
+			}
 
-		scores = append(scores, score)
-		scored = append(scored, host)
+			score := hostScore(cfg, Host{h})
+			if score == 0 {
+				c.logger.DPanicw("sanity check failed", "score", score, "hk", h.PublicKey)
+				continue
+			}
+
+			scored = append(scored, h)
+			scores = append(scores, score)
+		}
 	}
 
 	// update num wanted
-	if wanted > uint64(len(scores)) {
-		wanted = uint64(len(scores))
+	if len(scores) < wanted {
+		wanted = len(scores)
 	}
 
 	// select hosts
 	var selected []consensus.PublicKey
-	for uint64(len(selected)) < wanted && len(scored) > 0 {
+	for len(selected) < wanted && len(scored) > 0 {
 		i := randSelectByWeight(scores)
 		selected = append(selected, scored[i].PublicKey)
 
 		// remove selected host
 		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
 		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
+	}
+
+	if len(selected) < wanted {
+		c.logger.Debugf("could not fetch 'wanted' candidate hosts, %d<%d", len(selected), wanted)
 	}
 	return selected, nil
 }

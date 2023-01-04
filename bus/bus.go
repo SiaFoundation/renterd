@@ -3,6 +3,7 @@ package bus
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -65,6 +66,7 @@ type (
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 		Hosts(offset, limit int) ([]hostdb.Host, error)
 		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
+		RandomHosts(limit int) ([]hostdb.Host, error)
 	}
 
 	// A ContractStore stores contracts.
@@ -348,9 +350,17 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 func (b *bus) hostsHandlerGET(jc jape.Context) {
 	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
 		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
-			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check("couldn't load hosts", err) == nil {
+			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts, offset: %d limit: %d", offset, limit), err) == nil {
 				jc.Encode(hosts)
 			}
+		}
+	}
+}
+
+func (b *bus) hostsRandomHandlerGET(jc jape.Context) {
+	if limit := -1; jc.DecodeForm("limit", &limit) == nil {
+		if hosts, err := b.hdb.RandomHosts(limit); jc.Check("couldn't fetch hosts", err) == nil {
+			jc.Encode(hosts)
 		}
 	}
 }
@@ -638,9 +648,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":          b.hostsHandlerGET,
-		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
-		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
+		"GET    /hosts":         b.hostsHandlerGET,
+		"GET    /hosts/random":  b.hostsRandomHandlerGET,
+		"GET    /host/:hostkey": b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey": b.hostsPubkeyHandlerPOST,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

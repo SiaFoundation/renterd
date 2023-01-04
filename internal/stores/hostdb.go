@@ -230,8 +230,7 @@ func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	return h.convert(), tx.Error
 }
 
-// Hosts returns up to max hosts that have not been interacted with since
-// the specified time.
+// Hosts returns hosts at given offset and limit.
 func (db *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -260,6 +259,29 @@ func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
 	err := tx.Where("public_key", gobEncode(hostKey)).
 		Take(&h).Error
 	return h, err
+}
+
+// RandomHosts returns up to given limit of hosts that are randomly selected
+// from the host database.
+func (db *SQLStore) RandomHosts(limit int) ([]hostdb.Host, error) {
+	var dbHosts []dbHost
+	err := db.db.
+		Model(&dbHost{}).
+		Order("RANDOM()").
+		Limit(limit).
+		Preload("Interactions").
+		Preload("Announcements").
+		Find(&dbHosts).
+		Error
+	if err != nil {
+		return nil, err
+	}
+
+	var hosts []hostdb.Host
+	for _, fh := range dbHosts {
+		hosts = append(hosts, fh.convert())
+	}
+	return hosts, err
 }
 
 // RecordHostInteraction records an interaction with a host. If the host is not in

@@ -208,7 +208,7 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 
 // Host returns information about a particular host known to the server.
 func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts/%s", hostKey), &h)
+	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &h)
 	return
 }
 
@@ -218,6 +218,14 @@ func (c *Client) Hosts(offset, limit int) (hosts []hostdb.Host, err error) {
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
 	err = c.c.GET("/hosts?"+values.Encode(), &hosts)
+	return
+}
+
+// RandomHosts returns 'limit' randomly selected hosts.
+func (c *Client) RandomHosts(limit int) (hosts []hostdb.Host, err error) {
+	values := url.Values{}
+	values.Set("limit", fmt.Sprint(limit))
+	err = c.c.GET("/hosts/random?"+values.Encode(), &hosts)
 	return
 }
 

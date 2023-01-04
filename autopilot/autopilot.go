@@ -32,6 +32,7 @@ type Bus interface {
 	// hostdb
 	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 	Hosts(offset, limit int) ([]hostdb.Host, error)
+	RandomHosts(limit int) ([]hostdb.Host, error)
 	RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 
 	// contracts
