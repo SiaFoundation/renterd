@@ -237,6 +237,48 @@ func TestRecordInteractions(t *testing.T) {
 	}
 }
 
+// TestSQLHosts tests the Hosts method of the SQLHostDB type.
+func TestSQLHosts(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// add 3 hosts
+	hk1 := consensus.GeneratePrivateKey().PublicKey()
+	if err := hdb.addTestHost(hk1); err != nil {
+		t.Fatal(err)
+	}
+	hk2 := consensus.GeneratePrivateKey().PublicKey()
+	if err := hdb.addTestHost(hk2); err != nil {
+		t.Fatal(err)
+	}
+	hk3 := consensus.GeneratePrivateKey().PublicKey()
+	if err := hdb.addTestHost(hk3); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the hosts method returns the expected hosts
+	if hosts, err := hdb.Hosts(0, -1); err != nil || len(hosts) != 3 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	if hosts, err := hdb.Hosts(0, 1); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	} else if host := hosts[0]; host.PublicKey != hk1 {
+		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
+	}
+	if hosts, err := hdb.Hosts(1, 1); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	} else if host := hosts[0]; host.PublicKey != hk2 {
+		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
+	}
+	if hosts, err := hdb.Hosts(3, 1); err != nil || len(hosts) != 0 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	if _, err := hdb.Hosts(-1, -1); err != ErrNegativeOffset {
+		t.Fatal("unexpected error", err)
+	}
+}
+
 // TestRecordScan is a test for recording scans.
 func TestRecordScan(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
