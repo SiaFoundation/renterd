@@ -3,6 +3,7 @@ package stores
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -221,23 +222,30 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 		hks = append(hks, gobEncode(a.hostKey))
 	}
 	createdHosts := append([]dbHost{}, hosts...)
-	if err := tx.Clauses(clause.OnConflict{DoNothing: true}, clause.Returning{}).Create(&createdHosts).Error; err != nil {
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&createdHosts).Error; err != nil {
 		return err
 	}
 
 	// Fill in their ids using the public_key.
-	res := tx.Where("public_key IN ?", hks).Find(&hosts)
+	var foundHosts []dbHost
+	res := tx.Where("public_key IN ?", hks).Find(&foundHosts)
 	if res.Error != nil {
 		return res.Error
-	}
-	if res.RowsAffected != int64(len(hks)) {
-		return errors.New("not all hosts found - should never happen")
 	}
 
 	// Create a map of host key to its id.
 	hostMap := make(map[consensus.PublicKey]uint)
-	for _, host := range hosts {
+	for _, host := range foundHosts {
 		hostMap[host.PublicKey] = host.ID
+	}
+
+	// Sanity check. Every announcement should have a translation within the
+	// hostMap.
+	for _, a := range as {
+		_, exists := hostMap[a.hostKey]
+		if !exists {
+			return fmt.Errorf("no host id for host with key %v found - should never happen", a.hostKey)
+		}
 	}
 
 	// Create announcements.
