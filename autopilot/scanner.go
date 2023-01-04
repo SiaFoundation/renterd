@@ -14,23 +14,23 @@ import (
 )
 
 const (
-	// TODO: we could make these configurable
+	// TODO: make these configurable
 	scannerBatchSize       = 100
 	scannerNumThreads      = 5
 	scannerTimeoutInterval = 10 * time.Minute
 
-	trackerMinTimeout = time.Second * 30
-
+	// TODO: make these configurable
 	trackerMinDataPoints     = 25
+	trackerMinTimeout        = time.Second * 30
 	trackerNumDataPoints     = 1000
 	trackerTimeoutPercentile = 99
 )
 
 type (
-	// TODO: use the actual bus and worker interfaces when they've consolidated
-	// a bit, we currently use inline interfaces to avoid having to update the
-	// scanner tests with every interface change
 	scanner struct {
+		// TODO: use the actual bus and worker interfaces when they've consolidated
+		// a bit, we currently use inline interfaces to avoid having to update the
+		// scanner tests with every interface change
 		bus interface {
 			Hosts(offset, limit int) ([]hostdb.Host, error)
 		}

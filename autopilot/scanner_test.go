@@ -18,10 +18,6 @@ type mockBus struct {
 	reqs  []string
 }
 
-func (b *mockBus) ConsensusState() (api.ConsensusState, error) {
-	return api.ConsensusState{BlockHeight: 0, Synced: true}, nil
-}
-
 func (b *mockBus) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", offset, offset+limit))
 
