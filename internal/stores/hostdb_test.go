@@ -322,6 +322,60 @@ func TestSQLHosts(t *testing.T) {
 	}
 }
 
+// TestInsertAnnouncements is a test for insertAnnouncements.
+func TestInsertAnnouncements(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create announcements for 2 hosts.
+	ann1 := announcement{
+		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{},
+	}
+	ann2 := announcement{
+		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{},
+	}
+	ann3 := announcement{
+		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{},
+	}
+
+	// Insert the first one.
+	if err := insertAnnouncements(hdb.db, []announcement{ann1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert the first and second one.
+	if err := insertAnnouncements(hdb.db, []announcement{ann1, ann2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert the first one twice. The second one again and the third one.
+	if err := insertAnnouncements(hdb.db, []announcement{ann1, ann2, ann1, ann3}); err != nil {
+		t.Fatal(err)
+	}
+
+	// There should be 3 hosts in the db.
+	hosts, err := hdb.hosts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 3 {
+		t.Fatal("invalid number of hosts")
+	}
+
+	var anns []dbAnnouncement
+	if err := hdb.db.Find(&anns).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(anns) != 7 {
+		t.Fatal("wrong number of announcements in db")
+	}
+}
+
 // addTestHost ensures a host with given hostkey exists in the db.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk}).Error

@@ -226,14 +226,13 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 		return err
 	}
 
-	// Fill in their ids using the public_key.
+	// Fetch all the hosts for the relevant pubkeys to get their ids in the
+	// db and map the keys to those ids.
 	var foundHosts []dbHost
 	res := tx.Where("public_key IN ?", hks).Find(&foundHosts)
 	if res.Error != nil {
 		return res.Error
 	}
-
-	// Create a map of host key to its id.
 	hostMap := make(map[consensus.PublicKey]uint)
 	for _, host := range foundHosts {
 		hostMap[host.PublicKey] = host.ID
