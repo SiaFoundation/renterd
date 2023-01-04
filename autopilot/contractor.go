@@ -19,7 +19,7 @@ import (
 const (
 	// candidateHostsBatchSize is the amount of candidate hosts we fetch in a
 	// single batch
-	candidateHostsBatchSize = 100
+	candidateHostsBatchSize = 1000
 
 	// contractLockingDurationRenew is the amount of time we hold a contract
 	// lock when renewing a contract
