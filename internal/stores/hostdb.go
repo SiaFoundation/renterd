@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // consensusInfoID defines the primary key of the entry in the consensusInfo
@@ -212,13 +213,25 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {
-	// Create hosts if they don't exist yet.
+	// Create all missing hosts.
 	var hosts []dbHost
+	var hks [][]byte
 	for _, a := range as {
 		hosts = append(hosts, dbHost{PublicKey: a.hostKey})
+		hks = append(hks, gobEncode(a.hostKey))
 	}
-	if err := tx.FirstOrCreate(&hosts).Error; err != nil {
+	createdHosts := append([]dbHost{}, hosts...)
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}, clause.Returning{}).Create(&createdHosts).Error; err != nil {
 		return err
+	}
+
+	// Fill in their ids using the public_key.
+	res := tx.Where("public_key IN ?", hks).Find(&hosts)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != int64(len(hks)) {
+		return errors.New("not all hosts found - should never happen")
 	}
 
 	// Create a map of host key to its id.
@@ -242,4 +255,12 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 		return err
 	}
 	return nil
+}
+
+func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChange) error {
+	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
+		Model: Model{
+			ID: consensusInfoID,
+		},
+	}).Update("CCID", newCCID.ID[:]).Error
 }

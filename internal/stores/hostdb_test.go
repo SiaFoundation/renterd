@@ -177,13 +177,22 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatalf("wrong number of announcements %v != %v", len(h2.Announcements), 1)
 	}
 
-	// Apply a consensus change to make sure the ccid is updated.
+	// Wait for the persist interval to pass to make sure an empty consensus
+	// change triggers a persist.
+	time.Sleep(hdb.persistInterval)
+
+	// Apply a consensus change.
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}
 	hdb.ProcessConsensusChange(modules.ConsensusChange{ID: ccid2})
 
+	// Shut down the background thread and wait for it to exit to be sure
+	// that the ccid was written to the db.
+	hdb.cancel()
+	hdb.wg.Wait()
+
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false)
+	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

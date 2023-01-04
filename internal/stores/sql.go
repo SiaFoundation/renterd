@@ -29,6 +29,7 @@ type (
 		ctx    context.Context
 		cancel context.CancelFunc
 
+		persistInterval  time.Duration
 		newAnnouncements chan *announcementBatch
 		wg               sync.WaitGroup
 	}
@@ -78,25 +79,25 @@ func (s *SQLStore) threadedProcessAnnouncements() {
 		// If there is nothing to insert at all, block again. Unless too
 		// much time has passed since the last insertion. Then we want
 		// to at least update the ccid.
-		if len(announcements) == 0 && time.Since(lastInsert) < 10*time.Minute {
+		if len(announcements) == 0 && time.Since(lastInsert) < s.persistInterval {
 			continue
 		}
 
 		for {
 			err := s.db.Transaction(func(tx *gorm.DB) error {
 				// Insert announcements.
-				if err := insertAnnouncements(tx, announcements); err != nil {
-					return err
+				if len(announcements) > 0 {
+					if err := insertAnnouncements(tx, announcements); err != nil {
+						return err
+					}
 				}
 				// Update consensus change id.
-				return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-					Model: Model{
-						ID: consensusInfoID,
-					},
-				}).Update("CCID", ccid.ID[:]).Error
+				return updateCCID(tx, ccid)
 			})
+
 			// If the update failed, try again after some time.
 			if err != nil {
+				println("failed to persist host announcements... retrying: " + err.Error()) // TODO: replace with proper logging
 				select {
 				case <-s.ctx.Done():
 					return // shutdown
@@ -138,7 +139,7 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
@@ -195,6 +196,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 		cancel:           cancel,
 		db:               db,
 		newAnnouncements: make(chan *announcementBatch, 1000),
+		persistInterval:  persistInterval,
 	}
 
 	// Start background thread.

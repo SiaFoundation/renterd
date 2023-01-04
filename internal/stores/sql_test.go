@@ -2,6 +2,7 @@ package stores
 
 import (
 	"encoding/hex"
+	"time"
 
 	"go.sia.tech/siad/modules"
 	"lukechampine.com/frand"
@@ -11,7 +12,7 @@ import (
 func newTestSQLStore() (*SQLStore, string, modules.ConsensusChangeID, error) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	conn := NewEphemeralSQLiteConnection(dbName)
-	sqlStore, ccid, err := NewSQLStore(conn, true)
+	sqlStore, ccid, err := NewSQLStore(conn, true, time.Second)
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}
