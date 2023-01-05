@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
@@ -225,9 +226,17 @@ func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Interaction) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), i, nil)
+func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, successful, failed uint64) (err error) {
+	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), api.HostsPubkeyHandlerPOSTRequest{
+		Successes: successful,
+		Failures:  failed,
+	}, nil)
 	return
+}
+
+// RecordHostScan recors a scan for the supplied host.
+func (c *Client) RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) (err error) {
+	panic("not implemented")
 }
 
 // ActiveContracts returns all active contracts in the contract store.

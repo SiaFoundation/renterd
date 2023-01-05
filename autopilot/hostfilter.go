@@ -72,8 +72,8 @@ func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64
 }
 
 func isOutOfFunds(cfg api.AutopilotConfig, h Host, c api.Contract) bool {
-	settings, _, found := h.LastKnownSettings()
-	if !found {
+	settings := h.Settings
+	if settings == nil {
 		return false
 	}
 
@@ -93,18 +93,18 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 }
 
 func isGouging(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
-	settings, _, found := h.LastKnownSettings()
-	if !found {
+	settings := h.Settings
+	if settings == nil {
 		return true, "no settings"
 	}
 
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
-	return worker.PerformGougingChecks(gs, settings, cfg.Contracts.Period, redundancy).IsGouging()
+	return worker.PerformGougingChecks(gs, *settings, cfg.Contracts.Period, redundancy).IsGouging()
 }
 
 func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {
-	settings, _, found := h.LastKnownSettings()
-	if !found {
+	settings := h.Settings
+	if settings == nil {
 		return true, "no settings"
 	}
 	if !settings.AcceptingContracts {

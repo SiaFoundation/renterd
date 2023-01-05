@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"encoding/json"
 	"net"
 	"testing"
 	"time"
@@ -21,55 +20,41 @@ func TestHost(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 
-	// add two failed scans and assert it's offline
-	scan1 := newTestScan(newTestHostSettings(), false)
-	scan2 := newTestScan(newTestHostSettings(), false)
-	h.Interactions = append(h.Interactions, scan1, scan2)
+	// Mark last scan failed. Should still be online.
+	h.Interactions.LastScanSuccess = false
+	if !h.IsOnline() {
+		t.Fatal("unexpected")
+	}
+
+	// Mark previous scan failed as well. Should be offline.
+	h.Interactions.PreviousScanSuccess = false
 	if h.IsOnline() {
 		t.Fatal("unexpected")
 	}
 
-	// assert we get the last known settings
-	s, _, found := h.LastKnownSettings()
-	if !found || !s.AcceptingContracts {
-		t.Fatal("unexpected")
-	}
-
-	// add new scan and assert we get the latest settings
-	settings := newTestHostSettings()
-	settings.AcceptingContracts = false
-	scan3 := newTestScan(settings, true)
-	h.Interactions = append(h.Interactions, scan3)
-	s, _, _ = h.LastKnownSettings()
-	if s.AcceptingContracts {
-		t.Fatal("unexpected")
-	}
-
-	// fetch latest host scans without limit
-	var latestSettings rhpv2.HostSettings
-	if scans := h.LatestHostScans(0); len(scans) != 4 {
-		t.Fatal("unexpected", len(scans))
-	}
-	if scans := h.LatestHostScans(1); len(scans) != 1 {
-		t.Fatal("unexpected", len(scans))
-	} else if err := json.Unmarshal(scans[0].Result, &latestSettings); err != nil {
-		t.Fatal("unexpected err", err)
-	} else if latestSettings.AcceptingContracts {
-		t.Fatal("unexpected scan", scans[0])
-	}
-
-	// assert is host returns expected outcome
-	if h.IsHost("foo") || !h.IsHost(hk.String()) || !h.IsHost(h.NetAddress) {
+	// Mark last scan successful again. Should be online.
+	h.Interactions.LastScanSuccess = true
+	if !h.IsOnline() {
 		t.Fatal("unexpected")
 	}
 }
 
 func newTestHost(hk consensus.PublicKey, settings *rhpv2.HostSettings) hostdb.Host {
 	return hostdb.Host{
-		NetAddress:   randomIP().String(),
-		KnownSince:   time.Now(),
-		Interactions: []hostdb.Interaction{newTestScan(settings, true)},
-		PublicKey:    hk,
+		NetAddress: randomIP().String(),
+		KnownSince: time.Now(),
+		Interactions: hostdb.Interactions{
+			TotalScans:          2,
+			LastScan:            time.Now().Add(-time.Minute),
+			LastScanSuccess:     true,
+			PreviousScanSuccess: true,
+			Uptime:              10 * time.Minute,
+			Downtime:            10 * time.Minute,
+
+			SuccessfulInteractions: 2,
+			FailedInteractions:     0,
+		},
+		PublicKey: hk,
 	}
 }
 

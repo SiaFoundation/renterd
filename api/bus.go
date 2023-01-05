@@ -43,6 +43,11 @@ type ContractAcquireResponse struct {
 	Locked bool `json:"locked"`
 }
 
+type HostsPubkeyHandlerPOSTRequest struct {
+	Failures  uint64 `json:"failures"`
+	Successes uint64 `json:"successes"`
+}
+
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`

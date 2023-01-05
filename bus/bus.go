@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
@@ -64,7 +65,8 @@ type (
 	HostDB interface {
 		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
-		RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+		RecordHostInteractions(hostKey consensus.PublicKey, successes, failures uint64) error
+		RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) error
 	}
 
 	// A ContractStore stores contracts.
@@ -369,10 +371,10 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
-	var hi hostdb.Interaction
+	var req api.HostsPubkeyHandlerPOSTRequest
 	var hostKey consensus.PublicKey
-	if jc.Decode(&hi) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordInteraction(hostKey, hi))
+	if jc.Decode(&req) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
+		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(hostKey, req.Successes, req.Failures))
 	}
 }
 

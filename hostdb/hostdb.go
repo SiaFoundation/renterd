@@ -1,11 +1,11 @@
 package hostdb
 
 import (
-	"encoding/json"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
@@ -54,11 +54,17 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 	}
 }
 
-// An Interaction represents a generic interaction with a host.
-type Interaction struct {
-	Timestamp time.Time
-	Type      string
-	Result    json.RawMessage
+// Interactions contains metadata about a host's interactions.
+type Interactions struct {
+	TotalScans          uint64
+	LastScan            time.Time
+	LastScanSuccess     bool
+	PreviousScanSuccess bool
+	Uptime              time.Duration
+	Downtime            time.Duration
+
+	SuccessfulInteractions float64
+	FailedInteractions     float64
 }
 
 // A Host pairs a host's public key with a set of interactions.
@@ -66,5 +72,16 @@ type Host struct {
 	KnownSince   time.Time
 	PublicKey    consensus.PublicKey
 	NetAddress   string
-	Interactions []Interaction
+	Settings     *rhp.HostSettings
+	Interactions Interactions
+}
+
+// IsOnline returns whether a host is considered online.
+func (h Host) IsOnline() bool {
+	if h.Interactions.TotalScans == 0 {
+		return false
+	} else if h.Interactions.TotalScans == 1 {
+		return h.Interactions.LastScanSuccess
+	}
+	return h.Interactions.LastScanSuccess || h.Interactions.PreviousScanSuccess
 }

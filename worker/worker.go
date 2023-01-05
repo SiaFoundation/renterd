@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,15 +14,19 @@ import (
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
 )
+
+type InteractionResult struct {
+	Error string `json:"error,omitempty"`
+}
 
 // parseRange parses a Range header string as per RFC 7233. Only the first range
 // is returned. If no range is specified, parseRange returns 0, size.
@@ -92,23 +95,6 @@ func errToStr(err error) string {
 	return ""
 }
 
-type InteractionResult struct {
-	Error string `json:"error,omitempty"`
-}
-
-type ScanResult struct {
-	InteractionResult
-	Settings rhpv2.HostSettings `json:"settings,omitempty"`
-}
-
-func IsSuccessfulInteraction(i hostdb.Interaction) bool {
-	var result InteractionResult
-	if err := json.Unmarshal(i.Result, &result); err != nil {
-		return false
-	}
-	return result.Error == ""
-}
-
 type ephemeralMetricsRecorder struct {
 	ms []metrics.Metric
 	mu sync.Mutex
@@ -120,15 +106,18 @@ func (mr *ephemeralMetricsRecorder) RecordMetric(m metrics.Metric) {
 	mr.ms = append(mr.ms, m)
 }
 
-func (mr *ephemeralMetricsRecorder) interactions() []hostdb.Interaction {
+func (mr *ephemeralMetricsRecorder) stats() (successes, failures uint64) {
 	// TODO: merge/filter metrics?
-	var his []hostdb.Interaction
+	mr.mu.Lock()
+	defer mr.mu.Unlock()
 	for _, m := range mr.ms {
-		if hi, ok := toHostInteraction(m); ok {
-			his = append(his, hi)
+		if m.IsSuccess() {
+			successes++
+		} else {
+			failures++
 		}
 	}
-	return his
+	return
 }
 
 // MetricHostDial contains metrics relating to a host dial.
@@ -143,6 +132,9 @@ type MetricHostDial struct {
 // IsMetric implements metrics.Metric.
 func (MetricHostDial) IsMetric() {}
 
+// IsSuccess implements metrics.Metric.
+func (m MetricHostDial) IsSuccess() bool { return m.Err == nil }
+
 func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.Conn, error) {
 	start := time.Now()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
@@ -156,46 +148,13 @@ func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.
 	return conn, err
 }
 
-func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
-	transform := func(timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
-		b, _ := json.Marshal(InteractionResult{Error: errToStr(err)})
-		hi := hostdb.Interaction{
-			Timestamp: timestamp,
-			Type:      typ,
-			Result:    json.RawMessage(b),
-		}
-		return hi, true
-	}
-
-	switch m := m.(type) {
-	case MetricHostDial:
-		return transform(m.Timestamp, "dial", m.Err, struct {
-			HostIP    string        `json:"hostIP"`
-			Timestamp time.Time     `json:"timestamp"`
-			Elapsed   time.Duration `json:"elapsed"`
-		}{m.HostIP, m.Timestamp, m.Elapsed})
-	case rhpv2.MetricRPC:
-		return transform(m.Timestamp, "rhpv2 rpc", m.Err, struct {
-			RPC        string         `json:"RPC"`
-			Timestamp  time.Time      `json:"timestamp"`
-			Elapsed    time.Duration  `json:"elapsed"`
-			Contract   string         `json:"contract"`
-			Uploaded   uint64         `json:"uploaded"`
-			Downloaded uint64         `json:"downloaded"`
-			Cost       types.Currency `json:"cost"`
-			Collateral types.Currency `json:"collateral"`
-		}{m.RPC.String(), m.Timestamp, m.Elapsed, m.Contract.String(), m.Uploaded, m.Downloaded, m.Cost, m.Collateral})
-	default:
-		return hostdb.Interaction{}, false
-	}
-}
-
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	ActiveContracts() ([]api.ContractMetadata, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
-	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+	RecordHostInteractions(hostKey consensus.PublicKey, successful, failed uint64) error
+	RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) error
 
 	DownloadParams() (api.DownloadParams, error)
 	UploadParams() (api.UploadParams, error)
@@ -239,33 +198,12 @@ type worker struct {
 	masterKey [32]byte
 }
 
-func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
-	hi := hostdb.Interaction{
-		Timestamp: time.Now(),
-		Type:      "scan",
-	}
-	if err == nil {
-		hi.Result, _ = json.Marshal(ScanResult{
-			Settings: settings,
-		})
-	} else {
-		hi.Result, _ = json.Marshal(ScanResult{
-			InteractionResult: InteractionResult{
-				Error: errToStr(err),
-			},
-		})
-	}
-	return w.bus.RecordHostInteraction(hostKey, hi)
-}
-
 func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
-		// TODO: send all interactions in one request
-		for _, hi := range mr.interactions() {
-			// TODO: handle error
-			_ = w.bus.RecordHostInteraction(hostKey, hi)
-		}
+		successes, failures := mr.stats()
+		// TODO: handle error
+		_ = w.bus.RecordHostInteractions(hostKey, successes, failures)
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
 	conn, err := dial(ctx, hostIP, hostKey)
@@ -376,7 +314,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		return err
 	})
 	elapsed := time.Since(start)
-	w.recordScan(rsr.HostKey, settings, err)
+	w.bus.RecordHostScan(rsr.HostKey, time.Now(), err == nil, settings) // TODO: error handling
 
 	if jc.Check("couldn't scan host", err) != nil {
 		return

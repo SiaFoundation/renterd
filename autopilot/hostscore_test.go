@@ -1,15 +1,12 @@
 package autopilot
 
 import (
-	"encoding/json"
 	"math"
 	"testing"
 	"time"
 
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
@@ -44,14 +41,14 @@ func TestHostScore(t *testing.T) {
 
 	// assert interactions affect the score
 	h1 = newHost(newTestHostSettings()) // reset
-	h1.Interactions = append(h1.Interactions, newTestScan(newTestHostSettings(), true))
+	h1.Interactions.SuccessfulInteractions++
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
 		t.Fatal("unexpected")
 	}
 
 	// assert uptime affects the score
 	h2 = newHost(newTestHostSettings()) // reset
-	h2.Interactions[0] = newTestScan(nil, false)
+	h2.Interactions.PreviousScanSuccess = false
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) || ageScore(h1) != ageScore(h2) {
 		t.Fatal("unexpected")
 	}
@@ -83,25 +80,6 @@ func TestRandSelectByWeight(t *testing.T) {
 	}
 	if diff := absDiffInt(counts[0], counts[1]); diff > 40 {
 		t.Fatal("unexpected", counts[0], counts[1], diff)
-	}
-}
-
-func newTestScan(settings *rhpv2.HostSettings, success bool) hostdb.Interaction {
-	sr := worker.ScanResult{}
-	if settings != nil {
-		sr.Settings = *settings
-	}
-	if !success {
-		sr.Error = "failure"
-	}
-	b, err := json.Marshal(sr)
-	if err != nil {
-		panic(err)
-	}
-	return hostdb.Interaction{
-		Timestamp: time.Now(),
-		Type:      "scan",
-		Result:    b,
 	}
 }
 

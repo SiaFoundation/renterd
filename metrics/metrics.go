@@ -7,6 +7,7 @@ import (
 // A Metric contains metadata pertaining to a particular operation.
 type Metric interface {
 	IsMetric()
+	IsSuccess() bool
 }
 
 // A MetricsRecorder records metrics.

@@ -68,7 +68,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool) (*SQLStore, modules.Consensu
 
 			// bus.HostDB tables
 			&dbHost{},
-			&dbInteraction{},
 			&dbConsensusInfo{},
 
 			// bus.ObjectStore tables
