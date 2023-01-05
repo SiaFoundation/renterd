@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 )
 
@@ -43,16 +44,6 @@ func TestSQLHostDB(t *testing.T) {
 	}
 	if len(allHosts) != 1 || allHosts[0].PublicKey != hk {
 		t.Fatal("unexpected result", len(allHosts))
-	}
-
-	// Assert we can include/exclude the host if we play around with the notSince param
-	allHosts, err = hdb.Hosts(time.Now().Add(-2*time.Hour), -1)
-	if err != nil || len(allHosts) != 0 {
-		t.Fatal("unexpected result", err, len(allHosts))
-	}
-	allHosts, err = hdb.Hosts(time.Now().Add(-30*time.Minute), -1)
-	if err != nil || len(allHosts) != 1 || allHosts[0].PublicKey != hk {
-		t.Fatal("unexpected result", err, len(allHosts))
 	}
 
 	// Insert an announcement for the host and another one for an unknown
@@ -144,6 +135,118 @@ func TestSQLHostDB(t *testing.T) {
 	}
 }
 
+// TestRecordScan is a test for RecordHostScan.
+func TestRecordScan(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a host.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	err = hdb.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The host shouldn't have any interaction related fields set.
+	host, err := hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Interactions != (hostdb.Interactions{}) {
+		t.Fatal("mismatch")
+	}
+	if host.Settings != nil {
+		t.Fatal("mismatch")
+	}
+
+	// Fetch the host directly to get the creation time.
+	h, err := hostByPubKey(hdb.db, hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.CreatedAt.IsZero() {
+		t.Fatal("creation time not set")
+	}
+
+	// Record a scan.
+	firstScanTime := time.Now().UTC()
+	settings := rhp.HostSettings{NetAddress: "host.com"}
+	if err := hdb.RecordHostScan(hk, firstScanTime, true, settings); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// We expect no uptime or downtime from only a single scan.
+	uptime := time.Duration(0)
+	downtime := time.Duration(0)
+	if host.Interactions != (hostdb.Interactions{
+		TotalScans:             1,
+		LastScan:               firstScanTime,
+		LastScanSuccess:        true,
+		PreviousScanSuccess:    false,
+		Uptime:                 uptime,
+		Downtime:               downtime,
+		SuccessfulInteractions: 1,
+		FailedInteractions:     0,
+	}) {
+		t.Fatal("mismatch")
+	}
+	if !reflect.DeepEqual(*host.Settings, settings) {
+		t.Fatal("mismatch")
+	}
+
+	// Record another scan 1 hour after the previous one.
+	secondScanTime := firstScanTime.Add(time.Hour)
+	if err := hdb.RecordHostScan(hk, secondScanTime, true, settings); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uptime += secondScanTime.Sub(firstScanTime)
+	if host.Interactions != (hostdb.Interactions{
+		TotalScans:             2,
+		LastScan:               secondScanTime,
+		LastScanSuccess:        true,
+		PreviousScanSuccess:    true,
+		Uptime:                 uptime,
+		Downtime:               downtime,
+		SuccessfulInteractions: 2,
+		FailedInteractions:     0,
+	}) {
+		t.Fatal("mismatch")
+	}
+
+	// Record another scan 2 hours after the second one. This time it fails.
+	thirdScanTime := secondScanTime.Add(2 * time.Hour)
+	if err := hdb.RecordHostScan(hk, thirdScanTime, false, settings); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downtime += thirdScanTime.Sub(secondScanTime)
+	if host.Interactions != (hostdb.Interactions{
+		TotalScans:             3,
+		LastScan:               thirdScanTime,
+		LastScanSuccess:        false,
+		PreviousScanSuccess:    true,
+		Uptime:                 uptime,
+		Downtime:               downtime,
+		SuccessfulInteractions: 2,
+		FailedInteractions:     1,
+	}) {
+		t.Fatal("mismatch")
+	}
+}
+
 // addTestHost ensures a host with given hostkey exists in the db.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk}).Error
@@ -153,8 +256,7 @@ func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 // interactions for all hosts is expensive in production.
 func (db *SQLStore) hosts() ([]dbHost, error) {
 	var hosts []dbHost
-	tx := db.db.Preload("Interactions").
-		Find(&hosts)
+	tx := db.db.Find(&hosts)
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
