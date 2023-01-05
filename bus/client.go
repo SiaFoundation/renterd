@@ -236,7 +236,12 @@ func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, successful,
 
 // RecordHostScan recors a scan for the supplied host.
 func (c *Client) RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) (err error) {
-	panic("not implemented")
+	err = c.c.POST(fmt.Sprintf("/hosts/scan/%s", hostKey), api.HostsScanPubkeyHandlerPOSTRequest{
+		Time:     t,
+		Success:  success,
+		Settings: settings,
+	}, nil)
+	return
 }
 
 // ActiveContracts returns all active contracts in the contract store.

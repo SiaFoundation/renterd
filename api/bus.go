@@ -5,6 +5,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
@@ -46,6 +47,12 @@ type ContractAcquireResponse struct {
 type HostsPubkeyHandlerPOSTRequest struct {
 	Failures  uint64 `json:"failures"`
 	Successes uint64 `json:"successes"`
+}
+
+type HostsScanPubkeyHandlerPOSTRequest struct {
+	Time     time.Time        `json:"time"`
+	Success  bool             `json:"success"`
+	Settings rhp.HostSettings `json:"settings"`
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
