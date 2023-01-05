@@ -55,6 +55,7 @@ func newTestHost(hk consensus.PublicKey, settings *rhpv2.HostSettings) hostdb.Ho
 			FailedInteractions:     0,
 		},
 		PublicKey: hk,
+		Settings:  settings,
 	}
 }
 
