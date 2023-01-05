@@ -442,7 +442,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		}
 
 		// fetch host settings
-		scan, err := c.ap.worker.RHPScan(candidate, host.NetAddress(), 0)
+		scan, err := c.ap.worker.RHPScan(candidate, host.NetAddress, 0)
 		if err != nil {
 			c.logger.Debugw(
 				fmt.Sprintf("failed scan, err: %v", err),
@@ -477,7 +477,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		}
 
 		// form contract
-		contract, err := c.formContract(cfg, currentPeriod, candidate, host.NetAddress(), settings, renterAddress, renterFunds, hostCollateral)
+		contract, err := c.formContract(cfg, currentPeriod, candidate, host.NetAddress, settings, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			c.logger.Errorw(
@@ -589,7 +589,7 @@ func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract ap
 	}
 
 	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress(), 0)
+	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
 	if err != nil {
 		c.logger.Debugw(
 			fmt.Sprintf("failed scan, err: %v", err),
@@ -628,7 +628,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	}
 
 	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress(), 0)
+	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
 	if err != nil {
 		c.logger.Debugw(
 			fmt.Sprintf("failed scan, err: %v", err),

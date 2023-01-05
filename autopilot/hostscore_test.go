@@ -28,7 +28,7 @@ func TestHostScore(t *testing.T) {
 	}
 
 	// assert age affects the score
-	h1.Announcements[0].Timestamp = time.Now().Add(-1 * day)
+	h1.KnownSince = time.Now().Add(-1 * day)
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
 		t.Fatal("unexpected")
 	}

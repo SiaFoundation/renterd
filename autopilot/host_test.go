@@ -59,16 +59,17 @@ func TestHost(t *testing.T) {
 	}
 
 	// assert is host returns expected outcome
-	if h.IsHost("foo") || !h.IsHost(hk.String()) || !h.IsHost(h.NetAddress()) {
+	if h.IsHost("foo") || !h.IsHost(hk.String()) || !h.IsHost(h.NetAddress) {
 		t.Fatal("unexpected")
 	}
 }
 
 func newTestHost(hk consensus.PublicKey, settings *rhpv2.HostSettings) hostdb.Host {
 	return hostdb.Host{
-		Announcements: []hostdb.Announcement{{Timestamp: time.Now(), NetAddress: randomIP().String()}},
-		Interactions:  []hostdb.Interaction{newTestScan(settings, true)},
-		PublicKey:     hk,
+		NetAddress:   randomIP().String(),
+		KnownSince:   time.Now(),
+		Interactions: []hostdb.Interaction{newTestScan(settings, true)},
+		PublicKey:    hk,
 	}
 }
 

@@ -108,35 +108,31 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Read the announcement and verify it.
-	var announcements []dbAnnouncement
-	tx = hdb.db.Find(&announcements)
+	// Read the host and verify that the announcement related fields were
+	// set.
+	var h dbHost
+	tx = hdb.db.Where("last_announcement = ? AND net_address = ?", a.Timestamp, a.NetAddress).Find(&h)
 	if tx.Error != nil {
-		t.Fatal(err)
+		t.Fatal(tx.Error)
 	}
-	if len(announcements) != 1 {
-		t.Fatalf("wrong number of announcements %v != %v", len(announcements), 1)
-	}
-	if !reflect.DeepEqual(announcements[0].convert(), a) {
-		t.Fatal("announcement mismatch", announcements[0], a)
+	if h.PublicKey != hk {
+		t.Fatal("wrong host returned")
 	}
 
-	// Read the host using SelectHosts. Even without manually adding it
-	// there should be an entry which was created upon inserting the first
-	// interaction. We should also be able to preload the interactions.
+	// Same thing again but with hosts.
 	hosts, err := hdb.hosts()
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := hosts[0]
 	if len(hosts) != 1 {
-		t.Fatalf("invalid number of hosts %v != %v", len(hosts), 1)
+		t.Fatal("wrong number of hosts", len(hosts))
 	}
-	if len(h.Interactions) != 2 {
-		t.Fatalf("wrong number of interactions %v != %v", len(h.Interactions), 2)
-	}
-	if len(h.Announcements) != 1 {
-		t.Fatalf("wrong number of announcements %v != %v", len(h.Announcements), 1)
+	h1 := hosts[0]
+	h1.Interactions = h.Interactions // ignore for comparison
+	if !reflect.DeepEqual(h1, h) {
+		fmt.Println(h1)
+		fmt.Println(h)
+		t.Fatal("mismatch")
 	}
 
 	// Same thing again but with Host.
@@ -144,11 +140,11 @@ func TestSQLHostDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(h2.Interactions) != 2 {
-		t.Fatalf("wrong number of interactions %v != %v", len(h2.Interactions), 2)
+	if h2.NetAddress != h.NetAddress {
+		t.Fatal("wrong net address")
 	}
-	if len(h2.Announcements) != 1 {
-		t.Fatalf("wrong number of announcements %v != %v", len(h2.Announcements), 1)
+	if h2.KnownSince.IsZero() {
+		t.Fatal("known since not set")
 	}
 
 	// Insert another announcement for an unknown host.
@@ -164,8 +160,11 @@ func TestSQLHostDB(t *testing.T) {
 	if len(h3.Interactions) != 0 {
 		t.Fatalf("wrong number of interactions %v != %v", len(h2.Interactions), 2)
 	}
-	if len(h3.Announcements) != 1 {
-		t.Fatalf("wrong number of announcements %v != %v", len(h2.Announcements), 1)
+	if h3.NetAddress != a.NetAddress {
+		t.Fatal("wrong net address")
+	}
+	if h3.KnownSince.IsZero() {
+		t.Fatal("known since not set")
 	}
 
 	// Apply a consensus change to make sure the ccid is updated.
@@ -307,4 +306,16 @@ func TestSQLHosts(t *testing.T) {
 // addTestHost ensures a host with given hostkey exists in the db.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk}).Error
+}
+
+// hosts returns all hosts in the db. Only used in testing since preloading all
+// interactions for all hosts is expensive in production.
+func (db *SQLStore) hosts() ([]dbHost, error) {
+	var hosts []dbHost
+	tx := db.db.Preload("Interactions").
+		Find(&hosts)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return hosts, nil
 }

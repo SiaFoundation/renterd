@@ -63,15 +63,8 @@ type Interaction struct {
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	PublicKey     consensus.PublicKey
-	Announcements []Announcement
-	Interactions  []Interaction
-}
-
-// NetAddress returns the host's last announced NetAddress, if available.
-func (h *Host) NetAddress() string {
-	if len(h.Announcements) == 0 {
-		return ""
-	}
-	return h.Announcements[len(h.Announcements)-1].NetAddress
+	KnownSince   time.Time
+	PublicKey    consensus.PublicKey
+	NetAddress   string
+	Interactions []Interaction
 }
