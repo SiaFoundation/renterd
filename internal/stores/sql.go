@@ -1,9 +1,7 @@
 package stores
 
 import (
-	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"go.sia.tech/siad/modules"
@@ -24,11 +22,10 @@ type (
 	SQLStore struct {
 		db *gorm.DB
 
-		ctx    context.Context
-		cancel context.CancelFunc
-
-		newAnnouncements chan *announcementBatch
-		wg               sync.WaitGroup
+		lastAnnouncementSave   time.Time
+		persistInterval        time.Duration
+		unappliedAnnouncements []announcement
+		unappliedCCID          modules.ConsensusChangeID
 	}
 )
 
@@ -54,7 +51,7 @@ func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
 //	  should be made configurable and set to TRUNCATE or any of the other options.
 //	  For reference see https://github.com/mattn/go-sqlite3#connection-string.
 func NewSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=5000&_foreign_keys=1&_journal_mode=WAL", path))
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL", path))
 }
 
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
@@ -111,33 +108,16 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	var ccid modules.ConsensusChangeID
 	copy(ccid[:], ci.CCID)
 
-	ctx, cancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
-		ctx:              ctx,
-		cancel:           cancel,
-		db:               db,
-		newAnnouncements: make(chan *announcementBatch, 1000),
+		db:                   db,
+		lastAnnouncementSave: time.Now(),
+		persistInterval:      persistInterval,
 	}
-
-	// Start background thread.
-	ss.wg.Add(1)
-	go func() {
-		defer ss.wg.Done()
-		ss.threadedProcessAnnouncements(persistInterval)
-	}()
-
 	return ss, ccid, nil
 }
 
 // Close closes the underlying database connection of the store.
 func (s *SQLStore) Close() error {
-	// Close context.
-	s.cancel()
-
-	// Block for threads to finish.
-	s.wg.Wait()
-
-	// Close db connection.
 	db, err := s.db.DB()
 	if err != nil {
 		return err

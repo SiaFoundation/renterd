@@ -185,11 +185,6 @@ func TestSQLHostDB(t *testing.T) {
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}
 	hdb.ProcessConsensusChange(modules.ConsensusChange{ID: ccid2})
 
-	// Shut down the background thread and wait for it to exit to be sure
-	// that the ccid was written to the db.
-	hdb.cancel()
-	hdb.wg.Wait()
-
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
 	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second)

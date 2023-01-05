@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -227,93 +226,34 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 
 	// Fetch announcements and add them to the queue.
-	var announcements []announcement
+	var newAnnouncements []announcement
 	for _, b := range cc.AppliedBlocks {
 		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
-			announcements = append(announcements, announcement{
+			newAnnouncements = append(newAnnouncements, announcement{
 				hostKey:      hostKey,
 				announcement: ha,
 			})
 		})
 		height++
 	}
-	db.newAnnouncements <- &announcementBatch{
-		announcements: announcements,
-		cc:            cc,
-	}
-}
 
-// threadedProcessAnnouncements works through the queue of announcements
-// obtained from ProcessConsensusChange and writes them to the db. Failed
-// insertions will be retried up until a certain limit.
-// Empty batches won't be inserted until persistInterval time has passed since
-// the last successful insertion.
-func (s *SQLStore) threadedProcessAnnouncements(persistInterval time.Duration) {
-	lastInsert := time.Now()
-	for {
-		var announcements []announcement
-		var ccid modules.ConsensusChange
+	db.unappliedAnnouncements = append(db.unappliedAnnouncements, newAnnouncements...)
+	db.unappliedCCID = cc.ID
 
-		// Block for next batch.
-		select {
-		case nextBatch := <-s.newAnnouncements:
-			announcements = append(announcements, nextBatch.announcements...)
-			ccid = nextBatch.cc
-		case <-s.ctx.Done():
-			return // shutdown
-		}
-
-		// Try to get a few more batches up to a soft limit of
-		// announcements.
-	ADD_MORE_LOOP:
-		for len(announcements) < announcementBatchSoftLimit {
-			select {
-			case nextBatch := <-s.newAnnouncements:
-				if nextBatch != nil {
-					announcements = append(announcements, nextBatch.announcements...)
-					ccid = nextBatch.cc
-				}
-			default:
-				// No more batches.
-				break ADD_MORE_LOOP
+	// Apply new announcements
+	if time.Since(db.lastAnnouncementSave) > db.persistInterval || len(db.unappliedAnnouncements) >= announcementBatchSoftLimit {
+		err := db.db.Transaction(func(tx *gorm.DB) error {
+			if err := insertAnnouncements(tx, db.unappliedAnnouncements); err != nil {
+				return err
 			}
+			return updateCCID(tx, db.unappliedCCID)
+		})
+		if err != nil {
+			// NOTE: print error. If we failed due to a temporary error
+			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(db.unappliedAnnouncements)))
 		}
 
-		// If there is nothing to insert at all, block again. Unless too
-		// much time has passed since the last insertion. Then we want
-		// to at least update the ccid.
-		if len(announcements) == 0 && time.Since(lastInsert) < persistInterval {
-			continue
-		}
-
-		for numRetries := 0; ; numRetries++ {
-			if numRetries >= processAnnouncementRetryLimit {
-				log.Fatalf("host announcement insertion failed more than %v times - abort", processAnnouncementRetryLimit)
-			}
-			err := s.db.Transaction(func(tx *gorm.DB) error {
-				// Insert announcements.
-				if len(announcements) > 0 {
-					if err := insertAnnouncements(tx, announcements); err != nil {
-						return err
-					}
-				}
-				// Update consensus change id.
-				return updateCCID(tx, ccid)
-			})
-
-			// If the update failed, try again after some time.
-			if err != nil {
-				println("failed to persist host announcements... retrying: " + err.Error()) // TODO: replace with proper logging
-				select {
-				case <-s.ctx.Done():
-					return // shutdown
-				case <-time.After(processAnnouncementRetryInterval):
-				}
-				continue
-			}
-			lastInsert = time.Now()
-			break
-		}
+		db.unappliedAnnouncements = db.unappliedAnnouncements[:0]
 	}
 }
 
@@ -368,10 +308,10 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	return nil
 }
 
-func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChange) error {
+func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
 	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
 		Model: Model{
 			ID: consensusInfoID,
 		},
-	}).Update("CCID", newCCID.ID[:]).Error
+	}).Update("CCID", newCCID[:]).Error
 }
