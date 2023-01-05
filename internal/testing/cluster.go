@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/modules"
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
@@ -140,6 +141,7 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 		Bootstrap:          false,
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              miner,
+		PersistInterval:    2 * time.Second,
 		RedundancySettings: defaultRedundancy,
 	}, busDir, wk)
 	if err != nil {
@@ -384,27 +386,31 @@ func (c *TestCluster) AddHosts(n int) error {
 		return err
 	}
 
-	// Mine a few more blocks to mine the announcements and sync the
-	// cluster.
-	if err := c.MineBlocks(5); err != nil {
+	// Mine a few blocks. The host should show up eventually.
+	err = build.Retry(10, time.Second, func() error {
+		if err := c.MineBlocks(1); err != nil {
+			return err
+		}
+
+		for _, h := range newHosts {
+			hpk, err := h.HostPublicKey()
+			if err != nil {
+				return err
+			}
+			_, err = c.Bus.Host(consensus.PublicKey(hpk.ToPublicKey()))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
-	// Sync cluster.
+	// Wait for all hosts to be synced.
 	if err := c.Sync(); err != nil {
 		return err
-	}
-
-	// Hosts should show up in hostdb.
-	for _, h := range newHosts {
-		hpk, err := h.HostPublicKey()
-		if err != nil {
-			return err
-		}
-		_, err = c.Bus.Host(consensus.PublicKey(hpk.ToPublicKey()))
-		if err != nil {
-			return err
-		}
 	}
 
 	//  Wait for the contracts to form.

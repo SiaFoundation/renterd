@@ -28,9 +28,10 @@ type WorkerConfig struct {
 }
 
 type BusConfig struct {
-	Bootstrap   bool
-	GatewayAddr string
-	Miner       *Miner
+	Bootstrap       bool
+	GatewayAddr     string
+	Miner           *Miner
+	PersistInterval time.Duration
 
 	api.GougingSettings
 	api.RedundancySettings
@@ -188,7 +189,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	if err := os.MkdirAll(hostdbDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, 10*time.Minute)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval)
 	if err != nil {
 		return nil, nil, err
 	} else if err := cm.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
