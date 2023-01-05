@@ -397,7 +397,6 @@ func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {
 func removeContract(tx *gorm.DB, id types.FileContractID) error {
 	var contract dbContract
 	if err := tx.Where(&dbContract{FCID: id}).
-		Preload("Host").
 		Take(&contract).Error; err != nil {
 		return err
 	}
