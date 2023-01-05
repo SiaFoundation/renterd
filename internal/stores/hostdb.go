@@ -187,8 +187,10 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	// Apply new announcements
 	if time.Since(db.lastAnnouncementSave) > db.persistInterval || len(db.unappliedAnnouncements) >= announcementBatchSoftLimit {
 		err := db.db.Transaction(func(tx *gorm.DB) error {
-			if err := insertAnnouncements(tx, db.unappliedAnnouncements); err != nil {
-				return err
+			if len(db.unappliedAnnouncements) > 0 {
+				if err := insertAnnouncements(tx, db.unappliedAnnouncements); err != nil {
+					return err
+				}
 			}
 			return updateCCID(tx, db.unappliedCCID)
 		})
@@ -198,6 +200,7 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		}
 
 		db.unappliedAnnouncements = db.unappliedAnnouncements[:0]
+		db.lastAnnouncementSave = time.Now()
 	}
 }
 
