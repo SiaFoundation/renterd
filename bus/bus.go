@@ -650,10 +650,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":               b.hostsHandler,
-		"GET    /hosts/:hostkey":      b.hostsPubkeyHandlerGET,
-		"POST   /hosts/:hostkey":      b.hostsPubkeyHandlerPOST,
-		"POST   /hosts/scan/:hostkey": b.hostsScanPubkeyHandlerPOST,
+		"GET    /hosts":                       b.hostsHandler,
+		"GET    /hosts/:hostkey":              b.hostsPubkeyHandlerGET,
+		"POST   /hosts/interactions/:hostkey": b.hostsPubkeyHandlerPOST,
+		"POST   /hosts/scans/:hostkey":        b.hostsScanPubkeyHandlerPOST,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

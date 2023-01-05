@@ -227,7 +227,7 @@ func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
 
 // RecordHostInteraction records an interaction for the supplied host.
 func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, successful, failed uint64) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), api.HostsPubkeyHandlerPOSTRequest{
+	err = c.c.POST(fmt.Sprintf("/hosts/interactions/%s", hostKey), api.HostsPubkeyHandlerPOSTRequest{
 		Successes: successful,
 		Failures:  failed,
 	}, nil)
@@ -236,7 +236,7 @@ func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, successful,
 
 // RecordHostScan recors a scan for the supplied host.
 func (c *Client) RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/scan/%s", hostKey), api.HostsScanPubkeyHandlerPOSTRequest{
+	err = c.c.POST(fmt.Sprintf("/hosts/scans/%s", hostKey), api.HostsScanPubkeyHandlerPOSTRequest{
 		Time:     t,
 		Success:  success,
 		Settings: settings,
