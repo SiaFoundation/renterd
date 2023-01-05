@@ -89,7 +89,7 @@ func (dbContractSet) TableName() string { return "contract_sets" }
 func (c dbContract) convert() api.ContractMetadata {
 	return api.ContractMetadata{
 		ID:          c.FCID,
-		HostIP:      c.Host.NetAddress(),
+		HostIP:      c.Host.NetAddress,
 		HostKey:     c.Host.PublicKey,
 		StartHeight: c.StartHeight,
 		RenewedFrom: c.RenewedFrom,
@@ -224,7 +224,7 @@ func (s *SQLStore) ActiveContracts() ([]api.ContractMetadata, error) {
 	var dbContracts []dbContract
 	err := s.db.
 		Model(&dbContract{}).
-		Preload("Host.Announcements").
+		Preload("Host").
 		Find(&dbContracts).
 		Error
 	if err != nil {
@@ -370,7 +370,7 @@ func (s *SQLStore) contracts(set string) ([]dbContract, error) {
 	var cs dbContractSet
 	err := s.db.
 		Where(&dbContractSet{Name: set}).
-		Preload("Contracts.Host.Announcements").
+		Preload("Contracts.Host").
 		Take(&cs).
 		Error
 
@@ -386,7 +386,7 @@ func (s *SQLStore) contracts(set string) ([]dbContract, error) {
 func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {
 	var contract dbContract
 	err := tx.Where(&dbContract{FCID: id}).
-		Preload("Host.Announcements").
+		Preload("Host").
 		Take(&contract).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return contract, ErrContractNotFound

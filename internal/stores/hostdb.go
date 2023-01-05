@@ -19,14 +19,6 @@ const (
 	// announcements and apply them to the db.
 	announcementBatchSoftLimit = 1000
 
-	// processAnnouncementRetryInterval is the amount of time after which a
-	// failed insertion of announcements will be retried.
-	processAnnouncementRetryInterval = time.Second
-
-	// processAnnouncementRetryLimit is a limit to the number of retries for
-	// a single announcement insertion.
-	processAnnouncementRetryLimit = 3600 // 1 hour
-
 	// consensusInfoID defines the primary key of the entry in the consensusInfo
 	// table.
 	consensusInfoID = 1
@@ -42,19 +34,11 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey     consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
-		Announcements []dbAnnouncement    `gorm:"OnDelete:CASCADE"`
-		Interactions  []dbInteraction     `gorm:"OnDelete:CASCADE"`
-	}
+		PublicKey    consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		Interactions []dbInteraction     `gorm:"OnDelete:CASCADE"`
 
-	dbAnnouncement struct {
-		Model
-		DBHostID uint `gorm:"index"`
-
-		BlockHeight uint64            `gorm:"NOT NULL"`
-		BlockID     consensus.BlockID `gorm:"NOT NULL;type:bytes;serializer:gob"`
-		Timestamp   time.Time         `gorm:"NOT NULL"`
-		NetAddress  string            `gorm:"NOT NULL"`
+		LastAnnouncement time.Time
+		NetAddress       string
 	}
 
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
@@ -94,49 +78,23 @@ type (
 func (dbHost) TableName() string { return "hosts" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbAnnouncement) TableName() string { return "announcements" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbInteraction) TableName() string { return "host_interactions" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
-// NetAddress returns the latest announced address of a host.
-func (h dbHost) NetAddress() string {
-	if len(h.Announcements) == 0 {
-		return ""
-	}
-	return h.Announcements[len(h.Announcements)-1].NetAddress
-}
-
 // convert converts a host into a hostdb.Host.
 func (h dbHost) convert() hostdb.Host {
 	hdbHost := hostdb.Host{
-		Announcements: make([]hostdb.Announcement, len(h.Announcements)),
-		Interactions:  make([]hostdb.Interaction, len(h.Interactions)),
-		PublicKey:     h.PublicKey,
-	}
-	for i, announcement := range h.Announcements {
-		hdbHost.Announcements[i] = announcement.convert()
+		KnownSince:   h.CreatedAt,
+		NetAddress:   h.NetAddress,
+		Interactions: make([]hostdb.Interaction, len(h.Interactions)),
+		PublicKey:    h.PublicKey,
 	}
 	for i, interaction := range h.Interactions {
 		hdbHost.Interactions[i] = interaction.convert()
 	}
 	return hdbHost
-}
-
-// convert converts a host into a hostdb.Announcement.
-func (a dbAnnouncement) convert() hostdb.Announcement {
-	hostdbAnnouncement := hostdb.Announcement{
-		Index: consensus.ChainIndex{
-			Height: a.BlockHeight,
-			ID:     consensus.BlockID(a.BlockID),
-		},
-		Timestamp:  a.Timestamp,
-		NetAddress: a.NetAddress,
-	}
-	return hostdbAnnouncement
 }
 
 // convert converts an interaction into a hostdb.Interaction.
@@ -153,7 +111,6 @@ func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
 	tx := db.db.Where(&dbHost{PublicKey: hostKey}).
 		Preload("Interactions").
-		Preload("Announcements").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound
@@ -173,7 +130,6 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 		Having("IFNULL(MAX(Timestamp), 0) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
 		Limit(max).
 		Preload("Interactions").
-		Preload("Announcements").
 		Find(&fullHosts).
 		Error
 	if err != nil {
@@ -204,18 +160,6 @@ func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Int
 			Result:    hi.Result,
 		}).Error
 	})
-}
-
-// hosts returns all hosts int he db.
-func (db *SQLStore) hosts() ([]dbHost, error) {
-	var hosts []dbHost
-	tx := db.db.Preload("Interactions").
-		Preload("Announcements").
-		Find(&hosts)
-	if tx.Error != nil {
-		return nil, tx.Error
-	}
-	return hosts, nil
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.
@@ -257,61 +201,27 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 }
 
-func insertAnnouncements(tx *gorm.DB, as []announcement) error {
-	// Create all missing hosts.
-	var hosts []dbHost
-	var hks [][]byte
-	for _, a := range as {
-		hosts = append(hosts, dbHost{PublicKey: a.hostKey})
-		hks = append(hks, gobEncode(a.hostKey))
-	}
-	createdHosts := append([]dbHost{}, hosts...)
-	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&createdHosts).Error; err != nil {
-		return err
-	}
-
-	// Fetch all the hosts for the relevant pubkeys to get their ids in the
-	// db and map the keys to those ids.
-	var foundHosts []dbHost
-	res := tx.Where("public_key IN ?", hks).Find(&foundHosts)
-	if res.Error != nil {
-		return res.Error
-	}
-	hostMap := make(map[consensus.PublicKey]uint)
-	for _, host := range foundHosts {
-		hostMap[host.PublicKey] = host.ID
-	}
-
-	// Sanity check. Every announcement should have a translation within the
-	// hostMap.
-	for _, a := range as {
-		_, exists := hostMap[a.hostKey]
-		if !exists {
-			return fmt.Errorf("no host id for host with key %v found - should never happen", a.hostKey)
-		}
-	}
-
-	// Create announcements.
-	announcements := make([]dbAnnouncement, len(as))
-	for i, a := range as {
-		announcements[i] = dbAnnouncement{
-			DBHostID:    hostMap[a.hostKey],
-			BlockHeight: a.announcement.Index.Height,
-			BlockID:     a.announcement.Index.ID,
-			Timestamp:   a.announcement.Timestamp.UTC(), // explicitly store timestamp as UTC
-			NetAddress:  a.announcement.NetAddress,
-		}
-	}
-	if err := tx.Create(&announcements).Error; err != nil {
-		return err
-	}
-	return nil
-}
-
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
 	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
 		Model: Model{
 			ID: consensusInfoID,
 		},
 	}).Update("CCID", newCCID[:]).Error
+}
+
+func insertAnnouncements(tx *gorm.DB, as []announcement) error {
+	var hosts []dbHost
+	for _, a := range as {
+		hosts = append(hosts, dbHost{
+			PublicKey:        a.hostKey,
+			LastAnnouncement: a.announcement.Timestamp.UTC(),
+			NetAddress:       a.announcement.NetAddress,
+		})
+	}
+	// Create hosts that don't exist and regardless of whether they exist or
+	// not update the last_announcement and net_address fields.
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "public_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
+	}).Create(&hosts).Error
 }

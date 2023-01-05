@@ -208,7 +208,7 @@ func (s *scanner) performHostScans() error {
 	for _, h := range hosts {
 		reqChan <- scanReq{
 			hostKey: h.PublicKey,
-			hostIP:  h.NetAddress(),
+			hostIP:  h.NetAddress,
 		}
 	}
 	close(reqChan)

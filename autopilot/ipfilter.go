@@ -30,7 +30,7 @@ func newIPFilter() *ipFilter {
 
 func (f *ipFilter) isRedundantIP(h Host) bool {
 	// lookup all IP addresses for the given host
-	host, _, err := net.SplitHostPort(h.NetAddress())
+	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
 		return true
 	}
