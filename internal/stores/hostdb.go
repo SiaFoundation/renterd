@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -54,6 +55,14 @@ type (
 
 		LastAnnouncement time.Time
 		NetAddress       string
+		NetHost          string
+	}
+
+	// dbBlocklistEntry defines a table that stores the host blocklist.
+	dbBlocklistEntry struct {
+		Model
+		Entry string   `gorm:"unique;index;NOT NULL"`
+		Hosts []dbHost `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbConsensusInfo defines table which stores the latest consensus info
@@ -189,6 +198,9 @@ func (dbHost) TableName() string { return "hosts" }
 // TableName implements the gorm.Tabler interface.
 func (dbInteraction) TableName() string { return "host_interactions" }
 
+// TableName implements the gorm.Tabler interface.
+func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
+
 // convert converts a host into a hostdb.Host.
 func (h dbHost) convert() hostdb.Host {
 	var lastScan time.Time
@@ -220,9 +232,15 @@ func (h dbHost) convert() hostdb.Host {
 }
 
 // Host returns information about a host.
-func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
+func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
-	tx := db.db.Where(&dbHost{PublicKey: hostKey}).
+
+	tx := ss.db.
+		Joins("LEFT JOIN host_blocklist_entry_hosts AS be ON hosts.id = be.db_host_id").
+		Group("id").
+		Having("MAX(IFNULL(be.db_blocklist_entry_id, 0), 0) == 0").
+		Where(&dbHost{PublicKey: hostKey}).
+		Preload("Interactions").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound
@@ -231,14 +249,18 @@ func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 }
 
 // Hosts returns hosts at given offset and limit.
-func (db *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
+func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
 
 	var hosts []hostdb.Host
 	var fullHosts []dbHost
-	err := db.db.Model(&dbHost{}).
+
+	err := ss.db.
+		Joins("LEFT JOIN host_blocklist_entry_hosts AS be ON hosts.id = be.db_host_id").
+		Group("id").
+		Having("MAX(IFNULL(be.db_blocklist_entry_id, 0), 0) == 0").
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
@@ -261,27 +283,51 @@ func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
 	return h, err
 }
 
-// RandomHosts returns up to given limit of hosts that are randomly selected
-// from the host database.
-func (db *SQLStore) RandomHosts(limit int) ([]hostdb.Host, error) {
-	var dbHosts []dbHost
-	err := db.db.
-		Model(&dbHost{}).
-		Order("RANDOM()").
-		Limit(limit).
-		Preload("Interactions").
-		Preload("Announcements").
-		Find(&dbHosts).
-		Error
-	if err != nil {
-		return nil, err
-	}
+func (ss *SQLStore) AddHostBlocklistEntry(entry string) error {
+	db := ss.db
+	return db.Transaction(func(tx *gorm.DB) error {
+		dbEntry := &dbBlocklistEntry{Entry: entry}
 
-	var hosts []hostdb.Host
-	for _, fh := range dbHosts {
-		hosts = append(hosts, fh.convert())
-	}
-	return hosts, err
+		// insert block list entry
+		tx = tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "entry"}},
+			DoNothing: true,
+		}).Create(dbEntry)
+
+		// return early if possible
+		if tx.Error != nil || tx.RowsAffected == 0 {
+			return tx.Error
+		}
+
+		params := map[string]interface{}{"entry": entry, "dot_entry": "." + entry}
+
+		// find all hosts where the entry matches the hosts's net address
+		var dbHosts []dbHost
+		err := tx.
+			Table(dbHost{}.TableName()).
+			Where(db.Where("net_host == @entry", params)).                                                                                                    // exact match on entry
+			Or(db.Where("instr(net_host, @dot_entry) > 0", params).Where("instr(net_host, @dot_entry) -1 + length(@dot_entry) == length(net_host)", params)). // has_suffix .[entry]
+			Find(&dbHosts).
+			Error
+		if err != nil {
+			return err
+		}
+
+		return tx.Model(&dbEntry).Association("Hosts").Append(&dbHosts)
+	})
+}
+
+func (db *SQLStore) RemoveHostBlocklistEntry(entry string) (err error) {
+	err = db.db.Where(&dbBlocklistEntry{Entry: entry}).Delete(&dbBlocklistEntry{}).Error
+	return
+}
+
+func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
+	err = db.db.
+		Model(&dbBlocklistEntry{}).
+		Pluck("entry", &blocklist).
+		Error
+	return
 }
 
 // RecordHostInteraction records an interaction with a host. If the host is not in
@@ -401,10 +447,15 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	var hosts []dbHost
 	var announcements []dbAnnouncement
 	for _, a := range as {
+		host, _, err := net.SplitHostPort(a.announcement.NetAddress)
+		if err != nil {
+			return err
+		}
 		hosts = append(hosts, dbHost{
 			PublicKey:        a.hostKey,
 			LastAnnouncement: a.announcement.Timestamp.UTC(),
 			NetAddress:       a.announcement.NetAddress,
+			NetHost:          host,
 		})
 		announcements = append(announcements, dbAnnouncement{
 			HostKey:     a.hostKey,
@@ -416,10 +467,8 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	if err := tx.Create(&announcements).Error; err != nil {
 		return err
 	}
-	// Create hosts that don't exist and regardless of whether they exist or
-	// not update the last_announcement and net_address fields.
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "public_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
+		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address", "net_host"}), // upsert
 	}).Create(&hosts).Error
 }

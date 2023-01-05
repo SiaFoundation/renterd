@@ -366,19 +366,6 @@ func (s *SQLStore) SlabsForMigration(n int, failureCutoff time.Time, goodContrac
 	return slabs, err
 }
 
-func (s *SQLStore) host(id uint) (dbHost, bool, error) {
-	var h dbHost
-	err := s.db.Where(&dbHost{Model: Model{ID: id}}).
-		Take(&h).
-		Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return dbHost{}, false, nil
-	} else if err != nil {
-		return dbHost{}, false, err
-	}
-	return h, true, nil
-}
-
 // slabForMigration returns all the info about a slab necessary for migrating
 // it to better hosts/contracts.
 func (s *SQLStore) slabForMigration(slabID api.SlabID) (object.Slab, error) {

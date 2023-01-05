@@ -221,11 +221,21 @@ func (c *Client) Hosts(offset, limit int) (hosts []hostdb.Host, err error) {
 	return
 }
 
-// RandomHosts returns 'limit' randomly selected hosts.
-func (c *Client) RandomHosts(limit int) (hosts []hostdb.Host, err error) {
-	values := url.Values{}
-	values.Set("limit", fmt.Sprint(limit))
-	err = c.c.GET("/hosts/random?"+values.Encode(), &hosts)
+// HostBlocklist returns a host blocklist.
+func (c *Client) HostBlocklist() (blocklist []string, err error) {
+	err = c.c.GET("/hosts/blocklist", &blocklist)
+	return
+}
+
+// AddHostBlocklistEntry adds the given entry to the host blocklist.
+func (c *Client) AddHostBlocklistEntry(entry string) (err error) {
+	err = c.c.PUT(fmt.Sprintf("/hosts/blocklist/%s", entry), nil)
+	return
+}
+
+// RemoveHostBlocklistEntry removes the given entry from the host blocklist.
+func (c *Client) RemoveHostBlocklistEntry(entry string) (err error) {
+	err = c.c.DELETE(fmt.Sprintf("/hosts/blocklist/%s", entry))
 	return
 }
 

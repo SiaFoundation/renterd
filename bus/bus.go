@@ -66,7 +66,10 @@ type (
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 		Hosts(offset, limit int) ([]hostdb.Host, error)
 		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
-		RandomHosts(limit int) ([]hostdb.Host, error)
+
+		HostBlocklist() ([]string, error)
+		AddHostBlocklistEntry(entry string) error
+		RemoveHostBlocklistEntry(entry string) error
 	}
 
 	// A ContractStore stores contracts.
@@ -357,14 +360,6 @@ func (b *bus) hostsHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) hostsRandomHandlerGET(jc jape.Context) {
-	if limit := -1; jc.DecodeForm("limit", &limit) == nil {
-		if hosts, err := b.hdb.RandomHosts(limit); jc.Check("couldn't fetch hosts", err) == nil {
-			jc.Encode(hosts)
-		}
-	}
-}
-
 func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	var hostKey consensus.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
@@ -381,6 +376,27 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var hostKey consensus.PublicKey
 	if jc.Decode(&interactions) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
 		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(hostKey, interactions))
+	}
+}
+
+func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
+	blocklist, err := b.hdb.HostBlocklist()
+	if jc.Check("couldn't load blocklist", err) == nil {
+		jc.Encode(blocklist)
+	}
+}
+
+func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
+	var entry string
+	if jc.DecodeParam("entry", &entry) == nil {
+		jc.Check("couldn't add blocklist entry", b.hdb.AddHostBlocklistEntry(entry))
+	}
+}
+
+func (b *bus) hostsBlocklistHandlerDELETE(jc jape.Context) {
+	var entry string
+	if jc.DecodeParam("entry", &entry) == nil {
+		jc.Check("couldn't remove blocklist entry", b.hdb.RemoveHostBlocklistEntry(entry))
 	}
 }
 
@@ -648,10 +664,12 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":         b.hostsHandlerGET,
-		"GET    /hosts/random":  b.hostsRandomHandlerGET,
-		"GET    /host/:hostkey": b.hostsPubkeyHandlerGET,
-		"POST   /host/:hostkey": b.hostsPubkeyHandlerPOST,
+		"GET    /hosts":                  b.hostsHandlerGET,
+		"GET    /host/:hostkey":          b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey":          b.hostsPubkeyHandlerPOST,
+		"GET    /hosts/blocklist":        b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist/:entry": b.hostsBlocklistHandlerPUT,
+		"DLETE  /hosts/blocklist/:entry": b.hostsBlocklistHandlerDELETE,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

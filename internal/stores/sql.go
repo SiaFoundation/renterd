@@ -76,6 +76,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbConsensusInfo{},
 			&dbHost{},
 			&dbInteraction{},
+			&dbBlocklistEntry{},
 
 			// bus.ObjectStore tables
 			&dbObject{},

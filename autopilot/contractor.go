@@ -17,10 +17,6 @@ import (
 )
 
 const (
-	// candidateHostsBatchSize is the amount of candidate hosts we fetch in a
-	// single batch
-	candidateHostsBatchSize = 1000
-
 	// contractLockingDurationRenew is the amount of time we hold a contract
 	// lock when renewing a contract
 	contractLockingDurationRenew = 30 * time.Second
@@ -411,9 +407,15 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		return nil, err
 	}
 
+	// create a map of used hosts
+	used := make(map[string]bool)
+	for _, contract := range active {
+		used[contract.HostKey.String()] = true
+	}
+
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, err := c.candidateHosts(cfg, wanted)
+	candidates, err := c.candidateHosts(cfg, used, wanted)
 	if err != nil {
 		return nil, err
 	}
@@ -722,7 +724,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	return estimatedCost, nil
 }
 
-func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted int) ([]consensus.PublicKey, error) {
+func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]bool, wanted int) ([]consensus.PublicKey, error) {
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings()
 	if err != nil {
@@ -735,66 +737,34 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted int) ([]cons
 		return nil, err
 	}
 
-	// fetch currently active contracts
-	active, err := c.ap.bus.ActiveContracts()
+	// create IP filter
+	ipFilter := newIPFilter()
+
+	// fetch all hosts
+	hosts, err := c.ap.bus.Hosts(0, -1)
 	if err != nil {
 		return nil, err
 	}
 
-	// create a map of used hosts
-	used := make(map[string]bool)
-	for _, contract := range active {
-		used[contract.HostKey.String()] = true
-	}
-
-	// create a map of unusable hosts to avoid redundant checks
-	unusable := make(map[string]bool)
-
-	// create IP filter
-	ipFilter := newIPFilter()
-
-	// limit the amount of rounds we want to do
-	rounds := 10
-	for rounds*candidateHostsBatchSize < wanted {
-		rounds *= 2
-	}
-
-	// fetch random hosts
-	scored := make([]hostdb.Host, 0, wanted)
-	scores := make([]float64, 0, wanted)
-	for r := 0; r < rounds && len(scored) < wanted; r++ {
-		hosts, err := c.ap.bus.RandomHosts(candidateHostsBatchSize)
-		if err != nil {
-			return nil, err
+	// collect scores for all usable hosts
+	scores := make([]float64, 0, len(hosts))
+	scored := make([]hostdb.Host, 0, len(hosts))
+	for _, h := range hosts {
+		if used[h.PublicKey.String()] {
+			continue
+		}
+		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h}); !usable {
+			continue
 		}
 
-		for _, h := range hosts {
-			hk := h.PublicKey.String()
-			if used[hk] || unusable[hk] {
-				continue
-			}
-
-			usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h})
-			if !usable {
-				unusable[h.PublicKey.String()] = true
-				continue
-			}
-
-			score := hostScore(cfg, Host{h})
-			if score == 0 {
-				c.logger.DPanicw("sanity check failed", "score", score, "hk", h.PublicKey)
-				continue
-			}
-
-			scored = append(scored, h)
-			scores = append(scores, score)
-			used[h.PublicKey.String()] = true
+		score := hostScore(cfg, Host{h})
+		if score == 0 {
+			c.logger.DPanicw("sanity check failed", "score", score, "hk", h.PublicKey)
+			continue
 		}
-	}
 
-	// update num wanted
-	if len(scores) < wanted {
-		wanted = len(scores)
+		scored = append(scored, h)
+		scores = append(scores, score)
 	}
 
 	// select hosts

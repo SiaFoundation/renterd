@@ -15,7 +15,7 @@ import (
 
 const (
 	// TODO: make these configurable
-	scannerBatchSize       = 100
+	scannerBatchSize       = 1000
 	scannerNumThreads      = 5
 	scannerTimeoutInterval = 10 * time.Minute
 

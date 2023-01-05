@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"testing"
 	"time"
@@ -428,6 +429,7 @@ func TestRecordScan(t *testing.T) {
 // TestInsertAnnouncements is a test for insertAnnouncements.
 func TestInsertAnnouncements(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,9 +499,189 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 }
 
-// addTestHost ensures a host with given hostkey exists in the db.
+func TestSQLHostBlocklist(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Helper()
+	numEntries := func() int {
+		bl, err := hdb.HostBlocklist()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(bl)
+	}
+
+	t.Helper()
+	numHosts := func() int {
+		hosts, err := hdb.Hosts(0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(hosts)
+	}
+
+	t.Helper()
+	numRelations := func() (cnt int64) {
+		err = hdb.db.Table("host_blocklist_entry_hosts").Count(&cnt).Error
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	t.Helper()
+	isBlocked := func(hk consensus.PublicKey) bool {
+		hosts, err := hdb.Hosts(0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, host := range hosts {
+			if host.PublicKey == hk {
+				return false
+			}
+		}
+		return true
+	}
+
+	// add three hosts
+	hk1 := consensus.GeneratePrivateKey().PublicKey()
+	if err := hdb.addCustomTestHost(hk1, "foo.bar.com:1000"); err != nil {
+		t.Fatal(err)
+	}
+	hk2 := consensus.GeneratePrivateKey().PublicKey()
+	if err := hdb.addCustomTestHost(hk2, "bar.baz.com:2000"); err != nil {
+		t.Fatal(err)
+	}
+	hk3 := consensus.GeneratePrivateKey().PublicKey()
+	if err := hdb.addCustomTestHost(hk3, "foobar.com:3000"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we can find them
+	if numHosts() != 3 {
+		t.Fatalf("unexpected number of hosts, %v != 3", numHosts())
+	}
+
+	// assert blocklist is empty
+	if numEntries() != 0 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 0", numEntries())
+	}
+
+	// assert we can add entries to the blocklist
+	entry1 := "foo.bar.com"
+	err = hdb.AddHostBlocklistEntry(entry1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry2 := "bar.com"
+	err = hdb.AddHostBlocklistEntry(entry2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if numEntries() != 2 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 2", numEntries())
+	}
+	if numRelations() != 2 {
+		t.Fatalf("unexpected number of entries in join table, %v != 2", numRelations())
+	}
+
+	// assert only host 1 is blocked now
+	if !isBlocked(hk1) || isBlocked(hk2) || isBlocked(hk3) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3))
+	}
+	if _, err = hdb.Host(hk1); err != ErrHostNotFound {
+		t.Fatal("unexpected err", err)
+	}
+
+	// assert adding the same entry is a no-op
+	err = hdb.AddHostBlocklistEntry(entry1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if numEntries() != 2 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 2", numEntries())
+	}
+
+	// assert we can remove an entry
+	err = hdb.RemoveHostBlocklistEntry(entry1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if numEntries() != 1 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 1", numEntries())
+	}
+	if numRelations() != 1 {
+		t.Fatalf("unexpected number of entries in join table, %v != 1", numRelations())
+	}
+
+	// assert the host is still blocked
+	if !isBlocked(hk1) || isBlocked(hk2) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2))
+	}
+
+	// assert removing a non-existing entry is a no-op
+	err = hdb.RemoveHostBlocklistEntry(entry1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// remove the other entry and assert the delete cascaded properly
+	err = hdb.RemoveHostBlocklistEntry(entry2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if numEntries() != 0 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 0", numEntries())
+	}
+	if isBlocked(hk1) || isBlocked(hk2) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2))
+	}
+	if numRelations() != 0 {
+		t.Fatalf("unexpected number of entries in join table, %v != 0", numRelations())
+	}
+
+	// block the second host
+	entry3 := "baz.com"
+	err = hdb.AddHostBlocklistEntry(entry3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isBlocked(hk1) || !isBlocked(hk2) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2))
+	}
+	if numRelations() != 1 {
+		t.Fatalf("unexpected number of entries in join table, %v != 1", numRelations())
+	}
+
+	// delete the host and assert the delete cascaded properly
+	if err = hdb.db.Model(&dbHost{}).Where(&dbHost{PublicKey: hk2}).Delete(&dbHost{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if numHosts() != 2 {
+		t.Fatalf("unexpected number of hosts, %v != 2", numHosts())
+	}
+	if numRelations() != 0 {
+		t.Fatalf("unexpected number of entries in join table, %v != 0", numRelations())
+	}
+	if numEntries() != 1 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 1", numEntries())
+	}
+}
+
+// addTestHost ensures a host with given hostkey exists.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk}).Error
+}
+
+// addCustomTestHost ensures a host with given hostkey and net address exists.
+func (s *SQLStore) addCustomTestHost(hk consensus.PublicKey, na string) error {
+	host, _, err := net.SplitHostPort(na)
+	if err != nil {
+		return err
+	}
+	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk, NetAddress: na, NetHost: host}).Error
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all
