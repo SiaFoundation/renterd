@@ -16,12 +16,12 @@ import (
 const (
 	// TODO: make these configurable
 	scannerBatchSize       = 1000
-	scannerNumThreads      = 5
+	scannerNumThreads      = 25
 	scannerTimeoutInterval = 10 * time.Minute
 
 	// TODO: make these configurable
 	trackerMinDataPoints     = 25
-	trackerMinTimeout        = time.Second * 30
+	trackerMinTimeout        = time.Second * 5
 	trackerNumDataPoints     = 1000
 	trackerTimeoutPercentile = 99
 )
@@ -192,7 +192,7 @@ func (s *scanner) launchHostScans(cfg api.AutopilotConfig) chan scanReq {
 		var offset int
 		var exhausted bool
 		for !s.isStopped() && !exhausted {
-			s.logger.Debugf("fetching hosts batch %d-%d", offset, offset+int(s.scanBatchSize))
+			s.logger.Debugf("scanning hosts %d-%d", offset, offset+int(s.scanBatchSize))
 
 			// fetch next batch
 			hosts, err := s.bus.Hosts(offset, int(s.scanBatchSize))
@@ -208,7 +208,6 @@ func (s *scanner) launchHostScans(cfg api.AutopilotConfig) chan scanReq {
 			}
 
 			// add batch to scan queue
-			s.logger.Debugf("scanning %d hosts in batch %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
 			for _, h := range hosts {
 				reqChan <- scanReq{
 					hostKey: h.PublicKey,
