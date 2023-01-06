@@ -66,7 +66,7 @@ func TestSQLHostDB(t *testing.T) {
 			ID:     consensus.BlockID{1, 2, 3},
 		},
 		Timestamp:  time.Now().UTC().Round(time.Second),
-		NetAddress: "host.com",
+		NetAddress: "foo.bar:1000",
 	}
 	err = hdb.insertTestAnnouncement(hk, a)
 	if err != nil {
@@ -440,16 +440,16 @@ func TestInsertAnnouncements(t *testing.T) {
 		announcement: hostdb.Announcement{
 			Index:      consensus.ChainIndex{Height: 1, ID: consensus.BlockID{1}},
 			Timestamp:  time.Now(),
-			NetAddress: "ann1",
+			NetAddress: "foo.bar:1000",
 		},
 	}
 	ann2 := announcement{
 		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{},
+		announcement: hostdb.Announcement{NetAddress: "foo.bar:2000"},
 	}
 	ann3 := announcement{
 		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{},
+		announcement: hostdb.Announcement{NetAddress: "foo.bar:3000"},
 	}
 
 	// Insert the first one and check that all fields are set.
@@ -465,7 +465,7 @@ func TestInsertAnnouncements(t *testing.T) {
 		HostKey:     ann1.hostKey,
 		BlockHeight: 1,
 		BlockID:     consensus.BlockID{1}.String(),
-		NetAddress:  "ann1",
+		NetAddress:  "foo.bar:1000",
 	}
 	if ann != expectedAnn {
 		t.Fatal("mismatch")

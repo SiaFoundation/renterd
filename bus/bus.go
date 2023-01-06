@@ -664,12 +664,12 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":                  b.hostsHandlerGET,
-		"GET    /host/:hostkey":          b.hostsPubkeyHandlerGET,
-		"POST   /host/:hostkey":          b.hostsPubkeyHandlerPOST,
-		"GET    /hosts/blocklist":        b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist/:entry": b.hostsBlocklistHandlerPUT,
-		"DLETE  /hosts/blocklist/:entry": b.hostsBlocklistHandlerDELETE,
+		"GET    /hosts":                   b.hostsHandlerGET,
+		"GET    /host/:hostkey":           b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey":           b.hostsPubkeyHandlerPOST,
+		"GET    /hosts/blocklist":         b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist/:entry":  b.hostsBlocklistHandlerPUT,
+		"DELETE  /hosts/blocklist/:entry": b.hostsBlocklistHandlerDELETE,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
