@@ -103,20 +103,22 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	// Filter all hosts for the ones that have not been updated since a
 	// given time.
 	var fullHosts []dbHost
+	var hosts []hostdb.Host
 	err := db.db.Table("hosts").
 		Joins("LEFT JOIN host_interactions ON host_interactions.db_host_id = hosts.ID").
 		Group("Public_Key").
 		Having("IFNULL(MAX(Timestamp), 0) < ?", notSince.UTC()). // use UTC since we stored timestamps in UTC
 		Limit(max).
 		Preload("Interactions").
-		Find(&fullHosts).
+		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
+			for _, fh := range fullHosts {
+				hosts = append(hosts, fh.convert())
+			}
+			return nil
+		}).
 		Error
 	if err != nil {
 		return nil, err
-	}
-	var hosts []hostdb.Host
-	for _, fh := range fullHosts {
-		hosts = append(hosts, fh.convert())
 	}
 	return hosts, err
 }
