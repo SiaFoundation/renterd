@@ -8,6 +8,8 @@ import (
 	"lukechampine.com/frand"
 )
 
+const testPersistInterval = time.Second
+
 // newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore() (*SQLStore, string, modules.ConsensusChangeID, error) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db

@@ -67,7 +67,7 @@ type (
 		cc            modules.ConsensusChange
 	}
 
-	// announcement describes a an announcement for a single host.
+	// announcement describes an announcement for a single host.
 	announcement struct {
 		hostKey      consensus.PublicKey
 		announcement hostdb.Announcement

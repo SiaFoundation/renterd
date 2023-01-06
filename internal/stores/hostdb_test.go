@@ -178,7 +178,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Wait for the persist interval to pass to make sure an empty consensus
 	// change triggers a persist.
-	time.Sleep(2 * time.Second)
+	time.Sleep(testPersistInterval)
 
 	// Apply a consensus change.
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}

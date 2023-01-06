@@ -30,6 +30,8 @@ import (
 	"lukechampine.com/frand"
 )
 
+const testPersistInterval = 2 * time.Second
+
 var (
 	// defaultAutopilotConfig is the autopilot used for testing unless a
 	// different one is explicitly set.
@@ -141,7 +143,7 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 		Bootstrap:          false,
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              miner,
-		PersistInterval:    2 * time.Second,
+		PersistInterval:    testPersistInterval,
 		RedundancySettings: defaultRedundancy,
 	}, busDir, wk)
 	if err != nil {
