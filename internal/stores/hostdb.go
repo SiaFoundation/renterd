@@ -435,10 +435,7 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 func ExcludeBlockedHosts(db *gorm.DB) *gorm.DB {
-	return db.
-		Joins("LEFT JOIN host_blocklist_entry_hosts AS be ON hosts.id = be.db_host_id").
-		Group("id").
-		Having("MAX(IFNULL(be.db_blocklist_entry_id, 0), 0) == 0")
+	return db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
 }
 
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
