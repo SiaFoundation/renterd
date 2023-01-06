@@ -325,8 +325,12 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{},
+		hostKey: consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{
+			Index:      consensus.ChainIndex{Height: 1, ID: consensus.BlockID{1}},
+			Timestamp:  time.Now(),
+			NetAddress: "ann1",
+		},
 	}
 	ann2 := announcement{
 		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
@@ -337,11 +341,24 @@ func TestInsertAnnouncements(t *testing.T) {
 		announcement: hostdb.Announcement{},
 	}
 
-	// Insert the first one.
+	// Insert the first one and check that all fields are set.
 	if err := insertAnnouncements(hdb.db, []announcement{ann1}); err != nil {
 		t.Fatal(err)
 	}
-
+	var ann dbAnnouncement
+	if err := hdb.db.Find(&ann).Error; err != nil {
+		t.Fatal(err)
+	}
+	ann.Model = Model{} // ignore
+	expectedAnn := dbAnnouncement{
+		HostKey:     ann1.hostKey,
+		BlockHeight: 1,
+		BlockID:     consensus.BlockID{1}.String(),
+		NetAddress:  "ann1",
+	}
+	if ann != expectedAnn {
+		t.Fatal("mismatch")
+	}
 	// Insert the first and second one.
 	if err := insertAnnouncements(hdb.db, []announcement{ann1, ann2}); err != nil {
 		t.Fatal(err)
@@ -359,6 +376,15 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 	if len(hosts) != 3 {
 		t.Fatal("invalid number of hosts")
+	}
+
+	// There should be 7 announcements total.
+	var announcements []dbAnnouncement
+	if err := hdb.db.Find(&announcements).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(announcements) != 7 {
+		t.Fatal("invalid number of announcements")
 	}
 }
 
