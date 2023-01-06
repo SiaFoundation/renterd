@@ -44,7 +44,7 @@ type (
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
 		Model
-		DBHostID uint `gorm:"index"`
+		DBHostID uint `gorm:"index;NOT NULL"`
 
 		Result    json.RawMessage
 		Timestamp time.Time `gorm:"index; NOT NULL"`
@@ -57,14 +57,6 @@ type (
 	dbConsensusInfo struct {
 		Model
 		CCID []byte
-	}
-
-	// announcementBatch contains all announcements from a single consensus
-	// change. After applying the announcements to the db, the persisted
-	// consensus change id should be updated to cc.
-	announcementBatch struct {
-		announcements []announcement
-		cc            modules.ConsensusChange
 	}
 
 	// announcement describes an announcement for a single host.
@@ -147,21 +139,32 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 // RecordInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
 func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
-	return db.db.Transaction(func(tx *gorm.DB) error {
-		// Create a host if it doesn't exist yet.
-		var host dbHost
-		if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
-			return err
-		}
-
-		// Create an interaction.
-		return tx.Create(&dbInteraction{
-			DBHostID:  host.ID,
-			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
-			Type:      hi.Type,
-			Result:    hi.Result,
+	// Try creating the interaction first. This is in 99.99% of cases
+	// sufficient since the host should have been created as we picked up
+	// its announcement from the chain already. If that fails, we try
+	// creating the unannounced host with an associated interaction instead.
+	err := db.db.Exec("INSERT INTO host_interactions (db_host_id, timestamp, type, result) VALUES ((SELECT id FROM hosts WHERE public_key = ?), ?, ?, ?)",
+		gobEncode(hostKey), hi.Timestamp.UTC(), hi.Type, hi.Result).Error
+	if err != nil {
+		// If creating the interaction by itself failed it's usually
+		// because the host doesn't exist. Since there is no cross db
+		// way to check the error we try creating a host.
+		errCreate := db.db.Create(&dbHost{
+			PublicKey: hostKey,
+			Interactions: []dbInteraction{{
+				Result:    hi.Result,
+				Timestamp: hi.Timestamp,
+				Type:      hi.Type,
+			}},
+			LastAnnouncement: time.Time{}, // not announced yet
+			NetAddress:       "",          // not announced yet
 		}).Error
-	})
+		if errCreate != nil {
+			return err // return outer error if creating the host wasn't the solution
+		}
+		return nil
+	}
+	return nil
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.
