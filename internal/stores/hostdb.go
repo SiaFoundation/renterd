@@ -59,12 +59,27 @@ type (
 		CCID []byte
 	}
 
+	// dbAnnouncement is a table used for storing all announcements. It
+	// doesn't have any relations to dbHost which means it won't
+	// automatically prune when a host is deleted.
+	dbAnnouncement struct {
+		Model
+		HostKey consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+
+		BlockHeight uint64
+		BlockID     string
+		NetAddress  string
+	}
+
 	// announcement describes an announcement for a single host.
 	announcement struct {
 		hostKey      consensus.PublicKey
 		announcement hostdb.Announcement
 	}
 )
+
+// TableName implements the gorm.Tabler interface.
+func (dbAnnouncement) TableName() string { return "host_announcements" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbHost) TableName() string { return "hosts" }
@@ -219,12 +234,22 @@ func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
 
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	var hosts []dbHost
+	var announcements []dbAnnouncement
 	for _, a := range as {
 		hosts = append(hosts, dbHost{
 			PublicKey:        a.hostKey,
 			LastAnnouncement: a.announcement.Timestamp.UTC(),
 			NetAddress:       a.announcement.NetAddress,
 		})
+		announcements = append(announcements, dbAnnouncement{
+			HostKey:     a.hostKey,
+			BlockHeight: a.announcement.Index.Height,
+			BlockID:     a.announcement.Index.ID.String(),
+			NetAddress:  a.announcement.NetAddress,
+		})
+	}
+	if err := tx.Create(&announcements).Error; err != nil {
+		return err
 	}
 	// Create hosts that don't exist and regardless of whether they exist or
 	// not update the last_announcement and net_address fields.

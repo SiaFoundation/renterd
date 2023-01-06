@@ -207,15 +207,10 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 
 // AddContract implements the bus.ContractStore interface.
 func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
-	var added dbContract
-
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		added, err = addContract(tx, c, totalCost, startHeight, types.FileContractID{})
-		return err
-	}); err != nil {
+	added, err := addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
+	if err != nil {
 		return api.ContractMetadata{}, err
 	}
-
 	return added.convert(), nil
 }
 
@@ -357,9 +352,7 @@ func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractI
 
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		return removeContract(tx, id)
-	})
+	return removeContract(s.db, id)
 }
 
 func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
