@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -34,7 +33,7 @@ type (
 		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
 		HostID              uint                 `gorm:"index"`
 		Host                dbHost
-		LockedUntil         time.Time
+		LockedUntil         int64
 		RenewedFrom         types.FileContractID `gorm:"index;type:bytes;serializer:gob"`
 		StartHeight         uint64               `gorm:"index;NOT NULL"`
 		TotalCost           *big.Int             `gorm:"type:bytes;serializer:gob"`
@@ -129,44 +128,20 @@ func gobEncode(i interface{}) []byte {
 // that it isn't locked right now. The returned bool indicates whether locking
 // the contract was successful.
 func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error) {
-	var contract dbContract
-	var locked bool
-
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Get revision.
-		err := tx.Model(&dbContract{}).
-			Where("fcid", gobEncode(fcid)).
-			Take(&contract).
-			Error
-		if err != nil {
-			return err
-		}
-		// See if it is locked.
-		locked = time.Now().Before(contract.LockedUntil)
-		if locked {
-			return nil
-		}
-
-		// Update lock.
-		return tx.Model(&dbContract{}).
-			Where("fcid", gobEncode(fcid)).
-			Update("locked_until", time.Now().Add(duration).UTC()).
-			Error
-	})
-	if err != nil {
-		return false, fmt.Errorf("failed to lock contract: %w", err)
-	}
-	if locked {
-		return false, nil
-	}
-	return true, nil
+	now := time.Now()
+	tryLockUntil := now.Add(duration)
+	var newLockedUntil int64
+	err := s.db.Raw("UPDATE contracts SET locked_UNTIL = CASE WHEN locked_until < ? THEN ? ELSE locked_until END WHERE fcid = ? RETURNING locked_until",
+		now.UnixNano(), tryLockUntil.UnixNano(), gobEncode(fcid)).
+		Scan(&newLockedUntil).Error
+	return tryLockUntil.UnixNano() == newLockedUntil, err
 }
 
 // ReleaseContract releases a contract by setting its locked_until field to 0.
 func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
 	return s.db.Model(&dbContract{}).
 		Where("fcid", gobEncode(fcid)).
-		Update("locked_until", time.Time{}).
+		Update("locked_until", 0).
 		Error
 }
 
