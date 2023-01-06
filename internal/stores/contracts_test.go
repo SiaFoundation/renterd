@@ -32,7 +32,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = insertAnnouncement(cs.db, hk, hostdb.Announcement{NetAddress: "address"})
+	err = cs.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = insertAnnouncement(cs.db, hk, hostdb.Announcement{NetAddress: "address"})
+	err = cs.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
 	if err != nil {
 		t.Fatal(err)
 	}

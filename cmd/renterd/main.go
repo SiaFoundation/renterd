@@ -115,6 +115,8 @@ func main() {
 		apiPassword string
 		node.BusConfig
 	}
+	busCfg.PersistInterval = 10 * time.Minute
+
 	var workerCfg struct {
 		remoteAddr  string
 		apiPassword string

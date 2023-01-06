@@ -12,6 +12,15 @@ import (
 	"go.sia.tech/siad/modules"
 )
 
+func (s *SQLStore) insertTestAnnouncement(hk consensus.PublicKey, a hostdb.Announcement) error {
+	return insertAnnouncements(s.db, []announcement{
+		{
+			hostKey:      hk,
+			announcement: a,
+		},
+	})
+}
+
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
@@ -103,7 +112,7 @@ func TestSQLHostDB(t *testing.T) {
 		Timestamp:  time.Now().UTC().Round(time.Second),
 		NetAddress: "host.com",
 	}
-	err = insertAnnouncement(hdb.db, hk, a)
+	err = hdb.insertTestAnnouncement(hk, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +158,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert another announcement for an unknown host.
 	unknownKey := consensus.PublicKey{1, 4, 7}
-	err = insertAnnouncement(hdb.db, unknownKey, a)
+	err = hdb.insertTestAnnouncement(unknownKey, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,13 +176,17 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal("known since not set")
 	}
 
-	// Apply a consensus change to make sure the ccid is updated.
+	// Wait for the persist interval to pass to make sure an empty consensus
+	// change triggers a persist.
+	time.Sleep(testPersistInterval)
+
+	// Apply a consensus change.
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}
 	hdb.ProcessConsensusChange(modules.ConsensusChange{ID: ccid2})
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false)
+	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,6 +313,52 @@ func TestSQLHosts(t *testing.T) {
 	err3 := checkHosts(hostKey3)
 	if err1 != nil && err2 != nil && err3 != nil {
 		t.Fatal(err1, err2, err3)
+	}
+}
+
+// TestInsertAnnouncements is a test for insertAnnouncements.
+func TestInsertAnnouncements(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create announcements for 2 hosts.
+	ann1 := announcement{
+		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{},
+	}
+	ann2 := announcement{
+		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{},
+	}
+	ann3 := announcement{
+		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{},
+	}
+
+	// Insert the first one.
+	if err := insertAnnouncements(hdb.db, []announcement{ann1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert the first and second one.
+	if err := insertAnnouncements(hdb.db, []announcement{ann1, ann2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert the first one twice. The second one again and the third one.
+	if err := insertAnnouncements(hdb.db, []announcement{ann1, ann2, ann1, ann3}); err != nil {
+		t.Fatal(err)
+	}
+
+	// There should be 3 hosts in the db.
+	hosts, err := hdb.hosts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 3 {
+		t.Fatal("invalid number of hosts")
 	}
 }
 

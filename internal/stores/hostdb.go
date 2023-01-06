@@ -3,7 +3,7 @@ package stores
 import (
 	"encoding/json"
 	"errors"
-	"log"
+	"fmt"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -13,9 +13,16 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// consensusInfoID defines the primary key of the entry in the consensusInfo
-// table.
-const consensusInfoID = 1
+const (
+	// announcementBatchSoftLimit is the limit above which
+	// threadedProcessAnnouncements will stop merging batches of
+	// announcements and apply them to the db.
+	announcementBatchSoftLimit = 1000
+
+	// consensusInfoID defines the primary key of the entry in the consensusInfo
+	// table.
+	consensusInfoID = 1
+)
 
 // ErrHostNotFound is returned if a specific host can't be retrieved from the hostdb.
 var ErrHostNotFound = errors.New("host doesn't exist in hostdb")
@@ -50,6 +57,20 @@ type (
 	dbConsensusInfo struct {
 		Model
 		CCID []byte
+	}
+
+	// announcementBatch contains all announcements from a single consensus
+	// change. After applying the announcements to the db, the persisted
+	// consensus change id should be updated to cc.
+	announcementBatch struct {
+		announcements []announcement
+		cc            modules.ConsensusChange
+	}
+
+	// announcement describes an announcement for a single host.
+	announcement struct {
+		hostKey      consensus.PublicKey
+		announcement hostdb.Announcement
 	}
 )
 
@@ -150,39 +171,62 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height--
 	}
 
-	// Atomically apply ConsensusChange.
-	err := db.db.Transaction(func(tx *gorm.DB) error {
-		var err error
-		for _, b := range cc.AppliedBlocks {
-			hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
-				if err == nil {
-					err = insertAnnouncement(tx, hostKey, ha)
-				}
+	// Fetch announcements and add them to the queue.
+	var newAnnouncements []announcement
+	for _, b := range cc.AppliedBlocks {
+		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
+			newAnnouncements = append(newAnnouncements, announcement{
+				hostKey:      hostKey,
+				announcement: ha,
 			})
-			height++
-		}
+		})
+		height++
+	}
+
+	db.unappliedAnnouncements = append(db.unappliedAnnouncements, newAnnouncements...)
+	db.unappliedCCID = cc.ID
+
+	// Apply new announcements
+	if time.Since(db.lastAnnouncementSave) > db.persistInterval || len(db.unappliedAnnouncements) >= announcementBatchSoftLimit {
+		err := db.db.Transaction(func(tx *gorm.DB) error {
+			if len(db.unappliedAnnouncements) > 0 {
+				if err := insertAnnouncements(tx, db.unappliedAnnouncements); err != nil {
+					return err
+				}
+			}
+			return updateCCID(tx, db.unappliedCCID)
+		})
 		if err != nil {
-			return err
+			// NOTE: print error. If we failed due to a temporary error
+			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(db.unappliedAnnouncements)))
 		}
-		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-			Model: Model{
-				ID: consensusInfoID,
-			},
-		}).Update("CCID", cc.ID[:]).Error
-	})
-	if err != nil {
-		log.Fatalln("Failed to apply consensus change to hostdb", err)
+
+		db.unappliedAnnouncements = db.unappliedAnnouncements[:0]
+		db.lastAnnouncementSave = time.Now()
 	}
 }
 
-func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
-	// Create a host if it doesn't exist yet.
+func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
+	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
+		Model: Model{
+			ID: consensusInfoID,
+		},
+	}).Update("CCID", newCCID[:]).Error
+}
+
+func insertAnnouncements(tx *gorm.DB, as []announcement) error {
+	var hosts []dbHost
+	for _, a := range as {
+		hosts = append(hosts, dbHost{
+			PublicKey:        a.hostKey,
+			LastAnnouncement: a.announcement.Timestamp.UTC(),
+			NetAddress:       a.announcement.NetAddress,
+		})
+	}
+	// Create hosts that don't exist and regardless of whether they exist or
+	// not update the last_announcement and net_address fields.
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "public_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
-	}).Create(&dbHost{
-		PublicKey:        hostKey,
-		LastAnnouncement: a.Timestamp.UTC(),
-		NetAddress:       a.NetAddress,
-	}).Error
+	}).Create(&hosts).Error
 }
