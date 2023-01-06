@@ -234,9 +234,7 @@ func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
 
 	tx := ss.db.
-		Joins("LEFT JOIN host_blocklist_entry_hosts AS be ON hosts.id = be.db_host_id").
-		Group("id").
-		Having("MAX(IFNULL(be.db_blocklist_entry_id, 0), 0) == 0").
+		Scopes(ExcludeBlockedHosts).
 		Where(&dbHost{PublicKey: hostKey}).
 		Preload("Interactions").
 		Take(&h)
@@ -256,9 +254,7 @@ func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	var fullHosts []dbHost
 
 	err := ss.db.
-		Joins("LEFT JOIN host_blocklist_entry_hosts AS be ON hosts.id = be.db_host_id").
-		Group("id").
-		Having("MAX(IFNULL(be.db_blocklist_entry_id, 0), 0) == 0").
+		Scopes(ExcludeBlockedHosts).
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
@@ -436,6 +432,13 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		db.unappliedAnnouncements = db.unappliedAnnouncements[:0]
 		db.lastAnnouncementSave = time.Now()
 	}
+}
+
+func ExcludeBlockedHosts(db *gorm.DB) *gorm.DB {
+	return db.
+		Joins("LEFT JOIN host_blocklist_entry_hosts AS be ON hosts.id = be.db_host_id").
+		Group("id").
+		Having("MAX(IFNULL(be.db_blocklist_entry_id, 0), 0) == 0")
 }
 
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {

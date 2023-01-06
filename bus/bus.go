@@ -353,7 +353,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 func (b *bus) hostsHandlerGET(jc jape.Context) {
 	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
 		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
-			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts, offset: %d limit: %d", offset, limit), err) == nil {
+			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
 				jc.Encode(hosts)
 			}
 		}

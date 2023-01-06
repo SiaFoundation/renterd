@@ -187,9 +187,9 @@ func (s *scanner) tryUpdateTimeout() {
 
 func (s *scanner) launchHostScans(cfg api.AutopilotConfig) chan scanReq {
 	reqChan := make(chan scanReq, s.scanBatchSize)
-	offset := 0
 
 	go func() {
+		var offset int
 		var exhausted bool
 		for !s.isStopped() && !exhausted {
 			s.logger.Debugf("fetching hosts batch %d-%d", offset, offset+int(s.scanBatchSize))
