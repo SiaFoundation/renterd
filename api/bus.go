@@ -120,6 +120,12 @@ type AddObjectRequest struct {
 	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
+// UpdateBlocklistRequest is the request type for /hosts/blocklist PUT endpoint.
+type UpdateBlocklistRequest struct {
+	Add    []string `json:"add"`
+	Remove []string `json:"remove"`
+}
+
 // DownloadParams contains the metadata needed by a worker to download an object.
 type DownloadParams struct {
 	ContractSet string

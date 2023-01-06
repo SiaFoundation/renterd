@@ -227,15 +227,9 @@ func (c *Client) HostBlocklist() (blocklist []string, err error) {
 	return
 }
 
-// AddHostBlocklistEntry adds the given entry to the host blocklist.
-func (c *Client) AddHostBlocklistEntry(entry string) (err error) {
-	err = c.c.PUT(fmt.Sprintf("/hosts/blocklist/%s", entry), nil)
-	return
-}
-
-// RemoveHostBlocklistEntry removes the given entry from the host blocklist.
-func (c *Client) RemoveHostBlocklistEntry(entry string) (err error) {
-	err = c.c.DELETE(fmt.Sprintf("/hosts/blocklist/%s", entry))
+// UpdateHostBlocklist updates the host blocklist, adding and removing the given entries.
+func (c *Client) UpdateHostBlocklist(add, remove []string) (err error) {
+	err = c.c.PUT("/hosts/blocklist", api.UpdateBlocklistRequest{Add: add, Remove: remove})
 	return
 }
 

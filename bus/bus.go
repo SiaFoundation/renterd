@@ -387,16 +387,18 @@ func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
-	var entry string
-	if jc.DecodeParam("entry", &entry) == nil {
-		jc.Check("couldn't add blocklist entry", b.hdb.AddHostBlocklistEntry(entry))
-	}
-}
-
-func (b *bus) hostsBlocklistHandlerDELETE(jc jape.Context) {
-	var entry string
-	if jc.DecodeParam("entry", &entry) == nil {
-		jc.Check("couldn't remove blocklist entry", b.hdb.RemoveHostBlocklistEntry(entry))
+	var req api.UpdateBlocklistRequest
+	if jc.Decode(&req) == nil {
+		for _, entry := range req.Add {
+			if jc.Check(fmt.Sprintf("couldn't add blocklist entry '%s'", entry), b.hdb.AddHostBlocklistEntry(entry)) != nil {
+				return
+			}
+		}
+		for _, entry := range req.Remove {
+			if jc.Check(fmt.Sprintf("couldn't remove blocklist entry '%s'", entry), b.hdb.RemoveHostBlocklistEntry(entry)) != nil {
+				return
+			}
+		}
 	}
 }
 
@@ -664,12 +666,11 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":                   b.hostsHandlerGET,
-		"GET    /host/:hostkey":           b.hostsPubkeyHandlerGET,
-		"POST   /host/:hostkey":           b.hostsPubkeyHandlerPOST,
-		"GET    /hosts/blocklist":         b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist/:entry":  b.hostsBlocklistHandlerPUT,
-		"DELETE  /hosts/blocklist/:entry": b.hostsBlocklistHandlerDELETE,
+		"GET    /hosts":           b.hostsHandlerGET,
+		"GET    /host/:hostkey":   b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey":   b.hostsPubkeyHandlerPOST,
+		"GET    /hosts/blocklist": b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist": b.hostsBlocklistHandlerPUT,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
