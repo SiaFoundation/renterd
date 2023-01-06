@@ -72,6 +72,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbContractSetContract{},
 
 			// bus.HostDB tables
+			&dbAnnouncement{},
 			&dbHost{},
 			&dbInteraction{},
 			&dbConsensusInfo{},

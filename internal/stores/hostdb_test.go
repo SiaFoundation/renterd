@@ -325,8 +325,12 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{},
+		hostKey: consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{
+			Index:      consensus.ChainIndex{Height: 1, ID: consensus.BlockID{1}},
+			Timestamp:  time.Now(),
+			NetAddress: "ann1",
+		},
 	}
 	ann2 := announcement{
 		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
@@ -337,11 +341,24 @@ func TestInsertAnnouncements(t *testing.T) {
 		announcement: hostdb.Announcement{},
 	}
 
-	// Insert the first one.
+	// Insert the first one and check that all fields are set.
 	if err := insertAnnouncements(hdb.db, []announcement{ann1}); err != nil {
 		t.Fatal(err)
 	}
-
+	var ann dbAnnouncement
+	if err := hdb.db.Find(&ann).Error; err != nil {
+		t.Fatal(err)
+	}
+	ann.Model = Model{} // ignore
+	expectedAnn := dbAnnouncement{
+		HostKey:     ann1.hostKey,
+		BlockHeight: 1,
+		BlockID:     consensus.BlockID{1}.String(),
+		NetAddress:  "ann1",
+	}
+	if ann != expectedAnn {
+		t.Fatal("mismatch")
+	}
 	// Insert the first and second one.
 	if err := insertAnnouncements(hdb.db, []announcement{ann1, ann2}); err != nil {
 		t.Fatal(err)
@@ -359,6 +376,15 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 	if len(hosts) != 3 {
 		t.Fatal("invalid number of hosts")
+	}
+
+	// There should be 7 announcements total.
+	var announcements []dbAnnouncement
+	if err := hdb.db.Find(&announcements).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(announcements) != 7 {
+		t.Fatal("invalid number of announcements")
 	}
 }
 
@@ -378,3 +404,54 @@ func (db *SQLStore) hosts() ([]dbHost, error) {
 	}
 	return hosts, nil
 }
+
+// TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
+// SQLite DB.
+//func TestSQL100KHosts(t *testing.T) {
+//	path := "/Users/cschinnerl/benchmark.sql"
+//	os.RemoveAll(path)
+//	conn := NewSQLiteConnection(path)
+//	hdb, _, err := NewSQLStore(conn, true, 2*time.Second)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	// Add 100k hosts.
+//	var hosts []dbHost
+//	timestamp := time.Now().Add(-time.Minute)
+//	for i := uint64(0); i < 100000; i++ {
+//		var hk consensus.PublicKey
+//		binary.LittleEndian.PutUint64(hk[:], i)
+//		hosts = append(hosts, dbHost{
+//			PublicKey:    hk,
+//			Interactions: []dbInteraction{{Timestamp: timestamp}, {Timestamp: timestamp}},
+//		})
+//	}
+//
+//	startInsert := time.Now()
+//	if err := hdb.db.CreateInBatches(&hosts, 1000).Error; err != nil {
+//		t.Fatal(err)
+//	}
+//	fmt.Printf("Insertion took: %v\n", time.Since(startInsert))
+//
+//	// Assert it's returned
+//	startHosts := time.Now()
+//	allHosts, err := hdb.Hosts(time.Now().Add(time.Hour), -1)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	if len(allHosts) != 100000 {
+//		t.Fatal("unexpected result", len(allHosts))
+//	}
+//	fmt.Printf("Fetching multiple took: %v\n", time.Since(startHosts))
+//
+//	startHost := time.Now()
+//	var hk consensus.PublicKey
+//	binary.LittleEndian.PutUint64(hk[:], 1)
+//	_, err = hdb.Host(hk)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	fmt.Printf("Fetching single took: %v\n", time.Since(startHost))
+//}
+//
