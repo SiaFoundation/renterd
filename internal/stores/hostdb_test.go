@@ -694,7 +694,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 // addTestHost ensures a host with given hostkey exists.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
-	return s.addCustomTestHost(hk, "foo.bar:1000")
+	return s.addCustomTestHost(hk, "")
 }
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
