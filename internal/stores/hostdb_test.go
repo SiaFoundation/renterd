@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"reflect"
 	"testing"
 	"time"
@@ -66,7 +65,7 @@ func TestSQLHostDB(t *testing.T) {
 			ID:     consensus.BlockID{1, 2, 3},
 		},
 		Timestamp:  time.Now().UTC().Round(time.Second),
-		NetAddress: "foo.bar:1000",
+		NetAddress: "address",
 	}
 	err = hdb.insertTestAnnouncement(hk, a)
 	if err != nil {
@@ -138,7 +137,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second)
+	hdb2, ccid, err := NewSQLStore(conn2, false, false, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,20 +435,16 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		hostKey: consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{
-			Index:      consensus.ChainIndex{Height: 1, ID: consensus.BlockID{1}},
-			Timestamp:  time.Now(),
-			NetAddress: "foo.bar:1000",
-		},
+		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{},
 	}
 	ann2 := announcement{
 		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{NetAddress: "foo.bar:2000"},
+		announcement: hostdb.Announcement{},
 	}
 	ann3 := announcement{
 		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{NetAddress: "foo.bar:3000"},
+		announcement: hostdb.Announcement{},
 	}
 
 	// Insert the first one and check that all fields are set.
@@ -677,11 +672,7 @@ func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk consensus.PublicKey, na string) error {
-	host, _, err := net.SplitHostPort(na)
-	if err != nil {
-		return err
-	}
-	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk, NetAddress: na, NetHost: host}).Error
+	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk, NetAddress: na}).Error
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all

@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -33,7 +32,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = cs.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "foo.bar:1000"})
+	err = cs.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +112,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 	expected := api.ContractMetadata{
 		ID:          fcid,
-		HostIP:      "foo.bar:1000",
+		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: 100,
 		RenewedFrom: types.FileContractID{},
@@ -125,9 +124,7 @@ func TestSQLContractStore(t *testing.T) {
 		TotalCost: totalCost,
 	}
 	if !reflect.DeepEqual(fetched, expected) {
-		js1, _ := json.MarshalIndent(fetched, "", "  ")
-		js2, _ := json.MarshalIndent(expected, "", "  ")
-		t.Fatal("contract mismatch", string(js1), string(js2))
+		t.Fatal("contract mismatch")
 	}
 	contracts, err = cs.ActiveContracts()
 	if err != nil {
@@ -341,7 +338,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 	expected := api.ContractMetadata{
 		ID:          fcid2,
-		HostIP:      "foo.bar:1000",
+		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
 		RenewedFrom: fcid,

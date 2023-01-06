@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -55,7 +54,6 @@ type (
 
 		LastAnnouncement time.Time
 		NetAddress       string
-		NetHost          string
 	}
 
 	// dbBlocklistEntry defines a table that stores the host blocklist.
@@ -299,14 +297,19 @@ func (ss *SQLStore) AddHostBlocklistEntry(entry string) error {
 			return tx.Error
 		}
 
-		params := map[string]interface{}{"entry": entry, "dot_entry": "." + entry}
+		params := map[string]interface{}{
+			"exact_entry":  entry,
+			"suffix_entry": fmt.Sprintf("%%.%s", entry),
+		}
+
+		netHost := "rtrim(rtrim(net_address, replace(net_address, ':', '')),':')"
 
 		// find all hosts where the entry matches the hosts's net address
 		var dbHosts []dbHost
 		err := tx.
 			Table(dbHost{}.TableName()).
-			Where(db.Where("net_host == @entry", params)).                                                                                                    // exact match on entry
-			Or(db.Where("instr(net_host, @dot_entry) > 0", params).Where("instr(net_host, @dot_entry) -1 + length(@dot_entry) == length(net_host)", params)). // has_suffix .[entry]
+			Where(db.Where(fmt.Sprintf("%s == @exact_entry", netHost), params)).
+			Or(db.Where(fmt.Sprintf("%s LIKE @suffix_entry", netHost), params)).
 			Find(&dbHosts).
 			Error
 		if err != nil {
@@ -447,15 +450,10 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	var hosts []dbHost
 	var announcements []dbAnnouncement
 	for _, a := range as {
-		host, _, err := net.SplitHostPort(a.announcement.NetAddress)
-		if err != nil {
-			return err
-		}
 		hosts = append(hosts, dbHost{
 			PublicKey:        a.hostKey,
 			LastAnnouncement: a.announcement.Timestamp.UTC(),
 			NetAddress:       a.announcement.NetAddress,
-			NetHost:          host,
 		})
 		announcements = append(announcements, dbAnnouncement{
 			HostKey:     a.hostKey,
@@ -469,6 +467,6 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	}
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "public_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address", "net_host"}), // upsert
+		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}), // upsert
 	}).Create(&hosts).Error
 }

@@ -57,8 +57,9 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration) (*SQLStore, modules.ConsensusChangeID, error) {
-	db, err := gorm.Open(conn, &gorm.Config{})
+func NewSQLStore(conn gorm.Dialector, applyDefaultBlocklist, migrate bool, persistInterval time.Duration) (*SQLStore, modules.ConsensusChangeID, error) {
+	db, err := gorm.Open(conn, &gorm.Config{}) // Logger: logger.Default.LogMode(logger.Silent)
+
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
@@ -113,6 +114,14 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		db:                   db,
 		lastAnnouncementSave: time.Now(),
 		persistInterval:      persistInterval,
+	}
+
+	if applyDefaultBlocklist {
+		for _, entry := range []string{"siacentral.ddnsfree.com", "siacentral.mooo.com", "51.158.108.244"} {
+			if err := ss.AddHostBlocklistEntry(entry); err != nil {
+				return nil, modules.ConsensusChangeID{}, err
+			}
+		}
 	}
 	return ss, ccid, nil
 }
