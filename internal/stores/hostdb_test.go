@@ -666,12 +666,10 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	// add two hosts, one that should be blocked by 'baz.com' and one that should not
 	hk4 := consensus.GeneratePrivateKey().PublicKey()
-	fmt.Println("hk4", hk4.String())
 	if err := hdb.addCustomTestHost(hk4, "foo.baz.com:3000"); err != nil {
 		t.Fatal(err)
 	}
 	hk5 := consensus.GeneratePrivateKey().PublicKey()
-	fmt.Println("hk5", hk5.String())
 	if err := hdb.addCustomTestHost(hk5, "foo.baz.commmmm:3000"); err != nil {
 		t.Fatal(err)
 	}
@@ -689,6 +687,9 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 	if _, err = hdb.Host(hk4); err != nil {
 		t.Fatal("expected host to be found")
+	}
+	if numRelations() != 0 {
+		t.Fatalf("unexpected number of entries in join table, %v != 0", numRelations())
 	}
 }
 

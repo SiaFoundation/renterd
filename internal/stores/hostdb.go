@@ -259,7 +259,39 @@ func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
-func (e dbBlocklistEntry) blocks(h *dbHost) bool {
+func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) (err error) {
+	// NOTE: the ID is zero here if we ignore a conflict on create
+	if e.ID == 0 {
+		return nil
+	}
+
+	params := map[string]interface{}{
+		"entry_id":    e.ID,
+		"exact_entry": e.Entry,
+		"like_entry":  fmt.Sprintf("%%.%s", e.Entry),
+	}
+
+	err = tx.Exec(`
+INSERT INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+VALUES (@entry_id, (
+	SELECT id FROM (
+		SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
+		FROM hosts
+		WHERE net_host == @exact_entry OR net_host LIKE @like_entry
+	)
+))`, params).Error
+	return
+}
+
+func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
+	tx.Statement.AddClause(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "entry"}},
+		DoNothing: true,
+	})
+	return nil
+}
+
+func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
 		return false // do nothing
@@ -326,45 +358,7 @@ func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
 }
 
 func (ss *SQLStore) AddHostBlocklistEntry(entry string) error {
-	db := ss.db
-	return db.Transaction(func(tx *gorm.DB) error {
-		dbEntry := &dbBlocklistEntry{Entry: entry}
-
-		// insert block list entry
-		tx = tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "entry"}},
-			DoNothing: true,
-		}).Create(dbEntry)
-
-		// return early if possible
-		if tx.Error != nil || tx.RowsAffected == 0 {
-			return tx.Error
-		}
-
-		params := map[string]interface{}{
-			"exact_entry":  entry,
-			"suffix_entry": fmt.Sprintf("%%.%s", entry),
-		}
-
-		netHost := "rtrim(rtrim(net_address, replace(net_address, ':', '')),':')"
-
-		// find all hosts where the entry matches the hosts's net address
-		var dbHosts, dbBatch []dbHost
-		err := tx.
-			Table(dbHost{}.TableName()).
-			Where(db.Where(fmt.Sprintf("%s == @exact_entry", netHost), params)).
-			Or(db.Where(fmt.Sprintf("%s LIKE @suffix_entry", netHost), params)).
-			FindInBatches(&dbBatch, 10000, func(tx *gorm.DB, batch int) error {
-				dbHosts = append(dbHosts, dbBatch...)
-				return nil
-			}).
-			Error
-		if err != nil {
-			return err
-		}
-
-		return tx.Model(&dbEntry).Association("Hosts").Append(&dbHosts)
-	})
+	return ss.db.Create(&dbBlocklistEntry{Entry: entry}).Error
 }
 
 func (db *SQLStore) RemoveHostBlocklistEntry(entry string) (err error) {
