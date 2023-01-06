@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
+	"strings"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -54,6 +56,8 @@ type (
 
 		LastAnnouncement time.Time
 		NetAddress       string
+
+		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbBlocklistEntry defines a table that stores the host blocklist.
@@ -229,6 +233,50 @@ func (h dbHost) convert() hostdb.Host {
 	return hdbHost
 }
 
+func (h *dbHost) AfterCreate(tx *gorm.DB) (err error) {
+	var dbBlocklist []dbBlocklistEntry
+	if err := tx.
+		Model(&dbBlocklistEntry{}).
+		Find(&dbBlocklist).
+		Error; err != nil {
+		return err
+	}
+
+	filtered := dbBlocklist[:0]
+	for _, entry := range dbBlocklist {
+		if entry.blocks(h) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return tx.Model(h).Association("Blocklist").Replace(&filtered)
+}
+
+func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
+	tx.Statement.AddClause(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "public_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
+	})
+	return nil
+}
+
+func (e dbBlocklistEntry) blocks(h *dbHost) bool {
+	host, _, err := net.SplitHostPort(h.NetAddress)
+	if err != nil {
+		return false // do nothing
+	}
+
+	return host == e.Entry || strings.HasSuffix(host, "."+e.Entry)
+}
+
+// convert converts an interaction into a hostdb.Interaction.
+func (i dbInteraction) convert() hostdb.Interaction {
+	return hostdb.Interaction{
+		Timestamp: i.Timestamp,
+		Type:      i.Type,
+		Result:    i.Result,
+	}
+}
+
 // Host returns information about a host.
 func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
@@ -301,12 +349,15 @@ func (ss *SQLStore) AddHostBlocklistEntry(entry string) error {
 		netHost := "rtrim(rtrim(net_address, replace(net_address, ':', '')),':')"
 
 		// find all hosts where the entry matches the hosts's net address
-		var dbHosts []dbHost
+		var dbHosts, dbBatch []dbHost
 		err := tx.
 			Table(dbHost{}.TableName()).
 			Where(db.Where(fmt.Sprintf("%s == @exact_entry", netHost), params)).
 			Or(db.Where(fmt.Sprintf("%s LIKE @suffix_entry", netHost), params)).
-			Find(&dbHosts).
+			FindInBatches(&dbBatch, 10000, func(tx *gorm.DB, batch int) error {
+				dbHosts = append(dbHosts, dbBatch...)
+				return nil
+			}).
 			Error
 		if err != nil {
 			return err
@@ -465,8 +516,5 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	if err := tx.Create(&announcements).Error; err != nil {
 		return err
 	}
-	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "public_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}), // upsert
-	}).Create(&hosts).Error
+	return tx.Create(&hosts).Error
 }

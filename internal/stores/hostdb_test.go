@@ -663,16 +663,46 @@ func TestSQLHostBlocklist(t *testing.T) {
 	if numEntries() != 1 {
 		t.Fatalf("unexpected number of entries in blocklist, %v != 1", numEntries())
 	}
+
+	// add two hosts, one that should be blocked by 'baz.com' and one that should not
+	hk4 := consensus.GeneratePrivateKey().PublicKey()
+	fmt.Println("hk4", hk4.String())
+	if err := hdb.addCustomTestHost(hk4, "foo.baz.com:3000"); err != nil {
+		t.Fatal(err)
+	}
+	hk5 := consensus.GeneratePrivateKey().PublicKey()
+	fmt.Println("hk5", hk5.String())
+	if err := hdb.addCustomTestHost(hk5, "foo.baz.commmmm:3000"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = hdb.Host(hk4); err != ErrHostNotFound {
+		t.Fatal("expected host to be blocked")
+	}
+	if _, err = hdb.Host(hk5); err != nil {
+		t.Fatal("expected host to be found")
+	}
+
+	// now update host 4's address so it's no longer blocked
+	if err := hdb.addCustomTestHost(hk4, "foo.baz.commmmm:3000"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = hdb.Host(hk4); err != nil {
+		t.Fatal("expected host to be found")
+	}
 }
 
 // addTestHost ensures a host with given hostkey exists.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
-	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk}).Error
+	return s.addCustomTestHost(hk, "foo.bar:1000")
 }
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk consensus.PublicKey, na string) error {
-	return s.db.FirstOrCreate(&dbHost{}, &dbHost{PublicKey: hk, NetAddress: na}).Error
+	return insertAnnouncements(s.db, []announcement{{
+		hostKey:      hk,
+		announcement: hostdb.Announcement{NetAddress: na},
+	}})
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all
