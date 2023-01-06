@@ -29,10 +29,8 @@ type (
 
 	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
-		Blacklist          []string                        `json:"blacklist"`
 		IgnoreRedundantIPs bool                            `json:"ignoreRedundantIPs"`
 		ScoreOverrides     map[consensus.PublicKey]float64 `json:"scoreOverrides"`
-		Whitelist          []string                        `json:"whitelist"`
 	}
 
 	// ContractsConfig contains all contracts configuration parameters.

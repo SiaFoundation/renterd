@@ -22,12 +22,6 @@ const (
 func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
 	var reasons []string
 
-	if !isWhitelisted(cfg, h) {
-		reasons = append(reasons, "not whitelisted")
-	}
-	if isBlacklisted(cfg, h) {
-		reasons = append(reasons, "blacklisted")
-	}
 	if !h.IsOnline() {
 		reasons = append(reasons, "offline")
 	}
@@ -122,28 +116,4 @@ func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {
 		return true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
 	}
 	return false, ""
-}
-
-func isBlacklisted(cfg api.AutopilotConfig, h Host) bool {
-	for _, host := range cfg.Hosts.Blacklist {
-		if h.IsHost(host) {
-			return true
-		}
-	}
-	return false
-}
-
-func isWhitelisted(cfg api.AutopilotConfig, h Host) bool {
-	if len(cfg.Hosts.Whitelist) == 0 {
-		return true
-	}
-
-	var whitelisted bool
-	for _, host := range cfg.Hosts.Whitelist {
-		if h.IsHost(host) {
-			whitelisted = true
-			break
-		}
-	}
-	return whitelisted
 }

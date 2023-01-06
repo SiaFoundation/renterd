@@ -207,17 +207,9 @@ func (s *scanner) launchHostScans(cfg api.AutopilotConfig) chan scanReq {
 				exhausted = true
 			}
 
-			// filter batch
-			filtered := hosts[:0]
-			for _, host := range hosts {
-				if !isBlacklisted(cfg, Host{host}) && isWhitelisted(cfg, Host{host}) {
-					filtered = append(filtered, host)
-				}
-			}
-
 			// add batch to scan queue
-			s.logger.Debugf("scanning %d hosts in batch %d-%d", len(filtered), offset, offset+int(s.scanBatchSize))
-			for _, h := range filtered {
+			s.logger.Debugf("scanning %d hosts in batch %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
+			for _, h := range hosts {
 				reqChan <- scanReq{
 					hostKey: h.PublicKey,
 					hostIP:  h.NetAddress,
