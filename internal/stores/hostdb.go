@@ -158,28 +158,8 @@ func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Int
 	// sufficient since the host should have been created as we picked up
 	// its announcement from the chain already. If that fails, we try
 	// creating the unannounced host with an associated interaction instead.
-	err := db.db.Exec("INSERT INTO host_interactions (db_host_id, timestamp, type, result) VALUES ((SELECT id FROM hosts WHERE public_key = ?), ?, ?, ?)",
+	return db.db.Exec("INSERT INTO host_interactions (db_host_id, timestamp, type, result) VALUES ((SELECT id FROM hosts WHERE public_key = ?), ?, ?, ?)",
 		gobEncode(hostKey), hi.Timestamp.UTC(), hi.Type, hi.Result).Error
-	if err != nil {
-		// If creating the interaction by itself failed it's usually
-		// because the host doesn't exist. Since there is no cross db
-		// way to check the error we try creating a host.
-		errCreate := db.db.Create(&dbHost{
-			PublicKey: hostKey,
-			Interactions: []dbInteraction{{
-				Result:    hi.Result,
-				Timestamp: hi.Timestamp,
-				Type:      hi.Type,
-			}},
-			LastAnnouncement: time.Time{}, // not announced yet
-			NetAddress:       "",          // not announced yet
-		}).Error
-		if errCreate != nil {
-			return err // return outer error if creating the host wasn't the solution
-		}
-		return nil
-	}
-	return nil
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.
