@@ -1,7 +1,7 @@
 package autopilot
 
 import (
-	"fmt"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,13 +15,11 @@ import (
 
 const (
 	// TODO: make these configurable
-	scannerBatchSize       = 1000
-	scannerNumThreads      = 25
-	scannerTimeoutInterval = 10 * time.Minute
+	scannerTimeoutInterval   = 10 * time.Minute
+	scannerTimeoutMinTimeout = time.Second * 5
 
 	// TODO: make these configurable
 	trackerMinDataPoints     = 25
-	trackerMinTimeout        = time.Second * 5
 	trackerNumDataPoints     = 1000
 	trackerTimeoutPercentile = 99
 )
@@ -41,10 +39,12 @@ type (
 		tracker *tracker
 		logger  *zap.SugaredLogger
 
-		scanBatchSize      uint64
-		scanThreads        uint64
-		scanMinInterval    time.Duration
+		scanBatchSize   uint64
+		scanThreads     uint64
+		scanMinInterval time.Duration
+
 		timeoutMinInterval time.Duration
+		timeoutMinTimeout  time.Duration
 
 		stopChan chan struct{}
 
@@ -69,7 +69,6 @@ type (
 	tracker struct {
 		threshold  uint64
 		percentile float64
-		minTimeout time.Duration
 
 		mu      sync.Mutex
 		count   uint64
@@ -77,10 +76,9 @@ type (
 	}
 )
 
-func newTracker(threshold, total uint64, percentile float64, minTimeout time.Duration) *tracker {
+func newTracker(threshold, total uint64, percentile float64) *tracker {
 	return &tracker{
 		threshold:  threshold,
-		minTimeout: minTimeout,
 		percentile: percentile,
 		timings:    make([]float64, total),
 	}
@@ -106,23 +104,25 @@ func (t *tracker) timeout() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.count < uint64(t.threshold) {
-		return t.minTimeout
+		return 0
 	}
 
 	percentile, err := percentile(t.timings, t.percentile)
 	if err != nil {
-		return t.minTimeout
+		return 0
 	}
 
-	timeout := time.Duration(percentile) * time.Millisecond
-	if timeout < t.minTimeout {
-		timeout = t.minTimeout
-	}
-
-	return timeout
+	return time.Duration(percentile) * time.Millisecond
 }
 
-func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
+func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
+	if scanBatchSize == 0 {
+		return nil, errors.New("scanner batch size has to be greater than zero")
+	}
+	if scanThreads == 0 {
+		return nil, errors.New("scanner threads has to be greater than zero")
+	}
+
 	return &scanner{
 		bus:    ap.bus,
 		worker: ap.worker,
@@ -130,20 +130,21 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 			trackerMinDataPoints,
 			trackerNumDataPoints,
 			trackerTimeoutPercentile,
-			trackerMinTimeout,
 		),
 		logger: ap.logger.Named("scanner"),
 
 		stopChan: ap.stopChan,
 
-		scanBatchSize:      scanBatchSize,
-		scanThreads:        scanThreads,
-		scanMinInterval:    scanMinInterval,
+		scanBatchSize:   scanBatchSize,
+		scanThreads:     scanThreads,
+		scanMinInterval: scanMinInterval,
+
 		timeoutMinInterval: timeoutMinInterval,
-	}
+		timeoutMinTimeout:  timeoutMinTimeout,
+	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(cfg api.AutopilotConfig) {
+func (s *scanner) tryPerformHostScan() {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
@@ -156,12 +157,12 @@ func (s *scanner) tryPerformHostScan(cfg api.AutopilotConfig) {
 	s.mu.Unlock()
 
 	go func() {
-		for res := range s.launchScanWorkers(s.launchHostScans(cfg)) {
+		for res := range s.launchScanWorkers(s.launchHostScans()) {
+			if s.isStopped() {
+				break
+			}
 			if res.err != nil {
-				s.logger.Debugw(
-					fmt.Sprintf("failed scan, err: %v", res.err),
-					"hk", res.hostKey,
-				)
+				s.logger.Debugw(res.err.Error(), "hk", res.hostKey)
 			}
 		}
 
@@ -179,13 +180,19 @@ func (s *scanner) tryUpdateTimeout() {
 		return
 	}
 
+	updated := s.tracker.timeout()
+	if updated < s.timeoutMinTimeout {
+		s.logger.Debugf("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
+		updated = s.timeoutMinTimeout
+	}
+
 	prev := s.timeout
-	s.timeout = s.tracker.timeout()
+	s.timeout = updated
 	s.timeoutLastUpdate = time.Now()
 	s.logger.Debugf("updated timeout %v->%v", prev, s.timeout)
 }
 
-func (s *scanner) launchHostScans(cfg api.AutopilotConfig) chan scanReq {
+func (s *scanner) launchHostScans() chan scanReq {
 	reqChan := make(chan scanReq, s.scanBatchSize)
 
 	go func() {

@@ -464,10 +464,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		// fetch host settings
 		scan, err := c.ap.worker.RHPScan(candidate, host.NetAddress, 0)
 		if err != nil {
-			c.logger.Debugw(
-				fmt.Sprintf("failed scan, err: %v", err),
-				"hk", candidate,
-			)
+			c.logger.Debugw(err.Error(), "hk", candidate)
 			continue
 		}
 		settings := scan.Settings
@@ -543,10 +540,7 @@ func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(toRenew.HostKey(), toRenew.HostIP, 0)
 	if err != nil {
-		c.logger.Debugw(
-			fmt.Sprintf("failed scan, err: %v", err),
-			"hk", toRenew.HostKey(),
-		)
+		c.logger.Debugw(err.Error(), "hk", toRenew.HostKey())
 		return rhpv2.ContractRevision{}, nil
 	}
 
@@ -611,10 +605,7 @@ func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract ap
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
 	if err != nil {
-		c.logger.Debugw(
-			fmt.Sprintf("failed scan, err: %v", err),
-			"hk", contract.HostKey(),
-		)
+		c.logger.Debugw(err.Error(), "hk", contract.HostKey())
 		return types.ZeroCurrency, err
 	}
 
@@ -650,10 +641,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
 	if err != nil {
-		c.logger.Debugw(
-			fmt.Sprintf("failed scan, err: %v", err),
-			"hk", contract.HostKey,
-		)
+		c.logger.Debugw(err.Error(), "hk", contract.HostKey)
 		return types.ZeroCurrency, err
 	}
 

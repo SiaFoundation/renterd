@@ -176,8 +176,10 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 
 	// Create autopilot.
 	ap, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
-		Heartbeat:       time.Second,
-		ScannerInterval: 2 * time.Second,
+		Heartbeat:         time.Second,
+		ScannerInterval:   time.Second,
+		ScannerBatchSize:  10,
+		ScannerNumThreads: 1,
 	}, autopilotStore, busClient, workerClient, logger)
 	if err != nil {
 		return nil, err

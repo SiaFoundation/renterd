@@ -108,12 +108,9 @@ func (ap *Autopilot) Run() error {
 		case <-ap.ticker.C:
 		}
 
-		// fetch config to ensure its not updated during maintenance
-		cfg := ap.store.Config()
-
 		// initiate a host scan
 		ap.s.tryUpdateTimeout()
-		ap.s.tryPerformHostScan(cfg)
+		ap.s.tryPerformHostScan()
 
 		// fetch consensus state
 		cs, err := ap.bus.ConsensusState()
@@ -126,6 +123,9 @@ func (ap *Autopilot) Run() error {
 		if !cs.Synced {
 			continue
 		}
+
+		// fetch config to ensure its not updated during maintenance
+		cfg := ap.store.Config()
 
 		// perform maintenance
 		err = ap.c.performContractMaintenance(cfg, cs)
@@ -190,7 +190,7 @@ func NewServer(ap *Autopilot) http.Handler {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scanInterval time.Duration) *Autopilot {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64) (*Autopilot, error) {
 	ap := &Autopilot{
 		bus:    bus,
 		logger: logger.Sugar().Named("autopilot"),
@@ -201,15 +201,21 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		stopChan: make(chan struct{}),
 	}
 
-	ap.c = newContractor(ap)
-	ap.m = newMigrator(ap)
-	ap.s = newScanner(
+	scanner, err := newScanner(
 		ap,
 		scannerBatchSize,
 		scannerNumThreads,
-		scanInterval,
+		scannerScanInterval,
 		scannerTimeoutInterval,
+		scannerTimeoutMinTimeout,
 	)
+	if err != nil {
+		return nil, err
+	}
 
-	return ap
+	ap.s = scanner
+	ap.c = newContractor(ap)
+	ap.m = newMigrator(ap)
+
+	return ap, nil
 }
