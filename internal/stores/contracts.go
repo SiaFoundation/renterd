@@ -131,10 +131,10 @@ func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Dura
 	now := time.Now()
 	tryLockUntil := now.Add(duration)
 	var newLockedUntil int64
-	err := s.db.Raw("UPDATE contracts SET locked_UNTIL = CASE WHEN locked_until < ? THEN ? ELSE locked_until END WHERE fcid = ? RETURNING locked_until",
-		now.UnixNano(), tryLockUntil.UnixNano(), gobEncode(fcid)).
-		Scan(&newLockedUntil).Error
-	return tryLockUntil.UnixNano() == newLockedUntil, err
+	res := s.db.Raw("UPDATE contracts SET locked_until = ? WHERE locked_until < ? AND fcid = ? RETURNING locked_until",
+		tryLockUntil.UnixNano(), now.UnixNano(), gobEncode(fcid)).
+		Scan(&newLockedUntil)
+	return res.RowsAffected > 0, res.Error
 }
 
 // ReleaseContract releases a contract by setting its locked_until field to 0.
