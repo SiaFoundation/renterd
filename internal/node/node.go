@@ -192,7 +192,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	if err := os.MkdirAll(hostdbDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, cfg.ApplyDefaultBlocklist, true, cfg.PersistInterval)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval)
 	if err != nil {
 		return nil, nil, err
 	} else if err := cm.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {

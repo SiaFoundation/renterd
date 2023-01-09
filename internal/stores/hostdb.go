@@ -300,15 +300,6 @@ func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
 	return host == e.Entry || strings.HasSuffix(host, "."+e.Entry)
 }
 
-// convert converts an interaction into a hostdb.Interaction.
-func (i dbInteraction) convert() hostdb.Interaction {
-	return hostdb.Interaction{
-		Timestamp: i.Timestamp,
-		Type:      i.Type,
-		Result:    i.Result,
-	}
-}
-
 // Host returns information about a host.
 func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
@@ -316,7 +307,6 @@ func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	tx := ss.db.
 		Scopes(ExcludeBlockedHosts).
 		Where(&dbHost{PublicKey: hostKey}).
-		Preload("Interactions").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound

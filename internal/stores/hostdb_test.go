@@ -137,7 +137,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false, false, time.Second)
+	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,8 +435,12 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
-		announcement: hostdb.Announcement{},
+		hostKey: consensus.GeneratePrivateKey().PublicKey(),
+		announcement: hostdb.Announcement{
+			Index:      consensus.ChainIndex{Height: 1, ID: consensus.BlockID{1}},
+			Timestamp:  time.Now(),
+			NetAddress: "foo.bar:1000",
+		},
 	}
 	ann2 := announcement{
 		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
