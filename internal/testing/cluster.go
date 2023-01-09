@@ -24,10 +24,10 @@ import (
 	"go.sia.tech/siad/node/api/client"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/siatest"
-	"lukechampine.com/frand"
 )
 
 const (
@@ -57,6 +57,14 @@ var (
 	defaultRedundancy = api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 3,
+	}
+
+	defaultGouging = api.GougingSettings{
+		MaxRPCPrice:      types.SiacoinPrecision,
+		MaxContractPrice: types.SiacoinPrecision,
+		MaxDownloadPrice: types.SiacoinPrecision.Mul64(2500),
+		MaxUploadPrice:   types.SiacoinPrecision.Mul64(2500),
+		MaxStoragePrice:  types.SiacoinPrecision,
 	}
 )
 
@@ -148,6 +156,7 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 		GatewayAddr:              "127.0.0.1:0",
 		Miner:                    miner,
 		PersistInterval:          testPersistInterval,
+		GougingSettings:          defaultGouging,
 		RedundancySettings:       defaultRedundancy,
 	}, busDir, wk)
 	if err != nil {
@@ -335,37 +344,71 @@ func (c *TestCluster) MineBlocks(n int) error {
 	return c.miner.Mine(addr, n)
 }
 
+func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
+	needed := make(map[string]struct{})
+	for _, host := range c.hosts {
+		hpk, err := host.HostPublicKey()
+		if err != nil {
+			return nil, err
+		}
+		needed[hpk.String()] = struct{}{}
+	}
+
+	//  Wait for the contracts to form.
+	if err := Retry(30, time.Second, func() error {
+		contracts, err := c.Bus.ActiveContracts()
+		if err != nil {
+			return err
+		}
+
+		existing := make(map[string]struct{})
+		for _, c := range contracts {
+			existing[c.HostKey.String()] = struct{}{}
+		}
+		for hpk := range needed {
+			if _, exists := existing[hpk]; !exists {
+				return fmt.Errorf("missing contract for host %v", hpk)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return c.Worker.ActiveContracts()
+}
+
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
 // themselves on the network, ready to form contracts.
-func (c *TestCluster) AddHosts(n int) error {
+func (c *TestCluster) AddHosts(n int) ([]*siatest.TestNode, error) {
 	// Create hosts.
 	var newHosts []*siatest.TestNode
 	for i := 0; i < n; i++ {
 		hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
 		n, err := siatest.NewCleanNodeAsync(sianode.Host(hostDir))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		c.hosts = append(c.hosts, n)
 		newHosts = append(newHosts, n)
 
 		// Connect gateways.
 		if err := c.Bus.SyncerConnect(string(n.GatewayAddress())); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// Fund host from bus.
 	balance, err := c.Bus.WalletBalance()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fundAmt := balance.Div64(2).Div64(uint64(len(newHosts))) // 50% of bus balance
 	var scos []types.SiacoinOutput
 	for _, h := range newHosts {
 		wag, err := h.WalletAddressGet()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		scos = append(scos, types.SiacoinOutput{
 			Value:      fundAmt,
@@ -373,25 +416,25 @@ func (c *TestCluster) AddHosts(n int) error {
 		})
 	}
 	if err := c.Bus.SendSiacoins(scos); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Mine transaction.
 	if err := c.MineBlocks(1); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Wait for hosts to sync up with consensus.
 	if err := c.sync(newHosts); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Announce hosts.
 	if err := addStorageFolderToHost(newHosts); err != nil {
-		return err
+		return nil, err
 	}
 	if err := announceHosts(newHosts); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Mine a few blocks. The host should show up eventually.
@@ -413,36 +456,15 @@ func (c *TestCluster) AddHosts(n int) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Wait for all hosts to be synced.
 	if err := c.Sync(); err != nil {
-		return err
+		return nil, err
 	}
 
-	//  Wait for the contracts to form.
-	hostsWithContracts := make(map[string]struct{})
-	return Retry(20, time.Second, func() error {
-		contracts, err := c.Bus.ActiveContracts()
-		if err != nil {
-			return err
-		}
-		for _, c := range contracts {
-			hostsWithContracts[c.HostKey.String()] = struct{}{}
-		}
-		for _, h := range newHosts {
-			hpk, err := h.HostPublicKey()
-			if err != nil {
-				return err
-			}
-			_, exists := hostsWithContracts[hpk.String()]
-			if !exists {
-				return fmt.Errorf("missing contract for host %v", hpk.String())
-			}
-		}
-		return nil
-	})
+	return newHosts, nil
 }
 
 // Shutdown shuts down a TestCluster. Cleanups are performed in reverse order.

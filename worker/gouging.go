@@ -82,7 +82,7 @@ func (gr GougingResults) CanForm() []error {
 	return gr.CanUpload() // same conditions apply
 }
 
-func (gr GougingResults) CanUpload() (errs []error) {
+func (gr GougingResults) CanUpload() []error {
 	return filterErrors(
 		gr.downloadErr,
 		gr.uploadErr,

@@ -747,10 +747,10 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, b Bus) http.Handler {
+func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) http.Handler {
 	w := &worker{
 		bus:       b,
-		pool:      newSessionPool(),
+		pool:      newSessionPool(sessionTTL),
 		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{

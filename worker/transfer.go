@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -23,7 +24,7 @@ type sectorStore interface {
 
 func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore) ([]object.Sector, error) {
 	if len(hosts) < len(shards) {
-		return nil, errors.New("fewer hosts than shards")
+		return nil, fmt.Errorf("fewer hosts than shards, %v<%v", len(hosts), len(shards))
 	}
 
 	type req struct {

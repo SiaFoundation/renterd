@@ -179,9 +179,11 @@ func (s *session) DeleteSectors(roots []consensus.Hash256) error {
 // A sessionPool is a set of sessions that can be used for uploading and
 // downloading.
 type sessionPool struct {
-	hosts  map[consensus.PublicKey]*sharedSession
-	height uint64
+	sessionTTL time.Duration
+
 	mu     sync.Mutex
+	height uint64
+	hosts  map[consensus.PublicKey]*sharedSession
 }
 
 func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSession, err error) {
@@ -202,7 +204,7 @@ func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSessio
 	// reuse existing session or transport if possible
 	if ss.sess != nil {
 		t := ss.sess.Transport()
-		if time.Since(ss.lastSeen) >= 2*time.Minute {
+		if time.Since(ss.lastSeen) >= sp.sessionTTL {
 			// use RPCSettings as a generic "ping"
 			ss.settings, err = rhpv2.RPCSettings(ctx, t)
 			if err != nil {
@@ -321,8 +323,9 @@ func (sp *sessionPool) Close() error {
 }
 
 // newSessionPool creates a new sessionPool.
-func newSessionPool() *sessionPool {
+func newSessionPool(sessionTTL time.Duration) *sessionPool {
 	return &sessionPool{
-		hosts: make(map[consensus.PublicKey]*sharedSession),
+		sessionTTL: sessionTTL,
+		hosts:      make(map[consensus.PublicKey]*sharedSession),
 	}
 }
