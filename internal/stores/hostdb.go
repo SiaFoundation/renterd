@@ -235,6 +235,12 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	err := db.db.Table("hosts").
 		Limit(max).
 		Find(&fullHosts).
+		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
+			for _, fh := range fullHosts {
+				hosts = append(hosts, fh.convert())
+			}
+			return nil
+		}).
 		Error
 	if err != nil {
 		return nil, err
