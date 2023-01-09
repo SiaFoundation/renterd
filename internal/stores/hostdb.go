@@ -291,13 +291,14 @@ func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interact
 				}
 			}
 			scanQuery += fmt.Sprintf(`UPDATE hosts
-			              SET total_scans = total_scans + 1,
-				      second_to_last_scan_success = last_scan_success,
-				      last_scan_success = ?,
-				      %s = CASE WHEN last_scan == 0 THEN last_scan ELSE ? - last_scan END,
-				      last_scan = ?,
-				      settings = ?;`, timeToAddTo)
-			scanArgs = append(scanArgs, interaction.Success, interaction.Timestamp.UnixNano(), interaction.Timestamp.UnixNano(), gobEncode(convertHostSettings(sr.Settings)))
+						  SET total_scans = total_scans + 1,
+						  second_to_last_scan_success = last_scan_success,
+						  last_scan_success = ?,
+						  %s = CASE WHEN last_scan == 0 THEN last_scan ELSE ? - last_scan END,
+						  last_scan = ?,
+						  settings = ?
+						  WHERE public_key = ?;`, timeToAddTo)
+			scanArgs = append(scanArgs, interaction.Success, interaction.Timestamp.UnixNano(), interaction.Timestamp.UnixNano(), gobEncode(convertHostSettings(sr.Settings)), gobEncode(hostKey))
 		}
 	}
 	return db.db.Transaction(func(tx *gorm.DB) error {

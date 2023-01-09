@@ -288,12 +288,11 @@ func TestRecordScan(t *testing.T) {
 		return []hostdb.Interaction{
 			{
 				Result:    result,
-				Success:   true,
+				Success:   success,
 				Timestamp: scanTime,
 				Type:      hostdb.InteractionTypeScan,
 			}}
 	}
-	t.SkipNow()
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
@@ -309,9 +308,13 @@ func TestRecordScan(t *testing.T) {
 	// We expect no uptime or downtime from only a single scan.
 	uptime := time.Duration(0)
 	downtime := time.Duration(0)
+	if host.Interactions.LastScan.UnixNano() != firstScanTime.UnixNano() {
+		t.Fatal("wrong time")
+	}
+	host.Interactions.LastScan = time.Time{}
 	if host.Interactions != (hostdb.Interactions{
 		TotalScans:              1,
-		LastScan:                firstScanTime,
+		LastScan:                time.Time{},
 		LastScanSuccess:         true,
 		SecondToLastScanSuccess: false,
 		Uptime:                  uptime,
@@ -334,10 +337,14 @@ func TestRecordScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if host.Interactions.LastScan.UnixNano() != secondScanTime.UnixNano() {
+		t.Fatal("wrong time")
+	}
+	host.Interactions.LastScan = time.Time{}
 	uptime += secondScanTime.Sub(firstScanTime)
 	if host.Interactions != (hostdb.Interactions{
 		TotalScans:              2,
-		LastScan:                secondScanTime,
+		LastScan:                time.Time{},
 		LastScanSuccess:         true,
 		SecondToLastScanSuccess: true,
 		Uptime:                  uptime,
@@ -357,10 +364,14 @@ func TestRecordScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if host.Interactions.LastScan.UnixNano() != thirdScanTime.UnixNano() {
+		t.Fatal("wrong time")
+	}
+	host.Interactions.LastScan = time.Time{}
 	downtime += thirdScanTime.Sub(secondScanTime)
 	if host.Interactions != (hostdb.Interactions{
 		TotalScans:              3,
-		LastScan:                thirdScanTime,
+		LastScan:                time.Time{},
 		LastScanSuccess:         false,
 		SecondToLastScanSuccess: true,
 		Uptime:                  uptime,
