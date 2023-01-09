@@ -64,12 +64,12 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 
 // Interactions contains metadata about a host's interactions.
 type Interactions struct {
-	TotalScans          uint64
-	LastScan            time.Time
-	LastScanSuccess     bool
-	PreviousScanSuccess bool
-	Uptime              time.Duration
-	Downtime            time.Duration
+	TotalScans              uint64
+	LastScan                time.Time
+	LastScanSuccess         bool
+	SecondToLastScanSuccess bool
+	Uptime                  time.Duration
+	Downtime                time.Duration
 
 	SuccessfulInteractions float64
 	FailedInteractions     float64
@@ -98,5 +98,5 @@ func (h Host) IsOnline() bool {
 	} else if h.Interactions.TotalScans == 1 {
 		return h.Interactions.LastScanSuccess
 	}
-	return h.Interactions.LastScanSuccess || h.Interactions.PreviousScanSuccess
+	return h.Interactions.LastScanSuccess || h.Interactions.SecondToLastScanSuccess
 }

@@ -27,7 +27,7 @@ func TestHost(t *testing.T) {
 	}
 
 	// Mark previous scan failed as well. Should be offline.
-	h.Interactions.PreviousScanSuccess = false
+	h.Interactions.SecondToLastScanSuccess = false
 	if h.IsOnline() {
 		t.Fatal("unexpected")
 	}
@@ -44,12 +44,12 @@ func newTestHost(hk consensus.PublicKey, settings *rhpv2.HostSettings) hostdb.Ho
 		NetAddress: randomIP().String(),
 		KnownSince: time.Now(),
 		Interactions: hostdb.Interactions{
-			TotalScans:          2,
-			LastScan:            time.Now().Add(-time.Minute),
-			LastScanSuccess:     true,
-			PreviousScanSuccess: true,
-			Uptime:              10 * time.Minute,
-			Downtime:            10 * time.Minute,
+			TotalScans:              2,
+			LastScan:                time.Now().Add(-time.Minute),
+			LastScanSuccess:         true,
+			SecondToLastScanSuccess: true,
+			Uptime:                  10 * time.Minute,
+			Downtime:                10 * time.Minute,
 
 			SuccessfulInteractions: 2,
 			FailedInteractions:     0,

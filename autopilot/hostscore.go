@@ -120,7 +120,7 @@ func interactionScore(h Host) float64 {
 }
 
 func uptimeScore(h Host) float64 {
-	prevScanSuccess := h.Interactions.PreviousScanSuccess
+	secondToLastScanSuccess := h.Interactions.SecondToLastScanSuccess
 	lastScanSuccess := h.Interactions.LastScanSuccess
 	uptime := h.Interactions.Uptime
 	downtime := h.Interactions.Downtime
@@ -137,9 +137,9 @@ func uptimeScore(h Host) float64 {
 			return 0.25 // 1 failed scan
 		}
 	case 2:
-		if lastScanSuccess && prevScanSuccess {
+		if lastScanSuccess && secondToLastScanSuccess {
 			return 0.85
-		} else if lastScanSuccess || prevScanSuccess {
+		} else if lastScanSuccess || secondToLastScanSuccess {
 			return 0.5
 		} else {
 			return 0.05

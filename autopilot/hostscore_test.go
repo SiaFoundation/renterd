@@ -48,7 +48,7 @@ func TestHostScore(t *testing.T) {
 
 	// assert uptime affects the score
 	h2 = newHost(newTestHostSettings()) // reset
-	h2.Interactions.PreviousScanSuccess = false
+	h2.Interactions.SecondToLastScanSuccess = false
 	if hostScore(cfg, h1) <= hostScore(cfg, h2) || ageScore(h1) != ageScore(h2) {
 		t.Fatal("unexpected")
 	}

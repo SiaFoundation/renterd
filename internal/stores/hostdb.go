@@ -40,12 +40,12 @@ type (
 		PublicKey consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
 		Settings  hostSettings        `gorm:"type:bytes;serializer:gob"`
 
-		TotalScans          uint64
-		LastScan            int64 // Unix nano
-		LastScanSuccess     bool
-		PreviousScanSuccess bool
-		Uptime              time.Duration
-		Downtime            time.Duration
+		TotalScans              uint64
+		LastScan                int64 // Unix nano
+		LastScanSuccess         bool
+		SecondToLastScanSuccess bool
+		Uptime                  time.Duration
+		Downtime                time.Duration
 
 		SuccessfulInteractions float64
 		FailedInteractions     float64
@@ -198,14 +198,14 @@ func (h dbHost) convert() hostdb.Host {
 		KnownSince: h.CreatedAt,
 		NetAddress: h.NetAddress,
 		Interactions: hostdb.Interactions{
-			TotalScans:             h.TotalScans,
-			LastScan:               lastScan,
-			LastScanSuccess:        h.LastScanSuccess,
-			PreviousScanSuccess:    h.PreviousScanSuccess,
-			Uptime:                 h.Uptime,
-			Downtime:               h.Downtime,
-			SuccessfulInteractions: h.SuccessfulInteractions,
-			FailedInteractions:     h.FailedInteractions,
+			TotalScans:              h.TotalScans,
+			LastScan:                lastScan,
+			LastScanSuccess:         h.LastScanSuccess,
+			SecondToLastScanSuccess: h.SecondToLastScanSuccess,
+			Uptime:                  h.Uptime,
+			Downtime:                h.Downtime,
+			SuccessfulInteractions:  h.SuccessfulInteractions,
+			FailedInteractions:      h.FailedInteractions,
 		},
 		PublicKey: h.PublicKey,
 	}

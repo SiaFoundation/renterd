@@ -310,14 +310,14 @@ func TestRecordScan(t *testing.T) {
 	uptime := time.Duration(0)
 	downtime := time.Duration(0)
 	if host.Interactions != (hostdb.Interactions{
-		TotalScans:             1,
-		LastScan:               firstScanTime,
-		LastScanSuccess:        true,
-		PreviousScanSuccess:    false,
-		Uptime:                 uptime,
-		Downtime:               downtime,
-		SuccessfulInteractions: 1,
-		FailedInteractions:     0,
+		TotalScans:              1,
+		LastScan:                firstScanTime,
+		LastScanSuccess:         true,
+		SecondToLastScanSuccess: false,
+		Uptime:                  uptime,
+		Downtime:                downtime,
+		SuccessfulInteractions:  1,
+		FailedInteractions:      0,
 	}) {
 		t.Fatal("mismatch")
 	}
@@ -336,14 +336,14 @@ func TestRecordScan(t *testing.T) {
 	}
 	uptime += secondScanTime.Sub(firstScanTime)
 	if host.Interactions != (hostdb.Interactions{
-		TotalScans:             2,
-		LastScan:               secondScanTime,
-		LastScanSuccess:        true,
-		PreviousScanSuccess:    true,
-		Uptime:                 uptime,
-		Downtime:               downtime,
-		SuccessfulInteractions: 2,
-		FailedInteractions:     0,
+		TotalScans:              2,
+		LastScan:                secondScanTime,
+		LastScanSuccess:         true,
+		SecondToLastScanSuccess: true,
+		Uptime:                  uptime,
+		Downtime:                downtime,
+		SuccessfulInteractions:  2,
+		FailedInteractions:      0,
 	}) {
 		t.Fatal("mismatch")
 	}
@@ -359,14 +359,14 @@ func TestRecordScan(t *testing.T) {
 	}
 	downtime += thirdScanTime.Sub(secondScanTime)
 	if host.Interactions != (hostdb.Interactions{
-		TotalScans:             3,
-		LastScan:               thirdScanTime,
-		LastScanSuccess:        false,
-		PreviousScanSuccess:    true,
-		Uptime:                 uptime,
-		Downtime:               downtime,
-		SuccessfulInteractions: 2,
-		FailedInteractions:     1,
+		TotalScans:              3,
+		LastScan:                thirdScanTime,
+		LastScanSuccess:         false,
+		SecondToLastScanSuccess: true,
+		Uptime:                  uptime,
+		Downtime:                downtime,
+		SuccessfulInteractions:  2,
+		FailedInteractions:      1,
 	}) {
 		t.Fatal("mismatch")
 	}
