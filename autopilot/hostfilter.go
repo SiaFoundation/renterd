@@ -90,6 +90,10 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 }
 
 func isGouging(gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
+	if h.Settings == nil {
+		return false, ""
+	}
+
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
 	return worker.IsGouging(gs, *h.Settings, redundancy)
 }

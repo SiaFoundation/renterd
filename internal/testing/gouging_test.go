@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -164,18 +163,14 @@ func TestGouging(t *testing.T) {
 	}
 }
 
-func hostSettings(b *bus.Client, h *siatest.TestNode) (rhpv2.HostSettings, error) {
+func hostSettings(b *bus.Client, h *siatest.TestNode) (*rhpv2.HostSettings, error) {
 	hpk, err := h.HostPublicKey()
 	if err != nil {
-		return rhpv2.HostSettings{}, err
+		return nil, err
 	}
 	host, err := b.Host(consensus.PublicKey(hpk.ToPublicKey()))
 	if err != nil {
-		return rhpv2.HostSettings{}, err
+		return nil, err
 	}
-	settings, _, found := (&autopilot.Host{Host: host}).LastKnownSettings()
-	if !found {
-		return rhpv2.HostSettings{}, errors.New("settings not found")
-	}
-	return settings, nil
+	return host.Settings, nil
 }
