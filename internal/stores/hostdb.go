@@ -54,7 +54,6 @@ type (
 		NetAddress       string
 	}
 
-	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	// dbConsensusInfo defines table which stores the latest consensus info
 	// known to the hostdb. It should only ever contain a single entry with
 	// the consensusInfoID primary key.
@@ -259,7 +258,7 @@ func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
 	return h, err
 }
 
-// RecordInteraction records an interaction with a host. If the host is not in
+// RecordHostInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
 func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error {
 	dbInteractions := make([]dbInteraction, len(interactions))
