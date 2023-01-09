@@ -123,7 +123,7 @@ func uptimeScore(h Host) float64 {
 	prevScanSuccess := h.Interactions.PreviousScanSuccess
 	lastScanSuccess := h.Interactions.LastScanSuccess
 	uptime := h.Interactions.Uptime
-	downtime := h.Interactions.Uptime
+	downtime := h.Interactions.Downtime
 	totalScans := h.Interactions.TotalScans
 
 	// special cases
