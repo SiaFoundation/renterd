@@ -38,7 +38,7 @@ type (
 		bus interface {
 			AllHosts() ([]hostdb.Host, error)
 			ConsensusState() (api.ConsensusState, error)
-			RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+			RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 		}
 		worker interface {
 			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)

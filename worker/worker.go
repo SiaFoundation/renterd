@@ -96,19 +96,6 @@ type InteractionResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-type ScanResult struct {
-	InteractionResult
-	Settings rhpv2.HostSettings `json:"settings,omitempty"`
-}
-
-func IsSuccessfulInteraction(i hostdb.Interaction) bool {
-	var result InteractionResult
-	if err := json.Unmarshal(i.Result, &result); err != nil {
-		return false
-	}
-	return result.Error == ""
-}
-
 type ephemeralMetricsRecorder struct {
 	ms []metrics.Metric
 	mu sync.Mutex
@@ -123,6 +110,8 @@ func (mr *ephemeralMetricsRecorder) RecordMetric(m metrics.Metric) {
 func (mr *ephemeralMetricsRecorder) interactions() []hostdb.Interaction {
 	// TODO: merge/filter metrics?
 	var his []hostdb.Interaction
+	mr.mu.Lock()
+	defer mr.mu.Unlock()
 	for _, m := range mr.ms {
 		if hi, ok := toHostInteraction(m); ok {
 			his = append(his, hi)
@@ -142,6 +131,9 @@ type MetricHostDial struct {
 
 // IsMetric implements metrics.Metric.
 func (MetricHostDial) IsMetric() {}
+
+// IsSuccess implements metrics.Metric.
+func (m MetricHostDial) IsSuccess() bool { return m.Err == nil }
 
 func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.Conn, error) {
 	start := time.Now()
@@ -163,6 +155,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 			Timestamp: timestamp,
 			Type:      typ,
 			Result:    json.RawMessage(b),
+			Success:   err == nil,
 		}
 		return hi, true
 	}
@@ -195,7 +188,7 @@ type Bus interface {
 	ActiveContracts() ([]api.ContractMetadata, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
-	RecordHostInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+	RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 
 	DownloadParams() (api.DownloadParams, error)
 	UploadParams() (api.UploadParams, error)
@@ -242,30 +235,26 @@ type worker struct {
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
 	hi := hostdb.Interaction{
 		Timestamp: time.Now(),
-		Type:      "scan",
+		Type:      hostdb.InteractionTypeScan,
+		Success:   err == nil,
 	}
 	if err == nil {
-		hi.Result, _ = json.Marshal(ScanResult{
+		hi.Result, _ = json.Marshal(hostdb.ScanResult{
 			Settings: settings,
 		})
 	} else {
-		hi.Result, _ = json.Marshal(ScanResult{
-			InteractionResult: InteractionResult{
-				Error: errToStr(err),
-			},
+		hi.Result, _ = json.Marshal(hostdb.ScanResult{
+			Error: errToStr(err),
 		})
 	}
-	return w.bus.RecordHostInteraction(hostKey, hi)
+	return w.bus.RecordHostInteractions(hostKey, []hostdb.Interaction{hi})
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
-		// TODO: send all interactions in one request
-		for _, hi := range mr.interactions() {
-			// TODO: handle error
-			_ = w.bus.RecordHostInteraction(hostKey, hi)
-		}
+		// TODO: handle error
+		_ = w.bus.RecordHostInteractions(hostKey, mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
 	conn, err := dial(ctx, hostIP, hostKey)
@@ -376,7 +365,20 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		return err
 	})
 	elapsed := time.Since(start)
-	w.recordScan(rsr.HostKey, settings, err)
+
+	var sr hostdb.ScanResult
+	if err == nil {
+		sr = hostdb.ScanResult{Settings: settings}
+	} else {
+		sr = hostdb.ScanResult{Error: err.Error()}
+	}
+	scanResult, _ := json.Marshal(sr)
+	w.bus.RecordHostInteractions(rsr.HostKey, []hostdb.Interaction{{
+		Result:    scanResult,
+		Success:   err == nil,
+		Timestamp: time.Now(),
+		Type:      hostdb.InteractionTypeScan,
+	}}) // TODO: error handling
 
 	if jc.Check("couldn't scan host", err) != nil {
 		return

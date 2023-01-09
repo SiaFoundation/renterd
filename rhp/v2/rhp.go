@@ -288,3 +288,6 @@ type MetricRPC struct {
 
 // IsMetric implements metrics.Metric.
 func (MetricRPC) IsMetric() {}
+
+// IsMetric implements metrics.Metric.
+func (m MetricRPC) IsSuccess() bool { return m.Err == nil }

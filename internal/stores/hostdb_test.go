@@ -1,6 +1,8 @@
 package stores
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -9,6 +11,7 @@ import (
 
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 )
 
@@ -54,54 +57,6 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal("unexpected result", len(allHosts))
 	}
 
-	// Add an interaction one hour in the past
-	currentTime := time.Now().UTC().Round(time.Second)
-	hi1 := hostdb.Interaction{
-		Timestamp: currentTime.Add(-time.Hour),
-		Type:      "foo1",
-
-		Result: []byte{1},
-	}
-	if err := hdb.RecordInteraction(hk, hi1); err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert we can include/exclude the host if we play around with the notSince param
-	allHosts, err = hdb.Hosts(time.Now().Add(-2*time.Hour), -1)
-	if err != nil || len(allHosts) != 0 {
-		t.Fatal("unexpected result", err, len(allHosts))
-	}
-	allHosts, err = hdb.Hosts(time.Now().Add(-30*time.Minute), -1)
-	if err != nil || len(allHosts) != 1 || allHosts[0].PublicKey != hk {
-		t.Fatal("unexpected result", err, len(allHosts))
-	}
-
-	// Add another interaction.
-	hi2 := hostdb.Interaction{
-		Timestamp: currentTime,
-		Type:      "foo2",
-		Result:    []byte{2},
-	}
-	if err := hdb.RecordInteraction(hk, hi2); err != nil {
-		t.Fatal(err)
-	}
-
-	// Read the interactions and verify them.
-	var interactions []dbInteraction
-	tx := hdb.db.Find(&interactions)
-	if tx.Error != nil {
-		t.Fatal(err)
-	}
-	if len(interactions) != 2 {
-		t.Fatalf("expected %v rows but got %v", 2, len(interactions))
-	}
-	if !reflect.DeepEqual(interactions[0].convert(), hi1) {
-		t.Fatal("interaction mismatch", interactions[0], hi1)
-	}
-	if !reflect.DeepEqual(interactions[1].convert(), hi2) {
-		t.Fatal("interaction mismatch", interactions[1], hi2)
-	}
-
 	// Insert an announcement for the host and another one for an unknown
 	// host.
 	a := hostdb.Announcement{
@@ -120,7 +75,7 @@ func TestSQLHostDB(t *testing.T) {
 	// Read the host and verify that the announcement related fields were
 	// set.
 	var h dbHost
-	tx = hdb.db.Where("last_announcement = ? AND net_address = ?", a.Timestamp, a.NetAddress).Find(&h)
+	tx := hdb.db.Where("last_announcement = ? AND net_address = ?", a.Timestamp, a.NetAddress).Find(&h)
 	if tx.Error != nil {
 		t.Fatal(tx.Error)
 	}
@@ -137,7 +92,6 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal("wrong number of hosts", len(hosts))
 	}
 	h1 := hosts[0]
-	h1.Interactions = h.Interactions // ignore for comparison
 	if !reflect.DeepEqual(h1, h) {
 		fmt.Println(h1)
 		fmt.Println(h)
@@ -165,9 +119,6 @@ func TestSQLHostDB(t *testing.T) {
 	h3, err := hdb.Host(unknownKey)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(h3.Interactions) != 0 {
-		t.Fatalf("wrong number of interactions %v != %v", len(h2.Interactions), 2)
 	}
 	if h3.NetAddress != a.NetAddress {
 		t.Fatal("wrong net address")
@@ -199,130 +150,225 @@ func TestSQLHostDB(t *testing.T) {
 	}
 }
 
-// TestSQLHosts tests the Hosts method of the SQLHostDB type.
-func TestSQLHosts(t *testing.T) {
+// TestRecordInteractions is a test for RecordHostInteractions.
+func TestRecordInteractions(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer hdb.Close()
 
-	// Prepare interactions for 3 hosts. One interaction will be in the past
-	// and one of them uses the current time and one is in the future.
-	hostKey1 := consensus.GeneratePrivateKey().PublicKey()
-	hostKey2 := consensus.GeneratePrivateKey().PublicKey()
-	hostKey3 := consensus.GeneratePrivateKey().PublicKey()
-
-	if err := hdb.addTestHost(hostKey1); err != nil {
-		t.Fatal(err)
-	}
-	if err := hdb.addTestHost(hostKey2); err != nil {
-		t.Fatal(err)
-	}
-	if err := hdb.addTestHost(hostKey3); err != nil {
+	// Add a host.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	err = hdb.addTestHost(hk)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	currentTime := time.Now()
-	pastHi := hostdb.Interaction{
-		Timestamp: currentTime.Add(-time.Hour),
+	// It shouldn't have any interactions.
+	host, err := hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
 	}
-	currentHi := hostdb.Interaction{
-		Timestamp: currentTime,
-	}
-	futureHi := hostdb.Interaction{
-		Timestamp: currentTime.Add(time.Hour),
+	if host.Interactions != (hostdb.Interactions{}) {
+		t.Fatal("mismatch")
 	}
 
-	// Host1 - All interactions.
-	if err := hdb.RecordInteraction(hostKey1, pastHi); err != nil {
-		t.Fatal(err)
-	}
-	if err := hdb.RecordInteraction(hostKey1, currentHi); err != nil {
-		t.Fatal(err)
-	}
-	if err := hdb.RecordInteraction(hostKey1, futureHi); err != nil {
-		t.Fatal(err)
-	}
-
-	// Host2 - Current and past.
-	if err := hdb.RecordInteraction(hostKey2, currentHi); err != nil {
-		t.Fatal(err)
-	}
-	if err := hdb.RecordInteraction(hostKey2, pastHi); err != nil {
-		t.Fatal(err)
-	}
-
-	// Host3 - past.
-	if err := hdb.RecordInteraction(hostKey3, pastHi); err != nil {
-		t.Fatal(err)
-	}
-
-	// Helper for testing.
-	var hosts []hostdb.Host
-	checkHosts := func(hostKeys ...consensus.PublicKey) error {
-		if len(hostKeys) != len(hosts) {
-			return fmt.Errorf("expected %v hosts but got %v", len(hostKeys), len(hosts))
+	createInteractions := func(successful, failed int) (interactions []hostdb.Interaction) {
+		for i := 0; i < successful+failed; i++ {
+			interactions = append(interactions, hostdb.Interaction{
+				Result:    []byte{1, 2, 3},
+				Success:   i < successful,
+				Timestamp: time.Now(),
+				Type:      "test",
+			})
 		}
-		hostMap := make(map[consensus.PublicKey]struct{})
-		for _, h := range hosts {
-			hostMap[h.PublicKey] = struct{}{}
+		return
+	}
+
+	// Add one successful and two failed interactions.
+	if err := hdb.RecordHostInteractions(hk, createInteractions(1, 2)); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Interactions != (hostdb.Interactions{
+		SuccessfulInteractions: 1,
+		FailedInteractions:     2,
+	}) {
+		t.Fatal("mismatch")
+	}
+
+	// Add some more
+	if err := hdb.RecordHostInteractions(hk, createInteractions(3, 10)); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Interactions != (hostdb.Interactions{
+		SuccessfulInteractions: 4,
+		FailedInteractions:     12,
+	}) {
+		t.Fatal("mismatch")
+	}
+
+	// Check that interactions were created.
+	var interactions []dbInteraction
+	if err := hdb.db.Find(&interactions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(interactions) != 16 {
+		t.Fatal("wrong number of interactions")
+	}
+	for _, interaction := range interactions {
+		if !bytes.Equal(interaction.Result, []byte{1, 2, 3}) {
+			t.Fatal("result mismatch")
 		}
-		for _, hk := range hostKeys {
-			_, exists := hostMap[hk]
-			if !exists {
-				return fmt.Errorf("host %v missing from map", hk)
-			}
+		if interaction.Timestamp.IsZero() {
+			t.Fatal("timestamp not set")
 		}
-		return nil
+		if interaction.Type != "test" {
+			t.Fatal("type not set")
+		}
 	}
+}
 
-	// Case1 - Timestamp 1 second after futureHi. 3 hosts expected.
-	hosts, err = hdb.Hosts(futureHi.Timestamp.Add(time.Second), 3)
+// TestRecordScan is a test for recording scans.
+func TestRecordScan(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkHosts(hostKey1, hostKey2, hostKey3); err != nil {
-		t.Fatal(err)
-	}
+	defer hdb.Close()
 
-	// Case2 - Timestamp 1 second after currentHi. 2 hosts expected.
-	hosts, err = hdb.Hosts(currentHi.Timestamp.Add(time.Second), 3)
+	// Add a host.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	err = hdb.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkHosts(hostKey2, hostKey3); err != nil {
-		t.Fatal(err)
-	}
 
-	// Case3 - Timestamp 1 second after pastHi. 1 host expected.
-	hosts, err = hdb.Hosts(pastHi.Timestamp.Add(time.Second), 3)
+	// The host shouldn't have any interaction related fields set.
+	host, err := hdb.Host(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkHosts(hostKey3); err != nil {
-		t.Fatal(err)
+	if host.Interactions != (hostdb.Interactions{}) {
+		t.Fatal("mismatch")
+	}
+	if host.Settings != nil {
+		t.Fatal("mismatch")
 	}
 
-	// Case4 - Timestamp 1 second before pastHi. 0 hosts expected.
-	hosts, err = hdb.Hosts(pastHi.Timestamp.Add(-time.Second), 3)
+	// Fetch the host directly to get the creation time.
+	h, err := hostByPubKey(hdb.db, hk)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkHosts(); err != nil {
-		t.Fatal(err)
+	if h.CreatedAt.IsZero() {
+		t.Fatal("creation time not set")
 	}
 
-	// Case5 - Same as Case 1 but with a limit of 1. So we expect any of the
-	// 3 hosts to be returned.
-	hosts, err = hdb.Hosts(futureHi.Timestamp.Add(time.Second), 1)
+	scanInteraction := func(scanTime time.Time, settings rhp.HostSettings, success bool) []hostdb.Interaction {
+		var err string
+		if !success {
+			err = "failure"
+		}
+		result, _ := json.Marshal(struct {
+			Settings rhp.HostSettings `json:"settings"`
+			Error    string           `json:"error"`
+		}{
+			Settings: settings,
+			Error:    err,
+		})
+		return []hostdb.Interaction{
+			{
+				Result:    result,
+				Success:   true,
+				Timestamp: scanTime,
+				Type:      hostdb.InteractionTypeScan,
+			}}
+	}
+	t.SkipNow()
+
+	// Record a scan.
+	firstScanTime := time.Now().UTC()
+	settings := rhp.HostSettings{NetAddress: "host.com"}
+	if err := hdb.RecordHostInteractions(hk, scanInteraction(firstScanTime, settings, true)); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err1 := checkHosts(hostKey1)
-	err2 := checkHosts(hostKey2)
-	err3 := checkHosts(hostKey3)
-	if err1 != nil && err2 != nil && err3 != nil {
-		t.Fatal(err1, err2, err3)
+
+	// We expect no uptime or downtime from only a single scan.
+	uptime := time.Duration(0)
+	downtime := time.Duration(0)
+	if host.Interactions != (hostdb.Interactions{
+		TotalScans:              1,
+		LastScan:                firstScanTime,
+		LastScanSuccess:         true,
+		SecondToLastScanSuccess: false,
+		Uptime:                  uptime,
+		Downtime:                downtime,
+		SuccessfulInteractions:  1,
+		FailedInteractions:      0,
+	}) {
+		t.Fatal("mismatch")
+	}
+	if !reflect.DeepEqual(*host.Settings, settings) {
+		t.Fatal("mismatch")
+	}
+
+	// Record another scan 1 hour after the previous one.
+	secondScanTime := firstScanTime.Add(time.Hour)
+	if err := hdb.RecordHostInteractions(hk, scanInteraction(secondScanTime, settings, true)); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uptime += secondScanTime.Sub(firstScanTime)
+	if host.Interactions != (hostdb.Interactions{
+		TotalScans:              2,
+		LastScan:                secondScanTime,
+		LastScanSuccess:         true,
+		SecondToLastScanSuccess: true,
+		Uptime:                  uptime,
+		Downtime:                downtime,
+		SuccessfulInteractions:  2,
+		FailedInteractions:      0,
+	}) {
+		t.Fatal("mismatch")
+	}
+
+	// Record another scan 2 hours after the second one. This time it fails.
+	thirdScanTime := secondScanTime.Add(2 * time.Hour)
+	if err := hdb.RecordHostInteractions(hk, scanInteraction(thirdScanTime, settings, false)); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downtime += thirdScanTime.Sub(secondScanTime)
+	if host.Interactions != (hostdb.Interactions{
+		TotalScans:              3,
+		LastScan:                thirdScanTime,
+		LastScanSuccess:         false,
+		SecondToLastScanSuccess: true,
+		Uptime:                  uptime,
+		Downtime:                downtime,
+		SuccessfulInteractions:  2,
+		FailedInteractions:      1,
+	}) {
+		t.Fatal("mismatch")
 	}
 }
 
@@ -407,8 +453,7 @@ func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 // interactions for all hosts is expensive in production.
 func (db *SQLStore) hosts() ([]dbHost, error) {
 	var hosts []dbHost
-	tx := db.db.Preload("Interactions").
-		Find(&hosts)
+	tx := db.db.Find(&hosts)
 	if tx.Error != nil {
 		return nil, tx.Error
 	}

@@ -3,12 +3,9 @@ package autopilot
 import (
 	"math"
 	"math/big"
-	"sort"
 	"time"
 
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/build"
 	"lukechampine.com/frand"
 )
@@ -75,8 +72,8 @@ func ageScore(h Host) float64 {
 
 func collateralScore(cfg api.AutopilotConfig, h Host) float64 {
 	// sanity check - host should have been filtered
-	settings, _, ok := h.LastKnownSettings()
-	if !ok {
+	settings := h.Settings
+	if settings == nil {
 		return 0
 	}
 
@@ -117,64 +114,42 @@ func collateralScore(cfg api.AutopilotConfig, h Host) float64 {
 
 func interactionScore(h Host) float64 {
 	success, fail := 30.0, 1.0
-	for _, hi := range h.Interactions {
-		if worker.IsSuccessfulInteraction(hi) {
-			success++
-		} else {
-			fail++
-		}
-	}
-
-	weight := math.Pow(success/(success+fail), 10)
-	return weight
+	success += h.Interactions.SuccessfulInteractions
+	fail += h.Interactions.FailedInteractions
+	return math.Pow(success/(success+fail), 10)
 }
 
 func uptimeScore(h Host) float64 {
-	sorted := append([]hostdb.Interaction{}, h.Interactions...)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Timestamp.Before(sorted[j].Timestamp)
-	})
+	secondToLastScanSuccess := h.Interactions.SecondToLastScanSuccess
+	lastScanSuccess := h.Interactions.LastScanSuccess
+	uptime := h.Interactions.Uptime
+	downtime := h.Interactions.Downtime
+	totalScans := h.Interactions.TotalScans
 
 	// special cases
-	weight := float64(1)
-	switch len(sorted) {
+	switch totalScans {
 	case 0:
-		weight = 0.25
+		return 0.25 // no scans yet
 	case 1:
-		if worker.IsSuccessfulInteraction(sorted[0]) {
-			weight = 0.75
+		if lastScanSuccess {
+			return 0.75 // 1 successful scan
 		} else {
-			weight = 0.25
+			return 0.25 // 1 failed scan
 		}
 	case 2:
-		if worker.IsSuccessfulInteraction(sorted[0]) && worker.IsSuccessfulInteraction(sorted[1]) {
-			weight = 0.85
-		} else if worker.IsSuccessfulInteraction(sorted[0]) || worker.IsSuccessfulInteraction(sorted[1]) {
-			weight = 0.5
+		if lastScanSuccess && secondToLastScanSuccess {
+			return 0.85
+		} else if lastScanSuccess || secondToLastScanSuccess {
+			return 0.5
 		} else {
-			weight = 0.05
+			return 0.05
 		}
-	}
-	if weight < 1 {
-		return weight
 	}
 
-	// compute the total uptime and downtime by assuming that a host's
-	// online/offline state persists in the interval between each interaction
-	var downtime, uptime time.Duration
-	for i := 1; i < len(sorted); i++ {
-		prev, cur := sorted[i-1], sorted[i]
-		interval := cur.Timestamp.Sub(prev.Timestamp)
-		if worker.IsSuccessfulInteraction(prev) {
-			uptime += interval
-		} else {
-			downtime += interval
-		}
-	}
 	// account for the interval between the most recent interaction and the
 	// current time
-	finalInterval := time.Since(sorted[len(sorted)-1].Timestamp)
-	if worker.IsSuccessfulInteraction(sorted[len(sorted)-1]) {
+	finalInterval := time.Since(h.Interactions.LastScan)
+	if lastScanSuccess {
 		uptime += finalInterval
 	} else {
 		downtime += finalInterval
@@ -189,18 +164,17 @@ func uptimeScore(h Host) float64 {
 	// forgive downtime inversely proportional to the number of interactions;
 	// e.g. if we have only interacted 4 times, and half of the interactions
 	// failed, assume a ratio of 88% rather than 50%
-	ratio = math.Max(ratio, 1-(0.03*float64(len(sorted))))
+	ratio = math.Max(ratio, 1-(0.03*float64(totalScans)))
 
 	// Calculate the penalty for poor uptime. Penalties increase extremely
 	// quickly as uptime falls away from 95%.
-	weight = math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
-	return weight
+	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
 }
 
 func versionScore(h Host) float64 {
 	// sanity check - host should have been filtered
-	settings, _, ok := h.LastKnownSettings()
-	if !ok {
+	settings := h.Settings
+	if settings == nil {
 		return 0
 	}
 

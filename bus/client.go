@@ -225,8 +225,8 @@ func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostInteraction(hostKey consensus.PublicKey, i hostdb.Interaction) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), i, nil)
+func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) (err error) {
+	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), interactions, nil)
 	return
 }
 

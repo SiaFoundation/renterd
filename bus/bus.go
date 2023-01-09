@@ -64,7 +64,7 @@ type (
 	HostDB interface {
 		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
-		RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error
+		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 	}
 
 	// A ContractStore stores contracts.
@@ -369,10 +369,10 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
-	var hi hostdb.Interaction
+	var interactions []hostdb.Interaction
 	var hostKey consensus.PublicKey
-	if jc.Decode(&hi) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordInteraction(hostKey, hi))
+	if jc.Decode(&interactions) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
+		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(hostKey, interactions))
 	}
 }
 

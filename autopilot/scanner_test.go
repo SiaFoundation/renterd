@@ -27,7 +27,7 @@ func (b *mockBus) AllHosts() ([]hostdb.Host, error) { return b.hosts, nil }
 func (b *mockBus) ConsensusState() (api.ConsensusState, error) {
 	return api.ConsensusState{BlockHeight: 0, Synced: true}, nil
 }
-func (b *mockBus) RecordHostInteraction(hostKey consensus.PublicKey, itx hostdb.Interaction) error {
+func (b *mockBus) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error {
 	panic("never called")
 }
 
