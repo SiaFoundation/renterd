@@ -293,7 +293,7 @@ func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interact
 			}
 			scanQuery += fmt.Sprintf(`UPDATE hosts
 			              SET total_scans = total_scans + 1,
-				      previous_scan_success = last_scan_success,
+				      second_to_last_scan_success = last_scan_success,
 				      last_scan_success = ?,
 				      %s = CASE WHEN last_scan == 0 THEN last_scan ELSE ? - last_scan END,
 				      last_scan = ?,
