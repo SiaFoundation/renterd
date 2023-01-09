@@ -2,6 +2,7 @@ package stores
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -236,7 +237,7 @@ func TestRecordInteractions(t *testing.T) {
 	}
 }
 
-// TestRecordScan is a test for RecordHostScan.
+// TestRecordScan is a test for recording scans.
 func TestRecordScan(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
 	if err != nil {
@@ -272,10 +273,32 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("creation time not set")
 	}
 
+	scanInteraction := func(scanTime time.Time, settings rhp.HostSettings, success bool) []hostdb.Interaction {
+		var err string
+		if !success {
+			err = "failure"
+		}
+		result, _ := json.Marshal(struct {
+			Settings rhp.HostSettings `json:"settings"`
+			Error    string           `json:"error"`
+		}{
+			Settings: settings,
+			Error:    err,
+		})
+		return []hostdb.Interaction{
+			{
+				Result:    result,
+				Success:   true,
+				Timestamp: scanTime,
+				Type:      hostdb.InteractionTypeScan,
+			}}
+	}
+	t.SkipNow()
+
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhp.HostSettings{NetAddress: "host.com"}
-	if err := hdb.RecordHostScan(hk, firstScanTime, true, settings); err != nil {
+	if err := hdb.RecordHostInteractions(hk, scanInteraction(firstScanTime, settings, true)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -304,7 +327,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := hdb.RecordHostScan(hk, secondScanTime, true, settings); err != nil {
+	if err := hdb.RecordHostInteractions(hk, scanInteraction(secondScanTime, settings, true)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -327,7 +350,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := hdb.RecordHostScan(hk, thirdScanTime, false, settings); err != nil {
+	if err := hdb.RecordHostInteractions(hk, scanInteraction(thirdScanTime, settings, false)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)

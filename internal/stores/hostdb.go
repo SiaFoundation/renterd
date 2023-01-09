@@ -41,7 +41,7 @@ type (
 		Settings  hostSettings        `gorm:"type:bytes;serializer:gob"`
 
 		TotalScans          uint64
-		LastScan            time.Time
+		LastScan            int64 // Unix nano
 		LastScanSuccess     bool
 		PreviousScanSuccess bool
 		Uptime              time.Duration
@@ -190,12 +190,16 @@ func (dbInteraction) TableName() string { return "host_interactions" }
 
 // convert converts a host into a hostdb.Host.
 func (h dbHost) convert() hostdb.Host {
+	var lastScan time.Time
+	if h.LastScan > 0 {
+		lastScan = time.Unix(0, h.LastScan)
+	}
 	hdbHost := hostdb.Host{
 		KnownSince: h.CreatedAt,
 		NetAddress: h.NetAddress,
 		Interactions: hostdb.Interactions{
 			TotalScans:             h.TotalScans,
-			LastScan:               h.LastScan,
+			LastScan:               lastScan,
 			LastScanSuccess:        h.LastScanSuccess,
 			PreviousScanSuccess:    h.PreviousScanSuccess,
 			Uptime:                 h.Uptime,
@@ -260,6 +264,9 @@ func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
 func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error {
 	dbInteractions := make([]dbInteraction, len(interactions))
 	var successful, failed float64
+
+	var scanQuery string
+	var scanArgs []interface{}
 	for i, interaction := range interactions {
 		dbInteractions[i] = dbInteraction{
 			Result:    interaction.Result,
@@ -272,57 +279,45 @@ func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interact
 		} else {
 			failed++
 		}
+		// Handle scan edge case.
+		if interaction.Type == hostdb.InteractionTypeScan {
+			timeToAddTo := "uptime"
+			if !interaction.Success {
+				timeToAddTo = "downtime"
+			}
+			var sr hostdb.ScanResult
+			if interaction.Success {
+				if err := json.Unmarshal(interaction.Result, &sr); err != nil {
+					return err
+				}
+			}
+			scanQuery += fmt.Sprintf(`UPDATE hosts
+			              SET total_scans = total_scans + 1,
+				      previous_scan_success = last_scan_success,
+				      last_scan_success = ?,
+				      %s = CASE WHEN last_scan == 0 THEN last_scan ELSE ? - last_scan END,
+				      last_scan = ?,
+				      settings = ?;`, timeToAddTo)
+			scanArgs = append(scanArgs, interaction.Success, interaction.Timestamp.UnixNano(), interaction.Timestamp.UnixNano(), gobEncode(convertHostSettings(sr.Settings)))
+		}
 	}
 	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Create interactions.
 		if err := tx.CreateInBatches(&dbInteractions, 100).Error; err != nil {
 			return err
 		}
+		// Prepare query.
 		// TODO: Add decay
-		return tx.Exec("UPDATE hosts SET successful_interactions = successful_interactions + ?, failed_interactions = failed_interactions + ? WHERE public_key = ?", successful, failed, gobEncode(hostKey)).Error
-	})
-}
+		query := `UPDATE hosts
+			  SET successful_interactions = successful_interactions + ?,
+			  failed_interactions = failed_interactions + ?
+			  WHERE public_key = ?;`
+		queryArgs := []interface{}{successful, failed, gobEncode(hostKey)}
 
-// RecordHostScan recors a scan for the supplied host.
-func (db *SQLStore) RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) error {
-	return db.db.Transaction(func(tx *gorm.DB) error {
-		// Get host.
-		var h dbHost
-		h, err := hostByPubKey(tx, hostKey)
-		if err != nil {
-			return err
-		}
-
-		// Update it.
-		h.TotalScans++
-		h.PreviousScanSuccess = h.LastScanSuccess
-		h.LastScanSuccess = success
-		if success {
-			if !h.LastScan.IsZero() {
-				h.Uptime = t.Sub(h.LastScan)
-			}
-			h.SuccessfulInteractions++
-		} else {
-			if !h.LastScan.IsZero() {
-				h.Downtime = t.Sub(h.LastScan)
-			}
-			h.FailedInteractions++
-		}
-		h.LastScan = t.UTC()
-		h.Settings = convertHostSettings(settings)
-		return tx.Model(&dbHost{}).
-			Where("public_key", gobEncode(hostKey)).
-			Updates(map[string]interface{}{
-				"total_scans":             h.TotalScans,
-				"last_scan":               h.LastScan,
-				"previous_scan_success":   h.PreviousScanSuccess,
-				"last_scan_success":       h.LastScanSuccess,
-				"uptime":                  h.Uptime,
-				"downtime":                h.Downtime,
-				"successful_interactions": h.SuccessfulInteractions,
-				"failed_interactions":     h.FailedInteractions,
-				"settings":                gobEncode(h.Settings),
-			}).Error
+		// Attach potential scanQuery.
+		query += scanQuery
+		queryArgs = append(queryArgs, scanArgs...)
+		return tx.Exec(query, queryArgs...).Error
 	})
 }
 

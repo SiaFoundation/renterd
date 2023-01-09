@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
@@ -95,11 +94,6 @@ func errToStr(err error) string {
 
 type InteractionResult struct {
 	Error string `json:"error,omitempty"`
-}
-
-type ScanResult struct {
-	Error    string
-	Settings rhpv2.HostSettings `json:"settings,omitempty"`
 }
 
 type ephemeralMetricsRecorder struct {
@@ -195,7 +189,6 @@ type Bus interface {
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
-	RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) error
 
 	DownloadParams() (api.DownloadParams, error)
 	UploadParams() (api.UploadParams, error)
@@ -242,15 +235,15 @@ type worker struct {
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
 	hi := hostdb.Interaction{
 		Timestamp: time.Now(),
-		Type:      "scan",
+		Type:      hostdb.InteractionTypeScan,
 		Success:   err == nil,
 	}
 	if err == nil {
-		hi.Result, _ = json.Marshal(ScanResult{
+		hi.Result, _ = json.Marshal(hostdb.ScanResult{
 			Settings: settings,
 		})
 	} else {
-		hi.Result, _ = json.Marshal(ScanResult{
+		hi.Result, _ = json.Marshal(hostdb.ScanResult{
 			Error: errToStr(err),
 		})
 	}
@@ -372,7 +365,20 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		return err
 	})
 	elapsed := time.Since(start)
-	w.bus.RecordHostScan(rsr.HostKey, time.Now(), err == nil, settings) // TODO: error handling
+
+	var sr hostdb.ScanResult
+	if err == nil {
+		sr = hostdb.ScanResult{Settings: settings}
+	} else {
+		sr = hostdb.ScanResult{Error: err.Error()}
+	}
+	scanResult, _ := json.Marshal(sr)
+	w.bus.RecordHostInteractions(rsr.HostKey, []hostdb.Interaction{{
+		Result:    scanResult,
+		Success:   err == nil,
+		Timestamp: time.Now(),
+		Type:      hostdb.InteractionTypeScan,
+	}}) // TODO: error handling
 
 	if jc.Check("couldn't scan host", err) != nil {
 		return

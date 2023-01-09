@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
@@ -66,7 +65,6 @@ type (
 		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
-		RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) error
 	}
 
 	// A ContractStore stores contracts.
@@ -378,14 +376,6 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) hostsScanPubkeyHandlerPOST(jc jape.Context) {
-	var req api.HostsScanPubkeyHandlerPOSTRequest
-	var hostKey consensus.PublicKey
-	if jc.Decode(&req) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordHostScan(hostKey, req.Time, req.Success, req.Settings))
-	}
-}
-
 func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
 	cs, err := b.cs.ActiveContracts()
 	if jc.Check("couldn't load contracts", err) == nil {
@@ -650,10 +640,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":                       b.hostsHandler,
-		"GET    /hosts/:hostkey":              b.hostsPubkeyHandlerGET,
-		"POST   /hosts/interactions/:hostkey": b.hostsPubkeyHandlerPOST,
-		"POST   /hosts/scans/:hostkey":        b.hostsScanPubkeyHandlerPOST,
+		"GET    /hosts":          b.hostsHandler,
+		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
+		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

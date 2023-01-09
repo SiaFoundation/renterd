@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
@@ -227,17 +226,7 @@ func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
 
 // RecordHostInteraction records an interaction for the supplied host.
 func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/interactions/%s", hostKey), interactions, nil)
-	return
-}
-
-// RecordHostScan recors a scan for the supplied host.
-func (c *Client) RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/scans/%s", hostKey), api.HostsScanPubkeyHandlerPOSTRequest{
-		Time:     t,
-		Success:  success,
-		Settings: settings,
-	}, nil)
+	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), interactions, nil)
 	return
 }
 

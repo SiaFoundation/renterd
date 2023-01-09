@@ -24,6 +24,13 @@ type hostAnnouncement struct {
 	Signature consensus.Signature
 }
 
+type ScanResult struct {
+	Error    string
+	Settings rhp.HostSettings `json:"settings,omitempty"`
+}
+
+const InteractionTypeScan = "scan"
+
 // ForEachAnnouncement calls fn on each host announcement in a block.
 func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consensus.PublicKey, Announcement)) {
 	for _, txn := range b.Transactions {
