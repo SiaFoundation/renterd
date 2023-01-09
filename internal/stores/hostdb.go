@@ -272,9 +272,8 @@ func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interact
 		if err := tx.CreateInBatches(&dbInteractions, 100).Error; err != nil {
 			return err
 		}
-		// Update host.
 		// TODO: Add decay
-		return tx.Raw("UPDATE hosts SET successful_interactions = successful_interactions + ?, failed_interactions = failed_interactions + ? WHERE public_key = ?", successful, failed, gobEncode(hostKey)).Error
+		return tx.Exec("UPDATE hosts SET successful_interactions = successful_interactions + ?, failed_interactions = failed_interactions + ? WHERE public_key = ?", successful, failed, gobEncode(hostKey)).Error
 	})
 }
 

@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
@@ -149,59 +150,91 @@ func TestSQLHostDB(t *testing.T) {
 }
 
 // TestRecordInteractions is a test for RecordHostInteractions.
-//func TestRecordInteractions(t *testing.T) {
-//	hdb, _, _, err := newTestSQLStore()
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	defer hdb.Close()
-//
-//	// Add a host.
-//	hk := consensus.GeneratePrivateKey().PublicKey()
-//	err = hdb.addTestHost(hk)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	// It shouldn't have any interactions.
-//	host, err := hdb.Host(hk)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	if host.Interactions != (hostdb.Interactions{}) {
-//		t.Fatal("mismatch")
-//	}
-//
-//	// Add one successful and two failed interactions.
-//	if err := hdb.RecordHostInteractions(hk, 1, 2); err != nil {
-//		t.Fatal(err)
-//	}
-//	host, err = hdb.Host(hk)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	if host.Interactions != (hostdb.Interactions{
-//		SuccessfulInteractions: 1,
-//		FailedInteractions:     2,
-//	}) {
-//		t.Fatal("mismatch")
-//	}
-//
-//	// Add some more
-//	if err := hdb.RecordHostInteractions(hk, 3, 10); err != nil {
-//		t.Fatal(err)
-//	}
-//	host, err = hdb.Host(hk)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	if host.Interactions != (hostdb.Interactions{
-//		SuccessfulInteractions: 4,
-//		FailedInteractions:     12,
-//	}) {
-//		t.Fatal("mismatch")
-//	}
-//}
+func TestRecordInteractions(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hdb.Close()
+
+	// Add a host.
+	hk := consensus.GeneratePrivateKey().PublicKey()
+	err = hdb.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// It shouldn't have any interactions.
+	host, err := hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Interactions != (hostdb.Interactions{}) {
+		t.Fatal("mismatch")
+	}
+
+	createInteractions := func(successful, failed int) (interactions []hostdb.Interaction) {
+		for i := 0; i < successful+failed; i++ {
+			interactions = append(interactions, hostdb.Interaction{
+				Result:    []byte{1, 2, 3},
+				Success:   i < successful,
+				Timestamp: time.Now(),
+				Type:      "test",
+			})
+		}
+		return
+	}
+
+	// Add one successful and two failed interactions.
+	if err := hdb.RecordHostInteractions(hk, createInteractions(1, 2)); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Interactions != (hostdb.Interactions{
+		SuccessfulInteractions: 1,
+		FailedInteractions:     2,
+	}) {
+		t.Fatal("mismatch")
+	}
+
+	// Add some more
+	if err := hdb.RecordHostInteractions(hk, createInteractions(3, 10)); err != nil {
+		t.Fatal(err)
+	}
+	host, err = hdb.Host(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Interactions != (hostdb.Interactions{
+		SuccessfulInteractions: 4,
+		FailedInteractions:     12,
+	}) {
+		t.Fatal("mismatch")
+	}
+
+	// Check that interactions were created.
+	var interactions []dbInteraction
+	if err := hdb.db.Find(&interactions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(interactions) != 16 {
+		t.Fatal("wrong number of interactions")
+	}
+	for _, interaction := range interactions {
+		if !bytes.Equal(interaction.Result, []byte{1, 2, 3}) {
+			t.Fatal("result mismatch")
+		}
+		if interaction.Timestamp.IsZero() {
+			t.Fatal("timestamp not set")
+		}
+		if interaction.Type != "test" {
+			t.Fatal("type not set")
+		}
+	}
+}
 
 // TestRecordScan is a test for RecordHostScan.
 func TestRecordScan(t *testing.T) {
