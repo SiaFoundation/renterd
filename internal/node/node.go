@@ -28,11 +28,10 @@ type WorkerConfig struct {
 }
 
 type BusConfig struct {
-	ApplyDefaultBlocklist bool
-	Bootstrap             bool
-	GatewayAddr           string
-	Miner                 *Miner
-	PersistInterval       time.Duration
+	Bootstrap       bool
+	GatewayAddr     string
+	Miner           *Miner
+	PersistInterval time.Duration
 
 	api.GougingSettings
 	api.RedundancySettings
