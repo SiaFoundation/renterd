@@ -250,7 +250,15 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 				"fcid", contract.ID,
 				"reasons", reasons,
 			)
-			toIgnore = append(toIgnore, contract.ID)
+
+			// decide whether the contract is still good
+			_, refresh, renew, _ := isUsableContract(cfg, Host{host}, contract, blockHeight)
+			if !refresh && !renew {
+				toDelete = append(toDelete, contract.ID)
+			} else {
+				toIgnore = append(toIgnore, contract.ID)
+			}
+
 			continue
 		}
 

@@ -57,9 +57,12 @@ func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64
 	}
 	if c.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
+		refresh = false
 	}
 	if bh > c.EndHeight() {
 		reasons = append(reasons, "expired")
+		refresh = false
+		renew = false
 	}
 	usable = len(reasons) == 0
 	return
