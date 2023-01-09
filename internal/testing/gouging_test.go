@@ -45,15 +45,29 @@ func TestGouging(t *testing.T) {
 	}
 
 	// create helper to update host settings
+	t.Helper()
 	updateHostSetting := func(param client.HostParam, value interface{}) {
 		for _, h := range hosts {
 			if err := h.HostModifySettingPost(param, value); err != nil {
 				t.Fatal(err)
 			}
-			if err := h.HostAnnouncePost(); err != nil {
-				t.Fatal(err)
+		}
+	}
+
+	t.Helper()
+	waitForContractSet := func(numContracts int) {
+		if err := Retry(30, time.Second, func() error {
+			contracts, err := b.Contracts("autopilot")
+			if err != nil {
+				return err
 			}
-			time.Sleep(time.Second)
+
+			if len(contracts) != numContracts {
+				return errors.New("contract set not ready yet")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	}
 
@@ -92,6 +106,7 @@ func TestGouging(t *testing.T) {
 		t.Fatal("expected download to fail")
 	}
 	updateHostSetting("mindownloadbandwidthprice", settings.DownloadBandwidthPrice)
+	waitForContractSet(int(defaultRedundancy.TotalShards))
 	if err := w.DownloadObject(&buffer, name); err != nil {
 		t.Fatal(err)
 	}
@@ -102,16 +117,16 @@ func TestGouging(t *testing.T) {
 		t.Fatal("expected download to fail")
 	}
 	updateHostSetting("minuploadbandwidthprice", settings.UploadBandwidthPrice)
-
+	waitForContractSet(int(defaultRedundancy.TotalShards))
 	if err := w.UploadObject(bytes.NewReader(data), name+"2"); err != nil {
 		t.Fatal(err)
 	}
 
 	// force renew gouging error
-	updateHostSetting("mincontractprice", types.SiacoinPrecision)
+	updateHostSetting("mincontractprice", types.SiacoinPrecision.Mul64(10))
 
 	// mine until we're at the renew window
-	if err = cluster.MineToRenewWindow(); err == nil {
+	if err = cluster.MineToRenewWindow(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,18 +135,13 @@ func TestGouging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.MineBlocks(int(cfg.Contracts.RenewWindow)); err == nil {
+
+	if err := cluster.MineBlocks(int(cfg.Contracts.RenewWindow) * 2); err != nil {
 		t.Fatal(err)
 	}
 
-	// assert there's no active contracts
-	contracts, err := b.ActiveContracts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(contracts) != 0 {
-		t.Fatal("expected no active contracts")
-	}
+	// assert there's no contracts in the contract set
+	waitForContractSet(0)
 }
 
 func hostSettings(b *bus.Client, h *siatest.TestNode) (rhpv2.HostSettings, error) {
