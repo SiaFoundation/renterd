@@ -44,7 +44,7 @@ type (
 	// dbInteraction defines a hostdb.Interaction as persisted in the DB.
 	dbInteraction struct {
 		Model
-		DBHostID uint `gorm:"index"`
+		DBHostID uint `gorm:"index;NOT NULL"`
 
 		Result    json.RawMessage
 		Timestamp time.Time `gorm:"index; NOT NULL"`
@@ -154,21 +154,12 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 // RecordInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
 func (db *SQLStore) RecordInteraction(hostKey consensus.PublicKey, hi hostdb.Interaction) error {
-	return db.db.Transaction(func(tx *gorm.DB) error {
-		// Create a host if it doesn't exist yet.
-		var host dbHost
-		if err := tx.FirstOrCreate(&host, &dbHost{PublicKey: hostKey}).Error; err != nil {
-			return err
-		}
-
-		// Create an interaction.
-		return tx.Create(&dbInteraction{
-			DBHostID:  host.ID,
-			Timestamp: hi.Timestamp.UTC(), // explicitly store timestamp as UTC
-			Type:      hi.Type,
-			Result:    hi.Result,
-		}).Error
-	})
+	// Try creating the interaction first. This is in 99.99% of cases
+	// sufficient since the host should have been created as we picked up
+	// its announcement from the chain already. If that fails, we try
+	// creating the unannounced host with an associated interaction instead.
+	return db.db.Exec("INSERT INTO host_interactions (db_host_id, timestamp, type, result) VALUES ((SELECT id FROM hosts WHERE public_key = ?), ?, ?, ?)",
+		gobEncode(hostKey), hi.Timestamp.UTC(), hi.Type, hi.Result).Error
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.

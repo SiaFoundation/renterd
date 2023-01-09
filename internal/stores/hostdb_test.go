@@ -212,6 +212,16 @@ func TestSQLHosts(t *testing.T) {
 	hostKey2 := consensus.GeneratePrivateKey().PublicKey()
 	hostKey3 := consensus.GeneratePrivateKey().PublicKey()
 
+	if err := hdb.addTestHost(hostKey1); err != nil {
+		t.Fatal(err)
+	}
+	if err := hdb.addTestHost(hostKey2); err != nil {
+		t.Fatal(err)
+	}
+	if err := hdb.addTestHost(hostKey3); err != nil {
+		t.Fatal(err)
+	}
+
 	currentTime := time.Now()
 	pastHi := hostdb.Interaction{
 		Timestamp: currentTime.Add(-time.Hour),
