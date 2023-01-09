@@ -33,7 +33,7 @@ type Bus interface {
 	AllHosts() ([]hostdb.Host, error)
 	Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
-	RecordHostInteractions(hostKey consensus.PublicKey, successful, failed uint64) error
+	RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 
 	// contracts
 	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)

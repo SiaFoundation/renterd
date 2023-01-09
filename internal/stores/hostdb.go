@@ -1,8 +1,9 @@
 package stores
 
 import (
+	"encoding/json"
 	"errors"
-	"log"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -15,9 +16,16 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// consensusInfoID defines the primary key of the entry in the consensusInfo
-// table.
-const consensusInfoID = 1
+const (
+	// announcementBatchSoftLimit is the limit above which
+	// threadedProcessAnnouncements will stop merging batches of
+	// announcements and apply them to the db.
+	announcementBatchSoftLimit = 1000
+
+	// consensusInfoID defines the primary key of the entry in the consensusInfo
+	// table.
+	consensusInfoID = 1
+)
 
 // ErrHostNotFound is returned if a specific host can't be retrieved from the hostdb.
 var ErrHostNotFound = errors.New("host doesn't exist in hostdb")
@@ -50,6 +58,15 @@ type (
 	// dbConsensusInfo defines table which stores the latest consensus info
 	// known to the hostdb. It should only ever contain a single entry with
 	// the consensusInfoID primary key.
+	dbInteraction struct {
+		Model
+
+		Result    json.RawMessage
+		Success   bool
+		Timestamp time.Time `gorm:"index; NOT NULL"`
+		Type      string    `gorm:"NOT NULL"`
+	}
+
 	dbConsensusInfo struct {
 		Model
 		CCID []byte
@@ -81,6 +98,24 @@ type (
 		RevisionNumber             uint64           `json:"revisionnumber"`
 		Version                    string           `json:"version"`
 		SiaMuxPort                 string           `json:"siamuxport"`
+	}
+
+	// dbAnnouncement is a table used for storing all announcements. It
+	// doesn't have any relations to dbHost which means it won't
+	// automatically prune when a host is deleted.
+	dbAnnouncement struct {
+		Model
+		HostKey consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+
+		BlockHeight uint64
+		BlockID     string
+		NetAddress  string
+	}
+
+	// announcement describes an announcement for a single host.
+	announcement struct {
+		hostKey      consensus.PublicKey
+		announcement hostdb.Announcement
 	}
 )
 
@@ -142,10 +177,16 @@ func convertHostSettings(settings rhp.HostSettings) hostSettings {
 }
 
 // TableName implements the gorm.Tabler interface.
-func (dbHost) TableName() string { return "hosts" }
+func (dbAnnouncement) TableName() string { return "host_announcements" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbConsensusInfo) TableName() string { return "consensus_infos" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbHost) TableName() string { return "hosts" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbInteraction) TableName() string { return "host_interactions" }
 
 // convert converts a host into a hostdb.Host.
 func (h dbHost) convert() hostdb.Host {
@@ -190,16 +231,13 @@ func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
 	// Filter all hosts for the ones that have not been updated since a
 	// given time.
 	var fullHosts []dbHost
+	var hosts []hostdb.Host
 	err := db.db.Table("hosts").
 		Limit(max).
 		Find(&fullHosts).
 		Error
 	if err != nil {
 		return nil, err
-	}
-	var hosts []hostdb.Host
-	for _, fh := range fullHosts {
-		hosts = append(hosts, fh.convert())
 	}
 	return hosts, err
 }
@@ -213,21 +251,30 @@ func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
 
 // RecordInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
-func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, successful, failed uint64) error {
+func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error {
+	dbInteractions := make([]dbInteraction, len(interactions))
+	var successful, failed float64
+	for i, interaction := range interactions {
+		dbInteractions[i] = dbInteraction{
+			Result:    interaction.Result,
+			Success:   interaction.Success,
+			Timestamp: interaction.Timestamp.UTC(),
+			Type:      interaction.Type,
+		}
+		if interaction.Success {
+			successful++
+		} else {
+			failed++
+		}
+	}
 	return db.db.Transaction(func(tx *gorm.DB) error {
-		// Get host.
-		h, err := hostByPubKey(tx, hostKey)
-		if err != nil {
+		// Create interactions.
+		if err := tx.CreateInBatches(&dbInteractions, 100).Error; err != nil {
 			return err
 		}
-
-		// Update it.
+		// Update host.
 		// TODO: Add decay
-		h.SuccessfulInteractions += float64(successful)
-		h.FailedInteractions += float64(failed)
-		return tx.Model(&dbHost{}).
-			Where("public_key", gobEncode(hostKey)).
-			Updates(&h).Error
+		return tx.Raw("UPDATE hosts SET successful_interactions = successful_interactions + ?, failed_interactions = failed_interactions + ? WHERE public_key = ?", successful, failed, gobEncode(hostKey)).Error
 	})
 }
 
@@ -281,39 +328,72 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height--
 	}
 
-	// Atomically apply ConsensusChange.
-	err := db.db.Transaction(func(tx *gorm.DB) error {
-		var err error
-		for _, b := range cc.AppliedBlocks {
-			hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
-				if err == nil {
-					err = insertAnnouncement(tx, hostKey, ha)
-				}
+	// Fetch announcements and add them to the queue.
+	var newAnnouncements []announcement
+	for _, b := range cc.AppliedBlocks {
+		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
+			newAnnouncements = append(newAnnouncements, announcement{
+				hostKey:      hostKey,
+				announcement: ha,
 			})
-			height++
-		}
+		})
+		height++
+	}
+
+	db.unappliedAnnouncements = append(db.unappliedAnnouncements, newAnnouncements...)
+	db.unappliedCCID = cc.ID
+
+	// Apply new announcements
+	if time.Since(db.lastAnnouncementSave) > db.persistInterval || len(db.unappliedAnnouncements) >= announcementBatchSoftLimit {
+		err := db.db.Transaction(func(tx *gorm.DB) error {
+			if len(db.unappliedAnnouncements) > 0 {
+				if err := insertAnnouncements(tx, db.unappliedAnnouncements); err != nil {
+					return err
+				}
+			}
+			return updateCCID(tx, db.unappliedCCID)
+		})
 		if err != nil {
-			return err
+			// NOTE: print error. If we failed due to a temporary error
+			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(db.unappliedAnnouncements)))
 		}
-		return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-			Model: Model{
-				ID: consensusInfoID,
-			},
-		}).Update("CCID", cc.ID[:]).Error
-	})
-	if err != nil {
-		log.Fatalln("Failed to apply consensus change to hostdb", err)
+
+		db.unappliedAnnouncements = db.unappliedAnnouncements[:0]
+		db.lastAnnouncementSave = time.Now()
 	}
 }
 
-func insertAnnouncement(tx *gorm.DB, hostKey consensus.PublicKey, a hostdb.Announcement) error {
-	// Create a host if it doesn't exist yet.
+func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
+	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
+		Model: Model{
+			ID: consensusInfoID,
+		},
+	}).Update("CCID", newCCID[:]).Error
+}
+
+func insertAnnouncements(tx *gorm.DB, as []announcement) error {
+	var hosts []dbHost
+	var announcements []dbAnnouncement
+	for _, a := range as {
+		hosts = append(hosts, dbHost{
+			PublicKey:        a.hostKey,
+			LastAnnouncement: a.announcement.Timestamp.UTC(),
+			NetAddress:       a.announcement.NetAddress,
+		})
+		announcements = append(announcements, dbAnnouncement{
+			HostKey:     a.hostKey,
+			BlockHeight: a.announcement.Index.Height,
+			BlockID:     a.announcement.Index.ID.String(),
+			NetAddress:  a.announcement.NetAddress,
+		})
+	}
+	if err := tx.Create(&announcements).Error; err != nil {
+		return err
+	}
+	// Create hosts that don't exist and regardless of whether they exist or
+	// not update the last_announcement and net_address fields.
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "public_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
-	}).Create(&dbHost{
-		PublicKey:        hostKey,
-		LastAnnouncement: a.Timestamp.UTC(),
-		NetAddress:       a.NetAddress,
-	}).Error
+	}).Create(&hosts).Error
 }

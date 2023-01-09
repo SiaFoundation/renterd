@@ -44,11 +44,6 @@ type ContractAcquireResponse struct {
 	Locked bool `json:"locked"`
 }
 
-type HostsPubkeyHandlerPOSTRequest struct {
-	Failures  uint64 `json:"failures"`
-	Successes uint64 `json:"successes"`
-}
-
 type HostsScanPubkeyHandlerPOSTRequest struct {
 	Time     time.Time        `json:"time"`
 	Success  bool             `json:"success"`

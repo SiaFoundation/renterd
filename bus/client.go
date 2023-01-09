@@ -226,11 +226,8 @@ func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, successful, failed uint64) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/interactions/%s", hostKey), api.HostsPubkeyHandlerPOSTRequest{
-		Successes: successful,
-		Failures:  failed,
-	}, nil)
+func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) (err error) {
+	err = c.c.POST(fmt.Sprintf("/hosts/interactions/%s", hostKey), interactions, nil)
 	return
 }
 

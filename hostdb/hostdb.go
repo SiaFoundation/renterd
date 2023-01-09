@@ -1,6 +1,7 @@
 package hostdb
 
 import (
+	"encoding/json"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
@@ -65,6 +66,13 @@ type Interactions struct {
 
 	SuccessfulInteractions float64
 	FailedInteractions     float64
+}
+
+type Interaction struct {
+	Result    json.RawMessage
+	Success   bool
+	Timestamp time.Time
+	Type      string
 }
 
 // A Host pairs a host's public key with a set of interactions.

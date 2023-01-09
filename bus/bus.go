@@ -65,7 +65,7 @@ type (
 	HostDB interface {
 		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
-		RecordHostInteractions(hostKey consensus.PublicKey, successes, failures uint64) error
+		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 		RecordHostScan(hostKey consensus.PublicKey, t time.Time, success bool, settings rhp.HostSettings) error
 	}
 
@@ -371,10 +371,10 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
-	var req api.HostsPubkeyHandlerPOSTRequest
+	var interactions []hostdb.Interaction
 	var hostKey consensus.PublicKey
-	if jc.Decode(&req) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(hostKey, req.Successes, req.Failures))
+	if jc.Decode(&interactions) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
+		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(hostKey, interactions))
 	}
 }
 
