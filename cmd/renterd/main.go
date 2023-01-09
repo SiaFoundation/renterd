@@ -140,6 +140,7 @@ func main() {
 	flagCurrencyVar(&busCfg.MaxContractPrice, "bus.maxContractPrice", types.SiacoinPrecision, "max allowed price to form a contract")
 	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.SiacoinPrecision.Mul64(2500), "max allowed price to download one TiB")
 	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.SiacoinPrecision.Mul64(1000), "max allowed price to upload one TiB")
+	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.SiacoinPrecision, "max allowed price to store one byte per block")
 	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")

@@ -570,7 +570,7 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.PathParam("key")); isErrSettingsNotFound(err) {
+	} else if setting, err := b.ss.Setting(jc.PathParam("key")); err == api.ErrSettingNotFound {
 		jc.Error(err, http.StatusNotFound)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -690,14 +690,7 @@ func (b *bus) gougingParams() (api.GougingParams, error) {
 	return api.GougingParams{
 		GougingSettings:    gs,
 		RedundancySettings: rs,
-		Period:             144 * 7 * 6, // TODO
 	}, nil
-}
-
-// TODO: use simple err check against stores.ErrSettingNotFound as soon as the
-// import-cycle is fixed
-func isErrSettingsNotFound(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "setting not found")
 }
 
 // New returns a new Bus.

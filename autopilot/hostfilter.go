@@ -31,7 +31,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	if bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Sprintf("bad settings: %v", reason))
 	}
-	if gouging, reason := isGouging(cfg, gs, rs, h); gouging {
+	if gouging, reason := isGouging(gs, rs, h); gouging {
 		reasons = append(reasons, fmt.Sprintf("price gouging: %v", reason))
 	}
 
@@ -86,14 +86,9 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 	return blockHeight+cfg.Contracts.RenewWindow >= uint64(r.EndHeight())
 }
 
-func isGouging(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
-	settings := h.Settings
-	if settings == nil {
-		return true, "no settings"
-	}
-
+func isGouging(gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
-	return worker.IsGouging(gs, *settings, cfg.Contracts.Period, redundancy)
+	return worker.IsGouging(gs, *h.Settings, redundancy)
 }
 
 func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {

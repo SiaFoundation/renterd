@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -150,7 +151,6 @@ type MigrateParams struct {
 // GougingParams contains the metadata needed by a worker to perform gouging
 // checks.
 type GougingParams struct {
-	Period             uint64
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
 }
@@ -161,6 +161,7 @@ type GougingSettings struct {
 	MaxContractPrice types.Currency
 	MaxDownloadPrice types.Currency // per TiB
 	MaxUploadPrice   types.Currency // per TiB
+	MaxStoragePrice  types.Currency // per byte per block
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
@@ -168,3 +169,7 @@ type RedundancySettings struct {
 	MinShards   uint64
 	TotalShards uint64
 }
+
+// ErrSettingNotFound is returned if a requested setting is not present in the
+// database.
+var ErrSettingNotFound = errors.New("setting not found")

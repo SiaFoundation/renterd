@@ -27,7 +27,6 @@ type (
 	gougingChecker struct {
 		settings   api.GougingSettings
 		redundancy float64
-		period     uint64
 	}
 
 	contextKey string
@@ -45,15 +44,14 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 	return context.WithValue(ctx, keyGougingChecker, gougingChecker{
 		settings:   gp.GougingSettings,
 		redundancy: float64(rs.TotalShards) / float64(rs.MinShards),
-		period:     gp.Period,
 	})
 }
 
-func IsGouging(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) (bool, string) {
+func IsGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64) (bool, string) {
 	errs := filterErrors(
 		checkDownloadGouging(gs, hs, redundancy),
 		checkFormContractGouging(gs, hs),
-		checkUploadGouging(gs, hs, period, redundancy),
+		checkUploadGouging(gs, hs, redundancy),
 	)
 	if len(errs) == 0 {
 		return false, ""
@@ -70,7 +68,7 @@ func (gc gougingChecker) Check(hs rhpv2.HostSettings) GougingResults {
 	return GougingResults{
 		downloadErr:     checkDownloadGouging(gc.settings, hs, gc.redundancy),
 		formContractErr: checkFormContractGouging(gc.settings, hs),
-		uploadErr:       checkUploadGouging(gc.settings, hs, gc.period, gc.redundancy),
+		uploadErr:       checkUploadGouging(gc.settings, hs, gc.redundancy),
 	}
 }
 
@@ -107,14 +105,19 @@ func checkDownloadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redunda
 	return nil
 }
 
-func checkUploadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, period uint64, redundancy float64) error {
+func checkUploadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
 	}
 
+	// check max storage price
+	if !gs.MaxStoragePrice.IsZero() && hs.StoragePrice.Cmp(gs.MaxStoragePrice) > 0 {
+		return fmt.Errorf("storage price exceeds max: %v>%v", hs.StoragePrice, gs.MaxUploadPrice)
+	}
+
 	// check upload cost
-	uploadPrice := uploadPricePerTB(hs, period).MulFloat(redundancy)
+	uploadPrice := uploadPricePerTB(hs).MulFloat(redundancy)
 	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
 		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
 	}
@@ -136,11 +139,10 @@ func checkFormContractGouging(gs api.GougingSettings, hs rhpv2.HostSettings) err
 	return nil
 }
 
-func uploadPricePerTB(hs rhpv2.HostSettings, period uint64) types.Currency {
+func uploadPricePerTB(hs rhpv2.HostSettings) types.Currency {
 	sectorPrice := hs.SectorAccessPrice.
 		Add(hs.BaseRPCPrice).
-		Add(hs.UploadBandwidthPrice.Mul64(modules.SectorSize)).
-		Add(hs.StoragePrice.Mul64(period).Mul64(modules.SectorSize))
+		Add(hs.UploadBandwidthPrice.Mul64(modules.SectorSize))
 
 	return sectorPrice.Mul64(1 << 40 / modules.SectorSize) // sectors per TiB
 }

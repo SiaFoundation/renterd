@@ -4,12 +4,10 @@ import (
 	"errors"
 	"fmt"
 
+	"go.sia.tech/renterd/api"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-// ErrSettingNotFound is returned if a specific setting can't be retrieved from the db.
-var ErrSettingNotFound = errors.New("setting not found")
 
 type (
 	dbSetting struct {
@@ -29,7 +27,7 @@ func (s *SQLStore) Setting(key string) (string, error) {
 	err := s.db.Where(&dbSetting{Key: key}).
 		Take(&entry).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", fmt.Errorf("key '%s' err: %w", key, ErrSettingNotFound)
+		return "", fmt.Errorf("key '%s' err: %w", key, api.ErrSettingNotFound)
 	} else if err != nil {
 		return "", err
 	}
