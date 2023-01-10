@@ -2,7 +2,6 @@ package autopilot
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,30 +14,23 @@ import (
 )
 
 const (
-	// TODO: we could make these configurable
-	scannerNumThreads      = 5
-	scannerTimeoutInterval = 10 * time.Minute
+	// TODO: make these configurable
+	scannerTimeoutInterval   = 10 * time.Minute
+	scannerTimeoutMinTimeout = time.Second * 5
 
-	trackerMinTimeout = time.Second * 30
-
+	// TODO: make these configurable
 	trackerMinDataPoints     = 25
 	trackerNumDataPoints     = 1000
 	trackerTimeoutPercentile = 99
 )
 
-var (
-	errScanInterrupted = errors.New("scan was interrupted")
-)
-
 type (
-	// TODO: use the actual bus and worker interfaces when they've consolidated
-	// a bit, we currently use inline interfaces to avoid having to update the
-	// scanner tests with every interface change
 	scanner struct {
+		// TODO: use the actual bus and worker interfaces when they've consolidated
+		// a bit, we currently use inline interfaces to avoid having to update the
+		// scanner tests with every interface change
 		bus interface {
-			AllHosts() ([]hostdb.Host, error)
-			ConsensusState() (api.ConsensusState, error)
-			RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
+			Hosts(offset, limit int) ([]hostdb.Host, error)
 		}
 		worker interface {
 			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -47,9 +39,12 @@ type (
 		tracker *tracker
 		logger  *zap.SugaredLogger
 
-		scanThreads        uint64
-		scanMinInterval    time.Duration
+		scanBatchSize   uint64
+		scanThreads     uint64
+		scanMinInterval time.Duration
+
 		timeoutMinInterval time.Duration
+		timeoutMinTimeout  time.Duration
 
 		stopChan chan struct{}
 
@@ -74,7 +69,6 @@ type (
 	tracker struct {
 		threshold  uint64
 		percentile float64
-		minTimeout time.Duration
 
 		mu      sync.Mutex
 		count   uint64
@@ -82,16 +76,19 @@ type (
 	}
 )
 
-func newTracker(threshold, total uint64, percentile float64, minTimeout time.Duration) *tracker {
+func newTracker(threshold, total uint64, percentile float64) *tracker {
 	return &tracker{
 		threshold:  threshold,
-		minTimeout: minTimeout,
 		percentile: percentile,
 		timings:    make([]float64, total),
 	}
 }
 
 func (t *tracker) addDataPoint(duration time.Duration) {
+	if duration == 0 {
+		return
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -107,23 +104,25 @@ func (t *tracker) timeout() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.count < uint64(t.threshold) {
-		return t.minTimeout
+		return 0
 	}
 
 	percentile, err := percentile(t.timings, t.percentile)
 	if err != nil {
-		return t.minTimeout
+		return 0
 	}
 
-	timeout := time.Duration(percentile) * time.Millisecond
-	if timeout < t.minTimeout {
-		timeout = t.minTimeout
-	}
-
-	return timeout
+	return time.Duration(percentile) * time.Millisecond
 }
 
-func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterval time.Duration) *scanner {
+func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
+	if scanBatchSize == 0 {
+		return nil, errors.New("scanner batch size has to be greater than zero")
+	}
+	if scanThreads == 0 {
+		return nil, errors.New("scanner threads has to be greater than zero")
+	}
+
 	return &scanner{
 		bus:    ap.bus,
 		worker: ap.worker,
@@ -131,23 +130,25 @@ func newScanner(ap *Autopilot, threads uint64, scanMinInterval, timeoutMinInterv
 			trackerMinDataPoints,
 			trackerNumDataPoints,
 			trackerTimeoutPercentile,
-			trackerMinTimeout,
 		),
 		logger: ap.logger.Named("scanner"),
 
 		stopChan: ap.stopChan,
 
-		scanThreads:        threads,
-		scanMinInterval:    scanMinInterval,
+		scanBatchSize:   scanBatchSize,
+		scanThreads:     scanThreads,
+		scanMinInterval: scanMinInterval,
+
 		timeoutMinInterval: timeoutMinInterval,
-	}
+		timeoutMinTimeout:  timeoutMinTimeout,
+	}, nil
 }
 
-func (s *scanner) tryPerformHostScan() <-chan error {
+func (s *scanner) tryPerformHostScan() {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
-		return nil
+		return
 	}
 
 	s.logger.Debug("host scan started")
@@ -155,23 +156,21 @@ func (s *scanner) tryPerformHostScan() <-chan error {
 	s.scanning = true
 	s.mu.Unlock()
 
-	errChan := make(chan error, 1)
 	go func() {
-		defer close(errChan)
-
-		err := s.performHostScans()
-		if err != nil {
-			s.logger.Debug("host scan encountered error: err: %v", err)
+		for res := range s.launchScanWorkers(s.launchHostScans()) {
+			if s.isStopped() {
+				break
+			}
+			if res.err != nil {
+				s.logger.Debugw(res.err.Error(), "hk", res.hostKey)
+			}
 		}
 
 		s.mu.Lock()
 		s.scanning = false
 		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
 		s.mu.Unlock()
-
-		errChan <- err
 	}()
-	return errChan
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -181,80 +180,79 @@ func (s *scanner) tryUpdateTimeout() {
 		return
 	}
 
+	updated := s.tracker.timeout()
+	if updated < s.timeoutMinTimeout {
+		s.logger.Debugf("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
+		updated = s.timeoutMinTimeout
+	}
+
 	prev := s.timeout
-	s.timeout = s.tracker.timeout()
+	s.timeout = updated
 	s.timeoutLastUpdate = time.Now()
 	s.logger.Debugf("updated timeout %v->%v", prev, s.timeout)
 }
 
-// performHostScans scans every host in our database
-func (s *scanner) performHostScans() error {
-	// TODO: running a scan on all hosts is not infinitely scalable, this will
-	// need to be updated to be smarter and run on a subset of all hosts
-	hosts, err := s.bus.AllHosts()
-	if err != nil {
-		return err
-	}
+func (s *scanner) launchHostScans() chan scanReq {
+	reqChan := make(chan scanReq, s.scanBatchSize)
 
-	// nothing to do
-	if len(hosts) == 0 {
-		return nil
-	}
+	go func() {
+		var offset int
+		var exhausted bool
+		for !s.isStopped() && !exhausted {
+			s.logger.Debugf("scanning hosts %d-%d", offset, offset+int(s.scanBatchSize))
 
-	s.logger.Debugf("launching %v host scans", len(hosts))
+			// fetch next batch
+			hosts, err := s.bus.Hosts(offset, int(s.scanBatchSize))
+			if err != nil {
+				s.logger.Errorf("could not get hosts, err: %v", err)
+				break
+			}
+			if len(hosts) == 0 {
+				break
+			}
+			if len(hosts) < int(s.scanBatchSize) {
+				exhausted = true
+			}
 
-	// add all hosts to a scan queue
-	reqChan := make(chan scanReq, len(hosts))
-	for _, h := range hosts {
-		reqChan <- scanReq{
-			hostKey: h.PublicKey,
-			hostIP:  h.NetAddress,
+			// add batch to scan queue
+			for _, h := range hosts {
+				reqChan <- scanReq{
+					hostKey: h.PublicKey,
+					hostIP:  h.NetAddress,
+				}
+			}
+
+			offset += int(s.scanBatchSize)
 		}
-	}
-	close(reqChan)
+		close(reqChan)
+	}()
 
-	// launch workers
-	liveThreads := s.scanThreads
+	return reqChan
+}
+
+func (s *scanner) launchScanWorkers(reqs chan scanReq) chan scanResp {
 	respChan := make(chan scanResp, s.scanThreads)
+	liveThreads := s.scanThreads
+
 	for i := uint64(0); i < s.scanThreads; i++ {
 		go func() {
-			for req := range reqChan {
+			for req := range reqs {
 				if s.isStopped() {
 					break
 				}
 
 				scan, err := s.worker.RHPScan(req.hostKey, req.hostIP, s.currentTimeout())
 				respChan <- scanResp{req.hostKey, scan.Settings, err}
-
-				if err == nil {
-					s.tracker.addDataPoint(time.Duration(scan.Ping))
-				}
+				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}
+
 			if atomic.AddUint64(&liveThreads, ^uint64(0)) == 0 {
 				close(respChan)
 			}
 		}()
 	}
 
-	// handle responses
-	inflight := len(hosts)
-	for inflight > 0 {
-		var res scanResp
-		select {
-		case <-s.stopChan:
-			return errScanInterrupted
-		case res = <-respChan:
-			inflight--
-		}
-
-		if res.err != nil {
-			s.logger.Debugw(
-				fmt.Sprintf("failed scan, err: %v", res.err),
-				"hk", res.hostKey,
-			)
-		}
-	}
-	return nil
+	return respChan
 }
 
 func (s *scanner) isScanRequired() bool {

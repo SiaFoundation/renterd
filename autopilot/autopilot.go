@@ -30,9 +30,8 @@ type Bus interface {
 	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
 
 	// hostdb
-	AllHosts() ([]hostdb.Host, error)
-	Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+	Hosts(offset, limit int) ([]hostdb.Host, error)
 	RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
 
 	// contracts
@@ -109,6 +108,7 @@ func (ap *Autopilot) Run() error {
 		case <-ap.ticker.C:
 		}
 
+		// initiate a host scan
 		ap.s.tryUpdateTimeout()
 		ap.s.tryPerformHostScan()
 
@@ -190,10 +190,10 @@ func NewServer(ap *Autopilot) http.Handler {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scanInterval time.Duration) *Autopilot {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64) (*Autopilot, error) {
 	ap := &Autopilot{
 		bus:    bus,
-		logger: logger.Sugar(),
+		logger: logger.Sugar().Named("autopilot"),
 		store:  store,
 		worker: worker,
 
@@ -201,14 +201,21 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		stopChan: make(chan struct{}),
 	}
 
+	scanner, err := newScanner(
+		ap,
+		scannerBatchSize,
+		scannerNumThreads,
+		scannerScanInterval,
+		scannerTimeoutInterval,
+		scannerTimeoutMinTimeout,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	ap.s = scanner
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap)
-	ap.s = newScanner(
-		ap,
-		scannerNumThreads,
-		scanInterval,
-		scannerTimeoutInterval,
-	)
 
-	return ap
+	return ap, nil
 }

@@ -206,27 +206,36 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 	return
 }
 
-// Hosts returns up to max hosts that have not been interacted with since
-// the specified time.
-func (c *Client) Hosts(notSince time.Time, max int) (hosts []hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts?max=%v&notSince=%v", max, api.ParamTime(notSince)), &hosts)
+// Host returns information about a particular host known to the server.
+func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
+	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &h)
 	return
 }
 
-// AllHosts returns all hosts known to the server.
-func (c *Client) AllHosts() (hosts []hostdb.Host, err error) {
-	return c.Hosts(time.Now(), -1)
+// Hosts returns 'limit' hosts at given 'offset'.
+func (c *Client) Hosts(offset, limit int) (hosts []hostdb.Host, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+	err = c.c.GET("/hosts?"+values.Encode(), &hosts)
+	return
 }
 
-// Host returns information about a particular host known to the server.
-func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
-	err = c.c.GET(fmt.Sprintf("/hosts/%s", hostKey), &h)
+// HostBlocklist returns a host blocklist.
+func (c *Client) HostBlocklist() (blocklist []string, err error) {
+	err = c.c.GET("/hosts/blocklist", &blocklist)
+	return
+}
+
+// UpdateHostBlocklist updates the host blocklist, adding and removing the given entries.
+func (c *Client) UpdateHostBlocklist(add, remove []string) (err error) {
+	err = c.c.PUT("/hosts/blocklist", api.UpdateBlocklistRequest{Add: add, Remove: remove})
 	return
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
 func (c *Client) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) (err error) {
-	err = c.c.POST(fmt.Sprintf("/hosts/%s", hostKey), interactions, nil)
+	err = c.c.POST(fmt.Sprintf("/host/%s", hostKey), interactions, nil)
 	return
 }
 

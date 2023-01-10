@@ -38,8 +38,10 @@ type BusConfig struct {
 }
 
 type AutopilotConfig struct {
-	Heartbeat       time.Duration
-	ScannerInterval time.Duration
+	Heartbeat         time.Duration
+	ScannerInterval   time.Duration
+	ScannerBatchSize  uint64
+	ScannerNumThreads uint64
 }
 
 type chainManager struct {
@@ -228,7 +230,11 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (
 }
 
 func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
-	ap := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval)
+	ap, err := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return ap, ap.Stop, nil
 }
 

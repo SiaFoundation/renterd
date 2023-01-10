@@ -79,7 +79,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(contracts) != 1 {
-		t.Fatal("no contract")
+		t.Fatal("no contract", len(contracts))
 	}
 
 	// Verify startHeight and endHeight of the contract.

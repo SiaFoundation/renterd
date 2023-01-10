@@ -3,6 +3,7 @@ package bus
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -62,9 +63,13 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Hosts(notSince time.Time, max int) ([]hostdb.Host, error)
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+		Hosts(offset, limit int) ([]hostdb.Host, error)
 		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
+
+		HostBlocklist() ([]string, error)
+		AddHostBlocklistEntry(entry string) error
+		RemoveHostBlocklistEntry(entry string) error
 	}
 
 	// A ContractStore stores contracts.
@@ -345,15 +350,13 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *bus) hostsHandler(jc jape.Context) {
-	var notSince time.Time
-	max := -1
-	if jc.DecodeForm("notSince", (*api.ParamTime)(&notSince)) != nil || jc.DecodeForm("max", &max) != nil {
-		return
-	}
-	hosts, err := b.hdb.Hosts(notSince, max)
-	if jc.Check("couldn't load hosts", err) == nil {
-		jc.Encode(hosts)
+func (b *bus) hostsHandlerGET(jc jape.Context) {
+	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
+		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
+			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
+				jc.Encode(hosts)
+			}
+		}
 	}
 }
 
@@ -373,6 +376,29 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var hostKey consensus.PublicKey
 	if jc.Decode(&interactions) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
 		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(hostKey, interactions))
+	}
+}
+
+func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
+	blocklist, err := b.hdb.HostBlocklist()
+	if jc.Check("couldn't load blocklist", err) == nil {
+		jc.Encode(blocklist)
+	}
+}
+
+func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
+	var req api.UpdateBlocklistRequest
+	if jc.Decode(&req) == nil {
+		for _, entry := range req.Add {
+			if jc.Check(fmt.Sprintf("couldn't add blocklist entry '%s'", entry), b.hdb.AddHostBlocklistEntry(entry)) != nil {
+				return
+			}
+		}
+		for _, entry := range req.Remove {
+			if jc.Check(fmt.Sprintf("couldn't remove blocklist entry '%s'", entry), b.hdb.RemoveHostBlocklistEntry(entry)) != nil {
+				return
+			}
+		}
 	}
 }
 
@@ -640,9 +666,11 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":          b.hostsHandler,
-		"GET    /hosts/:hostkey": b.hostsPubkeyHandlerGET,
-		"POST   /hosts/:hostkey": b.hostsPubkeyHandlerPOST,
+		"GET    /hosts":           b.hostsHandlerGET,
+		"GET    /host/:hostkey":   b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey":   b.hostsPubkeyHandlerPOST,
+		"GET    /hosts/blocklist": b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist": b.hostsBlocklistHandlerPUT,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

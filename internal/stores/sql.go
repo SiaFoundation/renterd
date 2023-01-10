@@ -58,7 +58,8 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
 func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration) (*SQLStore, modules.ConsensusChangeID, error) {
-	db, err := gorm.Open(conn, &gorm.Config{})
+	db, err := gorm.Open(conn, &gorm.Config{}) // Logger: logger.Default.LogMode(logger.Silent)
+
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
@@ -76,6 +77,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbConsensusInfo{},
 			&dbHost{},
 			&dbInteraction{},
+			&dbBlocklistEntry{},
 
 			// bus.ObjectStore tables
 			&dbObject{},

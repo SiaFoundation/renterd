@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
+	"strings"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -27,8 +29,10 @@ const (
 	consensusInfoID = 1
 )
 
-// ErrHostNotFound is returned if a specific host can't be retrieved from the hostdb.
-var ErrHostNotFound = errors.New("host doesn't exist in hostdb")
+var (
+	ErrHostNotFound   = errors.New("host doesn't exist in hostdb")
+	ErrNegativeOffset = errors.New("offset can not be negative")
+)
 
 type (
 	// dbHost defines a hostdb.Interaction as persisted in the DB.
@@ -52,6 +56,15 @@ type (
 
 		LastAnnouncement time.Time
 		NetAddress       string
+
+		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
+	}
+
+	// dbBlocklistEntry defines a table that stores the host blocklist.
+	dbBlocklistEntry struct {
+		Model
+		Entry string   `gorm:"unique;index;NOT NULL"`
+		Hosts []dbHost `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbConsensusInfo defines table which stores the latest consensus info
@@ -187,6 +200,9 @@ func (dbHost) TableName() string { return "hosts" }
 // TableName implements the gorm.Tabler interface.
 func (dbInteraction) TableName() string { return "host_interactions" }
 
+// TableName implements the gorm.Tabler interface.
+func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
+
 // convert converts a host into a hostdb.Host.
 func (h dbHost) convert() hostdb.Host {
 	var lastScan time.Time
@@ -217,10 +233,80 @@ func (h dbHost) convert() hostdb.Host {
 	return hdbHost
 }
 
+func (h *dbHost) AfterCreate(tx *gorm.DB) (err error) {
+	var dbBlocklist []dbBlocklistEntry
+	if err := tx.
+		Model(&dbBlocklistEntry{}).
+		Find(&dbBlocklist).
+		Error; err != nil {
+		return err
+	}
+
+	filtered := dbBlocklist[:0]
+	for _, entry := range dbBlocklist {
+		if entry.blocks(h) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return tx.Model(h).Association("Blocklist").Replace(&filtered)
+}
+
+func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
+	tx.Statement.AddClause(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "public_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
+	})
+	return nil
+}
+
+func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) (err error) {
+	// NOTE: the ID is zero here if we ignore a conflict on create
+	if e.ID == 0 {
+		return nil
+	}
+
+	params := map[string]interface{}{
+		"entry_id":    e.ID,
+		"exact_entry": e.Entry,
+		"like_entry":  fmt.Sprintf("%%.%s", e.Entry),
+	}
+
+	err = tx.Exec(`
+INSERT INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+VALUES (@entry_id, (
+	SELECT id FROM (
+		SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
+		FROM hosts
+		WHERE net_host == @exact_entry OR net_host LIKE @like_entry
+	)
+))`, params).Error
+	return
+}
+
+func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
+	tx.Statement.AddClause(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "entry"}},
+		DoNothing: true,
+	})
+	return nil
+}
+
+func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
+	host, _, err := net.SplitHostPort(h.NetAddress)
+	if err != nil {
+		return false // do nothing
+	}
+
+	return host == e.Entry || strings.HasSuffix(host, "."+e.Entry)
+}
+
 // Host returns information about a host.
-func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
+func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	var h dbHost
-	tx := db.db.Where(&dbHost{PublicKey: hostKey}).
+
+	tx := ss.db.
+		Scopes(ExcludeBlockedHosts).
+		Where(&dbHost{PublicKey: hostKey}).
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound
@@ -228,16 +314,19 @@ func (db *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	return h.convert(), tx.Error
 }
 
-// Hosts returns up to max hosts that have not been interacted with since
-// the specified time.
-func (db *SQLStore) Hosts(notSince time.Time, max int) ([]hostdb.Host, error) {
-	// Filter all hosts for the ones that have not been updated since a
-	// given time.
-	var fullHosts []dbHost
+// Hosts returns hosts at given offset and limit.
+func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	}
+
 	var hosts []hostdb.Host
-	err := db.db.Table("hosts").
-		Limit(max).
-		Find(&fullHosts).
+	var fullHosts []dbHost
+
+	err := ss.db.
+		Scopes(ExcludeBlockedHosts).
+		Offset(offset).
+		Limit(limit).
 		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
 			for _, fh := range fullHosts {
 				hosts = append(hosts, fh.convert())
@@ -256,6 +345,23 @@ func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
 	err := tx.Where("public_key", gobEncode(hostKey)).
 		Take(&h).Error
 	return h, err
+}
+
+func (ss *SQLStore) AddHostBlocklistEntry(entry string) error {
+	return ss.db.Create(&dbBlocklistEntry{Entry: entry}).Error
+}
+
+func (db *SQLStore) RemoveHostBlocklistEntry(entry string) (err error) {
+	err = db.db.Where(&dbBlocklistEntry{Entry: entry}).Delete(&dbBlocklistEntry{}).Error
+	return
+}
+
+func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
+	err = db.db.
+		Model(&dbBlocklistEntry{}).
+		Pluck("entry", &blocklist).
+		Error
+	return
 }
 
 // RecordHostInteraction records an interaction with a host. If the host is not in
@@ -363,6 +469,10 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 }
 
+func ExcludeBlockedHosts(db *gorm.DB) *gorm.DB {
+	return db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+}
+
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
 	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
 		Model: Model{
@@ -390,10 +500,5 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	if err := tx.Create(&announcements).Error; err != nil {
 		return err
 	}
-	// Create hosts that don't exist and regardless of whether they exist or
-	// not update the last_announcement and net_address fields.
-	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "public_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
-	}).Create(&hosts).Error
+	return tx.Create(&hosts).Error
 }

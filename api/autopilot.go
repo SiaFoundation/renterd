@@ -29,10 +29,8 @@ type (
 
 	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
-		Blacklist          []string                        `json:"blacklist"`
 		IgnoreRedundantIPs bool                            `json:"ignoreRedundantIPs"`
 		ScoreOverrides     map[consensus.PublicKey]float64 `json:"scoreOverrides"`
-		Whitelist          []string                        `json:"whitelist"`
 	}
 
 	// ContractsConfig contains all contracts configuration parameters.
@@ -53,8 +51,8 @@ type (
 	}
 )
 
-// DefaultConfig returns an autopilot configuration with configured defaults.
-func DefaultConfig() (c AutopilotConfig) {
+// DefaultAutopilotConfig returns a configuration with sane default values.
+func DefaultAutopilotConfig() (c AutopilotConfig) {
 	c.Wallet.DefragThreshold = 1000
 	c.Hosts.ScoreOverrides = make(map[consensus.PublicKey]float64)
 	c.Contracts.Allowance = types.SiacoinPrecision.Mul64(1000)

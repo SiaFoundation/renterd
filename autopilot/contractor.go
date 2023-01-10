@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
@@ -16,6 +17,8 @@ import (
 )
 
 const (
+	// contractLockingDurationRenew is the amount of time we hold a contract
+	// lock when renewing a contract
 	contractLockingDurationRenew = 30 * time.Second
 
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
@@ -195,9 +198,11 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// update contract set
-	err = c.ap.updateDefaultContracts(contractIds(contracts), formed, toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
+	set, err := c.ap.updateDefaultContracts(contractIds(contracts), formed, toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
 	if err != nil {
 		return fmt.Errorf("failed to update default contracts, err: %v", err)
+	} else if len(set) < int(rs.MinShards) {
+		c.logger.Warnf("contract set does not have enough contracts to support the min redundancy, %v<%v", len(set), rs.MinShards)
 	}
 
 	return nil
@@ -299,6 +304,9 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 }
 
 func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []api.Contract) ([]api.ContractMetadata, error) {
+	if len(toRenew)+len(toRefresh) == 0 {
+		return nil, nil
+	}
 	renewed := make([]api.ContractMetadata, 0, len(toRenew)+len(toRefresh))
 
 	// log contracts renewed
@@ -384,12 +392,14 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		return nil, err
 	}
 
-	// calculate how many contracts we are missing
-	required := addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts)
-	missing := int(required) - len(active)
-	if missing <= 0 {
+	// check if we're missing contracts
+	minRequired := addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts)
+	if uint64(len(active)) >= minRequired {
 		return nil, nil
 	}
+
+	// calculate how much we are missing
+	missing := cfg.Contracts.Hosts - uint64(len(active))
 
 	// fetch recommended txn fee
 	fee, err := c.ap.bus.RecommendedFee()
@@ -397,8 +407,18 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		return nil, err
 	}
 
+	// create a map of used hosts
+	used := make(map[string]bool)
+	for _, contract := range active {
+		used[contract.HostKey.String()] = true
+	}
+
 	// fetch candidate hosts
-	candidates, _ := c.candidateHosts(cfg, addLeeway(uint64(missing), leewayPctCandidateHosts))
+	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
+	candidates, err := c.candidateHosts(cfg, used, wanted)
+	if err != nil {
+		return nil, err
+	}
 
 	// calculate min/max contract funds
 	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
@@ -444,10 +464,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight,
 		// fetch host settings
 		scan, err := c.ap.worker.RHPScan(candidate, host.NetAddress, 0)
 		if err != nil {
-			c.logger.Debugw(
-				fmt.Sprintf("failed scan, err: %v", err),
-				"hk", candidate,
-			)
+			c.logger.Debugw(err.Error(), "hk", candidate)
 			continue
 		}
 		settings := scan.Settings
@@ -523,10 +540,7 @@ func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(toRenew.HostKey(), toRenew.HostIP, 0)
 	if err != nil {
-		c.logger.Debugw(
-			fmt.Sprintf("failed scan, err: %v", err),
-			"hk", toRenew.HostKey(),
-		)
+		c.logger.Debugw(err.Error(), "hk", toRenew.HostKey())
 		return rhpv2.ContractRevision{}, nil
 	}
 
@@ -591,10 +605,7 @@ func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract ap
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
 	if err != nil {
-		c.logger.Debugw(
-			fmt.Sprintf("failed scan, err: %v", err),
-			"hk", contract.HostKey(),
-		)
+		c.logger.Debugw(err.Error(), "hk", contract.HostKey())
 		return types.ZeroCurrency, err
 	}
 
@@ -630,10 +641,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	// fetch host settings
 	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
 	if err != nil {
-		c.logger.Debugw(
-			fmt.Sprintf("failed scan, err: %v", err),
-			"hk", contract.HostKey,
-		)
+		c.logger.Debugw(err.Error(), "hk", contract.HostKey)
 		return types.ZeroCurrency, err
 	}
 
@@ -704,13 +712,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	return estimatedCost, nil
 }
 
-func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted uint64) ([]consensus.PublicKey, error) {
-	// fetch all contracts
-	active, err := c.ap.bus.ActiveContracts()
-	if err != nil {
-		return nil, err
-	}
-
+func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]bool, wanted int) ([]consensus.PublicKey, error) {
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings()
 	if err != nil {
@@ -723,61 +725,49 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, wanted uint64) ([]c
 		return nil, err
 	}
 
-	// build a map
-	used := make(map[string]bool)
-	for _, contract := range active {
-		used[contract.HostKey.String()] = true
-	}
-
 	// create IP filter
 	ipFilter := newIPFilter()
 
 	// fetch all hosts
-	hosts, err := c.ap.bus.AllHosts()
+	hosts, err := c.ap.bus.Hosts(0, -1)
 	if err != nil {
 		return nil, err
 	}
 
-	// filter unusable hosts
-	filtered := hosts[:0]
+	// collect scores for all usable hosts
+	scores := make([]float64, 0, len(hosts))
+	scored := make([]hostdb.Host, 0, len(hosts))
 	for _, h := range hosts {
 		if used[h.PublicKey.String()] {
 			continue
 		}
-
-		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h}); usable {
-			filtered = append(filtered, h)
-		}
-	}
-
-	// score each host
-	scores := make([]float64, 0, len(filtered))
-	scored := filtered[:0]
-	for _, host := range filtered {
-		score := hostScore(cfg, Host{host})
-		if score == 0 {
-			c.logger.DPanicw("sanity check failed", "score", score, "hk", host.PublicKey)
+		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h}); !usable {
 			continue
 		}
 
-		scores = append(scores, score)
-		scored = append(scored, host)
-	}
+		score := hostScore(cfg, Host{h})
+		if score == 0 {
+			c.logger.DPanicw("sanity check failed", "score", score, "hk", h.PublicKey)
+			continue
+		}
 
-	// update num wanted
-	if wanted > uint64(len(scores)) {
-		wanted = uint64(len(scores))
+		scored = append(scored, h)
+		scores = append(scores, score)
 	}
 
 	// select hosts
 	var selected []consensus.PublicKey
-	for uint64(len(selected)) < wanted && len(scored) > 0 {
+	for len(selected) < wanted && len(scored) > 0 {
 		i := randSelectByWeight(scores)
 		selected = append(selected, scored[i].PublicKey)
 
 		// remove selected host
 		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
 		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
+	}
+
+	if len(selected) < wanted {
+		c.logger.Debugf("could not fetch 'wanted' candidate hosts, %d<%d", len(selected), wanted)
 	}
 	return selected, nil
 }

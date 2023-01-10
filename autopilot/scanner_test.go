@@ -1,7 +1,8 @@
 package autopilot
 
 import (
-	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,39 +11,46 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"lukechampine.com/frand"
-)
-
-var (
-	testHost1 consensus.PublicKey
-	testHost2 consensus.PublicKey
-	testHost3 consensus.PublicKey
 )
 
 type mockBus struct {
 	hosts []hostdb.Host
+	reqs  []string
 }
 
-func (b *mockBus) AllHosts() ([]hostdb.Host, error) { return b.hosts, nil }
-func (b *mockBus) ConsensusState() (api.ConsensusState, error) {
-	return api.ConsensusState{BlockHeight: 0, Synced: true}, nil
-}
-func (b *mockBus) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error {
-	panic("never called")
+func (b *mockBus) Hosts(offset, limit int) ([]hostdb.Host, error) {
+	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", offset, offset+limit))
+
+	start := offset
+	if start > len(b.hosts) {
+		return nil, nil
+	}
+
+	end := offset + limit
+	if end > len(b.hosts) {
+		end = len(b.hosts)
+	}
+
+	return b.hosts[start:end], nil
 }
 
 type mockWorker struct {
 	blockChan chan struct{}
+
+	mu        sync.Mutex
+	scanCount int
 }
 
-func (w *mockWorker) RHPScan(hostKey consensus.PublicKey, hostIP string, _ time.Duration) (r api.RHPScanResponse, e error) {
+func (w *mockWorker) RHPScan(hostKey consensus.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
 	if w.blockChan != nil {
 		<-w.blockChan
 	}
-	if hostKey == testHost1 || hostKey == testHost2 {
-		e = errors.New("fail")
-	}
-	return
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.scanCount++
+
+	return api.RHPScanResponse{}, nil
 }
 
 func (s *scanner) isScanning() bool {
@@ -52,75 +60,54 @@ func (s *scanner) isScanning() bool {
 }
 
 func TestScanner(t *testing.T) {
-	// init host keys
-	frand.Read(testHost1[:])
-	frand.Read(testHost2[:])
-	frand.Read(testHost3[:])
-
-	// prepare some hosts
-	settings := newTestHostSettings()
-	var hosts []hostdb.Host
-	for i := 0; i < 8; i++ {
-		h := newTestHost(randomHostKey(), settings)
-		hosts = append(hosts, h)
-	}
-	hosts = append(hosts, newTestHost(testHost1, settings))
-	hosts = append(hosts, newTestHost(testHost2, settings))
+	// prepare 100 hosts
+	hosts := newTestHosts(100)
 
 	// init new scanner
 	b := &mockBus{hosts: hosts}
-	w := &mockWorker{}
+	w := &mockWorker{blockChan: make(chan struct{})}
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	errChan := s.tryPerformHostScan()
-	if errChan == nil {
+	s.tryPerformHostScan()
+	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
 
-	// wait until the scan is done
-	select {
-	case err := <-errChan:
-		if err != nil {
-			t.Fatal("unexpected error", err)
-		}
-	case <-time.After(time.Second): // avoid test deadlock
-		t.Fatal("scan took longer than expected")
+	// unblock the worker and sleep
+	close(w.blockChan)
+	time.Sleep(time.Second)
+
+	// assert the scan is done
+	if s.isScanning() {
+		t.Fatal("unexpected")
+	}
+
+	// assert the scanner made 3 batch reqs
+	if len(b.reqs) != 3 {
+		t.Fatalf("unexpected number of requests, %v != 3", len(b.reqs))
+	}
+	if b.reqs[0] != "0-40" || b.reqs[1] != "40-80" || b.reqs[2] != "80-120" {
+		t.Fatalf("unexpected requests, %v", b.reqs)
+	}
+
+	// assert we scanned 100 hosts
+	if w.scanCount != 100 {
+		t.Fatalf("unexpected number of scans, %v != 100", w.scanCount)
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	if s.tryPerformHostScan() != nil {
+	s.tryPerformHostScan()
+	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
 
 	// reset the scanner
-	w.blockChan = make(chan struct{})
 	s.scanningLastStart = time.Time{}
 
-	// start another scan
-	if errChan = s.tryPerformHostScan(); errChan == nil {
-		t.Fatal("unexpected")
-	}
+	// assert it started a host scan
+	s.tryPerformHostScan()
 	if !s.isScanning() {
-		t.Fatal("unexpected")
-	}
-	close(w.blockChan) // we have to block on a channel to avoid an NDF on the isScanning check
-
-	// immediately interrupt the scanner
-	close(s.stopChan)
-
-	// wait until the scan is done
-	select {
-	case err := <-errChan:
-		if err != errScanInterrupted {
-			t.Fatal("unexpected error", err)
-		}
-	case <-time.After(time.Second): // avoid test deadlock
-		t.Fatal("scan took longer than expected")
-	}
-
-	// assert scanner is no longer scanning
-	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
 }
@@ -134,10 +121,10 @@ func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 			trackerMinDataPoints,
 			trackerNumDataPoints,
 			trackerTimeoutPercentile,
-			trackerMinTimeout,
 		),
 		stopChan:        make(chan struct{}),
+		scanBatchSize:   40,
 		scanThreads:     3,
-		scanMinInterval: time.Second,
+		scanMinInterval: time.Minute,
 	}
 }
