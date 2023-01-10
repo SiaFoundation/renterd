@@ -185,10 +185,6 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	}
 	dbConn := stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 
-	hostdbDir := filepath.Join(dir, "hostdb")
-	if err := os.MkdirAll(hostdbDir, 0700); err != nil {
-		return nil, nil, err
-	}
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval)
 	if err != nil {
 		return nil, nil, err
@@ -201,16 +197,6 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 			return nil, nil, err
 		}
 		tp.TransactionPoolSubscribe(m)
-	}
-
-	contractsDir := filepath.Join(dir, "contracts")
-	if err := os.MkdirAll(contractsDir, 0700); err != nil {
-		return nil, nil, err
-	}
-
-	objectsDir := filepath.Join(dir, "objects")
-	if err := os.MkdirAll(objectsDir, 0700); err != nil {
-		return nil, nil, err
 	}
 
 	cleanup := func() error {
