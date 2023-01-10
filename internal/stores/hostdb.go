@@ -272,14 +272,13 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) (err error) {
 	}
 
 	err = tx.Exec(`
-INSERT INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-VALUES (@entry_id, (
-	SELECT id FROM (
+	INSERT INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+	SELECT @entry_id, id FROM (
 		SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
 		FROM hosts
 		WHERE net_host == @exact_entry OR net_host LIKE @like_entry
 	)
-))`, params).Error
+	`, params).Error
 	return
 }
 

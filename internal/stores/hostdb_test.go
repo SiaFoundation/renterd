@@ -697,6 +697,18 @@ func TestSQLHostBlocklist(t *testing.T) {
 	if numRelations() != 0 {
 		t.Fatalf("unexpected number of entries in join table, %v != 0", numRelations())
 	}
+
+	// add another entry that blocks multiple hosts
+	entry4 := "com"
+	err = hdb.AddHostBlocklistEntry(entry4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert 3 out of 5 hosts are blocked
+	if !isBlocked(hk1) || !isBlocked(hk2) || !isBlocked(hk3) || isBlocked(hk4) || isBlocked(hk5) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
+	}
 }
 
 // addTestHost ensures a host with given hostkey exists.
