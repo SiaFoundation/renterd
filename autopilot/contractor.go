@@ -167,9 +167,9 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 
 	// delete contracts
 	if len(toDelete) > 0 {
-		err = c.ap.bus.DeleteContracts(toDelete)
-		if err != nil {
-			return fmt.Errorf("failed to delete contracts, err: %v", err)
+		if err := c.ap.bus.DeleteContracts(toDelete); err != nil {
+			c.logger.Errorf("failed to delete contracts, err: %v", err)
+			// continue
 		}
 	}
 
@@ -188,24 +188,28 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	// run renewals + refreshes
 	renewed, err := c.runContractRenewals(cfg, blockHeight, currentPeriod, &remaining, address, toRefresh, toRenew)
 	if err != nil {
-		return fmt.Errorf("failed to renew contracts, err: %v", err)
+		c.logger.Errorf("failed to renew contracts, err: %v", err)
+		// continue
 	}
 
-	// run formations
-	formed, err := c.runContractFormations(cfg, blockHeight, currentPeriod, &remaining, address)
-	if err != nil {
-		return fmt.Errorf("failed to form contracts, err: %v", err)
+	// build the new contract set (excluding formed contracts)
+	contractset := buildContractSet(contractIds(contracts), toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
+	numContracts := uint64(len(contractset))
+
+	// check if we need to form contracts and add them to the contract set
+	if numContracts < addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts) {
+		if formed, err := c.runContractFormations(cfg, contracts, cfg.Contracts.Hosts-numContracts, blockHeight, currentPeriod, &remaining, address); err == nil {
+			contractset = append(contractset, formed...)
+		} else {
+			c.logger.Errorf("failed to form contracts, err: %v", err)
+		}
 	}
 
 	// update contract set
-	set, err := c.ap.updateDefaultContracts(contractIds(contracts), formed, toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
-	if err != nil {
-		return fmt.Errorf("failed to update default contracts, err: %v", err)
-	} else if len(set) < int(rs.MinShards) {
-		c.logger.Warnf("contract set does not have enough contracts to support the min redundancy, %v<%v", len(set), rs.MinShards)
+	if len(contractset) < int(rs.TotalShards) {
+		c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
 	}
-
-	return nil
+	return c.ap.bus.SetContractSet("autopilot", contractset)
 }
 
 func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []api.Contract, _ error) {
@@ -251,14 +255,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 				"reasons", reasons,
 			)
 
-			// decide whether the contract is still good
-			usable, refresh, renew, _ := isUsableContract(cfg, Host{host}, contract, blockHeight)
-			if !usable && (refresh || renew) {
-				toDelete = append(toDelete, contract.ID)
-			} else {
-				toIgnore = append(toIgnore, contract.ID)
-			}
-
+			toIgnore = append(toIgnore, contract.ID)
 			continue
 		}
 
@@ -312,9 +309,6 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 }
 
 func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash, toRefresh, toRenew []api.Contract) ([]api.ContractMetadata, error) {
-	if len(toRenew)+len(toRefresh) == 0 {
-		return nil, nil
-	}
 	renewed := make([]api.ContractMetadata, 0, len(toRenew)+len(toRefresh))
 
 	// log contracts renewed
@@ -393,32 +387,17 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 	return renewed, nil
 }
 
-func (c *contractor) runContractFormations(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
-	// fetch all active contracts
-	active, err := c.ap.bus.ActiveContracts()
-	if err != nil {
-		return nil, err
+func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api.Contract, missing, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.UnlockHash) ([]types.FileContractID, error) {
+	// create a map of used hosts
+	used := make(map[string]bool)
+	for _, contract := range active {
+		used[contract.HostKey().String()] = true
 	}
-
-	// check if we're missing contracts
-	minRequired := addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts)
-	if uint64(len(active)) >= minRequired {
-		return nil, nil
-	}
-
-	// calculate how much we are missing
-	missing := cfg.Contracts.Hosts - uint64(len(active))
 
 	// fetch recommended txn fee
 	fee, err := c.ap.bus.RecommendedFee()
 	if err != nil {
 		return nil, err
-	}
-
-	// create a map of used hosts
-	used := make(map[string]bool)
-	for _, contract := range active {
-		used[contract.HostKey.String()] = true
 	}
 
 	// fetch candidate hosts
@@ -767,6 +746,56 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]boo
 
 func (c *contractor) endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+}
+
+func buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) []types.FileContractID {
+	// build some maps
+	isDeleted := contractMapBool(toDelete)
+	isIgnored := contractMapBool(toIgnore)
+	isUpForRenew := contractMapBool(append(toRefresh, toRenew...))
+
+	// renewed map is special case since we need renewed from
+	isRenewed := make(map[types.FileContractID]bool)
+	renewedIDs := make([]types.FileContractID, len(renewed))
+	for _, c := range renewed {
+		isRenewed[c.RenewedFrom] = true
+		renewedIDs = append(renewedIDs, c.ID)
+	}
+
+	// build new contract set
+	var contracts []types.FileContractID
+	for _, fcid := range append(active, renewedIDs...) {
+		if isDeleted[fcid] {
+			continue // exclude deleted contracts
+		}
+		if isIgnored[fcid] {
+			continue // exclude ignored contracts (contracts that became unusable)
+		}
+		if isRenewed[fcid] {
+			continue // exclude (effectively) renewed contracts
+		}
+		if isUpForRenew[fcid] && !isRenewed[fcid] {
+			continue // exclude contracts that were up for renewal but failed to renew
+		}
+		contracts = append(contracts, fcid)
+	}
+	return contracts
+}
+
+func contractIds(contracts []api.Contract) []types.FileContractID {
+	ids := make([]types.FileContractID, len(contracts))
+	for i, c := range contracts {
+		ids[i] = c.ID
+	}
+	return ids
+}
+
+func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]bool {
+	cmap := make(map[types.FileContractID]bool)
+	for _, fcid := range contracts {
+		cmap[fcid] = true
+	}
+	return cmap
 }
 
 func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings, renterFunds, txnFee types.Currency) (types.Currency, error) {
