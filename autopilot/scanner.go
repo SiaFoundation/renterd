@@ -157,12 +157,9 @@ func (s *scanner) tryPerformHostScan() {
 	s.mu.Unlock()
 
 	go func() {
-		for res := range s.launchScanWorkers(s.launchHostScans()) {
+		for range s.launchScanWorkers(s.launchHostScans()) {
 			if s.isStopped() {
 				break
-			}
-			if res.err != nil {
-				s.logger.Debugw(res.err.Error(), "hk", res.hostKey)
 			}
 		}
 
