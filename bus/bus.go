@@ -373,8 +373,7 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var interactions []hostdb.Interaction
-	var hostKey consensus.PublicKey
-	if jc.Decode(&interactions) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
+	if jc.Decode(&interactions) == nil {
 		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(interactions))
 	}
 }
