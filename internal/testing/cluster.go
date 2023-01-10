@@ -140,11 +140,12 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	// Create bus.
 	var cleanups []func(context.Context) error
 	b, bCleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:          false,
-		GatewayAddr:        "127.0.0.1:0",
-		Miner:              miner,
-		PersistInterval:    testPersistInterval,
-		RedundancySettings: defaultRedundancy,
+		Bootstrap:                false,
+		InteractionFlushInterval: time.Second,
+		GatewayAddr:              "127.0.0.1:0",
+		Miner:                    miner,
+		PersistInterval:          testPersistInterval,
+		RedundancySettings:       defaultRedundancy,
 	}, busDir, wk)
 	if err != nil {
 		return nil, err

@@ -28,10 +28,11 @@ type WorkerConfig struct {
 }
 
 type BusConfig struct {
-	Bootstrap       bool
-	GatewayAddr     string
-	Miner           *Miner
-	PersistInterval time.Duration
+	Bootstrap                bool
+	GatewayAddr              string
+	InteractionFlushInterval time.Duration
+	Miner                    *Miner
+	PersistInterval          time.Duration
 
 	api.GougingSettings
 	api.RedundancySettings
@@ -216,7 +217,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		return nil
 	}
 
-	b, err := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings)
+	b, err := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, cfg.InteractionFlushInterval)
 	if err != nil {
 		return nil, nil, err
 	}

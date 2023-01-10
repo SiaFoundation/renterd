@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
@@ -112,6 +113,16 @@ type bus struct {
 	cs  ContractStore
 	os  ObjectStore
 	ss  SettingStore
+
+	interactionsMu            sync.Mutex
+	interactions              []hostdb.Interaction
+	interactionsFlushInterval time.Duration
+	interactionsFlush         *interactionsFlush
+}
+
+type interactionsFlush struct {
+	c      chan struct{}
+	result error
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -374,7 +385,7 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var interactions []hostdb.Interaction
 	if jc.Decode(&interactions) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(interactions))
+		jc.Check("couldn't record interaction", b.recordInteractions(interactions))
 	}
 }
 
@@ -621,16 +632,17 @@ func isErrSettingsNotFound(err error) bool {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings, interactionsFlushInterval time.Duration) (http.Handler, error) {
 	b := &bus{
-		s:   s,
-		cm:  cm,
-		tp:  tp,
-		w:   w,
-		hdb: hdb,
-		cs:  cs,
-		os:  os,
-		ss:  ss,
+		s:                         s,
+		cm:                        cm,
+		tp:                        tp,
+		w:                         w,
+		hdb:                       hdb,
+		cs:                        cs,
+		os:                        os,
+		ss:                        ss,
+		interactionsFlushInterval: interactionsFlushInterval,
 	}
 
 	if err := b.setGougingSettings(gs); err != nil {
@@ -691,4 +703,42 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /setting/:key":        b.settingKeyHandlerGET,
 		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
 	}), nil
+}
+
+func (b *bus) recordInteractions(interactions []hostdb.Interaction) error {
+	// Check whether someone else is flushing the interactions or if this
+	// thread needs to.
+	var shouldFlush bool
+
+	// No interactionsFlush exists so this thread needs to flush.
+	b.interactionsMu.Lock()
+	f := b.interactionsFlush
+	if f == nil {
+		f = &interactionsFlush{
+			c: make(chan struct{}),
+		}
+		b.interactionsFlush = f
+		shouldFlush = true
+	}
+	b.interactions = append(b.interactions, interactions...)
+	b.interactionsMu.Unlock()
+
+	// If we don't need to flush, we block on the flush channel and then
+	// return the result.
+	if !shouldFlush {
+		<-f.c // TODO: handle shutdown
+		return f.result
+	}
+
+	// Otherwise we wait for the interval and apply the interactions.
+	time.Sleep(b.interactionsFlushInterval) // TODO: handle shutdown
+
+	b.interactionsMu.Lock()
+	defer b.interactionsMu.Unlock()
+
+	f.result = b.hdb.RecordHostInteractions(b.interactions)
+	close(f.c)
+	b.interactions = nil
+	b.interactionsFlush = nil
+	return f.result
 }
