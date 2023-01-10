@@ -366,64 +366,95 @@ func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
 
 // RecordHostInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
-func (db *SQLStore) RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error {
-	dbInteractions := make([]dbInteraction, len(interactions))
-	var successful, failed float64
+func (db *SQLStore) RecordHostInteractions(interactions []hostdb.Interaction) error {
+	// Get keys from input.
+	keyMap := make(map[consensus.PublicKey]struct{})
+	for _, interaction := range interactions {
+		keyMap[interaction.Host] = struct{}{}
+	}
+	var hks [][]byte
+	for hk := range keyMap {
+		hks = append(hks, gobEncode(hk))
+	}
 
-	var scanQuery string
-	var scanArgs []interface{}
-	for i, interaction := range interactions {
-		dbInteractions[i] = dbInteraction{
-			Result:    interaction.Result,
-			Success:   interaction.Success,
-			Timestamp: interaction.Timestamp.UTC(),
-			Type:      interaction.Type,
+	return db.db.Transaction(func(tx *gorm.DB) error {
+		// Fetch hosts for which to add interactions.
+		var hosts []dbHost
+		if err := db.db.Where("public_key IN ?", hks).
+			Find(&hosts).Error; err != nil {
+			return err
 		}
-		if interaction.Success {
-			successful++
-		} else {
-			failed++
+		hostMap := make(map[consensus.PublicKey]dbHost)
+		for _, h := range hosts {
+			hostMap[h.PublicKey] = h
 		}
-		// Handle scan edge case.
-		if interaction.Type == hostdb.InteractionTypeScan {
-			timeToAddTo := "uptime"
-			if !interaction.Success {
-				timeToAddTo = "downtime"
+
+		// Apply all the interactions to the hosts.
+		dbInteractions := make([]dbInteraction, len(interactions))
+		for i, interaction := range interactions {
+			isScan := interaction.Type == hostdb.InteractionTypeScan
+			dbInteractions[i] = dbInteraction{
+				Result:    interaction.Result,
+				Success:   interaction.Success,
+				Timestamp: interaction.Timestamp.UTC(),
+				Type:      interaction.Type,
 			}
-			var sr hostdb.ScanResult
+			host, exists := hostMap[interaction.Host]
+			if !exists {
+				continue // host doesn't exist
+			}
 			if interaction.Success {
-				if err := json.Unmarshal(interaction.Result, &sr); err != nil {
-					return err
+				host.SuccessfulInteractions++
+				if isScan && host.LastScan > 0 {
+					host.Uptime += time.Duration(interaction.Timestamp.UnixNano() - host.LastScan)
+				}
+			} else {
+				host.FailedInteractions++
+				if isScan && host.LastScan > 0 {
+					host.Downtime += time.Duration(interaction.Timestamp.UnixNano() - host.LastScan)
 				}
 			}
-			scanQuery += fmt.Sprintf(`UPDATE hosts
-						  SET total_scans = total_scans + 1,
-						  second_to_last_scan_success = last_scan_success,
-						  last_scan_success = ?,
-						  %s = CASE WHEN last_scan == 0 THEN last_scan ELSE ? - last_scan END,
-						  last_scan = ?,
-						  settings = ?
-						  WHERE public_key = ?;`, timeToAddTo)
-			scanArgs = append(scanArgs, interaction.Success, interaction.Timestamp.UnixNano(), interaction.Timestamp.UnixNano(), gobEncode(convertHostSettings(sr.Settings)), gobEncode(hostKey))
+			if isScan {
+				host.TotalScans++
+				host.SecondToLastScanSuccess = host.LastScanSuccess
+				host.LastScanSuccess = interaction.Success
+				host.LastScan = interaction.Timestamp.UnixNano()
+				var sr hostdb.ScanResult
+				if interaction.Success {
+					if err := json.Unmarshal(interaction.Result, &sr); err != nil {
+						return err
+					}
+				}
+				host.Settings = convertHostSettings(sr.Settings)
+			}
+
+			// Save to map again.
+			hostMap[host.PublicKey] = host
 		}
-	}
-	return db.db.Transaction(func(tx *gorm.DB) error {
-		// Create interactions.
+
+		// Save everything to the db.
 		if err := tx.CreateInBatches(&dbInteractions, 100).Error; err != nil {
 			return err
 		}
-		// Prepare query.
-		// TODO: Add decay
-		query := `UPDATE hosts
-			  SET successful_interactions = successful_interactions + ?,
-			  failed_interactions = failed_interactions + ?
-			  WHERE public_key = ?;`
-		queryArgs := []interface{}{successful, failed, gobEncode(hostKey)}
-
-		// Attach potential scanQuery.
-		query += scanQuery
-		queryArgs = append(queryArgs, scanArgs...)
-		return tx.Exec(query, queryArgs...).Error
+		for _, h := range hostMap {
+			err := tx.Model(&dbHost{}).
+				Where("public_key", gobEncode(h.PublicKey)).
+				Updates(map[string]interface{}{
+					"total_scans":                 h.TotalScans,
+					"second_to_last_scan_success": h.SecondToLastScanSuccess,
+					"last_scan_success":           h.LastScanSuccess,
+					"downtime":                    h.Downtime,
+					"uptime":                      h.Uptime,
+					"last_scan":                   h.LastScan,
+					"settings":                    gobEncode(h.Settings),
+					"successful_interactions":     h.SuccessfulInteractions,
+					"failed_interactions":         h.FailedInteractions,
+				}).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

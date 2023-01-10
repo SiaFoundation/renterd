@@ -76,6 +76,7 @@ type Interactions struct {
 }
 
 type Interaction struct {
+	Host      consensus.PublicKey
 	Result    json.RawMessage
 	Success   bool
 	Timestamp time.Time

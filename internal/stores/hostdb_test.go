@@ -174,9 +174,10 @@ func TestRecordInteractions(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
-	createInteractions := func(successful, failed int) (interactions []hostdb.Interaction) {
+	createInteractions := func(hk consensus.PublicKey, successful, failed int) (interactions []hostdb.Interaction) {
 		for i := 0; i < successful+failed; i++ {
 			interactions = append(interactions, hostdb.Interaction{
+				Host:      hk,
 				Result:    []byte{1, 2, 3},
 				Success:   i < successful,
 				Timestamp: time.Now(),
@@ -187,7 +188,7 @@ func TestRecordInteractions(t *testing.T) {
 	}
 
 	// Add one successful and two failed interactions.
-	if err := hdb.RecordHostInteractions(hk, createInteractions(1, 2)); err != nil {
+	if err := hdb.RecordHostInteractions(createInteractions(hk, 1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -202,7 +203,7 @@ func TestRecordInteractions(t *testing.T) {
 	}
 
 	// Add some more
-	if err := hdb.RecordHostInteractions(hk, createInteractions(3, 10)); err != nil {
+	if err := hdb.RecordHostInteractions(createInteractions(hk, 3, 10)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -315,7 +316,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("creation time not set")
 	}
 
-	scanInteraction := func(scanTime time.Time, settings rhp.HostSettings, success bool) []hostdb.Interaction {
+	scanInteraction := func(hk consensus.PublicKey, scanTime time.Time, settings rhp.HostSettings, success bool) []hostdb.Interaction {
 		var err string
 		if !success {
 			err = "failure"
@@ -329,6 +330,7 @@ func TestRecordScan(t *testing.T) {
 		})
 		return []hostdb.Interaction{
 			{
+				Host:      hk,
 				Result:    result,
 				Success:   success,
 				Timestamp: scanTime,
@@ -339,7 +341,7 @@ func TestRecordScan(t *testing.T) {
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhp.HostSettings{NetAddress: "host.com"}
-	if err := hdb.RecordHostInteractions(hk, scanInteraction(firstScanTime, settings, true)); err != nil {
+	if err := hdb.RecordHostInteractions(scanInteraction(hk, firstScanTime, settings, true)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -372,7 +374,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := hdb.RecordHostInteractions(hk, scanInteraction(secondScanTime, settings, true)); err != nil {
+	if err := hdb.RecordHostInteractions(scanInteraction(hk, secondScanTime, settings, true)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -399,7 +401,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := hdb.RecordHostInteractions(hk, scanInteraction(thirdScanTime, settings, false)); err != nil {
+	if err := hdb.RecordHostInteractions(scanInteraction(hk, thirdScanTime, settings, false)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)

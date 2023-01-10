@@ -65,7 +65,7 @@ type (
 	HostDB interface {
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 		Hosts(offset, limit int) ([]hostdb.Host, error)
-		RecordHostInteractions(hostKey consensus.PublicKey, interactions []hostdb.Interaction) error
+		RecordHostInteractions(interactions []hostdb.Interaction) error
 
 		HostBlocklist() ([]string, error)
 		AddHostBlocklistEntry(entry string) error
@@ -375,7 +375,7 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var interactions []hostdb.Interaction
 	var hostKey consensus.PublicKey
 	if jc.Decode(&interactions) == nil && jc.DecodeParam("hostkey", &hostKey) == nil {
-		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(hostKey, interactions))
+		jc.Check("couldn't record interaction", b.hdb.RecordHostInteractions(interactions))
 	}
 }
 
@@ -668,7 +668,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 
 		"GET    /hosts":           b.hostsHandlerGET,
 		"GET    /host/:hostkey":   b.hostsPubkeyHandlerGET,
-		"POST   /host/:hostkey":   b.hostsPubkeyHandlerPOST,
+		"POST   /hosts":           b.hostsPubkeyHandlerPOST,
 		"GET    /hosts/blocklist": b.hostsBlocklistHandlerGET,
 		"PUT    /hosts/blocklist": b.hostsBlocklistHandlerPUT,
 

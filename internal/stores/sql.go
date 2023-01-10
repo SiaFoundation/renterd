@@ -59,7 +59,8 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 // same Dialector multiple times.
 func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
-		PrepareStmt: true, // caches queries as prepared statements
+		DisableNestedTransaction: true, // disable nesting transactions
+		PrepareStmt:              true, // caches queries as prepared statements
 	}) // Logger: logger.Default.LogMode(logger.Silent)
 
 	if err != nil {
