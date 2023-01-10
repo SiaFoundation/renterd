@@ -53,7 +53,7 @@ var (
 
 	defaultRedundancy = api.RedundancySettings{
 		MinShards:   2,
-		TotalShards: 5,
+		TotalShards: 3,
 	}
 )
 
@@ -141,7 +141,7 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	var cleanups []func(context.Context) error
 	b, bCleanup, err := node.NewBus(node.BusConfig{
 		Bootstrap:                false,
-		InteractionFlushInterval: time.Second,
+		InteractionFlushInterval: 100 * time.Millisecond,
 		GatewayAddr:              "127.0.0.1:0",
 		Miner:                    miner,
 		PersistInterval:          testPersistInterval,
