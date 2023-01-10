@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/node/api/client"
@@ -34,46 +33,59 @@ func TestGouging(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-	w := cluster.Worker
+
+	cfg := defaultAutopilotConfig.Contracts
 	b := cluster.Bus
+	w := cluster.Worker
 
 	// add hosts
-	hosts, err := cluster.AddHosts(int(defaultRedundancy.TotalShards))
+	hosts, err := cluster.AddHosts(int(cfg.Hosts))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// create helper to update host settings
-	t.Helper()
-	updateHostSetting := func(param client.HostParam, value interface{}) {
-		for _, h := range hosts {
-			if err := h.HostModifySettingPost(param, value); err != nil {
-				t.Fatal(err)
-			}
-		}
+	// build a hosts map
+	hostsmap := make(map[string]*siatest.TestNode)
+	for _, h := range hosts {
+		hostsmap[hostPK(h).String()] = h
 	}
 
+	// helper that waits until the contract set is ready
 	t.Helper()
-	waitForContractSet := func(numContracts int) error {
+	waitForContractSet := func() error {
 		return Retry(30, time.Second, func() error {
-			contracts, err := b.Contracts("autopilot")
-			if err != nil {
-				return err
-			}
-			if len(contracts) != numContracts {
-				cluster.MineBlocks(1) // mine a block
-				return errors.New("contract set not ready yet")
+			if contracts, err := b.Contracts("autopilot"); err != nil {
+				t.Fatal(err)
+			} else if len(contracts) != int(cfg.Hosts) {
+				return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), int(cfg.Hosts))
 			}
 			return nil
 		})
 	}
 
-	// wait for contracts to form
-	if _, err := cluster.WaitForContracts(); err != nil {
+	// helper that waits untail a certain host is removed from the contract set
+	t.Helper()
+	waitForHostRemoval := func(hk consensus.PublicKey) error {
+		return Retry(30, time.Second, func() error {
+			if contracts, err := b.Contracts("autopilot"); err != nil {
+				t.Fatal(err)
+			} else {
+				for _, c := range contracts {
+					if c.HostKey == hk {
+						return errors.New("host still in contract set")
+					}
+				}
+			}
+			return nil
+		})
+	}
+
+	// wait until we have a full contract set
+	if err := waitForContractSet(); err != nil {
 		t.Fatal(err)
 	}
 
-	// do small upload and download asserting a working contract set
+	// upload and download some data, asserting we have a working contract set
 	data := make([]byte, rhpv2.SectorSize/12)
 	if _, err := frand.Read(data); err != nil {
 		t.Fatal(err)
@@ -91,86 +103,61 @@ func TestGouging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch the host settings of the first host so we can reset
-	settings, err := hostSettings(b, hosts[0])
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		param client.HostParam
+		value types.Currency
+	}{
+		{"mindownloadbandwidthprice", types.SiacoinPrecision},
+		{"minuploadbandwidthprice", types.SiacoinPrecision},
+		{"mincontractprice", types.SiacoinPrecision.Mul64(10)},
 	}
 
-	// force download gouging error - assert it fails, reset and assert it succeeds again
-	updateHostSetting("mindownloadbandwidthprice", types.SiacoinPrecision)
-	if err := w.DownloadObject(&buffer, name); err == nil {
-		t.Fatal("expected download to fail")
+	for _, c := range cases {
+		// fetch current contract set
+		contracts, err := b.Contracts("autopilot")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// update the host settings so it's gouging
+		hk := contracts[0].HostKey
+		if err := hostsmap[hk.String()].HostModifySettingPost(c.param, c.value); err != nil {
+			t.Fatal(err)
+		}
+
+		// assert it was removed from the contract set
+		if err := waitForHostRemoval(hk); err != nil {
+			t.Fatal(err)
+		}
 	}
-	updateHostSetting("mindownloadbandwidthprice", settings.DownloadBandwidthPrice)
-	if err := waitForContractSet(int(defaultRedundancy.TotalShards)); err != nil {
-		t.Fatal(err)
+
+	// upload some data - should fail
+	if err := w.UploadObject(bytes.NewReader(data), name); err == nil {
+		t.Fatal("expected upload to fail")
 	}
+
+	// download the data - should work
 	if err := w.DownloadObject(&buffer, name); err != nil {
 		t.Fatal(err)
 	}
 
-	// force upload gouging error - assert it fails, reset and assert it succeeds again
-	updateHostSetting("minuploadbandwidthprice", types.SiacoinPrecision)
-	if err := w.UploadObject(bytes.NewReader(data), name+"2"); err == nil {
+	// updat all host settings so they're gouging
+	for _, h := range hosts {
+		if err := h.HostModifySettingPost("mindownloadbandwidthprice", types.SiacoinPrecision); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// download the data - should fail
+	if err := w.DownloadObject(&buffer, name); err == nil {
 		t.Fatal("expected download to fail")
-	}
-	updateHostSetting("minuploadbandwidthprice", settings.UploadBandwidthPrice)
-	if err := waitForContractSet(int(defaultRedundancy.TotalShards)); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.UploadObject(bytes.NewReader(data), name+"2"); err != nil {
-		t.Fatal(err)
-	}
-
-	// force renew gouging error
-	updateHostSetting("mincontractprice", types.SiacoinPrecision.Mul64(10))
-
-	// mine until we're at the renew window
-	if err = cluster.MineToRenewWindow(); err != nil {
-		t.Fatal(err)
-	}
-
-	// mine blocks until we've past it
-	cfg, err := cluster.Autopilot.Config()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cluster.MineBlocks(int(cfg.Contracts.RenewWindow) * 2); err != nil {
-		t.Fatal(err)
-	}
-
-	// assert there's no active contracts, asserting contracts are not being formed or renewed
-	contracts, err := b.ActiveContracts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(contracts) != 0 {
-		t.Fatal("expected no contracts")
-	}
-
-	// assert contract set is empty
-	if err := waitForContractSet(0); err != nil {
-		t.Fatal(err)
-	}
-
-	// reset the contract price
-	updateHostSetting("mincontractprice", settings.ContractPrice)
-
-	// assert contracts get formed
-	if err := waitForContractSet(int(defaultRedundancy.TotalShards)); err != nil {
-		t.Fatal(err)
 	}
 }
 
-func hostSettings(b *bus.Client, h *siatest.TestNode) (*rhpv2.HostSettings, error) {
-	hpk, err := h.HostPublicKey()
+func hostPK(node *siatest.TestNode) consensus.PublicKey {
+	pk, err := node.HostPublicKey()
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	host, err := b.Host(consensus.PublicKey(hpk.ToPublicKey()))
-	if err != nil {
-		return nil, err
-	}
-	return host.Settings, nil
+	return consensus.PublicKey(pk.ToPublicKey())
 }

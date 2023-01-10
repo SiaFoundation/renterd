@@ -48,6 +48,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
 	if isOutOfFunds(cfg, h, c) {
 		reasons = append(reasons, "out of funds")
+		renew = false
 		refresh = true
 	}
 	if isUpForRenewal(cfg, c.Revision, bh) {
@@ -57,12 +58,13 @@ func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64
 	}
 	if c.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
+		renew = true
 		refresh = false
 	}
 	if bh > c.EndHeight() {
 		reasons = append(reasons, "expired")
+		renew = true
 		refresh = false
-		renew = false
 	}
 	usable = len(reasons) == 0
 	return
