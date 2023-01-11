@@ -66,6 +66,7 @@ type (
 	HostDB interface {
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 		Hosts(offset, limit int) ([]hostdb.Host, error)
+		HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(interactions []hostdb.Interaction) error
 
 		HostBlocklist() ([]string, error)
@@ -366,6 +367,18 @@ func (b *bus) hostsHandlerGET(jc jape.Context) {
 		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
 			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
 				jc.Encode(hosts)
+			}
+		}
+	}
+}
+
+func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
+	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
+		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
+			if maxLastScan := time.Now(); jc.DecodeForm("lastScan", (*api.ParamTime)(&maxLastScan)) == nil {
+				if hosts, err := b.hdb.HostsForScanning(maxLastScan, offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
+					jc.Encode(hosts)
+				}
 			}
 		}
 	}
@@ -744,6 +757,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /hosts/interactions": b.hostsPubkeyHandlerPOST,
 		"GET    /hosts/blocklist":    b.hostsBlocklistHandlerGET,
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
+		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

@@ -31,6 +31,7 @@ type (
 		// scanner tests with every interface change
 		bus interface {
 			Hosts(offset, limit int) ([]hostdb.Host, error)
+			HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		}
 		worker interface {
 			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -195,13 +196,12 @@ func (s *scanner) launchHostScans() chan scanReq {
 	go func() {
 		var offset int
 		var exhausted bool
+		cutoff := time.Now().Add(-s.scanMinInterval)
 		for !s.isStopped() && !exhausted {
-			s.logger.Debugf("scanning hosts %d-%d", offset, offset+int(s.scanBatchSize))
-
 			// fetch next batch
-			hosts, err := s.bus.Hosts(offset, int(s.scanBatchSize))
+			hosts, err := s.bus.HostsForScanning(cutoff, offset, int(s.scanBatchSize))
 			if err != nil {
-				s.logger.Errorf("could not get hosts, err: %v", err)
+				s.logger.Errorf("could not get hosts for scanning, err: %v", err)
 				break
 			}
 			if len(hosts) == 0 {
@@ -210,6 +210,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 			if len(hosts) < int(s.scanBatchSize) {
 				exhausted = true
 			}
+			s.logger.Debugf("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
 
 			// add batch to scan queue
 			for _, h := range hosts {
@@ -253,7 +254,7 @@ func (s *scanner) launchScanWorkers(reqs chan scanReq) chan scanResp {
 }
 
 func (s *scanner) isScanRequired() bool {
-	return s.scanningLastStart.IsZero() || time.Since(s.scanningLastStart) > s.scanMinInterval
+	return s.scanningLastStart.IsZero() || time.Since(s.scanningLastStart) > s.scanMinInterval/20 // check 20 times per minInterval, so every 30 minutes
 }
 
 func (s *scanner) isStopped() bool {

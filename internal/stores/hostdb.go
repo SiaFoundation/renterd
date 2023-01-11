@@ -27,6 +27,11 @@ const (
 	// consensusInfoID defines the primary key of the entry in the consensusInfo
 	// table.
 	consensusInfoID = 1
+
+	// hostRetrievalBatchSize is the number of hosts we fetch from the
+	// database per batch. Empirically tested to verify that this is a value
+	// that performs reasonably well.
+	hostRetrievalBatchSize = 10000
 )
 
 var (
@@ -45,7 +50,7 @@ type (
 		Settings  hostSettings        `gorm:"type:bytes;serializer:gob"`
 
 		TotalScans              uint64
-		LastScan                int64 // Unix nano
+		LastScan                int64 `gorm:"index"` // unix nano
 		LastScanSuccess         bool
 		SecondToLastScanSuccess bool
 		Uptime                  time.Duration
@@ -55,7 +60,7 @@ type (
 		FailedInteractions     float64
 
 		LastAnnouncement time.Time
-		NetAddress       string
+		NetAddress       string `gorm:"index"`
 
 		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
@@ -313,6 +318,40 @@ func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	return h.convert(), tx.Error
 }
 
+// HostsForScanning returns the address of hosts for scanning.
+func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	}
+
+	var hosts []struct {
+		PublicKey  consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		NetAddress string
+	}
+	var hostAddresses []hostdb.HostAddress
+
+	err := ss.db.
+		Scopes(ExcludeBlockedHosts).
+		Model(&dbHost{}).
+		Where("last_scan < ?", maxLastScan.UnixNano()).
+		Offset(offset).
+		Limit(limit).
+		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
+			for _, h := range hosts {
+				hostAddresses = append(hostAddresses, hostdb.HostAddress{
+					PublicKey:  h.PublicKey,
+					NetAddress: h.NetAddress,
+				})
+			}
+			return nil
+		}).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return hostAddresses, err
+}
+
 // Hosts returns hosts at given offset and limit.
 func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	if offset < 0 {
@@ -326,7 +365,7 @@ func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 		Scopes(ExcludeBlockedHosts).
 		Offset(offset).
 		Limit(limit).
-		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
+		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, fh := range fullHosts {
 				hosts = append(hosts, fh.convert())
 			}
@@ -429,8 +468,8 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 					if err := json.Unmarshal(interaction.Result, &sr); err != nil {
 						return err
 					}
+					host.Settings = convertHostSettings(sr.Settings)
 				}
-				host.Settings = convertHostSettings(sr.Settings)
 			}
 
 			// Save to map again.

@@ -34,6 +34,21 @@ func (b *mockBus) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	return b.hosts[start:end], nil
 }
 
+func (b *mockBus) HostsForScanning(_ time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
+	hosts, err := b.Hosts(offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	var hostAddresses []hostdb.HostAddress
+	for _, h := range hosts {
+		hostAddresses = append(hostAddresses, hostdb.HostAddress{
+			NetAddress: h.NetAddress,
+			PublicKey:  h.PublicKey,
+		})
+	}
+	return hostAddresses, nil
+}
+
 type mockWorker struct {
 	blockChan chan struct{}
 
