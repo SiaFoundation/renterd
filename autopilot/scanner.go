@@ -197,12 +197,10 @@ func (s *scanner) launchHostScans() chan scanReq {
 		var offset int
 		var exhausted bool
 		for !s.isStopped() && !exhausted {
-			s.logger.Debugf("scanning hosts %d-%d", offset, offset+int(s.scanBatchSize))
-
 			// fetch next batch
 			hosts, err := s.bus.HostsForScanning(time.Now().Add(-s.scanMinInterval), offset, int(s.scanBatchSize))
 			if err != nil {
-				s.logger.Errorf("could not get hosts, err: %v", err)
+				s.logger.Errorf("could not get hosts for scanning, err: %v", err)
 				break
 			}
 			if len(hosts) == 0 {
@@ -211,6 +209,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 			if len(hosts) < int(s.scanBatchSize) {
 				exhausted = true
 			}
+			s.logger.Debugf("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
 
 			// add batch to scan queue
 			for _, h := range hosts {
