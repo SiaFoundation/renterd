@@ -196,9 +196,10 @@ func (s *scanner) launchHostScans() chan scanReq {
 	go func() {
 		var offset int
 		var exhausted bool
+		cutoff := time.Now().Add(-s.scanMinInterval)
 		for !s.isStopped() && !exhausted {
 			// fetch next batch
-			hosts, err := s.bus.HostsForScanning(time.Now().Add(-s.scanMinInterval), offset, int(s.scanBatchSize))
+			hosts, err := s.bus.HostsForScanning(cutoff, offset, int(s.scanBatchSize))
 			if err != nil {
 				s.logger.Errorf("could not get hosts for scanning, err: %v", err)
 				break

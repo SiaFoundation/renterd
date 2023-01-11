@@ -238,6 +238,25 @@ func TestRecordInteractions(t *testing.T) {
 	}
 }
 
+func (s *SQLStore) addTestScan(hk consensus.PublicKey, t time.Time, err error, settings rhp.HostSettings) error {
+	var sr hostdb.ScanResult
+	if err == nil {
+		sr.Settings = settings
+	} else {
+		sr.Error = err.Error()
+	}
+	result, _ := json.Marshal(sr)
+	return s.RecordInteractions([]hostdb.Interaction{
+		{
+			Host:      hk,
+			Result:    result,
+			Success:   err == nil,
+			Timestamp: t,
+			Type:      hostdb.InteractionTypeScan,
+		},
+	})
+}
+
 // TestSQLHosts tests the Hosts method of the SQLHostDB type.
 func TestSQLHosts(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
@@ -279,8 +298,20 @@ func TestSQLHosts(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	}
 
-	// Fetch hosts using the HostsForScanning method.
-	hostAddresses, err := hdb.HostsForScanning(time.Now(), 0, 3)
+	// Add a scan for each host.
+	n := time.Now()
+	if err := hdb.addTestScan(hk1, n.Add(-time.Minute), nil, rhp.HostSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hdb.addTestScan(hk2, n.Add(-2*time.Minute), nil, rhp.HostSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hdb.addTestScan(hk3, n.Add(-3*time.Minute), nil, rhp.HostSettings{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch all hosts using the HostsForScanning method.
+	hostAddresses, err := hdb.HostsForScanning(n, 0, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,6 +327,17 @@ func TestSQLHosts(t *testing.T) {
 	if hostAddresses[2].PublicKey != hk3 {
 		t.Fatal("wrong key")
 	}
+
+	// Fetch one host by setting the cutoff exactly to hk2.
+	hostAddresses, err = hdb.HostsForScanning(n.Add(-2*time.Minute), 0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hostAddresses) != 1 {
+		t.Fatal("wrong number of addresses")
+	}
+
+	// Fetch no hosts.
 	hostAddresses, err = hdb.HostsForScanning(time.Time{}, 0, 3)
 	if err != nil {
 		t.Fatal(err)

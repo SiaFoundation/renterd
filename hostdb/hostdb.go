@@ -83,6 +83,8 @@ type Interaction struct {
 	Type      string
 }
 
+// HostAddress contains the address of a specific host identified by a public
+// key.
 type HostAddress struct {
 	PublicKey  consensus.PublicKey `json:"public_key"`
 	NetAddress string              `json:"net_address"`

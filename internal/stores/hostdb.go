@@ -27,6 +27,11 @@ const (
 	// consensusInfoID defines the primary key of the entry in the consensusInfo
 	// table.
 	consensusInfoID = 1
+
+	// hostRetrievalBatchSize is the number of hosts we fetch from the
+	// database per batch. Empirically tested to verify that this is a value
+	// that performs reasonably well.
+	hostRetrievalBatchSize = 10000
 )
 
 var (
@@ -327,11 +332,11 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 
 	err := ss.db.
 		Scopes(ExcludeBlockedHosts).
-		Offset(offset).
-		Limit(limit).
 		Model(&dbHost{}).
 		Where("last_scan < ?", maxLastScan.UnixNano()).
-		FindInBatches(&hosts, 10000, func(tx *gorm.DB, batch int) error {
+		Offset(offset).
+		Limit(limit).
+		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, h := range hosts {
 				hostAddresses = append(hostAddresses, hostdb.HostAddress{
 					PublicKey:  h.PublicKey,
@@ -360,7 +365,7 @@ func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 		Scopes(ExcludeBlockedHosts).
 		Offset(offset).
 		Limit(limit).
-		FindInBatches(&fullHosts, 10000, func(tx *gorm.DB, batch int) error {
+		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, fh := range fullHosts {
 				hosts = append(hosts, fh.convert())
 			}
