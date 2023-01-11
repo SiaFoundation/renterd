@@ -83,13 +83,18 @@ type Interaction struct {
 	Type      string
 }
 
+type HostAddress struct {
+	PublicKey  consensus.PublicKey `json:"public_key"`
+	NetAddress string              `json:"net_address"`
+}
+
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	KnownSince   time.Time
-	PublicKey    consensus.PublicKey
-	NetAddress   string
-	Settings     *rhp.HostSettings
-	Interactions Interactions
+	KnownSince   time.Time           `json:"knownSince"`
+	PublicKey    consensus.PublicKey `json:"public_key"`
+	NetAddress   string              `json:"netAddress"`
+	Settings     *rhp.HostSettings   `json:"settings"`
+	Interactions Interactions        `json:"interactions"`
 }
 
 // IsOnline returns whether a host is considered online.

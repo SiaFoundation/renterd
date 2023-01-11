@@ -278,6 +278,31 @@ func TestSQLHosts(t *testing.T) {
 	if _, err := hdb.Hosts(-1, -1); err != ErrNegativeOffset {
 		t.Fatal("unexpected error", err)
 	}
+
+	// Fetch hosts using the HostsForScanning method.
+	hostAddresses, err := hdb.HostsForScanning(time.Now(), 0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hostAddresses) != 3 {
+		t.Fatal("wrong number of addresses")
+	}
+	if hostAddresses[0].PublicKey != hk1 {
+		t.Fatal("wrong key")
+	}
+	if hostAddresses[1].PublicKey != hk2 {
+		t.Fatal("wrong key")
+	}
+	if hostAddresses[2].PublicKey != hk3 {
+		t.Fatal("wrong key")
+	}
+	hostAddresses, err = hdb.HostsForScanning(time.Time{}, 0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hostAddresses) != 0 {
+		t.Fatal("wrong number of addresses")
+	}
 }
 
 // TestRecordScan is a test for recording scans.

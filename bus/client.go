@@ -221,6 +221,17 @@ func (c *Client) Hosts(offset, limit int) (hosts []hostdb.Host, err error) {
 	return
 }
 
+// Hosts returns 'limit' host addresses at given 'offset' which haven't been
+// scanned after lastScan.
+func (c *Client) HostsForScanning(maxLastScan time.Time, offset, limit int) (hosts []hostdb.HostAddress, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+	values.Set("lastScan", fmt.Sprint(maxLastScan))
+	err = c.c.GET("/hosts/scanning?"+values.Encode(), &hosts)
+	return
+}
+
 // HostBlocklist returns a host blocklist.
 func (c *Client) HostBlocklist() (blocklist []string, err error) {
 	err = c.c.GET("/hosts/blocklist", &blocklist)

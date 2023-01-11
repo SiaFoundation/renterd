@@ -313,6 +313,40 @@ func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
 	return h.convert(), tx.Error
 }
 
+// HostsForScanning returns the address of hosts for scanning.
+func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	}
+
+	var hosts []struct {
+		PublicKey  consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		NetAddress string
+	}
+	var hostAddresses []hostdb.HostAddress
+
+	err := ss.db.
+		Scopes(ExcludeBlockedHosts).
+		Offset(offset).
+		Limit(limit).
+		Model(&dbHost{}).
+		Where("last_scan < ?", maxLastScan.UnixNano()).
+		FindInBatches(&hosts, 10000, func(tx *gorm.DB, batch int) error {
+			for _, h := range hosts {
+				hostAddresses = append(hostAddresses, hostdb.HostAddress{
+					PublicKey:  h.PublicKey,
+					NetAddress: h.NetAddress,
+				})
+			}
+			return nil
+		}).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return hostAddresses, err
+}
+
 // Hosts returns hosts at given offset and limit.
 func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	if offset < 0 {

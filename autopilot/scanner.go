@@ -31,6 +31,7 @@ type (
 		// scanner tests with every interface change
 		bus interface {
 			Hosts(offset, limit int) ([]hostdb.Host, error)
+			HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		}
 		worker interface {
 			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -199,7 +200,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 			s.logger.Debugf("scanning hosts %d-%d", offset, offset+int(s.scanBatchSize))
 
 			// fetch next batch
-			hosts, err := s.bus.Hosts(offset, int(s.scanBatchSize))
+			hosts, err := s.bus.HostsForScanning(time.Now().Add(-s.scanMinInterval), offset, int(s.scanBatchSize))
 			if err != nil {
 				s.logger.Errorf("could not get hosts, err: %v", err)
 				break

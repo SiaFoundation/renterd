@@ -32,6 +32,7 @@ type Bus interface {
 	// hostdb
 	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 	Hosts(offset, limit int) ([]hostdb.Host, error)
+	HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 	RecordInteractions(interactions []hostdb.Interaction) error
 
 	// contracts
