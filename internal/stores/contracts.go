@@ -121,6 +121,13 @@ func gobEncode(i interface{}) []byte {
 	}
 	return buf.Bytes()
 }
+func gobEncodeSlice(i []interface{}) [][]byte {
+	var res [][]byte
+	for _, v := range i {
+		res = append(res, gobEncode(v))
+	}
+	return res
+}
 
 // addContract implements the bus.ContractStore interface.
 func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
