@@ -570,7 +570,7 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.PathParam("key")); isErrSettingsNotFound(err) {
+	} else if setting, err := b.ss.Setting(jc.PathParam("key")); err == api.ErrSettingNotFound {
 		jc.Error(err, http.StatusNotFound)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -625,10 +625,72 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	jc.Encode(ancestors)
 }
 
-// TODO: use simple err check against stores.ErrSettingNotFound as soon as the
-// import-cycle is fixed
-func isErrSettingsNotFound(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "setting not found")
+func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+
+	jc.Encode(api.DownloadParams{
+		ContractSet:   "autopilot", // TODO
+		GougingParams: gp,
+	})
+}
+
+func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+
+	jc.Encode(api.UploadParams{
+		ContractSet:   "autopilot", // TODO
+		CurrentHeight: b.cm.TipState().Index.Height,
+		GougingParams: gp,
+	})
+}
+
+func (b *bus) paramsHandlerMigrateGET(jc jape.Context) {
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+
+	jc.Encode(api.MigrateParams{
+		CurrentHeight: b.cm.TipState().Index.Height,
+		FromContracts: "", // TODO
+		ToContracts:   "", // TODO
+		GougingParams: gp,
+	})
+}
+
+func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
+	gp, err := b.gougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	jc.Encode(gp)
+}
+
+func (b *bus) gougingParams() (api.GougingParams, error) {
+	var gs api.GougingSettings
+	if gss, err := b.ss.Setting(SettingGouging); err != nil {
+		return api.GougingParams{}, err
+	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
+		panic(err)
+	}
+
+	var rs api.RedundancySettings
+	if rss, err := b.ss.Setting(SettingRedundancy); err != nil {
+		return api.GougingParams{}, err
+	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
+		panic(err)
+	}
+
+	return api.GougingParams{
+		GougingSettings:    gs,
+		RedundancySettings: rs,
+	}, nil
 }
 
 // New returns a new Bus.
@@ -702,6 +764,11 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /settings":            b.settingsHandlerGET,
 		"GET    /setting/:key":        b.settingKeyHandlerGET,
 		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
+
+		"GET    /params/download": b.paramsHandlerDownloadGET,
+		"GET    /params/upload":   b.paramsHandlerUploadGET,
+		"GET    /params/migrate":  b.paramsHandlerMigrateGET,
+		"GET    /params/gouging":  b.paramsHandlerGougingGET,
 	}), nil
 }
 

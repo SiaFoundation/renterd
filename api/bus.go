@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -129,14 +130,14 @@ type UpdateBlocklistRequest struct {
 // DownloadParams contains the metadata needed by a worker to download an object.
 type DownloadParams struct {
 	ContractSet string
+	GougingParams
 }
 
 // UploadParams contains the metadata needed by a worker to upload an object.
 type UploadParams struct {
 	CurrentHeight uint64
-	MinShards     uint8
-	TotalShards   uint8
 	ContractSet   string
+	GougingParams
 }
 
 // MigrateParams contains the metadata needed by a worker to migrate a slab.
@@ -144,6 +145,14 @@ type MigrateParams struct {
 	CurrentHeight uint64
 	FromContracts string
 	ToContracts   string
+	GougingParams
+}
+
+// GougingParams contains the metadata needed by a worker to perform gouging
+// checks.
+type GougingParams struct {
+	GougingSettings    GougingSettings
+	RedundancySettings RedundancySettings
 }
 
 // GougingSettings contain some price settings used in price gouging.
@@ -152,6 +161,7 @@ type GougingSettings struct {
 	MaxContractPrice types.Currency
 	MaxDownloadPrice types.Currency // per TiB
 	MaxUploadPrice   types.Currency // per TiB
+	MaxStoragePrice  types.Currency // per byte per block
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
@@ -159,3 +169,7 @@ type RedundancySettings struct {
 	MinShards   uint64
 	TotalShards uint64
 }
+
+// ErrSettingNotFound is returned if a requested setting is not present in the
+// database.
+var ErrSettingNotFound = errors.New("setting not found")

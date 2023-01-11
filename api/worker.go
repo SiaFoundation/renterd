@@ -27,7 +27,7 @@ type RHPFormRequest struct {
 	EndHeight      uint64              `json:"endHeight"`
 	HostCollateral types.Currency      `json:"hostCollateral"`
 	HostKey        consensus.PublicKey `json:"hostKey"`
-	HostSettings   rhpv2.HostSettings  `json:"hostSettings"`
+	HostIP         string              `json:"hostIP"`
 	RenterFunds    types.Currency      `json:"renterFunds"`
 	RenterAddress  types.UnlockHash    `json:"renterAddress"`
 }
@@ -44,7 +44,7 @@ type RHPRenewRequest struct {
 	ContractID    types.FileContractID `json:"contractID"`
 	EndHeight     uint64               `json:"endHeight"`
 	HostKey       consensus.PublicKey  `json:"hostKey"`
-	HostSettings  rhpv2.HostSettings   `json:"hostSettings"`
+	HostIP        string               `json:"hostIP"`
 	RenterAddress types.UnlockHash     `json:"renterAddress"`
 	RenterFunds   types.Currency       `json:"renterFunds"`
 }

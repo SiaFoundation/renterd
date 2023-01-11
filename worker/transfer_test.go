@@ -30,13 +30,13 @@ func (h *mockHost) PublicKey() consensus.PublicKey {
 	return h.publicKey
 }
 
-func (h *mockHost) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	root := rhpv2.SectorRoot(sector)
 	h.sectors[root] = append([]byte(nil), sector[:]...)
 	return root, nil
 }
 
-func (h *mockHost) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")

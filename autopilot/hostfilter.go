@@ -31,7 +31,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	if bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Sprintf("bad settings: %v", reason))
 	}
-	if gouging, reason := isGouging(cfg, gs, rs, h); gouging {
+	if gouging, reason := isGouging(gs, rs, h); gouging {
 		reasons = append(reasons, fmt.Sprintf("price gouging: %v", reason))
 	}
 
@@ -48,6 +48,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
 	if isOutOfFunds(cfg, h, c) {
 		reasons = append(reasons, "out of funds")
+		renew = false
 		refresh = true
 	}
 	if isUpForRenewal(cfg, c.Revision, bh) {
@@ -57,9 +58,13 @@ func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64
 	}
 	if c.Revision.NewRevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
+		renew = false
+		refresh = false
 	}
 	if bh > c.EndHeight() {
 		reasons = append(reasons, "expired")
+		renew = false
+		refresh = false
 	}
 	usable = len(reasons) == 0
 	return
@@ -86,14 +91,13 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 	return blockHeight+cfg.Contracts.RenewWindow >= uint64(r.EndHeight())
 }
 
-func isGouging(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
-	settings := h.Settings
-	if settings == nil {
-		return true, "no settings"
+func isGouging(gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
+	if h.Settings == nil {
+		return false, ""
 	}
 
 	redundancy := float64(rs.TotalShards) / float64(rs.MinShards)
-	return worker.PerformGougingChecks(gs, *settings, cfg.Contracts.Period, redundancy).IsGouging()
+	return worker.IsGouging(gs, *h.Settings, redundancy)
 }
 
 func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {

@@ -25,6 +25,7 @@ import (
 )
 
 type WorkerConfig struct {
+	SessionTTL time.Duration
 }
 
 type BusConfig struct {
@@ -226,7 +227,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w := worker.New(workerKey, b)
+	w := worker.New(workerKey, b, cfg.SessionTTL)
 	return w, func() error { return nil }, nil
 }
 

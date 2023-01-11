@@ -192,8 +192,9 @@ type Bus interface {
 	RecordInteractions(interactions []hostdb.Interaction) error
 
 	DownloadParams() (api.DownloadParams, error)
-	UploadParams() (api.UploadParams, error)
+	GougingParams() (api.GougingParams, error)
 	MigrateParams(slab object.Slab) (api.MigrateParams, error)
+	UploadParams() (api.UploadParams, error)
 
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
@@ -398,14 +399,29 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		return
 	}
 
-	hostSettings, hostKey, renterFunds := rfr.HostSettings, rfr.HostKey, rfr.RenterFunds
+	gp, err := w.bus.GougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+
+	hostIP, hostKey, renterFunds := rfr.HostIP, rfr.HostKey, rfr.RenterFunds
 	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
 	rk := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	err := w.withTransportV2(jc.Request.Context(), hostSettings.NetAddress, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
-		renterTxnSet, err := w.bus.WalletPrepareForm(rk, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, hostSettings)
+	ctx := WithGougingChecker(jc.Request.Context(), gp)
+	err = w.withTransportV2(ctx, hostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
+		settings, err := rhpv2.RPCSettings(ctx, t)
+		if err != nil {
+			return err
+		}
+
+		if errs := PerformGougingChecks(ctx, settings).CanForm(); len(errs) > 0 {
+			return fmt.Errorf("failed to form contract, gouging check failed: %v", errs)
+		}
+
+		renterTxnSet, err := w.bus.WalletPrepareForm(rk, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, settings)
 		if err != nil {
 			return err
 		}
@@ -432,20 +448,36 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Decode(&rrr) != nil {
 		return
 	}
-	hostSettings, hostKey, toRenewID, renterFunds := rrr.HostSettings, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
+
+	gp, err := w.bus.GougingParams()
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+
+	hostIP, hostKey, toRenewID, renterFunds := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
 	rk := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	err := w.withTransportV2(jc.Request.Context(), hostSettings.NetAddress, hostKey, func(t *rhpv2.Transport) error {
-		session, err := rhpv2.RPCLock(jc.Request.Context(), t, toRenewID, rk, 5*time.Second)
+	ctx := WithGougingChecker(jc.Request.Context(), gp)
+	err = w.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
+		settings, err := rhpv2.RPCSettings(ctx, t)
+		if err != nil {
+			return err
+		}
+
+		if errs := PerformGougingChecks(ctx, settings).CanForm(); len(errs) > 0 {
+			return fmt.Errorf("failed to renew contract, gouging check failed: %v", errs)
+		}
+
+		session, err := rhpv2.RPCLock(ctx, t, toRenewID, rk, 5*time.Second)
 		if err != nil {
 			return err
 		}
 		rev := session.Revision()
 
-		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, rk, hostKey, renterFunds, renterAddress, endHeight, hostSettings)
+		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, rk, hostKey, renterFunds, renterAddress, endHeight, settings)
 		if err != nil {
 			return err
 		}
@@ -537,6 +569,9 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// attach gouging checker to the context
+	ctx := WithGougingChecker(jc.Request.Context(), mp.GougingParams)
+
 	from, err := w.bus.Contracts(mp.FromContracts)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
@@ -548,8 +583,8 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
-	err = w.withHosts(jc.Request.Context(), append(from, to...), func(hosts []sectorStore) error {
-		return migrateSlab(jc.Request.Context(), &slab, hosts[:len(from)], hosts[len(from):])
+	err = w.withHosts(ctx, append(from, to...), func(hosts []sectorStore) error {
+		return migrateSlab(ctx, &slab, hosts[:len(from)], hosts[len(from):])
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -574,6 +609,9 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
 		return
 	}
+
+	// attach gouging checker to the context
+	ctx := WithGougingChecker(jc.Request.Context(), dp.GougingParams)
 
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
@@ -606,8 +644,8 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return
 		}
 
-		err = w.withHosts(jc.Request.Context(), contracts, func(hosts []sectorStore) error {
-			return downloadSlab(jc.Request.Context(), cw, ss, hosts)
+		err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
+			return downloadSlab(ctx, cw, ss, hosts)
 		})
 		if err != nil {
 			_ = err // NOTE: can't write error because we may have already written to the response
@@ -623,6 +661,10 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
+	rs := up.RedundancySettings
+
+	// attach gouging checker to the context
+	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
 
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -641,9 +683,9 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		var s object.Slab
 		var length int
 
-		lr := io.LimitReader(cr, int64(up.MinShards)*rhpv2.SectorSize)
-		if err := w.withHosts(jc.Request.Context(), bcs, func(hosts []sectorStore) (err error) {
-			s, length, err = uploadSlab(jc.Request.Context(), lr, up.MinShards, up.TotalShards, hosts)
+		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
+		if err := w.withHosts(ctx, bcs, func(hosts []sectorStore) (err error) {
+			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts)
 			return err
 		}); err == io.EOF {
 			break
@@ -705,10 +747,10 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, b Bus) http.Handler {
+func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) http.Handler {
 	w := &worker{
 		bus:       b,
-		pool:      newSessionPool(),
+		pool:      newSessionPool(sessionTTL),
 		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{

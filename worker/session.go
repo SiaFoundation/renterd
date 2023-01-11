@@ -139,7 +139,7 @@ func (s *session) Revision() (rhpv2.ContractRevision, error) {
 	return ss.sess.Revision(), nil
 }
 
-func (s *session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+func (s *session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
 	currentHeight := s.pool.currentHeight()
 	if currentHeight == 0 {
 		panic("cannot upload without knowing current height") // developer error
@@ -149,15 +149,21 @@ func (s *session) UploadSector(sector *[rhpv2.SectorSize]byte) (consensus.Hash25
 		return consensus.Hash256{}, err
 	}
 	defer s.pool.release(ss)
+	if errs := PerformGougingChecks(ctx, ss.settings).CanUpload(); len(errs) > 0 {
+		return consensus.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
+	}
 	return ss.appendSector(s.ctx, sector, currentHeight)
 }
 
-func (s *session) DownloadSector(w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (s *session) DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
 	ss, err := s.pool.acquire(s.ctx, s)
 	if err != nil {
 		return err
 	}
 	defer s.pool.release(ss)
+	if errs := PerformGougingChecks(ctx, ss.settings).CanDownload(); len(errs) > 0 {
+		return fmt.Errorf("failed to download sector, gouging check failed: %v", errs)
+	}
 	return ss.readSector(s.ctx, w, root, offset, length)
 }
 
@@ -173,9 +179,11 @@ func (s *session) DeleteSectors(roots []consensus.Hash256) error {
 // A sessionPool is a set of sessions that can be used for uploading and
 // downloading.
 type sessionPool struct {
-	hosts  map[consensus.PublicKey]*sharedSession
-	height uint64
+	sessionTTL time.Duration
+
 	mu     sync.Mutex
+	height uint64
+	hosts  map[consensus.PublicKey]*sharedSession
 }
 
 func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSession, err error) {
@@ -196,7 +204,7 @@ func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSessio
 	// reuse existing session or transport if possible
 	if ss.sess != nil {
 		t := ss.sess.Transport()
-		if time.Since(ss.lastSeen) >= 2*time.Minute {
+		if time.Since(ss.lastSeen) >= sp.sessionTTL {
 			// use RPCSettings as a generic "ping"
 			ss.settings, err = rhpv2.RPCSettings(ctx, t)
 			if err != nil {
@@ -315,8 +323,9 @@ func (sp *sessionPool) Close() error {
 }
 
 // newSessionPool creates a new sessionPool.
-func newSessionPool() *sessionPool {
+func newSessionPool(sessionTTL time.Duration) *sessionPool {
 	return &sessionPool{
-		hosts: make(map[consensus.PublicKey]*sharedSession),
+		sessionTTL: sessionTTL,
+		hosts:      make(map[consensus.PublicKey]*sharedSession),
 	}
 }

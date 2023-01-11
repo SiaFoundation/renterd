@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -68,22 +69,19 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Add a host.
-	if err := cluster.AddHosts(1); err != nil {
+	if _, err := cluster.AddHosts(1); err != nil {
 		t.Fatal(err)
 	}
 
-	// NOTE: AddHosts implicitly waits for contracts to form so we don't have to
-	// add a retry loop here
-	contracts, err := w.ActiveContracts()
-	if err != nil {
+	// Wait for contracts to form.
+	var contract api.Contract
+	if contracts, err := cluster.WaitForContracts(); err != nil {
 		t.Fatal(err)
-	}
-	if len(contracts) != 1 {
-		t.Fatal("no contract", len(contracts))
+	} else {
+		contract = contracts[0]
 	}
 
 	// Verify startHeight and endHeight of the contract.
-	contract := contracts[0]
 	currentPeriod, err := cluster.Autopilot.Status()
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +148,12 @@ func TestUploadDownload(t *testing.T) {
 	rs := defaultRedundancy
 
 	// add hosts
-	if err := cluster.AddHosts(int(rs.TotalShards)); err != nil {
+	if _, err := cluster.AddHosts(int(rs.TotalShards)); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for contracts to form
+	if _, err := cluster.WaitForContracts(); err != nil {
 		t.Fatal(err)
 	}
 
