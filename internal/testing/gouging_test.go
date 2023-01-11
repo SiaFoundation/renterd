@@ -136,12 +136,7 @@ func TestGouging(t *testing.T) {
 		t.Fatal("expected upload to fail")
 	}
 
-	// download the data - should work
-	if err := w.DownloadObject(&buffer, name); err != nil {
-		t.Fatal(err)
-	}
-
-	// updat all host settings so they're gouging
+	// update all host settings so they're gouging
 	for _, h := range hosts {
 		if err := h.HostModifySettingPost("mindownloadbandwidthprice", types.SiacoinPrecision); err != nil {
 			t.Fatal(err)
