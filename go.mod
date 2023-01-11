@@ -14,7 +14,7 @@ require (
 	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
 	golang.org/x/term v0.0.0-20220526004731-065cf7ba2467
 	gorm.io/driver/sqlite v1.4.3
-	gorm.io/gorm v1.24.1
+	gorm.io/gorm v1.24.3
 	lukechampine.com/frand v1.4.2
 )
 

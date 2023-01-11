@@ -116,6 +116,7 @@ func main() {
 		node.BusConfig
 	}
 	busCfg.PersistInterval = 10 * time.Minute
+	busCfg.InteractionFlushInterval = 5 * time.Second
 
 	var workerCfg struct {
 		remoteAddr  string
