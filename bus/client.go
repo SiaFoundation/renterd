@@ -224,11 +224,7 @@ func (c *Client) Hosts(offset, limit int) (hosts []hostdb.Host, err error) {
 // Hosts returns 'limit' host addresses at given 'offset' which haven't been
 // scanned after lastScan.
 func (c *Client) HostsForScanning(maxLastScan time.Time, offset, limit int) (hosts []hostdb.HostAddress, err error) {
-	values := url.Values{}
-	values.Set("offset", fmt.Sprint(offset))
-	values.Set("limit", fmt.Sprint(limit))
-	values.Set("lastScan", fmt.Sprint(maxLastScan))
-	err = c.c.GET("/hosts/scanning?"+values.Encode(), &hosts)
+	err = c.c.GET(fmt.Sprintf("/hosts/scanning?offset=%v&limit=%v&lastScan=%s", offset, limit, api.ParamTime(maxLastScan)), &hosts)
 	return
 }
 
