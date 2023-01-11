@@ -93,7 +93,9 @@ type (
 		List(key string) ([]string, error)
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
-		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
+
+		SlabsForMigration(set string, limit int) ([]object.Slab, error)
+		PutSlab(s object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID, migratedHosts []consensus.PublicKey) error
 	}
 
 	// A SettingStore stores settings.
@@ -541,24 +543,23 @@ func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.os.Delete(jc.PathParam("key")))
 }
 
-func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
-	var cutoff time.Time
+func (b *bus) slabHandlerPUT(jc jape.Context) {
+	var usr api.UpdateSlabRequest
+	if jc.Decode(&usr) == nil {
+		jc.Check("couldn't update slab", b.os.PutSlab(usr.Slab, usr.UsedContracts, usr.MigratedHosts))
+	}
+}
+
+func (b *bus) slabsMigrationHandlerGET(jc jape.Context) {
+	var set string
 	var limit int
-	var goodContracts []types.FileContractID
-	if jc.DecodeForm("cutoff", (*api.ParamTime)(&cutoff)) != nil {
-		return
+	if jc.DecodeForm("set", &set) == nil {
+		if jc.DecodeForm("limit", &limit) == nil {
+			if slabs, err := b.os.SlabsForMigration(set, limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+				jc.Encode(slabs)
+			}
+		}
 	}
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	}
-	if jc.DecodeForm("goodContracts", &goodContracts) != nil {
-		return
-	}
-	slabs, err := b.os.SlabsForMigration(limit, time.Time(cutoff), goodContracts)
-	if jc.Check("couldn't fetch slabs for migration", err) != nil {
-		return
-	}
-	jc.Encode(slabs)
 }
 
 func (b *bus) settingsHandlerGET(jc jape.Context) {
@@ -646,20 +647,6 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	jc.Encode(api.UploadParams{
 		ContractSet:   "autopilot", // TODO
 		CurrentHeight: b.cm.TipState().Index.Height,
-		GougingParams: gp,
-	})
-}
-
-func (b *bus) paramsHandlerMigrateGET(jc jape.Context) {
-	gp, err := b.gougingParams()
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-
-	jc.Encode(api.MigrateParams{
-		CurrentHeight: b.cm.TipState().Index.Height,
-		FromContracts: "", // TODO
-		ToContracts:   "", // TODO
 		GougingParams: gp,
 	})
 }
@@ -756,10 +743,12 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
-		"GET    /objects/*key":    b.objectsKeyHandlerGET,
-		"PUT    /objects/*key":    b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key":    b.objectsKeyHandlerDELETE,
-		"GET    /migration/slabs": b.objectsMigrationSlabsHandlerGET,
+		"GET    /objects/*key": b.objectsKeyHandlerGET,
+		"PUT    /objects/*key": b.objectsKeyHandlerPUT,
+		"DELETE /objects/*key": b.objectsKeyHandlerDELETE,
+
+		"GET    /slabs/migration": b.slabsMigrationHandlerGET,
+		"PUT    /slab/":           b.slabHandlerPUT,
 
 		"GET    /settings":            b.settingsHandlerGET,
 		"GET    /setting/:key":        b.settingKeyHandlerGET,
@@ -767,7 +756,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
-		"GET    /params/migrate":  b.paramsHandlerMigrateGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
 	}), nil
 }
