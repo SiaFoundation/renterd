@@ -47,7 +47,7 @@ type (
 		Model
 
 		PublicKey consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
-		Settings  hostSettings        `gorm:"type:bytes;serializer:gob"`
+		Settings  hostSettings        `gorm:"serializer:json"`
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -92,29 +92,29 @@ type (
 	// hostSettings are the settings and prices used when interacting with a host.
 	// TODO: might be useful to have this be a table.
 	hostSettings struct {
-		AcceptingContracts         bool             `json:"acceptingcontracts"`
-		MaxDownloadBatchSize       uint64           `json:"maxdownloadbatchsize"`
-		MaxDuration                uint64           `json:"maxduration"`
-		MaxReviseBatchSize         uint64           `json:"maxrevisebatchsize"`
-		NetAddress                 string           `json:"netaddress"`
-		RemainingStorage           uint64           `json:"remainingstorage"`
-		SectorSize                 uint64           `json:"sectorsize"`
-		TotalStorage               uint64           `json:"totalstorage"`
-		UnlockHash                 types.UnlockHash `json:"unlockhash"`
-		WindowSize                 uint64           `json:"windowsize"`
-		Collateral                 *big.Int         `json:"collateral"`
-		MaxCollateral              *big.Int         `json:"maxcollateral"`
-		BaseRPCPrice               *big.Int         `json:"baserpcprice"`
-		ContractPrice              *big.Int         `json:"contractprice"`
-		DownloadBandwidthPrice     *big.Int         `json:"downloadbandwidthprice"`
-		SectorAccessPrice          *big.Int         `json:"sectoraccessprice"`
-		StoragePrice               *big.Int         `json:"storageprice"`
-		UploadBandwidthPrice       *big.Int         `json:"uploadbandwidthprice"`
-		EphemeralAccountExpiry     time.Duration    `json:"ephemeralaccountexpiry"`
-		MaxEphemeralAccountBalance *big.Int         `json:"maxephemeralaccountbalance"`
-		RevisionNumber             uint64           `json:"revisionnumber"`
-		Version                    string           `json:"version"`
-		SiaMuxPort                 string           `json:"siamuxport"`
+		AcceptingContracts         bool             `json:"acceptingcontracts,omitempty"`
+		MaxDownloadBatchSize       uint64           `json:"maxdownloadbatchsize,omitempty"`
+		MaxDuration                uint64           `json:"maxduration,omitempty"`
+		MaxReviseBatchSize         uint64           `json:"maxrevisebatchsize,omitempty"`
+		NetAddress                 string           `json:"netaddress,omitempty"`
+		RemainingStorage           uint64           `json:"remainingstorage,omitempty"`
+		SectorSize                 uint64           `json:"sectorsize,omitempty"`
+		TotalStorage               uint64           `json:"totalstorage,omitempty"`
+		UnlockHash                 types.UnlockHash `json:"unlockhash,omitempty"`
+		WindowSize                 uint64           `json:"windowsize,omitempty"`
+		Collateral                 *big.Int         `json:"collateral,omitempty"`
+		MaxCollateral              *big.Int         `json:"maxcollateral,omitempty"`
+		BaseRPCPrice               *big.Int         `json:"baserpcprice,omitempty"`
+		ContractPrice              *big.Int         `json:"contractprice,omitempty"`
+		DownloadBandwidthPrice     *big.Int         `json:"downloadbandwidthprice,omitempty"`
+		SectorAccessPrice          *big.Int         `json:"sectoraccessprice,omitempty"`
+		StoragePrice               *big.Int         `json:"storageprice,omitempty"`
+		UploadBandwidthPrice       *big.Int         `json:"uploadbandwidthprice,omitempty"`
+		EphemeralAccountExpiry     time.Duration    `json:"ephemeralaccountexpiry,omitempty"`
+		MaxEphemeralAccountBalance *big.Int         `json:"maxephemeralaccountbalance,omitempty"`
+		RevisionNumber             uint64           `json:"revisionnumber,omitempty"`
+		Version                    string           `json:"version,omitempty"`
+		SiaMuxPort                 string           `json:"siamuxport,omitempty"`
 	}
 
 	// dbAnnouncement is a table used for storing all announcements. It
@@ -468,8 +468,8 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 					if err := json.Unmarshal(interaction.Result, &sr); err != nil {
 						return err
 					}
+					host.Settings = convertHostSettings(sr.Settings)
 				}
-				host.Settings = convertHostSettings(sr.Settings)
 			}
 
 			// Save to map again.
@@ -481,6 +481,7 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 			return err
 		}
 		for _, h := range hostMap {
+			settings, _ := json.Marshal(h.Settings)
 			err := tx.Model(&dbHost{}).
 				Where("public_key", gobEncode(h.PublicKey)).
 				Updates(map[string]interface{}{
@@ -490,7 +491,7 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 					"downtime":                    h.Downtime,
 					"uptime":                      h.Uptime,
 					"last_scan":                   h.LastScan,
-					"settings":                    gobEncode(h.Settings),
+					"settings":                    string(settings),
 					"successful_interactions":     h.SuccessfulInteractions,
 					"failed_interactions":         h.FailedInteractions,
 				}).Error

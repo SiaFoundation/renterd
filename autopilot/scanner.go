@@ -254,7 +254,7 @@ func (s *scanner) launchScanWorkers(reqs chan scanReq) chan scanResp {
 }
 
 func (s *scanner) isScanRequired() bool {
-	return s.scanningLastStart.IsZero() || time.Since(s.scanningLastStart) > s.scanMinInterval
+	return s.scanningLastStart.IsZero() || time.Since(s.scanningLastStart) > s.scanMinInterval/20 // check 20 times per minInterval, so every 30 minutes
 }
 
 func (s *scanner) isStopped() bool {
