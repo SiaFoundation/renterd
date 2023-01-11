@@ -1,12 +1,10 @@
 package stores
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
-	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -15,6 +13,83 @@ import (
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
+
+// TestSQLPutSlab verifies the functionality of PutSlab.
+func TestSQLPutSlab(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create 3 hosts
+	hk1 := consensus.GeneratePrivateKey().PublicKey()
+	if err := db.addTestHost(hk1); err != nil {
+		t.Fatal(err)
+	}
+	hk2 := consensus.GeneratePrivateKey().PublicKey()
+	if err := db.addTestHost(hk2); err != nil {
+		t.Fatal(err)
+	}
+	hk3 := consensus.GeneratePrivateKey().PublicKey()
+	if err := db.addTestHost(hk3); err != nil {
+		t.Fatal(err)
+	}
+
+	// create 3 contracts
+	fcid1 := types.FileContractID{1}
+	if _, err := db.addTestContract(fcid1, hk1); err != nil {
+		t.Fatal(err)
+	}
+	fcid2 := types.FileContractID{2}
+	if _, err := db.addTestContract(fcid2, hk2); err != nil {
+		t.Fatal(err)
+	}
+	fcid3 := types.FileContractID{3}
+	if _, err := db.addTestContract(fcid3, hk3); err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hk1,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk2,
+							Root: consensus.Hash256{2},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := db.Put("foo", obj, map[consensus.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// migrate the slab and move the second sector to a new host
+	obj.Slabs[0].Slab.Shards[1] = object.Sector{
+		Host: hk3,
+		Root: consensus.Hash256{3},
+	}
+	if err := db.PutSlab(obj.Slabs[0].Slab, map[consensus.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk3: fcid3,
+	}, []consensus.PublicKey{hk2}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // TestSQLObjectStore tests basic SQLObjectStore functionality.
 func TestSQLObjectStore(t *testing.T) {
@@ -321,196 +396,171 @@ func TestSQLList(t *testing.T) {
 	}
 }
 
-// TestSlabsForRepair tests the functionality of slabsForRepair.
-func TestSlabsForRepair(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
+// TestSlabsForMigration tests the functionality of SlabsForMigration.
+func TestSlabsForMigration(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Prepare public keys and contract ids for a host with a good contract
-	// and a host with a bad contract.
-	hkGood := consensus.PublicKey{1}
-	hkBad := consensus.PublicKey{2}
-	fcidGood := types.FileContractID{1}
-	fcidBad := types.FileContractID{2}
-	hkDeleted := consensus.PublicKey{3}
-	fcidDeleted := types.FileContractID{3}
-
-	// Create hosts.
-	err = os.addTestHost(hkGood)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = os.addTestHost(hkBad)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = os.addTestHost(hkDeleted)
+	// add 3 hosts
+	hk1 := consensus.PublicKey{1}
+	err = db.addTestHost(hk1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Prepare 3 sectors:
-	// - one that is part of a good contract
-	// - one that is part of a bad contract
-	// - one that is part of no contract (because it failed to renew etc.)
-	_, err = os.AddContract(newTestContract(fcidGood, hkGood))
+	hk2 := consensus.PublicKey{2}
+	err = db.addTestHost(hk2)
 	if err != nil {
 		t.Fatal(err)
-	}
-	_, err = os.AddContract(newTestContract(fcidBad, hkBad))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = os.AddContract(newTestContract(fcidDeleted, hkDeleted))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sectorGood := object.Sector{
-		Host: hkGood,
-		Root: consensus.Hash256{1},
-	}
-	sectorBad := object.Sector{
-		Host: hkBad,
-		Root: consensus.Hash256{2},
-	}
-	sectorDeleted := object.Sector{
-		Host: hkDeleted,
-		Root: consensus.Hash256{3},
 	}
 
-	// Prepare used contracts.
-	usedContracts := map[consensus.PublicKey]types.FileContractID{
-		hkGood:    fcidGood,
-		hkBad:     fcidBad,
-		hkDeleted: fcidDeleted,
+	hk3 := consensus.PublicKey{3}
+	err = db.addTestHost(hk3)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Create object.
+	// add 3 contracts
+	fc1 := types.FileContractID{1}
+	_, err = db.AddContract(newTestContract(fc1, hk1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fc2 := types.FileContractID{2}
+	_, err = db.AddContract(newTestContract(fc2, hk2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fc3 := types.FileContractID{3}
+	_, err = db.AddContract(newTestContract(fc3, hk3))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add the first two contracts to the autopilot
+	if err = db.SetContractSet("autopilot", []types.FileContractID{fc1, fc2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object
 	obj := object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
-			// 2/3 sectors bad
+			// good slab
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorGood,
-						sectorBad,
-						sectorDeleted,
+						{
+							Host: hk1,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk2,
+							Root: consensus.Hash256{2},
+						},
+						{
+							Host: hk2,
+							Root: consensus.Hash256{3},
+						},
 					},
 				},
 			},
-			// 1/3 sectors bad
+			// unhealthy slab - hk3 is bad (1/3)
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorGood,
-						sectorGood,
-						sectorDeleted,
+						{
+							Host: hk1,
+							Root: consensus.Hash256{4},
+						},
+						{
+							Host: hk2,
+							Root: consensus.Hash256{5},
+						},
+						{
+							Host: hk3,
+							Root: consensus.Hash256{6},
+						},
 					},
 				},
 			},
-			// 2/3 sectors bad
+			// unhealthy slab - hk3 is bad (2/3)
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad,
-						sectorBad,
-						sectorGood,
+						{
+							Host: hk1,
+							Root: consensus.Hash256{7},
+						},
+						{
+							Host: hk3,
+							Root: consensus.Hash256{8},
+						},
+						{
+							Host: hk3,
+							Root: consensus.Hash256{9},
+						},
 					},
 				},
 			},
-			// 2/3 sectors bad
+			// unhealthy slab - hk4 is deleted (1/3)
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						sectorBad,
-						sectorDeleted,
-						sectorGood,
-					},
-				},
-			},
-			// 2/3 sectors bad
-			{
-				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards: []object.Sector{
-						sectorDeleted,
-						sectorDeleted,
-						sectorGood,
-					},
-				},
-			},
-			// 3/3 sectors bad
-			{
-				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards: []object.Sector{
-						sectorBad,
-						sectorBad,
-						sectorDeleted,
+						{
+							Host: hk1,
+							Root: consensus.Hash256{10},
+						},
+						{
+							Host: hk2,
+							Root: consensus.Hash256{11},
+						},
+						{
+							Host: consensus.PublicKey{4},
+							Root: consensus.Hash256{12},
+						},
 					},
 				},
 			},
 		},
 	}
-	if err := os.Put("foo", obj, usedContracts); err != nil {
+
+	if err := db.Put("foo", obj, map[consensus.PublicKey]types.FileContractID{
+		hk1: fc1,
+		hk2: fc2,
+		hk3: fc3,
+		{4}: {4}, // deleted host and contract
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Only consider fcidGood and fcidDeleted good contracts.
-	goodContracts := []types.FileContractID{fcidGood, fcidDeleted}
-
-	// Delete the contract.
-	err = os.RemoveContract(fcidDeleted)
+	slabs, err := db.SlabsForMigration("autopilot", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Count the shards. Every slab should have 3 shards associated with it
-	// which makes 18 in total.
-	var sslabs []dbShard
-	if err := os.db.Find(&sslabs).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(sslabs) != len(obj.Slabs)*3 {
-		t.Fatalf("wrong length %v != %v", len(sslabs), len(obj.Slabs)*3)
+	if len(slabs) != 3 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=3", len(slabs))
 	}
 
-	// Make sure the slab IDs are returned in the right order.
-	// 5 first since it doesn't have any good sectors
-	// 1 last since it only got 1 bad sector
-	// 0, 2, 3, 4 in the middle since they all have 2 bad sectors.
-	expectedSlabs := []object.Slab{
-		obj.Slabs[5].Slab,
-		obj.Slabs[0].Slab,
-		obj.Slabs[2].Slab,
-		obj.Slabs[3].Slab,
-		obj.Slabs[4].Slab,
-		obj.Slabs[1].Slab,
+	expected := []object.SlabSlice{
+		obj.Slabs[2],
+		obj.Slabs[1],
+		obj.Slabs[3],
 	}
-	for i := range expectedSlabs {
-		// Check the i worst slabs.
-		slabs, err := os.SlabsForMigration(i+1, time.Now(), goodContracts)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, _ := json.MarshalIndent(slabs, "", "  ")
-		exp, _ := json.MarshalIndent(expectedSlabs[:i+1], "", "  ")
-		if string(got) != string(exp) {
-			t.Fatalf("wrong slabs returned: %v != %v", string(got), string(exp))
-		}
+	if reflect.DeepEqual(slabs, expected) {
+		t.Fatal("slabs are not returned in the correct order")
 	}
 }
 

@@ -121,6 +121,13 @@ type AddObjectRequest struct {
 	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
+// UpdateSlabRequest is the request type for the /slab PUT endpoint.
+type UpdateSlabRequest struct {
+	Slab          object.Slab                                  `json:"slab"`
+	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
+	MigratedHosts []consensus.PublicKey                        `json:"migratedHosts"`
+}
+
 // UpdateBlocklistRequest is the request type for /hosts/blocklist PUT endpoint.
 type UpdateBlocklistRequest struct {
 	Add    []string `json:"add"`
@@ -137,14 +144,6 @@ type DownloadParams struct {
 type UploadParams struct {
 	CurrentHeight uint64
 	ContractSet   string
-	GougingParams
-}
-
-// MigrateParams contains the metadata needed by a worker to migrate a slab.
-type MigrateParams struct {
-	CurrentHeight uint64
-	FromContracts string
-	ToContracts   string
 	GougingParams
 }
 
