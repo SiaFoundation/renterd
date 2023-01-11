@@ -45,7 +45,7 @@ type (
 		Settings  hostSettings        `gorm:"type:bytes;serializer:gob"`
 
 		TotalScans              uint64
-		LastScan                int64 // Unix nano
+		LastScan                int64 `gorm:"index"` // unix nano
 		LastScanSuccess         bool
 		SecondToLastScanSuccess bool
 		Uptime                  time.Duration
@@ -55,7 +55,7 @@ type (
 		FailedInteractions     float64
 
 		LastAnnouncement time.Time
-		NetAddress       string
+		NetAddress       string `gorm:"index"`
 
 		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
