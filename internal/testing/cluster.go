@@ -30,7 +30,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-const testPersistInterval = 2 * time.Second
+const (
+	testInteractionsFlushInterval = 100 * time.Millisecond
+	testPersistInterval           = 2 * time.Second
+)
 
 var (
 	// defaultAutopilotConfig is the autopilot used for testing unless a
@@ -141,7 +144,7 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	var cleanups []func(context.Context) error
 	b, bCleanup, err := node.NewBus(node.BusConfig{
 		Bootstrap:                false,
-		InteractionFlushInterval: 100 * time.Millisecond,
+		InteractionFlushInterval: testInteractionsFlushInterval,
 		GatewayAddr:              "127.0.0.1:0",
 		Miner:                    miner,
 		PersistInterval:          testPersistInterval,

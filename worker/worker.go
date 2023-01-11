@@ -189,7 +189,7 @@ type Bus interface {
 	ActiveContracts() ([]api.ContractMetadata, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
-	RecordHostInteractions(interactions []hostdb.Interaction) error
+	RecordInteractions(interactions []hostdb.Interaction) error
 
 	DownloadParams() (api.DownloadParams, error)
 	UploadParams() (api.UploadParams, error)
@@ -249,14 +249,14 @@ func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSett
 			Error: errToStr(err),
 		})
 	}
-	return w.bus.RecordHostInteractions([]hostdb.Interaction{hi})
+	return w.bus.RecordInteractions([]hostdb.Interaction{hi})
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
 		// TODO: handle error
-		_ = w.bus.RecordHostInteractions(mr.interactions())
+		_ = w.bus.RecordInteractions(mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
 	conn, err := dial(ctx, hostIP, hostKey)
@@ -375,7 +375,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		sr = hostdb.ScanResult{Error: err.Error()}
 	}
 	scanResult, _ := json.Marshal(sr)
-	w.bus.RecordHostInteractions([]hostdb.Interaction{{
+	w.bus.RecordInteractions([]hostdb.Interaction{{
 		Host:      rsr.HostKey,
 		Result:    scanResult,
 		Success:   err == nil,

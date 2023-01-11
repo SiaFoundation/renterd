@@ -66,7 +66,7 @@ type (
 	HostDB interface {
 		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
 		Hosts(offset, limit int) ([]hostdb.Host, error)
-		RecordHostInteractions(interactions []hostdb.Interaction) error
+		RecordInteractions(interactions []hostdb.Interaction) error
 
 		HostBlocklist() ([]string, error)
 		AddHostBlocklistEntry(entry string) error
@@ -677,11 +677,11 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":           b.hostsHandlerGET,
-		"GET    /host/:hostkey":   b.hostsPubkeyHandlerGET,
-		"POST   /hosts":           b.hostsPubkeyHandlerPOST,
-		"GET    /hosts/blocklist": b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist": b.hostsBlocklistHandlerPUT,
+		"GET    /hosts":              b.hostsHandlerGET,
+		"GET    /host/:hostkey":      b.hostsPubkeyHandlerGET,
+		"POST   /hosts/interactions": b.hostsPubkeyHandlerPOST,
+		"GET    /hosts/blocklist":    b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
@@ -736,7 +736,7 @@ func (b *bus) recordInteractions(interactions []hostdb.Interaction) error {
 	b.interactionsMu.Lock()
 	defer b.interactionsMu.Unlock()
 
-	f.result = b.hdb.RecordHostInteractions(b.interactions)
+	f.result = b.hdb.RecordInteractions(b.interactions)
 	close(f.c)
 	b.interactions = nil
 	b.interactionsFlush = nil

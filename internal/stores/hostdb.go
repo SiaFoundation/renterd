@@ -365,52 +365,58 @@ func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
 
 // RecordHostInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
-func (db *SQLStore) RecordHostInteractions(interactions []hostdb.Interaction) error {
+func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error {
 	// Get keys from input.
 	keyMap := make(map[consensus.PublicKey]struct{})
-	for _, interaction := range interactions {
-		keyMap[interaction.Host] = struct{}{}
-	}
 	var hks [][]byte
-	for hk := range keyMap {
-		hks = append(hks, gobEncode(hk))
+	for _, interaction := range interactions {
+		if _, exists := keyMap[interaction.Host]; !exists {
+			hks = append(hks, gobEncode(interaction.Host))
+			keyMap[interaction.Host] = struct{}{}
+		}
 	}
 
-	return db.db.Transaction(func(tx *gorm.DB) error {
-		// Fetch hosts for which to add interactions.
-		var hosts []dbHost
-		if err := db.db.Where("public_key IN ?", hks).
-			Find(&hosts).Error; err != nil {
-			return err
-		}
-		hostMap := make(map[consensus.PublicKey]dbHost)
-		for _, h := range hosts {
-			hostMap[h.PublicKey] = h
-		}
+	// Fetch hosts for which to add interactions. This can be done
+	// outsisde the transaction to reduce the time we spend in the
+	// transaction since we don't need it to be perfectly
+	// consistent.
+	var hosts []dbHost
+	if err := db.db.Where("public_key IN ?", hks).
+		Find(&hosts).Error; err != nil {
+		return err
+	}
+	hostMap := make(map[consensus.PublicKey]dbHost)
+	for _, h := range hosts {
+		hostMap[h.PublicKey] = h
+	}
 
+	// Write the interactions and update to the hosts atmomically within a
+	// single transaction.
+	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Apply all the interactions to the hosts.
-		dbInteractions := make([]dbInteraction, len(interactions))
-		for i, interaction := range interactions {
-			isScan := interaction.Type == hostdb.InteractionTypeScan
-			dbInteractions[i] = dbInteraction{
-				Result:    interaction.Result,
-				Success:   interaction.Success,
-				Timestamp: interaction.Timestamp.UTC(),
-				Type:      interaction.Type,
-			}
+		dbInteractions := make([]dbInteraction, 0, len(interactions))
+		for _, interaction := range interactions {
 			host, exists := hostMap[interaction.Host]
 			if !exists {
 				continue // host doesn't exist
 			}
+			isScan := interaction.Type == hostdb.InteractionTypeScan
+			dbInteractions = append(dbInteractions, dbInteraction{
+				Result:    interaction.Result,
+				Success:   interaction.Success,
+				Timestamp: interaction.Timestamp.UTC(),
+				Type:      interaction.Type,
+			})
+			interactionTime := interaction.Timestamp.UnixNano()
 			if interaction.Success {
 				host.SuccessfulInteractions++
-				if isScan && host.LastScan > 0 {
-					host.Uptime += time.Duration(interaction.Timestamp.UnixNano() - host.LastScan)
+				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
+					host.Uptime += time.Duration(interactionTime - host.LastScan)
 				}
 			} else {
 				host.FailedInteractions++
-				if isScan && host.LastScan > 0 {
-					host.Downtime += time.Duration(interaction.Timestamp.UnixNano() - host.LastScan)
+				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
+					host.Downtime += time.Duration(interactionTime - host.LastScan)
 				}
 			}
 			if isScan {

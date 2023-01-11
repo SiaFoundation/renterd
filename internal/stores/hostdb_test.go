@@ -150,7 +150,7 @@ func TestSQLHostDB(t *testing.T) {
 	}
 }
 
-// TestRecordInteractions is a test for RecordHostInteractions.
+// TestRecordInteractions is a test for RecordInteractions.
 func TestRecordInteractions(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
 	if err != nil {
@@ -188,7 +188,7 @@ func TestRecordInteractions(t *testing.T) {
 	}
 
 	// Add one successful and two failed interactions.
-	if err := hdb.RecordHostInteractions(createInteractions(hk, 1, 2)); err != nil {
+	if err := hdb.RecordInteractions(createInteractions(hk, 1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -203,7 +203,7 @@ func TestRecordInteractions(t *testing.T) {
 	}
 
 	// Add some more
-	if err := hdb.RecordHostInteractions(createInteractions(hk, 3, 10)); err != nil {
+	if err := hdb.RecordInteractions(createInteractions(hk, 3, 10)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -341,7 +341,7 @@ func TestRecordScan(t *testing.T) {
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhp.HostSettings{NetAddress: "host.com"}
-	if err := hdb.RecordHostInteractions(scanInteraction(hk, firstScanTime, settings, true)); err != nil {
+	if err := hdb.RecordInteractions(scanInteraction(hk, firstScanTime, settings, true)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -374,7 +374,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := hdb.RecordHostInteractions(scanInteraction(hk, secondScanTime, settings, true)); err != nil {
+	if err := hdb.RecordInteractions(scanInteraction(hk, secondScanTime, settings, true)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)
@@ -401,7 +401,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := hdb.RecordHostInteractions(scanInteraction(hk, thirdScanTime, settings, false)); err != nil {
+	if err := hdb.RecordInteractions(scanInteraction(hk, thirdScanTime, settings, false)); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(hk)

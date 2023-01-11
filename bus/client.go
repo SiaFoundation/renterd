@@ -234,8 +234,8 @@ func (c *Client) UpdateHostBlocklist(add, remove []string) (err error) {
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostInteractions(interactions []hostdb.Interaction) (err error) {
-	err = c.c.POST("/hosts", interactions, nil)
+func (c *Client) RecordInteractions(interactions []hostdb.Interaction) (err error) {
+	err = c.c.POST("/hosts/interactions", interactions, nil)
 	return
 }
 
