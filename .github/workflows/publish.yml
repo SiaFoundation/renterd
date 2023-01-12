@@ -1,0 +1,108 @@
+name: Publish
+
+# Controls when the action will run. 
+on:
+  # Triggers the workflow on new SemVer tags
+  push:
+    branches:
+      - master
+    tags: 
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+      - uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v4
+        name: generate tags
+        id: meta
+        with:
+          images: ghcr.io/SiaFoundation/renterd
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v2
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+      - name: Install dependencies
+        run: |
+          sudo apt install -y gcc-aarch64-linux-gnu
+      - name: Build amd64
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go build -trimpath -o bin/linux_amd64/ -a -ldflags '-s -w' ./cmd/renterd
+      - name: Build arm64
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: arm64
+          CC: aarch64-linux-gnu-gcc
+        run: |
+          go build -trimpath -o bin/linux_arm64/ -a -ldflags '-s -w' ./cmd/renterd
+      - uses: actions/upload-artifact@v2
+        with:
+          name: renterd-linux
+          path: bin/
+          retention-days: 30
+  build-mac: 
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+      - name: Build amd64
+        env:
+          CGO_ENABLED: 1
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -trimpath -o bin/macos_amd64/ -a -ldflags '-s -w' ./cmd/renterd
+      - name: Build arm64
+        env:
+          CGO_ENABLED: 1
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -trimpath -o bin/macos_arm64/ -a -ldflags '-s -w' ./cmd/renterd
+      - uses: actions/upload-artifact@v2
+        with:
+          name: renterd-macos
+          path: bin/
+  build-windows: 
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+      - name: Build amd64
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go build -trimpath -o bin/windows_amd64/ -a -ldflags '-s -w' ./cmd/renterd
+      - uses: actions/upload-artifact@v2
+        with:
+          name: renterd-macos
+          path: bin/
