@@ -5,11 +5,13 @@ running renterd within a docker container. For the time being it is provided
 as-is without any compatibility guarantees as it will change over time and be
 extended with more configuration options.
 
-### Building
+## Building Image
 
-`docker build --build-arg BRANCH=master .`
+From within the `./docker` folder run the following command to build an image of `renterd` named `renterd` build from the `master`-branch.
 
-### Running
+`docker build -t renterd --build-arg BRANCH=master .`
+
+## Running Container
 
 Run `renterd` in the background as a container named `renterd` that exposes its
 API to the host system and the gateway to the world.
