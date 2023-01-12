@@ -29,4 +29,4 @@ EXPOSE 9981/tcp
 
 USER ${PUID}:${PGID}
 
-ENTRYPOINT [ "renterd", "-dir", "./data" ]
+ENTRYPOINT [ "renterd", "-dir", "./data", "-http", ":9980" ]
