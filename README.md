@@ -39,3 +39,24 @@ become the recommended renter for new users. However, we also want to make it
 painless for existing `siad` users to switch to `renterd`. So before shipping
 v1.0, we'll implement compatibility code that will allow you to access all of
 your `siad` files with `renterd`.
+
+# DOCKER
+
+Renterd comes with a `Dockerfile` which can be used for building and running
+renterd within a docker container. For the time being it is provided as-is
+without any compatibility guarantees as it will change over time and be extended
+with more configuration options.
+
+## Building Image
+
+From within the root of the repo run the following command to build an image of
+`renterd` tagged `renterd`.
+
+`docker build -t renterd .`
+
+## Running Container
+
+Run `renterd` in the background as a container named `renterd` that exposes its
+API to the host system and the gateway to the world.
+
+`docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_WALLET_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp <IMAGE_ID>`

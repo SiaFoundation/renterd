@@ -2,13 +2,10 @@
 FROM golang:1.19 AS builder
 LABEL maintainer="The Sia Foundation <info@sia.tech>"
 
-ARG BRANCH
-
-WORKDIR /
-
-# Clone and build binary.
-RUN git clone https://github.com/SiaFoundation/renterd.git --single-branch --depth 1 --branch ${BRANCH}
 WORKDIR /renterd
+
+# Copy and build binary.
+COPY . .
 RUN go build ./cmd/renterd
 
 # Build image that will be used to run renterd.
@@ -32,4 +29,4 @@ EXPOSE 9981/tcp
 
 USER ${PUID}:${PGID}
 
-ENTRYPOINT [ "renterd", "-dir", "./data" ]
+ENTRYPOINT [ "renterd", "-dir", "./data", "-http", ":9980" ]
