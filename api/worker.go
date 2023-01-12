@@ -18,8 +18,9 @@ type RHPScanRequest struct {
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
 type RHPScanResponse struct {
-	Settings rhpv2.HostSettings `json:"settings"`
-	Ping     Duration           `json:"ping"`
+	Ping      Duration           `json:"ping"`
+	ScanError string             `json:"scanError,omitempty"`
+	Settings  rhpv2.HostSettings `json:"settings,omitempty"`
 }
 
 // RHPFormRequest is the request type for the /rhp/form endpoint.

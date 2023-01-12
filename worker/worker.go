@@ -363,33 +363,24 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	var settings rhpv2.HostSettings
 	start := time.Now()
-	err := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
+	scanErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
 		settings, err = rhpv2.RPCSettings(ctx, t)
 		return err
 	})
 	elapsed := time.Since(start)
 
-	var sr hostdb.ScanResult
-	if err == nil {
-		sr = hostdb.ScanResult{Settings: settings}
-	} else {
-		sr = hostdb.ScanResult{Error: err.Error()}
-	}
-	scanResult, _ := json.Marshal(sr)
-	w.bus.RecordInteractions([]hostdb.Interaction{{
-		Host:      rsr.HostKey,
-		Result:    scanResult,
-		Success:   err == nil,
-		Timestamp: time.Now(),
-		Type:      hostdb.InteractionTypeScan,
-	}}) // TODO: error handling
-
-	if jc.Check("couldn't scan host", err) != nil {
+	err := w.recordScan(rsr.HostKey, settings, scanErr)
+	if jc.Check("failed to record scan", err) != nil {
 		return
 	}
+	var scanErrStr string
+	if scanErr != nil {
+		scanErrStr = scanErr.Error()
+	}
 	jc.Encode(api.RHPScanResponse{
-		Settings: settings,
-		Ping:     api.Duration(elapsed),
+		Ping:      api.Duration(elapsed),
+		ScanError: scanErrStr,
+		Settings:  settings,
 	})
 }
 
