@@ -158,9 +158,12 @@ func (s *scanner) tryPerformHostScan() {
 	s.mu.Unlock()
 
 	go func() {
-		for range s.launchScanWorkers(s.launchHostScans()) {
+		for resp := range s.launchScanWorkers(s.launchHostScans()) {
 			if s.isStopped() {
 				break
+			}
+			if resp.err != nil {
+				s.logger.Error(resp.err)
 			}
 		}
 
