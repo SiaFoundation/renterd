@@ -142,9 +142,12 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// fetch all contracts
-	contracts, err := c.ap.worker.ActiveContracts()
+	resp, err := c.ap.worker.ActiveContracts()
 	if err != nil {
 		return err
+	}
+	if resp.Error != "" {
+		c.logger.Error(resp.Error)
 	}
 
 	// fetch gouging settings
@@ -160,6 +163,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// run checks
+	contracts := resp.Contracts
 	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(cfg, blockHeight, gs, rs, contracts)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)

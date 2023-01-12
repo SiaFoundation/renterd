@@ -728,22 +728,51 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 
 	var contracts []api.Contract
 	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
+		var errs []error
 		for i, store := range ss {
 			rev, err := store.(*session).Revision()
 			if err != nil {
-				return err
+				errs = append(errs, err)
+				continue
 			}
 			contracts = append(contracts, api.Contract{
 				ContractMetadata: busContracts[i],
 				Revision:         rev.Revision,
 			})
 		}
+		if err := joinErrors(errs); err != nil {
+			return fmt.Errorf("couldn't retrieve %d contract(s): %w", len(errs), err)
+		}
 		return nil
 	})
-	if jc.Check("failed to fetch contracts", err) != nil {
-		return
+
+	resp := api.ActiveContractsResponse{Contracts: contracts}
+	if err != nil {
+		resp.Error = err.Error()
 	}
-	jc.Encode(contracts)
+	jc.Encode(resp)
+}
+
+func joinErrors(errs []error) error {
+	filtered := errs[:0]
+	for _, err := range errs {
+		if err != nil {
+			filtered = append(filtered, err)
+		}
+	}
+
+	switch len(filtered) {
+	case 0:
+		return nil
+	case 1:
+		return filtered[0]
+	default:
+		strs := make([]string, len(filtered))
+		for i := range strs {
+			strs[i] = filtered[i].Error()
+		}
+		return errors.New(strings.Join(strs, ";"))
+	}
 }
 
 // New returns an HTTP handler that serves the worker API.

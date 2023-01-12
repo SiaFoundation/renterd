@@ -375,7 +375,11 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 		return nil, err
 	}
 
-	return c.Worker.ActiveContracts()
+	resp, err := c.Worker.ActiveContracts()
+	if err != nil {
+		return nil, err
+	}
+	return resp.Contracts, nil
 }
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
