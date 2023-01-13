@@ -109,6 +109,10 @@ func (ap *Autopilot) Run() error {
 		}
 		ap.logger.Info("autopilot loop starting")
 
+		// initiate a host scan
+		ap.s.tryUpdateTimeout()
+		ap.s.tryPerformHostScan()
+
 		// fetch consensus state
 		cs, err := ap.bus.ConsensusState()
 		if err != nil {
@@ -137,10 +141,6 @@ func (ap *Autopilot) Run() error {
 			ap.logger.Errorf("update contracts failed, err: %v", err)
 		}
 		ap.m.TryPerformMigrations()
-
-		// initiate a host scan
-		ap.s.tryUpdateTimeout()
-		ap.s.tryPerformHostScan()
 	}
 }
 
