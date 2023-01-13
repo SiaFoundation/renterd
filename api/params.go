@@ -26,9 +26,14 @@ func (t ParamTime) String() string { return url.QueryEscape((time.Time)(t).Forma
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (t *ParamTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
+// String implements fmt.Stringer.
+func (d Duration) String() string {
+	return strconv.FormatInt(time.Duration(d).Milliseconds(), 10)
+}
+
 // MarshalText implements encoding.TextMarshaler.
 func (d Duration) MarshalText() ([]byte, error) {
-	return []byte(strconv.FormatInt(time.Duration(d).Milliseconds(), 10)), nil
+	return []byte(d.String()), nil
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.

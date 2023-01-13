@@ -19,7 +19,7 @@ type sectorStore interface {
 	PublicKey() consensus.PublicKey
 	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
 	DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error
-	DeleteSectors(roots []consensus.Hash256) error
+	DeleteSectors(ctx context.Context, roots []consensus.Hash256) error
 }
 
 func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore) ([]object.Sector, error) {
@@ -239,7 +239,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 		go func(h sectorStore) {
 			// NOTE: if host is not storing any sectors, the map lookup will return
 			// nil, making this a no-op
-			err := h.DeleteSectors(rootsBysectorStore[h.PublicKey()])
+			err := h.DeleteSectors(ctx, rootsBysectorStore[h.PublicKey()])
 			if err != nil {
 				errChan <- &HostError{h.PublicKey(), err}
 			} else {

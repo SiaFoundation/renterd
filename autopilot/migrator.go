@@ -68,6 +68,8 @@ func (m *migrator) fetchSlabsForMigration() ([]object.Slab, error) {
 }
 
 func (m *migrator) performMigrations() {
+	m.logger.Info("performing migrations")
+
 	for {
 		// Fetch slabs for repair
 		slabsToRepair, err := m.fetchSlabsForMigration()

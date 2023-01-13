@@ -118,7 +118,6 @@ type session struct {
 	hostIP     string
 	contractID types.FileContractID
 	renterKey  consensus.PrivateKey
-	ctx        context.Context
 	pool       *sessionPool
 }
 
@@ -130,8 +129,8 @@ func (s *session) PublicKey() consensus.PublicKey {
 	return s.hostKey
 }
 
-func (s *session) Revision() (rhpv2.ContractRevision, error) {
-	ss, err := s.pool.acquire(s.ctx, s)
+func (s *session) Revision(ctx context.Context) (rhpv2.ContractRevision, error) {
+	ss, err := s.pool.acquire(ctx, s)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
@@ -144,7 +143,7 @@ func (s *session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	if currentHeight == 0 {
 		panic("cannot upload without knowing current height") // developer error
 	}
-	ss, err := s.pool.acquire(s.ctx, s)
+	ss, err := s.pool.acquire(ctx, s)
 	if err != nil {
 		return consensus.Hash256{}, err
 	}
@@ -152,11 +151,11 @@ func (s *session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	if errs := PerformGougingChecks(ctx, ss.settings).CanUpload(); len(errs) > 0 {
 		return consensus.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
 	}
-	return ss.appendSector(s.ctx, sector, currentHeight)
+	return ss.appendSector(ctx, sector, currentHeight)
 }
 
 func (s *session) DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
-	ss, err := s.pool.acquire(s.ctx, s)
+	ss, err := s.pool.acquire(ctx, s)
 	if err != nil {
 		return err
 	}
@@ -164,16 +163,16 @@ func (s *session) DownloadSector(ctx context.Context, w io.Writer, root consensu
 	if errs := PerformGougingChecks(ctx, ss.settings).CanDownload(); len(errs) > 0 {
 		return fmt.Errorf("failed to download sector, gouging check failed: %v", errs)
 	}
-	return ss.readSector(s.ctx, w, root, offset, length)
+	return ss.readSector(ctx, w, root, offset, length)
 }
 
-func (s *session) DeleteSectors(roots []consensus.Hash256) error {
-	ss, err := s.pool.acquire(s.ctx, s)
+func (s *session) DeleteSectors(ctx context.Context, roots []consensus.Hash256) error {
+	ss, err := s.pool.acquire(ctx, s)
 	if err != nil {
 		return err
 	}
 	defer s.pool.release(ss)
-	return ss.deleteSectors(s.ctx, roots)
+	return ss.deleteSectors(ctx, roots)
 }
 
 // A sessionPool is a set of sessions that can be used for uploading and
@@ -230,7 +229,7 @@ func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSessio
 	}
 
 reconnect:
-	ss.conn, err = (&net.Dialer{}).DialContext(context.TODO(), "tcp", s.hostIP)
+	ss.conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", s.hostIP)
 	if err != nil {
 		return nil, err
 	}
@@ -273,13 +272,12 @@ func (sp *sessionPool) currentHeight() uint64 {
 
 // session adds a RHPv2 session to the pool. The session is initiated lazily; no
 // I/O is performed until the first RPC call is made.
-func (sp *sessionPool) session(ctx context.Context, hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey) *session {
+func (sp *sessionPool) session(hostKey consensus.PublicKey, hostIP string, contractID types.FileContractID, renterKey consensus.PrivateKey) *session {
 	return &session{
 		hostKey:    hostKey,
 		hostIP:     hostIP,
 		contractID: contractID,
 		renterKey:  renterKey,
-		ctx:        ctx,
 		pool:       sp,
 	}
 }
