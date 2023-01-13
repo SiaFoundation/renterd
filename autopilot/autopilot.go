@@ -65,7 +65,7 @@ type Worker interface {
 	RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	MigrateSlab(s object.Slab) error
-	ActiveContracts() (api.ActiveContractsResponse, error)
+	Contracts(contracts []api.ContractMetadata, timeout time.Duration) (api.ContractsResponse, error)
 }
 
 type Autopilot struct {
@@ -107,10 +107,7 @@ func (ap *Autopilot) Run() error {
 			return nil
 		case <-ap.ticker.C:
 		}
-
-		// initiate a host scan
-		ap.s.tryUpdateTimeout()
-		ap.s.tryPerformHostScan()
+		ap.logger.Info("autopilot loop starting")
 
 		// fetch consensus state
 		cs, err := ap.bus.ConsensusState()
@@ -140,6 +137,10 @@ func (ap *Autopilot) Run() error {
 			ap.logger.Errorf("update contracts failed, err: %v", err)
 		}
 		ap.m.TryPerformMigrations()
+
+		// initiate a host scan
+		ap.s.tryUpdateTimeout()
+		ap.s.tryPerformHostScan()
 	}
 }
 

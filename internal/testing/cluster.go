@@ -375,7 +375,12 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 		return nil, err
 	}
 
-	resp, err := c.Worker.ActiveContracts()
+	contracts, err := c.Bus.ActiveContracts()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.Worker.Contracts(contracts, time.Minute)
 	if err != nil {
 		return nil, err
 	}

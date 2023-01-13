@@ -316,7 +316,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
+		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
 	go func() {
@@ -720,25 +720,31 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
-	busContracts, err := w.bus.ActiveContracts()
-	if jc.Check("failed to fetch contracts from bus", err) != nil {
+func (w *worker) rhpContractsHandler(jc jape.Context) {
+	var req api.ContractsRequests
+	if jc.Decode(&req) != nil {
 		return
 	}
 
+	// fetch all contracts
 	var contracts []api.Contract
-	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
+	err := w.withHosts(jc.Request.Context(), req.Contracts, func(ss []sectorStore) error {
 		var errs []error
 		for i, store := range ss {
-			rev, err := store.(*session).Revision()
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			contracts = append(contracts, api.Contract{
-				ContractMetadata: busContracts[i],
-				Revision:         rev.Revision,
-			})
+			func() {
+				ctx, cancel := context.WithTimeout(jc.Request.Context(), req.HostTimeout)
+				defer cancel()
+
+				rev, err := store.(*session).Revision(ctx)
+				if err != nil {
+					errs = append(errs, err)
+					return
+				}
+				contracts = append(contracts, api.Contract{
+					ContractMetadata: req.Contracts[i],
+					Revision:         rev.Revision,
+				})
+			}()
 		}
 		if err := joinErrors(errs); err != nil {
 			return fmt.Errorf("couldn't retrieve %d contract(s): %w", len(errs), err)
@@ -746,7 +752,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		return nil
 	})
 
-	resp := api.ActiveContractsResponse{Contracts: contracts}
+	resp := api.ContractsResponse{Contracts: contracts}
 	if err != nil {
 		resp.Error = err.Error()
 	}
@@ -783,14 +789,14 @@ func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) http.Handler {
 		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
-		"POST   /rhp/prepare/payment":  w.rhpPreparePaymentHandler,
-		"POST   /rhp/scan":             w.rhpScanHandler,
-		"POST   /rhp/form":             w.rhpFormHandler,
-		"POST   /rhp/renew":            w.rhpRenewHandler,
-		"POST   /rhp/fund":             w.rhpFundHandler,
-		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
-		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
+		"POST   /rhp/contracts":       w.rhpContractsHandler,
+		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
+		"POST   /rhp/scan":            w.rhpScanHandler,
+		"POST   /rhp/form":            w.rhpFormHandler,
+		"POST   /rhp/renew":           w.rhpRenewHandler,
+		"POST   /rhp/fund":            w.rhpFundHandler,
+		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
 
 		"POST   /slabs/migrate": w.slabsMigrateHandler,
 

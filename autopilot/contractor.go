@@ -114,6 +114,8 @@ func (c *contractor) isStopped() bool {
 }
 
 func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.ConsensusState) error {
+	c.logger.Info("performing contract maintenance")
+
 	// No maintenance when syncing.
 	if !cs.Synced {
 		return nil
@@ -141,8 +143,14 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 		return err
 	}
 
-	// fetch all contracts
-	resp, err := c.ap.worker.ActiveContracts()
+	// fetch active contracts from the bus (without revision)
+	active, err := c.ap.bus.ActiveContracts()
+	if err != nil {
+		return err
+	}
+
+	// fetch all contracts from the worker (includes revision)
+	resp, err := c.ap.worker.Contracts(active, 30*time.Second)
 	if err != nil {
 		return err
 	}

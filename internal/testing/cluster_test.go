@@ -101,7 +101,11 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Wait for the contract to be renewed.
 	err = Retry(100, 100*time.Millisecond, func() error {
-		resp, err := w.ActiveContracts()
+		active, err := b.ActiveContracts()
+		if err != nil {
+			return err
+		}
+		resp, err := w.Contracts(active, time.Minute)
 		if err != nil {
 			return err
 		}

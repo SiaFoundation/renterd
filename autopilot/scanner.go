@@ -151,7 +151,7 @@ func (s *scanner) tryPerformHostScan() {
 		return
 	}
 
-	s.logger.Debug("host scan started")
+	s.logger.Info("host scan started")
 	s.scanningLastStart = time.Now()
 	s.scanning = true
 	s.mu.Unlock()
