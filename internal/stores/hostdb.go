@@ -337,6 +337,7 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 		Where("last_scan < ?", maxLastScan.UnixNano()).
 		Offset(offset).
 		Limit(limit).
+		Order("last_scan ASC").
 		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, h := range hosts {
 				hostAddresses = append(hostAddresses, hostdb.HostAddress{
