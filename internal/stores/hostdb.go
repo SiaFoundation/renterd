@@ -78,6 +78,7 @@ type (
 	dbInteraction struct {
 		Model
 
+		Host      consensus.PublicKey `gorm:"type:bytes;serializer:gob"`
 		Result    json.RawMessage
 		Success   bool
 		Timestamp time.Time `gorm:"index; NOT NULL"`
@@ -441,6 +442,7 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 			}
 			isScan := interaction.Type == hostdb.InteractionTypeScan
 			dbInteractions = append(dbInteractions, dbInteraction{
+				Host:      interaction.Host,
 				Result:    interaction.Result,
 				Success:   interaction.Success,
 				Timestamp: interaction.Timestamp.UTC(),

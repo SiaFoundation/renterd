@@ -235,6 +235,9 @@ func TestRecordInteractions(t *testing.T) {
 		if interaction.Type != "test" {
 			t.Fatal("type not set")
 		}
+		if interaction.Host != hk {
+			t.Fatal("wrong host")
+		}
 	}
 }
 
