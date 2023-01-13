@@ -378,9 +378,8 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 			)
 			if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 				break
-			} else {
-				continue
 			}
+			continue
 		}
 
 		// update the budget
@@ -507,9 +506,8 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 			)
 			if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 				break
-			} else {
-				continue
 			}
+			continue
 		}
 
 		// update the budget
