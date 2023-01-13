@@ -19,6 +19,10 @@ import (
 // TransactionSignature, assuming standard UnlockConditions.
 const BytesPerInput = 241
 
+// ErrInsufficientBalance is returned when there aren't enough unused outputs to
+// cover the requested amount.
+var ErrInsufficientBalance = errors.New("insufficient balance")
+
 // StandardUnlockConditions returns the standard unlock conditions for a single
 // Ed25519 key.
 func StandardUnlockConditions(pk consensus.PublicKey) types.UnlockConditions {
@@ -192,7 +196,7 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 		}
 	}
 	if outputSum.Cmp(amount) < 0 {
-		return nil, errors.New("insufficient balance")
+		return nil, ErrInsufficientBalance
 	} else if outputSum.Cmp(amount) > 0 {
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
 			Value:      outputSum.Sub(amount),
@@ -300,7 +304,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	// not enough outputs found
 	fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
 	if SumOutputs(inputs).Cmp(want.Add(fee)) < 0 {
-		return types.Transaction{}, nil, errors.New("insufficient balance")
+		return types.Transaction{}, nil, ErrInsufficientBalance
 	}
 
 	// set the miner fee

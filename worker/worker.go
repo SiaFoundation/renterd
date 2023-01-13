@@ -316,7 +316,7 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey con
 func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(ctx, c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
+		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
 	go func() {
@@ -717,24 +717,68 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
+	var hosttimeout api.Duration
+	if jc.DecodeForm("hosttimeout", &hosttimeout) != nil {
+		return
+	}
+
+	// fetch all contracts
 	var contracts []api.Contract
 	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
+		var errs []error
 		for i, store := range ss {
-			rev, err := store.(*session).Revision()
-			if err != nil {
-				return err
-			}
-			contracts = append(contracts, api.Contract{
-				ContractMetadata: busContracts[i],
-				Revision:         rev.Revision,
-			})
+			func() {
+				ctx := jc.Request.Context()
+				if hosttimeout > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, time.Duration(hosttimeout))
+					defer cancel()
+				}
+
+				rev, err := store.(*session).Revision(ctx)
+				if err != nil {
+					errs = append(errs, err)
+					return
+				}
+				contracts = append(contracts, api.Contract{
+					ContractMetadata: busContracts[i],
+					Revision:         rev.Revision,
+				})
+			}()
+		}
+		if err := joinErrors(errs); err != nil {
+			return fmt.Errorf("couldn't retrieve %d contract(s): %w", len(errs), err)
 		}
 		return nil
 	})
-	if jc.Check("failed to fetch contracts", err) != nil {
-		return
+
+	resp := api.ContractsResponse{Contracts: contracts}
+	if err != nil {
+		resp.Error = err.Error()
 	}
-	jc.Encode(contracts)
+	jc.Encode(resp)
+}
+
+func joinErrors(errs []error) error {
+	filtered := errs[:0]
+	for _, err := range errs {
+		if err != nil {
+			filtered = append(filtered, err)
+		}
+	}
+
+	switch len(filtered) {
+	case 0:
+		return nil
+	case 1:
+		return filtered[0]
+	default:
+		strs := make([]string, len(filtered))
+		for i := range strs {
+			strs[i] = filtered[i].Error()
+		}
+		return errors.New(strings.Join(strs, ";"))
+	}
 }
 
 // New returns an HTTP handler that serves the worker API.

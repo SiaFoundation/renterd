@@ -9,6 +9,12 @@ import (
 	"go.sia.tech/siad/types"
 )
 
+// ContractsResponse is the response type for the /rhp/contracts/active endpoint.
+type ContractsResponse struct {
+	Contracts []Contract `json:"contracts"`
+	Error     string     `json:"error,omitempty"`
+}
+
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
 	HostKey consensus.PublicKey `json:"hostKey"`

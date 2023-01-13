@@ -62,11 +62,11 @@ type Bus interface {
 }
 
 type Worker interface {
-	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
+	ActiveContracts(timeout time.Duration) (api.ContractsResponse, error)
+	MigrateSlab(s object.Slab) error
 	RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	MigrateSlab(s object.Slab) error
-	ActiveContracts() (contracts []api.Contract, err error)
+	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
 type Autopilot struct {
@@ -108,6 +108,7 @@ func (ap *Autopilot) Run() error {
 			return nil
 		case <-ap.ticker.C:
 		}
+		ap.logger.Info("autopilot loop starting")
 
 		// initiate a host scan
 		ap.s.tryUpdateTimeout()

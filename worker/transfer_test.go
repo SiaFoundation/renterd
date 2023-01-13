@@ -47,7 +47,7 @@ func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root consensus
 	return err
 }
 
-func (h *mockHost) DeleteSectors(roots []consensus.Hash256) error {
+func (h *mockHost) DeleteSectors(_ context.Context, roots []consensus.Hash256) error {
 	for _, root := range roots {
 		delete(h.sectors, root)
 	}
