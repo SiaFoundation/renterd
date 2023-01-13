@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
@@ -368,9 +370,17 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 		// derive the renter key
 		newRevision, err := c.renewContract(cfg, currentPeriod, contract, renterAddress, renterFunds, isRefresh)
 		if err != nil {
-			// TODO: keep track of consecutive failures and break at some point
-			// TODO: log error
-			continue
+			c.logger.Errorw(
+				fmt.Sprintf("renewal failed, err: %v", err),
+				"hk", contract.HostKey(),
+				"fcid", contract.ID,
+				"refresh", isRefresh,
+			)
+			if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+				break
+			} else {
+				continue
+			}
 		}
 
 		// update the budget
@@ -495,7 +505,11 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 				"hk", candidate,
 				"err", err,
 			)
-			continue
+			if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+				break
+			} else {
+				continue
+			}
 		}
 
 		// update the budget
