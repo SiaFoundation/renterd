@@ -720,20 +720,29 @@ func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
 }
 
-func (w *worker) rhpContractsHandler(jc jape.Context) {
-	var req api.ContractsRequests
-	if jc.Decode(&req) != nil {
+func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
+	busContracts, err := w.bus.ActiveContracts()
+	if jc.Check("failed to fetch contracts from bus", err) != nil {
+		return
+	}
+
+	var hosttimeout api.Duration
+	if jc.DecodeForm("hosttimeout", &hosttimeout) != nil {
 		return
 	}
 
 	// fetch all contracts
 	var contracts []api.Contract
-	err := w.withHosts(jc.Request.Context(), req.Contracts, func(ss []sectorStore) error {
+	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
 		var errs []error
 		for i, store := range ss {
 			func() {
-				ctx, cancel := context.WithTimeout(jc.Request.Context(), req.HostTimeout)
-				defer cancel()
+				ctx := jc.Request.Context()
+				if hosttimeout > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, time.Duration(hosttimeout))
+					defer cancel()
+				}
 
 				rev, err := store.(*session).Revision(ctx)
 				if err != nil {
@@ -741,7 +750,7 @@ func (w *worker) rhpContractsHandler(jc jape.Context) {
 					return
 				}
 				contracts = append(contracts, api.Contract{
-					ContractMetadata: req.Contracts[i],
+					ContractMetadata: busContracts[i],
 					Revision:         rev.Revision,
 				})
 			}()
@@ -789,14 +798,14 @@ func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) http.Handler {
 		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{
-		"POST   /rhp/contracts":       w.rhpContractsHandler,
-		"POST   /rhp/prepare/payment": w.rhpPreparePaymentHandler,
-		"POST   /rhp/scan":            w.rhpScanHandler,
-		"POST   /rhp/form":            w.rhpFormHandler,
-		"POST   /rhp/renew":           w.rhpRenewHandler,
-		"POST   /rhp/fund":            w.rhpFundHandler,
-		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
-		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
+		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
+		"POST   /rhp/prepare/payment":  w.rhpPreparePaymentHandler,
+		"POST   /rhp/scan":             w.rhpScanHandler,
+		"POST   /rhp/form":             w.rhpFormHandler,
+		"POST   /rhp/renew":            w.rhpRenewHandler,
+		"POST   /rhp/fund":             w.rhpFundHandler,
+		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
 
 		"POST   /slabs/migrate": w.slabsMigrateHandler,
 

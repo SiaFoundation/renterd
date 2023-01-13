@@ -143,14 +143,8 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 		return err
 	}
 
-	// fetch active contracts from the bus (without revision)
-	active, err := c.ap.bus.ActiveContracts()
-	if err != nil {
-		return err
-	}
-
-	// fetch all contracts from the worker (includes revision)
-	resp, err := c.ap.worker.Contracts(active, 30*time.Second)
+	// fetch all active contracts from the worker
+	resp, err := c.ap.worker.ActiveContracts(30 * time.Second)
 	if err != nil {
 		return err
 	}

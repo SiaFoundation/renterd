@@ -9,13 +9,7 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// ContractsRequests is the request type for the /rhp/contracts endpoint.
-type ContractsRequests struct {
-	Contracts   []ContractMetadata `json:"contracts"`
-	HostTimeout time.Duration      `json:"hostTimeout"`
-}
-
-// ContractsResponse is the response type for the /rhp/contracts endpoint.
+// ContractsResponse is the response type for the /rhp/contracts/active endpoint.
 type ContractsResponse struct {
 	Contracts []Contract `json:"contracts"`
 	Error     string     `json:"error,omitempty"`
