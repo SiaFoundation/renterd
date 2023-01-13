@@ -13,6 +13,7 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -103,6 +104,10 @@ type (
 		Setting(key string) (string, error)
 		UpdateSetting(key, value string) error
 	}
+
+	EphemeralAccountStore interface {
+		OwnerAccounts(owner string) ([]ephemeralaccounts.Account, error)
+	}
 )
 
 type bus struct {
@@ -114,6 +119,7 @@ type bus struct {
 	cs  ContractStore
 	os  ObjectStore
 	ss  SettingStore
+	eas EphemeralAccountStore
 
 	interactionsMu            sync.Mutex
 	interactions              []hostdb.Interaction
@@ -706,6 +712,18 @@ func (b *bus) gougingParams() (api.GougingParams, error) {
 	}, nil
 }
 
+func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
+	var owner string
+	if jc.DecodeForm("owner", &owner) != nil {
+		return
+	}
+	accounts, err := b.eas.OwnerAccounts(owner)
+	if jc.Check("failed to fetch accounts", err) != nil {
+		return
+	}
+	jc.Encode(accounts)
+}
+
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings, interactionsFlushInterval time.Duration) (http.Handler, error) {
 	b := &bus{
@@ -729,6 +747,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 	}
 
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /accounts/:owner": b.accountsOwnerHandlerGET,
+
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,

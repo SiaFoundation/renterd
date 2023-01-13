@@ -106,10 +106,26 @@ func (cs connSettings) maxPayloadSize() int {
 
 const connSettingsSize = 24
 
-var defaultConnSettings = connSettings{
-	RequestedPacketSize: 1440, // IPv6 MTU
-	MaxFrameSizePackets: 10,
-	MaxTimeout:          20 * time.Minute,
+func defaultConnSettings(conn net.Conn) (connSettings, error) {
+	var packetSize uint16
+	// Figure out if connection's ip is IPv4 or IPv6
+	host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+	if err != nil {
+		return connSettings{}, err
+	}
+	ip := net.ParseIP(host)
+	if ip.To4() != nil {
+		packetSize = 1460 // IPv4 MTU
+	} else if ip.To16() != nil {
+		packetSize = 1440 // IPv6 MTU
+	} else {
+		return connSettings{}, errors.New("invalid ip address")
+	}
+	return connSettings{
+		RequestedPacketSize: int(packetSize),
+		MaxFrameSizePackets: 10,
+		MaxTimeout:          20 * time.Minute,
+	}, nil
 }
 
 func initiateSettingsHandshake(conn net.Conn, ours connSettings, aead cipher.AEAD) (connSettings, error) {
@@ -123,7 +139,7 @@ func initiateSettingsHandshake(conn net.Conn, ours connSettings, aead cipher.AEA
 		id:     idUpdateSettings,
 		length: uint32(len(payload)),
 	}, payload, ours.RequestedPacketSize, aead)
-	if _, err := conn.Write(frame); err != nil {
+	if _, err := conn.Write(frame); err != nil { // writes 1440
 		return connSettings{}, err
 	}
 	// read + decode response

@@ -186,3 +186,40 @@ func TestUploadDownload(t *testing.T) {
 		}
 	}
 }
+
+func TestEphemeralAccounts(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	w := cluster.Worker
+
+	// add host
+	if _, err := cluster.AddHosts(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for contracts to form.
+	var contract api.Contract
+	if contracts, err := cluster.WaitForContracts(); err != nil {
+		t.Fatal(err)
+	} else {
+		contract = contracts[0]
+	}
+
+	// Fund account.
+	if err := w.RHPFund(contract.ID, contract.HostKey(), types.SiacoinPrecision); err != nil {
+		t.Fatal(err)
+	}
+
+	// TODO: fetch account balance.
+}

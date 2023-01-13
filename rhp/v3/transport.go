@@ -5,12 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net"
 	"strings"
+	"sync"
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/renterd/internal/mux"
+	"go.sia.tech/siad/crypto"
+	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
+	"lukechampine.com/frand"
 )
 
 func wrapErr(err *error, fnName string) {
@@ -48,16 +54,16 @@ type protocolObject interface {
 	encoding.SiaUnmarshaler
 }
 
-func writeRequest(s *mux.Stream, id Specifier, req protocolObject) error {
-	if _, err := s.Write(id[:]); err != nil {
+func writeRequest(w io.Writer, id Specifier, req protocolObject) error {
+	if _, err := w.Write(id[:]); err != nil {
 		return err
 	}
-	return req.MarshalSia(s)
+	return req.MarshalSia(w)
 }
 
-func readResponse(s *mux.Stream, resp protocolObject) error {
+func readResponse(r io.Reader, resp protocolObject) error {
 	rr := rpcResponse{nil, resp}
-	if err := rr.UnmarshalSia(s); err != nil {
+	if err := rr.UnmarshalSia(r); err != nil {
 		return err
 	} else if rr.err != nil {
 		return rr.err
@@ -65,26 +71,33 @@ func readResponse(s *mux.Stream, resp protocolObject) error {
 	return nil
 }
 
-func writeResponse(s *mux.Stream, resp protocolObject) error {
-	return (&rpcResponse{nil, resp}).MarshalSia(s)
+func writeResponse(w io.Writer, resp protocolObject) error {
+	return (&rpcResponse{nil, resp}).MarshalSia(w)
 }
 
 func writeResponseErr(s *mux.Stream, err error) error {
 	return (&rpcResponse{&RPCError{Description: err.Error()}, nil}).MarshalSia(s)
 }
 
-func processPayment(s *mux.Stream, payment PaymentMethod) error {
-	if err := writeResponse(s, paymentType(payment)); err != nil {
-		return err
-	} else if err := writeResponse(s, payment); err != nil {
+func processPayment(rw io.ReadWriter, payment PaymentMethod) error {
+	if err := modules.RPCWrite(rw, paymentType(payment)); err != nil {
 		return err
 	}
-	if pbcr, ok := payment.(*PayByContractRequest); ok {
-		var pr paymentResponse
-		if err := readResponse(s, &pr); err != nil {
+	if p, ok := payment.(*PayByContractRequest); ok {
+		if err := modules.RPCWrite(rw, p); err != nil {
 			return err
 		}
-		pbcr.HostSignature = pr.Signature
+		var pr paymentResponse
+		if err := modules.RPCRead(rw, &pr); err != nil {
+			return err
+		}
+		p.HostSignature = pr.Signature
+	} else if p, ok := payment.(*PayByEphemeralAccountRequest); ok {
+		if err := modules.RPCWrite(rw, p); err != nil {
+			return err
+		}
+	} else {
+		return errors.New("unknown payment type")
 	}
 	return nil
 }
@@ -95,16 +108,63 @@ type Transport struct {
 	mux *mux.Mux
 }
 
+type subscriberResponse struct {
+	Err string
+}
+
+type stream struct {
+	*mux.Stream
+	once sync.Once
+	do   func()
+}
+
+func (s *stream) Read(b []byte) (int, error) {
+	s.once.Do(s.do)
+	return s.Stream.Read(b)
+}
+
+func (s *stream) Write(b []byte) (int, error) { return s.Stream.Write(b) }
+
 // DialStream opens a new stream with the host.
-func (t *Transport) DialStream() *mux.Stream {
+func (t *Transport) DialStream() *stream {
 	buf := make([]byte, 8+8+len("host"))
 	binary.LittleEndian.PutUint64(buf[8:], uint64(len(buf[16:])))
 	binary.LittleEndian.PutUint64(buf[:8], uint64(len(buf[8:])))
 	copy(buf[16:], "host")
 
 	s := t.mux.DialStream()
+
+	// Write subscriber.
 	s.Write(buf)
-	return s
+
+	return &stream{
+		Stream: s,
+		do: func() {
+			// Read response.
+			var sr subscriberResponse
+			if err := encoding.ReadObject(s, &sr, 1000); err != nil {
+				println("hehe", err)
+			}
+		},
+	}
+}
+
+func (t *Transport) performSeedHandshake() error {
+	seed := frand.Uint64n(math.MaxUint64)
+
+	s := t.mux.DialStream()
+	defer s.Close()
+
+	// Write seed.
+	buf := make([]byte, 8+8)
+	binary.LittleEndian.PutUint64(buf[:8], 8)
+	binary.LittleEndian.PutUint64(buf[8:], seed)
+	if _, err := s.Write(buf); err != nil {
+		return err
+	}
+	// Read seed.
+	_, err := io.ReadFull(s, buf)
+	return err
 }
 
 // Close closes the protocol connection.
@@ -118,27 +178,30 @@ func NewRenterTransport(conn net.Conn, hostKey PublicKey) (*Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Transport{
+	t := &Transport{
 		mux: m,
-	}, nil
+	}
+	return t, t.performSeedHandshake()
 }
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
-func RPCPriceTable(t *Transport, payment PaymentMethod) (pt HostPriceTable, err error) {
+func RPCPriceTable(t *Transport, paymentFunc func(pt HostPriceTable) (PaymentMethod, error)) (pt HostPriceTable, err error) {
 	defer wrapErr(&err, "PriceTable")
 	s := t.DialStream()
 	defer s.Close()
 
 	var js []byte
-	if _, err := s.Write(rpcUpdatePriceTableID[:]); err != nil {
+	if err := modules.RPCWrite(s, &rpcUpdatePriceTableID); err != nil {
 		return HostPriceTable{}, err
-	} else if err := encoding.NewDecoder(s, 1<<20).Decode(&js); err != nil {
+	} else if err := modules.RPCRead(s, &js); err != nil {
 		return HostPriceTable{}, err
 	} else if err := json.Unmarshal(js, &pt); err != nil {
 		return HostPriceTable{}, err
+	} else if payment, err := paymentFunc(pt); err != nil {
+		return HostPriceTable{}, err
 	} else if err := processPayment(s, payment); err != nil {
 		return HostPriceTable{}, err
-	} else if err := readResponse(s, rpcPriceTableResponse{}); err != nil {
+	} else if err := modules.RPCRead(s, &rpcPriceTableResponse{}); err != nil {
 		return HostPriceTable{}, err
 	}
 	return pt, nil
@@ -164,19 +227,21 @@ func RPCFundAccount(t *Transport, payment PaymentMethod, account Account, settin
 	s := t.DialStream()
 	defer s.Close()
 
+	var acc modules.AccountID
+	acc.FromSPK(types.Ed25519PublicKey(crypto.PublicKey(account)))
 	req := rpcFundAccountRequest{
-		Account: account,
+		Account: acc,
 	}
 	var resp rpcFundAccountResponse
-	if _, err := s.Write(rpcFundAccountID[:]); err != nil {
+	if err := modules.RPCWrite(s, &rpcFundAccountID); err != nil {
 		return err
-	} else if err := writeResponse(s, &settingsID); err != nil {
+	} else if err := modules.RPCWrite(s, &settingsID); err != nil {
 		return err
-	} else if err := writeResponse(s, &req); err != nil {
+	} else if err := modules.RPCWrite(s, &req); err != nil {
 		return err
 	} else if err := processPayment(s, payment); err != nil {
 		return err
-	} else if err := readResponse(s, &resp); err != nil {
+	} else if err := modules.RPCRead(s, &resp); err != nil {
 		return err
 	}
 	return nil

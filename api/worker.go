@@ -66,11 +66,9 @@ type RHPRenewResponse struct {
 
 // RHPFundRequest is the request type for the /rhp/fund endpoint.
 type RHPFundRequest struct {
-	Contract types.FileContractRevision `json:"contract"`
-	HostKey  consensus.PublicKey        `json:"hostKey"`
-	HostIP   string                     `json:"hostIP"`
-	Account  rhpv3.Account              `json:"account"`
-	Amount   types.Currency             `json:"amount"`
+	ContractID types.FileContractID `json:"contractID"`
+	HostKey    consensus.PublicKey  `json:"hostKey"`
+	Amount     types.Currency       `json:"amount"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
@@ -94,9 +92,8 @@ type RHPRegistryReadRequest struct {
 // RHPRegistryUpdateRequest is the request type for the /rhp/registry/update
 // endpoint.
 type RHPRegistryUpdateRequest struct {
-	HostKey       consensus.PublicKey                `json:"hostKey"`
-	HostIP        string                             `json:"hostIP"`
-	RegistryKey   rhpv3.RegistryKey                  `json:"registryKey"`
-	RegistryValue rhpv3.RegistryValue                `json:"registryValue"`
-	Payment       rhpv3.PayByEphemeralAccountRequest `json:"payment"`
+	HostKey       consensus.PublicKey `json:"hostKey"`
+	HostIP        string              `json:"hostIP"`
+	RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
+	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
 }

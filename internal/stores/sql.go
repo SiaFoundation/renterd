@@ -22,6 +22,7 @@ type (
 	SQLStore struct {
 		db *gorm.DB
 
+		// HostDB related fields.
 		lastAnnouncementSave   time.Time
 		persistInterval        time.Duration
 		unappliedAnnouncements []announcement
@@ -91,6 +92,9 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 
 			// bus.SettingStore tables
 			&dbSetting{},
+
+			// bus.EphemeralAccountStore tables
+			&dbEphemeralAccount{},
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err

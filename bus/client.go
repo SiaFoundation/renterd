@@ -8,6 +8,7 @@ import (
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -469,6 +470,12 @@ func (c *Client) MigrateParams(slab object.Slab) (mp api.MigrateParams, err erro
 // GougingParams returns parameters used for performing gouging checks.
 func (c *Client) GougingParams() (gp api.GougingParams, err error) {
 	err = c.c.GET("/params/gouging", &gp)
+	return
+}
+
+// GougingParams returns parameters used for performing gouging checks.
+func (c *Client) OwnerAccounts(owner string) (accounts []ephemeralaccounts.Account, err error) {
+	err = c.c.GET(fmt.Sprintf("/accounts/%s", owner), &accounts)
 	return
 }
 

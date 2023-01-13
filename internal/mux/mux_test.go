@@ -333,7 +333,11 @@ func BenchmarkMux(b *testing.B) {
 			defer m.Close()
 
 			// open each stream in a separate goroutine
-			bufSize := defaultConnSettings.maxPayloadSize()
+			settings, err := defaultConnSettings(conn)
+			if err != nil {
+				b.Fatal(err)
+			}
+			bufSize := settings.maxPayloadSize()
 			buf := make([]byte, bufSize)
 			b.ResetTimer()
 			b.SetBytes(int64(bufSize * numStreams))
@@ -374,8 +378,12 @@ func BenchmarkConn(b *testing.B) {
 				return err
 			}
 			defer conn.Close()
+			settings, err := defaultConnSettings(conn)
+			if err != nil {
+				return err
+			}
 			aead, _ := chacha20poly1305.New(encryptionKey)
-			buf := make([]byte, defaultConnSettings.maxFrameSize())
+			buf := make([]byte, settings.maxFrameSize())
 			for {
 				_, err := io.ReadFull(conn, buf)
 				if err != nil {
@@ -399,10 +407,15 @@ func BenchmarkConn(b *testing.B) {
 	}
 	defer conn.Close()
 
+	settings, err := defaultConnSettings(conn)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	aead, _ := chacha20poly1305.New(encryptionKey)
-	buf := make([]byte, defaultConnSettings.maxFrameSize())
+	buf := make([]byte, settings.maxFrameSize())
 	b.ResetTimer()
-	b.SetBytes(int64(defaultConnSettings.maxPayloadSize()))
+	b.SetBytes(int64(settings.maxPayloadSize()))
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		encryptInPlace(buf, aead)

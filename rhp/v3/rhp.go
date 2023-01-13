@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
+	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
@@ -71,12 +72,16 @@ func PayByContract(rev *types.FileContractRevision, amount types.Currency, refun
 	for i, o := range rev.NewMissedProofOutputs {
 		newMissed[i] = o.Value
 	}
+	ra := modules.ZeroAccountID
+	if refundAcct != ZeroAccount {
+		ra.FromSPK(types.Ed25519PublicKey(crypto.PublicKey(refundAcct)))
+	}
 	p := PayByContractRequest{
 		ContractID:           rev.ParentID,
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		RefundAccount:        refundAcct,
+		RefundAccount:        ra,
 	}
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{*rev},
@@ -86,7 +91,8 @@ func PayByContract(rev *types.FileContractRevision, amount types.Currency, refun
 			CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		}},
 	}
-	p.Signature = sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
+	sig := sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
+	p.Signature = sig[:]
 	return p, true
 }
 
@@ -131,6 +137,29 @@ type HostPriceTable struct {
 	RegistryEntriesTotal         uint64         `json:"registryentriestotal"`
 }
 
+const registryEntrySize = 256
+
+// MDMUpdateRegistryCost is the cost of executing a 'UpdateRegistry'
+// instruction on the MDM.
+func (pt *HostPriceTable) UpdateRegistryCost() (_, _ types.Currency) {
+	// Cost is the same as uploading and storing a registry entry for 5 years.
+	writeCost := pt.writeCost(registryEntrySize)
+	storeCost := pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * types.BlocksPerYear))
+	return writeCost.Add(storeCost), storeCost
+}
+
+// writeCost is the cost of executing a 'Write' instruction of a certain length
+// on the MDM.
+func (pt *HostPriceTable) writeCost(writeLength uint64) types.Currency {
+	// Atomic write size for modern disks is 4kib so we round up.
+	atomicWriteSize := uint64(1 << 12)
+	if mod := writeLength % atomicWriteSize; mod != 0 {
+		writeLength += (atomicWriteSize - mod)
+	}
+	writeCost := pt.WriteLengthCost.Mul64(writeLength).Add(pt.WriteBaseCost)
+	return writeCost
+}
+
 type (
 	// PayByEphemeralAccountRequest represents a payment made using an ephemeral account.
 	PayByEphemeralAccountRequest struct {
@@ -148,8 +177,8 @@ type (
 		NewRevisionNumber    uint64
 		NewValidProofValues  []types.Currency
 		NewMissedProofValues []types.Currency
-		RefundAccount        Account
-		Signature            Signature
+		RefundAccount        modules.AccountID
+		Signature            []byte
 		HostSignature        Signature
 	}
 )
@@ -193,14 +222,14 @@ type (
 	rpcPriceTableResponse struct{}
 
 	rpcFundAccountRequest struct {
-		Account Account
+		Account modules.AccountID
 	}
 
 	rpcFundAccountResponse struct {
 		Balance types.Currency
 		Receipt struct {
 			Host      types.SiaPublicKey
-			Account   Account
+			Account   modules.AccountID
 			Amount    types.Currency
 			Timestamp int64
 		}

@@ -1,6 +1,9 @@
 package rhp
 
 import (
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -30,6 +33,43 @@ func (s *SettingsID) MarshalSia(w io.Writer) error {
 func (s *SettingsID) UnmarshalSia(r io.Reader) error {
 	_, err := r.Read(s[:])
 	return err
+}
+
+// String prints the uid in hex.
+func (s SettingsID) String() string {
+	return hex.EncodeToString(s[:])
+}
+
+// LoadString loads the unique id from the given string. It is the inverse of
+// the `String` method.
+func (s *SettingsID) LoadString(input string) error {
+	// *2 because there are 2 hex characters per byte.
+	if len(input) != types.SpecifierLen*2 {
+		return errors.New("incorrect length")
+	}
+	uidBytes, err := hex.DecodeString(input)
+	if err != nil {
+		return errors.New("could not unmarshal hash: " + err.Error())
+	}
+	copy(s[:], uidBytes)
+	return nil
+}
+
+// MarshalJSON marshals an id as a hex string.
+func (s SettingsID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+// UnmarshalJSON decodes the json hex string of the id.
+func (s *SettingsID) UnmarshalJSON(b []byte) error {
+	// *2 because there are 2 hex characters per byte.
+	// +2 because the encoded JSON string is wrapped in `"`.
+	if len(b) != len(SettingsID{})*2+2 {
+		return errors.New("incorrect length")
+	}
+
+	// b[1 : len(b)-1] cuts off the leading and trailing `"` in the JSON string.
+	return s.LoadString(string(b[1 : len(b)-1]))
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
