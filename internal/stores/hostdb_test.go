@@ -321,13 +321,13 @@ func TestSQLHosts(t *testing.T) {
 	if len(hostAddresses) != 3 {
 		t.Fatal("wrong number of addresses")
 	}
-	if hostAddresses[0].PublicKey != hk1 {
+	if hostAddresses[0].PublicKey != hk3 {
 		t.Fatal("wrong key")
 	}
 	if hostAddresses[1].PublicKey != hk2 {
 		t.Fatal("wrong key")
 	}
-	if hostAddresses[2].PublicKey != hk3 {
+	if hostAddresses[2].PublicKey != hk1 {
 		t.Fatal("wrong key")
 	}
 
