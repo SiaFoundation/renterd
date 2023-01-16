@@ -655,10 +655,10 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	rs := up.RedundancySettings
 
 	// allow overriding the redundancy settings
-	if jc.Check("couldn't decode 'minshards' paramter", jc.DecodeForm("minshards", &rs.MinShards)) != nil {
+	if jc.Check("couldn't decode 'minshards' parameter", jc.DecodeForm("minshards", &rs.MinShards)) != nil {
 		return
 	}
-	if jc.Check("couldn't decode 'totalshards' paramter", jc.DecodeForm("totalshards", &rs.TotalShards)) != nil {
+	if jc.Check("couldn't decode 'totalshards' parameter", jc.DecodeForm("totalshards", &rs.TotalShards)) != nil {
 		return
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
