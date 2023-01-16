@@ -1,11 +1,12 @@
 package bus
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -592,15 +593,24 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
+func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
+	// TODO: hack to bypass jape - 'PUT' requires a request object to be read
+	jc.Custom((*interface{})(nil), nil)
+
+	bb, err := io.ReadAll(jc.Request.Body)
+	if jc.Check("could not read request body", err) != nil {
+		return
+	}
+
+	buffer := new(bytes.Buffer)
+	if jc.Check("could not read request body", json.Compact(buffer, bb)) != nil {
+		return
+	}
+
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if value := jc.PathParam("value"); value == "" {
-		jc.Error(errors.New("param 'value' can not be empty"), http.StatusBadRequest)
-	} else if value, err := url.QueryUnescape(value); err != nil {
-		jc.Error(errors.New("could not unescape 'value'"), http.StatusBadRequest)
 	} else {
-		jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
+		jc.Check("could not update setting", b.ss.UpdateSetting(key, buffer.String()))
 	}
 }
 
@@ -775,9 +785,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"DELETE /objects/*key":    b.objectsKeyHandlerDELETE,
 		"GET    /migration/slabs": b.objectsMigrationSlabsHandlerGET,
 
-		"GET    /settings":            b.settingsHandlerGET,
-		"GET    /setting/:key":        b.settingKeyHandlerGET,
-		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
+		"GET    /settings":     b.settingsHandlerGET,
+		"GET    /setting/:key": b.settingKeyHandlerGET,
+		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,

@@ -377,14 +377,9 @@ func (c *Client) Settings() (settings []string, err error) {
 	return
 }
 
-// UpdateSetting will update or insert the setting for given key with the given value.
-func (c *Client) UpdateSetting(key string, value interface{}) error {
-	v, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("unable to marshal given setting, err: %v", err)
-	}
-
-	return c.c.POST(fmt.Sprintf("/setting/%s/%s", key, url.QueryEscape(string(v))), nil, nil)
+// UpdateSetting will update the given setting under the given key.
+func (c *Client) UpdateSetting(key string, setting interface{}) error {
+	return c.c.PUT(fmt.Sprintf("/setting/%s", key), setting)
 }
 
 // GougingSettings returns the gouging settings.
