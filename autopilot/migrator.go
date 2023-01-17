@@ -61,7 +61,7 @@ func (m *migrator) performMigrations() {
 			return
 		}
 
-		// migrat them one by one
+		// migrate them one by one
 		for i, slab := range toMigrate {
 			err := m.ap.worker.MigrateSlab(slab)
 			if err != nil {

@@ -591,8 +591,7 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 		}
 	}
 
-	err = w.bus.UpdateSlab(slab, usedContracts)
-	if jc.Check("couldn't update slab", err) != nil {
+	if jc.Check("couldn't update slab", w.bus.UpdateSlab(slab, usedContracts)) != nil {
 		return
 	}
 }
