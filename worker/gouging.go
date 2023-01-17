@@ -40,10 +40,9 @@ func PerformGougingChecks(ctx context.Context, hs rhpv2.HostSettings) GougingRes
 }
 
 func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Context {
-	rs := gp.RedundancySettings
 	return context.WithValue(ctx, keyGougingChecker, gougingChecker{
 		settings:   gp.GougingSettings,
-		redundancy: float64(rs.TotalShards) / float64(rs.MinShards),
+		redundancy: gp.RedundancySettings.Redundancy(),
 	})
 }
 

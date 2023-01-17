@@ -613,10 +613,10 @@ func (b *bus) setGougingSettings(gs api.GougingSettings) error {
 }
 
 func (b *bus) setRedundancySettings(rs api.RedundancySettings) error {
-	if js, err := json.Marshal(rs); err != nil {
+	if err := rs.Validate(); err != nil {
+		return err
+	} else if js, err := json.Marshal(rs); err != nil {
 		panic(err)
-	} else if rs.MinShards == 0 || rs.MinShards >= rs.TotalShards {
-		return errors.New("invalid redundancy settings: MinShards has to be greater than zero and smaller than TotalShards")
 	} else {
 		return b.ss.UpdateSetting(SettingRedundancy, string(js))
 	}
