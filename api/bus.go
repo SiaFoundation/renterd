@@ -6,7 +6,6 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/rhp/v2"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 )
@@ -46,9 +45,9 @@ type ContractAcquireResponse struct {
 }
 
 type HostsScanPubkeyHandlerPOSTRequest struct {
-	Time     time.Time        `json:"time"`
-	Success  bool             `json:"success"`
-	Settings rhp.HostSettings `json:"settings"`
+	Time     time.Time          `json:"time"`
+	Success  bool               `json:"success"`
+	Settings rhpv2.HostSettings `json:"settings"`
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
@@ -166,8 +165,28 @@ type GougingSettings struct {
 
 // RedundancySettings contain settings that dictate an object's redundancy.
 type RedundancySettings struct {
-	MinShards   uint64
-	TotalShards uint64
+	MinShards   int
+	TotalShards int
+}
+
+// Redundancy returns the redundancy defined by the total shards and min shards.
+func (rs RedundancySettings) Redundancy() float64 {
+	return float64(rs.TotalShards) / float64(rs.MinShards)
+}
+
+// Validate returns an error if the redundancy settings are not considered
+// valid.
+func (rs RedundancySettings) Validate() error {
+	if rs.MinShards < 1 {
+		return errors.New("MinShards must be greater than 0")
+	}
+	if rs.TotalShards < rs.MinShards {
+		return errors.New("TotalShards must be at least MinShards")
+	}
+	if rs.TotalShards > 255 {
+		return errors.New("TotalShards must be less than 256")
+	}
+	return nil
 }
 
 // ErrSettingNotFound is returned if a requested setting is not present in the

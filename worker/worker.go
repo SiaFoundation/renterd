@@ -704,6 +704,17 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	}
 	rs := up.RedundancySettings
 
+	// allow overriding the redundancy settings
+	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
+		return
+	}
+	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
+		return
+	}
+	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
+		return
+	}
+
 	// attach gouging checker to the context
 	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
 
