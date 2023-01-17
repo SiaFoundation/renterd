@@ -277,7 +277,11 @@ func Dial(conn net.Conn, theirKey ed25519.PublicKey) (*Mux, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encryption handshake failed: %w", err)
 	}
-	settings, err := initiateSettingsHandshake(conn, defaultConnSettings, aead)
+	ourSettings, err := defaultConnSettings(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine type of connection: %w", err)
+	}
+	settings, err := initiateSettingsHandshake(conn, ourSettings, aead)
 	if err != nil {
 		return nil, fmt.Errorf("settings handshake failed: %w", err)
 	}
@@ -293,7 +297,11 @@ func Accept(conn net.Conn, ourKey ed25519.PrivateKey) (*Mux, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encryption handshake failed: %w", err)
 	}
-	settings, err := acceptSettingsHandshake(conn, defaultConnSettings, aead)
+	ourSettings, err := defaultConnSettings(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine type of connection: %w", err)
+	}
+	settings, err := acceptSettingsHandshake(conn, ourSettings, aead)
 	if err != nil {
 		return nil, fmt.Errorf("settings handshake failed: %w", err)
 	}
