@@ -714,7 +714,7 @@ func (b *bus) gougingParams() (api.GougingParams, error) {
 
 func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
 	var owner string
-	if jc.DecodeForm("owner", &owner) != nil {
+	if jc.DecodeParam("owner", &owner) != nil {
 		return
 	}
 	accounts, err := b.eas.OwnerAccounts(owner)
