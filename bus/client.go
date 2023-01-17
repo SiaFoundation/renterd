@@ -363,12 +363,9 @@ func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string
 }
 
 // Setting returns the value for the setting with given key.
-func (c *Client) Setting(key string, resp interface{}) (err error) {
-	var value string
-	if err := c.c.GET(fmt.Sprintf("/setting/%s", key), &value); err != nil {
-		return err
-	}
-	return json.Unmarshal([]byte(value), &resp)
+func (c *Client) Setting(key string) (value string, err error) {
+	err = c.c.GET(fmt.Sprintf("/setting/%s", key), &value)
+	return
 }
 
 // Settings returns the keys of all settings in the store.
@@ -378,30 +375,46 @@ func (c *Client) Settings() (settings []string, err error) {
 }
 
 // UpdateSetting will update the given setting under the given key.
-func (c *Client) UpdateSetting(key string, setting interface{}) error {
-	return c.c.PUT(fmt.Sprintf("/setting/%s", key), setting)
+func (c *Client) UpdateSetting(key string, value string) error {
+	return c.c.PUT(fmt.Sprintf("/setting/%s", key), value)
 }
 
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings() (gs api.GougingSettings, err error) {
-	err = c.Setting(SettingGouging, &gs)
+	setting, err := c.Setting(SettingGouging)
+	if err != nil {
+		return api.GougingSettings{}, err
+	}
+	err = json.Unmarshal([]byte(setting), &gs)
 	return
 }
 
 // UpdateGougingSettings allows configuring the gouging settings.
 func (c *Client) UpdateGougingSettings(gs api.GougingSettings) error {
-	return c.UpdateSetting(SettingGouging, gs)
+	b, err := json.Marshal(gs)
+	if err != nil {
+		return err
+	}
+	return c.UpdateSetting(SettingGouging, string(b))
 }
 
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings() (rs api.RedundancySettings, err error) {
-	err = c.Setting(SettingRedundancy, &rs)
+	setting, err := c.Setting(SettingRedundancy)
+	if err != nil {
+		return api.RedundancySettings{}, err
+	}
+	err = json.Unmarshal([]byte(setting), &rs)
 	return
 }
 
 // UpdateRedundancySettings allows configuring the redundancy.
 func (c *Client) UpdateRedundancySettings(rs api.RedundancySettings) error {
-	return c.UpdateSetting(SettingRedundancy, rs)
+	b, err := json.Marshal(rs)
+	if err != nil {
+		return err
+	}
+	return c.UpdateSetting(SettingRedundancy, string(b))
 }
 
 // Object returns the object at the given path, or, if path ends in '/', the

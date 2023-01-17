@@ -1,11 +1,9 @@
 package bus
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -584,7 +582,7 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.PathParam("key")); err == api.ErrSettingNotFound {
+	} else if setting, err := b.ss.Setting(jc.PathParam("key")); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -594,23 +592,11 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
-	// TODO: hack to bypass jape - 'PUT' requires a request object to be read
-	jc.Custom((*interface{})(nil), nil)
-
-	bb, err := io.ReadAll(jc.Request.Body)
-	if jc.Check("could not read request body", err) != nil {
-		return
-	}
-
-	buffer := new(bytes.Buffer)
-	if jc.Check("could not read request body", json.Compact(buffer, bb)) != nil {
-		return
-	}
-
+	var value string
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else {
-		jc.Check("could not update setting", b.ss.UpdateSetting(key, buffer.String()))
+	} else if jc.Decode(&value) == nil {
+		jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
 	}
 }
 
