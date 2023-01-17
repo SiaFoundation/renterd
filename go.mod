@@ -7,7 +7,6 @@ require (
 	github.com/klauspost/reedsolomon v1.9.16
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40
-	go.sia.tech/core v0.0.0-20220524010238-790a68db5817
 	go.sia.tech/jape v0.5.0
 	go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004
 	go.uber.org/zap v1.24.0
@@ -52,7 +51,3 @@ require (
 	golang.org/x/net v0.0.0-20220809184613-07c6da5e1ced // indirect
 	golang.org/x/text v0.3.7 // indirect
 )
-
-// replace gitlab.com/NebulousLabs/siamux => ../../../gitlab.com/NebulousLabs/siamux
-
-// replace go.sia.tech/siad => ../siad
