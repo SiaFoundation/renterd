@@ -166,6 +166,8 @@ func (t *Transport) DialStream() *stream {
 	}
 }
 
+// performSeedHandshake performs the initial seed handshake that the siamux
+// expects from the first established stream of a mux.
 func (t *Transport) performSeedHandshake() error {
 	seed := frand.Uint64n(math.MaxUint64)
 

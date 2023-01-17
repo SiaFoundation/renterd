@@ -24,14 +24,16 @@ type (
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
-		id  rhp.Account
-		key consensus.PrivateKey
+		id   rhp.Account
+		key  consensus.PrivateKey
+		host consensus.PublicKey
 
 		mu      sync.Mutex
 		balance types.Currency
 	}
 )
 
+// All returns information about all accounts to be returned in the API.
 func (a *accounts) All() ([]api.Account, error) {
 	// Make sure accounts are initialised.
 	if err := a.tryInitAccounts(); err != nil {
@@ -45,6 +47,7 @@ func (a *accounts) All() ([]api.Account, error) {
 		accounts = append(accounts, api.Account{
 			ID:      acc.id,
 			Balance: acc.balance,
+			Host:    acc.host,
 		})
 	}
 	return accounts, nil
@@ -73,6 +76,7 @@ func (a *accounts) AccountForHost(hk consensus.PublicKey) (*account, error) {
 	if !exists {
 		acc = &account{
 			id:      accountID,
+			host:    hk,
 			key:     accountKey,
 			balance: types.ZeroCurrency,
 		}

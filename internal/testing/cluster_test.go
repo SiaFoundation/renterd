@@ -206,7 +206,13 @@ func TestEphemeralAccounts(t *testing.T) {
 	w := cluster.Worker
 
 	// add host
-	if _, err := cluster.AddHosts(1); err != nil {
+	nodes, err := cluster.AddHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := nodes[0]
+	hg, err := host.HostGet()
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -237,5 +243,8 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 	if acc.ID == rhp.ZeroAccount {
 		t.Fatal("account id not set")
+	}
+	if acc.Host != consensus.PublicKey(hg.PublicKey.ToPublicKey()) {
+		t.Fatal("wrong host")
 	}
 }

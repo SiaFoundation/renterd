@@ -139,7 +139,7 @@ func initiateSettingsHandshake(conn net.Conn, ours connSettings, aead cipher.AEA
 		id:     idUpdateSettings,
 		length: uint32(len(payload)),
 	}, payload, ours.RequestedPacketSize, aead)
-	if _, err := conn.Write(frame); err != nil { // writes 1440
+	if _, err := conn.Write(frame); err != nil {
 		return connSettings{}, err
 	}
 	// read + decode response
