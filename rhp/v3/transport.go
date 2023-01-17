@@ -108,21 +108,45 @@ type Transport struct {
 	mux *mux.Mux
 }
 
-type subscriberResponse struct {
-	Err string
-}
-
+// stream wraps the mux.Stream type to catch the lazily written subscriber
+// response the host is sending us before the first Read.
 type stream struct {
 	*mux.Stream
-	once sync.Once
-	do   func()
+	once                      sync.Once
+	readSubscriberResponseErr error
 }
 
+func (s *stream) readSubscriberResponse() {
+	// Read response.
+	buf := make([]byte, 16)
+	_, s.readSubscriberResponseErr = io.ReadFull(s.Stream, buf)
+	if s.readSubscriberResponseErr != nil {
+		return
+	}
+	errLen := binary.LittleEndian.Uint64(buf[8:16])
+	if errLen == 0 {
+		return
+	}
+	// Read error.
+	buf = make([]byte, errLen)
+	_, s.readSubscriberResponseErr = io.ReadFull(s.Stream, buf)
+	if s.readSubscriberResponseErr != nil {
+		return
+	}
+	s.readSubscriberResponseErr = errors.New(string(buf))
+}
+
+// Read passes the read on to the underlying stream. The first time it is called
+// it will first try to read the subscriber response.
 func (s *stream) Read(b []byte) (int, error) {
-	s.once.Do(s.do)
+	s.once.Do(s.readSubscriberResponse)
+	if s.readSubscriberResponseErr != nil {
+		return 0, s.readSubscriberResponseErr
+	}
 	return s.Stream.Read(b)
 }
 
+// Write passes the write on to the underlying stream.
 func (s *stream) Write(b []byte) (int, error) { return s.Stream.Write(b) }
 
 // DialStream opens a new stream with the host.
@@ -139,16 +163,11 @@ func (t *Transport) DialStream() *stream {
 
 	return &stream{
 		Stream: s,
-		do: func() {
-			// Read response.
-			var sr subscriberResponse
-			if err := encoding.ReadObject(s, &sr, 1000); err != nil {
-				println("hehe", err)
-			}
-		},
 	}
 }
 
+// performSeedHandshake performs the initial seed handshake that the siamux
+// expects from the first established stream of a mux.
 func (t *Transport) performSeedHandshake() error {
 	seed := frand.Uint64n(math.MaxUint64)
 

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/types"
 )
 
@@ -92,8 +93,7 @@ func (resp *rpcResponse) UnmarshalSia(r io.Reader) error {
 	return d.Decode(resp.data)
 }
 
-// MarshalSia im
-// MarshalSia implements encoding.SiaMarshaler.plements encoding.SiaMarshaler.
+// MarshalSia implements encoding.SiaMarshaler.
 func (a *Account) MarshalSia(w io.Writer) error {
 	if *a == ZeroAccount {
 		return (types.SiaPublicKey{}).MarshalSia(w)
@@ -117,6 +117,16 @@ func (a *Account) UnmarshalSia(r io.Reader) error {
 	}
 	copy(a[:], spk.Key)
 	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (a Account) MarshalJSON() ([]byte, error) {
+	return consensus.PublicKey(a).MarshalJSON()
+}
+
+// MarshalJSON implements json.Unmarshaler.
+func (a *Account) UnmarshalJSON(b []byte) error {
+	return (*consensus.PublicKey)(a).UnmarshalJSON(b)
 }
 
 // MarshalSia implements encoding.SiaMarshaler.

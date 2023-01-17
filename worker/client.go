@@ -33,18 +33,6 @@ func (c *Client) RHPScan(hostKey consensus.PublicKey, hostIP string, timeout tim
 	return
 }
 
-// RHPPreparePayment prepares an ephemeral account payment.
-func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key consensus.PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
-	req := api.RHPPreparePaymentRequest{
-		Account:    account,
-		Amount:     amount,
-		Expiry:     0, // TODO
-		AccountKey: key,
-	}
-	err = c.c.POST("/rhp/prepare/payment", req, &resp)
-	return
-}
-
 // RHPForm forms a contract with a host.
 func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPFormRequest{
@@ -185,6 +173,12 @@ func (c *Client) DeleteObject(name string) (err error) {
 // decorate a bus contract with the contract's latest revision.
 func (c *Client) ActiveContracts(timeout time.Duration) (resp api.ContractsResponse, err error) {
 	err = c.c.GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.Duration(timeout)), &resp)
+	return
+}
+
+// Accounts requests the worker's /accounts endpoint.
+func (c *Client) Accounts() (accounts []api.Account, err error) {
+	err = c.c.GET("/accounts", &accounts)
 	return
 }
 

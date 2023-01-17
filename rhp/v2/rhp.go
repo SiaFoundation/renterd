@@ -97,12 +97,12 @@ type HostSettings struct {
 
 // SiamuxAddr is a helper which returns an address that can be used to connect
 // to the host's siamux.
-func (s HostSettings) SiamuxAddr() (string, error) {
+func (s HostSettings) SiamuxAddr() string {
 	host, _, err := net.SplitHostPort(s.NetAddress)
 	if err != nil {
-		return "", err
+		return ""
 	}
-	return net.JoinHostPort(host, s.SiaMuxPort), nil
+	return net.JoinHostPort(host, s.SiaMuxPort)
 }
 
 // A Specifier is a generic identification tag.

@@ -5,6 +5,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/rhp/v3"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
 )
@@ -96,4 +97,11 @@ type RHPRegistryUpdateRequest struct {
 	HostIP        string              `json:"hostIP"`
 	RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
+}
+
+// Account describes an ephemeral account as returned by the worker API.
+type Account struct {
+	ID      rhp.Account         `json:"id"`
+	Balance types.Currency      `json:"currency"`
+	Host    consensus.PublicKey `json:"host"`
 }

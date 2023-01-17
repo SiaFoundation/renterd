@@ -245,31 +245,6 @@ func (w *worker) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateK
 	return pk
 }
 
-func (w *worker) deriveAccountKey(hostKey consensus.PublicKey) consensus.PrivateKey {
-	index := byte(0) // not used yet but can be used to derive more than 1 account per host
-
-	// Append the owner of the account (worker's id), the host for which to
-	// create it and the index to the corresponding sub-key.
-	subKey := w.deriveSubKey("accountkey")
-	data := append(subKey, []byte(w.id)...)
-	data = append(data, hostKey[:]...)
-	data = append(data, index)
-
-	seed := blake2b.Sum256(data)
-	pk := consensus.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
-type account struct {
-	ephemeralaccounts.Account
-
-	Resync    bool
-	SecretKey consensus.PrivateKey
-}
-
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
@@ -278,8 +253,7 @@ type worker struct {
 	pool      *sessionPool
 	masterKey [32]byte
 
-	accounts    map[consensus.PublicKey]*account
-	priceTables map[consensus.PublicKey]*rhp.HostPriceTable
+	accounts *accounts
 }
 
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
@@ -537,18 +511,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 	// Get account for the host.
-	accountKey := w.deriveAccountKey(rfr.HostKey)
-	account := rhp.Account(accountKey.PublicKey())
+	account, err := w.accounts.AccountForHost(rfr.HostKey)
+	if jc.Check("failed to get account for provided host", err) != nil {
+		return
+	}
 
 	// Get IP of host.
 	h, err := w.bus.Host(rfr.HostKey)
 	if jc.Check("failed to fetch host", err) != nil {
 		return
 	}
-	hostIP, err := h.Settings.SiamuxAddr()
-	if jc.Check("failed to get siamux address of host", err) != nil {
-		return
-	}
+	hostIP := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
 	// TODO: This is not a good solution. We should have some mechanism to
@@ -585,14 +558,16 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		if !ok {
 			return errors.New("insufficient funds")
 		}
-		return rhpv3.RPCFundAccount(t, &payment, account, pt.ID)
+		return rhpv3.RPCFundAccount(t, &payment, account.id, pt.ID)
 	})
 	if jc.Check("couldn't fund account", err) != nil {
 		return
 	}
 
-	// Upon success, we inform the bus of the changes to the account.
-	// w.recordAccountDeposit(account, rfr.Amount) // TODO
+	// Record deposit.
+	if jc.Check("failed to record account deposit", account.Deposit(rfr.Amount)) != nil {
+		return
+	}
 }
 
 func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
@@ -902,36 +877,17 @@ func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.Publ
 	return pt, err
 }
 
-func (w *worker) initAccounts() error {
-	if w.accounts != nil {
-		return nil // already initialised
-	}
-	// Init accounts from bus.
-	accounts, err := w.bus.OwnerAccounts(w.id)
-	if err != nil {
-		return err
-	}
-	for _, acc := range accounts {
-		w.accounts[acc.Host] = &account{
-			Account:   acc,
-			Resync:    false,
-			SecretKey: w.deriveAccountKey(acc.Host),
-		}
-	}
-	return nil
-}
-
-func (w *worker) recordAccountDeposit(acount rhp.Account, amt types.Currency) error {
-	panic("not implemented")
-}
-
-func (w *worker) recordAccountWithdrawal(acount rhp.Account, amt types.Currency) error {
-	panic("not implemented")
-}
-
 func (w *worker) preparePayment(hk consensus.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
 	pk := w.deriveAccountKey(hk)
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
+}
+
+func (w *worker) accountsHandlerGET(jc jape.Context) {
+	accounts, err := w.accounts.All()
+	if jc.Check("failed to fetch accounts", err) != nil {
+		return
+	}
+	jc.Encode(accounts)
 }
 
 // New returns an HTTP handler that serves the worker API.
@@ -941,10 +897,16 @@ func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) (http.Handler, err
 		bus:       b,
 		pool:      newSessionPool(sessionTTL),
 		masterKey: masterKey,
-		accounts:  make(map[consensus.PublicKey]*account),
+		accounts:  nil,
+	}
+	w.accounts = &accounts{
+		accounts: make(map[rhpv3.Account]*account),
+		w:        w,
 	}
 
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /accounts": w.accountsHandlerGET,
+
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,
 		"POST   /rhp/form":             w.rhpFormHandler,
