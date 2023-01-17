@@ -33,18 +33,6 @@ func (c *Client) RHPScan(hostKey consensus.PublicKey, hostIP string, timeout tim
 	return
 }
 
-// RHPPreparePayment prepares an ephemeral account payment.
-func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key consensus.PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
-	req := api.RHPPreparePaymentRequest{
-		Account:    account,
-		Amount:     amount,
-		Expiry:     0, // TODO
-		AccountKey: key,
-	}
-	err = c.c.POST("/rhp/prepare/payment", req, &resp)
-	return
-}
-
 // RHPForm forms a contract with a host.
 func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPFormRequest{
