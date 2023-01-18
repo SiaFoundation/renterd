@@ -80,22 +80,15 @@ func writeResponseErr(s *mux.Stream, err error) error {
 func processPayment(rw io.ReadWriter, payment PaymentMethod) error {
 	if err := writeResponse(rw, paymentType(payment)); err != nil {
 		return err
+	} else if err := writeResponse(rw, payment); err != nil {
+		return err
 	}
-	if p, ok := payment.(*PayByContractRequest); ok {
-		if err := writeResponse(rw, p); err != nil {
-			return err
-		}
+	if pbcr, ok := payment.(*PayByContractRequest); ok {
 		var pr paymentResponse
 		if err := readResponse(rw, &pr); err != nil {
 			return err
 		}
-		p.HostSignature = pr.Signature
-	} else if p, ok := payment.(*PayByEphemeralAccountRequest); ok {
-		if err := writeResponse(rw, p); err != nil {
-			return err
-		}
-	} else {
-		return errors.New("unknown payment type")
+		pbcr.HostSignature = pr.Signature
 	}
 	return nil
 }
