@@ -384,6 +384,19 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	}
 	return resp.Contracts, nil
 }
+func (c *TestCluster) RemoveHost(host *siatest.TestNode) error {
+	if err := host.Close(); err != nil {
+		return err
+	}
+
+	for i, h := range c.hosts {
+		if h == host {
+			c.hosts = append(c.hosts[:i], c.hosts[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
 // themselves on the network, ready to form contracts.

@@ -69,9 +69,11 @@ type (
 	dbSector struct {
 		Model
 
-		Contracts []dbContract      `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
-		Hosts     []dbHost          `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
-		Root      consensus.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
+		LastHost consensus.PublicKey `gorm:"type:bytes;serializer:gob;NOT NULL"`
+		Root     consensus.Hash256   `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
+
+		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
+		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
 	}
 )
 
@@ -108,11 +110,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 			continue // sector wasn't preloaded
 		}
 
-		if len(shard.DBSector.Contracts) > 0 {
-			slab.Shards[i].Host = shard.DBSector.Contracts[len(shard.DBSector.Contracts)-1].Host.PublicKey
-		} else if len(shard.DBSector.Hosts) > 0 {
-			slab.Shards[i].Host = shard.DBSector.Hosts[len(shard.DBSector.Hosts)-1].PublicKey
-		}
+		slab.Shards[i].Host = shard.DBSector.LastHost
 		slab.Shards[i].Root = shard.DBSector.Root
 	}
 
@@ -138,17 +136,6 @@ func (o dbObject) convert() (object.Object, error) {
 			Slab:   slab,
 			Offset: sl.Offset,
 			Length: sl.Length,
-		}
-		for j, sh := range sl.Slab.Shards {
-			// Return first contract that's good for upload.
-			for _, c := range sh.DBSector.Contracts {
-				// TODO: This might cause issues. For now we can
-				// ignore the edge case for a shard existing on
-				// multiple hosts but we might want to be
-				// smarter about what host we return here.
-				obj.Slabs[i].Shards[j].Host = c.Host.PublicKey
-			}
-			obj.Slabs[i].Shards[j].Root = sh.DBSector.Root
 		}
 	}
 	return obj, nil
@@ -254,9 +241,11 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 
 				// Create sector if it doesn't exist yet.
 				var sector dbSector
-				err = tx.FirstOrCreate(&sector, &dbSector{
-					Root: shard.Root,
-				}).Error
+				err := tx.
+					Where(dbSector{Root: shard.Root}).
+					Assign(dbSector{LastHost: shard.Host}).
+					FirstOrCreate(&sector).
+					Error
 				if err != nil {
 					return err
 				}
@@ -308,6 +297,11 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 						return err
 					}
 				}
+
+				// Save the sector
+				if err := tx.Save(&sector).Error; err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -328,7 +322,7 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
+		Preload("Slabs.Slab.Shards.DBSector").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound
@@ -336,11 +330,21 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 	return obj, nil
 }
 
-func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) error {
+func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey]types.FileContractID) error {
 	// extract the slab key
 	key, err := s.Key.MarshalText()
 	if err != nil {
 		return err
+	}
+
+	// extract used contracts
+	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+	for _, shard := range s.Shards {
+		fcid, ok := goodContracts[shard.Host]
+		if !ok {
+			return errors.New("could not find contract for host")
+		}
+		usedContracts[shard.Host] = fcid
 	}
 
 	// extract host keys
@@ -409,7 +413,9 @@ func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[consensus.PublicKey
 			// ensure the sector exists
 			var sector dbSector
 			if err := tx.
-				FirstOrCreate(&sector, &dbSector{Root: shard.Root}).
+				Where(dbSector{Root: shard.Root}).
+				Assign(dbSector{LastHost: shard.Host}).
+				FirstOrCreate(&sector).
 				Error; err != nil {
 				return err
 			}
@@ -443,6 +449,11 @@ func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[consensus.PublicKey
 					return err
 				}
 			}
+
+			// save the sector
+			if err := tx.Save(&sector).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -454,27 +465,28 @@ func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[consensus.PublicKey
 //
 // TODO: consider that we don't want to migrate slabs above a given health.
 func (s *SQLStore) SlabsForMigration(set string, limit int) ([]object.Slab, error) {
-	goodContracts := s.db.
-		Model(&dbContract{}).
-		Select("contracts.id").
-		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-		Joins("INNER JOIN contract_sets cs ON csc.db_contract_set_id = cs.id").
-		Where("cs.name = ?", set)
+	inner := s.db.
+		Model(&dbSlab{}).
+		Select("`slabs`.*, COUNT(*) as TotalShards").
+		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
+		Group("slabs.id")
 
 	var dbBatch []dbSlab
 	var slabs []object.Slab
 
 	if err := s.db.
 		Model(&dbSlab{}).
+		Table("(?) as slabs", inner).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
-		Joins("LEFT JOIN contract_sectors se ON sh.db_sector_id = se.db_sector_id").
+		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
-		Where("c.id IS NULL OR c.id NOT IN (?)", goodContracts).
+		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
+		Joins("INNER JOIN contract_sets cs ON csc.db_contract_set_id = cs.id AND cs.name = (?)", set).
 		Group("slabs.id").
+		Having("COUNT(slabs.id) < TotalShards").
 		Order("COUNT(slabs.id) DESC").
 		Limit(limit).
-		Preload("Shards.DBSector.Contracts.Host").
-		Preload("Shards.DBSector.Hosts").
+		Preload("Shards.DBSector").
 		FindInBatches(&dbBatch, 10000, func(tx *gorm.DB, batch int) error {
 			for _, dbSlab := range dbBatch {
 				if slab, err := dbSlab.convert(); err == nil {

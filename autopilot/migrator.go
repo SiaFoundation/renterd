@@ -27,8 +27,10 @@ func newMigrator(ap *Autopilot) *migrator {
 }
 
 func (m *migrator) TryPerformMigrations() {
+	m.logger.Info("try performing migrations")
 	m.mu.Lock()
 	if m.running {
+		m.logger.Info("migrations still running")
 		m.mu.Unlock()
 		return
 	}

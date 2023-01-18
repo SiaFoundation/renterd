@@ -199,7 +199,7 @@ type Bus interface {
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
 
-	UpdateSlab(s object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) error
+	UpdateSlab(s object.Slab, goodContracts map[consensus.PublicKey]types.FileContractID) error
 
 	WalletDiscard(txn types.Transaction) error
 	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
@@ -550,7 +550,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	}
 }
 
-func (w *worker) slabsMigrateHandler(jc jape.Context) {
+func (w *worker) slabMigrateHandler(jc jape.Context) {
 	var slab object.Slab
 	if jc.Decode(&slab) != nil {
 		return
@@ -821,7 +821,7 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
 
-		"POST   /slabs/migrate": w.slabsMigrateHandler,
+		"POST   /slab/migrate": w.slabMigrateHandler,
 
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,

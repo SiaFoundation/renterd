@@ -823,6 +823,11 @@ func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSetting
 		return types.ZeroCurrency, errors.New("contract price + fees exceeds funding")
 	}
 
+	// avoid division by zero
+	if settings.StoragePrice.IsZero() {
+		settings.StoragePrice = types.NewCurrency64(1)
+	}
+
 	// calculate the host collateral
 	renterPayout := renterFunds.Sub(settings.ContractPrice).Sub(txnFee)
 	maxStorage := renterPayout.Div(settings.StoragePrice)

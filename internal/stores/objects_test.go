@@ -425,6 +425,27 @@ func TestSlabsForMigration(t *testing.T) {
 					},
 				},
 			},
+			// good slab - reused hosts
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hk1,
+							Root: consensus.Hash256{1},
+						},
+						{
+							Host: hk1,
+							Root: consensus.Hash256{2},
+						},
+						{
+							Host: hk2,
+							Root: consensus.Hash256{3},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -700,6 +721,15 @@ func TestPutSlab(t *testing.T) {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of hosts, %v!=2", len(hks))
 	} else if hks[0] != hk2 || hks[1] != hk3 {
 		t.Fatal("sector 1 was uploaded to unexpected hosts", hks[0], hks[1])
+	}
+
+	// fetch slabs for migration and assert there are none left
+	toMigrate, err = db.SlabsForMigration("autopilot", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(toMigrate) != 0 {
+		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 }
 
