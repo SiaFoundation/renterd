@@ -858,7 +858,7 @@ func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.Publ
 
 			// TODO: gouging check on price table
 
-			refundAccount := rhpv3.Account(w.deriveAccountKey(hk).PublicKey())
+			refundAccount := rhpv3.Account(w.accounts.deriveAccountKey(hk).PublicKey())
 			rk := w.deriveRenterKey(hk)
 			payment, ok := rhpv3.PayByContract(revision, cost, refundAccount, rk)
 			if !ok {
@@ -874,7 +874,7 @@ func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.Publ
 }
 
 func (w *worker) preparePayment(hk consensus.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
-	pk := w.deriveAccountKey(hk)
+	pk := w.accounts.deriveAccountKey(hk)
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
 }
 
@@ -897,7 +897,8 @@ func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) (http.Handler, err
 	}
 	w.accounts = &accounts{
 		accounts: make(map[rhpv3.Account]*account),
-		w:        w,
+		workerID: w.id,
+		key:      w.deriveSubKey("accountkey"),
 	}
 
 	return jape.Mux(map[string]jape.Handler{

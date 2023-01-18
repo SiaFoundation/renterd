@@ -15,7 +15,8 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
-		w *worker
+		workerID string
+		key      consensus.PrivateKey
 
 		mu       sync.Mutex
 		accounts map[rhp.Account]*account
@@ -67,8 +68,7 @@ func (a *accounts) AccountForHost(hk consensus.PublicKey) (*account, error) {
 	}
 
 	// Create and or return account.
-	accountKey := a.w.deriveAccountKey(hk)
-	accountID := rhp.Account(accountKey.PublicKey())
+	accountID := rhp.Account(a.key.PublicKey())
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -77,7 +77,7 @@ func (a *accounts) AccountForHost(hk consensus.PublicKey) (*account, error) {
 		acc = &account{
 			id:      accountID,
 			host:    hk,
-			key:     accountKey,
+			key:     a.key,
 			balance: types.ZeroCurrency,
 		}
 		a.accounts[accountID] = acc
@@ -111,13 +111,13 @@ func (a *accounts) tryInitAccounts() error {
 // Each worker has its own account for a given host. That makes concurrency
 // around keeping track of an accounts balance and refilling it a lot easier in
 // a multi-worker setup.
-func (w *worker) deriveAccountKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+func (a *accounts) deriveAccountKey(hostKey consensus.PublicKey) consensus.PrivateKey {
 	index := byte(0) // not used yet but can be used to derive more than 1 account per host
 
 	// Append the owner of the account (worker's id), the host for which to
 	// create it and the index to the corresponding sub-key.
-	subKey := w.deriveSubKey("accountkey")
-	data := append(subKey, []byte(w.id)...)
+	subKey := a.key
+	data := append(subKey, []byte(a.workerID)...)
 	data = append(data, hostKey[:]...)
 	data = append(data, index)
 
