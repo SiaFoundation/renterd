@@ -138,7 +138,7 @@ func (w *worker) preparePriceTableContractPayment(hk consensus.PublicKey, revisi
 	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
 		// TODO: gouging check on price table
 
-		refundAccount := rhp.Account(w.deriveAccountKey(hk).PublicKey())
+		refundAccount := rhp.Account(w.accounts.deriveAccountKey(hk).PublicKey())
 		rk := w.deriveRenterKey(hk)
 		payment, ok := rhpv3.PayByContract(revision, pt.UpdatePriceTableCost, refundAccount, rk)
 		if !ok {
@@ -154,7 +154,7 @@ func (w *worker) preparePriceTableAccountPayment(hk consensus.PublicKey, revisio
 	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
 		// TODO: gouging check on price table
 
-		accountKey := w.deriveAccountKey(hk)
+		accountKey := w.accounts.deriveAccountKey(hk)
 		account := rhpv3.Account(accountKey.PublicKey())
 		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, math.MaxUint64, accountKey)
 		return &payment, nil

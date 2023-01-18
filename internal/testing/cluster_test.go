@@ -224,13 +224,22 @@ func TestEphemeralAccounts(t *testing.T) {
 		contract = contracts[0]
 	}
 
+	// Account shouldnt' exist.
+	accounts, err := w.Accounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("wrong number of accounts %v", len(accounts))
+	}
+
 	// Fund account.
 	if err := w.RHPFund(contract.ID, contract.HostKey(), types.SiacoinPrecision); err != nil {
 		t.Fatal(err)
 	}
 
 	// Expected account balance should have increased.
-	accounts, err := w.Accounts()
+	accounts, err = w.Accounts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +250,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if !acc.Balance.Equals(types.SiacoinPrecision) {
 		t.Fatalf("wrong balance %v", acc.Balance.HumanString())
 	}
-	if acc.ID == rhp.ZeroAccount {
+	if acc.ID == (rhp.Account{}) {
 		t.Fatal("account id not set")
 	}
 	if acc.Host != consensus.PublicKey(hg.PublicKey.ToPublicKey()) {

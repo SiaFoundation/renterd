@@ -24,11 +24,13 @@ type (
 	Signature = consensus.Signature
 )
 
+const (
+	// Atomic write size for modern disks is 4kib so we round up.
+	atomicWriteSize = uint64(1 << 12)
+)
+
 // An Account is a public key used to identify an ephemeral account on a host.
 type Account PublicKey
-
-// ZeroAccount is a sentinel value that indicates the lack of an account.
-var ZeroAccount Account
 
 // A PaymentMethod is a way of paying for an arbitrary host operation.
 type PaymentMethod interface {
@@ -72,16 +74,12 @@ func PayByContract(rev *types.FileContractRevision, amount types.Currency, refun
 	for i, o := range rev.NewMissedProofOutputs {
 		newMissed[i] = o.Value
 	}
-	ra := modules.ZeroAccountID
-	if refundAcct != ZeroAccount {
-		ra.FromSPK(types.Ed25519PublicKey(crypto.PublicKey(refundAcct)))
-	}
 	p := PayByContractRequest{
 		ContractID:           rev.ParentID,
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		RefundAccount:        ra,
+		RefundAccount:        refundAcct,
 	}
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{*rev},
@@ -91,8 +89,7 @@ func PayByContract(rev *types.FileContractRevision, amount types.Currency, refun
 			CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		}},
 	}
-	sig := sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
-	p.Signature = sig[:]
+	p.Signature = sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
 	return p, true
 }
 
@@ -141,18 +138,16 @@ const registryEntrySize = 256
 
 // MDMUpdateRegistryCost is the cost of executing a 'UpdateRegistry'
 // instruction on the MDM.
-func (pt *HostPriceTable) UpdateRegistryCost() (_, _ types.Currency) {
+func (pt *HostPriceTable) UpdateRegistryCost() (writeCost, storeCost types.Currency) {
 	// Cost is the same as uploading and storing a registry entry for 5 years.
-	writeCost := pt.writeCost(registryEntrySize)
-	storeCost := pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * types.BlocksPerYear))
+	writeCost = pt.writeCost(registryEntrySize)
+	storeCost = pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * types.BlocksPerYear))
 	return writeCost.Add(storeCost), storeCost
 }
 
 // writeCost is the cost of executing a 'Write' instruction of a certain length
 // on the MDM.
 func (pt *HostPriceTable) writeCost(writeLength uint64) types.Currency {
-	// Atomic write size for modern disks is 4kib so we round up.
-	atomicWriteSize := uint64(1 << 12)
 	if mod := writeLength % atomicWriteSize; mod != 0 {
 		writeLength += (atomicWriteSize - mod)
 	}
@@ -177,8 +172,8 @@ type (
 		NewRevisionNumber    uint64
 		NewValidProofValues  []types.Currency
 		NewMissedProofValues []types.Currency
-		RefundAccount        modules.AccountID
-		Signature            []byte
+		RefundAccount        Account
+		Signature            Signature
 		HostSignature        Signature
 	}
 )
@@ -219,10 +214,14 @@ type (
 		Signature Signature
 	}
 
+	rpcUpdatePriceTableResponse struct {
+		PriceTableJSON []byte
+	}
+
 	rpcPriceTableResponse struct{}
 
 	rpcFundAccountRequest struct {
-		Account modules.AccountID
+		Account Account
 	}
 
 	rpcFundAccountResponse struct {

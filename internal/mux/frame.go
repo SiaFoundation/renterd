@@ -107,7 +107,7 @@ func (cs connSettings) maxPayloadSize() int {
 const connSettingsSize = 24
 
 func defaultConnSettings(conn net.Conn) (connSettings, error) {
-	var packetSize uint16
+	var packetSize int
 	// Figure out if connection's ip is IPv4 or IPv6
 	host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
 	if err != nil {
@@ -122,7 +122,7 @@ func defaultConnSettings(conn net.Conn) (connSettings, error) {
 		return connSettings{}, errors.New("invalid ip address")
 	}
 	return connSettings{
-		RequestedPacketSize: int(packetSize),
+		RequestedPacketSize: packetSize,
 		MaxFrameSizePackets: 10,
 		MaxTimeout:          20 * time.Minute,
 	}, nil

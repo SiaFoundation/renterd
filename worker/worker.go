@@ -22,7 +22,6 @@ import (
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/rhp/v3"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
@@ -213,8 +212,8 @@ type Bus interface {
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
-// masterkey to use for a specific purpose. Such as creating deriving more keys
-// for ephemeral accounts.
+// masterkey to use for a specific purpose. Such as deriving more keys for
+// ephemeral accounts.
 func (w *worker) deriveSubKey(purpose string) consensus.PrivateKey {
 	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
 	pk := consensus.NewPrivateKeyFromSeed(seed[:])
@@ -512,7 +511,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 	// Get account for the host.
-	account, err := w.accounts.AccountForHost(rfr.HostKey)
+	account, err := w.accounts.ForHost(rfr.HostKey)
 	if jc.Check("failed to get account for provided host", err) != nil {
 		return
 	}
@@ -559,7 +558,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	// Fund account.
 	err = w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 		rk := w.deriveRenterKey(rfr.HostKey)
-		payment, ok := rhpv3.PayByContract(&revision, rfr.Amount, rhpv3.ZeroAccount, rk)
+		payment, ok := rhpv3.PayByContract(&revision, rfr.Amount, rhpv3.Account{}, rk) // no account needed for funding
 		if !ok {
 			return errors.New("insufficient funds")
 		}
@@ -596,7 +595,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	if jc.Decode(&rrur) != nil {
 		return
 	}
-	var pt rhp.HostPriceTable          // TODO
+	var pt rhpv3.HostPriceTable        // TODO
 	cost, _ := pt.UpdateRegistryCost() // TODO: handle refund
 	payment := w.preparePayment(rrur.HostKey, cost)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
@@ -851,7 +850,7 @@ func joinErrors(errs []error) error {
 }
 
 func (w *worker) preparePayment(hk consensus.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
-	pk := w.deriveAccountKey(hk)
+	pk := w.accounts.deriveAccountKey(hk)
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
 }
 
@@ -874,7 +873,8 @@ func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) (http.Handler, err
 	}
 	w.accounts = &accounts{
 		accounts: make(map[rhpv3.Account]*account),
-		w:        w,
+		workerID: w.id,
+		key:      w.deriveSubKey("accountkey"),
 	}
 
 	return jape.Mux(map[string]jape.Handler{
