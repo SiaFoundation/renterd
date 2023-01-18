@@ -21,7 +21,6 @@ import (
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/rhp/v3"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
@@ -588,7 +587,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	if jc.Decode(&rrur) != nil {
 		return
 	}
-	var pt rhp.HostPriceTable          // TODO
+	var pt rhpv3.HostPriceTable        // TODO
 	cost, _ := pt.UpdateRegistryCost() // TODO: handle refund
 	payment := w.preparePayment(rrur.HostKey, cost)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
@@ -842,7 +841,7 @@ func joinErrors(errs []error) error {
 	}
 }
 
-func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.PublicKey, hostIP string, revision *types.FileContractRevision) (pt rhp.HostPriceTable, err error) {
+func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.PublicKey, hostIP string, revision *types.FileContractRevision) (pt rhpv3.HostPriceTable, err error) {
 	// TODO: Check if valid price table exists and handle the following edge cases.
 	// - If no price table exists, we fetch a new one.
 	// - If a price table exists that is valid but about to expire use it but launch an update.
@@ -859,7 +858,7 @@ func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.Publ
 
 			// TODO: gouging check on price table
 
-			refundAccount := rhp.Account(w.deriveAccountKey(hk).PublicKey())
+			refundAccount := rhpv3.Account(w.deriveAccountKey(hk).PublicKey())
 			rk := w.deriveRenterKey(hk)
 			payment, ok := rhpv3.PayByContract(revision, cost, refundAccount, rk)
 			if !ok {
