@@ -219,6 +219,10 @@ type (
 		Signature Signature
 	}
 
+	rpcUpdatePriceTableResponse struct {
+		PriceTableJSON []byte
+	}
+
 	rpcPriceTableResponse struct{}
 
 	rpcFundAccountRequest struct {

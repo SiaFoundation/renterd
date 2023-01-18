@@ -63,7 +63,7 @@ func writeRequest(w io.Writer, id Specifier, req protocolObject) error {
 
 func readResponse(r io.Reader, resp protocolObject) error {
 	rr := rpcResponse{nil, resp}
-	if err := rr.UnmarshalSia(r); err != nil {
+	if err := encoding.ReadObject(r, &rr, 4096); err != nil {
 		return err
 	} else if rr.err != nil {
 		return rr.err
@@ -80,20 +80,20 @@ func writeResponseErr(s *mux.Stream, err error) error {
 }
 
 func processPayment(rw io.ReadWriter, payment PaymentMethod) error {
-	if err := modules.RPCWrite(rw, paymentType(payment)); err != nil {
+	if err := writeResponse(rw, paymentType(payment)); err != nil {
 		return err
 	}
 	if p, ok := payment.(*PayByContractRequest); ok {
-		if err := modules.RPCWrite(rw, p); err != nil {
+		if err := writeResponse(rw, p); err != nil {
 			return err
 		}
 		var pr paymentResponse
-		if err := modules.RPCRead(rw, &pr); err != nil {
+		if err := readResponse(rw, &pr); err != nil {
 			return err
 		}
 		p.HostSignature = pr.Signature
 	} else if p, ok := payment.(*PayByEphemeralAccountRequest); ok {
-		if err := modules.RPCWrite(rw, p); err != nil {
+		if err := writeResponse(rw, p); err != nil {
 			return err
 		}
 	} else {
@@ -209,18 +209,18 @@ func RPCPriceTable(t *Transport, paymentFunc func(pt HostPriceTable) (PaymentMet
 	s := t.DialStream()
 	defer s.Close()
 
-	var js []byte
+	var ptr rpcUpdatePriceTableResponse
 	if err := writeResponse(s, &rpcUpdatePriceTableID); err != nil {
 		return HostPriceTable{}, err
-	} else if err := modules.RPCRead(s, &js); err != nil {
+	} else if err := readResponse(s, &ptr); err != nil {
 		return HostPriceTable{}, err
-	} else if err := json.Unmarshal(js, &pt); err != nil {
+	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
 		return HostPriceTable{}, err
 	} else if payment, err := paymentFunc(pt); err != nil {
 		return HostPriceTable{}, err
 	} else if err := processPayment(s, payment); err != nil {
 		return HostPriceTable{}, err
-	} else if err := modules.RPCRead(s, &rpcPriceTableResponse{}); err != nil {
+	} else if err := readResponse(s, &rpcPriceTableResponse{}); err != nil {
 		return HostPriceTable{}, err
 	}
 	return pt, nil
@@ -252,15 +252,15 @@ func RPCFundAccount(t *Transport, payment PaymentMethod, account Account, settin
 		Account: acc,
 	}
 	var resp rpcFundAccountResponse
-	if err := modules.RPCWrite(s, &rpcFundAccountID); err != nil {
+	if err := writeResponse(s, &rpcFundAccountID); err != nil {
 		return err
-	} else if err := modules.RPCWrite(s, &settingsID); err != nil {
+	} else if err := writeResponse(s, &settingsID); err != nil {
 		return err
-	} else if err := modules.RPCWrite(s, &req); err != nil {
+	} else if err := writeResponse(s, &req); err != nil {
 		return err
 	} else if err := processPayment(s, payment); err != nil {
 		return err
-	} else if err := modules.RPCRead(s, &resp); err != nil {
+	} else if err := readResponse(s, &resp); err != nil {
 		return err
 	}
 	return nil

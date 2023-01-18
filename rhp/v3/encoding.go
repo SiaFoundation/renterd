@@ -168,6 +168,14 @@ func paymentType(payment PaymentMethod) *Specifier {
 	}
 }
 
+func (ptr rpcUpdatePriceTableResponse) MarshalSia(w io.Writer) error {
+	return encoding.NewEncoder(w).EncodeAll(ptr.PriceTableJSON)
+}
+
+func (ptr *rpcUpdatePriceTableResponse) UnmarshalSia(rd io.Reader) error {
+	return encoding.NewDecoder(rd, 4096).DecodeAll(&ptr.PriceTableJSON)
+}
+
 func (rpcPriceTableResponse) MarshalSia(w io.Writer) error    { return nil }
 func (rpcPriceTableResponse) UnmarshalSia(rd io.Reader) error { return nil }
 
