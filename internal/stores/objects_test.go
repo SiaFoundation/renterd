@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -131,15 +132,17 @@ func TestSQLObjectStore(t *testing.T) {
 			{
 				DBObjectID: 1,
 				Slab: dbSlab{
-					DBSliceID: 1,
-					Key:       obj1Slab0Key,
-					MinShards: 1,
+					DBSliceID:   1,
+					Key:         obj1Slab0Key,
+					MinShards:   1,
+					TotalShards: 1,
 					Shards: []dbShard{
 						{
 							DBSlabID:   1,
 							DBSectorID: 1,
 							DBSector: dbSector{
-								Root: obj1.Slabs[0].Shards[0].Root,
+								Root:     obj1.Slabs[0].Shards[0].Root,
+								LastHost: obj1.Slabs[0].Shards[0].Host,
 								Contracts: []dbContract{
 									{
 										HostID: 1,
@@ -164,15 +167,17 @@ func TestSQLObjectStore(t *testing.T) {
 			{
 				DBObjectID: 1,
 				Slab: dbSlab{
-					DBSliceID: 2,
-					Key:       obj1Slab1Key,
-					MinShards: 2,
+					DBSliceID:   2,
+					Key:         obj1Slab1Key,
+					MinShards:   2,
+					TotalShards: 1,
 					Shards: []dbShard{
 						{
 							DBSlabID:   2,
 							DBSectorID: 2,
 							DBSector: dbSector{
-								Root: obj1.Slabs[1].Shards[0].Root,
+								Root:     obj1.Slabs[1].Shards[0].Root,
+								LastHost: obj1.Slabs[1].Shards[0].Host,
 								Contracts: []dbContract{
 									{
 										HostID: 2,
@@ -197,7 +202,9 @@ func TestSQLObjectStore(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(obj, expectedObj) {
-		t.Fatal("object mismatch")
+		js1, _ := json.MarshalIndent(obj, "", "  ")
+		js2, _ := json.MarshalIndent(expectedObj, "", "  ")
+		t.Fatal("object mismatch", string(js1), string(js2))
 	}
 
 	// Fetch it using Get and verify again.

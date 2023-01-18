@@ -324,7 +324,7 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.Slab.Shards.DBSector").
+		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, ErrObjectNotFound
