@@ -72,11 +72,11 @@ func readResponse(r io.Reader, resp protocolObject) error {
 }
 
 func writeResponse(w io.Writer, resp protocolObject) error {
-	return (&rpcResponse{nil, resp}).MarshalSia(w)
+	return encoding.WriteObject(w, &rpcResponse{nil, resp})
 }
 
 func writeResponseErr(s *mux.Stream, err error) error {
-	return (&rpcResponse{&RPCError{Description: err.Error()}, nil}).MarshalSia(s)
+	return encoding.WriteObject(s, &rpcResponse{&RPCError{Description: err.Error()}, nil})
 }
 
 func processPayment(rw io.ReadWriter, payment PaymentMethod) error {
@@ -210,7 +210,7 @@ func RPCPriceTable(t *Transport, paymentFunc func(pt HostPriceTable) (PaymentMet
 	defer s.Close()
 
 	var js []byte
-	if err := modules.RPCWrite(s, &rpcUpdatePriceTableID); err != nil {
+	if err := writeResponse(s, &rpcUpdatePriceTableID); err != nil {
 		return HostPriceTable{}, err
 	} else if err := modules.RPCRead(s, &js); err != nil {
 		return HostPriceTable{}, err
