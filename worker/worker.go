@@ -870,6 +870,9 @@ func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) (http.Handler, err
 		pool:      newSessionPool(sessionTTL),
 		masterKey: masterKey,
 		accounts:  nil,
+		priceTables: &priceTables{
+			priceTables: make(map[consensus.PublicKey]*priceTable),
+		},
 	}
 	w.accounts = &accounts{
 		accounts: make(map[rhpv3.Account]*account),
