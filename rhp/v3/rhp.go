@@ -32,9 +32,6 @@ const (
 // An Account is a public key used to identify an ephemeral account on a host.
 type Account PublicKey
 
-// ZeroAccount is a sentinel value that indicates the lack of an account.
-var ZeroAccount Account
-
 // A PaymentMethod is a way of paying for an arbitrary host operation.
 type PaymentMethod interface {
 	protocolObject

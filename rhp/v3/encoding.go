@@ -95,7 +95,7 @@ func (resp *rpcResponse) UnmarshalSia(r io.Reader) error {
 
 // MarshalSia implements encoding.SiaMarshaler.
 func (a Account) MarshalSia(w io.Writer) error {
-	if a == ZeroAccount {
+	if a == (Account{}) {
 		return (types.SiaPublicKey{}).MarshalSia(w)
 	}
 	return (types.SiaPublicKey{
@@ -110,7 +110,7 @@ func (a *Account) UnmarshalSia(r io.Reader) error {
 	if err := spk.UnmarshalSia(r); err != nil {
 		return err
 	} else if spk.Algorithm == (types.Specifier{}) && len(spk.Key) == 0 {
-		*a = ZeroAccount
+		*a = Account{}
 		return nil
 	} else if spk.Algorithm != types.SignatureEd25519 {
 		return fmt.Errorf("unsupported signature algorithm: %v", spk.Algorithm)

@@ -250,7 +250,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if !acc.Balance.Equals(types.SiacoinPrecision) {
 		t.Fatalf("wrong balance %v", acc.Balance.HumanString())
 	}
-	if acc.ID == rhp.ZeroAccount {
+	if acc.ID == (rhp.Account{}) {
 		t.Fatal("account id not set")
 	}
 	if acc.Host != consensus.PublicKey(hg.PublicKey.ToPublicKey()) {

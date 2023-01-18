@@ -550,7 +550,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	// Fund account.
 	err = w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 		rk := w.deriveRenterKey(rfr.HostKey)
-		payment, ok := rhpv3.PayByContract(&revision, rfr.Amount, rhpv3.ZeroAccount, rk)
+		payment, ok := rhpv3.PayByContract(&revision, rfr.Amount, rhpv3.Account{}, rk) // no account needed for funding
 		if !ok {
 			return errors.New("insufficient funds")
 		}
