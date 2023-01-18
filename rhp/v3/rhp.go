@@ -24,6 +24,11 @@ type (
 	Signature = consensus.Signature
 )
 
+const (
+	// Atomic write size for modern disks is 4kib so we round up.
+	atomicWriteSize = uint64(1 << 12)
+)
+
 // An Account is a public key used to identify an ephemeral account on a host.
 type Account PublicKey
 
@@ -136,18 +141,16 @@ const registryEntrySize = 256
 
 // MDMUpdateRegistryCost is the cost of executing a 'UpdateRegistry'
 // instruction on the MDM.
-func (pt *HostPriceTable) UpdateRegistryCost() (_, _ types.Currency) {
+func (pt *HostPriceTable) UpdateRegistryCost() (writeCost, storeCost types.Currency) {
 	// Cost is the same as uploading and storing a registry entry for 5 years.
-	writeCost := pt.writeCost(registryEntrySize)
-	storeCost := pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * types.BlocksPerYear))
+	writeCost = pt.writeCost(registryEntrySize)
+	storeCost = pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * types.BlocksPerYear))
 	return writeCost.Add(storeCost), storeCost
 }
 
 // writeCost is the cost of executing a 'Write' instruction of a certain length
 // on the MDM.
 func (pt *HostPriceTable) writeCost(writeLength uint64) types.Currency {
-	// Atomic write size for modern disks is 4kib so we round up.
-	atomicWriteSize := uint64(1 << 12)
 	if mod := writeLength % atomicWriteSize; mod != 0 {
 		writeLength += (atomicWriteSize - mod)
 	}

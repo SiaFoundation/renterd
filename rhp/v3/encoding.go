@@ -124,7 +124,7 @@ func (a Account) MarshalJSON() ([]byte, error) {
 	return consensus.PublicKey(a).MarshalJSON()
 }
 
-// MarshalJSON implements json.Unmarshaler.
+// MarshalJSON implements json.Marshaler.
 func (a *Account) UnmarshalJSON(b []byte) error {
 	return (*consensus.PublicKey)(a).UnmarshalJSON(b)
 }
