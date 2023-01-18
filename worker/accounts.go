@@ -15,10 +15,10 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
+		w *worker
+
 		mu       sync.Mutex
 		accounts map[rhp.Account]*account
-
-		w *worker
 	}
 
 	// account contains information regarding a specific account of the
