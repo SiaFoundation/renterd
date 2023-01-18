@@ -209,8 +209,8 @@ type Bus interface {
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
-// masterkey to use for a specific purpose. Such as creating deriving more keys
-// for ephemeral accounts.
+// masterkey to use for a specific purpose. Such as deriving more keys for
+// ephemeral accounts.
 func (w *worker) deriveSubKey(purpose string) consensus.PrivateKey {
 	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
 	pk := consensus.NewPrivateKeyFromSeed(seed[:])
