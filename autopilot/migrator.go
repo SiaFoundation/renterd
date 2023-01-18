@@ -27,10 +27,8 @@ func newMigrator(ap *Autopilot) *migrator {
 }
 
 func (m *migrator) TryPerformMigrations() {
-	m.logger.Info("try performing migrations")
 	m.mu.Lock()
 	if m.running {
-		m.logger.Info("migrations still running")
 		m.mu.Unlock()
 		return
 	}
@@ -58,12 +56,14 @@ func (m *migrator) performMigrations() {
 		}
 		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
 
-		// escape early if there's no slabs to migrate
+		// return if there are no slabs to migrate
 		if len(toMigrate) == 0 {
 			return
 		}
 
-		// migrate them one by one
+		// migrate the slabs one by one
+		//
+		// TODO: when we support parallel uploads we should parallellize this
 		for i, slab := range toMigrate {
 			err := m.ap.worker.MigrateSlab(slab)
 			if err != nil {

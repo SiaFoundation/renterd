@@ -52,6 +52,7 @@ type (
 		Key         []byte    `gorm:"unique;NOT NULL"` // json string
 		LastFailure time.Time `gorm:"index"`
 		MinShards   uint8
+		TotalShards uint8
 		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
@@ -226,9 +227,10 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 				return err
 			}
 			slab := &dbSlab{
-				DBSliceID: slice.ID,
-				Key:       slabKey,
-				MinShards: ss.MinShards,
+				DBSliceID:   slice.ID,
+				Key:         slabKey,
+				MinShards:   ss.MinShards,
+				TotalShards: uint8(len(ss.Shards)),
 			}
 			err = tx.Create(&slab).Error
 			if err != nil {
@@ -465,25 +467,18 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey
 //
 // TODO: consider that we don't want to migrate slabs above a given health.
 func (s *SQLStore) SlabsForMigration(set string, limit int) ([]object.Slab, error) {
-	inner := s.db.
-		Model(&dbSlab{}).
-		Select("`slabs`.*, COUNT(*) as TotalShards").
-		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
-		Group("slabs.id")
-
 	var dbBatch []dbSlab
 	var slabs []object.Slab
 
 	if err := s.db.
 		Model(&dbSlab{}).
-		Table("(?) as slabs", inner).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
 		Joins("INNER JOIN contract_sets cs ON csc.db_contract_set_id = cs.id AND cs.name = (?)", set).
 		Group("slabs.id").
-		Having("COUNT(slabs.id) < TotalShards").
+		Having("COUNT(slabs.id) < slabs.total_shards").
 		Order("COUNT(slabs.id) DESC").
 		Limit(limit).
 		Preload("Shards.DBSector").
