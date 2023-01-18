@@ -13,7 +13,7 @@ import (
 )
 
 // MarshalSia implements encoding.SiaMarshaler.
-func (s *Specifier) MarshalSia(w io.Writer) error {
+func (s Specifier) MarshalSia(w io.Writer) error {
 	_, err := w.Write(s[:])
 	return err
 }
@@ -25,7 +25,7 @@ func (s *Specifier) UnmarshalSia(r io.Reader) error {
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
-func (s *SettingsID) MarshalSia(w io.Writer) error {
+func (s SettingsID) MarshalSia(w io.Writer) error {
 	_, err := w.Write(s[:])
 	return err
 }
@@ -74,7 +74,7 @@ func (s *SettingsID) UnmarshalJSON(b []byte) error {
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
-func (resp *rpcResponse) MarshalSia(w io.Writer) error {
+func (resp rpcResponse) MarshalSia(w io.Writer) error {
 	if resp.err != nil {
 		return encoding.NewEncoder(w).EncodeAll(true, resp.err)
 	}
@@ -94,8 +94,8 @@ func (resp *rpcResponse) UnmarshalSia(r io.Reader) error {
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
-func (a *Account) MarshalSia(w io.Writer) error {
-	if *a == ZeroAccount {
+func (a Account) MarshalSia(w io.Writer) error {
+	if a == ZeroAccount {
 		return (types.SiaPublicKey{}).MarshalSia(w)
 	}
 	return (types.SiaPublicKey{
@@ -130,7 +130,7 @@ func (a *Account) UnmarshalJSON(b []byte) error {
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
-func (r *PayByEphemeralAccountRequest) MarshalSia(w io.Writer) error {
+func (r PayByEphemeralAccountRequest) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.Account, r.Expiry, r.Account, r.Nonce, r.Signature, r.Priority)
 }
 
@@ -140,7 +140,7 @@ func (r *PayByEphemeralAccountRequest) UnmarshalSia(rd io.Reader) error {
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
-func (r *PayByContractRequest) MarshalSia(w io.Writer) error {
+func (r PayByContractRequest) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.ContractID, r.NewRevisionNumber, r.NewValidProofValues, r.NewMissedProofValues, r.RefundAccount, r.Signature)
 }
 
@@ -149,7 +149,7 @@ func (r *PayByContractRequest) UnmarshalSia(rd io.Reader) error {
 	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.ContractID, &r.NewRevisionNumber, &r.NewValidProofValues, &r.NewMissedProofValues, &r.RefundAccount, &r.Signature)
 }
 
-func (r *paymentResponse) MarshalSia(w io.Writer) error {
+func (r paymentResponse) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.Signature)
 }
 
@@ -179,7 +179,7 @@ func (ptr *rpcUpdatePriceTableResponse) UnmarshalSia(rd io.Reader) error {
 func (rpcPriceTableResponse) MarshalSia(w io.Writer) error    { return nil }
 func (rpcPriceTableResponse) UnmarshalSia(rd io.Reader) error { return nil }
 
-func (r *rpcFundAccountRequest) MarshalSia(w io.Writer) error {
+func (r rpcFundAccountRequest) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.Account)
 }
 
@@ -187,7 +187,7 @@ func (r *rpcFundAccountRequest) UnmarshalSia(rd io.Reader) error {
 	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.Account)
 }
 
-func (r *rpcFundAccountResponse) MarshalSia(w io.Writer) error {
+func (r rpcFundAccountResponse) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.Balance, r.Receipt, r.Signature)
 }
 
@@ -195,7 +195,7 @@ func (r *rpcFundAccountResponse) UnmarshalSia(rd io.Reader) error {
 	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.Balance, &r.Receipt, &r.Signature)
 }
 
-func (r *rpcExecuteProgramRequest) MarshalSia(w io.Writer) error {
+func (r rpcExecuteProgramRequest) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.FileContractID, r.Program, r.ProgramData)
 }
 
@@ -203,7 +203,7 @@ func (r *rpcExecuteProgramRequest) UnmarshalSia(rd io.Reader) error {
 	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.FileContractID, &r.Program, &r.ProgramData)
 }
 
-func (r *rpcExecuteProgramResponse) MarshalSia(w io.Writer) error {
+func (r rpcExecuteProgramResponse) MarshalSia(w io.Writer) error {
 	return encoding.NewEncoder(w).EncodeAll(r.AdditionalCollateral, r.OutputLength, r.NewMerkleRoot, r.NewSize, r.Proof, r.Error, r.TotalCost, r.FailureRefund)
 }
 

@@ -72,16 +72,12 @@ func PayByContract(rev *types.FileContractRevision, amount types.Currency, refun
 	for i, o := range rev.NewMissedProofOutputs {
 		newMissed[i] = o.Value
 	}
-	ra := modules.ZeroAccountID
-	if refundAcct != ZeroAccount {
-		ra.FromSPK(types.Ed25519PublicKey(crypto.PublicKey(refundAcct)))
-	}
 	p := PayByContractRequest{
 		ContractID:           rev.ParentID,
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		RefundAccount:        ra,
+		RefundAccount:        refundAcct,
 	}
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{*rev},
@@ -177,7 +173,7 @@ type (
 		NewRevisionNumber    uint64
 		NewValidProofValues  []types.Currency
 		NewMissedProofValues []types.Currency
-		RefundAccount        modules.AccountID
+		RefundAccount        Account
 		Signature            []byte
 		HostSignature        Signature
 	}
@@ -226,7 +222,7 @@ type (
 	rpcPriceTableResponse struct{}
 
 	rpcFundAccountRequest struct {
-		Account modules.AccountID
+		Account Account
 	}
 
 	rpcFundAccountResponse struct {

@@ -13,8 +13,6 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/renterd/internal/mux"
-	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
@@ -246,10 +244,8 @@ func RPCFundAccount(t *Transport, payment PaymentMethod, account Account, settin
 	s := t.DialStream()
 	defer s.Close()
 
-	var acc modules.AccountID
-	acc.FromSPK(types.Ed25519PublicKey(crypto.PublicKey(account)))
 	req := rpcFundAccountRequest{
-		Account: acc,
+		Account: account,
 	}
 	var resp rpcFundAccountResponse
 	if err := writeResponse(s, &rpcFundAccountID); err != nil {
