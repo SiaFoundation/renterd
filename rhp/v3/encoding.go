@@ -131,22 +131,28 @@ func (a *Account) UnmarshalJSON(b []byte) error {
 
 // MarshalSia implements encoding.SiaMarshaler.
 func (r PayByEphemeralAccountRequest) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.Account, r.Expiry, r.Account, r.Nonce, r.Signature, r.Priority)
+	return encoding.NewEncoder(w).EncodeAll(r.Account, r.Expiry, r.Account, r.Nonce, r.Signature[:], r.Priority)
 }
 
 // UnmarshalSia implements encoding.SiaUnmarshaler.
 func (r *PayByEphemeralAccountRequest) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.Account, &r.Expiry, &r.Account, &r.Nonce, &r.Signature, &r.Priority)
+	var signature []byte
+	err := encoding.NewDecoder(rd, 4096).DecodeAll(&r.Account, &r.Expiry, &r.Account, &r.Nonce, &signature, &r.Priority)
+	copy(r.Signature[:], signature)
+	return err
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
 func (r PayByContractRequest) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.ContractID, r.NewRevisionNumber, r.NewValidProofValues, r.NewMissedProofValues, r.RefundAccount, r.Signature)
+	return encoding.NewEncoder(w).EncodeAll(r.ContractID, r.NewRevisionNumber, r.NewValidProofValues, r.NewMissedProofValues, r.RefundAccount, r.Signature[:])
 }
 
 // UnmarshalSia implements encoding.SiaUnmarshaler.
 func (r *PayByContractRequest) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.ContractID, &r.NewRevisionNumber, &r.NewValidProofValues, &r.NewMissedProofValues, &r.RefundAccount, &r.Signature)
+	var signature []byte
+	err := encoding.NewDecoder(rd, 4096).DecodeAll(&r.ContractID, &r.NewRevisionNumber, &r.NewValidProofValues, &r.NewMissedProofValues, &r.RefundAccount, &signature)
+	copy(r.Signature[:], signature)
+	return err
 }
 
 func (r paymentResponse) MarshalSia(w io.Writer) error {

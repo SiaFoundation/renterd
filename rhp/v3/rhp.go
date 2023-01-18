@@ -87,8 +87,7 @@ func PayByContract(rev *types.FileContractRevision, amount types.Currency, refun
 			CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		}},
 	}
-	sig := sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
-	p.Signature = sig[:]
+	p.Signature = sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
 	return p, true
 }
 
@@ -174,7 +173,7 @@ type (
 		NewValidProofValues  []types.Currency
 		NewMissedProofValues []types.Currency
 		RefundAccount        Account
-		Signature            []byte
+		Signature            Signature
 		HostSignature        Signature
 	}
 )
