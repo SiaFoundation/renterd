@@ -299,11 +299,6 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 						return err
 					}
 				}
-
-				// Save the sector
-				if err := tx.Save(&sector).Error; err != nil {
-					return err
-				}
 			}
 		}
 		return nil
@@ -450,11 +445,6 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey
 					Append(host); err != nil {
 					return err
 				}
-			}
-
-			// save the sector
-			if err := tx.Save(&sector).Error; err != nil {
-				return err
 			}
 		}
 		return nil
