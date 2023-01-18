@@ -25,6 +25,12 @@ func wrapErr(err *error, fnName string) {
 	}
 }
 
+// PriceTablePaymentFunc is a function that can be passed in to RPCPriceTable.
+// It is called after the price table is received from the host and supposed to
+// create a payment for that table and return it. It can also be used to perform
+// gouging checks before paying for the table.
+type PriceTablePaymentFunc func(pt HostPriceTable) (PaymentMethod, error)
+
 // An RPCError may be sent instead of a response object to any RPC.
 type RPCError struct {
 	Type        Specifier
@@ -204,7 +210,7 @@ func NewRenterTransport(conn net.Conn, hostKey PublicKey) (*Transport, error) {
 }
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
-func RPCPriceTable(t *Transport, paymentFunc func(pt HostPriceTable) (PaymentMethod, error)) (pt HostPriceTable, err error) {
+func RPCPriceTable(t *Transport, paymentFunc PriceTablePaymentFunc) (pt HostPriceTable, err error) {
 	defer wrapErr(&err, "PriceTable")
 	s := t.DialStream()
 	defer s.Close()

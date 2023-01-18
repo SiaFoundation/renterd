@@ -253,7 +253,8 @@ type worker struct {
 	pool      *sessionPool
 	masterKey [32]byte
 
-	accounts *accounts
+	accounts    *accounts
+	priceTables *priceTables
 }
 
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
@@ -546,9 +547,13 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Get price table.
-	pt, err := w.hostPriceTableByContract(jc.Request.Context(), rfr.HostKey, hostIP, &revision)
-	if jc.Check("failed to fetch pricetable", err) != nil {
-		return
+	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
+	if !ptValid {
+		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, hostIP, rfr.HostKey)
+		if jc.Check("failed to update outdated price table", err) != nil {
+			return
+		}
 	}
 
 	// Fund account.
@@ -843,38 +848,6 @@ func joinErrors(errs []error) error {
 		}
 		return errors.New(strings.Join(strs, ";"))
 	}
-}
-
-func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.PublicKey, hostIP string, revision *types.FileContractRevision) (pt rhp.HostPriceTable, err error) {
-	// TODO: Check if valid price table exists and handle the following edge cases.
-	// - If no price table exists, we fetch a new one.
-	// - If a price table exists that is valid but about to expire use it but launch an update.
-	// - If a price table exists that is valid and doesn't expire soon, use it.
-
-	// Get price table.
-	err = w.withTransportV3(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
-		// The FundAccount RPC requires a SettingsID, which we also have to pay
-		// for. To simplify things, we pay for the SettingsID using the full
-		// amount, with the "refund" going to the desired account; we then top
-		// up the account to cover the cost of the two RPCs.
-		pt, err = rhpv3.RPCPriceTable(t, func(priceTable rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
-			cost := priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost)
-
-			// TODO: gouging check on price table
-
-			refundAccount := rhp.Account(w.deriveAccountKey(hk).PublicKey())
-			rk := w.deriveRenterKey(hk)
-			payment, ok := rhpv3.PayByContract(revision, cost, refundAccount, rk)
-			if !ok {
-				return nil, errors.New("insufficient funds")
-			}
-			return &payment, nil
-		})
-		return err
-	})
-
-	// TODO: update cached price table.
-	return pt, err
 }
 
 func (w *worker) preparePayment(hk consensus.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
