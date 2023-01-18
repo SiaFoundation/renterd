@@ -54,9 +54,9 @@ func (a *accounts) All() ([]api.Account, error) {
 	return accounts, nil
 }
 
-// AccountForHost returns an account to use for a given host. If the account
+// ForHost returns an account to use for a given host. If the account
 // doesn't exist, a new one is created.
-func (a *accounts) AccountForHost(hk consensus.PublicKey) (*account, error) {
+func (a *accounts) ForHost(hk consensus.PublicKey) (*account, error) {
 	// Make sure accounts are initialised.
 	if err := a.tryInitAccounts(); err != nil {
 		return nil, err

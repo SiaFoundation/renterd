@@ -507,7 +507,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 	// Get account for the host.
-	account, err := w.accounts.AccountForHost(rfr.HostKey)
+	account, err := w.accounts.ForHost(rfr.HostKey)
 	if jc.Check("failed to get account for provided host", err) != nil {
 		return
 	}
