@@ -38,10 +38,6 @@ type priceTableUpdate struct {
 // PriceTable returns a price table for the give host and an bool to indicate
 // whether it is valid or not.
 func (pts *priceTables) PriceTable(hk consensus.PublicKey) (rhp.HostPriceTable, bool) {
-	// TODO: Check if valid price table exists and handle the following edge cases.
-	// - If no price table exists, we fetch a new one.
-	// - If a price table exists that is valid but about to expire use it but launch an update.
-	// - If a price table exists that is valid and doesn't expire soon, use it.
 	pt := pts.priceTable(hk)
 
 	// TODO: If the pricetable is valid, kick off a non-blocking update
