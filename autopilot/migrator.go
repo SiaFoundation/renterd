@@ -63,7 +63,7 @@ func (m *migrator) performMigrations() {
 
 		// migrate the slabs one by one
 		//
-		// TODO: when we support parallel uploads we should parallellize this
+		// TODO: when we support parallel uploads we should parallelize this
 		for i, slab := range toMigrate {
 			err := m.ap.worker.MigrateSlab(slab)
 			if err != nil {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -261,21 +262,23 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 }
 
 func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error {
-	// create a map of hosts we can use
-	usable := make(map[string]bool)
+	// keep some state, hosts in the state are considered good hosts, for every
+	// host we keep track of the amount of times they are used in the slab
+	state := make(map[string]int)
 	for _, h := range hosts {
-		usable[h.PublicKey().String()] = true
+		state[h.PublicKey().String()] = 0
 	}
 
-	// decide which shards need to be migrated
+	// loop all shards and collect the indices of those that need to be migrated
 	var shardIndices []int
 	for i, shard := range s.Shards {
-		if !usable[shard.Host.String()] {
+		if _, good := state[shard.Host.String()]; !good {
 			shardIndices = append(shardIndices, i)
 		}
+		state[shard.Host.String()]++
 	}
 
-	// if all shards are usable, we're done
+	// if all shards are on good hosts, we're done
 	if len(shardIndices) == 0 {
 		return nil
 	}
@@ -308,6 +311,11 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error
 		shards[i] = shards[si]
 	}
 	shards = shards[:len(shardIndices)]
+
+	// sort the hosts in a way that frequently used hosts are at the end
+	sort.SliceStable(hosts, func(i, j int) bool {
+		return state[hosts[i].PublicKey().String()] < state[hosts[j].PublicKey().String()]
+	})
 
 	// reupload those shards
 	uploaded, err := parallelUploadSlab(ctx, shards, hosts)
