@@ -31,18 +31,13 @@ func TestMigrations(t *testing.T) {
 	}()
 
 	// convenience variables
-	cfg := defaultAutopilotConfig.Contracts
+	cfg := defaultAutopilotConfig
 	w := cluster.Worker
 	b := cluster.Bus
 
 	// add hosts
-	hosts, err := cluster.AddHosts(int(cfg.Hosts))
+	hosts, err := cluster.AddHostsBlocking(int(cfg.Contracts.Hosts))
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	// wait until we have contracts
-	if _, err := cluster.WaitForContracts(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,22 +80,26 @@ func TestMigrations(t *testing.T) {
 		return false
 	}
 
-	// remove one (random) host from the cluster
-	hks := usedHosts()
-	var hk consensus.PublicKey
-	for _, h := range hosts {
-		if hk = h.HostKey(); isUsed(hk, hks) {
-			if err := cluster.RemoveHost(h); err != nil {
-				t.Fatal(err)
+	removeUsedHost := func() (hk consensus.PublicKey) {
+		t.Helper()
+		hks := usedHosts()
+		for _, h := range hosts {
+			if hk = h.HostKey(); isUsed(hk, hks) {
+				if err := cluster.RemoveHost(h); err != nil {
+					t.Fatal(err)
+				}
+				break
 			}
-			break
 		}
+		return
 	}
+
+	// remove one (random) host from the cluster
+	hk := removeUsedHost()
 
 	// assert we migrated away from the bad host
 	if err := Retry(30, time.Second, func() error {
-		hks := usedHosts()
-		if isUsed(hk, hks) {
+		if isUsed(hk, usedHosts()) {
 			return errors.New("host is still used")
 		}
 		return nil

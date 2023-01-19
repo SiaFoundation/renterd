@@ -393,6 +393,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey
 		var slab dbSlab
 		if err = tx.
 			Where(&dbSlab{Key: key}).
+			Assign(&dbSlab{TotalShards: uint8(len(slab.Shards))}).
 			Preload("Shards.DBSector").
 			Take(&slab).
 			Error; err != nil {
@@ -452,21 +453,25 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey
 }
 
 // SlabsForMigration returns up to 'limit' slabs that do not belong to contracts
-// in the given set. These slabs need to be migrated to contracts in the set so
-// they are restored to full health.
+// in the given set. These slabs need to be migrated to good contracts so they
+// are restored to full health.
 //
 // TODO: consider that we don't want to migrate slabs above a given health.
-func (s *SQLStore) SlabsForMigration(set string, limit int) ([]object.Slab, error) {
+func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error) {
 	var dbBatch []dbSlab
 	var slabs []object.Slab
+
+	fcids := make([]interface{}, len(goodContracts))
+	for i, fcid := range goodContracts {
+		fcids[i] = fcid
+	}
 
 	if err := s.db.
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
-		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
-		Joins("INNER JOIN contract_sets cs ON csc.db_contract_set_id = cs.id AND cs.name = (?)", set).
+		Where("c.fcid IN (?)", gobEncodeSlice(fcids)).
 		Group("slabs.id").
 		Having("COUNT(slabs.id) < slabs.total_shards").
 		Order("COUNT(slabs.id) DESC").

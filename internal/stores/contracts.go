@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"go.sia.tech/renterd/api"
@@ -197,6 +198,7 @@ func (s *SQLStore) ActiveContracts() ([]api.ContractMetadata, error) {
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
 func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+	fmt.Println("renew contract for host", c.HostKey().String())
 	var renewed dbContract
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {

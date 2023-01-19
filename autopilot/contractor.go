@@ -205,7 +205,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// build the new contract set (excluding formed contracts)
-	contractset := buildContractSet(contractIds(contracts), toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
+	contractset := buildContractSet(contractIds(contractMetadatas(contracts)), toDelete, toIgnore, contractIds(contractMetadatas(toRefresh)), contractIds(contractMetadatas(toRenew)), renewed)
 	numContracts := uint64(len(contractset))
 
 	// check if we need to form contracts and add them to the contract set
@@ -801,7 +801,15 @@ func buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew []types.Fil
 	return contracts
 }
 
-func contractIds(contracts []api.Contract) []types.FileContractID {
+func contractMetadatas(contracts []api.Contract) []api.ContractMetadata {
+	metadatas := make([]api.ContractMetadata, len(contracts))
+	for i, c := range contracts {
+		metadatas[i] = c.ContractMetadata
+	}
+	return metadatas
+}
+
+func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
 	ids := make([]types.FileContractID, len(contracts))
 	for i, c := range contracts {
 		ids[i] = c.ID

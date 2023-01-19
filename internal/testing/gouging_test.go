@@ -38,7 +38,7 @@ func TestGouging(t *testing.T) {
 	w := cluster.Worker
 
 	// add hosts
-	hosts, err := cluster.AddHosts(int(cfg.Hosts))
+	hosts, err := cluster.AddHostsBlocking(int(cfg.Hosts))
 	if err != nil {
 		t.Fatal(err)
 	}

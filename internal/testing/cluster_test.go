@@ -149,12 +149,7 @@ func TestUploadDownload(t *testing.T) {
 	rs := defaultRedundancy
 
 	// add hosts
-	if _, err := cluster.AddHosts(int(rs.TotalShards)); err != nil {
-		t.Fatal(err)
-	}
-
-	// wait for contracts to form
-	if _, err := cluster.WaitForContracts(); err != nil {
+	if _, err := cluster.AddHostsBlocking(int(rs.TotalShards)); err != nil {
 		t.Fatal(err)
 	}
 

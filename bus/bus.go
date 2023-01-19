@@ -92,7 +92,7 @@ type (
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
 
-		SlabsForMigration(set string, limit int) ([]object.Slab, error)
+		SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error)
 		PutSlab(s object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	}
 
@@ -571,8 +571,10 @@ func (b *bus) slabHandlerPUT(jc jape.Context) {
 func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
-		if slabs, err := b.os.SlabsForMigration(msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
-			jc.Encode(slabs)
+		if goodContracts, err := b.cs.Contracts(msr.ContractSet); jc.Check("couldn't fetch contracts for migration", err) == nil {
+			if slabs, err := b.os.SlabsForMigration(contractIds(goodContracts), msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+				jc.Encode(slabs)
+			}
 		}
 	}
 }
@@ -818,4 +820,12 @@ func (b *bus) recordInteractions(interactions []hostdb.Interaction) error {
 	b.interactions = nil
 	b.interactionsFlush = nil
 	return f.result
+}
+
+func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
+	ids := make([]types.FileContractID, len(contracts))
+	for i, c := range contracts {
+		ids[i] = c.ID
+	}
+	return ids
 }

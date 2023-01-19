@@ -337,10 +337,8 @@ func TestSlabsForMigration(t *testing.T) {
 	}
 	fcid1, fcid2, fcid3 := fcids[0], fcids[1], fcids[2]
 
-	// add the first two contracts to the autopilot
-	if err = db.SetContractSet("autopilot", []types.FileContractID{fcid1, fcid2}); err != nil {
-		t.Fatal(err)
-	}
+	// select the first two contracts as good contracts
+	goodContracts := []types.FileContractID{fcid1, fcid2}
 
 	// add an object
 	obj := object.Object{
@@ -463,7 +461,7 @@ func TestSlabsForMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slabs, err := db.SlabsForMigration("autopilot", -1)
+	slabs, err := db.SlabsForMigration(goodContracts, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,14 +670,11 @@ func TestPutSlab(t *testing.T) {
 		}
 	}
 
-	// create a contract set using contracts for h1 and h3 (h2 is bad)
-	err = db.SetContractSet("autopilot", []types.FileContractID{fcid1, fcid3})
-	if err != nil {
-		t.Fatal(err)
-	}
+	// select contracts h1 and h3 as good contracts (h2 is bad)
+	goodContracts := []types.FileContractID{fcid1, fcid3}
 
 	// fetch slabs for migration and assert there is only one
-	toMigrate, err := db.SlabsForMigration("autopilot", -1)
+	toMigrate, err := db.SlabsForMigration(goodContracts, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -737,7 +732,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there are none left
-	toMigrate, err = db.SlabsForMigration("autopilot", -1)
+	toMigrate, err = db.SlabsForMigration(goodContracts, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
