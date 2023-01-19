@@ -76,14 +76,12 @@ type (
 
 	// A ContractStore stores contracts.
 	ContractStore interface {
-		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		ActiveContracts() ([]api.ContractMetadata, error)
 		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		Contract(id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(set string) ([]api.ContractMetadata, error)
-		ReleaseContract(fcid types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
 		SetContractSet(set string, contracts []types.FileContractID) error
 	}
@@ -114,6 +112,8 @@ type bus struct {
 	cs  ContractStore
 	os  ObjectStore
 	ss  SettingStore
+
+	contractLocks *contractLocks
 
 	interactionsMu            sync.Mutex
 	interactions              []hostdb.Interaction
@@ -457,12 +457,13 @@ func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	locked, err := b.cs.AcquireContract(id, req.Duration)
+
+	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), id, req.Duration)
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}
 	jc.Encode(api.ContractAcquireResponse{
-		Locked: locked,
+		LockID: lockID,
 	})
 }
 
@@ -471,9 +472,7 @@ func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	if jc.Check("failed to release contract", b.cs.ReleaseContract(id)) != nil {
-		return
-	}
+	panic("not implemented yet")
 }
 
 func (b *bus) contractIDHandlerGET(jc jape.Context) {
@@ -717,6 +716,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		cs:                        cs,
 		os:                        os,
 		ss:                        ss,
+		contractLocks:             newContractLocks(),
 		interactionsFlushInterval: interactionsFlushInterval,
 	}
 

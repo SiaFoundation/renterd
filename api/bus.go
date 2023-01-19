@@ -41,7 +41,7 @@ type ContractAcquireRequest struct {
 // ContractAcquireResponse is the response type for the /contract/:id/acquire
 // endpoint.
 type ContractAcquireResponse struct {
-	Locked bool `json:"locked"`
+	LockID uint64 `json:"lockID"`
 }
 
 type HostsScanPubkeyHandlerPOSTRequest struct {
