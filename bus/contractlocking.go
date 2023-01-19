@@ -22,7 +22,13 @@ type contractLock struct {
 	lockChan    chan struct{} // locks the contract
 	lockedUntil time.Time
 	heldBy      uint64
-	references  uint64
+	queue       []*lockCandidate
+}
+
+type lockCandidate struct {
+	lockID       uint64
+	lockDuration time.Duration
+	c            chan struct{}
 }
 
 func newContractLocks() *contractLocks {
@@ -36,8 +42,10 @@ func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) 
 	defer l.mu.Unlock()
 	lock, exists := l.locks[id]
 	if !exists && create {
+		c := make(chan struct{})
+		close(c)
 		lock = &contractLock{
-			lockChan:    make(chan struct{}, 1),
+			lockChan:    c,
 			lockedUntil: time.Now().Add(time.Hour),
 		}
 		l.locks[id] = lock
@@ -56,6 +64,9 @@ var ErrAcquireContractTimeout = errors.New("acquiring the lock timed out")
 // to avoid being starved by low prio tasks.
 func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d time.Duration) (uint64, error) {
 	lock := l.lockForContractID(id, true)
+	ourLockID := frand.Uint64n(math.MaxUint64)
+	done := make(chan struct{})
+	defer close(done)
 
 	setAcquired := func() {
 		lock.lockedUntil = time.Now().Add(d)
@@ -63,59 +74,74 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 	}
 
 	lock.mu.Lock()
-	lockChan := lock.lockChan                        // remember lockChan to wait on
-	previousHolder := lock.heldBy                    // remember previous holder
-	lock.references++                                // update the number of threads waiting
+	lockChan := lock.lockChan // remember lockChan to wait on
+	lock.queue = append(lock.queue, &lockCandidate{
+		lockID: ourLockID,
+		c:      done,
+	})
 	t := time.NewTimer(time.Until(lock.lockedUntil)) // prepare a timer for expiring locks
 	lock.mu.Unlock()
 
-	for {
-		select {
-		case <-ctx.Done():
-			// We hit a timeout. Abort.
-			lock.mu.Lock()
-			lock.references--
-			lock.mu.Unlock()
-			return 0, ErrAcquireContractTimeout
-		case <-t.C:
-			// The lock has expired. That leaves us with 2 options
-			// after acquiring the mutext.
-			//   1. the holder hasn't changed. So we are the first
-			//   thread that acquired the mutex after the lock has
-			//   expired. We are free to acquire the lock in this
-			//   case and have to swap out the channel and remove
-			//   the reference of the original holder.
-			//   2. the holder has changed. In that case we were too
-			//   slow and another thread has acquired the lock and
-			//   swapped out the lockChan in the meantime. In that
-			//   case we grab the new channel, update the timer and
-			//   retry.
-			lock.mu.Lock()
-			if lock.heldBy == previousHolder {
-				setAcquired()
-				// Create a new lockChan and acquire it right away.
-				lockChan = make(chan struct{}, 1)
-				lockChan <- struct{}{}
-				lock.lockChan = lockChan
-				heldBy := lock.heldBy
-				// Remove the reference of the previous, expired
-				// holder.
-				lock.references--
-				lock.mu.Unlock()
-				return heldBy, nil
-			} else {
-				lockChan = lock.lockChan
-				previousHolder = lock.heldBy
-				t.Reset(time.Until(lock.lockedUntil))
+	// TODO: Drain timer.
+
+	// tryAcquire is a helper function that tries to acquire a lock
+	// whenenver waiting threads are either woken by the lock timing out or
+	// the lock being released.
+	tryAcquire := func() (uint64, bool, error) {
+		lock.mu.Lock()
+
+		// Fetch the next candidate for locking. Drop any that
+		// have timed out.
+		var nextCandidate *lockCandidate
+		for {
+			if len(lock.queue) == 0 {
+				panic("queue is empty - should never happen")
 			}
-			lock.mu.Unlock()
-			continue
-			// The lock was acquired successfully.
-		case lockChan <- struct{}{}: // lock acquired
-			lock.mu.Lock()
+			select {
+			case <-lock.queue[0].c:
+				lock.queue = lock.queue[1:]
+				continue
+			default:
+			}
+			nextCandidate = lock.queue[0]
+			break
+		}
+
+		if nextCandidate.lockID == ourLockID {
+			// If this thread is the next candidate in the queue,
+			// acquire the lock.
 			setAcquired()
 			heldBy := lock.heldBy
+			lock.lockChan = make(chan struct{})
+			lock.queue = lock.queue[1:]
 			lock.mu.Unlock()
+			return heldBy, true, nil
+		} else if nextCandidate.lockID != ourLockID {
+			// We are not the next candidate. Sleep for however long
+			// the next candidate wants to acquire the lock.
+			t.Reset(nextCandidate.lockDuration)
+			lock.mu.Unlock()
+		}
+		return 0, false, nil
+	}
+
+	// Begin loop.
+	for {
+		var heldBy uint64
+		var acquired bool
+		var err error
+		select {
+		case <-ctx.Done():
+			err = ErrAcquireContractTimeout
+		case <-t.C:
+			heldBy, acquired, err = tryAcquire()
+		case <-lockChan:
+			heldBy, acquired, err = tryAcquire()
+		}
+		if err != nil {
+			return 0, err
+		}
+		if acquired {
 			return heldBy, nil
 		}
 	}
@@ -123,6 +149,9 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 
 // Release releases the contract lock for a given contract and lock id.
 func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
+	if lockID == 0 {
+		return errors.New("can't release lock with id 0")
+	}
 	lock := l.lockForContractID(id, false)
 	if lock == nil {
 		return fmt.Errorf("no active contract lock found for contract %v and lockID %v", id, lockID)
@@ -135,7 +164,7 @@ func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 	}
 	lock.heldBy = 0
 	lock.lockedUntil = time.Time{}
-	lock.references--
+	close(lock.lockChan)
 
 	// Unlock channel. This should never block.
 	select {

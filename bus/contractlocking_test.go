@@ -14,7 +14,7 @@ import (
 func TestContractAcquire(t *testing.T) {
 	locks := newContractLocks()
 
-	verify := func(fcid types.FileContractID, references, lockID uint64, lockedDuration time.Duration, delta time.Duration) {
+	verify := func(fcid types.FileContractID, lockID uint64, lockedDuration time.Duration, delta time.Duration) {
 		t.Helper()
 		if lockID == 0 {
 			t.Fatal("invalid lock id")
@@ -27,9 +27,6 @@ func TestContractAcquire(t *testing.T) {
 		if lock.lockedUntil.Before(lockedUntil.Add(-delta)) || lock.lockedUntil.After(lockedUntil.Add(delta)) {
 			t.Fatal("locked_until not set correctly")
 		}
-		if lock.references != references {
-			t.Fatal("wrong references")
-		}
 	}
 
 	// Acquire contract.
@@ -38,7 +35,7 @@ func TestContractAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, 1, lockID, time.Minute, 3*time.Second)
+	verify(fcid, lockID, time.Minute, 3*time.Second)
 
 	// Acquire another contract but this time it has been acquired already
 	// and the lock expired.
@@ -53,7 +50,7 @@ func TestContractAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, 1, lockID, time.Minute, 3*time.Second)
+	verify(fcid, lockID, time.Minute, 3*time.Second)
 
 	// Same thing again but with multiple locks that expire.
 	fcid = types.FileContractID{3}
@@ -78,7 +75,7 @@ func TestContractAcquire(t *testing.T) {
 	if len(lockIDs) != 10 {
 		t.Fatal("wrong number of lock ids")
 	}
-	verify(fcid, 1, lockIDs[len(lockIDs)-1], 100*time.Millisecond, 50*time.Millisecond)
+	verify(fcid, lockIDs[len(lockIDs)-1], 100*time.Millisecond, 50*time.Millisecond)
 
 	// Test timing out while trying to acquire a lock.
 	fcid = types.FileContractID{4}
@@ -94,14 +91,14 @@ func TestContractAcquire(t *testing.T) {
 		t.Fatal("acquire should time out", err)
 		return
 	}
-	verify(fcid, 1, lockID, time.Hour, time.Second)
+	verify(fcid, lockID, time.Hour, time.Second)
 }
 
 // TestContractRelease is a unit test for contractLocks.Release.
 func TestContractRelease(t *testing.T) {
 	locks := newContractLocks()
 
-	verify := func(fcid types.FileContractID, references, lockID uint64, lockedUntil time.Time, delta time.Duration) {
+	verify := func(fcid types.FileContractID, lockID uint64, lockedUntil time.Time, delta time.Duration) {
 		t.Helper()
 		lock := locks.lockForContractID(fcid, false)
 		if lock.heldBy != lockID {
@@ -109,9 +106,6 @@ func TestContractRelease(t *testing.T) {
 		}
 		if lock.lockedUntil.Before(lockedUntil.Add(-delta)) || lock.lockedUntil.After(lockedUntil.Add(delta)) {
 			t.Fatal("locked_until not set correctly")
-		}
-		if lock.references != references {
-			t.Fatal("wrong references")
 		}
 	}
 
@@ -121,7 +115,7 @@ func TestContractRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, 1, lockID, time.Now().Add(time.Minute), 3*time.Second)
+	verify(fcid, lockID, time.Now().Add(time.Minute), 3*time.Second)
 
 	// Acquire it again but release the contract within a second.
 	var wg sync.WaitGroup
@@ -138,14 +132,14 @@ func TestContractRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, 1, lockID, time.Now().Add(time.Minute), 3*time.Second)
+	verify(fcid, lockID, time.Now().Add(time.Minute), 3*time.Second)
 
 	// Release one more time. Should decrease the references to 0 and reset
 	// fields.
 	if err := locks.Release(fcid, lockID); err != nil {
 		t.Error(err)
 	}
-	verify(fcid, 0, 0, time.Time{}, 0)
+	verify(fcid, 0, time.Time{}, 0)
 
 	// Try to release lock again. Should fail.
 	if err := locks.Release(fcid, lockID); err == nil {
