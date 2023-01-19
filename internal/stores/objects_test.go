@@ -728,6 +728,14 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal("sector 1 was uploaded to unexpected hosts", hks[0], hks[1])
 	}
 
+	// assert there's still only one entry in the dbslab table
+	var cnt int64
+	if err := db.db.Model(&dbSlab{}).Count(&cnt).Error; err != nil {
+		t.Fatal(err)
+	} else if cnt != 1 {
+		t.Fatalf("unexpected number of entries in dbslab, %v != 1", cnt)
+	}
+
 	// fetch slabs for migration and assert there are none left
 	toMigrate, err = db.SlabsForMigration("autopilot", -1)
 	if err != nil {
@@ -735,6 +743,14 @@ func TestPutSlab(t *testing.T) {
 	}
 	if len(toMigrate) != 0 {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
+	}
+
+	if obj, err := db.get("foo"); err != nil {
+		t.Fatal(err)
+	} else if len(obj.Slabs) != 1 {
+		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
+	} else if obj.Slabs[0].ID != updated.ID {
+		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].ID, updated.ID)
 	}
 }
 
