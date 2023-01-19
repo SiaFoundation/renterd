@@ -50,8 +50,8 @@ func TestGouging(t *testing.T) {
 	}
 
 	// helper that waits until the contract set is ready
-	t.Helper()
 	waitForContractSet := func() error {
+		t.Helper()
 		return Retry(30, time.Second, func() error {
 			if contracts, err := b.Contracts("autopilot"); err != nil {
 				t.Fatal(err)
@@ -63,8 +63,8 @@ func TestGouging(t *testing.T) {
 	}
 
 	// helper that waits untail a certain host is removed from the contract set
-	t.Helper()
 	waitForHostRemoval := func(hk consensus.PublicKey) error {
+		t.Helper()
 		return Retry(30, time.Second, func() error {
 			if contracts, err := b.Contracts("autopilot"); err != nil {
 				t.Fatal(err)

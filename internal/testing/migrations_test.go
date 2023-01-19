@@ -53,8 +53,8 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Helper()
 	usedHosts := func() []consensus.PublicKey {
+		t.Helper()
 		obj, _, err := b.Object("/foo")
 		if err != nil {
 			t.Fatal(err)
@@ -75,8 +75,8 @@ func TestMigrations(t *testing.T) {
 		return hks
 	}
 
-	t.Helper()
 	isUsed := func(hk consensus.PublicKey, usedHosts []consensus.PublicKey) bool {
+		t.Helper()
 		for _, h := range usedHosts {
 			if h == hk {
 				return true

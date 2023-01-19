@@ -7,10 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/types"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
@@ -24,14 +22,14 @@ func TestSQLObjectStore(t *testing.T) {
 	}
 
 	// Create 2 hosts
-	hks, err := addTestHosts(2, db)
+	hks, err := db.addTestHosts(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hk1, hk2 := hks[0], hks[1]
 
 	// Create 2 contracts
-	fcids, contracts, err := addTestContracts(hks, db)
+	fcids, contracts, err := db.addTestContracts(hks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,14 +324,14 @@ func TestSlabsForMigration(t *testing.T) {
 	}
 
 	// add 3 hosts
-	hks, err := addTestHosts(3, db)
+	hks, err := db.addTestHosts(3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
 	// add 3 contracts
-	fcids, _, err := addTestContracts(hks, db)
+	fcids, _, err := db.addTestContracts(hks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +497,7 @@ func TestContractSectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.AddContract(newTestContract(fcid1, hk1))
+	_, err = db.addTestContract(fcid1, hk1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +546,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the contract back.
-	_, err = db.AddContract(newTestContract(fcid1, hk1))
+	_, err = db.addTestContract(fcid1, hk1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,14 +581,14 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// add 3 hosts
-	hks, err := addTestHosts(3, db)
+	hks, err := db.addTestHosts(3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
 	// add 3 contracts
-	fcids, _, err := addTestContracts(hks, db)
+	fcids, _, err := db.addTestContracts(hks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,8 +630,8 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// helper to fetch a slab from the database
-	t.Helper()
 	fetchSlab := func() (slab dbSlab) {
+		t.Helper()
 		if err = db.db.
 			Where(&dbSlab{Key: key}).
 			Preload("Shards.DBSector").
@@ -738,45 +736,6 @@ func TestPutSlab(t *testing.T) {
 	if len(toMigrate) != 0 {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
-}
-
-func addTestHosts(n int, db *SQLStore) (keys []consensus.PublicKey, err error) {
-	for i := 0; i < n; i++ {
-		keys = append(keys, consensus.PublicKey{byte(i + 1)})
-		if err := db.addTestHost(keys[len(keys)-1]); err != nil {
-			return nil, err
-		}
-	}
-	return
-}
-
-func addTestContracts(keys []consensus.PublicKey, db *SQLStore) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
-	for i, key := range keys {
-		fcids = append(fcids, types.FileContractID{byte(i + 1)})
-		contract, err := db.AddContract(newTestContract(fcids[len(fcids)-1], key))
-		if err != nil {
-			return nil, nil, err
-		}
-		contracts = append(contracts, contract)
-	}
-	return
-}
-
-func newTestContract(id types.FileContractID, hk consensus.PublicKey) (rhp.ContractRevision, types.Currency, uint64) {
-	uc := types.UnlockConditions{
-		PublicKeys:         make([]types.SiaPublicKey, 2),
-		SignaturesRequired: 2,
-	}
-	uc.PublicKeys[1].Algorithm = types.SignatureEd25519
-	uc.PublicKeys[1].Key = hk[:]
-
-	totalCost := types.NewCurrency64(frand.Uint64n(1000))
-	return rhp.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         id,
-			UnlockConditions: uc,
-		},
-	}, totalCost, frand.Uint64n(100)
 }
 
 func newTestObject(slabs int) (object.Object, map[consensus.PublicKey]types.FileContractID) {
