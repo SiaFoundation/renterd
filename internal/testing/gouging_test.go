@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/node/api/client"
-	"go.sia.tech/siad/siatest"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -45,9 +44,9 @@ func TestGouging(t *testing.T) {
 	}
 
 	// build a hosts map
-	hostsmap := make(map[string]*siatest.TestNode)
+	hostsmap := make(map[string]*TestNode)
 	for _, h := range hosts {
-		hostsmap[hostPK(h).String()] = h
+		hostsmap[h.HostKey().String()] = h
 	}
 
 	// helper that waits until the contract set is ready
@@ -147,12 +146,4 @@ func TestGouging(t *testing.T) {
 	if err := w.DownloadObject(&buffer, name); err == nil {
 		t.Fatal("expected download to fail")
 	}
-}
-
-func hostPK(node *siatest.TestNode) consensus.PublicKey {
-	pk, err := node.HostPublicKey()
-	if err != nil {
-		panic(err)
-	}
-	return consensus.PublicKey(pk.ToPublicKey())
 }

@@ -89,13 +89,7 @@ func TestMigrations(t *testing.T) {
 	hks := usedHosts()
 	var hk consensus.PublicKey
 	for _, h := range hosts {
-		hpk, err := h.HostPublicKey()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		copy(hk[:], hpk.Key)
-		if isUsed(hk, hks) {
+		if hk = h.HostKey(); isUsed(hk, hks) {
 			if err := cluster.RemoveHost(h); err != nil {
 				t.Fatal(err)
 			}

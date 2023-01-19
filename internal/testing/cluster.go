@@ -68,10 +68,23 @@ var (
 	}
 )
 
+type TestNode struct {
+	*siatest.TestNode
+}
+
+func (n *TestNode) HostKey() (hk consensus.PublicKey) {
+	spk, err := n.HostPublicKey()
+	if err != nil {
+		panic(err)
+	}
+	copy(hk[:], spk.Key)
+	return
+}
+
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
-	hosts []*siatest.TestNode
+	hosts []*TestNode
 
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
@@ -254,7 +267,7 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.
-func addStorageFolderToHost(hosts []*siatest.TestNode) error {
+func addStorageFolderToHost(hosts []*TestNode) error {
 	for _, host := range hosts {
 		storage := 512 * modules.SectorSize
 		if err := host.HostStorageFoldersAddPost(host.Dir, storage); err != nil {
@@ -266,7 +279,7 @@ func addStorageFolderToHost(hosts []*siatest.TestNode) error {
 
 // announceHosts adds storage and a registry to each host and announces them to
 // the group
-func announceHosts(hosts []*siatest.TestNode) error {
+func announceHosts(hosts []*TestNode) error {
 	for _, host := range hosts {
 		if err := host.HostModifySettingPost(client.HostParamAcceptingContracts, true); err != nil {
 			return err
@@ -304,7 +317,7 @@ func (c *TestCluster) MineToRenewWindow() error {
 }
 
 // sync blocks until the cluster is synced.
-func (c *TestCluster) sync(hosts []*siatest.TestNode) error {
+func (c *TestCluster) sync(hosts []*TestNode) error {
 	return Retry(100, 100*time.Millisecond, func() error {
 		synced, err := c.synced(hosts)
 		if err != nil {
@@ -318,7 +331,7 @@ func (c *TestCluster) sync(hosts []*siatest.TestNode) error {
 }
 
 // synced returns true if bus and hosts are at the same blockheight.
-func (c *TestCluster) synced(hosts []*siatest.TestNode) (bool, error) {
+func (c *TestCluster) synced(hosts []*TestNode) (bool, error) {
 	cs, err := c.Bus.ConsensusState()
 	if err != nil {
 		return false, err
@@ -350,11 +363,7 @@ func (c *TestCluster) MineBlocks(n int) error {
 func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	needed := make(map[string]struct{})
 	for _, host := range c.hosts {
-		hpk, err := host.HostPublicKey()
-		if err != nil {
-			return nil, err
-		}
-		needed[hpk.String()] = struct{}{}
+		needed[host.HostKey().String()] = struct{}{}
 	}
 
 	//  Wait for the contracts to form.
@@ -384,13 +393,13 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	}
 	return resp.Contracts, nil
 }
-func (c *TestCluster) RemoveHost(host *siatest.TestNode) error {
+func (c *TestCluster) RemoveHost(host *TestNode) error {
 	if err := host.Close(); err != nil {
 		return err
 	}
 
 	for i, h := range c.hosts {
-		if h == host {
+		if h.HostKey().String() == host.HostKey().String() {
 			c.hosts = append(c.hosts[:i], c.hosts[i+1:]...)
 			break
 		}
@@ -400,17 +409,17 @@ func (c *TestCluster) RemoveHost(host *siatest.TestNode) error {
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
 // themselves on the network, ready to form contracts.
-func (c *TestCluster) AddHosts(n int) ([]*siatest.TestNode, error) {
+func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 	// Create hosts.
-	var newHosts []*siatest.TestNode
+	var newHosts []*TestNode
 	for i := 0; i < n; i++ {
 		hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
 		n, err := siatest.NewCleanNodeAsync(sianode.Host(hostDir))
 		if err != nil {
 			return nil, err
 		}
-		c.hosts = append(c.hosts, n)
-		newHosts = append(newHosts, n)
+		c.hosts = append(c.hosts, &TestNode{n})
+		newHosts = append(newHosts, &TestNode{n})
 
 		// Connect gateways.
 		if err := c.Bus.SyncerConnect(string(n.GatewayAddress())); err != nil {
@@ -464,11 +473,7 @@ func (c *TestCluster) AddHosts(n int) ([]*siatest.TestNode, error) {
 		}
 
 		for _, h := range newHosts {
-			hpk, err := h.HostPublicKey()
-			if err != nil {
-				return err
-			}
-			_, err = c.Bus.Host(consensus.PublicKey(hpk.ToPublicKey()))
+			_, err = c.Bus.Host(h.HostKey())
 			if err != nil {
 				return err
 			}
