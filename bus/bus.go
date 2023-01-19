@@ -449,12 +449,16 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
 	var req api.ContractAcquireRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
 
-	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), req.ContractID, req.Duration)
+	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), id, req.Duration)
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}
@@ -464,11 +468,15 @@ func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
 	var req api.ContractReleaseRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to release contract", b.contractLocks.Release(req.ContractID, req.LockID)) != nil {
+	if jc.Check("failed to release contract", b.contractLocks.Release(id, req.LockID)) != nil {
 		return
 	}
 }
@@ -765,8 +773,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
-		"POST   /contract/acquire":       b.contractAcquireHandlerPOST,
-		"POST   /contract/release":       b.contractReleaseHandlerPOST,
+		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
 		"GET    /objects/*key":    b.objectsKeyHandlerGET,
 		"PUT    /objects/*key":    b.objectsKeyHandlerPUT,

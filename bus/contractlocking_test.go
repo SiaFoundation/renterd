@@ -61,7 +61,7 @@ func TestContractAcquire(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			lockID, err = locks.Acquire(context.Background(), fcid, 100*time.Millisecond)
+			lockID, err := locks.Acquire(context.Background(), fcid, 100*time.Millisecond)
 			if err != nil {
 				t.Error(err)
 				return

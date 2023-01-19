@@ -35,15 +35,13 @@ type ContractsIDRenewedRequest struct {
 // ContractAcquireRequest is the request type for the /contract/acquire
 // endpoint.
 type ContractAcquireRequest struct {
-	ContractID types.FileContractID `json:"contractID"`
-	Duration   time.Duration        `json:"duration"`
+	Duration time.Duration `json:"duration"`
 }
 
 // ContractAcquireRequest is the request type for the /contract/release
 // endpoint.
 type ContractReleaseRequest struct {
-	ContractID types.FileContractID `json:"contractID"`
-	LockID     uint64               `json:"lockID"`
+	LockID uint64 `json:"lockID"`
 }
 
 // ContractAcquireResponse is the response type for the /contract/acquire
