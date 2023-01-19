@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -30,11 +31,11 @@ func newContractLocks() *contractLocks {
 	}
 }
 
-func (l *contractLocks) lockForContractID(id types.FileContractID) *contractLock {
+func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) *contractLock {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	lock, exists := l.locks[id]
-	if !exists {
+	if !exists && create {
 		lock = &contractLock{
 			lockChan:    make(chan struct{}, 1),
 			lockedUntil: time.Now().Add(time.Hour),
@@ -48,9 +49,13 @@ var ErrAcquireContractTimeout = errors.New("acquiring the lock timed out")
 
 // Acquire acquires a contract lock for the given id and provided duration. If
 // acquiring the lock doesn't finish before the context is closed,
-// ErrAcquireContractTimeout is returned.
+// ErrAcquireContractTimeout is returned. Upon success an identifier is returned
+// which can be used to release the lock before its lock duration has passed.
+// TODO: Extend this with some sort of priority. e.g. migrations would acquire a
+// lock with a low priority but contract maintenance would have a very high one
+// to avoid being starved by low prio tasks.
 func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d time.Duration) (uint64, error) {
-	lock := l.lockForContractID(id)
+	lock := l.lockForContractID(id, true)
 
 	setAcquired := func() {
 		lock.lockedUntil = time.Now().Add(d)
@@ -112,11 +117,31 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 			heldBy := lock.heldBy
 			lock.mu.Unlock()
 			return heldBy, nil
-
 		}
 	}
 }
 
-func (l *contractLock) Release(id types.FileContractID, lockID uint64) error {
-	panic("not implemeneted")
+// Release releases the contract lock for a given contract and lock id.
+func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
+	lock := l.lockForContractID(id, false)
+	if lock == nil {
+		return fmt.Errorf("no active contract lock found for contract %v and lockID %v", id, lockID)
+	}
+
+	lock.mu.Lock()
+	defer lock.mu.Unlock()
+	if lock.heldBy != lockID {
+		return fmt.Errorf("can't unlock lock due to id mismatch %v != %v", lockID, lock.heldBy)
+	}
+	lock.heldBy = 0
+	lock.lockedUntil = time.Time{}
+	lock.references--
+
+	// Unlock channel. This should never block.
+	select {
+	case <-lock.lockChan:
+	default:
+		panic("trying to unlock an unlocked contract lock")
+	}
+	return nil
 }

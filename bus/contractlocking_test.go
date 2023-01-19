@@ -19,7 +19,7 @@ func TestContractAcquire(t *testing.T) {
 		if lockID == 0 {
 			t.Fatal("invalid lock id")
 		}
-		lock := locks.lockForContractID(fcid)
+		lock := locks.lockForContractID(fcid, false)
 		if lock.heldBy != lockID {
 			t.Fatal("heldBy not set")
 		}
@@ -95,4 +95,65 @@ func TestContractAcquire(t *testing.T) {
 		return
 	}
 	verify(fcid, 1, lockID, time.Hour, time.Second)
+}
+
+// TestContractRelease is a unit test for contractLocks.Release.
+func TestContractRelease(t *testing.T) {
+	locks := newContractLocks()
+
+	verify := func(fcid types.FileContractID, references, lockID uint64, lockedUntil time.Time, delta time.Duration) {
+		t.Helper()
+		lock := locks.lockForContractID(fcid, false)
+		if lock.heldBy != lockID {
+			t.Fatalf("heldBy not set")
+		}
+		if lock.lockedUntil.Before(lockedUntil.Add(-delta)) || lock.lockedUntil.After(lockedUntil.Add(delta)) {
+			t.Fatal("locked_until not set correctly")
+		}
+		if lock.references != references {
+			t.Fatal("wrong references")
+		}
+	}
+
+	// Acquire contract.
+	fcid := types.FileContractID{1}
+	lockID, err := locks.Acquire(context.Background(), fcid, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify(fcid, 1, lockID, time.Now().Add(time.Minute), 3*time.Second)
+
+	// Acquire it again but release the contract within a second.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(time.Second)
+		if err := locks.Release(fcid, lockID); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	lockID, err = locks.Acquire(context.Background(), fcid, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify(fcid, 1, lockID, time.Now().Add(time.Minute), 3*time.Second)
+
+	// Release one more time. Should decrease the references to 0 and reset
+	// fields.
+	if err := locks.Release(fcid, lockID); err != nil {
+		t.Error(err)
+	}
+	verify(fcid, 0, 0, time.Time{}, 0)
+
+	// Try to release lock again. Should fail.
+	if err := locks.Release(fcid, lockID); err == nil {
+		t.Fatal("should fail")
+	}
+
+	// Try to release lock for another contract. Should fail.
+	if err := locks.Release(types.FileContractID{2}, lockID); err == nil {
+		t.Fatal("should fail")
+	}
 }

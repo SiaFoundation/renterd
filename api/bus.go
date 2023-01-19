@@ -32,13 +32,21 @@ type ContractsIDRenewedRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
-// ContractAcquireRequest is the request type for the /contract/:id/acquire
+// ContractAcquireRequest is the request type for the /contract/acquire
 // endpoint.
 type ContractAcquireRequest struct {
-	Duration time.Duration
+	ContractID types.FileContractID `json:"contractID"`
+	Duration   time.Duration        `json:"duration"`
 }
 
-// ContractAcquireResponse is the response type for the /contract/:id/acquire
+// ContractAcquireRequest is the request type for the /contract/release
+// endpoint.
+type ContractReleaseRequest struct {
+	ContractID types.FileContractID `json:"contractID"`
+	LockID     uint64               `json:"lockID"`
+}
+
+// ContractAcquireResponse is the response type for the /contract/acquire
 // endpoint.
 type ContractAcquireResponse struct {
 	LockID uint64 `json:"lockID"`

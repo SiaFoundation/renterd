@@ -533,14 +533,11 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 
 func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64, toRenew api.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
-	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
+	lockID, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
-	if !locked {
-		return rhpv2.ContractRevision{}, errors.New("contract is currently locked")
-	}
-	defer c.ap.bus.ReleaseContract(toRenew.ID)
+	defer c.ap.bus.ReleaseContract(toRenew.ID, lockID)
 
 	// if we are refreshing the contract we use the contract's end height
 	endHeight := c.endHeight(cfg, currentPeriod)
