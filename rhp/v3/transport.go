@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/renterd/internal/mux"
+	"go.sia.tech/mux"
 	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
