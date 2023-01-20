@@ -176,7 +176,7 @@ func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 		return nil // nothing to do
 	}
 	if lock.heldByID != lockID {
-		return fmt.Errorf("can't unlock lock due to id mismatch %v != %v", lockID, lock.heldByID)
+		return fmt.Errorf("failed to unlock lock held by lockID %v with lockID %v - potentially due to a timeout", lock.heldByID, lockID)
 	}
 
 	// Stop the timer on the lock.
