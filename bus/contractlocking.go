@@ -17,49 +17,6 @@ import (
 // contractLocks.Acquire is closed before the lock can be acquired.
 var ErrAcquireContractTimeout = errors.New("acquiring the lock timed out")
 
-type contractLocks struct {
-	mu    sync.Mutex
-	locks map[types.FileContractID]*contractLock
-}
-
-type contractLock struct {
-	mu          sync.Mutex    // locks contractLock fields
-	lockChan    chan struct{} // locks the contract
-	lockedUntil time.Time
-	heldBy      uint64
-	queue       *lockCandidatePriorityHeap
-}
-
-type lockCandidate struct {
-	lockID       uint64
-	lockDuration time.Duration
-	c            chan struct{}
-	priority     int
-}
-
-func newContractLocks() *contractLocks {
-	return &contractLocks{
-		locks: make(map[types.FileContractID]*contractLock),
-	}
-}
-
-func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) *contractLock {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	lock, exists := l.locks[id]
-	if !exists && create {
-		c := make(chan struct{})
-		close(c)
-		lock = &contractLock{
-			lockChan:    c,
-			lockedUntil: time.Now().Add(time.Hour),
-			queue:       &lockCandidatePriorityHeap{},
-		}
-		l.locks[id] = lock
-	}
-	return lock
-}
-
 // lockCandidatePriorityHeap is a max-heap of lockCandidates.
 type lockCandidatePriorityHeap []*lockCandidate
 
@@ -88,6 +45,63 @@ func (h *lockCandidatePriorityHeap) Pop() interface{} {
 	return x
 }
 
+type contractLocks struct {
+	mu    sync.Mutex
+	locks map[types.FileContractID]*contractLock
+}
+
+type contractLock struct {
+	mu          sync.Mutex // locks contractLock fields
+	heldBy      uint64
+	wakeupTimer *time.Timer
+	queue       *lockCandidatePriorityHeap
+}
+
+type lockCandidate struct {
+	wake     chan struct{}
+	priority int
+	timedOut <-chan struct{}
+}
+
+func newContractLocks() *contractLocks {
+	return &contractLocks{
+		locks: make(map[types.FileContractID]*contractLock),
+	}
+}
+
+func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) *contractLock {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	lock, exists := l.locks[id]
+	if !exists && create {
+		c := make(chan struct{})
+		close(c)
+		lock = &contractLock{
+			queue: &lockCandidatePriorityHeap{},
+		}
+		l.locks[id] = lock
+	}
+	return lock
+}
+
+func (lock *contractLock) setTimer(l *contractLocks, lockID uint64, id types.FileContractID, d time.Duration) {
+	lock.wakeupTimer = time.AfterFunc(d, func() {
+		l.Release(id, lockID)
+	})
+}
+
+func (l *contractLock) stopTimer() {
+	if l.wakeupTimer == nil {
+		return
+	}
+	if !l.wakeupTimer.Stop() {
+		select {
+		case <-l.wakeupTimer.C:
+		default:
+		}
+	}
+}
+
 // Acquire acquires a contract lock for the given id and provided duration. If
 // acquiring the lock doesn't finish before the context is closed,
 // ErrAcquireContractTimeout is returned. Upon success an identifier is returned
@@ -99,113 +113,51 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 	lock := l.lockForContractID(id, true)
 
 	// Prepare a random lockID for ourselves.
-	ourLockID := frand.Uint64n(math.MaxUint64)
+	ourLockID := frand.Uint64n(math.MaxUint64) + 1
 
-	// Prepare a channel to indicate to other candidates whether we are
-	// still waiting to acquire the lock.
-	done := make(chan struct{})
-	defer close(done)
-
-	// Add ourselves to the queue of candidates for locking, grab the
-	// lockChan to be notified when the lock is released prematurely and
-	// prepare a timer to be notified when the current lock expires.
 	lock.mu.Lock()
-	lockChan := lock.lockChan
+
+	// If nobody holds the lock, acquire it and launch a timer to release
+	// the lock after the expiry.
+	if lock.heldBy == 0 {
+		lock.heldBy = ourLockID
+		lock.setTimer(l, ourLockID, id, d)
+		lock.mu.Unlock()
+		return ourLockID, nil
+	}
+
+	// Someone is holding the lock. Add ourselves to the queue.
+	wakeChan := make(chan struct{})
 	heap.Push(lock.queue, &lockCandidate{
-		lockID:       ourLockID,
-		lockDuration: d,
-		c:            done,
-		priority:     priority,
+		wake:     wakeChan,
+		priority: priority,
+		timedOut: ctx.Done(),
 	})
-	t := time.NewTimer(time.Until(lock.lockedUntil)) // prepare a timer for expiring locks
+
 	lock.mu.Unlock()
-
-	// Drain timer at the end if necessary.
-	drainTimer := func() {
-		if !t.Stop() {
-			select {
-			case <-t.C:
-			default:
-			}
-		}
-	}
-	defer drainTimer()
-
-	// tryAcquire is a helper function that tries to acquire a lock
-	// whenenver waiting threads are either woken by the lock timing out or
-	// the lock being released.
-	tryAcquire := func() (uint64, bool, error) {
+	select {
+	case <-ctx.Done():
+		// NOTE: We need to acquire the lock again and check for a
+		// wakeup. That way we close a gap where a thread could time out
+		// while being woken up.
 		lock.mu.Lock()
-
-		// Fetch the next candidate for locking. Drop any that
-		// have timed out in the meantime.
-		var nextCandidate *lockCandidate
-		for {
-			if lock.queue.Len() == 0 {
-				panic("queue is empty - should never happen")
-			}
-			select {
-			case <-lock.queue.Peek().c:
-				heap.Pop(lock.queue)
-				continue
-			default:
-			}
-			nextCandidate = lock.queue.Peek()
-			break
-		}
-
-		// Check if it is safe to acquire the lock for the next
-		// candidate. That's the case if either lock.heldBy == 0 or we
-		// are beyond the lock's expiry.
-		if lock.heldBy != 0 && time.Until(lock.lockedUntil) > 0 {
-			drainTimer()
-			t.Reset(time.Until(lock.lockedUntil))
-			lock.mu.Unlock()
-			return 0, false, nil
-		}
-
-		// It is safe to acquire the lock. Check whether we are the next
-		// one to acquire it or not.
-		if nextCandidate.lockID == ourLockID {
-			// If we are the next candidate in the queue, acquire
-			// the lock and return.
-			lock.lockedUntil = time.Now().Add(d)
-			lock.heldBy = ourLockID
-			lock.lockChan = make(chan struct{})
-			heap.Pop(lock.queue)
-			heldBy := lock.heldBy
-			lock.mu.Unlock()
-			return heldBy, true, nil
-		} else if nextCandidate.lockID != ourLockID {
-			// We are not the next candidate to acquire the lock.
-			// Wait until the next candidate is done acquiring it.
-			lock.lockChan = nextCandidate.c
-			lockChan = lock.lockChan
-			lock.mu.Unlock()
-		}
-		return 0, false, nil
-	}
-
-	// Begin loop.
-	for {
-		var heldBy uint64
-		var acquired bool
-		var err error
 		select {
-		case <-ctx.Done():
-			err = ErrAcquireContractTimeout
-		case <-t.C:
-			heldBy, acquired, err = tryAcquire()
-		case <-lockChan:
-			heldBy, acquired, err = tryAcquire()
+		case <-wakeChan:
+		default:
+			lock.mu.Unlock()
+			return 0, ErrAcquireContractTimeout
 		}
-		if err != nil {
-			return 0, err
-		}
-		if acquired {
-			return heldBy, nil
-		}
+	case <-wakeChan:
+		lock.mu.Lock()
 	}
+
+	if lock.heldBy != 0 {
+		panic("lock should be released after being woken up")
+	}
+	lock.heldBy = ourLockID
+	lock.setTimer(l, ourLockID, id, d)
+	lock.mu.Unlock()
+	return ourLockID, nil
 }
 
 // Release releases the contract lock for a given contract and lock id.
@@ -215,23 +167,43 @@ func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 	}
 	lock := l.lockForContractID(id, false)
 	if lock == nil {
-		return fmt.Errorf("no active contract lock found for contract %v and lockID %v", id, lockID)
+		return nil // nothing to do
 	}
 
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
+	if lock.heldBy == 0 {
+		return nil // nothing to do
+	}
 	if lock.heldBy != lockID {
 		return fmt.Errorf("can't unlock lock due to id mismatch %v != %v", lockID, lock.heldBy)
 	}
-	lock.heldBy = 0
-	lock.lockedUntil = time.Time{}
-	close(lock.lockChan)
 
-	// Unlock channel. This should never block.
-	select {
-	case <-lock.lockChan:
-	default:
-		panic("trying to unlock an unlocked contract lock")
+	// Stop the timer on the lock.
+	lock.stopTimer()
+
+	// Set holder to 0.
+	lock.heldBy = 0
+
+	// If there is no next candidate we are done.
+	if lock.queue.Len() == 0 {
+		return nil
+	}
+
+	// Wake the next candidate.
+	for next := heap.Pop(lock.queue).(*lockCandidate); next != nil; next = heap.Pop(lock.queue).(*lockCandidate) {
+		// NOTE: We need to close the wake chan first and then check for
+		// the timeout. The code in Acquire does it the opposite way,
+		// also while holding the lock. That way we close a gap where a
+		// thread could time out while being woken, resulting in the
+		// next candidate not being actually woken.
+		close(next.wake)
+		select {
+		case <-next.timedOut:
+			// try next
+		default:
+			return nil
+		}
 	}
 	return nil
 }

@@ -24,10 +24,6 @@ func TestContractAcquire(t *testing.T) {
 		if lock.heldBy != lockID {
 			t.Fatal("heldBy not set")
 		}
-		lockedUntil := time.Now().Add(lockedDuration)
-		if lock.lockedUntil.Before(lockedUntil.Add(-delta)) || lock.lockedUntil.After(lockedUntil.Add(delta)) {
-			t.Fatal("locked_until not set correctly")
-		}
 	}
 
 	// Acquire contract.
@@ -53,25 +49,33 @@ func TestContractAcquire(t *testing.T) {
 	}
 	verify(fcid, lockID, time.Minute, 3*time.Second)
 
-	// Same thing again but with multiple locks that expire.
+	// Same thing again but with multiple locks that expire. The first lock
+	// is acquired in the same thread to guarantee it's the first and the
+	// remaining ones are launched simultaneously in goroutines.
+	// The index of the launch is the priority so the first goroutine should
+	// acquire the lock last.
 	fcid = types.FileContractID{3}
-	var lockIDs []uint64
-	var threadIndices []int
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	threadIndices := []int{}
+	lockIDs := []uint64{}
 	start := time.Now()
+	_, err = locks.Acquire(context.Background(), 0, fcid, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		go func(priority int) {
+		go func(threadIndex int) {
 			defer wg.Done()
-			lockID, err := locks.Acquire(context.Background(), priority, fcid, 100*time.Millisecond)
+			lockID, err := locks.Acquire(context.Background(), threadIndex, fcid, 100*time.Millisecond)
 			if err != nil {
 				t.Error(err)
 				return
 			}
 			mu.Lock()
 			lockIDs = append(lockIDs, lockID)
-			threadIndices = append(threadIndices, i)
+			threadIndices = append(threadIndices, threadIndex)
 			mu.Unlock()
 		}(i)
 	}
@@ -79,8 +83,8 @@ func TestContractAcquire(t *testing.T) {
 	if len(lockIDs) != 10 {
 		t.Fatal("wrong number of lock ids")
 	}
-	if !sort.IsSorted(sort.IntSlice(threadIndices)) {
-		t.Fatal("threads didn't finish in order or priority")
+	if !sort.IsSorted(sort.Reverse(sort.IntSlice(threadIndices))) {
+		t.Fatal("threads didn't finish in order or priority", threadIndices)
 	}
 	verify(fcid, lockIDs[len(lockIDs)-1], 100*time.Millisecond, 50*time.Millisecond)
 
@@ -117,9 +121,6 @@ func TestContractRelease(t *testing.T) {
 		if lock.heldBy != lockID {
 			t.Fatalf("heldBy not set")
 		}
-		if lock.lockedUntil.Before(lockedUntil.Add(-delta)) || lock.lockedUntil.After(lockedUntil.Add(delta)) {
-			t.Fatal("locked_until not set correctly")
-		}
 	}
 
 	// Acquire contract.
@@ -154,13 +155,13 @@ func TestContractRelease(t *testing.T) {
 	}
 	verify(fcid, 0, time.Time{}, 0)
 
-	// Try to release lock again. Should fail.
-	if err := locks.Release(fcid, lockID); err == nil {
-		t.Fatal("should fail")
+	// Try to release lock again. Is a no-op.
+	if err := locks.Release(fcid, lockID); err != nil {
+		t.Fatal(err)
 	}
 
 	// Try to release lock for another contract. Should fail.
-	if err := locks.Release(types.FileContractID{2}, lockID); err == nil {
-		t.Fatal("should fail")
+	if err := locks.Release(types.FileContractID{2}, lockID); err != nil {
+		t.Fatal(err)
 	}
 }
