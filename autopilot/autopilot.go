@@ -112,14 +112,14 @@ func (ap *Autopilot) Run() error {
 		case <-ap.stopChan:
 			return nil
 		case <-ap.triggerChan:
-			ap.logger.Info("autopilot loop triggered")
+			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
 		case <-ap.ticker.C:
-			ap.logger.Info("autopilot loop starting")
+			ap.logger.Info("autopilot iteration starting")
 		}
 
 		func() {
-			defer ap.logger.Info("autopilot loop ended")
+			defer ap.logger.Info("autopilot iteration ended")
 
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
@@ -128,13 +128,13 @@ func (ap *Autopilot) Run() error {
 			// fetch consensus state
 			cs, err := ap.bus.ConsensusState()
 			if err != nil {
-				ap.logger.Errorf("loop interrupted, could not fetch consensus state, err: %v", err)
+				ap.logger.Errorf("iteration interrupted, could not fetch consensus state, err: %v", err)
 				return
 			}
 
 			// do not continue if we are not synced
 			if !cs.Synced {
-				ap.logger.Info("consensus not synced")
+				ap.logger.Debug("iteration interrupted, consensus not synced")
 				return
 			}
 
