@@ -57,6 +57,7 @@ func TestContractAcquire(t *testing.T) {
 	var lockIDs []uint64
 	var lockIDsMu sync.Mutex
 	var wg sync.WaitGroup
+	start := time.Now()
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
@@ -76,6 +77,12 @@ func TestContractAcquire(t *testing.T) {
 		t.Fatal("wrong number of lock ids")
 	}
 	verify(fcid, lockIDs[len(lockIDs)-1], 100*time.Millisecond, 50*time.Millisecond)
+
+	// Acquiring the lock should take 10 threads with a 100ms lock duration
+	// a total of at least 900ms.
+	if time.Since(start) < 900*time.Millisecond {
+		t.Fatal("not enough time has passed")
+	}
 
 	// Test timing out while trying to acquire a lock.
 	fcid = types.FileContractID{4}

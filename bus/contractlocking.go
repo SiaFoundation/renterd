@@ -12,6 +12,10 @@ import (
 	"lukechampine.com/frand"
 )
 
+// ErrAcquireContractTimeout is returned when the context passed in to
+// contractLocks.Acquire is closed before the lock can be acquired.
+var ErrAcquireContractTimeout = errors.New("acquiring the lock timed out")
+
 type contractLocks struct {
 	mu    sync.Mutex
 	locks map[types.FileContractID]*contractLock
@@ -53,8 +57,6 @@ func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) 
 	return lock
 }
 
-var ErrAcquireContractTimeout = errors.New("acquiring the lock timed out")
-
 // Acquire acquires a contract lock for the given id and provided duration. If
 // acquiring the lock doesn't finish before the context is closed,
 // ErrAcquireContractTimeout is returned. Upon success an identifier is returned
@@ -64,25 +66,38 @@ var ErrAcquireContractTimeout = errors.New("acquiring the lock timed out")
 // to avoid being starved by low prio tasks.
 func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d time.Duration) (uint64, error) {
 	lock := l.lockForContractID(id, true)
+
+	// Prepare a random lockID for ourselves.
 	ourLockID := frand.Uint64n(math.MaxUint64)
+
+	// Prepare a channel to indicate to other candidates whether we are
+	// still waiting to acquire the lock.
 	done := make(chan struct{})
 	defer close(done)
 
-	setAcquired := func() {
-		lock.lockedUntil = time.Now().Add(d)
-		lock.heldBy = frand.Uint64n(math.MaxUint64)
-	}
-
+	// Add ourselves to the queue of candidates for locking, grab the
+	// lockChan to be notified when the lock is released prematurely and
+	// prepare a timer to be notified when the current lock expires.
 	lock.mu.Lock()
-	lockChan := lock.lockChan // remember lockChan to wait on
+	lockChan := lock.lockChan
 	lock.queue = append(lock.queue, &lockCandidate{
-		lockID: ourLockID,
-		c:      done,
+		lockID:       ourLockID,
+		lockDuration: d,
+		c:            done,
 	})
 	t := time.NewTimer(time.Until(lock.lockedUntil)) // prepare a timer for expiring locks
 	lock.mu.Unlock()
 
-	// TODO: Drain timer.
+	// Drain timer at the end if necessary.
+	drainTimer := func() {
+		if !t.Stop() {
+			select {
+			case <-t.C:
+			default:
+			}
+		}
+	}
+	defer drainTimer()
 
 	// tryAcquire is a helper function that tries to acquire a lock
 	// whenenver waiting threads are either woken by the lock timing out or
@@ -91,7 +106,7 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 		lock.mu.Lock()
 
 		// Fetch the next candidate for locking. Drop any that
-		// have timed out.
+		// have timed out in the meantime.
 		var nextCandidate *lockCandidate
 		for {
 			if len(lock.queue) == 0 {
@@ -107,19 +122,33 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 			break
 		}
 
+		// Check if it is safe to acquire the lock for the next
+		// candidate. That's the case if either lock.heldBy == 0 or we
+		// are beyond the lock's expiry.
+		if lock.heldBy != 0 && time.Until(lock.lockedUntil) > 0 {
+			drainTimer()
+			t.Reset(time.Until(lock.lockedUntil))
+			lock.mu.Unlock()
+			return 0, false, nil
+		}
+
+		// It is safe to acquire the lock. Check whether we are the next
+		// one to acquire it or not.
 		if nextCandidate.lockID == ourLockID {
-			// If this thread is the next candidate in the queue,
-			// acquire the lock.
-			setAcquired()
-			heldBy := lock.heldBy
+			// If we are the next candidate in the queue, acquire
+			// the lock and return.
+			lock.lockedUntil = time.Now().Add(d)
+			lock.heldBy = ourLockID
 			lock.lockChan = make(chan struct{})
 			lock.queue = lock.queue[1:]
+			heldBy := lock.heldBy
 			lock.mu.Unlock()
 			return heldBy, true, nil
 		} else if nextCandidate.lockID != ourLockID {
-			// We are not the next candidate. Sleep for however long
-			// the next candidate wants to acquire the lock.
-			t.Reset(nextCandidate.lockDuration)
+			// We are not the next candidate to acquire the lock.
+			// Wait until the next candidate is done acquiring it.
+			lock.lockChan = nextCandidate.c
+			lockChan = lock.lockChan
 			lock.mu.Unlock()
 		}
 		return 0, false, nil
