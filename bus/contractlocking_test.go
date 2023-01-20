@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -55,26 +56,31 @@ func TestContractAcquire(t *testing.T) {
 	// Same thing again but with multiple locks that expire.
 	fcid = types.FileContractID{3}
 	var lockIDs []uint64
-	var lockIDsMu sync.Mutex
+	var threadIndices []int
+	var mu sync.Mutex
 	var wg sync.WaitGroup
 	start := time.Now()
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		go func() {
+		go func(priority int) {
 			defer wg.Done()
-			lockID, err := locks.Acquire(context.Background(), 0, fcid, 100*time.Millisecond)
+			lockID, err := locks.Acquire(context.Background(), priority, fcid, 100*time.Millisecond)
 			if err != nil {
 				t.Error(err)
 				return
 			}
-			lockIDsMu.Lock()
+			mu.Lock()
 			lockIDs = append(lockIDs, lockID)
-			lockIDsMu.Unlock()
-		}()
+			threadIndices = append(threadIndices, i)
+			mu.Unlock()
+		}(i)
 	}
 	wg.Wait()
 	if len(lockIDs) != 10 {
 		t.Fatal("wrong number of lock ids")
+	}
+	if !sort.IsSorted(sort.IntSlice(threadIndices)) {
+		t.Fatal("threads didn't finish in order or priority")
 	}
 	verify(fcid, lockIDs[len(lockIDs)-1], 100*time.Millisecond, 50*time.Millisecond)
 
