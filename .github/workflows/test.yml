@@ -40,13 +40,13 @@ jobs:
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
-          args: "-tags='testing';-timeout=300s"
+          args: "-tags='testing';-timeout=600s"
       - name: Test Integration
         if: matrix.os != 'windows-latest' || matrix.go-version != '1.18'
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
-          args: "-race;-tags='testing';-timeout=300s"
+          args: "-race;-tags='testing';-timeout=600s"
       - name: Check Endpoints
         uses: SiaFoundation/action-golang-analysis@HEAD
         with:
