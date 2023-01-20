@@ -178,7 +178,8 @@ func (s *session) DeleteSectors(ctx context.Context, roots []consensus.Hash256) 
 // A sessionPool is a set of sessions that can be used for uploading and
 // downloading.
 type sessionPool struct {
-	sessionTTL time.Duration
+	sessionReconnectTimeout time.Duration
+	sessionTTL              time.Duration
 
 	mu     sync.Mutex
 	height uint64
@@ -229,16 +230,25 @@ func (sp *sessionPool) acquire(ctx context.Context, s *session) (_ *sharedSessio
 	}
 
 reconnect:
+	if ss.sess != nil && sp.sessionReconnectTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, sp.sessionReconnectTimeout)
+		defer cancel()
+	}
+
 	ss.conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", s.hostIP)
 	if err != nil {
+		ss.sess = nil
 		return nil, err
 	}
 	t, err := rhpv2.NewRenterTransport(ss.conn, s.hostKey)
 	if err != nil {
+		ss.sess = nil
 		return nil, err
 	}
 	ss.settings, err = rhpv2.RPCSettings(ctx, t)
 	if err != nil {
+		ss.sess = nil
 		t.Close()
 		return nil, err
 	}
@@ -321,9 +331,10 @@ func (sp *sessionPool) Close() error {
 }
 
 // newSessionPool creates a new sessionPool.
-func newSessionPool(sessionTTL time.Duration) *sessionPool {
+func newSessionPool(sessionReconectTimeout, sessionTTL time.Duration) *sessionPool {
 	return &sessionPool{
-		sessionTTL: sessionTTL,
-		hosts:      make(map[consensus.PublicKey]*sharedSession),
+		sessionReconnectTimeout: sessionReconectTimeout,
+		sessionTTL:              sessionTTL,
+		hosts:                   make(map[consensus.PublicKey]*sharedSession),
 	}
 }

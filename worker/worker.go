@@ -793,10 +793,10 @@ func joinErrors(errs []error) error {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, b Bus, sessionTTL time.Duration) http.Handler {
+func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Duration) http.Handler {
 	w := &worker{
 		bus:       b,
-		pool:      newSessionPool(sessionTTL),
+		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey: masterKey,
 	}
 	return jape.Mux(map[string]jape.Handler{
