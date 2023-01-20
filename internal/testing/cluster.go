@@ -171,8 +171,8 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 
 	// Create worker.
 	w, wCleanup, err := node.NewWorker(node.WorkerConfig{
-		SessionTTL:              2 * time.Minute,
 		SessionReconnectTimeout: 10 * time.Second,
+		SessionTTL:              2 * time.Minute,
 	}, busClient, wk)
 	if err != nil {
 		return nil, err
