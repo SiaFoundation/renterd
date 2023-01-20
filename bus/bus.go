@@ -458,7 +458,7 @@ func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), req.Priority, id, req.Duration)
+	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), req.Priority, id, time.Duration(req.Duration))
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}

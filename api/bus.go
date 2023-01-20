@@ -35,8 +35,8 @@ type ContractsIDRenewedRequest struct {
 // ContractAcquireRequest is the request type for the /contract/acquire
 // endpoint.
 type ContractAcquireRequest struct {
-	Duration time.Duration `json:"duration"`
-	Priority int           `json:"priority"`
+	Duration Duration `json:"duration"`
+	Priority int      `json:"priority"`
 }
 
 // ContractAcquireRequest is the request type for the /contract/:id/release

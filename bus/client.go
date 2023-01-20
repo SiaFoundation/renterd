@@ -321,7 +321,7 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 func (c *Client) AcquireContract(fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
 	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
-		Duration: d,
+		Duration: api.Duration(d),
 		Priority: priority,
 	}, &resp)
 	lockID = resp.LockID
