@@ -42,7 +42,7 @@ func (s *SQLStore) Settings() ([]string, error) {
 	return keys, tx.Error
 }
 
-// Setting implements the bus.SettingStore interface.
+// UpdateSetting implements the bus.SettingStore interface.
 func (s *SQLStore) UpdateSetting(key, value string) error {
 	return s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
@@ -51,4 +51,20 @@ func (s *SQLStore) UpdateSetting(key, value string) error {
 		Key:   key,
 		Value: value,
 	}).Error
+}
+
+// UpdateSettings implements the bus.SettingStore interface.
+func (s *SQLStore) UpdateSettings(settings map[string]string) error {
+	var dbSettings []dbSetting
+	for key, value := range settings {
+		dbSettings = append(dbSettings, dbSetting{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value"}),
+	}).Create(&dbSettings).Error
 }

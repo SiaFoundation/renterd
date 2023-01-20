@@ -48,11 +48,9 @@ jobs:
           package: "./internal/testing/..."
           args: "-race;-tags='testing';-timeout=300s"
       - name: Check Endpoints
-        shell: bash
-        run: |
-          go install go.sia.tech/jape/japecheck@latest
-          $(go env GOPATH)/bin/japecheck ./bus
-          $(go env GOPATH)/bin/japecheck ./worker
-          $(go env GOPATH)/bin/japecheck ./autopilot
+        uses: SiaFoundation/action-golang-analysis@HEAD
+        with:
+          analyzers: |
+            go.sia.tech/jape.Analyzer
       - name: Build
         run: go build -o bin/ ./cmd/renterd

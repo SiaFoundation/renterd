@@ -2,7 +2,6 @@ package bus_test
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -38,27 +37,20 @@ func TestClient(t *testing.T) {
 	go serveFn()
 
 	// assert setting 'foo' is not found
-	if err := c.Setting("foo", nil); err == nil || !strings.Contains(err.Error(), "setting not found") {
+	if _, err := c.Setting("foo"); err == nil || !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
 		t.Fatal("unexpected err", err)
 	}
 
 	// update setting 'foo'
-	want := api.RedundancySettings{
-		MinShards:   2,
-		TotalShards: 5,
-	}
-	if err := c.UpdateSetting("foo", want); err != nil {
+	if err := c.UpdateSetting("foo", "bar"); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch setting 'foo' and assert it matches
-	var got api.RedundancySettings
-	if err := c.Setting("foo", &got); err != nil {
+	if value, err := c.Setting("foo"); err != nil {
 		t.Fatal("unexpected err", err)
-	} else if got.MinShards != want.MinShards || got.TotalShards != want.TotalShards {
-		wb, _ := json.Marshal(want)
-		gb, _ := json.Marshal(got)
-		t.Fatal("unexpected result", string(wb), string(gb))
+	} else if value != "bar" {
+		t.Fatal("unexpected result", value)
 	}
 
 	// fetch redundancy settings and assert they're configured to the default values
