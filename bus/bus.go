@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -99,9 +98,10 @@ type (
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		Settings() ([]string, error)
 		Setting(key string) (string, error)
+		Settings() ([]string, error)
 		UpdateSetting(key, value string) error
+		UpdateSettings(settings map[string]string) error
 	}
 )
 
@@ -580,10 +580,17 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *bus) settingsHandlerPUT(jc jape.Context) {
+	var settings map[string]string
+	if jc.Decode(&settings) == nil {
+		jc.Check("couldn't update settings", b.ss.UpdateSettings(settings))
+	}
+}
+
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.PathParam("key")); err == api.ErrSettingNotFound {
+	} else if setting, err := b.ss.Setting(jc.PathParam("key")); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -592,14 +599,11 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
+func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
+	var value string
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if value := jc.PathParam("value"); value == "" {
-		jc.Error(errors.New("param 'value' can not be empty"), http.StatusBadRequest)
-	} else if value, err := url.QueryUnescape(value); err != nil {
-		jc.Error(errors.New("could not unescape 'value'"), http.StatusBadRequest)
-	} else {
+	} else if jc.Decode(&value) == nil {
 		jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
 	}
 }
@@ -775,9 +779,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"DELETE /objects/*key":    b.objectsKeyHandlerDELETE,
 		"GET    /migration/slabs": b.objectsMigrationSlabsHandlerGET,
 
-		"GET    /settings":            b.settingsHandlerGET,
-		"GET    /setting/:key":        b.settingKeyHandlerGET,
-		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
+		"GET    /settings":     b.settingsHandlerGET,
+		"PUT    /settings":     b.settingsHandlerPUT,
+		"GET    /setting/:key": b.settingKeyHandlerGET,
+		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
