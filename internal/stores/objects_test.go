@@ -139,8 +139,8 @@ func TestSQLObjectStore(t *testing.T) {
 							DBSlabID:   1,
 							DBSectorID: 1,
 							DBSector: dbSector{
-								Root:     obj1.Slabs[0].Shards[0].Root,
-								LastHost: obj1.Slabs[0].Shards[0].Host,
+								Root:       obj1.Slabs[0].Shards[0].Root,
+								LatestHost: obj1.Slabs[0].Shards[0].Host,
 								Contracts: []dbContract{
 									{
 										HostID: 1,
@@ -174,8 +174,8 @@ func TestSQLObjectStore(t *testing.T) {
 							DBSlabID:   2,
 							DBSectorID: 2,
 							DBSector: dbSector{
-								Root:     obj1.Slabs[1].Shards[0].Root,
-								LastHost: obj1.Slabs[1].Shards[0].Host,
+								Root:       obj1.Slabs[1].Shards[0].Root,
+								LatestHost: obj1.Slabs[1].Shards[0].Host,
 								Contracts: []dbContract{
 									{
 										HostID: 2,

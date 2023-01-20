@@ -12,6 +12,12 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	// slabRetrievalBatchSize is the number of slabs we fetch from the
+	// database per batch
+	slabRetrievalBatchSize = 10000
+)
+
 var (
 	// ErrOBjectNotFound is returned if get is unable to retrieve an object
 	// from the database.
@@ -70,8 +76,8 @@ type (
 	dbSector struct {
 		Model
 
-		LastHost consensus.PublicKey `gorm:"type:bytes;serializer:gob;NOT NULL"`
-		Root     consensus.Hash256   `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
+		LatestHost consensus.PublicKey `gorm:"type:bytes;serializer:gob;NOT NULL"`
+		Root       consensus.Hash256   `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
@@ -111,7 +117,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 			continue // sector wasn't preloaded
 		}
 
-		slab.Shards[i].Host = shard.DBSector.LastHost
+		slab.Shards[i].Host = shard.DBSector.LatestHost
 		slab.Shards[i].Root = shard.DBSector.Root
 	}
 
@@ -245,7 +251,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.
 				var sector dbSector
 				err := tx.
 					Where(dbSector{Root: shard.Root}).
-					Assign(dbSector{LastHost: shard.Host}).
+					Assign(dbSector{LatestHost: shard.Host}).
 					FirstOrCreate(&sector).
 					Error
 				if err != nil {
@@ -412,7 +418,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey
 			var sector dbSector
 			if err := tx.
 				Where(dbSector{Root: shard.Root}).
-				Assign(dbSector{LastHost: shard.Host}).
+				Assign(dbSector{LatestHost: shard.Host}).
 				FirstOrCreate(&sector).
 				Error; err != nil {
 				return err
@@ -477,7 +483,7 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 		Order("COUNT(slabs.id) DESC").
 		Limit(limit).
 		Preload("Shards.DBSector").
-		FindInBatches(&dbBatch, 10000, func(tx *gorm.DB, batch int) error {
+		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, dbSlab := range dbBatch {
 				if slab, err := dbSlab.convert(); err == nil {
 					slabs = append(slabs, slab)
