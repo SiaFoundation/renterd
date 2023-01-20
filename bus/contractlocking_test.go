@@ -31,7 +31,7 @@ func TestContractAcquire(t *testing.T) {
 
 	// Acquire contract.
 	fcid := types.FileContractID{1}
-	lockID, err := locks.Acquire(context.Background(), fcid, time.Minute)
+	lockID, err := locks.Acquire(context.Background(), 0, fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,13 +40,13 @@ func TestContractAcquire(t *testing.T) {
 	// Acquire another contract but this time it has been acquired already
 	// and the lock expired.
 	fcid = types.FileContractID{2}
-	_, err = locks.Acquire(context.Background(), fcid, time.Millisecond)
+	_, err = locks.Acquire(context.Background(), 0, fcid, time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond) // wait for lock to expire
 
-	lockID, err = locks.Acquire(context.Background(), fcid, time.Minute)
+	lockID, err = locks.Acquire(context.Background(), 0, fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestContractAcquire(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			lockID, err := locks.Acquire(context.Background(), fcid, 100*time.Millisecond)
+			lockID, err := locks.Acquire(context.Background(), 0, fcid, 100*time.Millisecond)
 			if err != nil {
 				t.Error(err)
 				return
@@ -86,14 +86,14 @@ func TestContractAcquire(t *testing.T) {
 
 	// Test timing out while trying to acquire a lock.
 	fcid = types.FileContractID{4}
-	lockID, err = locks.Acquire(context.Background(), fcid, time.Hour)
+	lockID, err = locks.Acquire(context.Background(), 0, fcid, time.Hour)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = locks.Acquire(ctx, fcid, 100*time.Millisecond)
+	_, err = locks.Acquire(ctx, 0, fcid, 100*time.Millisecond)
 	if !errors.Is(err, ErrAcquireContractTimeout) {
 		t.Fatal("acquire should time out", err)
 		return
@@ -118,7 +118,7 @@ func TestContractRelease(t *testing.T) {
 
 	// Acquire contract.
 	fcid := types.FileContractID{1}
-	lockID, err := locks.Acquire(context.Background(), fcid, time.Minute)
+	lockID, err := locks.Acquire(context.Background(), 0, fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestContractRelease(t *testing.T) {
 		}
 	}()
 
-	lockID, err = locks.Acquire(context.Background(), fcid, time.Minute)
+	lockID, err = locks.Acquire(context.Background(), 0, fcid, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

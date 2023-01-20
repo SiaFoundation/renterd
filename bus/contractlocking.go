@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -26,13 +27,14 @@ type contractLock struct {
 	lockChan    chan struct{} // locks the contract
 	lockedUntil time.Time
 	heldBy      uint64
-	queue       []*lockCandidate
+	queue       *lockCandidatePriorityHeap
 }
 
 type lockCandidate struct {
 	lockID       uint64
 	lockDuration time.Duration
 	c            chan struct{}
+	priority     int
 }
 
 func newContractLocks() *contractLocks {
@@ -51,10 +53,39 @@ func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) 
 		lock = &contractLock{
 			lockChan:    c,
 			lockedUntil: time.Now().Add(time.Hour),
+			queue:       &lockCandidatePriorityHeap{},
 		}
 		l.locks[id] = lock
 	}
 	return lock
+}
+
+// lockCandidatePriorityHeap is a max-heap of lockCandidates.
+type lockCandidatePriorityHeap []*lockCandidate
+
+func (h lockCandidatePriorityHeap) Len() int           { return len(h) }
+func (h lockCandidatePriorityHeap) Less(i, j int) bool { return h[i].priority > h[j].priority }
+func (h lockCandidatePriorityHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h lockCandidatePriorityHeap) Peek() *lockCandidate {
+	if h.Len() == 0 {
+		return nil
+	}
+	return h[0]
+}
+
+func (h *lockCandidatePriorityHeap) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*h = append(*h, x.(*lockCandidate))
+}
+
+func (h *lockCandidatePriorityHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
 }
 
 // Acquire acquires a contract lock for the given id and provided duration. If
@@ -64,7 +95,7 @@ func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) 
 // TODO: Extend this with some sort of priority. e.g. migrations would acquire a
 // lock with a low priority but contract maintenance would have a very high one
 // to avoid being starved by low prio tasks.
-func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d time.Duration) (uint64, error) {
+func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.FileContractID, d time.Duration) (uint64, error) {
 	lock := l.lockForContractID(id, true)
 
 	// Prepare a random lockID for ourselves.
@@ -80,10 +111,11 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 	// prepare a timer to be notified when the current lock expires.
 	lock.mu.Lock()
 	lockChan := lock.lockChan
-	lock.queue = append(lock.queue, &lockCandidate{
+	heap.Push(lock.queue, &lockCandidate{
 		lockID:       ourLockID,
 		lockDuration: d,
 		c:            done,
+		priority:     priority,
 	})
 	t := time.NewTimer(time.Until(lock.lockedUntil)) // prepare a timer for expiring locks
 	lock.mu.Unlock()
@@ -109,16 +141,16 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 		// have timed out in the meantime.
 		var nextCandidate *lockCandidate
 		for {
-			if len(lock.queue) == 0 {
+			if lock.queue.Len() == 0 {
 				panic("queue is empty - should never happen")
 			}
 			select {
-			case <-lock.queue[0].c:
-				lock.queue = lock.queue[1:]
+			case <-lock.queue.Peek().c:
+				heap.Pop(lock.queue)
 				continue
 			default:
 			}
-			nextCandidate = lock.queue[0]
+			nextCandidate = lock.queue.Peek()
 			break
 		}
 
@@ -140,7 +172,7 @@ func (l *contractLocks) Acquire(ctx context.Context, id types.FileContractID, d 
 			lock.lockedUntil = time.Now().Add(d)
 			lock.heldBy = ourLockID
 			lock.lockChan = make(chan struct{})
-			lock.queue = lock.queue[1:]
+			heap.Pop(lock.queue)
 			heldBy := lock.heldBy
 			lock.mu.Unlock()
 			return heldBy, true, nil

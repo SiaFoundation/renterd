@@ -318,10 +318,11 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 
 // AcquireContract acquires a contract for a given amount of time unless
 // released manually before that time.
-func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (lockID uint64, err error) {
+func (c *Client) AcquireContract(fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
 	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
 		Duration: d,
+		Priority: priority,
 	}, &resp)
 	lockID = resp.LockID
 	return

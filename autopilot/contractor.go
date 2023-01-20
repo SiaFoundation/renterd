@@ -23,6 +23,10 @@ const (
 	// lock when renewing a contract
 	contractLockingDurationRenew = 30 * time.Second
 
+	// contractLockingPriorityRenew is the priority used when locking a
+	// contract for renew.
+	contractLockingPriorityRenew = 10
+
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
@@ -533,7 +537,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 
 func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64, toRenew api.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
-	lockID, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
+	lockID, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingPriorityRenew, contractLockingDurationRenew)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
