@@ -98,9 +98,10 @@ type (
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		Settings() ([]string, error)
 		Setting(key string) (string, error)
+		Settings() ([]string, error)
 		UpdateSetting(key, value string) error
+		UpdateSettings(settings map[string]string) error
 	}
 )
 
@@ -579,6 +580,13 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *bus) settingsHandlerPUT(jc jape.Context) {
+	var settings map[string]string
+	if jc.Decode(&settings) == nil {
+		jc.Check("couldn't update settings", b.ss.UpdateSettings(settings))
+	}
+}
+
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
@@ -772,6 +780,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /migration/slabs": b.objectsMigrationSlabsHandlerGET,
 
 		"GET    /settings":     b.settingsHandlerGET,
+		"PUT    /settings":     b.settingsHandlerPUT,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 

@@ -379,6 +379,11 @@ func (c *Client) UpdateSetting(key string, value string) error {
 	return c.c.PUT(fmt.Sprintf("/setting/%s", key), value)
 }
 
+// UpdateSettings will bulk update the given settings.
+func (c *Client) UpdateSettings(settings map[string]string) error {
+	return c.c.PUT("/settings", settings)
+}
+
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings() (gs api.GougingSettings, err error) {
 	setting, err := c.Setting(SettingGouging)
