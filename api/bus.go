@@ -39,13 +39,13 @@ type ContractAcquireRequest struct {
 	Priority int           `json:"priority"`
 }
 
-// ContractAcquireRequest is the request type for the /contract/release
+// ContractAcquireRequest is the request type for the /contract/:id/release
 // endpoint.
 type ContractReleaseRequest struct {
 	LockID uint64 `json:"lockID"`
 }
 
-// ContractAcquireResponse is the response type for the /contract/acquire
+// ContractAcquireResponse is the response type for the /contract/:id/acquire
 // endpoint.
 type ContractAcquireResponse struct {
 	LockID uint64 `json:"lockID"`

@@ -15,13 +15,13 @@ import (
 func TestContractAcquire(t *testing.T) {
 	locks := newContractLocks()
 
-	verify := func(fcid types.FileContractID, lockID uint64, lockedDuration time.Duration, delta time.Duration) {
+	verify := func(fcid types.FileContractID, lockID uint64) {
 		t.Helper()
 		if lockID == 0 {
 			t.Fatal("invalid lock id")
 		}
 		lock := locks.lockForContractID(fcid, false)
-		if lock.heldBy != lockID {
+		if lock.heldByID != lockID {
 			t.Fatal("heldBy not set")
 		}
 	}
@@ -32,7 +32,7 @@ func TestContractAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, lockID, time.Minute, 3*time.Second)
+	verify(fcid, lockID)
 
 	// Acquire another contract but this time it has been acquired already
 	// and the lock expired.
@@ -47,7 +47,7 @@ func TestContractAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, lockID, time.Minute, 3*time.Second)
+	verify(fcid, lockID)
 
 	// Same thing again but with multiple locks that expire. The first lock
 	// is acquired in the same thread to guarantee it's the first and the
@@ -86,7 +86,7 @@ func TestContractAcquire(t *testing.T) {
 	if !sort.IsSorted(sort.Reverse(sort.IntSlice(threadIndices))) {
 		t.Fatal("threads didn't finish in order or priority", threadIndices)
 	}
-	verify(fcid, lockIDs[len(lockIDs)-1], 100*time.Millisecond, 50*time.Millisecond)
+	verify(fcid, lockIDs[len(lockIDs)-1])
 
 	// Acquiring the lock should take 10 threads with a 100ms lock duration
 	// a total of at least 900ms.
@@ -108,7 +108,7 @@ func TestContractAcquire(t *testing.T) {
 		t.Fatal("acquire should time out", err)
 		return
 	}
-	verify(fcid, lockID, time.Hour, time.Second)
+	verify(fcid, lockID)
 }
 
 // TestContractRelease is a unit test for contractLocks.Release.
@@ -118,7 +118,7 @@ func TestContractRelease(t *testing.T) {
 	verify := func(fcid types.FileContractID, lockID uint64, lockedUntil time.Time, delta time.Duration) {
 		t.Helper()
 		lock := locks.lockForContractID(fcid, false)
-		if lock.heldBy != lockID {
+		if lock.heldByID != lockID {
 			t.Fatalf("heldBy not set")
 		}
 	}

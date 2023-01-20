@@ -52,7 +52,7 @@ type contractLocks struct {
 
 type contractLock struct {
 	mu          sync.Mutex // locks contractLock fields
-	heldBy      uint64
+	heldByID    uint64
 	wakeupTimer *time.Timer
 	queue       *lockCandidatePriorityHeap
 }
@@ -119,8 +119,8 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 
 	// If nobody holds the lock, acquire it and launch a timer to release
 	// the lock after the expiry.
-	if lock.heldBy == 0 {
-		lock.heldBy = ourLockID
+	if lock.heldByID == 0 {
+		lock.heldByID = ourLockID
 		lock.setTimer(l, ourLockID, id, d)
 		lock.mu.Unlock()
 		return ourLockID, nil
@@ -151,10 +151,10 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 		lock.mu.Lock()
 	}
 
-	if lock.heldBy != 0 {
+	if lock.heldByID != 0 {
 		panic("lock should be released after being woken up")
 	}
-	lock.heldBy = ourLockID
+	lock.heldByID = ourLockID
 	lock.setTimer(l, ourLockID, id, d)
 	lock.mu.Unlock()
 	return ourLockID, nil
@@ -172,18 +172,18 @@ func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
-	if lock.heldBy == 0 {
+	if lock.heldByID == 0 {
 		return nil // nothing to do
 	}
-	if lock.heldBy != lockID {
-		return fmt.Errorf("can't unlock lock due to id mismatch %v != %v", lockID, lock.heldBy)
+	if lock.heldByID != lockID {
+		return fmt.Errorf("can't unlock lock due to id mismatch %v != %v", lockID, lock.heldByID)
 	}
 
 	// Stop the timer on the lock.
 	lock.stopTimer()
 
 	// Set holder to 0.
-	lock.heldBy = 0
+	lock.heldByID = 0
 
 	// If there is no next candidate we are done.
 	if lock.queue.Len() == 0 {
