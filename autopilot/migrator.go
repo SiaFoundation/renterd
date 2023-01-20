@@ -35,6 +35,7 @@ func (m *migrator) TryPerformMigrations() {
 	m.running = true
 	m.mu.Unlock()
 
+	m.logger.Info("performing migrations")
 	go func() {
 		m.performMigrations()
 		m.mu.Lock()

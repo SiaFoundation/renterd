@@ -290,6 +290,7 @@ func NewLogger(path string) (*zap.Logger, func(), error) {
 	config := zap.NewProductionEncoderConfig()
 	config.EncodeTime = zapcore.RFC3339TimeEncoder
 	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	config.StacktraceKey = ""
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
 
 	// file
