@@ -1,16 +1,19 @@
 package node
 
 import (
+	"bytes"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
@@ -18,7 +21,7 @@ import (
 	mconsensus "go.sia.tech/siad/modules/consensus"
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
-	"go.sia.tech/siad/types"
+	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
@@ -47,12 +50,34 @@ type AutopilotConfig struct {
 	ScannerNumThreads uint64
 }
 
+func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	core.EncodeTo(e)
+	e.Flush()
+	if err := siad.UnmarshalSia(&buf); err != nil {
+		panic(err)
+	}
+}
+
+func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
+	var buf bytes.Buffer
+	siad.MarshalSia(&buf)
+	d := types.NewBufDecoder(buf.Bytes())
+	core.DecodeFrom(d)
+	if d.Err() != nil {
+		panic(d.Err())
+	}
+}
+
 type chainManager struct {
 	cs modules.ConsensusSet
 }
 
 func (cm chainManager) AcceptBlock(b types.Block) error {
-	return cm.cs.AcceptBlock(b)
+	var sb stypes.Block
+	convertToSiad(b, &sb)
+	return cm.cs.AcceptBlock(sb)
 }
 
 func (cm chainManager) Synced() bool {
@@ -61,9 +86,9 @@ func (cm chainManager) Synced() bool {
 
 func (cm chainManager) TipState() consensus.State {
 	return consensus.State{
-		Index: consensus.ChainIndex{
+		Index: types.ChainIndex{
 			Height: uint64(cm.cs.Height()),
-			ID:     consensus.BlockID(cm.cs.CurrentBlock().ID()),
+			ID:     types.BlockID(cm.cs.CurrentBlock().ID()),
 		},
 	}
 }
@@ -90,7 +115,12 @@ func (s syncer) Connect(addr string) error {
 }
 
 func (s syncer) BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction) {
-	s.tp.Broadcast(append(dependsOn, txn))
+	txnSet := make([]stypes.Transaction, len(dependsOn)+1)
+	for i, txn := range dependsOn {
+		convertToSiad(txn, &txnSet[i])
+	}
+	convertToSiad(txn, &txnSet[len(txnSet)-1])
+	s.tp.Broadcast(txnSet)
 }
 
 func (s syncer) SyncerAddress() (string, error) {
@@ -101,32 +131,41 @@ type txpool struct {
 	tp modules.TransactionPool
 }
 
-func (tp txpool) RecommendedFee() types.Currency {
+func (tp txpool) RecommendedFee() (fee types.Currency) {
 	_, max := tp.tp.FeeEstimation()
-	return max
+	convertToCore(&max, &fee)
+	return
 }
 
 func (tp txpool) Transactions() []types.Transaction {
-	return tp.tp.Transactions()
+	stxns := tp.tp.Transactions()
+	txns := make([]types.Transaction, len(stxns))
+	for i := range txns {
+		convertToCore(&stxns[i], &txns[i])
+	}
+	return txns
 }
 
 func (tp txpool) AddTransactionSet(txns []types.Transaction) error {
-	return tp.tp.AcceptTransactionSet(txns)
+	stxns := make([]stypes.Transaction, len(txns))
+	for i := range stxns {
+		convertToSiad(&txns[i], &stxns[i])
+	}
+	return tp.tp.AcceptTransactionSet(stxns)
 }
 
 func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
 	pool := tp.Transactions()
-	outputToParent := make(map[types.OutputID]*types.Transaction)
+	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
 	for i, txn := range pool {
 		for j := range txn.SiacoinOutputs {
-			scoid := txn.SiacoinOutputID(uint64(j))
-			outputToParent[types.OutputID(scoid)] = &pool[i]
+			outputToParent[txn.SiacoinOutputID(j)] = &pool[i]
 		}
 	}
 	var parents []types.Transaction
 	seen := make(map[types.TransactionID]bool)
 	for _, sci := range txn.SiacoinInputs {
-		if parent, ok := outputToParent[types.OutputID(sci.ParentID)]; ok {
+		if parent, ok := outputToParent[sci.ParentID]; ok {
 			if txid := parent.ID(); !seen[txid] {
 				seen[txid] = true
 				parents = append(parents, *parent)
@@ -136,7 +175,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Handler, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler, func() error, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -149,7 +188,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	cm, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
+	cs, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
 	select {
 	case err := <-errCh:
 		if err != nil {
@@ -166,7 +205,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	if err := os.MkdirAll(tpoolDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	tp, err := transactionpool.New(cm, g, tpoolDir)
+	tp, err := transactionpool.New(cs, g, tpoolDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -179,7 +218,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	ws, ccid, err := stores.NewJSONWalletStore(walletDir, walletAddr)
 	if err != nil {
 		return nil, nil, err
-	} else if err := cm.ConsensusSetSubscribe(ws, ccid, nil); err != nil {
+	} else if err := cs.ConsensusSetSubscribe(ws, ccid, nil); err != nil {
 		return nil, nil, err
 	}
 	w := wallet.NewSingleAddressWallet(walletKey, ws)
@@ -193,12 +232,12 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval)
 	if err != nil {
 		return nil, nil, err
-	} else if err := cm.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
+	} else if err := cs.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
 		return nil, nil, err
 	}
 
 	if m := cfg.Miner; m != nil {
-		if err := cm.ConsensusSetSubscribe(m, ccid, nil); err != nil {
+		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {
 			return nil, nil, err
 		}
 		tp.TransactionPoolSubscribe(m)
@@ -207,7 +246,7 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 	cleanup := func() error {
 		errs := []error{
 			g.Close(),
-			cm.Close(),
+			cs.Close(),
 			tp.Close(),
 			sqlStore.Close(),
 		}
@@ -219,14 +258,14 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 		return nil
 	}
 
-	b, err := bus.New(syncer{g, tp}, chainManager{cm}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, cfg.InteractionFlushInterval)
+	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, cfg.InteractionFlushInterval)
 	if err != nil {
 		return nil, nil, err
 	}
 	return b, cleanup, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (http.Handler, func() error, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
 	w, err := worker.New(workerKey, b, cfg.SessionReconnectTimeout, cfg.SessionTTL)
 	return w, func() error { return nil }, err

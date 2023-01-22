@@ -4,10 +4,9 @@ import (
 	"errors"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 )
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
@@ -66,14 +65,14 @@ type WalletFundRequest struct {
 // WalletFundResponse is the response type for the /wallet/fund endpoint.
 type WalletFundResponse struct {
 	Transaction types.Transaction   `json:"transaction"`
-	ToSign      []types.OutputID    `json:"toSign"`
+	ToSign      []types.Hash256     `json:"toSign"`
 	DependsOn   []types.Transaction `json:"dependsOn"`
 }
 
 // WalletSignRequest is the request type for the /wallet/sign endpoint.
 type WalletSignRequest struct {
 	Transaction   types.Transaction   `json:"transaction"`
-	ToSign        []types.OutputID    `json:"toSign"`
+	ToSign        []types.Hash256     `json:"toSign"`
 	CoveredFields types.CoveredFields `json:"coveredFields"`
 }
 
@@ -87,23 +86,23 @@ type WalletRedistributeRequest struct {
 // WalletPrepareFormRequest is the request type for the /wallet/prepare/form
 // endpoint.
 type WalletPrepareFormRequest struct {
-	RenterKey      consensus.PrivateKey `json:"renterKey"`
-	HostKey        consensus.PublicKey  `json:"hostKey"`
-	RenterFunds    types.Currency       `json:"renterFunds"`
-	RenterAddress  types.UnlockHash     `json:"renterAddress"`
-	HostCollateral types.Currency       `json:"hostCollateral"`
-	EndHeight      uint64               `json:"endHeight"`
-	HostSettings   rhpv2.HostSettings   `json:"hostSettings"`
+	RenterKey      types.PrivateKey   `json:"renterKey"`
+	HostKey        types.PublicKey    `json:"hostKey"`
+	RenterFunds    types.Currency     `json:"renterFunds"`
+	RenterAddress  types.Address      `json:"renterAddress"`
+	HostCollateral types.Currency     `json:"hostCollateral"`
+	EndHeight      uint64             `json:"endHeight"`
+	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
 }
 
 // WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
 // endpoint.
 type WalletPrepareRenewRequest struct {
 	Contract      types.FileContractRevision `json:"contract"`
-	RenterKey     consensus.PrivateKey       `json:"renterKey"`
-	HostKey       consensus.PublicKey        `json:"hostKey"`
+	RenterKey     types.PrivateKey           `json:"renterKey"`
+	HostKey       types.PublicKey            `json:"hostKey"`
 	RenterFunds   types.Currency             `json:"renterFunds"`
-	RenterAddress types.UnlockHash           `json:"renterAddress"`
+	RenterAddress types.Address              `json:"renterAddress"`
 	EndHeight     uint64                     `json:"endHeight"`
 	HostSettings  rhpv2.HostSettings         `json:"hostSettings"`
 }
@@ -123,8 +122,8 @@ type ObjectsResponse struct {
 
 // AddObjectRequest is the request type for the /object/*key endpoint.
 type AddObjectRequest struct {
-	Object        object.Object                                `json:"object"`
-	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
+	Object        object.Object                            `json:"object"`
+	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
 // MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
@@ -135,8 +134,8 @@ type MigrationSlabsRequest struct {
 
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
-	Slab          object.Slab                                  `json:"slab"`
-	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
+	Slab          object.Slab                              `json:"slab"`
+	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
 // UpdateBlocklistRequest is the request type for /hosts/blocklist endpoint.
@@ -178,11 +177,6 @@ type GougingSettings struct {
 type RedundancySettings struct {
 	MinShards   int
 	TotalShards int
-}
-
-// Redundancy returns the redundancy defined by the total shards and min shards.
-func (rs RedundancySettings) Redundancy() float64 {
-	return float64(rs.TotalShards) / float64(rs.MinShards)
 }
 
 // Validate returns an error if the redundancy settings are not considered

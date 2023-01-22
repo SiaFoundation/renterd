@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/types"
 )
 
 const (
@@ -26,8 +26,8 @@ const (
 
 // A RegistryKey uniquely identifies a value in the host's registry.
 type RegistryKey struct {
-	PublicKey PublicKey
-	Tweak     Hash256
+	PublicKey types.PublicKey
+	Tweak     types.Hash256
 }
 
 // A RegistryValue is a value associated with a key and a tweak in a host's
@@ -36,7 +36,7 @@ type RegistryValue struct {
 	Data      []byte
 	Revision  uint64
 	Type      uint8
-	Signature Signature
+	Signature types.Signature
 }
 
 // A RegistryEntry contains the data stored by a host for each registry value.
@@ -47,26 +47,26 @@ type RegistryEntry struct {
 
 // Hash returns the hash of the Value used for signing
 // the entry.
-func (re *RegistryEntry) Hash() Hash256 {
+func (re *RegistryEntry) Hash() types.Hash256 {
 	if re.Type != EntryTypePubKey {
-		return Hash256(crypto.HashAll(re.Tweak, re.Data, re.Revision))
+		return types.Hash256(crypto.HashAll(re.Tweak, re.Data, re.Revision))
 	}
-	return Hash256(crypto.HashAll(re.Tweak, re.Data, re.Revision, re.Type))
+	return types.Hash256(crypto.HashAll(re.Tweak, re.Data, re.Revision, re.Type))
 }
 
 // Work returns the work of a Value.
-func (re *RegistryEntry) Work() Hash256 {
+func (re *RegistryEntry) Work() types.Hash256 {
 	data := re.Data
 	if re.Type == EntryTypePubKey {
 		data = re.Data[20:]
 	}
-	return Hash256(crypto.HashAll(re.Tweak, data, re.Revision))
+	return types.Hash256(crypto.HashAll(re.Tweak, data, re.Revision))
 }
 
 // RegistryHostID returns the ID hash of the host for primary registry entries.
-func RegistryHostID(pk PublicKey) Hash256 {
-	return Hash256(crypto.HashObject(types.SiaPublicKey{
-		Algorithm: types.SignatureEd25519,
+func RegistryHostID(pk types.PublicKey) types.Hash256 {
+	return types.Hash256(crypto.HashObject(types.UnlockKey{
+		Algorithm: types.SpecifierEd25519,
 		Key:       pk[:],
 	}))
 }

@@ -1,6 +1,7 @@
 package rhp
 
 import (
+	"bytes"
 	"crypto/cipher"
 	"crypto/subtle"
 	"encoding/binary"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/crypto"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20"
@@ -27,12 +29,12 @@ const minMessageSize = 4096
 
 var (
 	// Handshake specifiers
-	loopEnter = newSpecifier("LoopEnter")
-	loopExit  = newSpecifier("LoopExit")
+	loopEnter = types.NewSpecifier("LoopEnter")
+	loopExit  = types.NewSpecifier("LoopExit")
 
 	// RPC ciphers
-	cipherChaCha20Poly1305 = newSpecifier("ChaCha20Poly1305")
-	cipherNoOverlap        = newSpecifier("NoOverlap")
+	cipherChaCha20Poly1305 = types.NewSpecifier("ChaCha20Poly1305")
+	cipherNoOverlap        = types.NewSpecifier("NoOverlap")
 
 	// ErrRenterClosed is returned by (*Transport).ReadID when the renter sends the
 	// Transport termination signal.
@@ -41,7 +43,7 @@ var (
 
 // An RPCError may be sent instead of a response object to any RPC.
 type RPCError struct {
-	Type        Specifier
+	Type        types.Specifier
 	Data        []byte // structure depends on Type
 	Description string // human-readable error string
 }
@@ -69,11 +71,11 @@ type Transport struct {
 	conn      net.Conn
 	aead      cipher.AEAD
 	key       []byte // for RawResponse
-	inbuf     objBuffer
-	outbuf    objBuffer
+	inbuf     bytes.Buffer
+	outbuf    bytes.Buffer
 	challenge [16]byte
 	isRenter  bool
-	hostKey   PublicKey
+	hostKey   types.PublicKey
 
 	mu     sync.Mutex
 	r, w   uint64
@@ -93,7 +95,7 @@ func (t *Transport) setErr(err error) {
 }
 
 // HostKey returns the host's public key.
-func (t *Transport) HostKey() PublicKey { return t.hostKey }
+func (t *Transport) HostKey() types.PublicKey { return t.hostKey }
 
 // BytesRead returns the number of bytes read from the underlying connection.
 func (t *Transport) BytesRead() uint64 { return atomic.LoadUint64(&t.r) }
@@ -130,7 +132,7 @@ func hashChallenge(challenge [16]byte) [32]byte {
 }
 
 // SignChallenge signs the current Transport challenge.
-func (t *Transport) SignChallenge(priv PrivateKey) Signature {
+func (t *Transport) SignChallenge(priv types.PrivateKey) types.Signature {
 	return priv.SignHash(hashChallenge(t.challenge))
 }
 
@@ -138,25 +140,27 @@ func (t *Transport) writeMessage(obj ProtocolObject) error {
 	if err := t.PrematureCloseErr(); err != nil {
 		return err
 	}
-	// generate random nonce
-	nonce := make([]byte, 256)[:t.aead.NonceSize()] // avoid heap alloc
+	nonce := make([]byte, 32)[:t.aead.NonceSize()] // avoid heap alloc
 	frand.Read(nonce)
 
-	// pad short messages to minMessageSize
-	msgSize := 8 + t.aead.NonceSize() + obj.marshalledSize() + t.aead.Overhead()
+	t.outbuf.Reset()
+	t.outbuf.Grow(minMessageSize)
+	e := types.NewEncoder(&t.outbuf)
+	e.WritePrefix(0) // placeholder
+	e.Write(nonce)
+	obj.EncodeTo(e)
+	e.Flush()
+
+	// overwrite message length
+	msgSize := t.outbuf.Len() + t.aead.Overhead()
 	if msgSize < minMessageSize {
 		msgSize = minMessageSize
 	}
-
-	// write length prefix, nonce, and object directly into buffer
-	t.outbuf.reset()
-	t.outbuf.grow(msgSize)
-	t.outbuf.writePrefix(msgSize - 8)
-	t.outbuf.write(nonce)
-	obj.marshalBuffer(&t.outbuf)
+	t.outbuf.Grow(t.aead.Overhead())
+	msg := t.outbuf.Bytes()[:msgSize]
+	binary.LittleEndian.PutUint64(msg[:8], uint64(msgSize-8))
 
 	// encrypt the object in-place
-	msg := t.outbuf.bytes()[:msgSize]
 	msgNonce := msg[8:][:len(nonce)]
 	payload := msg[8+len(nonce) : msgSize-t.aead.Overhead()]
 	t.aead.Seal(payload[:0], msgNonce, payload, nil)
@@ -174,39 +178,39 @@ func (t *Transport) readMessage(obj ProtocolObject, maxLen uint64) error {
 	if maxLen < minMessageSize {
 		maxLen = minMessageSize
 	}
-	t.inbuf.reset()
-	if err := t.inbuf.copyN(t.conn, 8); err != nil {
-		t.setErr(err)
-		return err
-	}
-	msgSize := t.inbuf.readUint64()
-	if msgSize > maxLen {
+	d := types.NewDecoder(io.LimitedReader{R: t.conn, N: int64(8 + maxLen)})
+	msgSize := d.ReadUint64()
+	if d.Err() != nil {
+		return d.Err()
+	} else if msgSize > maxLen {
 		return fmt.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
 	} else if msgSize < uint64(t.aead.NonceSize()+t.aead.Overhead()) {
 		return fmt.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, t.aead.NonceSize()+t.aead.Overhead())
 	}
-
-	t.inbuf.reset()
-	t.inbuf.grow(int(msgSize))
-	if err := t.inbuf.copyN(t.conn, msgSize); err != nil {
-		t.setErr(err)
-		return err
+	t.inbuf.Reset()
+	t.inbuf.Grow(int(msgSize))
+	buf := t.inbuf.Bytes()[:msgSize]
+	d.Read(buf)
+	if d.Err() != nil {
+		return d.Err()
 	}
 	atomic.AddUint64(&t.r, uint64(8+msgSize))
 
-	nonce := t.inbuf.next(t.aead.NonceSize())
-	paddedPayload := t.inbuf.bytes()
-	_, err := t.aead.Open(paddedPayload[:0], nonce, paddedPayload, nil)
+	nonce := buf[:t.aead.NonceSize()]
+	paddedPayload := buf[t.aead.NonceSize():]
+	plaintext, err := t.aead.Open(paddedPayload[:0], nonce, paddedPayload, nil)
 	if err != nil {
 		t.setErr(err) // not an I/O error, but still fatal
 		return err
 	}
-	return obj.unmarshalBuffer(&t.inbuf)
+	d = types.NewBufDecoder(plaintext)
+	obj.DecodeFrom(d)
+	return d.Err()
 }
 
 // WriteRequest sends an encrypted RPC request, comprising an RPC ID and a
 // request object.
-func (t *Transport) WriteRequest(rpcID Specifier, req ProtocolObject) error {
+func (t *Transport) WriteRequest(rpcID types.Specifier, req ProtocolObject) error {
 	if err := t.writeMessage(&rpcID); err != nil {
 		return fmt.Errorf("WriteRequestID: %w", err)
 	}
@@ -220,7 +224,7 @@ func (t *Transport) WriteRequest(rpcID Specifier, req ProtocolObject) error {
 
 // ReadID reads an RPC request ID. If the renter sends the Transport termination
 // signal, ReadID returns ErrRenterClosed.
-func (t *Transport) ReadID() (rpcID Specifier, err error) {
+func (t *Transport) ReadID() (rpcID types.Specifier, err error) {
 	defer wrapErr(&err, "ReadID")
 	err = t.readMessage(&rpcID, minMessageSize)
 	if rpcID == loopExit {
@@ -266,7 +270,7 @@ func (t *Transport) ReadResponse(resp ProtocolObject, maxLen uint64) (err error)
 }
 
 // Call is a helper method that writes a request and then reads a response.
-func (t *Transport) Call(rpcID Specifier, req, resp ProtocolObject) error {
+func (t *Transport) Call(rpcID types.Specifier, req, resp ProtocolObject) error {
 	if err := t.WriteRequest(rpcID, req); err != nil {
 		return err
 	}
@@ -334,26 +338,17 @@ func (t *Transport) RawResponse(maxLen uint64) (*ResponseReader, error) {
 	if maxLen < minMessageSize {
 		maxLen = minMessageSize
 	}
-	t.inbuf.reset()
-	if err := t.inbuf.copyN(t.conn, 8); err != nil {
-		t.setErr(err)
-		return nil, err
-	}
-	msgSize := t.inbuf.readUint64()
+	d := types.NewDecoder(io.LimitedReader{R: t.conn, N: int64(8 + chacha20.NonceSize)})
+	msgSize := d.ReadUint64()
 	if msgSize > maxLen {
 		return nil, fmt.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
-	} else if msgSize < uint64(t.aead.NonceSize()+t.aead.Overhead()) {
-		return nil, fmt.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, t.aead.NonceSize()+t.aead.Overhead())
+	} else if msgSize < uint64(chacha20.NonceSize+poly1305.TagSize) {
+		return nil, fmt.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, chacha20.NonceSize+poly1305.TagSize)
 	}
-	msgSize -= uint64(t.aead.NonceSize() + t.aead.Overhead())
+	msgSize -= uint64(chacha20.NonceSize + poly1305.TagSize)
 
-	t.inbuf.reset()
-	t.inbuf.grow(t.aead.NonceSize())
-	if err := t.inbuf.copyN(t.conn, uint64(t.aead.NonceSize())); err != nil {
-		t.setErr(err)
-		return nil, err
-	}
-	nonce := t.inbuf.next(t.aead.NonceSize())
+	nonce := make([]byte, 32)[:chacha20.NonceSize] // avoid heap allocation
+	d.Read(nonce)
 
 	// construct reader
 	c, _ := chacha20.NewUnauthenticatedCipher(t.key, nonce)
@@ -373,15 +368,10 @@ func (t *Transport) RawResponse(maxLen uint64) (*ResponseReader, error) {
 	}
 
 	// check if response is an RPCError
-	if err := t.inbuf.copyN(rr, 1); err != nil {
-		return nil, err
-	}
-	if isErr := t.inbuf.readBool(); isErr {
-		if err := t.inbuf.copyN(rr, msgSize-1); err != nil {
-			return nil, err
-		}
+	d = types.NewDecoder(io.LimitedReader{R: rr, N: int64(msgSize)})
+	if isErr := d.ReadBool(); isErr {
 		err := new(RPCError)
-		err.unmarshalBuffer(&t.inbuf)
+		err.DecodeFrom(d)
 		if err := rr.VerifyTag(); err != nil {
 			return nil, err
 		}
@@ -406,16 +396,20 @@ func (t *Transport) Close() (err error) {
 	return t.conn.Close()
 }
 
-func hashKeys(k1, k2 [32]byte) Hash256 {
+func hashKeys(k1, k2 [32]byte) types.Hash256 {
 	return blake2b.Sum256(append(append(make([]byte, 0, len(k1)+len(k2)), k1[:]...), k2[:]...))
 }
 
 // NewHostTransport conducts the hosts's half of the renter-host protocol
 // handshake, returning a Transport that can be used to handle RPC requests.
-func NewHostTransport(conn net.Conn, priv PrivateKey) (_ *Transport, err error) {
+func NewHostTransport(conn net.Conn, priv types.PrivateKey) (_ *Transport, err error) {
 	defer wrapErr(&err, "NewHostTransport")
+	e := types.NewEncoder(conn)
+	d := types.NewDecoder(io.LimitedReader{R: conn, N: 1024})
+
 	var req loopKeyExchangeRequest
-	if err := req.readFrom(conn); err != nil {
+	req.DecodeFrom(d)
+	if err := d.Err(); err != nil {
 		return nil, err
 	}
 
@@ -426,7 +420,7 @@ func NewHostTransport(conn net.Conn, priv PrivateKey) (_ *Transport, err error) 
 		}
 	}
 	if !supportsChaCha {
-		(&loopKeyExchangeResponse{Cipher: cipherNoOverlap}).writeTo(conn)
+		(&loopKeyExchangeResponse{Cipher: cipherNoOverlap}).EncodeTo(e)
 		return nil, errors.New("no supported ciphers")
 	}
 
@@ -437,7 +431,8 @@ func NewHostTransport(conn net.Conn, priv PrivateKey) (_ *Transport, err error) 
 		PublicKey: xpk,
 		Signature: priv.SignHash(h),
 	}
-	if err := resp.writeTo(conn); err != nil {
+	resp.EncodeTo(e)
+	if err := e.Flush(); err != nil {
 		return nil, err
 	}
 
@@ -452,7 +447,7 @@ func NewHostTransport(conn net.Conn, priv PrivateKey) (_ *Transport, err error) 
 		hostKey:   priv.PublicKey(),
 	}
 	// hack: cast challenge to Specifier to make it a ProtocolObject
-	if err := t.writeMessage((*Specifier)(&t.challenge)); err != nil {
+	if err := t.writeMessage((*types.Specifier)(&t.challenge)); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -460,19 +455,23 @@ func NewHostTransport(conn net.Conn, priv PrivateKey) (_ *Transport, err error) 
 
 // NewRenterTransport conducts the renter's half of the renter-host protocol
 // handshake, returning a Transport that can be used to make RPC requests.
-func NewRenterTransport(conn net.Conn, pub PublicKey) (_ *Transport, err error) {
+func NewRenterTransport(conn net.Conn, pub types.PublicKey) (_ *Transport, err error) {
 	defer wrapErr(&err, "NewRenterTransport")
+	e := types.NewEncoder(conn)
+	d := types.NewDecoder(io.LimitedReader{R: conn, N: 1024})
 
 	xsk, xpk := crypto.GenerateX25519KeyPair()
 	req := &loopKeyExchangeRequest{
 		PublicKey: xpk,
-		Ciphers:   []Specifier{cipherChaCha20Poly1305},
+		Ciphers:   []types.Specifier{cipherChaCha20Poly1305},
 	}
-	if err := req.writeTo(conn); err != nil {
+	req.EncodeTo(e)
+	if err := e.Flush(); err != nil {
 		return nil, fmt.Errorf("couldn't write handshake: %w", err)
 	}
 	var resp loopKeyExchangeResponse
-	if err := resp.readFrom(conn); err != nil {
+	resp.DecodeFrom(d)
+	if err := d.Err(); err != nil {
 		return nil, fmt.Errorf("couldn't read host's handshake: %w", err)
 	}
 	// validate the signature before doing anything else
@@ -496,7 +495,7 @@ func NewRenterTransport(conn net.Conn, pub PublicKey) (_ *Transport, err error) 
 		hostKey:  pub,
 	}
 	// hack: cast challenge to Specifier to make it a ProtocolObject
-	if err := t.readMessage((*Specifier)(&t.challenge), minMessageSize); err != nil {
+	if err := t.readMessage((*types.Specifier)(&t.challenge), minMessageSize); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -506,12 +505,12 @@ func NewRenterTransport(conn net.Conn, pub PublicKey) (_ *Transport, err error) 
 type (
 	loopKeyExchangeRequest struct {
 		PublicKey crypto.X25519PublicKey
-		Ciphers   []Specifier
+		Ciphers   []types.Specifier
 	}
 
 	loopKeyExchangeResponse struct {
 		PublicKey crypto.X25519PublicKey
-		Signature Signature
-		Cipher    Specifier
+		Signature types.Signature
+		Cipher    types.Specifier
 	}
 )

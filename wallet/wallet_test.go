@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
@@ -24,24 +24,24 @@ func (s *mockStore) Transactions(since time.Time, max int) ([]wallet.Transaction
 }
 
 var cs = consensus.State{
-	Index: consensus.ChainIndex{
+	Index: types.ChainIndex{
 		Height: 1,
-		ID:     consensus.BlockID{},
+		ID:     types.BlockID{},
 	},
 }
 
 // TestWalletRedistribute is a small unit test that covers the functionality of
 // the 'Redistribute' method on the wallet.
 func TestWalletRedistribute(t *testing.T) {
-	oneSC := types.SiacoinPrecision
+	oneSC := types.Siacoins(1)
 
 	// create a wallet with one output
-	priv := consensus.GeneratePrivateKey()
+	priv := types.GeneratePrivateKey()
 	pub := priv.PublicKey()
 	utxo := wallet.SiacoinElement{
 		types.SiacoinOutput{
-			Value:      oneSC.Mul64(20),
-			UnlockHash: wallet.StandardAddress(pub),
+			Value:   oneSC.Mul64(20),
+			Address: wallet.StandardAddress(pub),
 		},
 		randomOutputID(),
 		0,
@@ -127,7 +127,7 @@ func TestWalletRedistribute(t *testing.T) {
 	}
 }
 
-func randomOutputID() (t types.OutputID) {
+func randomOutputID() (t types.Hash256) {
 	frand.Read(t[:])
 	return
 }

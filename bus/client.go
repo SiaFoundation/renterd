@@ -6,14 +6,13 @@ import (
 	"net/url"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/siad/types"
 )
 
 // A Client provides methods for interacting with a renterd API server.
@@ -70,7 +69,7 @@ func (c *Client) WalletBalance() (bal types.Currency, err error) {
 }
 
 // WalletAddress returns an address controlled by the wallet.
-func (c *Client) WalletAddress() (resp types.UnlockHash, err error) {
+func (c *Client) WalletAddress() (resp types.Address, err error) {
 	err = c.c.GET("/wallet/address", &resp)
 	return
 }
@@ -112,7 +111,7 @@ func (c *Client) SendSiacoins(scos []types.SiacoinOutput) (err error) {
 			_ = c.WalletDiscard(txn)
 		}
 	}()
-	err = c.WalletSign(&txn, toSign, types.FullCoveredFields)
+	err = c.WalletSign(&txn, toSign, types.CoveredFields{WholeTransaction: true})
 	if err != nil {
 		return err
 	}
@@ -126,7 +125,7 @@ func (c *Client) WalletTransactions(since time.Time, max int) (resp []wallet.Tra
 }
 
 // WalletFund funds txn using inputs controlled by the wallet.
-func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error) {
+func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error) {
 	req := api.WalletFundRequest{
 		Transaction: *txn,
 		Amount:      amount,
@@ -141,7 +140,7 @@ func (c *Client) WalletFund(txn *types.Transaction, amount types.Currency) ([]ty
 }
 
 // WalletSign signs txn using the wallet's private key.
-func (c *Client) WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error {
+func (c *Client) WalletSign(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
 	req := api.WalletSignRequest{
 		Transaction:   *txn,
 		ToSign:        toSign,
@@ -169,7 +168,7 @@ func (c *Client) WalletDiscard(txn types.Transaction) error {
 }
 
 // WalletPrepareForm funds and signs a contract transaction.
-func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
+func (c *Client) WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
 	req := api.WalletPrepareFormRequest{
 		RenterKey:      renterKey,
 		HostKey:        hostKey,
@@ -184,7 +183,7 @@ func (c *Client) WalletPrepareForm(renterKey consensus.PrivateKey, hostKey conse
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
+func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
 	req := api.WalletPrepareRenewRequest{
 		Contract:      contract,
 		RenterKey:     renterKey,
@@ -207,7 +206,7 @@ func (c *Client) WalletPending() (resp []types.Transaction, err error) {
 }
 
 // Host returns information about a particular host known to the server.
-func (c *Client) Host(hostKey consensus.PublicKey) (h hostdb.Host, err error) {
+func (c *Client) Host(hostKey types.PublicKey) (h hostdb.Host, err error) {
 	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &h)
 	return
 }
@@ -441,7 +440,7 @@ func (c *Client) Object(path string) (o object.Object, entries []string, err err
 }
 
 // AddObject stores the provided object under the given name.
-func (c *Client) AddObject(name string, o object.Object, usedContract map[consensus.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddObject(name string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.PUT(fmt.Sprintf("/objects/%s", name), api.AddObjectRequest{
 		Object:        o,
 		UsedContracts: usedContract,
@@ -464,7 +463,7 @@ func (c *Client) SlabsForMigration(set string, limit int) (slabs []object.Slab, 
 }
 
 // UpdateSlab updates the given slab in the database.
-func (c *Client) UpdateSlab(slab object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) (err error) {
+func (c *Client) UpdateSlab(slab object.Slab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.PUT("/slab", api.UpdateSlabRequest{
 		Slab:          slab,
 		UsedContracts: usedContracts,

@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 )
 
-func (s *SQLStore) insertTestAnnouncement(hk consensus.PublicKey, a hostdb.Announcement) error {
+func (s *SQLStore) insertTestAnnouncement(hk types.PublicKey, a hostdb.Announcement) error {
 	return insertAnnouncements(s.db, []announcement{
 		{
 			hostKey:      hk,
@@ -36,7 +36,7 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Try to fetch a random host. Should fail.
-	hk := consensus.GeneratePrivateKey().PublicKey()
+	hk := types.GeneratePrivateKey().PublicKey()
 	_, err = hdb.Host(hk)
 	if !errors.Is(err, ErrHostNotFound) {
 		t.Fatal(err)
@@ -60,9 +60,9 @@ func TestSQLHostDB(t *testing.T) {
 	// Insert an announcement for the host and another one for an unknown
 	// host.
 	a := hostdb.Announcement{
-		Index: consensus.ChainIndex{
+		Index: types.ChainIndex{
 			Height: 42,
-			ID:     consensus.BlockID{1, 2, 3},
+			ID:     types.BlockID{1, 2, 3},
 		},
 		Timestamp:  time.Now().UTC().Round(time.Second),
 		NetAddress: "address",
@@ -111,7 +111,7 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Insert another announcement for an unknown host.
-	unknownKey := consensus.PublicKey{1, 4, 7}
+	unknownKey := types.PublicKey{1, 4, 7}
 	err = hdb.insertTestAnnouncement(unknownKey, a)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestRecordInteractions(t *testing.T) {
 	defer hdb.Close()
 
 	// Add a host.
-	hk := consensus.GeneratePrivateKey().PublicKey()
+	hk := types.GeneratePrivateKey().PublicKey()
 	err = hdb.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestRecordInteractions(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
-	createInteractions := func(hk consensus.PublicKey, successful, failed int) (interactions []hostdb.Interaction) {
+	createInteractions := func(hk types.PublicKey, successful, failed int) (interactions []hostdb.Interaction) {
 		for i := 0; i < successful+failed; i++ {
 			interactions = append(interactions, hostdb.Interaction{
 				Host:      hk,
@@ -241,7 +241,7 @@ func TestRecordInteractions(t *testing.T) {
 	}
 }
 
-func (s *SQLStore) addTestScan(hk consensus.PublicKey, t time.Time, err error, settings rhp.HostSettings) error {
+func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhp.HostSettings) error {
 	var sr hostdb.ScanResult
 	if err == nil {
 		sr.Settings = settings
@@ -353,7 +353,7 @@ func TestRecordScan(t *testing.T) {
 	defer hdb.Close()
 
 	// Add a host.
-	hk := consensus.GeneratePrivateKey().PublicKey()
+	hk := types.GeneratePrivateKey().PublicKey()
 	err = hdb.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
@@ -380,7 +380,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("creation time not set")
 	}
 
-	scanInteraction := func(hk consensus.PublicKey, scanTime time.Time, settings rhp.HostSettings, success bool) []hostdb.Interaction {
+	scanInteraction := func(hk types.PublicKey, scanTime time.Time, settings rhp.HostSettings, success bool) []hostdb.Interaction {
 		var err string
 		if !success {
 			err = "failure"
@@ -500,19 +500,19 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		hostKey: consensus.GeneratePrivateKey().PublicKey(),
+		hostKey: types.GeneratePrivateKey().PublicKey(),
 		announcement: hostdb.Announcement{
-			Index:      consensus.ChainIndex{Height: 1, ID: consensus.BlockID{1}},
+			Index:      types.ChainIndex{Height: 1, ID: types.BlockID{1}},
 			Timestamp:  time.Now(),
 			NetAddress: "foo.bar:1000",
 		},
 	}
 	ann2 := announcement{
-		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		hostKey:      types.GeneratePrivateKey().PublicKey(),
 		announcement: hostdb.Announcement{},
 	}
 	ann3 := announcement{
-		hostKey:      consensus.GeneratePrivateKey().PublicKey(),
+		hostKey:      types.GeneratePrivateKey().PublicKey(),
 		announcement: hostdb.Announcement{},
 	}
 
@@ -528,7 +528,7 @@ func TestInsertAnnouncements(t *testing.T) {
 	expectedAnn := dbAnnouncement{
 		HostKey:     ann1.hostKey,
 		BlockHeight: 1,
-		BlockID:     consensus.BlockID{1}.String(),
+		BlockID:     types.BlockID{1}.String(),
 		NetAddress:  "foo.bar:1000",
 	}
 	if ann != expectedAnn {
@@ -610,7 +610,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 		return
 	}
 
-	isBlocked := func(hk consensus.PublicKey) bool {
+	isBlocked := func(hk types.PublicKey) bool {
 		t.Helper()
 		hosts, err := hdb.Hosts(0, -1)
 		if err != nil {
@@ -625,15 +625,15 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// add three hosts
-	hk1 := consensus.GeneratePrivateKey().PublicKey()
+	hk1 := types.GeneratePrivateKey().PublicKey()
 	if err := hdb.addCustomTestHost(hk1, "foo.bar.com:1000"); err != nil {
 		t.Fatal(err)
 	}
-	hk2 := consensus.GeneratePrivateKey().PublicKey()
+	hk2 := types.GeneratePrivateKey().PublicKey()
 	if err := hdb.addCustomTestHost(hk2, "bar.baz.com:2000"); err != nil {
 		t.Fatal(err)
 	}
-	hk3 := consensus.GeneratePrivateKey().PublicKey()
+	hk3 := types.GeneratePrivateKey().PublicKey()
 	if err := hdb.addCustomTestHost(hk3, "foobar.com:3000"); err != nil {
 		t.Fatal(err)
 	}
@@ -748,11 +748,11 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// add two hosts, one that should be blocked by 'baz.com' and one that should not
-	hk4 := consensus.GeneratePrivateKey().PublicKey()
+	hk4 := types.GeneratePrivateKey().PublicKey()
 	if err := hdb.addCustomTestHost(hk4, "foo.baz.com:3000"); err != nil {
 		t.Fatal(err)
 	}
-	hk5 := consensus.GeneratePrivateKey().PublicKey()
+	hk5 := types.GeneratePrivateKey().PublicKey()
 	if err := hdb.addCustomTestHost(hk5, "foo.baz.commmmm:3000"); err != nil {
 		t.Fatal(err)
 	}
@@ -789,14 +789,14 @@ func TestSQLHostBlocklist(t *testing.T) {
 }
 
 // addTestHosts adds 'n' hosts to the db and returns their keys.
-func (s *SQLStore) addTestHosts(n int) (keys []consensus.PublicKey, err error) {
+func (s *SQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 	cnt, err := s.contractsCount()
 	if err != nil {
 		return nil, err
 	}
 
 	for i := 0; i < n; i++ {
-		keys = append(keys, consensus.PublicKey{byte(int(cnt) + i + 1)})
+		keys = append(keys, types.PublicKey{byte(int(cnt) + i + 1)})
 		if err := s.addTestHost(keys[len(keys)-1]); err != nil {
 			return nil, err
 		}
@@ -805,12 +805,12 @@ func (s *SQLStore) addTestHosts(n int) (keys []consensus.PublicKey, err error) {
 }
 
 // addTestHost ensures a host with given hostkey exists.
-func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
+func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 	return s.addCustomTestHost(hk, "")
 }
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
-func (s *SQLStore) addCustomTestHost(hk consensus.PublicKey, na string) error {
+func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 	return insertAnnouncements(s.db, []announcement{{
 		hostKey:      hk,
 		announcement: hostdb.Announcement{NetAddress: na},
