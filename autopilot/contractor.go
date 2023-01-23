@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -588,15 +587,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 		}
 
 		// calculate the host collateral
-		hostCollateral, err := calculateHostCollateral(cfg, settings, renterFunds, txnFee)
-		if err != nil {
-			// TODO: keep track of consecutive failures and break at some point
-			c.logger.Errorw(
-				fmt.Sprintf("failed contract formation, err : %v", err),
-				"hk", host.PublicKey,
-			)
-			continue
-		}
+		hostCollateral := calculateHostCollateral(cfg, settings)
 
 		// form contract
 		contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), host.PublicKey, host.NetAddress, renterAddress, renterFunds, hostCollateral)
@@ -893,38 +884,13 @@ func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]
 	return cmap
 }
 
-func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings, renterFunds, txnFee types.Currency) (types.Currency, error) {
-	// check underflow
-	if settings.ContractPrice.Add(txnFee).Cmp(renterFunds) > 0 {
-		return types.ZeroCurrency, errors.New("contract price + fees exceeds funding")
-	}
-
-	// avoid division by zero
-	if settings.StoragePrice.IsZero() {
-		settings.StoragePrice = types.NewCurrency64(1)
-	}
-
-	// calculate the host collateral
-	renterPayout := renterFunds.Sub(settings.ContractPrice).Sub(txnFee)
-	maxStorage := renterPayout
-	if !settings.StoragePrice.IsZero() {
-		maxStorage = renterPayout.Div(settings.StoragePrice)
-	}
+func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings) types.Currency {
 	expectedStorage := cfg.Contracts.Storage / cfg.Contracts.Amount
-	hostCollateral := maxStorage.Mul(settings.Collateral)
-
-	// don't add more than 5x the collateral for the expected storage to save on fees
-	maxRenterCollateral := settings.Collateral.Mul64(cfg.Contracts.Period).Mul64(expectedStorage).Mul64(5)
-	if hostCollateral.Cmp(maxRenterCollateral) > 0 {
-		hostCollateral = maxRenterCollateral
-	}
-
-	// don't add more collateral than the host would allow
+	hostCollateral := settings.Collateral.Mul64(expectedStorage)
 	if hostCollateral.Cmp(settings.MaxCollateral) > 0 {
 		hostCollateral = settings.MaxCollateral
 	}
-
-	return hostCollateral, nil
+	return hostCollateral
 }
 
 func addLeeway(n uint64, pct float64) uint64 {

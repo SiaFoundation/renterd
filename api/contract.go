@@ -62,4 +62,12 @@ func (c Contract) HostKey() (pk types.PublicKey) {
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.
-func (c Contract) RenterFunds() types.Currency { return c.Revision.ValidRenterPayout() }
+func (c Contract) RenterFunds() types.Currency {
+	return c.Revision.ValidRenterPayout()
+}
+
+// HostCollateral returns the value of the host's collateral.
+func (c Contract) HostCollateral() types.Currency {
+	// TODO: use MissedHostValue
+	return c.Revision.MissedHostOutput().Value
+}
