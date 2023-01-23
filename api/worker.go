@@ -1,6 +1,7 @@
 package api
 
 import (
+	"math/big"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -102,6 +103,6 @@ type RHPRegistryUpdateRequest struct {
 // Account describes an ephemeral account as returned by the worker API.
 type Account struct {
 	ID      rhp.Account         `json:"id"`
-	Balance types.Currency      `json:"currency"`
+	Balance *big.Int            `json:"currency"`
 	Host    consensus.PublicKey `json:"host"`
 }

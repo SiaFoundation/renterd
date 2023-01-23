@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"net"
 	"net/http"
 	"strconv"
@@ -184,6 +185,11 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	default:
 		return hostdb.Interaction{}, false
 	}
+}
+
+type AccountStore interface {
+	Accounts(owner string) ([]ephemeralaccounts.Account, error)
+	UpdateBalance(id rhpv3.Account, delta *big.Int) error
 }
 
 // A Bus is the source of truth within a renterd system.

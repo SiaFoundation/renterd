@@ -2,6 +2,7 @@ package worker
 
 import (
 	"errors"
+	"math/big"
 	"sync"
 
 	"go.sia.tech/renterd/api"
@@ -15,6 +16,7 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
+		bus      AccountStore
 		workerID string
 		key      consensus.PrivateKey
 
@@ -25,12 +27,13 @@ type (
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
+		bus  AccountStore
 		id   rhp.Account
 		key  consensus.PrivateKey
 		host consensus.PublicKey
 
 		mu      sync.Mutex
-		balance types.Currency
+		balance *big.Int
 	}
 )
 
@@ -75,10 +78,11 @@ func (a *accounts) ForHost(hk consensus.PublicKey) (*account, error) {
 	acc, exists := a.accounts[accountID]
 	if !exists {
 		acc = &account{
+			bus:     a.bus,
 			id:      accountID,
 			host:    hk,
 			key:     a.key,
-			balance: types.ZeroCurrency,
+			balance: types.ZeroCurrency.Big(),
 		}
 		a.accounts[accountID] = acc
 	}
@@ -88,10 +92,17 @@ func (a *accounts) ForHost(hk consensus.PublicKey) (*account, error) {
 // Deposit increases the balance of an account.
 func (a *account) Deposit(amt types.Currency) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.balance = a.balance.Add(amt)
-	// TODO: notify bus
-	return nil
+	a.balance = a.balance.Add(a.balance, amt.Big())
+	a.mu.Unlock()
+	return a.bus.UpdateBalance(a.id, amt.Big())
+}
+
+// Withdraw decreases the balance of an account.
+func (a *account) Withdraw(amt types.Currency) error {
+	a.mu.Lock()
+	a.balance = a.balance.Sub(a.balance, amt.Big())
+	a.mu.Unlock()
+	return a.bus.UpdateBalance(a.id, new(big.Int).Neg(amt.Big()))
 }
 
 // tryInitAccounts is used for lazily initialising the accounts from the bus.
@@ -102,8 +113,18 @@ func (a *accounts) tryInitAccounts() error {
 		return nil // already initialised
 	}
 	a.accounts = make(map[rhp.Account]*account)
-
-	// TODO: populate from bus once we have persistence of accounts
+	accounts, err := a.bus.Accounts(a.workerID)
+	if err != nil {
+		return err
+	}
+	for _, acc := range accounts {
+		a.accounts[rhp.Account(acc.ID)] = &account{
+			bus:     a.bus,
+			id:      rhp.Account(acc.ID),
+			key:     a.deriveAccountKey(acc.Host),
+			balance: acc.Balance.Big(),
+		}
+	}
 	return nil
 }
 
