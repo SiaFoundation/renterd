@@ -249,7 +249,8 @@ type worker struct {
 	pool      *sessionPool
 	masterKey [32]byte
 
-	accounts *accounts
+	accounts    *accounts
+	priceTables *priceTables
 }
 
 func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) error {
@@ -542,9 +543,13 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Get price table.
-	pt, err := w.hostPriceTableByContract(jc.Request.Context(), rfr.HostKey, hostIP, &revision)
-	if jc.Check("failed to fetch pricetable", err) != nil {
-		return
+	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
+	if !ptValid {
+		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, hostIP, rfr.HostKey)
+		if jc.Check("failed to update outdated price table", err) != nil {
+			return
+		}
 	}
 
 	// Fund account.
@@ -905,6 +910,9 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey: masterKey,
 		accounts:  nil,
+		priceTables: &priceTables{
+			priceTables: make(map[types.PublicKey]*priceTable),
+		},
 	}
 	w.accounts = &accounts{
 		accounts: make(map[rhpv3.Account]*account),
