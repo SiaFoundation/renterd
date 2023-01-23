@@ -55,7 +55,7 @@ type Bus interface {
 	ConsensusState() (api.ConsensusState, error)
 
 	// objects
-	SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
+	SlabsForMigration(set string, limit int) ([]object.Slab, error)
 
 	// settings
 	GougingSettings() (gs api.GougingSettings, err error)
@@ -149,10 +149,6 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			err = ap.m.UpdateContracts()
-			if err != nil {
-				ap.logger.Errorf("update contracts failed, err: %v", err)
-			}
 			ap.m.TryPerformMigrations()
 		}()
 	}

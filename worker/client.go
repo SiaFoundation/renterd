@@ -98,7 +98,7 @@ func (c *Client) RHPUpdateRegistry(hostKey consensus.PublicKey, key rhpv3.Regist
 
 // MigrateSlab migrates the specified slab.
 func (c *Client) MigrateSlab(slab object.Slab) error {
-	return c.c.POST("/slabs/migrate", slab, nil)
+	return c.c.POST("/slab/migrate", slab, nil)
 }
 
 // UploadObject uploads the data in r, creating an object with the given name.

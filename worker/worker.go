@@ -196,12 +196,13 @@ type Bus interface {
 
 	DownloadParams() (api.DownloadParams, error)
 	GougingParams() (api.GougingParams, error)
-	MigrateParams(slab object.Slab) (api.MigrateParams, error)
 	UploadParams() (api.UploadParams, error)
 
 	Object(key string) (object.Object, []string, error)
 	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
+
+	UpdateSlab(s object.Slab, goodContracts map[consensus.PublicKey]types.FileContractID) error
 
 	WalletDiscard(txn types.Transaction) error
 	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
@@ -598,39 +599,50 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	}
 }
 
-func (w *worker) slabsMigrateHandler(jc jape.Context) {
+func (w *worker) slabMigrateHandler(jc jape.Context) {
 	var slab object.Slab
 	if jc.Decode(&slab) != nil {
 		return
 	}
 
-	mp, err := w.bus.MigrateParams(slab)
-	if jc.Check("couldn't fetch migration parameters from bus", err) != nil {
+	up, err := w.bus.UploadParams()
+	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
 
 	// attach gouging checker to the context
-	ctx := WithGougingChecker(jc.Request.Context(), mp.GougingParams)
+	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
 
-	from, err := w.bus.Contracts(mp.FromContracts)
+	contracts, err := w.bus.Contracts(up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
-	to, err := w.bus.Contracts(mp.ToContracts)
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
-	}
-
-	w.pool.setCurrentHeight(mp.CurrentHeight)
-	err = w.withHosts(ctx, append(from, to...), func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts[:len(from)], hosts[len(from):])
+	w.pool.setCurrentHeight(up.CurrentHeight)
+	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
+		return migrateSlab(ctx, &slab, hosts)
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
 
-	// TODO: After migration, we need to notify the bus of the changes to the slab.
+	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+	for _, ss := range slab.Shards {
+		if _, exists := usedContracts[ss.Host]; exists {
+			continue
+		}
+
+		for _, c := range contracts {
+			if c.HostKey == ss.Host {
+				usedContracts[ss.Host] = c.ID
+				break
+			}
+		}
+	}
+
+	if jc.Check("couldn't update slab", w.bus.UpdateSlab(slab, usedContracts)) != nil {
+		return
+	}
 }
 
 func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
@@ -724,7 +736,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
 
 	// fetch contracts
-	bcs, err := w.bus.Contracts(up.ContractSet)
+	contracts, err := w.bus.Contracts(up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -735,7 +747,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		var length int
 
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
-		if err := w.withHosts(ctx, bcs, func(hosts []sectorStore) (err error) {
+		if err := w.withHosts(ctx, contracts, func(hosts []sectorStore) (err error) {
 			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts)
 			return err
 		}); err == io.EOF {
@@ -752,7 +764,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 
 		for _, ss := range s.Shards {
 			if _, ok := usedContracts[ss.Host]; !ok {
-				for _, c := range bcs {
+				for _, c := range contracts {
 					if c.HostKey == ss.Host {
 						usedContracts[ss.Host] = c.ID
 						break
@@ -912,7 +924,7 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
 
-		"POST   /slabs/migrate": w.slabsMigrateHandler,
+		"POST   /slab/migrate": w.slabMigrateHandler,
 
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,

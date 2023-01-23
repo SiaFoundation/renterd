@@ -455,14 +455,20 @@ func (c *Client) DeleteObject(name string) (err error) {
 	return
 }
 
-// SlabsForMigration returns up to n slabs which require migration and haven't
-// failed migration since failureCutoff.
-func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) (slabs []object.Slab, err error) {
-	values := url.Values{}
-	values.Set("cutoff", api.ParamTime(failureCutoff).String())
-	values.Set("limit", fmt.Sprint(n))
-	values.Set("goodContracts", fmt.Sprint(goodContracts))
-	err = c.c.GET("/migration/slabs?"+values.Encode(), &slabs)
+// SlabsForMigration returns up to 'limit' slabs which require migration. A slab
+// needs to be migrated if it has sectors on contracts that are not part of the
+// given 'set'.
+func (c *Client) SlabsForMigration(set string, limit int) (slabs []object.Slab, err error) {
+	err = c.c.POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, Limit: limit}, &slabs)
+	return
+}
+
+// UpdateSlab updates the given slab in the database.
+func (c *Client) UpdateSlab(slab object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) (err error) {
+	err = c.c.PUT("/slab", api.UpdateSlabRequest{
+		Slab:          slab,
+		UsedContracts: usedContracts,
+	})
 	return
 }
 
@@ -475,12 +481,6 @@ func (c *Client) DownloadParams() (dp api.DownloadParams, err error) {
 // UploadParams returns parameters used for uploading slabs.
 func (c *Client) UploadParams() (up api.UploadParams, err error) {
 	err = c.c.GET("/params/upload", &up)
-	return
-}
-
-// MigrateParams returns parameters used for migrating a slab.
-func (c *Client) MigrateParams(slab object.Slab) (mp api.MigrateParams, err error) {
-	err = c.c.GET("/params/migrate", &mp)
 	return
 }
 

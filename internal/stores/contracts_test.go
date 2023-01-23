@@ -381,6 +381,22 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 }
 
+func (s *SQLStore) addTestContracts(keys []consensus.PublicKey) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
+	cnt, err := s.contractsCount()
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, key := range keys {
+		fcids = append(fcids, types.FileContractID{byte(int(cnt) + i + 1)})
+		contract, err := s.addTestContract(fcids[len(fcids)-1], key)
+		if err != nil {
+			return nil, nil, err
+		}
+		contracts = append(contracts, contract)
+	}
+	return
+}
+
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddContract(rev, types.ZeroCurrency, 0)
@@ -389,6 +405,14 @@ func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.Publi
 func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
+}
+
+func (s *SQLStore) contractsCount() (cnt int64, err error) {
+	err = s.db.
+		Model(&dbContract{}).
+		Count(&cnt).
+		Error
+	return
 }
 
 func testContractRevision(fcid types.FileContractID, hk consensus.PublicKey) rhpv2.ContractRevision {
