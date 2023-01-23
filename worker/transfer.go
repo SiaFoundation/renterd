@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -262,20 +261,22 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 }
 
 func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error {
-	// keep some state, hosts in the state are considered good hosts, for every
-	// host we keep track of the amount of times they are used in the slab
-	state := make(map[string]int)
+	hostsmap := make(map[string]struct{})
+	usedmap := make(map[string]struct{})
+
+	// make a map of good hosts
 	for _, h := range hosts {
-		state[h.PublicKey().String()] = 0
+		hostsmap[h.PublicKey().String()] = struct{}{}
 	}
 
-	// loop all shards and collect the indices of those that need to be migrated
+	// collect all indices of sectors that are on hosts which are not in the
+	// list and thus need to be migrated, as well as a map of used hosts
 	var shardIndices []int
 	for i, shard := range s.Shards {
-		if _, good := state[shard.Host.String()]; !good {
+		usedmap[shard.Host.String()] = struct{}{}
+		if _, exists := hostsmap[shard.Host.String()]; !exists {
 			shardIndices = append(shardIndices, i)
 		}
-		state[shard.Host.String()]++
 	}
 
 	// if all shards are on good hosts, we're done
@@ -312,13 +313,16 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error
 	}
 	shards = shards[:len(shardIndices)]
 
-	// sort the hosts in a way that frequently used hosts are at the end
-	sort.SliceStable(hosts, func(i, j int) bool {
-		return state[hosts[i].PublicKey().String()] < state[hosts[j].PublicKey().String()]
-	})
+	// filter out the hosts we used already
+	filtered := hosts[:0]
+	for _, h := range hosts {
+		if _, used := usedmap[h.PublicKey().String()]; !used {
+			filtered = append(filtered, h)
+		}
+	}
 
 	// reupload those shards
-	uploaded, err := parallelUploadSlab(ctx, shards, hosts)
+	uploaded, err := parallelUploadSlab(ctx, shards, filtered)
 	if err != nil {
 		return err
 	}
