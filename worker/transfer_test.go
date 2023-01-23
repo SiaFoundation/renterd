@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"testing"
+	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
@@ -64,8 +65,24 @@ func newMockHost() *mockHost {
 	}
 }
 
+type mockContractLocker struct {
+	acquired int
+	released int
+}
+
+func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+	l.acquired++
+	return 0, nil
+}
+
+func (l *mockContractLocker) ReleaseContract(fcid types.FileContractID, lockID uint64) (err error) {
+	l.released++
+	return nil
+}
+
 func TestSlabs(t *testing.T) {
 	ctx := context.Background()
+	mockLocker := &mockContractLocker{}
 
 	// generate data
 	data := frand.Bytes(1000000)
@@ -75,7 +92,7 @@ func TestSlabs(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, newMockHost())
 	}
-	s, _, err := uploadSlab(ctx, bytes.NewReader(data), 3, 10, hosts)
+	s, _, err := uploadSlab(ctx, bytes.NewReader(data), 3, 10, hosts, mockLocker)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +101,7 @@ func TestSlabs(t *testing.T) {
 	checkDownload := func(offset, length uint32) {
 		t.Helper()
 		var buf bytes.Buffer
-		err := downloadSlab(ctx, &buf, object.SlabSlice{Slab: s, Offset: offset, Length: length}, hosts)
+		err := downloadSlab(ctx, &buf, object.SlabSlice{Slab: s, Offset: offset, Length: length}, hosts, mockLocker)
 		if err != nil {
 			t.Error(err)
 			return
@@ -114,7 +131,7 @@ func TestSlabs(t *testing.T) {
 	checkDownloadFail := func(offset, length uint32) {
 		t.Helper()
 		var buf bytes.Buffer
-		if err := downloadSlab(ctx, &buf, object.SlabSlice{Slab: s, Offset: offset, Length: length}, hosts); err == nil {
+		if err := downloadSlab(ctx, &buf, object.SlabSlice{Slab: s, Offset: offset, Length: length}, hosts, mockLocker); err == nil {
 			t.Error("expected error, got nil")
 		}
 	}
@@ -128,7 +145,7 @@ func TestSlabs(t *testing.T) {
 		to = append(to, newMockHost())
 	}
 	old := fmt.Sprint(s)
-	if err := migrateSlab(ctx, &s, from, to); err != nil {
+	if err := migrateSlab(ctx, &s, from, to, mockLocker); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(s) == old {
@@ -150,9 +167,17 @@ func TestSlabs(t *testing.T) {
 	// downloads should now fail
 	checkDownloadFail(0, uint32(len(data)))
 	checkDownloadFail(0, 1)
+
+	if mockLocker.acquired == 0 {
+		t.Errorf("should have acquired")
+	}
+	if mockLocker.released == 0 {
+		t.Errorf("should have released")
+	}
 }
 
 func TestMultipleObjects(t *testing.T) {
+	mockLocker := &mockContractLocker{}
 	// generate object data
 	data := [][]byte{
 		frand.Bytes(111),
@@ -178,7 +203,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 	var slabs []object.Slab
 	for {
-		s, _, err := uploadSlab(context.Background(), r, 3, 10, hosts)
+		s, _, err := uploadSlab(context.Background(), r, 3, 10, hosts, mockLocker)
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -208,7 +233,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if err := downloadSlab(context.Background(), dst, s, hosts); err != nil {
+			if err := downloadSlab(context.Background(), dst, s, hosts, mockLocker); err != nil {
 				t.Error(err)
 				return
 			}
@@ -240,5 +265,12 @@ func TestMultipleObjects(t *testing.T) {
 		} {
 			checkDownload(data[i], o, r.offset, r.length)
 		}
+	}
+
+	if mockLocker.acquired == 0 {
+		t.Errorf("should have acquired")
+	}
+	if mockLocker.released == 0 {
+		t.Errorf("should have released")
 	}
 }

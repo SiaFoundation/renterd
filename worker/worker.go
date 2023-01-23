@@ -184,8 +184,15 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	}
 }
 
+type contractLocker interface {
+	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
+	ReleaseContract(fcid types.FileContractID, lockID uint64) (err error)
+}
+
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
+	contractLocker
+
 	ActiveContracts() ([]api.ContractMetadata, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
@@ -575,7 +582,7 @@ func (w *worker) slabsMigrateHandler(jc jape.Context) {
 
 	w.pool.setCurrentHeight(mp.CurrentHeight)
 	err = w.withHosts(ctx, append(from, to...), func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts[:len(from)], hosts[len(from):])
+		return migrateSlab(ctx, &slab, hosts[:len(from)], hosts[len(from):], w.bus)
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -636,7 +643,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		}
 
 		err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-			return downloadSlab(ctx, cw, ss, hosts)
+			return downloadSlab(ctx, cw, ss, hosts, w.bus)
 		})
 		if err != nil {
 			_ = err // NOTE: can't write error because we may have already written to the response
@@ -687,7 +694,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
 		if err := w.withHosts(ctx, bcs, func(hosts []sectorStore) (err error) {
-			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts)
+			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, w.bus)
 			return err
 		}); err == io.EOF {
 			break

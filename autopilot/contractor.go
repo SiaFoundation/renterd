@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -537,7 +538,9 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 
 func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64, toRenew api.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
-	lockID, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingPriorityRenew, contractLockingDurationRenew)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	lockID, err := c.ap.bus.AcquireContract(ctx, toRenew.ID, contractLockingPriorityRenew, contractLockingDurationRenew)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}

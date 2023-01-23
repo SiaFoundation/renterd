@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -318,7 +319,8 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 
 // AcquireContract acquires a contract for a given amount of time unless
 // released manually before that time.
-func (c *Client) AcquireContract(fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+// TODO: make use of ctx
+func (c *Client) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
 	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
 		Duration: api.Duration(d),
