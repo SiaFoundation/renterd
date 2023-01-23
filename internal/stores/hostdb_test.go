@@ -494,7 +494,6 @@ func TestRecordScan(t *testing.T) {
 // TestInsertAnnouncements is a test for insertAnnouncements.
 func TestInsertAnnouncements(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,6 +560,20 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 	if len(announcements) != 7 {
 		t.Fatal("invalid number of announcements")
+	}
+
+	// Add an entry to the blocklist to block host 1
+	entry1 := "foo.bar"
+	err = hdb.AddHostBlocklistEntry(entry1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert multiple announcements for host 1 - this asserts that the UNIQUE
+	// constraint on the blocklist table isn't triggered when inserting multiple
+	// announcements for a host that's on the blocklist
+	if err := insertAnnouncements(hdb.db, []announcement{ann1, ann1}); err != nil {
+		t.Fatal(err)
 	}
 }
 

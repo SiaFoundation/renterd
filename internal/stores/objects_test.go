@@ -323,22 +323,22 @@ func TestSlabsForMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add 3 hosts
-	hks, err := db.addTestHosts(3)
+	// add 4 hosts
+	hks, err := db.addTestHosts(4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
+	hk1, hk2, hk3, hk4 := hks[0], hks[1], hks[2], hks[3]
 
-	// add 3 contracts
+	// add 4 contracts
 	fcids, _, err := db.addTestContracts(hks)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fcid1, fcid2, fcid3 := fcids[0], fcids[1], fcids[2]
+	fcid1, fcid2, fcid3, fcid4 := fcids[0], fcids[1], fcids[2], fcids[3]
 
-	// select the first two contracts as good contracts
-	goodContracts := []types.FileContractID{fcid1, fcid2}
+	// select the first three contracts as good contracts
+	goodContracts := []types.FileContractID{fcid1, fcid2, fcid3}
 
 	// add an object
 	obj := object.Object{
@@ -359,13 +359,13 @@ func TestSlabsForMigration(t *testing.T) {
 							Root: consensus.Hash256{2},
 						},
 						{
-							Host: hk2,
+							Host: hk3,
 							Root: consensus.Hash256{3},
 						},
 					},
 				},
 			},
-			// unhealthy slab - hk3 is bad (1/3)
+			// unhealthy slab - hk4 is bad (1/3)
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
@@ -380,13 +380,13 @@ func TestSlabsForMigration(t *testing.T) {
 							Root: consensus.Hash256{5},
 						},
 						{
-							Host: hk3,
+							Host: hk4,
 							Root: consensus.Hash256{6},
 						},
 					},
 				},
 			},
-			// unhealthy slab - hk3 is bad (2/3)
+			// unhealthy slab - hk4 is bad (2/3)
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
@@ -397,17 +397,17 @@ func TestSlabsForMigration(t *testing.T) {
 							Root: consensus.Hash256{7},
 						},
 						{
-							Host: hk3,
+							Host: hk4,
 							Root: consensus.Hash256{8},
 						},
 						{
-							Host: hk3,
+							Host: hk4,
 							Root: consensus.Hash256{9},
 						},
 					},
 				},
 			},
-			// unhealthy slab - hk4 is deleted (1/3)
+			// unhealthy slab - hk5 is deleted (1/3)
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
@@ -422,13 +422,13 @@ func TestSlabsForMigration(t *testing.T) {
 							Root: consensus.Hash256{11},
 						},
 						{
-							Host: consensus.PublicKey{4},
+							Host: consensus.PublicKey{5},
 							Root: consensus.Hash256{12},
 						},
 					},
 				},
 			},
-			// good slab - reused hosts
+			// unhealthy slab - h1 is reused
 			{
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
@@ -436,15 +436,15 @@ func TestSlabsForMigration(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{1},
+							Root: consensus.Hash256{13},
 						},
 						{
 							Host: hk1,
-							Root: consensus.Hash256{2},
+							Root: consensus.Hash256{14},
 						},
 						{
-							Host: hk2,
-							Root: consensus.Hash256{3},
+							Host: hk1,
+							Root: consensus.Hash256{15},
 						},
 					},
 				},
@@ -456,7 +456,8 @@ func TestSlabsForMigration(t *testing.T) {
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
-		{4}: {4}, // deleted host and contract
+		hk4: fcid4,
+		{5}: {5}, // deleted host and contract
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -465,11 +466,12 @@ func TestSlabsForMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(slabs) != 3 {
-		t.Fatalf("unexpected amount of slabs to migrate, %v!=3", len(slabs))
+	if len(slabs) != 4 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=4", len(slabs))
 	}
 
 	expected := []object.SlabSlice{
+		obj.Slabs[4],
 		obj.Slabs[2],
 		obj.Slabs[1],
 		obj.Slabs[3],
