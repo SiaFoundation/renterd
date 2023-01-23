@@ -179,6 +179,8 @@ gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213/go.mod h1
 gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130 h1:0hiQX3a4rmdu/duDhrRxl80zYHZoJDkSbTEFwSlAc74=
 gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130/go.mod h1:SxigdS5Q1ui+OMgGAXt1E/Fg3RB6PvKXMov2O3gvIzs=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
+go.sia.tech/jape v0.5.1-0.20230123160333-ee3d69a51de8 h1:HTdGQklfF9906/43c6EOfgnZTG6Q8sy2tk5iraAv+YI=
+go.sia.tech/jape v0.5.1-0.20230123160333-ee3d69a51de8/go.mod h1:4QqmBB+t3W7cNplXPj++ZqpoUb2PeiS66RLpXmEGap4=
 go.sia.tech/mux v1.1.0 h1:AH5aHAbYMhi309p4d3iufWgTYR+H7yUTmLaz8FXyH+A=
 go.sia.tech/mux v1.1.0/go.mod h1:Yyo6wZelOYTyvrHmJZ6aQfRoer3o4xyKQ4NmQLJrBSo=
 go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004 h1:0tFQh99BL6NQuHiq0brkfVCy/nEq3vyu9DTi1cgnb/E=
