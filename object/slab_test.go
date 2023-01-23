@@ -2,7 +2,7 @@ package object
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"testing"
 
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -99,7 +99,7 @@ func BenchmarkReedSolomon(b *testing.B) {
 				for j := range shards[:r] {
 					shards[j] = shards[j][:0]
 				}
-				if err := ss.Recover(ioutil.Discard, shards); err != nil {
+				if err := ss.Recover(io.Discard, shards); err != nil {
 					b.Fatal(err)
 				}
 			}

@@ -32,16 +32,23 @@ type ContractsIDRenewedRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
-// ContractAcquireRequest is the request type for the /contract/:id/acquire
+// ContractAcquireRequest is the request type for the /contract/acquire
 // endpoint.
 type ContractAcquireRequest struct {
-	Duration time.Duration
+	Duration Duration `json:"duration"`
+	Priority int      `json:"priority"`
+}
+
+// ContractAcquireRequest is the request type for the /contract/:id/release
+// endpoint.
+type ContractReleaseRequest struct {
+	LockID uint64 `json:"lockID"`
 }
 
 // ContractAcquireResponse is the response type for the /contract/:id/acquire
 // endpoint.
 type ContractAcquireResponse struct {
-	Locked bool `json:"locked"`
+	LockID uint64 `json:"lockID"`
 }
 
 type HostsScanPubkeyHandlerPOSTRequest struct {
@@ -114,13 +121,25 @@ type ObjectsResponse struct {
 	Object  *object.Object `json:"object,omitempty"`
 }
 
-// AddObjectRequest is the request type for the /object/*key PUT endpoint.
+// AddObjectRequest is the request type for the /object/*key endpoint.
 type AddObjectRequest struct {
 	Object        object.Object                                `json:"object"`
 	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
-// UpdateBlocklistRequest is the request type for /hosts/blocklist PUT endpoint.
+// MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
+type MigrationSlabsRequest struct {
+	ContractSet string `json:"contractset"`
+	Limit       int    `json:"limit"`
+}
+
+// UpdateSlabRequest is the request type for the /slab endpoint.
+type UpdateSlabRequest struct {
+	Slab          object.Slab                                  `json:"slab"`
+	UsedContracts map[consensus.PublicKey]types.FileContractID `json:"usedContracts"`
+}
+
+// UpdateBlocklistRequest is the request type for /hosts/blocklist endpoint.
 type UpdateBlocklistRequest struct {
 	Add    []string `json:"add"`
 	Remove []string `json:"remove"`
@@ -136,14 +155,6 @@ type DownloadParams struct {
 type UploadParams struct {
 	CurrentHeight uint64
 	ContractSet   string
-	GougingParams
-}
-
-// MigrateParams contains the metadata needed by a worker to migrate a slab.
-type MigrateParams struct {
-	CurrentHeight uint64
-	FromContracts string
-	ToContracts   string
 	GougingParams
 }
 

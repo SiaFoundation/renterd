@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"math/big"
-	"time"
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/consensus"
@@ -33,7 +33,6 @@ type (
 		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
 		HostID              uint                 `gorm:"index"`
 		Host                dbHost
-		LockedUntil         int64
 		RenewedFrom         types.FileContractID `gorm:"index;type:bytes;serializer:gob"`
 		StartHeight         uint64               `gorm:"index;NOT NULL"`
 		TotalCost           *big.Int             `gorm:"type:bytes;serializer:gob"`
@@ -123,26 +122,12 @@ func gobEncode(i interface{}) []byte {
 	}
 	return buf.Bytes()
 }
-
-// AcquireContract acquires a contract assuming that the contract exists and
-// that it isn't locked right now. The returned bool indicates whether locking
-// the contract was successful.
-func (s *SQLStore) AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error) {
-	now := time.Now()
-	tryLockUntil := now.Add(duration)
-	var newLockedUntil int64
-	res := s.db.Raw("UPDATE contracts SET locked_until = ? WHERE locked_until < ? AND fcid = ? RETURNING locked_until",
-		tryLockUntil.UnixNano(), now.UnixNano(), gobEncode(fcid)).
-		Scan(&newLockedUntil)
-	return res.RowsAffected > 0, res.Error
-}
-
-// ReleaseContract releases a contract by setting its locked_until field to 0.
-func (s *SQLStore) ReleaseContract(fcid types.FileContractID) error {
-	return s.db.Model(&dbContract{}).
-		Where("fcid", gobEncode(fcid)).
-		Update("locked_until", 0).
-		Error
+func gobEncodeSlice(i []interface{}) [][]byte {
+	var res [][]byte
+	for _, v := range i {
+		res = append(res, gobEncode(v))
+	}
+	return res
 }
 
 // addContract implements the bus.ContractStore interface.
@@ -213,6 +198,7 @@ func (s *SQLStore) ActiveContracts() ([]api.ContractMetadata, error) {
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
 func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+	fmt.Println("renew contract for host", c.HostKey().String())
 	var renewed dbContract
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {

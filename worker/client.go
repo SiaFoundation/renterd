@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -99,7 +98,7 @@ func (c *Client) RHPUpdateRegistry(hostKey consensus.PublicKey, key rhpv3.Regist
 
 // MigrateSlab migrates the specified slab.
 func (c *Client) MigrateSlab(slab object.Slab) error {
-	return c.c.POST("/slabs/migrate", slab, nil)
+	return c.c.POST("/slab/migrate", slab, nil)
 }
 
 // UploadObject uploads the data in r, creating an object with the given name.
@@ -115,10 +114,10 @@ func (c *Client) UploadObject(r io.Reader, name string) (err error) {
 	if err != nil {
 		return err
 	}
-	defer io.Copy(ioutil.Discard, resp.Body)
+	defer io.Copy(io.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(resp.Body)
+		err, _ := io.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
 	return
@@ -136,10 +135,10 @@ func (c *Client) object(path string, w io.Writer, entries *[]string) (err error)
 	if err != nil {
 		return err
 	}
-	defer io.Copy(ioutil.Discard, resp.Body)
+	defer io.Copy(io.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(resp.Body)
+		err, _ := io.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
 	if w != nil {

@@ -2,20 +2,21 @@ package autopilot
 
 import (
 	"sync"
-	"time"
 
-	"go.sia.tech/renterd/object"
-	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
+)
+
+const (
+	migratorBatchSize   = 100
+	migratorContractset = "autopilot"
 )
 
 type migrator struct {
 	ap     *Autopilot
 	logger *zap.SugaredLogger
 
-	mu            sync.Mutex
-	goodContracts []types.FileContractID
-	running       bool
+	mu      sync.Mutex
+	running bool
 }
 
 func newMigrator(ap *Autopilot) *migrator {
@@ -25,27 +26,6 @@ func newMigrator(ap *Autopilot) *migrator {
 	}
 }
 
-// UpdateContracts updates the set of contracts that the migrator considers
-// good. Missing sectors in slabs will be migrated to these contracts.
-func (m *migrator) UpdateContracts() error {
-	bus := m.ap.bus
-
-	contracts, err := bus.ActiveContracts()
-	if err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.goodContracts = m.goodContracts[:0]
-	for _, c := range contracts {
-		// TODO: filter out contracts that are not good.
-		m.goodContracts = append(m.goodContracts, c.ID)
-	}
-	return nil
-}
-
-// TryPerformMigrations launches a migration routine unless it's already
-// running. A launched routine runs until there are no more slabs to migrate.
 func (m *migrator) TryPerformMigrations() {
 	m.mu.Lock()
 	if m.running {
@@ -63,28 +43,34 @@ func (m *migrator) TryPerformMigrations() {
 	}()
 }
 
-func (m *migrator) fetchSlabsForMigration() ([]object.Slab, error) {
-	return m.ap.bus.SlabsForMigration(10, time.Now().Add(-time.Hour), m.goodContracts)
-}
-
 func (m *migrator) performMigrations() {
 	m.logger.Info("performing migrations")
+	b := m.ap.bus
 
 	for {
-		// Fetch slabs for repair
-		slabsToRepair, err := m.fetchSlabsForMigration()
+		// fetch slabs for migration
+		toMigrate, err := b.SlabsForMigration(migratorContractset, migratorBatchSize)
 		if err != nil {
-			return // TODO log
+			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
+			return
 		}
-		if len(slabsToRepair) == 0 {
-			return // nothing to do
+		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
+
+		// return if there are no slabs to migrate
+		if len(toMigrate) == 0 {
+			return
 		}
 
-		// Repair them
-		for _, slab := range slabsToRepair {
-			if err := m.ap.worker.MigrateSlab(slab); err != nil {
-				continue // TODO log
+		// migrate the slabs one by one
+		//
+		// TODO: when we support parallel uploads we should parallelize this
+		for i, slab := range toMigrate {
+			err := m.ap.worker.MigrateSlab(slab)
+			if err != nil {
+				m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
+				continue
 			}
+			m.logger.Debugf("successfully migrated slab %d/%d", i+1, len(toMigrate))
 		}
 	}
 }

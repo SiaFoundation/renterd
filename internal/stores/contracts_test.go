@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"reflect"
 	"testing"
-	"time"
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -190,73 +189,6 @@ func TestSQLContractStore(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected %v objects in contract_sectors but got %v", 0, count)
-	}
-}
-
-// TestContractLocking is a test for verifying AcquireContract and
-// ReleaseContract.
-func TestContractLocking(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a host for the contract.
-	hk := consensus.GeneratePrivateKey().PublicKey()
-	err = cs.addTestHost(hk)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create random unlock conditions for the host.
-	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
-	uc.PublicKeys[1].Key = hk[:]
-	uc.Timelock = 192837
-
-	// Insert a contract.
-	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid,
-			UnlockConditions: uc,
-		},
-	}
-	totalCost := types.NewCurrency64(654)
-	startHeight := uint64(100)
-	if _, err := cs.AddContract(c, totalCost, startHeight); err != nil {
-		t.Fatal(err)
-	}
-
-	// Lock it.
-	acquired, err := cs.AcquireContract(fcid, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acquired {
-		t.Fatal("contract wasn't locked")
-	}
-
-	// Lock again. Shouldn't work.
-	acquired, err = cs.AcquireContract(fcid, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if acquired {
-		t.Fatal("shouldn't be able to acquire")
-	}
-
-	// Release.
-	if err := cs.ReleaseContract(fcid); err != nil {
-		t.Fatal(err)
-	}
-
-	// Acquire again.
-	acquired, err = cs.AcquireContract(fcid, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acquired {
-		t.Fatal("contract wasn't locked")
 	}
 }
 
@@ -449,6 +381,22 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 }
 
+func (s *SQLStore) addTestContracts(keys []consensus.PublicKey) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
+	cnt, err := s.contractsCount()
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, key := range keys {
+		fcids = append(fcids, types.FileContractID{byte(int(cnt) + i + 1)})
+		contract, err := s.addTestContract(fcids[len(fcids)-1], key)
+		if err != nil {
+			return nil, nil, err
+		}
+		contracts = append(contracts, contract)
+	}
+	return
+}
+
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddContract(rev, types.ZeroCurrency, 0)
@@ -457,6 +405,14 @@ func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.Publi
 func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
+}
+
+func (s *SQLStore) contractsCount() (cnt int64, err error) {
+	err = s.db.
+		Model(&dbContract{}).
+		Count(&cnt).
+		Error
+	return
 }
 
 func testContractRevision(fcid types.FileContractID, hk consensus.PublicKey) rhpv2.ContractRevision {

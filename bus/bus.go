@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -77,14 +76,12 @@ type (
 
 	// A ContractStore stores contracts.
 	ContractStore interface {
-		AcquireContract(fcid types.FileContractID, duration time.Duration) (bool, error)
 		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		ActiveContracts() ([]api.ContractMetadata, error)
 		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		Contract(id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(set string) ([]api.ContractMetadata, error)
-		ReleaseContract(fcid types.FileContractID) error
 		RemoveContract(id types.FileContractID) error
 		SetContractSet(set string, contracts []types.FileContractID) error
 	}
@@ -95,14 +92,17 @@ type (
 		List(key string) ([]string, error)
 		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
 		Delete(key string) error
-		SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) ([]object.Slab, error)
+
+		SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error)
+		PutSlab(s object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) error
 	}
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		Settings() ([]string, error)
 		Setting(key string) (string, error)
+		Settings() ([]string, error)
 		UpdateSetting(key, value string) error
+		UpdateSettings(settings map[string]string) error
 	}
 
 	EphemeralAccountStore interface {
@@ -120,6 +120,8 @@ type bus struct {
 	os  ObjectStore
 	ss  SettingStore
 	eas EphemeralAccountStore
+
+	contractLocks *contractLocks
 
 	interactionsMu            sync.Mutex
 	interactions              []hostdb.Interaction
@@ -463,12 +465,13 @@ func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	locked, err := b.cs.AcquireContract(id, req.Duration)
+
+	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), req.Priority, id, time.Duration(req.Duration))
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}
 	jc.Encode(api.ContractAcquireResponse{
-		Locked: locked,
+		LockID: lockID,
 	})
 }
 
@@ -477,7 +480,11 @@ func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	if jc.Check("failed to release contract", b.cs.ReleaseContract(id)) != nil {
+	var req api.ContractReleaseRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if jc.Check("failed to release contract", b.contractLocks.Release(id, req.LockID)) != nil {
 		return
 	}
 }
@@ -560,24 +567,22 @@ func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.os.Delete(jc.PathParam("key")))
 }
 
-func (b *bus) objectsMigrationSlabsHandlerGET(jc jape.Context) {
-	var cutoff time.Time
-	var limit int
-	var goodContracts []types.FileContractID
-	if jc.DecodeForm("cutoff", (*api.ParamTime)(&cutoff)) != nil {
-		return
+func (b *bus) slabHandlerPUT(jc jape.Context) {
+	var usr api.UpdateSlabRequest
+	if jc.Decode(&usr) == nil {
+		jc.Check("couldn't update slab", b.os.PutSlab(usr.Slab, usr.UsedContracts))
 	}
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
+}
+
+func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
+	var msr api.MigrationSlabsRequest
+	if jc.Decode(&msr) == nil {
+		if goodContracts, err := b.cs.Contracts(msr.ContractSet); jc.Check("couldn't fetch contracts for migration", err) == nil {
+			if slabs, err := b.os.SlabsForMigration(contractIds(goodContracts), msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+				jc.Encode(slabs)
+			}
+		}
 	}
-	if jc.DecodeForm("goodContracts", &goodContracts) != nil {
-		return
-	}
-	slabs, err := b.os.SlabsForMigration(limit, time.Time(cutoff), goodContracts)
-	if jc.Check("couldn't fetch slabs for migration", err) != nil {
-		return
-	}
-	jc.Encode(slabs)
 }
 
 func (b *bus) settingsHandlerGET(jc jape.Context) {
@@ -586,10 +591,17 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *bus) settingsHandlerPUT(jc jape.Context) {
+	var settings map[string]string
+	if jc.Decode(&settings) == nil {
+		jc.Check("couldn't update settings", b.ss.UpdateSettings(settings))
+	}
+}
+
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.PathParam("key")); err == api.ErrSettingNotFound {
+	} else if setting, err := b.ss.Setting(jc.PathParam("key")); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -598,14 +610,11 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) settingKeyHandlerPOST(jc jape.Context) {
+func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
+	var value string
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if value := jc.PathParam("value"); value == "" {
-		jc.Error(errors.New("param 'value' can not be empty"), http.StatusBadRequest)
-	} else if value, err := url.QueryUnescape(value); err != nil {
-		jc.Error(errors.New("could not unescape 'value'"), http.StatusBadRequest)
-	} else {
+	} else if jc.Decode(&value) == nil {
 		jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
 	}
 }
@@ -669,20 +678,6 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	})
 }
 
-func (b *bus) paramsHandlerMigrateGET(jc jape.Context) {
-	gp, err := b.gougingParams()
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-
-	jc.Encode(api.MigrateParams{
-		CurrentHeight: b.cm.TipState().Index.Height,
-		FromContracts: "", // TODO
-		ToContracts:   "", // TODO
-		GougingParams: gp,
-	})
-}
-
 func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
 	gp, err := b.gougingParams()
 	if jc.Check("could not get gouging parameters", err) != nil {
@@ -735,6 +730,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		cs:                        cs,
 		os:                        os,
 		ss:                        ss,
+		contractLocks:             newContractLocks(),
 		interactionsFlushInterval: interactionsFlushInterval,
 	}
 
@@ -790,18 +786,20 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
-		"GET    /objects/*key":    b.objectsKeyHandlerGET,
-		"PUT    /objects/*key":    b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key":    b.objectsKeyHandlerDELETE,
-		"GET    /migration/slabs": b.objectsMigrationSlabsHandlerGET,
+		"GET    /objects/*key": b.objectsKeyHandlerGET,
+		"PUT    /objects/*key": b.objectsKeyHandlerPUT,
+		"DELETE /objects/*key": b.objectsKeyHandlerDELETE,
 
-		"GET    /settings":            b.settingsHandlerGET,
-		"GET    /setting/:key":        b.settingKeyHandlerGET,
-		"POST   /setting/:key/:value": b.settingKeyHandlerPOST,
+		"POST   /slabs/migration": b.slabsMigrationHandlerPOST,
+		"PUT    /slab":            b.slabHandlerPUT,
+
+		"GET    /settings":     b.settingsHandlerGET,
+		"PUT    /settings":     b.settingsHandlerPUT,
+		"GET    /setting/:key": b.settingKeyHandlerGET,
+		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
-		"GET    /params/migrate":  b.paramsHandlerMigrateGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
 	}), nil
 }
@@ -842,4 +840,12 @@ func (b *bus) recordInteractions(interactions []hostdb.Interaction) error {
 	b.interactions = nil
 	b.interactionsFlush = nil
 	return f.result
+}
+
+func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
+	ids := make([]types.FileContractID, len(contracts))
+	for i, c := range contracts {
+		ids[i] = c.ID
+	}
+	return ids
 }

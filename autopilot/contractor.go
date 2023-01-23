@@ -23,6 +23,10 @@ const (
 	// lock when renewing a contract
 	contractLockingDurationRenew = 30 * time.Second
 
+	// contractLockingPriorityRenew is the priority used when locking a
+	// contract for renew.
+	contractLockingPriorityRenew = 10
+
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
@@ -201,7 +205,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// build the new contract set (excluding formed contracts)
-	contractset := buildContractSet(contractIds(contracts), toDelete, toIgnore, contractIds(toRefresh), contractIds(toRenew), renewed)
+	contractset := buildContractSet(contractIds(contractMetadatas(contracts)), toDelete, toIgnore, contractIds(contractMetadatas(toRefresh)), contractIds(contractMetadatas(toRenew)), renewed)
 	numContracts := uint64(len(contractset))
 
 	// check if we need to form contracts and add them to the contract set
@@ -533,14 +537,11 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 
 func (c *contractor) renewContract(cfg api.AutopilotConfig, currentPeriod uint64, toRenew api.Contract, renterAddress types.UnlockHash, renterFunds types.Currency, isRefresh bool) (rhpv2.ContractRevision, error) {
 	// handle contract locking
-	locked, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingDurationRenew)
+	lockID, err := c.ap.bus.AcquireContract(toRenew.ID, contractLockingPriorityRenew, contractLockingDurationRenew)
 	if err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
-	if !locked {
-		return rhpv2.ContractRevision{}, errors.New("contract is currently locked")
-	}
-	defer c.ap.bus.ReleaseContract(toRenew.ID)
+	defer c.ap.bus.ReleaseContract(toRenew.ID, lockID)
 
 	// if we are refreshing the contract we use the contract's end height
 	endHeight := c.endHeight(cfg, currentPeriod)
@@ -800,7 +801,15 @@ func buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew []types.Fil
 	return contracts
 }
 
-func contractIds(contracts []api.Contract) []types.FileContractID {
+func contractMetadatas(contracts []api.Contract) []api.ContractMetadata {
+	metadatas := make([]api.ContractMetadata, len(contracts))
+	for i, c := range contracts {
+		metadatas[i] = c.ContractMetadata
+	}
+	return metadatas
+}
+
+func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
 	ids := make([]types.FileContractID, len(contracts))
 	for i, c := range contracts {
 		ids[i] = c.ID
@@ -820,6 +829,11 @@ func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSetting
 	// check underflow
 	if settings.ContractPrice.Add(txnFee).Cmp(renterFunds) > 0 {
 		return types.ZeroCurrency, errors.New("contract price + fees exceeds funding")
+	}
+
+	// avoid division by zero
+	if settings.StoragePrice.IsZero() {
+		settings.StoragePrice = types.NewCurrency64(1)
 	}
 
 	// calculate the host collateral

@@ -183,6 +183,8 @@ go.sia.tech/core v0.0.0-20220524010238-790a68db5817/go.mod h1:8xDYLHHN3crrnDQamp
 go.sia.tech/jape v0.5.0 h1:6BLMZEePInWwQcJO1mcmrPBpF0QuvkrXmHSWGKeR0tY=
 go.sia.tech/jape v0.5.0/go.mod h1:bu+ka8FgKq7MNH2JRTTOjfvVNku97V4ffyKr0dKoU90=
 go.sia.tech/mux v1.0.1/go.mod h1:Yyo6wZelOYTyvrHmJZ6aQfRoer3o4xyKQ4NmQLJrBSo=
+go.sia.tech/mux v1.1.0 h1:AH5aHAbYMhi309p4d3iufWgTYR+H7yUTmLaz8FXyH+A=
+go.sia.tech/mux v1.1.0/go.mod h1:Yyo6wZelOYTyvrHmJZ6aQfRoer3o4xyKQ4NmQLJrBSo=
 go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004 h1:0tFQh99BL6NQuHiq0brkfVCy/nEq3vyu9DTi1cgnb/E=
 go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004/go.mod h1:ifu7TjXlL9s+47DSmqeMz8LOvthALMysZkJ3Df0daAY=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=

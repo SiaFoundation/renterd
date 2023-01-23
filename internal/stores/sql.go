@@ -7,6 +7,7 @@ import (
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type (
@@ -60,9 +61,10 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 // same Dialector multiple times.
 func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
-		DisableNestedTransaction: true, // disable nesting transactions
-		PrepareStmt:              true, // caches queries as prepared statements
-	}) // Logger: logger.Default.LogMode(logger.Silent)
+		DisableNestedTransaction: true,                                // disable nesting transactions
+		PrepareStmt:              true,                                // caches queries as prepared statements
+		Logger:                   logger.Default.LogMode(logger.Warn), // default log level
+	})
 
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
