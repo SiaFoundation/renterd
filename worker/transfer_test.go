@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,16 +65,21 @@ func newMockHost() *mockHost {
 }
 
 type mockContractLocker struct {
+	mu       sync.Mutex
 	acquired int
 	released int
 }
 
 func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.acquired++
 	return 0, nil
 }
 
 func (l *mockContractLocker) ReleaseContract(fcid types.FileContractID, lockID uint64) (err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.released++
 	return nil
 }

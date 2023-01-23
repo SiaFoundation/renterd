@@ -49,7 +49,6 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 		for req := range reqChan {
 			lockID, err := locker.AcquireContract(ctx, req.host.Contract(), contractLockingUploadPriority, 30*time.Second)
 			if err != nil {
-				println("here")
 				respChan <- resp{req, consensus.Hash256{}, err}
 				return
 			}
