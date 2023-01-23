@@ -318,16 +318,21 @@ func (c *Client) DeleteContract(id types.FileContractID) (err error) {
 
 // AcquireContract acquires a contract for a given amount of time unless
 // released manually before that time.
-func (c *Client) AcquireContract(fcid types.FileContractID, d time.Duration) (locked bool, err error) {
+func (c *Client) AcquireContract(fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
-	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{Duration: d}, &resp)
-	locked = resp.Locked
+	err = c.c.POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
+		Duration: api.Duration(d),
+		Priority: priority,
+	}, &resp)
+	lockID = resp.LockID
 	return
 }
 
 // ReleaseContract releases a contract that was previously acquired using AcquireContract.
-func (c *Client) ReleaseContract(fcid types.FileContractID) (err error) {
-	err = c.c.POST(fmt.Sprintf("/contract/%s/release", fcid), nil, nil)
+func (c *Client) ReleaseContract(fcid types.FileContractID, lockID uint64) (err error) {
+	err = c.c.POST(fmt.Sprintf("/contract/%s/release", fcid), api.ContractReleaseRequest{
+		LockID: lockID,
+	}, nil)
 	return
 }
 
