@@ -473,15 +473,15 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 	}
 
 	if err := s.db.
-		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as slab_unique_hosts, slabs.total_shards, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as bad_shards").
+		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Where("c.fcid IN (?)", gobEncodeSlice(fcids)).
 		Group("slabs.id").
-		Having("slab_unique_hosts < slabs.total_shards").
-		Order("bad_shards DESC").
+		Having("num_good_sectors < num_required_sectors").
+		Order("num_bad_sectors DESC").
 		Limit(limit).
 		Preload("Shards.DBSector").
 		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
