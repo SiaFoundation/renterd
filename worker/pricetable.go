@@ -8,21 +8,25 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/rhp/v3"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
+// priceTableValidityLeeway is the number of time before the actual expiry of a
+// price table when we start considering it invalid.
+const priceTableValidityLeeway = 30 * time.Second
+
+type withTransportV3 func(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error)
+
 type priceTables struct {
-	mu          sync.Mutex
-	priceTables map[types.PublicKey]*priceTable
+	withTransport withTransportV3
+	mu            sync.Mutex
+	priceTables   map[types.PublicKey]*priceTable
 }
 
 type priceTable struct {
-	pt     *rhp.HostPriceTable
+	pt     *rhpv3.HostPriceTable
 	hk     types.PublicKey
 	expiry time.Time
-
-	w *worker
 
 	mu            sync.Mutex
 	ongoingUpdate *priceTableUpdate
@@ -31,20 +35,29 @@ type priceTable struct {
 type priceTableUpdate struct {
 	err  error
 	done chan struct{}
-	pt   *rhp.HostPriceTable
+	pt   *rhpv3.HostPriceTable
 }
 
-// PriceTable returns a price table for the give host and an bool to indicate
+func newPriceTables(transportFn withTransportV3) *priceTables {
+	return &priceTables{
+		priceTables:   make(map[types.PublicKey]*priceTable),
+		withTransport: transportFn,
+	}
+}
+
+// PriceTable returns a price table for the given host and an bool to indicate
 // whether it is valid or not.
-func (pts *priceTables) PriceTable(hk types.PublicKey) (rhp.HostPriceTable, bool) {
+func (pts *priceTables) PriceTable(hk types.PublicKey) (rhpv3.HostPriceTable, bool) {
 	pt := pts.priceTable(hk)
-	return pt.convert()
+	if pt.pt == nil {
+		return rhpv3.HostPriceTable{}, false
+	}
+	return *pt.pt, time.Now().Before(pt.expiry.Add(priceTableValidityLeeway))
 }
 
-// Update updates a price table with the given host. If a revision is provided,
-// the table will be paid for using that revision. Otherwise an ephemeral
-// account will be used. The new table is returned.
-func (pts *priceTables) Update(ctx context.Context, f rhpv3.PriceTablePaymentFunc, hostIP string, hk types.PublicKey) (rhp.HostPriceTable, error) {
+// Update updates a price table with the given host using the provided payment
+// function to pay for it.
+func (pts *priceTables) Update(ctx context.Context, payFn rhpv3.PriceTablePaymentFunc, hostIP string, hk types.PublicKey) (rhpv3.HostPriceTable, error) {
 	// Fetch the price table to update.
 	pt := pts.priceTable(hk)
 
@@ -66,24 +79,25 @@ func (pts *priceTables) Update(ctx context.Context, f rhpv3.PriceTablePaymentFun
 	if !performUpdate {
 		select {
 		case <-ctx.Done():
-			return rhp.HostPriceTable{}, errors.New("timeout while blocking for pricetable update")
+			return rhpv3.HostPriceTable{}, errors.New("timeout while blocking for pricetable update")
 		case <-ongoing.done:
 		}
-		if ongoing.err == nil {
-			return *ongoing.pt, nil
+		if ongoing.err != nil {
+			return rhpv3.HostPriceTable{}, ongoing.err
 		} else {
-			return rhp.HostPriceTable{}, ongoing.err
+			return *ongoing.pt, nil
 		}
 	}
 
 	// Update price table.
 	var hpt rhpv3.HostPriceTable
-	err := pt.w.withTransportV3(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
-		hpt, err = rhpv3.RPCPriceTable(t, f)
+	err := pts.withTransport(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
+		hpt, err = rhpv3.RPCPriceTable(t, payFn)
 		return err
 	})
 
 	pt.mu.Lock()
+	defer pt.mu.Unlock()
 
 	// On success we update the pt.
 	if err == nil {
@@ -95,7 +109,6 @@ func (pts *priceTables) Update(ctx context.Context, f rhpv3.PriceTablePaymentFun
 	ongoing.err = err
 	close(ongoing.done)
 	pt.ongoingUpdate = nil
-	pt.mu.Unlock()
 	return hpt, err
 }
 
@@ -114,24 +127,16 @@ func (pts *priceTables) priceTable(hk types.PublicKey) *priceTable {
 	return pt
 }
 
-// convert turn the priceTable into a rhp.HostPriceTable and also returns
-// whether or not the price table is valid at the given time.
-func (pt *priceTable) convert() (rhp.HostPriceTable, bool) {
-	pt.mu.Lock()
-	defer pt.mu.Unlock()
-	if pt.pt == nil {
-		return rhp.HostPriceTable{}, false
-	}
-	return *pt.pt, time.Now().Before(pt.expiry)
-}
-
 // preparePriceTableContractPayment prepare a payment function to pay for a
 // price table from the given host using the provided revision.
+// This way of paying for a price table should only be used if payment by EA is
+// not possible or if we already need a contract revision anyway. e.g. funding
+// an EA.
 func (w *worker) preparePriceTableContractPayment(hk types.PublicKey, revision *types.FileContractRevision) rhpv3.PriceTablePaymentFunc {
 	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
 		// TODO: gouging check on price table
 
-		refundAccount := rhp.Account(w.accounts.deriveAccountKey(hk).PublicKey())
+		refundAccount := rhpv3.Account(w.accounts.deriveAccountKey(hk).PublicKey())
 		rk := w.deriveRenterKey(hk)
 		payment, ok := rhpv3.PayByContract(revision, pt.UpdatePriceTableCost, refundAccount, rk)
 		if !ok {
@@ -143,7 +148,9 @@ func (w *worker) preparePriceTableContractPayment(hk types.PublicKey, revision *
 
 // preparePriceTableAccountPayment prepare a payment function to pay for a
 // price table from the given host using the provided revision.
-func (w *worker) preparePriceTableAccountPayment(hk types.PublicKey, revision *types.FileContractRevision) rhpv3.PriceTablePaymentFunc {
+// This is the preferred way of paying for a price table since it is faster and
+// doesn't require locking a contract.
+func (w *worker) preparePriceTableAccountPayment(hk types.PublicKey) rhpv3.PriceTablePaymentFunc {
 	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
 		// TODO: gouging check on price table
 

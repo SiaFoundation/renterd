@@ -938,10 +938,8 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey: masterKey,
 		accounts:  nil,
-		priceTables: &priceTables{
-			priceTables: make(map[types.PublicKey]*priceTable),
-		},
 	}
+	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = &accounts{
 		accounts: make(map[rhpv3.Account]*account),
 		workerID: w.id,
