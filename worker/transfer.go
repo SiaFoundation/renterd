@@ -269,14 +269,23 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error
 		hostsmap[h.PublicKey().String()] = struct{}{}
 	}
 
-	// collect all indices of sectors that are on hosts which are not in the
-	// list and thus need to be migrated, as well as a map of used hosts
+	// collect indices of shards that need to be migrated
 	var shardIndices []int
 	for i, shard := range s.Shards {
-		usedmap[shard.Host.String()] = struct{}{}
+		// bad host
 		if _, exists := hostsmap[shard.Host.String()]; !exists {
 			shardIndices = append(shardIndices, i)
+			continue
 		}
+
+		// reused host
+		_, exists := usedmap[shard.Host.String()]
+		if exists {
+			shardIndices = append(shardIndices, i)
+			continue
+		}
+
+		usedmap[shard.Host.String()] = struct{}{}
 	}
 
 	// if all shards are on good hosts, we're done
