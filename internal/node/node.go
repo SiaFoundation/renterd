@@ -25,7 +25,8 @@ import (
 )
 
 type WorkerConfig struct {
-	SessionTTL time.Duration
+	SessionReconnectTimeout time.Duration
+	SessionTTL              time.Duration
 }
 
 type BusConfig struct {
@@ -227,8 +228,8 @@ func NewBus(cfg BusConfig, dir string, walletKey consensus.PrivateKey) (http.Han
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey consensus.PrivateKey) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w := worker.New(workerKey, b, cfg.SessionTTL)
-	return w, func() error { return nil }, nil
+	w, err := worker.New(workerKey, b, cfg.SessionReconnectTimeout, cfg.SessionTTL)
+	return w, func() error { return nil }, err
 }
 
 func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (_ *autopilot.Autopilot, cleanup func() error, _ error) {

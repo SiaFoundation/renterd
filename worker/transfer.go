@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -279,21 +280,32 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 	return nil
 }
 
-func migrateSlab(ctx context.Context, s *object.Slab, from, to []sectorStore, locker contractLocker) error {
-	// determine which shards need migration
-	var shardIndices []int
-outer:
-	for i, shard := range s.Shards {
-		for _, h := range to {
-			if h.PublicKey() == shard.Host {
-				continue outer
-			}
-		}
-		shardIndices = append(shardIndices, i)
+func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker) error {
+	// keep some state, hosts in the state are considered good hosts, for every
+	// host we keep track of the amount of times they are used in the slab
+	state := make(map[string]int)
+	for _, h := range hosts {
+		state[h.PublicKey().String()] = 0
 	}
+
+	// loop all shards and collect the indices of those that need to be migrated
+	var shardIndices []int
+	for i, shard := range s.Shards {
+		if _, good := state[shard.Host.String()]; !good {
+			shardIndices = append(shardIndices, i)
+		}
+		state[shard.Host.String()]++
+	}
+
+	// if all shards are on good hosts, we're done
 	if len(shardIndices) == 0 {
 		return nil
-	} else if len(shardIndices) > len(to) {
+	}
+
+	// perform some sanity checks
+	if len(s.Shards)-len(shardIndices) > int(s.MinShards) {
+		return errors.New("not enough hosts to download unhealthy shard")
+	} else if len(shardIndices) > len(hosts) {
 		return errors.New("not enough hosts to migrate shard")
 	}
 
@@ -303,7 +315,7 @@ outer:
 		Offset: 0,
 		Length: uint32(s.MinShards) * rhpv2.SectorSize,
 	}
-	shards, err := parallelDownloadSlab(ctx, ss, from, locker)
+	shards, err := parallelDownloadSlab(ctx, ss, hosts, locker)
 	if err != nil {
 		return err
 	}
@@ -313,57 +325,26 @@ outer:
 	}
 	s.Encrypt(shards)
 
-	// spawn workers and send initial requests
-	type req struct {
-		host       sectorStore
-		shardIndex int
+	// filter it down to the shards we need to migrate
+	for i, si := range shardIndices {
+		shards[i] = shards[si]
 	}
-	type resp struct {
-		req  req
-		root consensus.Hash256
-		err  error
+	shards = shards[:len(shardIndices)]
+
+	// sort the hosts in a way that frequently used hosts are at the end
+	sort.SliceStable(hosts, func(i, j int) bool {
+		return state[hosts[i].PublicKey().String()] < state[hosts[j].PublicKey().String()]
+	})
+
+	// reupload those shards
+	uploaded, err := parallelUploadSlab(ctx, shards, hosts, locker)
+	if err != nil {
+		return err
 	}
-	reqChan := make(chan req, len(shardIndices))
-	defer close(reqChan)
-	respChan := make(chan resp, len(shardIndices))
-	worker := func() {
-		for req := range reqChan {
-			root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
-			respChan <- resp{req, root, err}
-		}
-	}
-	hostIndex := 0
-	inflight := 0
-	for _, i := range shardIndices {
-		go worker()
-		reqChan <- req{to[hostIndex], i}
-		hostIndex++
-		inflight++
-	}
-	// collect responses
-	rem := len(shardIndices)
-	var errs HostErrorSet
-	for rem > 0 && inflight > 0 {
-		resp := <-respChan
-		inflight--
-		if resp.err != nil {
-			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
-			// try next host
-			if hostIndex < len(to) {
-				reqChan <- req{to[hostIndex], resp.req.shardIndex}
-				hostIndex++
-				inflight++
-			}
-		} else {
-			s.Shards[resp.req.shardIndex] = object.Sector{
-				Host: resp.req.host.PublicKey(),
-				Root: resp.root,
-			}
-			rem--
-		}
-	}
-	if rem > 0 {
-		return errs
+
+	// overwrite the unhealthy shards with the newly migrated ones
+	for i, si := range shardIndices {
+		s.Shards[si] = uploaded[i]
 	}
 	return nil
 }

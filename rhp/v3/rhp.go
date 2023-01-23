@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/siad/crypto"
+	"go.sia.tech/siad/modules"
 	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
@@ -23,11 +24,13 @@ type (
 	Signature = consensus.Signature
 )
 
+const (
+	// Atomic write size for modern disks is 4kib so we round up.
+	atomicWriteSize = uint64(1 << 12)
+)
+
 // An Account is a public key used to identify an ephemeral account on a host.
 type Account PublicKey
-
-// ZeroAccount is a sentinel value that indicates the lack of an account.
-var ZeroAccount Account
 
 // A PaymentMethod is a way of paying for an arbitrary host operation.
 type PaymentMethod interface {
@@ -131,6 +134,27 @@ type HostPriceTable struct {
 	RegistryEntriesTotal         uint64         `json:"registryentriestotal"`
 }
 
+const registryEntrySize = 256
+
+// MDMUpdateRegistryCost is the cost of executing a 'UpdateRegistry'
+// instruction on the MDM.
+func (pt *HostPriceTable) UpdateRegistryCost() (writeCost, storeCost types.Currency) {
+	// Cost is the same as uploading and storing a registry entry for 5 years.
+	writeCost = pt.writeCost(registryEntrySize)
+	storeCost = pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * types.BlocksPerYear))
+	return writeCost.Add(storeCost), storeCost
+}
+
+// writeCost is the cost of executing a 'Write' instruction of a certain length
+// on the MDM.
+func (pt *HostPriceTable) writeCost(writeLength uint64) types.Currency {
+	if mod := writeLength % atomicWriteSize; mod != 0 {
+		writeLength += (atomicWriteSize - mod)
+	}
+	writeCost := pt.WriteLengthCost.Mul64(writeLength).Add(pt.WriteBaseCost)
+	return writeCost
+}
+
 type (
 	// PayByEphemeralAccountRequest represents a payment made using an ephemeral account.
 	PayByEphemeralAccountRequest struct {
@@ -190,6 +214,10 @@ type (
 		Signature Signature
 	}
 
+	rpcUpdatePriceTableResponse struct {
+		PriceTableJSON []byte
+	}
+
 	rpcPriceTableResponse struct{}
 
 	rpcFundAccountRequest struct {
@@ -200,7 +228,7 @@ type (
 		Balance types.Currency
 		Receipt struct {
 			Host      types.SiaPublicKey
-			Account   Account
+			Account   modules.AccountID
 			Amount    types.Currency
 			Timestamp int64
 		}

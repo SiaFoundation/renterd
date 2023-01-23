@@ -370,12 +370,9 @@ func (c *Client) ContractsForSlab(shards []object.Sector, contractSetName string
 }
 
 // Setting returns the value for the setting with given key.
-func (c *Client) Setting(key string, resp interface{}) (err error) {
-	var value string
-	if err := c.c.GET(fmt.Sprintf("/setting/%s", key), &value); err != nil {
-		return err
-	}
-	return json.Unmarshal([]byte(value), &resp)
+func (c *Client) Setting(key string) (value string, err error) {
+	err = c.c.GET(fmt.Sprintf("/setting/%s", key), &value)
+	return
 }
 
 // Settings returns the keys of all settings in the store.
@@ -384,36 +381,52 @@ func (c *Client) Settings() (settings []string, err error) {
 	return
 }
 
-// UpdateSetting will update or insert the setting for given key with the given value.
-func (c *Client) UpdateSetting(key string, value interface{}) error {
-	v, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("unable to marshal given setting, err: %v", err)
-	}
+// UpdateSetting will update the given setting under the given key.
+func (c *Client) UpdateSetting(key string, value string) error {
+	return c.c.PUT(fmt.Sprintf("/setting/%s", key), value)
+}
 
-	return c.c.POST(fmt.Sprintf("/setting/%s/%s", key, url.QueryEscape(string(v))), nil, nil)
+// UpdateSettings will bulk update the given settings.
+func (c *Client) UpdateSettings(settings map[string]string) error {
+	return c.c.PUT("/settings", settings)
 }
 
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings() (gs api.GougingSettings, err error) {
-	err = c.Setting(SettingGouging, &gs)
+	setting, err := c.Setting(SettingGouging)
+	if err != nil {
+		return api.GougingSettings{}, err
+	}
+	err = json.Unmarshal([]byte(setting), &gs)
 	return
 }
 
 // UpdateGougingSettings allows configuring the gouging settings.
 func (c *Client) UpdateGougingSettings(gs api.GougingSettings) error {
-	return c.UpdateSetting(SettingGouging, gs)
+	b, err := json.Marshal(gs)
+	if err != nil {
+		return err
+	}
+	return c.UpdateSetting(SettingGouging, string(b))
 }
 
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings() (rs api.RedundancySettings, err error) {
-	err = c.Setting(SettingRedundancy, &rs)
+	setting, err := c.Setting(SettingRedundancy)
+	if err != nil {
+		return api.RedundancySettings{}, err
+	}
+	err = json.Unmarshal([]byte(setting), &rs)
 	return
 }
 
 // UpdateRedundancySettings allows configuring the redundancy.
 func (c *Client) UpdateRedundancySettings(rs api.RedundancySettings) error {
-	return c.UpdateSetting(SettingRedundancy, rs)
+	b, err := json.Marshal(rs)
+	if err != nil {
+		return err
+	}
+	return c.UpdateSetting(SettingRedundancy, string(b))
 }
 
 // Object returns the object at the given path, or, if path ends in '/', the
@@ -444,14 +457,20 @@ func (c *Client) DeleteObject(name string) (err error) {
 	return
 }
 
-// SlabsForMigration returns up to n slabs which require migration and haven't
-// failed migration since failureCutoff.
-func (c *Client) SlabsForMigration(n int, failureCutoff time.Time, goodContracts []types.FileContractID) (slabs []object.Slab, err error) {
-	values := url.Values{}
-	values.Set("cutoff", api.ParamTime(failureCutoff).String())
-	values.Set("limit", fmt.Sprint(n))
-	values.Set("goodContracts", fmt.Sprint(goodContracts))
-	err = c.c.GET("/migration/slabs?"+values.Encode(), &slabs)
+// SlabsForMigration returns up to 'limit' slabs which require migration. A slab
+// needs to be migrated if it has sectors on contracts that are not part of the
+// given 'set'.
+func (c *Client) SlabsForMigration(set string, limit int) (slabs []object.Slab, err error) {
+	err = c.c.POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, Limit: limit}, &slabs)
+	return
+}
+
+// UpdateSlab updates the given slab in the database.
+func (c *Client) UpdateSlab(slab object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) (err error) {
+	err = c.c.PUT("/slab", api.UpdateSlabRequest{
+		Slab:          slab,
+		UsedContracts: usedContracts,
+	})
 	return
 }
 
@@ -464,12 +483,6 @@ func (c *Client) DownloadParams() (dp api.DownloadParams, err error) {
 // UploadParams returns parameters used for uploading slabs.
 func (c *Client) UploadParams() (up api.UploadParams, err error) {
 	err = c.c.GET("/params/upload", &up)
-	return
-}
-
-// MigrateParams returns parameters used for migrating a slab.
-func (c *Client) MigrateParams(slab object.Slab) (mp api.MigrateParams, err error) {
-	err = c.c.GET("/params/migrate", &mp)
 	return
 }
 

@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net"
 	"strings"
+	"sync"
 
 	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/renterd/internal/mux"
+	"go.sia.tech/mux"
 	"go.sia.tech/siad/types"
+	"lukechampine.com/frand"
 )
 
 func wrapErr(err *error, fnName string) {
@@ -48,16 +52,16 @@ type protocolObject interface {
 	encoding.SiaUnmarshaler
 }
 
-func writeRequest(s *mux.Stream, id Specifier, req protocolObject) error {
-	if _, err := s.Write(id[:]); err != nil {
+func writeRequest(w io.Writer, id Specifier, req protocolObject) error {
+	if _, err := w.Write(id[:]); err != nil {
 		return err
 	}
-	return req.MarshalSia(s)
+	return req.MarshalSia(w)
 }
 
-func readResponse(s *mux.Stream, resp protocolObject) error {
+func readResponse(r io.Reader, resp protocolObject) error {
 	rr := rpcResponse{nil, resp}
-	if err := rr.UnmarshalSia(s); err != nil {
+	if err := encoding.ReadObject(r, &rr, 4096); err != nil {
 		return err
 	} else if rr.err != nil {
 		return rr.err
@@ -65,23 +69,23 @@ func readResponse(s *mux.Stream, resp protocolObject) error {
 	return nil
 }
 
-func writeResponse(s *mux.Stream, resp protocolObject) error {
-	return (&rpcResponse{nil, resp}).MarshalSia(s)
+func writeResponse(w io.Writer, resp protocolObject) error {
+	return encoding.WriteObject(w, &rpcResponse{nil, resp})
 }
 
 func writeResponseErr(s *mux.Stream, err error) error {
-	return (&rpcResponse{&RPCError{Description: err.Error()}, nil}).MarshalSia(s)
+	return encoding.WriteObject(s, &rpcResponse{&RPCError{Description: err.Error()}, nil})
 }
 
-func processPayment(s *mux.Stream, payment PaymentMethod) error {
-	if err := writeResponse(s, paymentType(payment)); err != nil {
+func processPayment(rw io.ReadWriter, payment PaymentMethod) error {
+	if err := writeResponse(rw, paymentType(payment)); err != nil {
 		return err
-	} else if err := writeResponse(s, payment); err != nil {
+	} else if err := writeResponse(rw, payment); err != nil {
 		return err
 	}
 	if pbcr, ok := payment.(*PayByContractRequest); ok {
 		var pr paymentResponse
-		if err := readResponse(s, &pr); err != nil {
+		if err := readResponse(rw, &pr); err != nil {
 			return err
 		}
 		pbcr.HostSignature = pr.Signature
@@ -95,16 +99,82 @@ type Transport struct {
 	mux *mux.Mux
 }
 
+// stream wraps the mux.Stream type to catch the lazily written subscriber
+// response the host is sending us before the first Read.
+type stream struct {
+	*mux.Stream
+	once                      sync.Once
+	readSubscriberResponseErr error
+}
+
+func (s *stream) readSubscriberResponse() {
+	// Read response.
+	buf := make([]byte, 16)
+	_, s.readSubscriberResponseErr = io.ReadFull(s.Stream, buf)
+	if s.readSubscriberResponseErr != nil {
+		return
+	}
+	errLen := binary.LittleEndian.Uint64(buf[8:16])
+	if errLen == 0 {
+		return
+	}
+	// Read error.
+	buf = make([]byte, errLen)
+	_, s.readSubscriberResponseErr = io.ReadFull(s.Stream, buf)
+	if s.readSubscriberResponseErr != nil {
+		return
+	}
+	s.readSubscriberResponseErr = errors.New(string(buf))
+}
+
+// Read passes the read on to the underlying stream. The first time it is called
+// it will first try to read the subscriber response.
+func (s *stream) Read(b []byte) (int, error) {
+	s.once.Do(s.readSubscriberResponse)
+	if s.readSubscriberResponseErr != nil {
+		return 0, s.readSubscriberResponseErr
+	}
+	return s.Stream.Read(b)
+}
+
+// Write passes the write on to the underlying stream.
+func (s *stream) Write(b []byte) (int, error) { return s.Stream.Write(b) }
+
 // DialStream opens a new stream with the host.
-func (t *Transport) DialStream() *mux.Stream {
+func (t *Transport) DialStream() *stream {
 	buf := make([]byte, 8+8+len("host"))
 	binary.LittleEndian.PutUint64(buf[8:], uint64(len(buf[16:])))
 	binary.LittleEndian.PutUint64(buf[:8], uint64(len(buf[8:])))
 	copy(buf[16:], "host")
 
 	s := t.mux.DialStream()
+
+	// Write subscriber.
 	s.Write(buf)
-	return s
+
+	return &stream{
+		Stream: s,
+	}
+}
+
+// performSeedHandshake performs the initial seed handshake that the siamux
+// expects from the first established stream of a mux.
+func (t *Transport) performSeedHandshake() error {
+	seed := frand.Uint64n(math.MaxUint64)
+
+	s := t.mux.DialStream()
+	defer s.Close()
+
+	// Write seed.
+	buf := make([]byte, 8+8)
+	binary.LittleEndian.PutUint64(buf[:8], 8)
+	binary.LittleEndian.PutUint64(buf[8:], seed)
+	if _, err := s.Write(buf); err != nil {
+		return err
+	}
+	// Read seed.
+	_, err := io.ReadFull(s, buf)
+	return err
 }
 
 // Close closes the protocol connection.
@@ -118,27 +188,30 @@ func NewRenterTransport(conn net.Conn, hostKey PublicKey) (*Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Transport{
+	t := &Transport{
 		mux: m,
-	}, nil
+	}
+	return t, t.performSeedHandshake()
 }
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
-func RPCPriceTable(t *Transport, payment PaymentMethod) (pt HostPriceTable, err error) {
+func RPCPriceTable(t *Transport, paymentFunc func(pt HostPriceTable) (PaymentMethod, error)) (pt HostPriceTable, err error) {
 	defer wrapErr(&err, "PriceTable")
 	s := t.DialStream()
 	defer s.Close()
 
-	var js []byte
-	if _, err := s.Write(rpcUpdatePriceTableID[:]); err != nil {
+	var ptr rpcUpdatePriceTableResponse
+	if err := writeResponse(s, &rpcUpdatePriceTableID); err != nil {
 		return HostPriceTable{}, err
-	} else if err := encoding.NewDecoder(s, 1<<20).Decode(&js); err != nil {
+	} else if err := readResponse(s, &ptr); err != nil {
 		return HostPriceTable{}, err
-	} else if err := json.Unmarshal(js, &pt); err != nil {
+	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
+		return HostPriceTable{}, err
+	} else if payment, err := paymentFunc(pt); err != nil {
 		return HostPriceTable{}, err
 	} else if err := processPayment(s, payment); err != nil {
 		return HostPriceTable{}, err
-	} else if err := readResponse(s, rpcPriceTableResponse{}); err != nil {
+	} else if err := readResponse(s, &rpcPriceTableResponse{}); err != nil {
 		return HostPriceTable{}, err
 	}
 	return pt, nil
@@ -168,7 +241,7 @@ func RPCFundAccount(t *Transport, payment PaymentMethod, account Account, settin
 		Account: account,
 	}
 	var resp rpcFundAccountResponse
-	if _, err := s.Write(rpcFundAccountID[:]); err != nil {
+	if err := writeResponse(s, &rpcFundAccountID); err != nil {
 		return err
 	} else if err := writeResponse(s, &settingsID); err != nil {
 		return err

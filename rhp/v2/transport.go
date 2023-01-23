@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"strings"
 	"sync"
@@ -303,7 +302,7 @@ func (rr *ResponseReader) Read(p []byte) (int, error) {
 func (rr *ResponseReader) VerifyTag() error {
 	// the caller may not have consumed the full message (e.g. if it was padded
 	// to minMessageSize), so make sure the whole thing is written to the MAC
-	if _, err := io.Copy(ioutil.Discard, rr); err != nil {
+	if _, err := io.Copy(io.Discard, rr); err != nil {
 		return err
 	}
 

@@ -262,59 +262,53 @@ func (s *SQLStore) addTestScan(hk consensus.PublicKey, t time.Time, err error, s
 
 // TestSQLHosts tests the Hosts method of the SQLHostDB type.
 func TestSQLHosts(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	// add 3 hosts
-	hk1 := consensus.GeneratePrivateKey().PublicKey()
-	if err := hdb.addTestHost(hk1); err != nil {
+	hks, err := db.addTestHosts(3)
+	if err != nil {
 		t.Fatal(err)
 	}
-	hk2 := consensus.GeneratePrivateKey().PublicKey()
-	if err := hdb.addTestHost(hk2); err != nil {
-		t.Fatal(err)
-	}
-	hk3 := consensus.GeneratePrivateKey().PublicKey()
-	if err := hdb.addTestHost(hk3); err != nil {
-		t.Fatal(err)
-	}
+	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
 	// assert the hosts method returns the expected hosts
-	if hosts, err := hdb.Hosts(0, -1); err != nil || len(hosts) != 3 {
+	if hosts, err := db.Hosts(0, -1); err != nil || len(hosts) != 3 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := hdb.Hosts(0, 1); err != nil || len(hosts) != 1 {
+	if hosts, err := db.Hosts(0, 1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	} else if host := hosts[0]; host.PublicKey != hk1 {
 		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
 	}
-	if hosts, err := hdb.Hosts(1, 1); err != nil || len(hosts) != 1 {
+	if hosts, err := db.Hosts(1, 1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	} else if host := hosts[0]; host.PublicKey != hk2 {
 		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
 	}
-	if hosts, err := hdb.Hosts(3, 1); err != nil || len(hosts) != 0 {
+	if hosts, err := db.Hosts(3, 1); err != nil || len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if _, err := hdb.Hosts(-1, -1); err != ErrNegativeOffset {
+	if _, err := db.Hosts(-1, -1); err != ErrNegativeOffset {
 		t.Fatal("unexpected error", err)
 	}
 
 	// Add a scan for each host.
 	n := time.Now()
-	if err := hdb.addTestScan(hk1, n.Add(-time.Minute), nil, rhp.HostSettings{}); err != nil {
+	if err := db.addTestScan(hk1, n.Add(-time.Minute), nil, rhp.HostSettings{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := hdb.addTestScan(hk2, n.Add(-2*time.Minute), nil, rhp.HostSettings{}); err != nil {
+	if err := db.addTestScan(hk2, n.Add(-2*time.Minute), nil, rhp.HostSettings{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := hdb.addTestScan(hk3, n.Add(-3*time.Minute), nil, rhp.HostSettings{}); err != nil {
+	if err := db.addTestScan(hk3, n.Add(-3*time.Minute), nil, rhp.HostSettings{}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Fetch all hosts using the HostsForScanning method.
-	hostAddresses, err := hdb.HostsForScanning(n, 0, 3)
+	hostAddresses, err := db.HostsForScanning(n, 0, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +326,7 @@ func TestSQLHosts(t *testing.T) {
 	}
 
 	// Fetch one host by setting the cutoff exactly to hk2.
-	hostAddresses, err = hdb.HostsForScanning(n.Add(-2*time.Minute), 0, 3)
+	hostAddresses, err = db.HostsForScanning(n.Add(-2*time.Minute), 0, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +335,7 @@ func TestSQLHosts(t *testing.T) {
 	}
 
 	// Fetch no hosts.
-	hostAddresses, err = hdb.HostsForScanning(time.Time{}, 0, 3)
+	hostAddresses, err = db.HostsForScanning(time.Time{}, 0, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,8 +570,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Helper()
 	numEntries := func() int {
+		t.Helper()
 		bl, err := hdb.HostBlocklist()
 		if err != nil {
 			t.Fatal(err)
@@ -585,8 +579,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 		return len(bl)
 	}
 
-	t.Helper()
 	numHosts := func() int {
+		t.Helper()
 		hosts, err := hdb.Hosts(0, -1)
 		if err != nil {
 			t.Fatal(err)
@@ -594,8 +588,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 		return len(hosts)
 	}
 
-	t.Helper()
 	numRelations := func() (cnt int64) {
+		t.Helper()
 		err = hdb.db.Table("host_blocklist_entry_hosts").Count(&cnt).Error
 		if err != nil {
 			t.Fatal(err)
@@ -603,8 +597,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 		return
 	}
 
-	t.Helper()
 	isBlocked := func(hk consensus.PublicKey) bool {
+		t.Helper()
 		hosts, err := hdb.Hosts(0, -1)
 		if err != nil {
 			t.Fatal(err)
@@ -781,6 +775,22 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 }
 
+// addTestHosts adds 'n' hosts to the db and returns their keys.
+func (s *SQLStore) addTestHosts(n int) (keys []consensus.PublicKey, err error) {
+	cnt, err := s.contractsCount()
+	if err != nil {
+		return nil, err
+	}
+
+	for i := 0; i < n; i++ {
+		keys = append(keys, consensus.PublicKey{byte(int(cnt) + i + 1)})
+		if err := s.addTestHost(keys[len(keys)-1]); err != nil {
+			return nil, err
+		}
+	}
+	return
+}
+
 // addTestHost ensures a host with given hostkey exists.
 func (s *SQLStore) addTestHost(hk consensus.PublicKey) error {
 	return s.addCustomTestHost(hk, "")
@@ -803,4 +813,12 @@ func (db *SQLStore) hosts() ([]dbHost, error) {
 		return nil, tx.Error
 	}
 	return hosts, nil
+}
+
+func (s *SQLStore) hostsCount() (cnt int64, err error) {
+	err = s.db.
+		Model(&dbHost{}).
+		Count(&cnt).
+		Error
+	return
 }
