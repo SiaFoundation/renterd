@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -36,7 +37,7 @@ type Bus interface {
 	RecordInteractions(interactions []hostdb.Interaction) error
 
 	// contracts
-	AcquireContract(id types.FileContractID, d time.Duration) (bool, error)
+	AcquireContract(id types.FileContractID, priority int, d time.Duration) (uint64, error)
 	ActiveContracts() (contracts []api.ContractMetadata, err error)
 	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
@@ -44,7 +45,7 @@ type Bus interface {
 	Contract(id types.FileContractID) (contract api.ContractMetadata, err error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	DeleteContracts(ids []types.FileContractID) error
-	ReleaseContract(id types.FileContractID) error
+	ReleaseContract(id types.FileContractID, lockID uint64) error
 	SetContractSet(set string, contracts []types.FileContractID) error
 
 	// txpool
@@ -79,9 +80,11 @@ type Autopilot struct {
 	m *migrator
 	s *scanner
 
-	ticker   *time.Ticker
-	stopChan chan struct{}
-	wg       sync.WaitGroup
+	ticker         *time.Ticker
+	tickerDuration time.Duration
+	stopChan       chan struct{}
+	triggerChan    chan struct{}
+	wg             sync.WaitGroup
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -100,56 +103,78 @@ func (ap *Autopilot) SetConfig(c api.AutopilotConfig) error {
 }
 
 func (ap *Autopilot) Run() error {
+	ap.ticker = time.NewTicker(ap.tickerDuration)
+
 	ap.wg.Add(1)
 	defer ap.wg.Done()
 	for {
 		select {
 		case <-ap.stopChan:
 			return nil
+		case <-ap.triggerChan:
+			ap.logger.Info("autopilot iteration triggered")
+			ap.ticker.Reset(ap.tickerDuration)
 		case <-ap.ticker.C:
-		}
-		ap.logger.Info("autopilot loop starting")
-
-		// initiate a host scan
-		ap.s.tryUpdateTimeout()
-		ap.s.tryPerformHostScan()
-
-		// fetch consensus state
-		cs, err := ap.bus.ConsensusState()
-		if err != nil {
-			ap.logger.Errorf("loop interrupted, could not fetch consensus state, err: %v", err)
-			continue
+			ap.logger.Info("autopilot iteration starting")
 		}
 
-		// do not continue if we are not synced
-		if !cs.Synced {
-			continue
-		}
+		func() {
+			defer ap.logger.Info("autopilot iteration ended")
 
-		// fetch config to ensure its not updated during maintenance
-		cfg := ap.store.Config()
+			// initiate a host scan
+			ap.s.tryUpdateTimeout()
+			ap.s.tryPerformHostScan()
 
-		// perform maintenance
-		err = ap.c.performContractMaintenance(cfg, cs)
-		if err != nil {
-			ap.logger.Errorf("contract maintenance failed, err: %v", err)
-			continue
-		}
+			// fetch consensus state
+			cs, err := ap.bus.ConsensusState()
+			if err != nil {
+				ap.logger.Errorf("iteration interrupted, could not fetch consensus state, err: %v", err)
+				return
+			}
 
-		// migration
-		err = ap.m.UpdateContracts()
-		if err != nil {
-			ap.logger.Errorf("update contracts failed, err: %v", err)
-		}
-		ap.m.TryPerformMigrations()
+			// do not continue if we are not synced
+			if !cs.Synced {
+				ap.logger.Debug("iteration interrupted, consensus not synced")
+				return
+			}
+
+			// fetch config to ensure its not updated during maintenance
+			cfg := ap.store.Config()
+
+			// perform maintenance
+			err = ap.c.performContractMaintenance(cfg, cs)
+			if err != nil {
+				ap.logger.Errorf("contract maintenance failed, err: %v", err)
+				return
+			}
+
+			// migration
+			err = ap.m.UpdateContracts()
+			if err != nil {
+				ap.logger.Errorf("update contracts failed, err: %v", err)
+			}
+			ap.m.TryPerformMigrations()
+		}()
 	}
 }
 
 func (ap *Autopilot) Stop() error {
-	ap.ticker.Stop()
+	if ap.ticker != nil {
+		ap.ticker.Stop()
+	}
 	close(ap.stopChan)
+	close(ap.triggerChan)
 	ap.wg.Wait()
 	return nil
+}
+
+func (ap *Autopilot) Trigger() bool {
+	select {
+	case ap.triggerChan <- struct{}{}:
+		return true
+	default:
+		return false
+	}
 }
 
 func (ap *Autopilot) actionsHandler(jc jape.Context) {
@@ -173,12 +198,17 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	if jc.Check("failed to set config", ap.SetConfig(c)) != nil {
 		return
 	}
+	ap.Trigger() // trigger the autopilot loop
 }
 
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 	jc.Encode(api.AutopilotStatusResponseGET{
 		CurrentPeriod: ap.c.currentPeriod(),
 	})
+}
+
+func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
+	jc.Encode(fmt.Sprintf("triggered: %t", ap.Trigger()))
 }
 
 // NewServer returns an HTTP handler that serves the renterd autopilot api.
@@ -188,6 +218,8 @@ func NewServer(ap *Autopilot) http.Handler {
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
 		"GET    /status":  ap.statusHandlerGET,
+
+		"POST    /debug/trigger": ap.triggerHandlerPOST,
 	})
 }
 
@@ -199,8 +231,9 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		store:  store,
 		worker: worker,
 
-		ticker:   time.NewTicker(heartbeat),
-		stopChan: make(chan struct{}),
+		tickerDuration: heartbeat,
+		stopChan:       make(chan struct{}),
+		triggerChan:    make(chan struct{}),
 	}
 
 	scanner, err := newScanner(

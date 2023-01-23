@@ -170,7 +170,10 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	cleanups = append(cleanups, busServer.Shutdown)
 
 	// Create worker.
-	w, wCleanup, err := node.NewWorker(node.WorkerConfig{}, busClient, wk)
+	w, wCleanup, err := node.NewWorker(node.WorkerConfig{
+		SessionReconnectTimeout: 10 * time.Second,
+		SessionTTL:              2 * time.Minute,
+	}, busClient, wk)
 	if err != nil {
 		return nil, err
 	}

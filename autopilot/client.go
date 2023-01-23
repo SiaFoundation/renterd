@@ -38,3 +38,8 @@ func (c *Client) Status() (uint64, error) {
 	err := c.c.GET("/status", &resp)
 	return resp.CurrentPeriod, err
 }
+
+func (c *Client) Trigger() (res string, err error) {
+	err = c.c.POST("/debug/trigger", nil, &res)
+	return
+}
