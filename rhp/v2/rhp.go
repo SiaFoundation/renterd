@@ -4,6 +4,7 @@ package rhp
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"time"
 
 	"go.sia.tech/renterd/internal/consensus"
@@ -92,6 +93,16 @@ type HostSettings struct {
 	RevisionNumber             uint64           `json:"revisionnumber"`
 	Version                    string           `json:"version"`
 	SiaMuxPort                 string           `json:"siamuxport"`
+}
+
+// SiamuxAddr is a helper which returns an address that can be used to connect
+// to the host's siamux.
+func (s HostSettings) SiamuxAddr() string {
+	host, _, err := net.SplitHostPort(s.NetAddress)
+	if err != nil {
+		return ""
+	}
+	return net.JoinHostPort(host, s.SiaMuxPort)
 }
 
 // A Specifier is a generic identification tag.

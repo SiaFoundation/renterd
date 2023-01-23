@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -184,5 +185,75 @@ func TestUploadDownload(t *testing.T) {
 		if !bytes.Equal(data, buffer.Bytes()) {
 			t.Fatal("unexpected")
 		}
+	}
+}
+
+// TestEphemeralAccounts tests the use of ephemeral accounts.
+func TestEphemeralAccounts(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	w := cluster.Worker
+
+	// add host
+	nodes, err := cluster.AddHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := nodes[0]
+	hg, err := host.HostGet()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for contracts to form.
+	var contract api.Contract
+	if contracts, err := cluster.WaitForContracts(); err != nil {
+		t.Fatal(err)
+	} else {
+		contract = contracts[0]
+	}
+
+	// Account shouldnt' exist.
+	accounts, err := w.Accounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("wrong number of accounts %v", len(accounts))
+	}
+
+	// Fund account.
+	if err := w.RHPFund(contract.ID, contract.HostKey(), types.SiacoinPrecision); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expected account balance should have increased.
+	accounts, err = w.Accounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("wrong number of accounts %v", len(accounts))
+	}
+	acc := accounts[0]
+	if !acc.Balance.Equals(types.SiacoinPrecision) {
+		t.Fatalf("wrong balance %v", acc.Balance.HumanString())
+	}
+	if acc.ID == (rhp.Account{}) {
+		t.Fatal("account id not set")
+	}
+	if acc.Host != consensus.PublicKey(hg.PublicKey.ToPublicKey()) {
+		t.Fatal("wrong host")
 	}
 }

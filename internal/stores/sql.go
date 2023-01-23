@@ -22,6 +22,7 @@ type (
 	SQLStore struct {
 		db *gorm.DB
 
+		// HostDB related fields.
 		lastAnnouncementSave   time.Time
 		persistInterval        time.Duration
 		unappliedAnnouncements []announcement

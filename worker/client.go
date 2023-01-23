@@ -32,18 +32,6 @@ func (c *Client) RHPScan(hostKey consensus.PublicKey, hostIP string, timeout tim
 	return
 }
 
-// RHPPreparePayment prepares an ephemeral account payment.
-func (c *Client) RHPPreparePayment(account rhpv3.Account, amount types.Currency, key consensus.PrivateKey) (resp rhpv3.PayByEphemeralAccountRequest, err error) {
-	req := api.RHPPreparePaymentRequest{
-		Account:    account,
-		Amount:     amount,
-		Expiry:     0, // TODO
-		AccountKey: key,
-	}
-	err = c.c.POST("/rhp/prepare/payment", req, &resp)
-	return
-}
-
 // RHPForm forms a contract with a host.
 func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPFormRequest{
@@ -75,13 +63,11 @@ func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consen
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(contract types.FileContractRevision, hostKey consensus.PublicKey, hostIP string, account rhpv3.Account, amount types.Currency) (err error) {
+func (c *Client) RHPFund(contractID types.FileContractID, hostKey consensus.PublicKey, amount types.Currency) (err error) {
 	req := api.RHPFundRequest{
-		Contract: contract,
-		HostKey:  hostKey,
-		HostIP:   hostIP,
-		Account:  account,
-		Amount:   amount,
+		ContractID: contractID,
+		HostKey:    hostKey,
+		Amount:     amount,
 	}
 	err = c.c.POST("/rhp/fund", req, nil)
 	return
@@ -100,13 +86,11 @@ func (c *Client) RHPReadRegistry(hostKey consensus.PublicKey, hostIP string, key
 }
 
 // RHPUpdateRegistry updates a registry value.
-func (c *Client) RHPUpdateRegistry(hostKey consensus.PublicKey, hostIP string, key rhpv3.RegistryKey, value rhpv3.RegistryValue, payment rhpv3.PayByEphemeralAccountRequest) (err error) {
+func (c *Client) RHPUpdateRegistry(hostKey consensus.PublicKey, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
 	req := api.RHPRegistryUpdateRequest{
 		HostKey:       hostKey,
-		HostIP:        hostIP,
 		RegistryKey:   key,
 		RegistryValue: value,
-		Payment:       payment,
 	}
 	err = c.c.POST("/rhp/registry/update", req, nil)
 	return
@@ -188,6 +172,12 @@ func (c *Client) DeleteObject(name string) (err error) {
 // decorate a bus contract with the contract's latest revision.
 func (c *Client) ActiveContracts(timeout time.Duration) (resp api.ContractsResponse, err error) {
 	err = c.c.GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.Duration(timeout)), &resp)
+	return
+}
+
+// Accounts requests the worker's /accounts endpoint.
+func (c *Client) Accounts() (accounts []api.Account, err error) {
+	err = c.c.GET("/accounts", &accounts)
 	return
 }
 

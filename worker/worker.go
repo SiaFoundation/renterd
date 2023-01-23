@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -191,6 +192,8 @@ type Bus interface {
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordInteractions(interactions []hostdb.Interaction) error
 
+	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+
 	DownloadParams() (api.DownloadParams, error)
 	GougingParams() (api.GougingParams, error)
 	MigrateParams(slab object.Slab) (api.MigrateParams, error)
@@ -203,6 +206,18 @@ type Bus interface {
 	WalletDiscard(txn types.Transaction) error
 	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
 	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+}
+
+// deriveSubKey can be used to derive a sub-masterkey from the worker's
+// masterkey to use for a specific purpose. Such as deriving more keys for
+// ephemeral accounts.
+func (w *worker) deriveSubKey(purpose string) consensus.PrivateKey {
+	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
+	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }
 
 // TODO: deriving the renter key from the host key using the master key only
@@ -218,7 +233,7 @@ type Bus interface {
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
 func (w *worker) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
-	seed := blake2b.Sum256(append(w.masterKey[:], hostKey[:]...))
+	seed := blake2b.Sum256(append(w.deriveSubKey("renterkey"), hostKey[:]...))
 	pk := consensus.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
 		seed[i] = 0
@@ -229,9 +244,12 @@ func (w *worker) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateK
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
+	id        string
 	bus       Bus
 	pool      *sessionPool
 	masterKey [32]byte
+
+	accounts *accounts
 }
 
 func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
@@ -339,13 +357,6 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 	}()
 	err = fn(hosts)
 	return err
-}
-
-func (w *worker) rhpPreparePaymentHandler(jc jape.Context) {
-	var rppr api.RHPPreparePaymentRequest
-	if jc.Decode(&rppr) == nil {
-		jc.Encode(rhpv3.PayByEphemeralAccount(rppr.Account, rppr.Amount, rppr.Expiry, rppr.AccountKey))
-	}
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
@@ -495,27 +506,62 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
-	rk := w.deriveRenterKey(rfr.HostKey)
-	err := w.withTransportV3(jc.Request.Context(), rfr.HostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
-		// The FundAccount RPC requires a SettingsID, which we also have to pay
-		// for. To simplify things, we pay for the SettingsID using the full
-		// amount, with the "refund" going to the desired account; we then top
-		// up the account to cover the cost of the two RPCs.
-		payment, ok := rhpv3.PayByContract(&rfr.Contract, rfr.Amount, rfr.Account, rk)
-		if !ok {
-			return errors.New("insufficient funds")
-		}
-		priceTable, err := rhpv3.RPCPriceTable(t, &payment)
+	// Get account for the host.
+	account, err := w.accounts.ForHost(rfr.HostKey)
+	if jc.Check("failed to get account for provided host", err) != nil {
+		return
+	}
+
+	// Get IP of host.
+	h, err := w.bus.Host(rfr.HostKey)
+	if jc.Check("failed to fetch host", err) != nil {
+		return
+	}
+	hostIP := h.Settings.SiamuxAddr()
+
+	// Get contract revision.
+	// TODO: This is not a good solution. We should have some mechanism to
+	// lock contracts across protocol versions. This is abusing rhpv2's
+	// withHosts to get the revision.
+	var revision types.FileContractRevision
+	cm := api.ContractMetadata{
+		ID:      rfr.ContractID,
+		HostIP:  hostIP,
+		HostKey: rfr.HostKey,
+	}
+	err = w.withHosts(jc.Request.Context(), []api.ContractMetadata{cm}, func(ss []sectorStore) error {
+		rev, err := ss[0].(*session).Revision(jc.Request.Context())
 		if err != nil {
 			return err
 		}
-		payment, ok = rhpv3.PayByContract(&rfr.Contract, priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost), rhpv3.ZeroAccount, rk)
+		revision = rev.Revision
+		return nil
+	})
+	if jc.Check("failed to fetch revision", err) != nil {
+		return
+	}
+
+	// Get price table.
+	pt, err := w.hostPriceTableByContract(jc.Request.Context(), rfr.HostKey, hostIP, &revision)
+	if jc.Check("failed to fetch pricetable", err) != nil {
+		return
+	}
+
+	// Fund account.
+	err = w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
+		rk := w.deriveRenterKey(rfr.HostKey)
+		payment, ok := rhpv3.PayByContract(&revision, rfr.Amount, rhpv3.Account{}, rk) // no account needed for funding
 		if !ok {
 			return errors.New("insufficient funds")
 		}
-		return rhpv3.RPCFundAccount(t, &payment, rfr.Account, priceTable.ID)
+		return rhpv3.RPCFundAccount(t, &payment, account.id, pt.ID)
 	})
 	if jc.Check("couldn't fund account", err) != nil {
+		return
+	}
+
+	// Record deposit.
+	if jc.Check("failed to record account deposit", account.Deposit(rfr.Amount)) != nil {
 		return
 	}
 }
@@ -541,8 +587,11 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	if jc.Decode(&rrur) != nil {
 		return
 	}
+	var pt rhpv3.HostPriceTable        // TODO
+	cost, _ := pt.UpdateRegistryCost() // TODO: handle refund
+	payment := w.preparePayment(rrur.HostKey, cost)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
-		return rhpv3.RPCUpdateRegistry(t, &rrur.Payment, rrur.RegistryKey, rrur.RegistryValue)
+		return rhpv3.RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
 		return
@@ -792,16 +841,70 @@ func joinErrors(errs []error) error {
 	}
 }
 
+func (w *worker) hostPriceTableByContract(ctx context.Context, hk consensus.PublicKey, hostIP string, revision *types.FileContractRevision) (pt rhpv3.HostPriceTable, err error) {
+	// TODO: Check if valid price table exists and handle the following edge cases.
+	// - If no price table exists, we fetch a new one.
+	// - If a price table exists that is valid but about to expire use it but launch an update.
+	// - If a price table exists that is valid and doesn't expire soon, use it.
+
+	// Get price table.
+	err = w.withTransportV3(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
+		// The FundAccount RPC requires a SettingsID, which we also have to pay
+		// for. To simplify things, we pay for the SettingsID using the full
+		// amount, with the "refund" going to the desired account; we then top
+		// up the account to cover the cost of the two RPCs.
+		pt, err = rhpv3.RPCPriceTable(t, func(priceTable rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
+			cost := priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost)
+
+			// TODO: gouging check on price table
+
+			refundAccount := rhpv3.Account(w.accounts.deriveAccountKey(hk).PublicKey())
+			rk := w.deriveRenterKey(hk)
+			payment, ok := rhpv3.PayByContract(revision, cost, refundAccount, rk)
+			if !ok {
+				return nil, errors.New("insufficient funds")
+			}
+			return &payment, nil
+		})
+		return err
+	})
+
+	// TODO: update cached price table.
+	return pt, err
+}
+
+func (w *worker) preparePayment(hk consensus.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
+	pk := w.accounts.deriveAccountKey(hk)
+	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
+}
+
+func (w *worker) accountsHandlerGET(jc jape.Context) {
+	accounts, err := w.accounts.All()
+	if jc.Check("failed to fetch accounts", err) != nil {
+		return
+	}
+	jc.Encode(accounts)
+}
+
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Duration) http.Handler {
+func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Duration) (http.Handler, error) {
 	w := &worker{
+		id:        "worker", // TODO: make this configurable for multi-worker setup.
 		bus:       b,
 		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey: masterKey,
+		accounts:  nil,
 	}
+	w.accounts = &accounts{
+		accounts: make(map[rhpv3.Account]*account),
+		workerID: w.id,
+		key:      w.deriveSubKey("accountkey"),
+	}
+
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /accounts": w.accountsHandlerGET,
+
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
-		"POST   /rhp/prepare/payment":  w.rhpPreparePaymentHandler,
 		"POST   /rhp/scan":             w.rhpScanHandler,
 		"POST   /rhp/form":             w.rhpFormHandler,
 		"POST   /rhp/renew":            w.rhpRenewHandler,
@@ -814,5 +917,5 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
-	})
+	}), nil
 }
