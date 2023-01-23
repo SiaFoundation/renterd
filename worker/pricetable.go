@@ -38,10 +38,6 @@ type priceTableUpdate struct {
 // whether it is valid or not.
 func (pts *priceTables) PriceTable(hk types.PublicKey) (rhp.HostPriceTable, bool) {
 	pt := pts.priceTable(hk)
-
-	// TODO: If the pricetable is valid, kick off a non-blocking update
-	// using an EA.
-
 	return pt.convert()
 }
 
@@ -88,11 +84,13 @@ func (pts *priceTables) Update(ctx context.Context, f rhpv3.PriceTablePaymentFun
 	})
 
 	pt.mu.Lock()
+
 	// On success we update the pt.
 	if err == nil {
 		pt.pt = &hpt
 		pt.expiry = time.Now().Add(hpt.Validity)
 	}
+
 	// Signal that the update is over.
 	ongoing.err = err
 	close(ongoing.done)

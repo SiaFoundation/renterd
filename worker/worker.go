@@ -25,6 +25,14 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
+const (
+	lockingPriorityRenew   = 100 // highest
+	lockingPriorityFunding = 90
+
+	lockingDurationRenew   = time.Minute
+	lockingDurationFunding = 30 * time.Second
+)
+
 // parseRange parses a Range header string as per RFC 7233. Only the first range
 // is returned. If no range is specified, parseRange returns 0, size.
 func parseRange(s string, size int64) (offset, length int64, _ error) {
@@ -187,9 +195,11 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	ActiveContracts() ([]api.ContractMetadata, error)
+	AcquireContract(id types.FileContractID, priority int, d time.Duration) (uint64, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordInteractions(interactions []hostdb.Interaction) error
+	ReleaseContract(id types.FileContractID, lockID uint64) error
 
 	Host(hostKey types.PublicKey) (hostdb.Host, error)
 
@@ -457,6 +467,16 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 
+	lockID, err := w.bus.AcquireContract(rrr.ContractID, lockingPriorityRenew, lockingDurationRenew)
+	if jc.Check("could not lock contract for renewal", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(rrr.ContractID, lockID); err != nil {
+			// TODO: log
+		}
+	}()
+
 	hostIP, hostKey, toRenewID, renterFunds := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
 	rk := w.deriveRenterKey(hostKey)
@@ -521,9 +541,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	hostIP := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
-	// TODO: This is not a good solution. We should have some mechanism to
-	// lock contracts across protocol versions. This is abusing rhpv2's
-	// withHosts to get the revision.
+	lockID, err := w.bus.AcquireContract(rfr.ContractID, lockingPriorityRenew, lockingPriorityFunding)
+	if jc.Check("failed to acquire contract for funding EA", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(rfr.ContractID, lockID); err != nil {
+			// TODO: log
+		}
+	}()
+
+	// Get contract revision.
 	var revision types.FileContractRevision
 	cm := api.ContractMetadata{
 		ID:      rfr.ContractID,
