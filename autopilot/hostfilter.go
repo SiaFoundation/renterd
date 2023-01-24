@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -25,56 +26,69 @@ const (
 	minContractCollateralThresholdDenominator = 100
 )
 
+var (
+	errHostOffline      = errors.New("host is offline")
+	errHostRedundantIP  = errors.New("host has redundant IP")
+	errHostBadSettings  = errors.New("host has bad settings")
+	errHostPriceGouging = errors.New("host is price gouging")
+	errHostNotAnnounced = errors.New("host is not announced")
+
+	errContractOutOfCollateral   = errors.New("contract is out of collateral")
+	errContractOutOfFunds        = errors.New("contract is out of funds")
+	errContractUpForRenewal      = errors.New("contract is up for renewal")
+	errContractMaxRevisionNumber = errors.New("contract has reached max revision number")
+	errContractExpired           = errors.New("contract has expired")
+)
+
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h hostdb.Host) (bool, []string) {
-	var reasons []string
+func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h hostdb.Host) (bool, []error) {
+	var reasons []error
 
 	if !h.IsOnline() {
-		reasons = append(reasons, "offline")
+		reasons = append(reasons, errHostOffline)
 	}
 	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
-		reasons = append(reasons, "redundant IP")
+		reasons = append(reasons, errHostRedundantIP)
 	}
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
-		reasons = append(reasons, fmt.Sprintf("bad settings: %v", reason))
+		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if gouging, reason := isGouging(gs, rs, settings); gouging {
-		reasons = append(reasons, fmt.Sprintf("price gouging: %v", reason))
+		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
 	}
 
 	// sanity check - should never happen but this would cause a zero score
 	if h.NetAddress == "" {
-		reasons = append(reasons, "not announced")
+		reasons = append(reasons, errHostNotAnnounced)
 	}
-
 	return len(reasons) == 0, reasons
 }
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
+func isUsableContract(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []error) {
 	if isOutOfCollateral(cfg, s, c) {
-		reasons = append(reasons, "out of collateral")
+		reasons = append(reasons, errContractOutOfCollateral)
 		renew = false
 		refresh = true
 	}
 	if isOutOfFunds(cfg, s, c) {
-		reasons = append(reasons, "out of funds")
+		reasons = append(reasons, errContractOutOfFunds)
 		renew = false
 		refresh = true
 	}
 	if isUpForRenewal(cfg, c.Revision, bh) {
-		reasons = append(reasons, "up for renewal")
+		reasons = append(reasons, errContractUpForRenewal)
 		renew = true
 		refresh = false
 	}
 	if c.Revision.RevisionNumber == math.MaxUint64 {
-		reasons = append(reasons, "max revision number")
+		reasons = append(reasons, errContractMaxRevisionNumber)
 		renew = false
 		refresh = false
 	}
 	if bh > c.EndHeight() {
-		reasons = append(reasons, "expired")
+		reasons = append(reasons, errContractExpired)
 		renew = false
 		refresh = false
 	}
@@ -82,11 +96,11 @@ func isUsableContract(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contrac
 	return
 }
 
-func isOutOfFunds(cfg api.AutopilotConfig, settings rhp.HostSettings, c api.Contract) bool {
+func isOutOfFunds(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract) bool {
 	blockBytes := types.NewCurrency64(modules.SectorSize * cfg.Contracts.Period)
-	sectorStoragePrice := settings.StoragePrice.Mul(blockBytes)
-	sectorUploadBandwidthPrice := settings.UploadBandwidthPrice.Mul64(modules.SectorSize)
-	sectorDownloadBandwidthPrice := settings.DownloadBandwidthPrice.Mul64(modules.SectorSize)
+	sectorStoragePrice := s.StoragePrice.Mul(blockBytes)
+	sectorUploadBandwidthPrice := s.UploadBandwidthPrice.Mul64(modules.SectorSize)
+	sectorDownloadBandwidthPrice := s.DownloadBandwidthPrice.Mul64(modules.SectorSize)
 	sectorBandwidthPrice := sectorUploadBandwidthPrice.Add(sectorDownloadBandwidthPrice)
 	sectorPrice := sectorStoragePrice.Add(sectorBandwidthPrice)
 	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.TotalCost.Big()).Float64()

@@ -30,11 +30,6 @@ const (
 )
 
 func hostScore(cfg api.AutopilotConfig, h hostdb.Host) float64 {
-	// sanity check - host should have been filtered
-	if h.Settings == nil {
-		return 0
-	}
-
 	// TODO: priceAdjustmentScore
 	// TODO: storageRemainingScore
 	return ageScore(h) *

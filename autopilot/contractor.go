@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -360,12 +361,14 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 				"unusable host",
 				"hk", hk,
 				"fcid", contract.ID,
-				"reasons", reasons,
+				"reasons", toString(joinErrors(reasons)),
 			)
 
 			toIgnore = append(toIgnore, contract.ID)
 			continue
 		}
+
+		// grab the settings - this is safe because bad settings make an unusable host
 		settings := *host.Settings
 
 		// decide whether the contract is still good
@@ -375,10 +378,11 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 				"unusable contract",
 				"hk", hk,
 				"fcid", contract.ID,
-				"reasons", reasons,
+				"reasons", toString(joinErrors(reasons)),
 				"refresh", refresh,
 				"renew", renew,
 			)
+
 			if renew {
 				renewIndices[contract.ID] = len(toRenew)
 				toRenew = append(toRenew, contractInfo{
@@ -386,10 +390,28 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 					settings: settings,
 				})
 			} else if refresh {
-				toRefresh = append(toRefresh, contractInfo{
-					contract: contract,
-					settings: settings,
-				})
+				// if the contract is not usable because it is out of collateral, we
+				// want to refresh if and only if the new collateral does not exceed
+				// the host's max collateral and it exceeds our refresh threshold
+				var dontRefresh bool
+				if len(reasons) == 1 && containsError(reasons, errContractOutOfCollateral) {
+					funding, _ := c.refreshFundingEstimate(cfg, contractInfo{
+						contract: contract,
+						settings: settings,
+					}) // TODO: handle err
+					collateral := renewContractCollateral(settings, funding)
+					dontRefresh = collateral.Cmp(settings.MaxCollateral) > 0
+					dontRefresh = dontRefresh || isBelowCollateralThreshold(cfg, settings, collateral)
+				}
+
+				if dontRefresh {
+					toIgnore = append(toIgnore, contract.ID)
+				} else {
+					toRefresh = append(toRefresh, contractInfo{
+						contract: contract,
+						settings: settings,
+					})
+				}
 			} else {
 				toDelete = append(toDelete, contract.ID)
 				continue
@@ -884,6 +906,15 @@ func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]
 	return cmap
 }
 
+func renewContractCollateral(settings rhpv2.HostSettings, renterFunds types.Currency) types.Currency {
+	var collateral types.Currency
+	if costPerByte := settings.UploadBandwidthPrice.Add(settings.StoragePrice).Add(settings.DownloadBandwidthPrice); !costPerByte.IsZero() {
+		bytes := renterFunds.Div(costPerByte)
+		collateral = settings.Collateral.Mul(bytes)
+	}
+	return collateral
+}
+
 func initialContractCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings) types.Currency {
 	expectedStorage := cfg.Contracts.Storage / cfg.Contracts.Amount
 
@@ -921,4 +952,42 @@ func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, 
 	min = allowance.Div64(minInitialContractFundingDivisor)
 	max = allowance.Div64(maxInitialContractFundingDivisor)
 	return
+}
+
+func toString(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func containsError(errs []error, err error) bool {
+	for _, e := range errs {
+		if e == err || errors.Unwrap(e) == err {
+			return true
+		}
+	}
+	return false
+}
+
+func joinErrors(errs []error) error {
+	filtered := errs[:0]
+	for _, err := range errs {
+		if err != nil {
+			filtered = append(filtered, err)
+		}
+	}
+
+	switch len(filtered) {
+	case 0:
+		return nil
+	case 1:
+		return filtered[0]
+	default:
+		strs := make([]string, len(filtered))
+		for i := range strs {
+			strs[i] = filtered[i].Error()
+		}
+		return errors.New(strings.Join(strs, ";"))
+	}
 }
