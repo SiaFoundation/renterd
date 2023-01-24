@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/siad/types"
 )
 
 const (
@@ -51,19 +51,19 @@ type (
 
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
-		Address() types.UnlockHash
+		Address() types.Address
 		Balance() types.Currency
-		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error)
-		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error)
+		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error)
+		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
 		ReleaseInputs(txn types.Transaction)
-		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
+		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+		Host(hostKey types.PublicKey) (hostdb.Host, error)
 		Hosts(offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(interactions []hostdb.Interaction) error
@@ -89,11 +89,11 @@ type (
 	ObjectStore interface {
 		Get(key string) (object.Object, error)
 		List(key string) ([]string, error)
-		Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
+		Put(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		Delete(key string) error
 
 		SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error)
-		PutSlab(s object.Slab, usedContracts map[consensus.PublicKey]types.FileContractID) error
+		PutSlab(s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
 
 	// A SettingStore stores settings.
@@ -258,7 +258,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	err = b.w.SignTransaction(cs, &txn, toSign, types.FullCoveredFields)
+	err = b.w.SignTransaction(cs, &txn, toSign, types.CoveredFields{WholeTransaction: true})
 	if jc.Check("couldn't sign the transaction", err) != nil {
 		return
 	}
@@ -347,7 +347,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 			}
 		}
 		for _, sco := range txn.SiacoinOutputs {
-			if sco.UnlockHash == addr {
+			if sco.Address == addr {
 				return true
 			}
 		}
@@ -387,7 +387,7 @@ func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
-	var hostKey consensus.PublicKey
+	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}

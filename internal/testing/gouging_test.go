@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/node/api/client"
-	"go.sia.tech/siad/types"
+	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
@@ -63,8 +63,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// helper that waits untail a certain host is removed from the contract set
-	waitForHostRemoval := func(hk consensus.PublicKey) error {
-		t.Helper()
+	waitForHostRemoval := func(hk types.PublicKey) error {
 		return Retry(30, time.Second, func() error {
 			if contracts, err := b.Contracts("autopilot"); err != nil {
 				t.Fatal(err)
@@ -104,11 +103,11 @@ func TestGouging(t *testing.T) {
 
 	cases := []struct {
 		param client.HostParam
-		value types.Currency
+		value stypes.Currency
 	}{
-		{"mindownloadbandwidthprice", types.SiacoinPrecision},
-		{"minuploadbandwidthprice", types.SiacoinPrecision},
-		{"mincontractprice", types.SiacoinPrecision.Mul64(10)},
+		{"mindownloadbandwidthprice", stypes.SiacoinPrecision},
+		{"minuploadbandwidthprice", stypes.SiacoinPrecision},
+		{"mincontractprice", stypes.SiacoinPrecision.Mul64(10)},
 	}
 
 	for _, c := range cases {
@@ -137,7 +136,7 @@ func TestGouging(t *testing.T) {
 
 	// update all host settings so they're gouging
 	for _, h := range hosts {
-		if err := h.HostModifySettingPost("mindownloadbandwidthprice", types.SiacoinPrecision); err != nil {
+		if err := h.HostModifySettingPost("mindownloadbandwidthprice", stypes.SiacoinPrecision); err != nil {
 			t.Fatal(err)
 		}
 	}

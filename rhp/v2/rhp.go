@@ -2,31 +2,11 @@
 package rhp
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/siad/types"
-)
-
-// exported types from internal/consensus
-type (
-	// A Hash256 is a generic 256-bit cryptographic hash.
-	Hash256 = consensus.Hash256
-	// A PublicKey is an Ed25519 public key.
-	PublicKey = consensus.PublicKey
-	// A PrivateKey is an Ed25519 private key.
-	PrivateKey = consensus.PrivateKey
-	// A Signature is an Ed25519 signature.
-	Signature = consensus.Signature
-	// A BlockID uniquely identifies a block.
-	BlockID = consensus.BlockID
-	// A ChainIndex pairs a block's height with its ID.
-	ChainIndex = consensus.ChainIndex
-	// ConsensusState represents the full state of the chain as of a particular block.
-	ConsensusState = consensus.State
+	"go.sia.tech/core/types"
 )
 
 func wrapErr(err *error, fnName string) {
@@ -44,7 +24,7 @@ type ContractRevision struct {
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
 func (c ContractRevision) EndHeight() uint64 {
-	return uint64(c.Revision.NewWindowStart)
+	return uint64(c.Revision.WindowStart)
 }
 
 // ID returns the ID of the original FileContract.
@@ -53,46 +33,46 @@ func (c ContractRevision) ID() types.FileContractID {
 }
 
 // HostKey returns the public key of the host.
-func (c ContractRevision) HostKey() (pk PublicKey) {
+func (c ContractRevision) HostKey() (pk types.PublicKey) {
 	copy(pk[:], c.Revision.UnlockConditions.PublicKeys[1].Key)
 	return
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.
 func (c ContractRevision) RenterFunds() types.Currency {
-	return c.Revision.NewValidProofOutputs[0].Value
+	return c.Revision.ValidProofOutputs[0].Value
 }
 
 // NumSectors returns the number of sectors covered by the contract.
 func (c ContractRevision) NumSectors() uint64 {
-	return c.Revision.NewFileSize / SectorSize
+	return c.Revision.Filesize / SectorSize
 }
 
 // HostSettings are the settings and prices used when interacting with a host.
 type HostSettings struct {
-	AcceptingContracts         bool             `json:"acceptingcontracts"`
-	MaxDownloadBatchSize       uint64           `json:"maxdownloadbatchsize"`
-	MaxDuration                uint64           `json:"maxduration"`
-	MaxReviseBatchSize         uint64           `json:"maxrevisebatchsize"`
-	NetAddress                 string           `json:"netaddress"`
-	RemainingStorage           uint64           `json:"remainingstorage"`
-	SectorSize                 uint64           `json:"sectorsize"`
-	TotalStorage               uint64           `json:"totalstorage"`
-	UnlockHash                 types.UnlockHash `json:"unlockhash"`
-	WindowSize                 uint64           `json:"windowsize"`
-	Collateral                 types.Currency   `json:"collateral"`
-	MaxCollateral              types.Currency   `json:"maxcollateral"`
-	BaseRPCPrice               types.Currency   `json:"baserpcprice"`
-	ContractPrice              types.Currency   `json:"contractprice"`
-	DownloadBandwidthPrice     types.Currency   `json:"downloadbandwidthprice"`
-	SectorAccessPrice          types.Currency   `json:"sectoraccessprice"`
-	StoragePrice               types.Currency   `json:"storageprice"`
-	UploadBandwidthPrice       types.Currency   `json:"uploadbandwidthprice"`
-	EphemeralAccountExpiry     time.Duration    `json:"ephemeralaccountexpiry"`
-	MaxEphemeralAccountBalance types.Currency   `json:"maxephemeralaccountbalance"`
-	RevisionNumber             uint64           `json:"revisionnumber"`
-	Version                    string           `json:"version"`
-	SiaMuxPort                 string           `json:"siamuxport"`
+	AcceptingContracts         bool           `json:"acceptingcontracts"`
+	MaxDownloadBatchSize       uint64         `json:"maxdownloadbatchsize"`
+	MaxDuration                uint64         `json:"maxduration"`
+	MaxReviseBatchSize         uint64         `json:"maxrevisebatchsize"`
+	NetAddress                 string         `json:"netaddress"`
+	RemainingStorage           uint64         `json:"remainingstorage"`
+	SectorSize                 uint64         `json:"sectorsize"`
+	TotalStorage               uint64         `json:"totalstorage"`
+	Address                    types.Address  `json:"unlockhash"`
+	WindowSize                 uint64         `json:"windowsize"`
+	Collateral                 types.Currency `json:"collateral"`
+	MaxCollateral              types.Currency `json:"maxcollateral"`
+	BaseRPCPrice               types.Currency `json:"baserpcprice"`
+	ContractPrice              types.Currency `json:"contractprice"`
+	DownloadBandwidthPrice     types.Currency `json:"downloadbandwidthprice"`
+	SectorAccessPrice          types.Currency `json:"sectoraccessprice"`
+	StoragePrice               types.Currency `json:"storageprice"`
+	UploadBandwidthPrice       types.Currency `json:"uploadbandwidthprice"`
+	EphemeralAccountExpiry     time.Duration  `json:"ephemeralaccountexpiry"`
+	MaxEphemeralAccountBalance types.Currency `json:"maxephemeralaccountbalance"`
+	RevisionNumber             uint64         `json:"revisionnumber"`
+	Version                    string         `json:"version"`
+	SiaMuxPort                 string         `json:"siamuxport"`
 }
 
 // SiamuxAddr is a helper which returns an address that can be used to connect
@@ -105,43 +85,27 @@ func (s HostSettings) SiamuxAddr() string {
 	return net.JoinHostPort(host, s.SiaMuxPort)
 }
 
-// A Specifier is a generic identification tag.
-type Specifier [16]byte
-
-func (s Specifier) String() string {
-	return string(bytes.Trim(s[:], "\x00"))
-}
-
-func newSpecifier(str string) Specifier {
-	if len(str) > 16 {
-		panic("specifier is too long")
-	}
-	var s Specifier
-	copy(s[:], str)
-	return s
-}
-
 // RPC IDs
 var (
-	RPCFormContractID       = newSpecifier("LoopFormContract")
-	RPCLockID               = newSpecifier("LoopLock")
-	RPCReadID               = newSpecifier("LoopRead")
-	RPCRenewContractID      = newSpecifier("LoopRenew")
-	RPCRenewClearContractID = newSpecifier("LoopRenewClear")
-	RPCSectorRootsID        = newSpecifier("LoopSectorRoots")
-	RPCSettingsID           = newSpecifier("LoopSettings")
-	RPCUnlockID             = newSpecifier("LoopUnlock")
-	RPCWriteID              = newSpecifier("LoopWrite")
+	RPCFormContractID       = types.NewSpecifier("LoopFormContract")
+	RPCLockID               = types.NewSpecifier("LoopLock")
+	RPCReadID               = types.NewSpecifier("LoopRead")
+	RPCRenewContractID      = types.NewSpecifier("LoopRenew")
+	RPCRenewClearContractID = types.NewSpecifier("LoopRenewClear")
+	RPCSectorRootsID        = types.NewSpecifier("LoopSectorRoots")
+	RPCSettingsID           = types.NewSpecifier("LoopSettings")
+	RPCUnlockID             = types.NewSpecifier("LoopUnlock")
+	RPCWriteID              = types.NewSpecifier("LoopWrite")
 )
 
 // Read/Write actions
 var (
-	RPCWriteActionAppend = newSpecifier("Append")
-	RPCWriteActionTrim   = newSpecifier("Trim")
-	RPCWriteActionSwap   = newSpecifier("Swap")
-	RPCWriteActionUpdate = newSpecifier("Update")
+	RPCWriteActionAppend = types.NewSpecifier("Append")
+	RPCWriteActionTrim   = types.NewSpecifier("Trim")
+	RPCWriteActionSwap   = types.NewSpecifier("Swap")
+	RPCWriteActionUpdate = types.NewSpecifier("Update")
 
-	RPCReadStop = newSpecifier("ReadStop")
+	RPCReadStop = types.NewSpecifier("ReadStop")
 )
 
 // RPC request/response objects
@@ -150,14 +114,14 @@ type (
 	// FormContract and RenewContract RPCs.
 	RPCFormContractRequest struct {
 		Transactions []types.Transaction
-		RenterKey    types.SiaPublicKey
+		RenterKey    types.UnlockKey
 	}
 
 	// RPCRenewAndClearContractRequest contains the request parameters for the
 	// RenewAndClearContract RPC.
 	RPCRenewAndClearContractRequest struct {
 		Transactions           []types.Transaction
-		RenterKey              types.SiaPublicKey
+		RenterKey              types.UnlockKey
 		FinalValidProofValues  []types.Currency
 		FinalMissedProofValues []types.Currency
 	}
@@ -185,13 +149,13 @@ type (
 	RPCRenewAndClearContractSignatures struct {
 		ContractSignatures     []types.TransactionSignature
 		RevisionSignature      types.TransactionSignature
-		FinalRevisionSignature Signature
+		FinalRevisionSignature types.Signature
 	}
 
 	// RPCLockRequest contains the request parameters for the Lock RPC.
 	RPCLockRequest struct {
 		ContractID types.FileContractID
-		Signature  Signature
+		Signature  types.Signature
 		Timeout    uint64
 	}
 
@@ -205,7 +169,7 @@ type (
 
 	// RPCReadRequestSection is a section requested in RPCReadRequest.
 	RPCReadRequestSection struct {
-		MerkleRoot Hash256
+		MerkleRoot types.Hash256
 		Offset     uint64
 		Length     uint64
 	}
@@ -215,17 +179,17 @@ type (
 		Sections    []RPCReadRequestSection
 		MerkleProof bool
 
-		NewRevisionNumber    uint64
-		NewValidProofValues  []types.Currency
-		NewMissedProofValues []types.Currency
-		Signature            Signature
+		RevisionNumber    uint64
+		ValidProofValues  []types.Currency
+		MissedProofValues []types.Currency
+		Signature         types.Signature
 	}
 
 	// RPCReadResponse contains the response data for the Read RPC.
 	RPCReadResponse struct {
-		Signature   Signature
+		Signature   types.Signature
 		Data        []byte
-		MerkleProof []Hash256
+		MerkleProof []types.Hash256
 	}
 
 	// RPCSectorRootsRequest contains the request parameters for the SectorRoots RPC.
@@ -233,17 +197,17 @@ type (
 		RootOffset uint64
 		NumRoots   uint64
 
-		NewRevisionNumber    uint64
-		NewValidProofValues  []types.Currency
-		NewMissedProofValues []types.Currency
-		Signature            Signature
+		RevisionNumber    uint64
+		ValidProofValues  []types.Currency
+		MissedProofValues []types.Currency
+		Signature         types.Signature
 	}
 
 	// RPCSectorRootsResponse contains the response data for the SectorRoots RPC.
 	RPCSectorRootsResponse struct {
-		Signature   Signature
-		SectorRoots []Hash256
-		MerkleProof []Hash256
+		Signature   types.Signature
+		SectorRoots []types.Hash256
+		MerkleProof []types.Hash256
 	}
 
 	// RPCSettingsResponse contains the response data for the SettingsResponse RPC.
@@ -256,15 +220,15 @@ type (
 		Actions     []RPCWriteAction
 		MerkleProof bool
 
-		NewRevisionNumber    uint64
-		NewValidProofValues  []types.Currency
-		NewMissedProofValues []types.Currency
+		RevisionNumber    uint64
+		ValidProofValues  []types.Currency
+		MissedProofValues []types.Currency
 	}
 
 	// RPCWriteAction is a generic Write action. The meaning of each field
 	// depends on the Type of the action.
 	RPCWriteAction struct {
-		Type Specifier
+		Type types.Specifier
 		A, B uint64
 		Data []byte
 	}
@@ -272,21 +236,21 @@ type (
 	// RPCWriteMerkleProof contains the optional Merkle proof for response data
 	// for the Write RPC.
 	RPCWriteMerkleProof struct {
-		OldSubtreeHashes []Hash256
-		OldLeafHashes    []Hash256
-		NewMerkleRoot    Hash256
+		OldSubtreeHashes []types.Hash256
+		OldLeafHashes    []types.Hash256
+		NewMerkleRoot    types.Hash256
 	}
 
 	// RPCWriteResponse contains the response data for the Write RPC.
 	RPCWriteResponse struct {
-		Signature Signature
+		Signature types.Signature
 	}
 )
 
 // MetricRPC contains metrics relating to a single RPC.
 type MetricRPC struct {
-	HostKey    PublicKey
-	RPC        Specifier
+	HostKey    types.PublicKey
+	RPC        types.Specifier
 	Timestamp  time.Time
 	Elapsed    time.Duration
 	Contract   types.FileContractID // possibly empty

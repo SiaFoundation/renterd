@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -31,7 +31,7 @@ func NewSeedPhrase() string {
 }
 
 // KeyFromPhrase returns the Ed25519 key derived from the supplied seed phrase.
-func KeyFromPhrase(phrase string) (consensus.PrivateKey, error) {
+func KeyFromPhrase(phrase string) (types.PrivateKey, error) {
 	entropy, err := decodeBIP39Phrase(phrase)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func KeyFromPhrase(phrase string) (consensus.PrivateKey, error) {
 	memclr(h[:])
 	binary.LittleEndian.PutUint64(buf[32:], 0)
 	seed := blake2b.Sum256(buf)
-	key := consensus.NewPrivateKeyFromSeed(seed[:])
+	key := types.NewPrivateKeyFromSeed(seed[:])
 	memclr(seed[:])
 	return key, nil
 }

@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"os"
@@ -8,17 +9,17 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
 )
 
 // EphemeralWalletStore implements wallet.SingleAddressStore in memory.
 type EphemeralWalletStore struct {
-	tip     consensus.ChainIndex
+	tip     types.ChainIndex
 	ccid    modules.ConsensusChangeID
-	addr    types.UnlockHash
+	addr    types.Address
 	scElems []wallet.SiacoinElement
 	txns    []wallet.Transaction
 	mu      sync.Mutex
@@ -63,14 +64,14 @@ func (s *EphemeralWalletStore) Transactions(since time.Time, max int) ([]wallet.
 	return txns, nil
 }
 
-func transactionIsRelevant(txn types.Transaction, addr types.UnlockHash) bool {
+func transactionIsRelevant(txn types.Transaction, addr types.Address) bool {
 	for i := range txn.SiacoinInputs {
 		if txn.SiacoinInputs[i].UnlockConditions.UnlockHash() == addr {
 			return true
 		}
 	}
 	for i := range txn.SiacoinOutputs {
-		if txn.SiacoinOutputs[i].UnlockHash == addr {
+		if txn.SiacoinOutputs[i].Address == addr {
 			return true
 		}
 	}
@@ -78,40 +79,50 @@ func transactionIsRelevant(txn types.Transaction, addr types.UnlockHash) bool {
 		if txn.SiafundInputs[i].UnlockConditions.UnlockHash() == addr {
 			return true
 		}
-		if txn.SiafundInputs[i].ClaimUnlockHash == addr {
+		if txn.SiafundInputs[i].ClaimAddress == addr {
 			return true
 		}
 	}
 	for i := range txn.SiafundOutputs {
-		if txn.SiafundOutputs[i].UnlockHash == addr {
+		if txn.SiafundOutputs[i].Address == addr {
 			return true
 		}
 	}
 	for i := range txn.FileContracts {
 		for _, sco := range txn.FileContracts[i].ValidProofOutputs {
-			if sco.UnlockHash == addr {
+			if sco.Address == addr {
 				return true
 			}
 		}
 		for _, sco := range txn.FileContracts[i].MissedProofOutputs {
-			if sco.UnlockHash == addr {
+			if sco.Address == addr {
 				return true
 			}
 		}
 	}
 	for i := range txn.FileContractRevisions {
-		for _, sco := range txn.FileContractRevisions[i].NewValidProofOutputs {
-			if sco.UnlockHash == addr {
+		for _, sco := range txn.FileContractRevisions[i].ValidProofOutputs {
+			if sco.Address == addr {
 				return true
 			}
 		}
-		for _, sco := range txn.FileContractRevisions[i].NewMissedProofOutputs {
-			if sco.UnlockHash == addr {
+		for _, sco := range txn.FileContractRevisions[i].MissedProofOutputs {
+			if sco.Address == addr {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
+	var buf bytes.Buffer
+	siad.MarshalSia(&buf)
+	d := types.NewBufDecoder(buf.Bytes())
+	core.DecodeFrom(d)
+	if d.Err() != nil {
+		panic(d.Err())
+	}
 }
 
 // ProcessConsensusChange implements modules.ConsensusSetSubscriber.
@@ -120,19 +131,21 @@ func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange
 	defer s.mu.Unlock()
 
 	for _, diff := range cc.SiacoinOutputDiffs {
-		if diff.SiacoinOutput.UnlockHash != s.addr {
+		var sco types.SiacoinOutput
+		convertToCore(diff.SiacoinOutput, &sco)
+		if sco.Address != s.addr {
 			continue
 		}
 		if diff.Direction == modules.DiffApply {
 			// add
 			s.scElems = append(s.scElems, wallet.SiacoinElement{
-				SiacoinOutput: diff.SiacoinOutput,
-				ID:            types.OutputID(diff.ID),
+				SiacoinOutput: sco,
+				ID:            types.Hash256(diff.ID),
 			})
 		} else {
 			// remove
 			for i := range s.scElems {
-				if s.scElems[i].ID == types.OutputID(diff.ID) {
+				if s.scElems[i].ID == types.Hash256(diff.ID) {
 					s.scElems[i] = s.scElems[len(s.scElems)-1]
 					s.scElems = s.scElems[:len(s.scElems)-1]
 					break
@@ -142,7 +155,9 @@ func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange
 	}
 
 	for _, block := range cc.RevertedBlocks {
-		for _, txn := range block.Transactions {
+		for _, stxn := range block.Transactions {
+			var txn types.Transaction
+			convertToCore(stxn, &txn)
 			if transactionIsRelevant(txn, s.addr) {
 				s.txns = s.txns[:len(s.txns)-1]
 			}
@@ -150,11 +165,13 @@ func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange
 	}
 
 	for _, block := range cc.AppliedBlocks {
-		for _, txn := range block.Transactions {
+		for _, stxn := range block.Transactions {
+			var txn types.Transaction
+			convertToCore(stxn, &txn)
 			if transactionIsRelevant(txn, s.addr) {
 				var inflow, outflow types.Currency
 				for _, out := range txn.SiacoinOutputs {
-					if out.UnlockHash == s.addr {
+					if out.Address == s.addr {
 						inflow = inflow.Add(out.Value)
 					}
 				}
@@ -178,12 +195,12 @@ func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange
 	}
 
 	s.tip.Height = uint64(cc.InitialHeight()) + uint64(len(cc.AppliedBlocks)) - uint64(len(cc.RevertedBlocks))
-	s.tip.ID = consensus.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID())
+	s.tip.ID = types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID())
 	s.ccid = cc.ID
 }
 
 // NewEphemeralWalletStore returns a new EphemeralWalletStore.
-func NewEphemeralWalletStore(addr types.UnlockHash) *EphemeralWalletStore {
+func NewEphemeralWalletStore(addr types.Address) *EphemeralWalletStore {
 	return &EphemeralWalletStore{
 		addr: addr,
 	}
@@ -197,7 +214,7 @@ type JSONWalletStore struct {
 }
 
 type jsonWalletPersistData struct {
-	Tip             consensus.ChainIndex
+	Tip             types.ChainIndex
 	CCID            modules.ConsensusChangeID
 	SiacoinElements []wallet.SiacoinElement
 	Transactions    []wallet.Transaction
@@ -262,7 +279,7 @@ func (s *JSONWalletStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 // NewJSONWalletStore returns a new JSONWalletStore.
-func NewJSONWalletStore(dir string, addr types.UnlockHash) (*JSONWalletStore, modules.ConsensusChangeID, error) {
+func NewJSONWalletStore(dir string, addr types.Address) (*JSONWalletStore, modules.ConsensusChangeID, error) {
 	s := &JSONWalletStore{
 		EphemeralWalletStore: NewEphemeralWalletStore(addr),
 		dir:                  dir,

@@ -5,23 +5,22 @@ import (
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
 )
 
 // Announcement represents a host announcement in a given block.
 type Announcement struct {
-	Index      consensus.ChainIndex
+	Index      types.ChainIndex
 	Timestamp  time.Time
 	NetAddress string
 }
 
 type hostAnnouncement struct {
 	modules.HostAnnouncement
-	Signature consensus.Signature
+	Signature types.Signature
 }
 
 type ScanResult struct {
@@ -32,7 +31,7 @@ type ScanResult struct {
 const InteractionTypeScan = "scan"
 
 // ForEachAnnouncement calls fn on each host announcement in a block.
-func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consensus.PublicKey, Announcement)) {
+func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, Announcement)) {
 	for _, txn := range b.Transactions {
 		for _, arb := range txn.ArbitraryData {
 			// decode announcement
@@ -43,19 +42,19 @@ func ForEachAnnouncement(b types.Block, height types.BlockHeight, fn func(consen
 				continue
 			}
 			// verify signature
-			var hostKey consensus.PublicKey
+			var hostKey types.PublicKey
 			copy(hostKey[:], ha.PublicKey.Key)
-			annHash := consensus.Hash256(crypto.HashObject(ha.HostAnnouncement))
+			annHash := types.Hash256(crypto.HashObject(ha.HostAnnouncement)) // TODO
 			if !hostKey.VerifyHash(annHash, ha.Signature) {
 				continue
 			}
 
 			fn(hostKey, Announcement{
-				Index: consensus.ChainIndex{
-					Height: uint64(height),
-					ID:     consensus.BlockID(b.ID()),
+				Index: types.ChainIndex{
+					Height: height,
+					ID:     b.ID(),
 				},
-				Timestamp:  time.Unix(int64(b.Timestamp), 0),
+				Timestamp:  b.Timestamp,
 				NetAddress: string(ha.NetAddress),
 			})
 		}
@@ -76,7 +75,7 @@ type Interactions struct {
 }
 
 type Interaction struct {
-	Host      consensus.PublicKey
+	Host      types.PublicKey
 	Result    json.RawMessage
 	Success   bool
 	Timestamp time.Time
@@ -86,17 +85,17 @@ type Interaction struct {
 // HostAddress contains the address of a specific host identified by a public
 // key.
 type HostAddress struct {
-	PublicKey  consensus.PublicKey `json:"public_key"`
-	NetAddress string              `json:"net_address"`
+	PublicKey  types.PublicKey `json:"public_key"`
+	NetAddress string          `json:"net_address"`
 }
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	KnownSince   time.Time           `json:"knownSince"`
-	PublicKey    consensus.PublicKey `json:"public_key"`
-	NetAddress   string              `json:"netAddress"`
-	Settings     *rhp.HostSettings   `json:"settings"`
-	Interactions Interactions        `json:"interactions"`
+	KnownSince   time.Time         `json:"knownSince"`
+	PublicKey    types.PublicKey   `json:"public_key"`
+	NetAddress   string            `json:"netAddress"`
+	Settings     *rhp.HostSettings `json:"settings"`
+	Interactions Interactions      `json:"interactions"`
 }
 
 // IsOnline returns whether a host is considered online.

@@ -5,10 +5,10 @@ import (
 	"math"
 	"math/big"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
 )
 
 const (
@@ -56,7 +56,7 @@ func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64
 		renew = true
 		refresh = false
 	}
-	if c.Revision.NewRevisionNumber == math.MaxUint64 {
+	if c.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, "max revision number")
 		renew = false
 		refresh = false
@@ -88,7 +88,7 @@ func isOutOfFunds(cfg api.AutopilotConfig, h Host, c api.Contract) bool {
 }
 
 func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) bool {
-	return blockHeight+cfg.Contracts.RenewWindow >= uint64(r.EndHeight())
+	return blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 }
 
 func isGouging(gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
@@ -96,7 +96,7 @@ func isGouging(gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool,
 		return false, ""
 	}
 
-	return worker.IsGouging(gs, *h.Settings, rs.Redundancy())
+	return worker.IsGouging(gs, *h.Settings, rs.MinShards, rs.TotalShards)
 }
 
 func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {

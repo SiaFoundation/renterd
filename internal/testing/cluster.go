@@ -11,18 +11,17 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/modules"
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
-	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 
@@ -40,7 +39,7 @@ var (
 	// different one is explicitly set.
 	defaultAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Allowance:   types.SiacoinPrecision.Mul64(1e3),
+			Allowance:   types.Siacoins(1).Mul64(1e3),
 			Hosts:       5,
 			Period:      50,
 			RenewWindow: 24,
@@ -60,11 +59,11 @@ var (
 	}
 
 	defaultGouging = api.GougingSettings{
-		MaxRPCPrice:      types.SiacoinPrecision,
-		MaxContractPrice: types.SiacoinPrecision,
-		MaxDownloadPrice: types.SiacoinPrecision.Mul64(2500),
-		MaxUploadPrice:   types.SiacoinPrecision.Mul64(2500),
-		MaxStoragePrice:  types.SiacoinPrecision,
+		MaxRPCPrice:      types.Siacoins(1),
+		MaxContractPrice: types.Siacoins(1),
+		MaxDownloadPrice: types.Siacoins(1).Mul64(2500),
+		MaxUploadPrice:   types.Siacoins(1).Mul64(2500),
+		MaxStoragePrice:  types.Siacoins(1),
 	}
 )
 
@@ -72,7 +71,7 @@ type TestNode struct {
 	*siatest.TestNode
 }
 
-func (n *TestNode) HostKey() (hk consensus.PublicKey) {
+func (n *TestNode) HostKey() (hk types.PublicKey) {
 	spk, err := n.HostPublicKey()
 	if err != nil {
 		panic(err)
@@ -126,7 +125,7 @@ func withCtx(f func() error) func(context.Context) error {
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	// Use shared wallet key.
-	wk := consensus.GeneratePrivateKey()
+	wk := types.GeneratePrivateKey()
 
 	// Prepare individual dirs.
 	busDir := filepath.Join(dir, "bus")
@@ -253,8 +252,8 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 		cluster.wg.Done()
 	}()
 
-	// Fund the bus by mining beyond the foundation hardfork height.
-	if err := cluster.MineBlocks(10 + int(types.FoundationHardforkHeight)); err != nil {
+	// Fund the bus.
+	if err := cluster.MineBlocks(20); err != nil {
 		return nil, err
 	}
 
@@ -427,8 +426,8 @@ func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 			return nil, err
 		}
 		scos = append(scos, types.SiacoinOutput{
-			Value:      fundAmt,
-			UnlockHash: wag.Address,
+			Value:   fundAmt,
+			Address: types.Address(wag.Address),
 		})
 	}
 	if err := c.Bus.SendSiacoins(scos); err != nil {

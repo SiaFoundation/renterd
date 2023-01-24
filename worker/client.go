@@ -8,13 +8,12 @@ import (
 	"net/http"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/siad/types"
 )
 
 // A Client provides methods for interacting with a renterd API server.
@@ -23,7 +22,7 @@ type Client struct {
 }
 
 // RHPScan scans a host, returning its current settings.
-func (c *Client) RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
+func (c *Client) RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
 	err = c.c.POST("/rhp/scan", api.RHPScanRequest{
 		HostKey: hostKey,
 		HostIP:  hostIP,
@@ -33,7 +32,7 @@ func (c *Client) RHPScan(hostKey consensus.PublicKey, hostIP string, timeout tim
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
@@ -48,7 +47,7 @@ func (c *Client) RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPRenewRequest{
 		ContractID:    fcid,
 		EndHeight:     endHeight,
@@ -63,7 +62,7 @@ func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk consen
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(contractID types.FileContractID, hostKey consensus.PublicKey, amount types.Currency) (err error) {
+func (c *Client) RHPFund(contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error) {
 	req := api.RHPFundRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
@@ -74,7 +73,7 @@ func (c *Client) RHPFund(contractID types.FileContractID, hostKey consensus.Publ
 }
 
 // RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(hostKey consensus.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
+func (c *Client) RHPReadRegistry(hostKey types.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
 	req := api.RHPRegistryReadRequest{
 		HostKey:     hostKey,
 		HostIP:      hostIP,
@@ -86,7 +85,7 @@ func (c *Client) RHPReadRegistry(hostKey consensus.PublicKey, hostIP string, key
 }
 
 // RHPUpdateRegistry updates a registry value.
-func (c *Client) RHPUpdateRegistry(hostKey consensus.PublicKey, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
+func (c *Client) RHPUpdateRegistry(hostKey types.PublicKey, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
 	req := api.RHPRegistryUpdateRequest{
 		HostKey:       hostKey,
 		RegistryKey:   key,

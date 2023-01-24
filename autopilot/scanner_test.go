@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -56,7 +56,7 @@ type mockWorker struct {
 	scanCount int
 }
 
-func (w *mockWorker) RHPScan(hostKey consensus.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
+func (w *mockWorker) RHPScan(hostKey types.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
 	if w.blockChan != nil {
 		<-w.blockChan
 	}

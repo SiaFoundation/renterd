@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,15 +13,14 @@ import (
 	"strings"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
-	"go.sia.tech/siad/types"
 	"golang.org/x/term"
 )
 
@@ -33,7 +31,7 @@ var (
 
 	// fetched once, then cached
 	apiPassword *string
-	walletKey   *consensus.PrivateKey
+	walletKey   *types.PrivateKey
 )
 
 func check(context string, err error) {
@@ -62,7 +60,7 @@ func getAPIPassword() string {
 	return *apiPassword
 }
 
-func getWalletKey() consensus.PrivateKey {
+func getWalletKey() types.PrivateKey {
 	if walletKey == nil {
 		phrase := os.Getenv("RENTERD_WALLET_SEED")
 		if phrase != "" {
@@ -90,17 +88,13 @@ func newCurrencyVar(c *types.Currency, d types.Currency) *currencyVar {
 	return (*currencyVar)(c)
 }
 
-func (c *currencyVar) Set(s string) error {
-	hastings, err := types.ParseCurrency(s)
-	if err != nil {
-		return errors.New("invalid currency format")
-	}
-	_, err = fmt.Sscan(hastings, (*types.Currency)(c))
-	return err
+func (c *currencyVar) Set(s string) (err error) {
+	*(*types.Currency)(c), err = types.ParseCurrency(s)
+	return
 }
 
 func (c *currencyVar) String() string {
-	return strings.Replace((*types.Currency)(c).HumanString(), " ", "", -1)
+	return strings.Replace((*types.Currency)(c).String(), " ", "", -1)
 }
 
 func flagCurrencyVar(c *types.Currency, name string, d types.Currency, usage string) {
@@ -136,11 +130,11 @@ func main() {
 	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
 	flag.IntVar(&busCfg.MinShards, "bus.minShards", 10, "min amount of shards needed to reconstruct the slab")
 	flag.IntVar(&busCfg.TotalShards, "bus.totalShards", 30, "total amount of shards for each slab")
-	flagCurrencyVar(&busCfg.MaxRPCPrice, "bus.maxRPCPrice", types.SiacoinPrecision, "max allowed base price for RPCs")
-	flagCurrencyVar(&busCfg.MaxContractPrice, "bus.maxContractPrice", types.SiacoinPrecision, "max allowed price to form a contract")
-	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.SiacoinPrecision.Mul64(2500), "max allowed price to download one TiB")
-	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.SiacoinPrecision.Mul64(2500), "max allowed price to upload one TiB")
-	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.SiacoinPrecision, "max allowed price to store one byte per block")
+	flagCurrencyVar(&busCfg.MaxRPCPrice, "bus.maxRPCPrice", types.Siacoins(1), "max allowed base price for RPCs")
+	flagCurrencyVar(&busCfg.MaxContractPrice, "bus.maxContractPrice", types.Siacoins(1), "max allowed price to form a contract")
+	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.Siacoins(2500), "max allowed price to download one TiB")
+	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.Siacoins(2500), "max allowed price to upload one TiB")
+	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.Siacoins(1), "max allowed price to store one byte per block")
 	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.DurationVar(&workerCfg.SessionReconnectTimeout, "worker.sessionReconnectTimeout", 10*time.Second, "the maximum of time reconnecting a session is allowed to take")

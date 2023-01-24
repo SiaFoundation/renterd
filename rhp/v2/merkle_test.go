@@ -5,30 +5,31 @@ import (
 	"math/bits"
 	"testing"
 
+	"go.sia.tech/core/types"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 )
 
-func leafHash(seg []byte) Hash256 {
+func leafHash(seg []byte) types.Hash256 {
 	return blake2b.Sum256(append([]byte{0}, seg...))
 }
 
-func nodeHash(left, right Hash256) Hash256 {
+func nodeHash(left, right types.Hash256) types.Hash256 {
 	return blake2b.Sum256(append([]byte{1}, append(left[:], right[:]...)...))
 }
 
-func refSectorRoot(sector *[SectorSize]byte) Hash256 {
-	roots := make([]Hash256, LeavesPerSector)
+func refSectorRoot(sector *[SectorSize]byte) types.Hash256 {
+	roots := make([]types.Hash256, LeavesPerSector)
 	for i := range roots {
 		roots[i] = leafHash(sector[i*LeafSize:][:LeafSize])
 	}
 	return recNodeRoot(roots)
 }
 
-func recNodeRoot(roots []Hash256) Hash256 {
+func recNodeRoot(roots []types.Hash256) types.Hash256 {
 	switch len(roots) {
 	case 0:
-		return Hash256{}
+		return types.Hash256{}
 	case 1:
 		return roots[0]
 	default:
@@ -85,15 +86,15 @@ func BenchmarkSectorRoot(b *testing.B) {
 
 func TestMetaRoot(t *testing.T) {
 	// test some known roots
-	if MetaRoot(nil) != (Hash256{}) {
+	if MetaRoot(nil) != (types.Hash256{}) {
 		t.Error("wrong Merkle root for empty tree")
 	}
-	roots := make([]Hash256, 1)
+	roots := make([]types.Hash256, 1)
 	roots[0] = frand.Entropy256()
 	if MetaRoot(roots) != roots[0] {
 		t.Error("wrong Merkle root for single root")
 	}
-	roots = make([]Hash256, 32)
+	roots = make([]types.Hash256, 32)
 	if MetaRoot(roots).String() != "h:1c23727030051d1bba1c887273addac2054afbd6926daddef6740f4f8bf1fb7f" {
 		t.Error("wrong Merkle root for 32 empty roots")
 	}
@@ -113,7 +114,7 @@ func TestMetaRoot(t *testing.T) {
 	}
 	// test some random tree sizes
 	for i := 0; i < 10; i++ {
-		roots := make([]Hash256, frand.Intn(LeavesPerSector))
+		roots := make([]types.Hash256, frand.Intn(LeavesPerSector))
 		if MetaRoot(roots) != recNodeRoot(roots) {
 			t.Error("MetaRoot does not match reference implementation")
 		}
@@ -133,7 +134,7 @@ func TestMetaRoot(t *testing.T) {
 
 	// test a massive number of roots, larger than a single stack can store
 	const sectorsPerTerabyte = 262145
-	roots = make([]Hash256, sectorsPerTerabyte)
+	roots = make([]types.Hash256, sectorsPerTerabyte)
 	if MetaRoot(roots) != recNodeRoot(roots) {
 		t.Error("MetaRoot does not match reference implementation")
 	}
@@ -141,7 +142,7 @@ func TestMetaRoot(t *testing.T) {
 
 func BenchmarkMetaRoot1TB(b *testing.B) {
 	const sectorsPerTerabyte = 262144
-	roots := make([]Hash256, sectorsPerTerabyte)
+	roots := make([]types.Hash256, sectorsPerTerabyte)
 	b.SetBytes(sectorsPerTerabyte * 32)
 	for i := 0; i < b.N; i++ {
 		_ = MetaRoot(roots)
@@ -152,11 +153,11 @@ func TestProofAccumulator(t *testing.T) {
 	var pa proofAccumulator
 
 	// test some known roots
-	if pa.root() != (Hash256{}) {
+	if pa.root() != (types.Hash256{}) {
 		t.Error("wrong root for empty accumulator")
 	}
 
-	roots := make([]Hash256, 32)
+	roots := make([]types.Hash256, 32)
 	for _, root := range roots {
 		pa.insertNode(root, 0)
 	}
@@ -191,7 +192,7 @@ func TestProofAccumulator(t *testing.T) {
 	for _, root := range roots {
 		pa.insertNode(root, 0)
 	}
-	refRoot := recNodeRoot([]Hash256{recNodeRoot(roots[:4]), roots[4]})
+	refRoot := recNodeRoot([]types.Hash256{recNodeRoot(roots[:4]), roots[4]})
 	if pa.root() != refRoot {
 		t.Error("root does not match reference implementation")
 	}

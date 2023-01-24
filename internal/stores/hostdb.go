@@ -4,16 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"strings"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -46,8 +44,8 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
-		Settings  hostSettings        `gorm:"type:bytes;serializer:gob"`
+		PublicKey types.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		Settings  hostSettings    `gorm:"type:bytes;serializer:gob"`
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -78,7 +76,7 @@ type (
 	dbInteraction struct {
 		Model
 
-		Host      consensus.PublicKey `gorm:"type:bytes;serializer:gob"`
+		Host      types.PublicKey `gorm:"type:bytes;serializer:gob"`
 		Result    json.RawMessage
 		Success   bool
 		Timestamp time.Time `gorm:"index; NOT NULL"`
@@ -92,30 +90,31 @@ type (
 
 	// hostSettings are the settings and prices used when interacting with a host.
 	// TODO: might be useful to have this be a table.
+	// TODO: is this still necessary?
 	hostSettings struct {
-		AcceptingContracts         bool             `json:"acceptingcontracts"`
-		MaxDownloadBatchSize       uint64           `json:"maxdownloadbatchsize"`
-		MaxDuration                uint64           `json:"maxduration"`
-		MaxReviseBatchSize         uint64           `json:"maxrevisebatchsize"`
-		NetAddress                 string           `json:"netaddress"`
-		RemainingStorage           uint64           `json:"remainingstorage"`
-		SectorSize                 uint64           `json:"sectorsize"`
-		TotalStorage               uint64           `json:"totalstorage"`
-		UnlockHash                 types.UnlockHash `json:"unlockhash"`
-		WindowSize                 uint64           `json:"windowsize"`
-		Collateral                 *big.Int         `json:"collateral"`
-		MaxCollateral              *big.Int         `json:"maxcollateral"`
-		BaseRPCPrice               *big.Int         `json:"baserpcprice"`
-		ContractPrice              *big.Int         `json:"contractprice"`
-		DownloadBandwidthPrice     *big.Int         `json:"downloadbandwidthprice"`
-		SectorAccessPrice          *big.Int         `json:"sectoraccessprice"`
-		StoragePrice               *big.Int         `json:"storageprice"`
-		UploadBandwidthPrice       *big.Int         `json:"uploadbandwidthprice"`
-		EphemeralAccountExpiry     time.Duration    `json:"ephemeralaccountexpiry"`
-		MaxEphemeralAccountBalance *big.Int         `json:"maxephemeralaccountbalance"`
-		RevisionNumber             uint64           `json:"revisionnumber"`
-		Version                    string           `json:"version"`
-		SiaMuxPort                 string           `json:"siamuxport"`
+		AcceptingContracts         bool           `json:"acceptingcontracts"`
+		MaxDownloadBatchSize       uint64         `json:"maxdownloadbatchsize"`
+		MaxDuration                uint64         `json:"maxduration"`
+		MaxReviseBatchSize         uint64         `json:"maxrevisebatchsize"`
+		NetAddress                 string         `json:"netaddress"`
+		RemainingStorage           uint64         `json:"remainingstorage"`
+		SectorSize                 uint64         `json:"sectorsize"`
+		TotalStorage               uint64         `json:"totalstorage"`
+		Address                    types.Address  `json:"unlockhash"`
+		WindowSize                 uint64         `json:"windowsize"`
+		Collateral                 types.Currency `json:"collateral"`
+		MaxCollateral              types.Currency `json:"maxcollateral"`
+		BaseRPCPrice               types.Currency `json:"baserpcprice"`
+		ContractPrice              types.Currency `json:"contractprice"`
+		DownloadBandwidthPrice     types.Currency `json:"downloadbandwidthprice"`
+		SectorAccessPrice          types.Currency `json:"sectoraccessprice"`
+		StoragePrice               types.Currency `json:"storageprice"`
+		UploadBandwidthPrice       types.Currency `json:"uploadbandwidthprice"`
+		EphemeralAccountExpiry     time.Duration  `json:"ephemeralaccountexpiry"`
+		MaxEphemeralAccountBalance types.Currency `json:"maxephemeralaccountbalance"`
+		RevisionNumber             uint64         `json:"revisionnumber"`
+		Version                    string         `json:"version"`
+		SiaMuxPort                 string         `json:"siamuxport"`
 	}
 
 	// dbAnnouncement is a table used for storing all announcements. It
@@ -123,7 +122,7 @@ type (
 	// automatically prune when a host is deleted.
 	dbAnnouncement struct {
 		Model
-		HostKey consensus.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		HostKey types.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
 
 		BlockHeight uint64
 		BlockID     string
@@ -132,7 +131,7 @@ type (
 
 	// announcement describes an announcement for a single host.
 	announcement struct {
-		hostKey      consensus.PublicKey
+		hostKey      types.PublicKey
 		announcement hostdb.Announcement
 	}
 )
@@ -148,18 +147,18 @@ func (s hostSettings) convert() rhp.HostSettings {
 		RemainingStorage:           s.RemainingStorage,
 		SectorSize:                 s.SectorSize,
 		TotalStorage:               s.TotalStorage,
-		UnlockHash:                 s.UnlockHash,
+		Address:                    s.Address,
 		WindowSize:                 s.WindowSize,
-		Collateral:                 types.NewCurrency(s.Collateral),
-		MaxCollateral:              types.NewCurrency(s.MaxCollateral),
-		BaseRPCPrice:               types.NewCurrency(s.BaseRPCPrice),
-		ContractPrice:              types.NewCurrency(s.ContractPrice),
-		DownloadBandwidthPrice:     types.NewCurrency(s.DownloadBandwidthPrice),
-		SectorAccessPrice:          types.NewCurrency(s.SectorAccessPrice),
-		StoragePrice:               types.NewCurrency(s.StoragePrice),
-		UploadBandwidthPrice:       types.NewCurrency(s.UploadBandwidthPrice),
+		Collateral:                 s.Collateral,
+		MaxCollateral:              s.MaxCollateral,
+		BaseRPCPrice:               s.BaseRPCPrice,
+		ContractPrice:              s.ContractPrice,
+		DownloadBandwidthPrice:     s.DownloadBandwidthPrice,
+		SectorAccessPrice:          s.SectorAccessPrice,
+		StoragePrice:               s.StoragePrice,
+		UploadBandwidthPrice:       s.UploadBandwidthPrice,
 		EphemeralAccountExpiry:     s.EphemeralAccountExpiry,
-		MaxEphemeralAccountBalance: types.NewCurrency(s.MaxEphemeralAccountBalance),
+		MaxEphemeralAccountBalance: s.MaxEphemeralAccountBalance,
 		RevisionNumber:             s.RevisionNumber,
 		Version:                    s.Version,
 		SiaMuxPort:                 s.SiaMuxPort,
@@ -176,18 +175,18 @@ func convertHostSettings(settings rhp.HostSettings) hostSettings {
 		RemainingStorage:           settings.RemainingStorage,
 		SectorSize:                 settings.SectorSize,
 		TotalStorage:               settings.TotalStorage,
-		UnlockHash:                 settings.UnlockHash,
+		Address:                    settings.Address,
 		WindowSize:                 settings.WindowSize,
-		Collateral:                 settings.Collateral.Big(),
-		MaxCollateral:              settings.MaxCollateral.Big(),
-		BaseRPCPrice:               settings.BaseRPCPrice.Big(),
-		ContractPrice:              settings.ContractPrice.Big(),
-		DownloadBandwidthPrice:     settings.DownloadBandwidthPrice.Big(),
-		SectorAccessPrice:          settings.SectorAccessPrice.Big(),
-		StoragePrice:               settings.StoragePrice.Big(),
-		UploadBandwidthPrice:       settings.UploadBandwidthPrice.Big(),
+		Collateral:                 settings.Collateral,
+		MaxCollateral:              settings.MaxCollateral,
+		BaseRPCPrice:               settings.BaseRPCPrice,
+		ContractPrice:              settings.ContractPrice,
+		DownloadBandwidthPrice:     settings.DownloadBandwidthPrice,
+		SectorAccessPrice:          settings.SectorAccessPrice,
+		StoragePrice:               settings.StoragePrice,
+		UploadBandwidthPrice:       settings.UploadBandwidthPrice,
 		EphemeralAccountExpiry:     settings.EphemeralAccountExpiry,
-		MaxEphemeralAccountBalance: settings.MaxEphemeralAccountBalance.Big(),
+		MaxEphemeralAccountBalance: settings.MaxEphemeralAccountBalance,
 		RevisionNumber:             settings.RevisionNumber,
 		Version:                    settings.Version,
 		SiaMuxPort:                 settings.SiaMuxPort,
@@ -306,7 +305,7 @@ func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
 }
 
 // Host returns information about a host.
-func (ss *SQLStore) Host(hostKey consensus.PublicKey) (hostdb.Host, error) {
+func (ss *SQLStore) Host(hostKey types.PublicKey) (hostdb.Host, error) {
 	var h dbHost
 
 	tx := ss.db.
@@ -326,7 +325,7 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 	}
 
 	var hosts []struct {
-		PublicKey  consensus.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		PublicKey  types.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
 		NetAddress string
 	}
 	var hostAddresses []hostdb.HostAddress
@@ -380,7 +379,7 @@ func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	return hosts, err
 }
 
-func hostByPubKey(tx *gorm.DB, hostKey consensus.PublicKey) (dbHost, error) {
+func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 	var h dbHost
 	err := tx.Where("public_key", gobEncode(hostKey)).
 		Take(&h).Error
@@ -408,7 +407,7 @@ func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
 // the store, a new entry is created for it.
 func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error {
 	// Get keys from input.
-	keyMap := make(map[consensus.PublicKey]struct{})
+	keyMap := make(map[types.PublicKey]struct{})
 	var hks [][]byte
 	for _, interaction := range interactions {
 		if _, exists := keyMap[interaction.Host]; !exists {
@@ -426,7 +425,7 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 		Find(&hosts).Error; err != nil {
 		return err
 	}
-	hostMap := make(map[consensus.PublicKey]dbHost)
+	hostMap := make(map[types.PublicKey]dbHost)
 	for _, h := range hosts {
 		hostMap[h.PublicKey] = h
 	}
@@ -507,15 +506,17 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 
 // ProcessConsensusChange implements consensus.Subscriber.
 func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	height := cc.InitialHeight()
+	height := uint64(cc.InitialHeight())
 	for range cc.RevertedBlocks {
 		height--
 	}
 
 	// Fetch announcements and add them to the queue.
 	var newAnnouncements []announcement
-	for _, b := range cc.AppliedBlocks {
-		hostdb.ForEachAnnouncement(b, height, func(hostKey consensus.PublicKey, ha hostdb.Announcement) {
+	for _, sb := range cc.AppliedBlocks {
+		var b types.Block
+		convertToCore(sb, &b)
+		hostdb.ForEachAnnouncement(b, height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
 			newAnnouncements = append(newAnnouncements, announcement{
 				hostKey:      hostKey,
 				announcement: ha,

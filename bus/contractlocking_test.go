@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/siad/types"
+	"go.sia.tech/core/types"
 )
 
 // TestContractAcquire is a unit test for contractLocks.Acquire.
