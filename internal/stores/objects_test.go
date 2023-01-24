@@ -3,13 +3,11 @@ package stores
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"reflect"
 	"testing"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/siad/types"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
@@ -40,7 +38,7 @@ func TestSQLObjectStore(t *testing.T) {
 	startHeight2, totalCost2 := contracts[1].StartHeight, contracts[1].TotalCost
 
 	// Define usedHosts.
-	usedHosts := map[consensus.PublicKey]types.FileContractID{
+	usedHosts := map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}
@@ -56,7 +54,7 @@ func TestSQLObjectStore(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{1},
+							Root: types.Hash256{1},
 						},
 					},
 				},
@@ -70,7 +68,7 @@ func TestSQLObjectStore(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk2,
-							Root: consensus.Hash256{2},
+							Root: types.Hash256{2},
 						},
 					},
 				},
@@ -149,10 +147,10 @@ func TestSQLObjectStore(t *testing.T) {
 										},
 										FCID:                fcid1,
 										StartHeight:         startHeight1,
-										TotalCost:           totalCost1.Big(),
-										UploadSpending:      big.NewInt(0),
-										DownloadSpending:    big.NewInt(0),
-										FundAccountSpending: big.NewInt(0),
+										TotalCost:           totalCost1,
+										UploadSpending:      types.ZeroCurrency,
+										DownloadSpending:    types.ZeroCurrency,
+										FundAccountSpending: types.ZeroCurrency,
 									},
 								},
 							},
@@ -184,10 +182,10 @@ func TestSQLObjectStore(t *testing.T) {
 										},
 										FCID:                fcid2,
 										StartHeight:         startHeight2,
-										TotalCost:           totalCost2.Big(),
-										UploadSpending:      big.NewInt(0),
-										DownloadSpending:    big.NewInt(0),
-										FundAccountSpending: big.NewInt(0),
+										TotalCost:           totalCost2,
+										UploadSpending:      types.ZeroCurrency,
+										DownloadSpending:    types.ZeroCurrency,
+										FundAccountSpending: types.ZeroCurrency,
 									},
 								},
 							},
@@ -352,15 +350,15 @@ func TestSlabsForMigration(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{1},
+							Root: types.Hash256{1},
 						},
 						{
 							Host: hk2,
-							Root: consensus.Hash256{2},
+							Root: types.Hash256{2},
 						},
 						{
 							Host: hk3,
-							Root: consensus.Hash256{3},
+							Root: types.Hash256{3},
 						},
 					},
 				},
@@ -373,15 +371,15 @@ func TestSlabsForMigration(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{4},
+							Root: types.Hash256{4},
 						},
 						{
 							Host: hk2,
-							Root: consensus.Hash256{5},
+							Root: types.Hash256{5},
 						},
 						{
 							Host: hk4,
-							Root: consensus.Hash256{6},
+							Root: types.Hash256{6},
 						},
 					},
 				},
@@ -394,15 +392,15 @@ func TestSlabsForMigration(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{7},
+							Root: types.Hash256{7},
 						},
 						{
 							Host: hk4,
-							Root: consensus.Hash256{8},
+							Root: types.Hash256{8},
 						},
 						{
 							Host: hk4,
-							Root: consensus.Hash256{9},
+							Root: types.Hash256{9},
 						},
 					},
 				},
@@ -415,15 +413,15 @@ func TestSlabsForMigration(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{10},
+							Root: types.Hash256{10},
 						},
 						{
 							Host: hk2,
-							Root: consensus.Hash256{11},
+							Root: types.Hash256{11},
 						},
 						{
-							Host: consensus.PublicKey{5},
-							Root: consensus.Hash256{12},
+							Host: types.PublicKey{5},
+							Root: types.Hash256{12},
 						},
 					},
 				},
@@ -436,15 +434,15 @@ func TestSlabsForMigration(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{13},
+							Root: types.Hash256{13},
 						},
 						{
 							Host: hk1,
-							Root: consensus.Hash256{14},
+							Root: types.Hash256{14},
 						},
 						{
 							Host: hk1,
-							Root: consensus.Hash256{15},
+							Root: types.Hash256{15},
 						},
 					},
 				},
@@ -452,7 +450,7 @@ func TestSlabsForMigration(t *testing.T) {
 		},
 	}
 
-	if err := db.Put("foo", obj, map[consensus.PublicKey]types.FileContractID{
+	if err := db.Put("foo", obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -491,7 +489,7 @@ func TestContractSectors(t *testing.T) {
 
 	// Create a host, contract and sector to upload to that host into the
 	// given contract.
-	hk1 := consensus.PublicKey{1}
+	hk1 := types.PublicKey{1}
 	fcid1 := types.FileContractID{1}
 	err = db.addTestHost(hk1)
 	if err != nil {
@@ -503,11 +501,11 @@ func TestContractSectors(t *testing.T) {
 	}
 	sectorGood := object.Sector{
 		Host: hk1,
-		Root: consensus.Hash256{1},
+		Root: types.Hash256{1},
 	}
 
 	// Prepare used contracts.
-	usedContracts := map[consensus.PublicKey]types.FileContractID{
+	usedContracts := map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 	}
 
@@ -605,18 +603,18 @@ func TestPutSlab(t *testing.T) {
 					Shards: []object.Sector{
 						{
 							Host: hk1,
-							Root: consensus.Hash256{1},
+							Root: types.Hash256{1},
 						},
 						{
 							Host: hk2,
-							Root: consensus.Hash256{2},
+							Root: types.Hash256{2},
 						},
 					},
 				},
 			},
 		},
 	}
-	if err := db.Put("foo", obj, map[consensus.PublicKey]types.FileContractID{
+	if err := db.Put("foo", obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -653,7 +651,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// helper to extract the hostkey from a list of hosts
-	hostKeys := func(hosts []dbHost) (ids []consensus.PublicKey) {
+	hostKeys := func(hosts []dbHost) (ids []types.PublicKey) {
 		for _, h := range hosts {
 			ids = append(ids, h.PublicKey)
 		}
@@ -688,11 +686,11 @@ func TestPutSlab(t *testing.T) {
 	slab := toMigrate[0]
 	slab.Shards[1] = object.Sector{
 		Host: hk3,
-		Root: consensus.Hash256{2},
+		Root: types.Hash256{2},
 	}
 
 	// update the slab to reflect the migration
-	err = db.PutSlab(slab, map[consensus.PublicKey]types.FileContractID{
+	err = db.PutSlab(slab, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk3: fcid3,
 	})
@@ -751,9 +749,9 @@ func TestPutSlab(t *testing.T) {
 	}
 }
 
-func newTestObject(slabs int) (object.Object, map[consensus.PublicKey]types.FileContractID) {
+func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileContractID) {
 	obj := object.Object{}
-	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
 
 	obj.Slabs = make([]object.SlabSlice, slabs)
 	obj.Key = object.GenerateEncryptionKey()

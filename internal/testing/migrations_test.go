@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -48,21 +48,21 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	usedHosts := func() []consensus.PublicKey {
+	usedHosts := func() []types.PublicKey {
 		t.Helper()
 		obj, _, err := b.Object("/foo")
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		hostmap := make(map[consensus.PublicKey]struct{})
+		hostmap := make(map[types.PublicKey]struct{})
 		for _, slab := range obj.Slabs {
 			for _, sector := range slab.Shards {
 				hostmap[sector.Host] = struct{}{}
 			}
 		}
 
-		hks := make([]consensus.PublicKey, 0, len(hostmap))
+		hks := make([]types.PublicKey, 0, len(hostmap))
 		for hk := range hostmap {
 			hks = append(hks, hk)
 		}
@@ -70,7 +70,7 @@ func TestMigrations(t *testing.T) {
 		return hks
 	}
 
-	isUsed := func(hk consensus.PublicKey, usedHosts []consensus.PublicKey) bool {
+	isUsed := func(hk types.PublicKey, usedHosts []types.PublicKey) bool {
 		t.Helper()
 		for _, h := range usedHosts {
 			if h == hk {
@@ -80,7 +80,7 @@ func TestMigrations(t *testing.T) {
 		return false
 	}
 
-	removeUsedHost := func() (hk consensus.PublicKey) {
+	removeUsedHost := func() (hk types.PublicKey) {
 		t.Helper()
 		hks := usedHosts()
 		for _, h := range hosts {

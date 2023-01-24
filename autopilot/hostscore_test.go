@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"lukechampine.com/frand"
 )
@@ -47,7 +47,7 @@ func newTestHosts(n int) []hostdb.Host {
 	return hosts
 }
 
-func newTestHost(hk consensus.PublicKey, settings *rhpv2.HostSettings) hostdb.Host {
+func newTestHost(hk types.PublicKey, settings *rhpv2.HostSettings) hostdb.Host {
 	return hostdb.Host{
 		NetAddress: randomIP().String(),
 		KnownSince: time.Now(),
@@ -81,8 +81,8 @@ func randomIP() net.IP {
 	return net.IP(rawIP)
 }
 
-func randomHostKey() consensus.PublicKey {
-	var hk consensus.PublicKey
+func randomHostKey() types.PublicKey {
+	var hk types.PublicKey
 	frand.Read(hk[:])
 	return hk
 }

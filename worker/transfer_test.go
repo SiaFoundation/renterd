@@ -9,34 +9,33 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
 type mockHost struct {
 	contractID types.FileContractID
-	publicKey  consensus.PublicKey
-	sectors    map[consensus.Hash256][]byte
+	publicKey  types.PublicKey
+	sectors    map[types.Hash256][]byte
 }
 
 func (h *mockHost) Contract() types.FileContractID {
 	return h.contractID
 }
 
-func (h *mockHost) PublicKey() consensus.PublicKey {
+func (h *mockHost) PublicKey() types.PublicKey {
 	return h.publicKey
 }
 
-func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error) {
+func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
 	root := rhpv2.SectorRoot(sector)
 	h.sectors[root] = append([]byte(nil), sector[:]...)
 	return root, nil
 }
 
-func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error {
+func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")
@@ -47,7 +46,7 @@ func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root consensus
 	return err
 }
 
-func (h *mockHost) DeleteSectors(_ context.Context, roots []consensus.Hash256) error {
+func (h *mockHost) DeleteSectors(_ context.Context, roots []types.Hash256) error {
 	for _, root := range roots {
 		delete(h.sectors, root)
 	}
@@ -59,8 +58,8 @@ func newMockHost() *mockHost {
 	frand.Read(contractID[:])
 	return &mockHost{
 		contractID: contractID,
-		publicKey:  consensus.GeneratePrivateKey().PublicKey(),
-		sectors:    make(map[consensus.Hash256][]byte),
+		publicKey:  types.GeneratePrivateKey().PublicKey(),
+		sectors:    make(map[types.Hash256][]byte),
 	}
 }
 

@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"sync"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
+	stypes "go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
@@ -29,11 +30,11 @@ type (
 		consensus Consensus
 
 		mu             sync.Mutex
-		height         types.BlockHeight
-		target         types.Target
-		currentBlockID types.BlockID
-		txnsets        map[modules.TransactionSetID][]types.TransactionID
-		transactions   []types.Transaction
+		height         stypes.BlockHeight
+		target         stypes.Target
+		currentBlockID stypes.BlockID
+		txnsets        map[modules.TransactionSetID][]stypes.TransactionID
+		transactions   []stypes.Transaction
 	}
 )
 
@@ -53,7 +54,7 @@ func (m *Miner) ReceiveUpdatedUnconfirmedTransactions(diff *modules.TransactionP
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	reverted := make(map[types.TransactionID]bool)
+	reverted := make(map[stypes.TransactionID]bool)
 	for _, setID := range diff.RevertedTransactions {
 		for _, txnID := range m.txnsets[setID] {
 			reverted[txnID] = true
@@ -76,19 +77,19 @@ func (m *Miner) ReceiveUpdatedUnconfirmedTransactions(diff *modules.TransactionP
 }
 
 // mineBlock attempts to mine a block and add it to the consensus set.
-func (m *Miner) mineBlock(addr types.UnlockHash) error {
+func (m *Miner) mineBlock(addr stypes.UnlockHash) error {
 	m.mu.Lock()
-	block := types.Block{
+	block := stypes.Block{
 		ParentID:  m.currentBlockID,
-		Timestamp: types.CurrentTimestamp(),
+		Timestamp: stypes.CurrentTimestamp(),
 	}
 
-	randBytes := frand.Bytes(types.SpecifierLen)
-	randTxn := types.Transaction{
+	randBytes := frand.Bytes(stypes.SpecifierLen)
+	randTxn := stypes.Transaction{
 		ArbitraryData: [][]byte{append(modules.PrefixNonSia[:], randBytes...)},
 	}
-	block.Transactions = append([]types.Transaction{randTxn}, m.transactions...)
-	block.MinerPayouts = append(block.MinerPayouts, types.SiacoinOutput{
+	block.Transactions = append([]stypes.Transaction{randTxn}, m.transactions...)
+	block.MinerPayouts = append(block.MinerPayouts, stypes.SiacoinOutput{
 		Value:      block.CalculateSubsidy(m.height + 1),
 		UnlockHash: addr,
 	})
@@ -106,30 +107,32 @@ func (m *Miner) mineBlock(addr types.UnlockHash) error {
 	for i := 0; i < solveAttempts; i++ {
 		id := crypto.HashBytes(header)
 		if bytes.Compare(target[:], id[:]) >= 0 {
-			block.Nonce = *(*types.BlockNonce)(header[32:40])
+			block.Nonce = *(*stypes.BlockNonce)(header[32:40])
 			solved = true
 			break
 		}
 		binary.LittleEndian.PutUint64(header[32:], nonce)
-		nonce += types.ASICHardforkFactor
+		nonce += stypes.ASICHardforkFactor
 	}
 	if !solved {
 		return errFailedToSolve
 	}
 
-	if err := m.consensus.AcceptBlock(block); err != nil {
+	var b types.Block
+	convertToCore(&block, &b)
+	if err := m.consensus.AcceptBlock(b); err != nil {
 		return fmt.Errorf("failed to get block accepted: %w", err)
 	}
 	return nil
 }
 
 // Mine mines n blocks, sending the reward to addr
-func (m *Miner) Mine(addr types.UnlockHash, n int) error {
+func (m *Miner) Mine(addr types.Address, n int) error {
 	var err error
 	for mined := 1; mined <= n; {
 		// return the error only if the miner failed to solve the block,
 		// ignore any consensus related errors
-		if err = m.mineBlock(addr); errors.Is(err, errFailedToSolve) {
+		if err = m.mineBlock(stypes.UnlockHash(addr)); errors.Is(err, errFailedToSolve) {
 			return fmt.Errorf("failed to mine block %v: %w", mined, errFailedToSolve)
 		}
 		mined++
@@ -141,6 +144,6 @@ func (m *Miner) Mine(addr types.UnlockHash, n int) error {
 func NewMiner(consensus Consensus) *Miner {
 	return &Miner{
 		consensus: consensus,
-		txnsets:   make(map[modules.TransactionSetID][]types.TransactionID),
+		txnsets:   make(map[modules.TransactionSetID][]stypes.TransactionID),
 	}
 }

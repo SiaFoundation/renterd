@@ -3,8 +3,7 @@ package api
 import (
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/siad/types"
+	"go.sia.tech/core/types"
 )
 
 type (
@@ -29,8 +28,8 @@ type (
 
 	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
-		IgnoreRedundantIPs bool                            `json:"ignoreRedundantIPs"`
-		ScoreOverrides     map[consensus.PublicKey]float64 `json:"scoreOverrides"`
+		IgnoreRedundantIPs bool                        `json:"ignoreRedundantIPs"`
+		ScoreOverrides     map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 
 	// ContractsConfig contains all contracts configuration parameters.
@@ -54,8 +53,8 @@ type (
 // DefaultAutopilotConfig returns a configuration with sane default values.
 func DefaultAutopilotConfig() (c AutopilotConfig) {
 	c.Wallet.DefragThreshold = 1000
-	c.Hosts.ScoreOverrides = make(map[consensus.PublicKey]float64)
-	c.Contracts.Allowance = types.SiacoinPrecision.Mul64(1000)
+	c.Hosts.ScoreOverrides = make(map[types.PublicKey]float64)
+	c.Contracts.Allowance = types.Siacoins(1000)
 	c.Contracts.Hosts = 50
 	c.Contracts.Period = 144 * 7 * 6      // 6 weeks
 	c.Contracts.RenewWindow = 144 * 7 * 2 // 2 weeks

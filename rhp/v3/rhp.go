@@ -2,35 +2,20 @@
 package rhp
 
 import (
-	"bytes"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
+	stypes "go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
-// exported types from internal/consensus
-type (
-	// A Hash256 is a generic 256-bit cryptographic hash.
-	Hash256 = consensus.Hash256
-	// A PublicKey is an Ed25519 public key.
-	PublicKey = consensus.PublicKey
-	// A PrivateKey is an Ed25519 private key.
-	PrivateKey = consensus.PrivateKey
-	// A Signature is an Ed25519 signature.
-	Signature = consensus.Signature
-)
-
-const (
-	// Atomic write size for modern disks is 4kib so we round up.
-	atomicWriteSize = uint64(1 << 12)
-)
-
 // An Account is a public key used to identify an ephemeral account on a host.
-type Account PublicKey
+type Account types.PublicKey
+
+// ZeroAccount is a sentinel value that indicates the lack of an account.
+var ZeroAccount Account
 
 // A PaymentMethod is a way of paying for an arbitrary host operation.
 type PaymentMethod interface {
@@ -42,7 +27,7 @@ func (PayByEphemeralAccountRequest) isPaymentMethod() {}
 func (PayByContractRequest) isPaymentMethod()         {}
 
 // PayByEphemeralAccount creates a PayByEphemeralAccountRequest.
-func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64, sk PrivateKey) PayByEphemeralAccountRequest {
+func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64, sk types.PrivateKey) PayByEphemeralAccountRequest {
 	p := PayByEphemeralAccountRequest{
 		Account:  account,
 		Expiry:   expiry,
@@ -50,46 +35,42 @@ func PayByEphemeralAccount(account Account, amount types.Currency, expiry uint64
 		Priority: 0, // TODO ???
 	}
 	frand.Read(p.Nonce[:])
-	p.Signature = sk.SignHash(Hash256(crypto.HashAll(p.Account, p.Expiry, p.Account, p.Nonce)))
+	p.Signature = sk.SignHash(types.Hash256(crypto.HashAll(p.Account, p.Expiry, p.Account, p.Nonce)))
 	return p
 }
 
 // PayByContract creates a PayByContractRequest by revising the supplied
 // contract.
-func PayByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct Account, sk PrivateKey) (PayByContractRequest, bool) {
+func PayByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct Account, sk types.PrivateKey) (PayByContractRequest, bool) {
 	if rev.ValidRenterPayout().Cmp(amount) < 0 || rev.MissedRenterPayout().Cmp(amount) < 0 {
 		return PayByContractRequest{}, false
 	}
-	rev.NewValidProofOutputs[0].Value = rev.NewValidProofOutputs[0].Value.Sub(amount)
-	rev.NewValidProofOutputs[1].Value = rev.NewValidProofOutputs[1].Value.Add(amount)
-	rev.NewMissedProofOutputs[0].Value = rev.NewMissedProofOutputs[0].Value.Sub(amount)
-	rev.NewMissedProofOutputs[1].Value = rev.NewMissedProofOutputs[1].Value.Add(amount)
-	rev.NewRevisionNumber++
+	rev.ValidProofOutputs[0].Value = rev.ValidProofOutputs[0].Value.Sub(amount)
+	rev.ValidProofOutputs[1].Value = rev.ValidProofOutputs[1].Value.Add(amount)
+	rev.MissedProofOutputs[0].Value = rev.MissedProofOutputs[0].Value.Sub(amount)
+	rev.MissedProofOutputs[1].Value = rev.MissedProofOutputs[1].Value.Add(amount)
+	rev.RevisionNumber++
 
-	newValid := make([]types.Currency, len(rev.NewValidProofOutputs))
-	for i, o := range rev.NewValidProofOutputs {
+	newValid := make([]types.Currency, len(rev.ValidProofOutputs))
+	for i, o := range rev.ValidProofOutputs {
 		newValid[i] = o.Value
 	}
-	newMissed := make([]types.Currency, len(rev.NewMissedProofOutputs))
-	for i, o := range rev.NewMissedProofOutputs {
+	newMissed := make([]types.Currency, len(rev.MissedProofOutputs))
+	for i, o := range rev.MissedProofOutputs {
 		newMissed[i] = o.Value
 	}
 	p := PayByContractRequest{
-		ContractID:           rev.ParentID,
-		NewRevisionNumber:    rev.NewRevisionNumber,
-		NewValidProofValues:  newValid,
-		NewMissedProofValues: newMissed,
-		RefundAccount:        refundAcct,
+		ContractID:        rev.ParentID,
+		RevisionNumber:    rev.RevisionNumber,
+		ValidProofValues:  newValid,
+		MissedProofValues: newMissed,
+		RefundAccount:     refundAcct,
 	}
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{*rev},
-		TransactionSignatures: []types.TransactionSignature{{
-			ParentID:       crypto.Hash(rev.ParentID),
-			PublicKeyIndex: 0,
-			CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
-		}},
 	}
-	p.Signature = sk.SignHash(Hash256(txn.SigHash(0, rev.NewWindowEnd)))
+	cs := consensus.State{Index: types.ChainIndex{Height: rev.WindowEnd}}
+	p.Signature = sk.SignHash(cs.PartialSigHash(txn, types.CoveredFields{FileContractRevisions: []uint64{0}}))
 	return p, true
 }
 
@@ -140,14 +121,16 @@ const registryEntrySize = 256
 // instruction on the MDM.
 func (pt *HostPriceTable) UpdateRegistryCost() (writeCost, storeCost types.Currency) {
 	// Cost is the same as uploading and storing a registry entry for 5 years.
+	// TODO: remove dependency on stypes
 	writeCost = pt.writeCost(registryEntrySize)
-	storeCost = pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * types.BlocksPerYear))
+	storeCost = pt.WriteStoreCost.Mul64(registryEntrySize).Mul64(uint64(5 * stypes.BlocksPerYear))
 	return writeCost.Add(storeCost), storeCost
 }
 
 // writeCost is the cost of executing a 'Write' instruction of a certain length
 // on the MDM.
 func (pt *HostPriceTable) writeCost(writeLength uint64) types.Currency {
+	const atomicWriteSize = 1 << 12
 	if mod := writeLength % atomicWriteSize; mod != 0 {
 		writeLength += (atomicWriteSize - mod)
 	}
@@ -162,56 +145,40 @@ type (
 		Expiry    uint64
 		Amount    types.Currency
 		Nonce     [8]byte
-		Signature Signature
+		Signature types.Signature
 		Priority  int64
 	}
 
 	// PayByContractRequest represents a payment made using a contract revision.
 	PayByContractRequest struct {
-		ContractID           types.FileContractID
-		NewRevisionNumber    uint64
-		NewValidProofValues  []types.Currency
-		NewMissedProofValues []types.Currency
-		RefundAccount        Account
-		Signature            Signature
-		HostSignature        Signature
+		ContractID        types.FileContractID
+		RevisionNumber    uint64
+		ValidProofValues  []types.Currency
+		MissedProofValues []types.Currency
+		RefundAccount     Account
+		Signature         types.Signature
+		HostSignature     types.Signature
 	}
 )
 
-// A Specifier is a generic identification tag.
-type Specifier [16]byte
-
-func (s Specifier) String() string {
-	return string(bytes.Trim(s[:], "\x00"))
-}
-
-func newSpecifier(str string) Specifier {
-	if len(str) > 16 {
-		panic("specifier is too long")
-	}
-	var s Specifier
-	copy(s[:], str)
-	return s
-}
-
 // RPC IDs
 var (
-	rpcAccountBalanceID   = newSpecifier("AccountBalance")
-	rpcExecuteProgramID   = newSpecifier("ExecuteProgram")
-	rpcUpdatePriceTableID = newSpecifier("UpdatePriceTable")
-	rpcFundAccountID      = newSpecifier("FundAccount")
-	// rpcLatestRevisionID       = newSpecifier("LatestRevision")
-	// rpcRegistrySubscriptionID = newSpecifier("Subscription")
-	// rpcRenewContractID        = newSpecifier("RenewContract")
+	rpcAccountBalanceID   = types.NewSpecifier("AccountBalance")
+	rpcExecuteProgramID   = types.NewSpecifier("ExecuteProgram")
+	rpcUpdatePriceTableID = types.NewSpecifier("UpdatePriceTable")
+	rpcFundAccountID      = types.NewSpecifier("FundAccount")
+	// rpcLatestRevisionID       = types.NewSpecifier("LatestRevision")
+	// rpcRegistrySubscriptionID = types.NewSpecifier("Subscription")
+	// rpcRenewContractID        = types.NewSpecifier("RenewContract")
 
-	paymentTypeContract         = newSpecifier("PayByContract")
-	paymentTypeEphemeralAccount = newSpecifier("PayByEphemAcc")
+	paymentTypeContract         = types.NewSpecifier("PayByContract")
+	paymentTypeEphemeralAccount = types.NewSpecifier("PayByEphemAcc")
 )
 
 // RPC request/response objects
 type (
 	paymentResponse struct {
-		Signature Signature
+		Signature types.Signature
 	}
 
 	rpcUpdatePriceTableResponse struct {
@@ -227,16 +194,16 @@ type (
 	rpcFundAccountResponse struct {
 		Balance types.Currency
 		Receipt struct {
-			Host      types.SiaPublicKey
-			Account   modules.AccountID
+			Host      types.UnlockKey
+			Account   Account
 			Amount    types.Currency
-			Timestamp int64
+			Timestamp time.Time
 		}
-		Signature Signature
+		Signature types.Signature
 	}
 
 	instruction struct {
-		Specifier Specifier
+		Specifier types.Specifier
 		Args      []byte
 	}
 
@@ -249,9 +216,9 @@ type (
 	rpcExecuteProgramResponse struct {
 		AdditionalCollateral types.Currency
 		OutputLength         uint64
-		NewMerkleRoot        Hash256
+		NewMerkleRoot        types.Hash256
 		NewSize              uint64
-		Proof                []Hash256
+		Proof                []types.Hash256
 		Error                error
 		TotalCost            types.Currency
 		FailureRefund        types.Currency

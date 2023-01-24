@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"errors"
-	"fmt"
-	"math/big"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -35,10 +32,10 @@ type (
 		Host                dbHost
 		RenewedFrom         types.FileContractID `gorm:"index;type:bytes;serializer:gob"`
 		StartHeight         uint64               `gorm:"index;NOT NULL"`
-		TotalCost           *big.Int             `gorm:"type:bytes;serializer:gob"`
-		UploadSpending      *big.Int             `gorm:"type:bytes;serializer:gob"`
-		DownloadSpending    *big.Int             `gorm:"type:bytes;serializer:gob"`
-		FundAccountSpending *big.Int             `gorm:"type:bytes;serializer:gob"`
+		TotalCost           types.Currency       `gorm:"type:bytes;serializer:gob"`
+		UploadSpending      types.Currency       `gorm:"type:bytes;serializer:gob"`
+		DownloadSpending    types.Currency       `gorm:"type:bytes;serializer:gob"`
+		FundAccountSpending types.Currency       `gorm:"type:bytes;serializer:gob"`
 	}
 
 	dbContractSet struct {
@@ -56,13 +53,13 @@ type (
 	dbArchivedContract struct {
 		Model
 		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
-		Host                consensus.PublicKey  `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
+		Host                types.PublicKey      `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		RenewedTo           types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob"`
 		Reason              string
-		UploadSpending      *big.Int `gorm:"type:bytes;serializer:gob"`
-		DownloadSpending    *big.Int `gorm:"type:bytes;serializer:gob"`
-		FundAccountSpending *big.Int `gorm:"type:bytes;serializer:gob"`
-		StartHeight         uint64   `gorm:"index;NOT NULL"`
+		UploadSpending      types.Currency `gorm:"type:bytes;serializer:gob"`
+		DownloadSpending    types.Currency `gorm:"type:bytes;serializer:gob"`
+		FundAccountSpending types.Currency `gorm:"type:bytes;serializer:gob"`
+		StartHeight         uint64         `gorm:"index;NOT NULL"`
 	}
 
 	dbContractSector struct {
@@ -91,11 +88,11 @@ func (c dbContract) convert() api.ContractMetadata {
 		HostKey:     c.Host.PublicKey,
 		StartHeight: c.StartHeight,
 		RenewedFrom: c.RenewedFrom,
-		TotalCost:   types.NewCurrency(c.TotalCost),
+		TotalCost:   c.TotalCost,
 		Spending: api.ContractSpending{
-			Uploads:     types.NewCurrency(c.UploadSpending),
-			Downloads:   types.NewCurrency(c.DownloadSpending),
-			FundAccount: types.NewCurrency(c.FundAccountSpending),
+			Uploads:     c.UploadSpending,
+			Downloads:   c.DownloadSpending,
+			FundAccount: c.FundAccountSpending,
 		},
 	}
 }
@@ -108,9 +105,9 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 		RenewedTo: c.RenewedTo,
 
 		Spending: api.ContractSpending{
-			Uploads:     types.NewCurrency(c.UploadSpending),
-			Downloads:   types.NewCurrency(c.DownloadSpending),
-			FundAccount: types.NewCurrency(c.FundAccountSpending),
+			Uploads:     c.UploadSpending,
+			Downloads:   c.DownloadSpending,
+			FundAccount: c.FundAccountSpending,
 		},
 	}
 }
@@ -148,12 +145,12 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		HostID:      host.ID,
 		RenewedFrom: renewedFrom,
 		StartHeight: startHeight,
-		TotalCost:   totalCost.Big(),
+		TotalCost:   totalCost,
 
 		// Spending starts at 0.
-		UploadSpending:      big.NewInt(0),
-		DownloadSpending:    big.NewInt(0),
-		FundAccountSpending: big.NewInt(0),
+		UploadSpending:      types.ZeroCurrency,
+		DownloadSpending:    types.ZeroCurrency,
+		FundAccountSpending: types.ZeroCurrency,
 	}
 
 	// Insert contract.
@@ -198,7 +195,6 @@ func (s *SQLStore) ActiveContracts() ([]api.ContractMetadata, error) {
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
 func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
-	fmt.Println("renew contract for host", c.HostKey().String())
 	var renewed dbContract
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {

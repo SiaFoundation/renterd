@@ -3,11 +3,9 @@ package api
 import (
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/rhp/v3"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/siad/types"
 )
 
 // ContractsResponse is the response type for the /rhp/contracts/active endpoint.
@@ -18,9 +16,9 @@ type ContractsResponse struct {
 
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
-	HostKey consensus.PublicKey `json:"hostKey"`
-	HostIP  string              `json:"hostIP"`
-	Timeout time.Duration       `json:"timeout"`
+	HostKey types.PublicKey `json:"hostKey"`
+	HostIP  string          `json:"hostIP"`
+	Timeout time.Duration   `json:"timeout"`
 }
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
@@ -32,12 +30,12 @@ type RHPScanResponse struct {
 
 // RHPFormRequest is the request type for the /rhp/form endpoint.
 type RHPFormRequest struct {
-	EndHeight      uint64              `json:"endHeight"`
-	HostCollateral types.Currency      `json:"hostCollateral"`
-	HostKey        consensus.PublicKey `json:"hostKey"`
-	HostIP         string              `json:"hostIP"`
-	RenterFunds    types.Currency      `json:"renterFunds"`
-	RenterAddress  types.UnlockHash    `json:"renterAddress"`
+	EndHeight      uint64          `json:"endHeight"`
+	HostCollateral types.Currency  `json:"hostCollateral"`
+	HostKey        types.PublicKey `json:"hostKey"`
+	HostIP         string          `json:"hostIP"`
+	RenterFunds    types.Currency  `json:"renterFunds"`
+	RenterAddress  types.Address   `json:"renterAddress"`
 }
 
 // RHPFormResponse is the response type for the /rhp/form endpoint.
@@ -51,9 +49,9 @@ type RHPFormResponse struct {
 type RHPRenewRequest struct {
 	ContractID    types.FileContractID `json:"contractID"`
 	EndHeight     uint64               `json:"endHeight"`
-	HostKey       consensus.PublicKey  `json:"hostKey"`
+	HostKey       types.PublicKey      `json:"hostKey"`
 	HostIP        string               `json:"hostIP"`
-	RenterAddress types.UnlockHash     `json:"renterAddress"`
+	RenterAddress types.Address        `json:"renterAddress"`
 	RenterFunds   types.Currency       `json:"renterFunds"`
 }
 
@@ -68,23 +66,23 @@ type RHPRenewResponse struct {
 // RHPFundRequest is the request type for the /rhp/fund endpoint.
 type RHPFundRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
-	HostKey    consensus.PublicKey  `json:"hostKey"`
+	HostKey    types.PublicKey      `json:"hostKey"`
 	Amount     types.Currency       `json:"amount"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
 // endpoint.
 type RHPPreparePaymentRequest struct {
-	Account    rhpv3.Account        `json:"account"`
-	Amount     types.Currency       `json:"amount"`
-	Expiry     uint64               `json:"expiry"`
-	AccountKey consensus.PrivateKey `json:"accountKey"`
+	Account    rhpv3.Account    `json:"account"`
+	Amount     types.Currency   `json:"amount"`
+	Expiry     uint64           `json:"expiry"`
+	AccountKey types.PrivateKey `json:"accountKey"`
 }
 
 // RHPRegistryReadRequest is the request type for the /rhp/registry/read
 // endpoint.
 type RHPRegistryReadRequest struct {
-	HostKey     consensus.PublicKey                `json:"hostKey"`
+	HostKey     types.PublicKey                    `json:"hostKey"`
 	HostIP      string                             `json:"hostIP"`
 	RegistryKey rhpv3.RegistryKey                  `json:"registryKey"`
 	Payment     rhpv3.PayByEphemeralAccountRequest `json:"payment"`
@@ -93,7 +91,7 @@ type RHPRegistryReadRequest struct {
 // RHPRegistryUpdateRequest is the request type for the /rhp/registry/update
 // endpoint.
 type RHPRegistryUpdateRequest struct {
-	HostKey       consensus.PublicKey `json:"hostKey"`
+	HostKey       types.PublicKey     `json:"hostKey"`
 	HostIP        string              `json:"hostIP"`
 	RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
@@ -101,7 +99,7 @@ type RHPRegistryUpdateRequest struct {
 
 // Account describes an ephemeral account as returned by the worker API.
 type Account struct {
-	ID      rhp.Account         `json:"id"`
-	Balance types.Currency      `json:"currency"`
-	Host    consensus.PublicKey `json:"host"`
+	ID      rhpv3.Account   `json:"id"`
+	Balance types.Currency  `json:"currency"`
+	Host    types.PublicKey `json:"host"`
 }

@@ -15,8 +15,8 @@ import (
 	"sort"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/metrics"
-	"go.sia.tech/siad/types"
 )
 
 var (
@@ -62,23 +62,23 @@ func wrapResponseErr(err error, readCtx, rejectCtx string) error {
 
 func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral types.Currency) (valid, missed []types.Currency) {
 	// allocate new slices; don't want to risk accidentally sharing memory
-	rev.NewValidProofOutputs = append([]types.SiacoinOutput(nil), rev.NewValidProofOutputs...)
-	rev.NewMissedProofOutputs = append([]types.SiacoinOutput(nil), rev.NewMissedProofOutputs...)
+	rev.ValidProofOutputs = append([]types.SiacoinOutput(nil), rev.ValidProofOutputs...)
+	rev.MissedProofOutputs = append([]types.SiacoinOutput(nil), rev.MissedProofOutputs...)
 
 	// move valid payout from renter to host
-	rev.NewValidProofOutputs[0].Value = rev.NewValidProofOutputs[0].Value.Sub(cost)
-	rev.NewValidProofOutputs[1].Value = rev.NewValidProofOutputs[1].Value.Add(cost)
+	rev.ValidProofOutputs[0].Value = rev.ValidProofOutputs[0].Value.Sub(cost)
+	rev.ValidProofOutputs[1].Value = rev.ValidProofOutputs[1].Value.Add(cost)
 
 	// move missed payout from renter to void
-	rev.NewMissedProofOutputs[0].Value = rev.NewMissedProofOutputs[0].Value.Sub(cost)
-	rev.NewMissedProofOutputs[2].Value = rev.NewMissedProofOutputs[2].Value.Add(cost)
+	rev.MissedProofOutputs[0].Value = rev.MissedProofOutputs[0].Value.Sub(cost)
+	rev.MissedProofOutputs[2].Value = rev.MissedProofOutputs[2].Value.Add(cost)
 
 	// move collateral from host to void
-	rev.NewMissedProofOutputs[1].Value = rev.NewMissedProofOutputs[1].Value.Sub(collateral)
-	rev.NewMissedProofOutputs[2].Value = rev.NewMissedProofOutputs[2].Value.Add(collateral)
+	rev.MissedProofOutputs[1].Value = rev.MissedProofOutputs[1].Value.Sub(collateral)
+	rev.MissedProofOutputs[2].Value = rev.MissedProofOutputs[2].Value.Add(collateral)
 
-	return []types.Currency{rev.NewValidProofOutputs[0].Value, rev.NewValidProofOutputs[1].Value},
-		[]types.Currency{rev.NewMissedProofOutputs[0].Value, rev.NewMissedProofOutputs[1].Value, rev.NewMissedProofOutputs[2].Value}
+	return []types.Currency{rev.ValidProofOutputs[0].Value, rev.ValidProofOutputs[1].Value},
+		[]types.Currency{rev.MissedProofOutputs[0].Value, rev.MissedProofOutputs[1].Value, rev.MissedProofOutputs[2].Value}
 }
 
 // RPCSectorRootsCost returns the price of a SectorRoots RPC.
@@ -112,8 +112,8 @@ func RPCAppendCost(settings HostSettings, storageDuration uint64) (price, collat
 		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
 	collateral = settings.Collateral.Mul64(SectorSize).Mul64(storageDuration)
 	// add some leeway to reduce chance of host rejecting
-	price = price.MulFloat(1.25)
-	collateral = collateral.MulFloat(0.95)
+	price = price.Mul64(125).Div64(100)
+	collateral = collateral.Mul64(95).Div64(100)
 	return
 }
 
@@ -121,7 +121,7 @@ func RPCAppendCost(settings HostSettings, storageDuration uint64) (price, collat
 func RPCDeleteCost(settings HostSettings, n int) types.Currency {
 	price := settings.BaseRPCPrice.
 		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
-	return price.MulFloat(1.05)
+	return price.Mul64(105).Div64(100)
 }
 
 // A Session pairs a Transport with a Contract, enabling RPCs that modify the
@@ -129,21 +129,21 @@ func RPCDeleteCost(settings HostSettings, n int) types.Currency {
 type Session struct {
 	transport   *Transport
 	revision    ContractRevision
-	key         PrivateKey
-	appendRoots []Hash256
+	key         types.PrivateKey
+	appendRoots []types.Hash256
 }
 
 // Transport returns the underlying Transport of the session.
 func (s *Session) Transport() *Transport { return s.transport }
 
 // HostKey returns the public key of the host.
-func (s *Session) HostKey() PublicKey { return s.revision.HostKey() }
+func (s *Session) HostKey() types.PublicKey { return s.revision.HostKey() }
 
 // Revision returns the current revision of the contract.
 func (s *Session) Revision() ContractRevision { return s.revision }
 
 func (s *Session) isRevisable() bool {
-	return s.revision.Revision.NewRevisionNumber < math.MaxUint64
+	return s.revision.Revision.RevisionNumber < math.MaxUint64
 }
 
 func (s *Session) sufficientFunds(price types.Currency) bool {
@@ -151,19 +151,19 @@ func (s *Session) sufficientFunds(price types.Currency) bool {
 }
 
 func (s *Session) sufficientCollateral(collateral types.Currency) bool {
-	return s.revision.Revision.NewMissedProofOutputs[1].Value.Cmp(collateral) >= 0
+	return s.revision.Revision.MissedProofOutputs[1].Value.Cmp(collateral) >= 0
 }
 
-func recordRPC(ctx context.Context, t *Transport, c ContractRevision, id Specifier, err *error) func() {
+func recordRPC(ctx context.Context, t *Transport, c ContractRevision, id types.Specifier, err *error) func() {
 	startTime := time.Now()
 	contractID := c.ID()
 	var startFunds types.Currency
-	if len(c.Revision.NewValidProofOutputs) > 0 {
-		startFunds = c.Revision.NewValidProofOutputs[0].Value
+	if len(c.Revision.ValidProofOutputs) > 0 {
+		startFunds = c.Revision.ValidProofOutputs[0].Value
 	}
 	var startCollateral types.Currency
-	if len(c.Revision.NewMissedProofOutputs) > 1 {
-		startCollateral = c.Revision.NewMissedProofOutputs[1].Value
+	if len(c.Revision.MissedProofOutputs) > 1 {
+		startCollateral = c.Revision.MissedProofOutputs[1].Value
 	}
 	startW, startR := t.BytesWritten(), t.BytesRead()
 	return func() {
@@ -177,11 +177,11 @@ func recordRPC(ctx context.Context, t *Transport, c ContractRevision, id Specifi
 			Downloaded: t.BytesRead() - startR,
 			Err:        *err,
 		}
-		if len(c.Revision.NewValidProofOutputs) > 0 && startFunds.Cmp(c.Revision.NewValidProofOutputs[0].Value) > 0 {
-			m.Cost = startFunds.Sub(c.Revision.NewValidProofOutputs[0].Value)
+		if len(c.Revision.ValidProofOutputs) > 0 && startFunds.Cmp(c.Revision.ValidProofOutputs[0].Value) > 0 {
+			m.Cost = startFunds.Sub(c.Revision.ValidProofOutputs[0].Value)
 		}
-		if len(c.Revision.NewMissedProofOutputs) > 1 && startCollateral.Cmp(c.Revision.NewMissedProofOutputs[1].Value) > 0 {
-			m.Collateral = startCollateral.Sub(c.Revision.NewMissedProofOutputs[1].Value)
+		if len(c.Revision.MissedProofOutputs) > 1 && startCollateral.Cmp(c.Revision.MissedProofOutputs[1].Value) > 0 {
+			m.Collateral = startCollateral.Sub(c.Revision.MissedProofOutputs[1].Value)
 		}
 		metrics.Record(ctx, m)
 	}
@@ -189,7 +189,7 @@ func recordRPC(ctx context.Context, t *Transport, c ContractRevision, id Specifi
 
 // SectorRoots calls the SectorRoots RPC, returning the requested range of
 // sector Merkle roots of the currently-locked contract.
-func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []Hash256, err error) {
+func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []types.Hash256, err error) {
 	defer wrapErr(&err, "SectorRoots")
 	defer recordRPC(ctx, s.transport, s.revision, RPCSectorRootsID, &err)()
 
@@ -205,7 +205,7 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 
 	// construct new revision
 	rev := s.revision.Revision
-	rev.NewRevisionNumber++
+	rev.RevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
 	revisionHash := hashRevision(rev)
 
@@ -213,10 +213,10 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 		RootOffset: uint64(offset),
 		NumRoots:   uint64(n),
 
-		NewRevisionNumber:    rev.NewRevisionNumber,
-		NewValidProofValues:  newValid,
-		NewMissedProofValues: newMissed,
-		Signature:            s.key.SignHash(revisionHash),
+		RevisionNumber:    rev.RevisionNumber,
+		ValidProofValues:  newValid,
+		MissedProofValues: newMissed,
+		Signature:         s.key.SignHash(revisionHash),
 	}
 	var resp RPCSectorRootsResponse
 	if err := s.transport.WriteRequest(RPCSectorRootsID, req); err != nil {
@@ -237,7 +237,7 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 	s.revision.Signatures[1].Signature = resp.Signature[:]
 
 	// verify the proof
-	if !VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, s.revision.NumSectors(), Hash256(rev.NewFileMerkleRoot)) {
+	if !VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, s.revision.NumSectors(), rev.FileMerkleRoot) {
 		return nil, ErrInvalidMerkleProof
 	}
 	return resp.SectorRoots, nil
@@ -292,7 +292,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 
 	// construct new revision
 	rev := s.revision.Revision
-	rev.NewRevisionNumber++
+	rev.RevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
 	revisionHash := hashRevision(rev)
 	renterSig := s.key.SignHash(revisionHash)
@@ -302,10 +302,10 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 		Sections:    sections,
 		MerkleProof: true,
 
-		NewRevisionNumber:    rev.NewRevisionNumber,
-		NewValidProofValues:  newValid,
-		NewMissedProofValues: newMissed,
-		Signature:            renterSig,
+		RevisionNumber:    rev.RevisionNumber,
+		ValidProofValues:  newValid,
+		MissedProofValues: newMissed,
+		Signature:         renterSig,
 	}
 	if err := s.transport.WriteRequest(RPCReadID, req); err != nil {
 		return err
@@ -314,7 +314,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
 	defer s.transport.WriteResponse(&RPCReadStop)
-	var hostSig *Signature
+	var hostSig *types.Signature
 	for _, sec := range sections {
 		// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
 		// message, verify the tag and decrypt, and then pass the data to
@@ -332,7 +332,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 			return fmt.Errorf("couldn't read signature len: %w", err)
 		}
 		if n := binary.LittleEndian.Uint64(lenbuf); n > 0 {
-			hostSig = new(Signature)
+			hostSig = new(types.Signature)
 			if _, err := io.ReadFull(msgReader, hostSig[:]); err != nil {
 				return fmt.Errorf("couldn't read signature: %w", err)
 			}
@@ -359,7 +359,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 		if binary.LittleEndian.Uint64(lenbuf) != uint64(RangeProofSize(LeavesPerSector, proofStart, proofEnd)) {
 			return errors.New("invalid proof size")
 		}
-		proof := make([]Hash256, binary.LittleEndian.Uint64(lenbuf))
+		proof := make([]types.Hash256, binary.LittleEndian.Uint64(lenbuf))
 		for i := range proof {
 			if _, err := io.ReadFull(msgReader, proof[i][:]); err != nil {
 				return fmt.Errorf("couldn't read Merkle proof: %w", err)
@@ -417,13 +417,13 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 	}
 
 	rev := s.revision.Revision
-	newFileSize := rev.NewFileSize
+	newFilesize := rev.Filesize
 	for _, action := range actions {
 		switch action.Type {
 		case RPCWriteActionAppend:
-			newFileSize += SectorSize
+			newFilesize += SectorSize
 		case RPCWriteActionTrim:
-			newFileSize -= SectorSize * action.A
+			newFilesize -= SectorSize * action.A
 		}
 	}
 
@@ -444,9 +444,9 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 		Actions:     actions,
 		MerkleProof: true,
 
-		NewRevisionNumber:    rev.NewRevisionNumber + 1,
-		NewValidProofValues:  newValid,
-		NewMissedProofValues: newMissed,
+		RevisionNumber:    rev.RevisionNumber + 1,
+		ValidProofValues:  newValid,
+		MissedProofValues: newMissed,
 	}
 	if err := s.transport.WriteRequest(RPCWriteID, req); err != nil {
 		return err
@@ -459,18 +459,18 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 	}
 	proofHashes := merkleResp.OldSubtreeHashes
 	leafHashes := merkleResp.OldLeafHashes
-	oldRoot, newRoot := Hash256(rev.NewFileMerkleRoot), merkleResp.NewMerkleRoot
+	oldRoot, newRoot := types.Hash256(rev.FileMerkleRoot), merkleResp.NewMerkleRoot
 	<-precompChan
-	if newFileSize > 0 && !VerifyDiffProof(actions, s.revision.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
+	if newFilesize > 0 && !VerifyDiffProof(actions, s.revision.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
 		err := ErrInvalidMerkleProof
 		s.transport.WriteResponseErr(err)
 		return err
 	}
 
 	// update revision and exchange signatures
-	rev.NewRevisionNumber++
-	rev.NewFileSize = newFileSize
-	copy(rev.NewFileMerkleRoot[:], newRoot[:])
+	rev.RevisionNumber++
+	rev.Filesize = newFilesize
+	copy(rev.FileMerkleRoot[:], newRoot[:])
 	revisionHash := hashRevision(rev)
 	renterSig := &RPCWriteResponse{
 		Signature: s.key.SignHash(revisionHash),
@@ -496,13 +496,13 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 
 // Append calls the Write RPC with a single action, appending the provided
 // sector. It returns the Merkle root of the sector.
-func (s *Session) Append(ctx context.Context, sector *[SectorSize]byte, price, collateral types.Currency) (Hash256, error) {
+func (s *Session) Append(ctx context.Context, sector *[SectorSize]byte, price, collateral types.Currency) (types.Hash256, error) {
 	err := s.Write(ctx, []RPCWriteAction{{
 		Type: RPCWriteActionAppend,
 		Data: sector[:],
 	}}, price, collateral)
 	if err != nil {
-		return Hash256{}, err
+		return types.Hash256{}, err
 	}
 	return s.appendRoots[0], nil
 }
@@ -585,7 +585,7 @@ func RPCSettings(ctx context.Context, t *Transport) (settings HostSettings, err 
 // milliseconds, so a timeout of less than 1ms will be rounded down to 0. (A
 // timeout of 0 is valid: it means that the lock will only be acquired if the
 // contract is unlocked at the moment the host receives the RPC.)
-func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key PrivateKey, timeout time.Duration) (_ *Session, err error) {
+func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key types.PrivateKey, timeout time.Duration) (_ *Session, err error) {
 	defer wrapErr(&err, "Lock")
 	defer recordRPC(ctx, t, ContractRevision{}, RPCLockID, &err)()
 	req := &RPCLockRequest{
@@ -603,13 +603,13 @@ func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key Pri
 		return nil, fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
 	}
 	revHash := hashRevision(resp.Revision)
-	if !key.PublicKey().VerifyHash(revHash, *(*Signature)(resp.Signatures[0].Signature)) {
+	if !key.PublicKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[0].Signature)) {
 		return nil, errors.New("renter's signature on claimed revision is invalid")
 	} else if !ed25519.Verify(resp.Revision.UnlockConditions.PublicKeys[1].Key, revHash[:], resp.Signatures[1].Signature) {
 		return nil, errors.New("host's signature on claimed revision is invalid")
 	} else if !resp.Acquired {
 		return nil, ErrContractLocked
-	} else if resp.Revision.NewRevisionNumber == math.MaxUint64 {
+	} else if resp.Revision.RevisionNumber == math.MaxUint64 {
 		return nil, ErrContractFinalized
 	}
 	return &Session{
@@ -624,7 +624,7 @@ func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key Pri
 
 // DialSession is a convenience function that connects to the specified host and
 // locks the specified contract.
-func DialSession(ctx context.Context, hostIP string, hostKey PublicKey, id types.FileContractID, renterKey PrivateKey) (_ *Session, err error) {
+func DialSession(ctx context.Context, hostIP string, hostKey types.PublicKey, id types.FileContractID, renterKey types.PrivateKey) (_ *Session, err error) {
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	if err != nil {
 		return nil, err
@@ -663,8 +663,8 @@ func DialSession(ctx context.Context, hostIP string, hostKey PublicKey, id types
 
 // DeleteSectorActions calculates a set of Write actions that will delete the
 // specified sectors from the contract.
-func DeleteSectorActions(allRoots, toDelete []Hash256) []RPCWriteAction {
-	rootIndices := make(map[Hash256]uint64, len(allRoots))
+func DeleteSectorActions(allRoots, toDelete []types.Hash256) []RPCWriteAction {
+	rootIndices := make(map[types.Hash256]uint64, len(allRoots))
 	for i, root := range allRoots {
 		rootIndices[root] = uint64(i)
 	}

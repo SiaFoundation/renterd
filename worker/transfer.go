@@ -8,10 +8,9 @@ import (
 	"io"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 )
 
 const (
@@ -22,10 +21,10 @@ const (
 // A sectorStore stores contract data.
 type sectorStore interface {
 	Contract() types.FileContractID
-	PublicKey() consensus.PublicKey
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
-	DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error
-	DeleteSectors(ctx context.Context, roots []consensus.Hash256) error
+	PublicKey() types.PublicKey
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error)
+	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
+	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }
 
 func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore, locker contractLocker) ([]object.Sector, error) {
@@ -39,7 +38,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	}
 	type resp struct {
 		req  req
-		root consensus.Hash256
+		root types.Hash256
 		err  error
 	}
 	reqChan := make(chan req, len(shards))
@@ -49,7 +48,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 		for req := range reqChan {
 			lockID, err := locker.AcquireContract(ctx, req.host.Contract(), contractLockingUploadPriority, 30*time.Second)
 			if err != nil {
-				respChan <- resp{req, consensus.Hash256{}, err}
+				respChan <- resp{req, types.Hash256{}, err}
 				return
 			}
 			root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
@@ -245,7 +244,7 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.S
 }
 
 func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) error {
-	rootsBysectorStore := make(map[consensus.PublicKey][]consensus.Hash256)
+	rootsBysectorStore := make(map[types.PublicKey][]types.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
 			rootsBysectorStore[sector.Host] = append(rootsBysectorStore[sector.Host], sector.Root)

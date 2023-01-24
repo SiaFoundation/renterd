@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.uber.org/zap"
 )
@@ -34,7 +34,7 @@ type (
 			HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		}
 		worker interface {
-			RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
+			RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 		}
 
 		tracker *tracker
@@ -57,12 +57,12 @@ type (
 	}
 
 	scanReq struct {
-		hostKey consensus.PublicKey
+		hostKey types.PublicKey
 		hostIP  string
 	}
 
 	scanResp struct {
-		hostKey  consensus.PublicKey
+		hostKey  types.PublicKey
 		settings rhpv2.HostSettings
 		err      error
 	}

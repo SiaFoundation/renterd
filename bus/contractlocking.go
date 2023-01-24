@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/siad/types"
+	"go.sia.tech/core/types"
 	"lukechampine.com/frand"
 )
 
