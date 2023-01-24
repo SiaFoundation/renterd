@@ -13,7 +13,7 @@ import (
 
 func TestHost(t *testing.T) {
 	hk := randomHostKey()
-	h := Host{newTestHost(hk, newTestHostSettings())}
+	h := newTestHost(hk, newTestHostSettings())
 
 	// assert host is online
 	if !h.IsOnline() {

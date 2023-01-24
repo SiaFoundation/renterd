@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+
+	"go.sia.tech/renterd/hostdb"
 )
 
 const (
@@ -28,7 +30,7 @@ func newIPFilter() *ipFilter {
 	}
 }
 
-func (f *ipFilter) isRedundantIP(h Host) bool {
+func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
 	// lookup all IP addresses for the given host
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {

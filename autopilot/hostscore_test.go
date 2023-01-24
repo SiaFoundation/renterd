@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"lukechampine.com/frand"
 )
@@ -15,7 +16,7 @@ func TestHostScore(t *testing.T) {
 	cfg := api.DefaultAutopilotConfig()
 	day := 24 * time.Hour
 
-	newHost := func(s *rhpv2.HostSettings) Host { return Host{newTestHost(randomHostKey(), s)} }
+	newHost := func(s *rhpv2.HostSettings) hostdb.Host { return newTestHost(randomHostKey(), s) }
 	h1 := newHost(newTestHostSettings())
 	h2 := newHost(newTestHostSettings())
 

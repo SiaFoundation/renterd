@@ -7,6 +7,8 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
 )
@@ -19,7 +21,7 @@ const (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h Host) (bool, []string) {
+func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h hostdb.Host) (bool, []string) {
 	var reasons []string
 
 	if !h.IsOnline() {
@@ -28,10 +30,9 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
 		reasons = append(reasons, "redundant IP")
 	}
-	if bad, reason := hasBadSettings(cfg, h); bad {
+	if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Sprintf("bad settings: %v", reason))
-	}
-	if gouging, reason := isGouging(gs, rs, h); gouging {
+	} else if gouging, reason := isGouging(gs, rs, settings); gouging {
 		reasons = append(reasons, fmt.Sprintf("price gouging: %v", reason))
 	}
 
@@ -45,8 +46,8 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
-	if isOutOfFunds(cfg, h, c) {
+func isUsableContract(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []string) {
+	if isOutOfFunds(cfg, s, c) {
 		reasons = append(reasons, "out of funds")
 		renew = false
 		refresh = true
@@ -70,12 +71,7 @@ func isUsableContract(cfg api.AutopilotConfig, h Host, c api.Contract, bh uint64
 	return
 }
 
-func isOutOfFunds(cfg api.AutopilotConfig, h Host, c api.Contract) bool {
-	settings := h.Settings
-	if settings == nil {
-		return false
-	}
-
+func isOutOfFunds(cfg api.AutopilotConfig, settings rhp.HostSettings, c api.Contract) bool {
 	blockBytes := types.NewCurrency64(modules.SectorSize * cfg.Contracts.Period)
 	sectorStoragePrice := settings.StoragePrice.Mul(blockBytes)
 	sectorUploadBandwidthPrice := settings.UploadBandwidthPrice.Mul64(modules.SectorSize)
@@ -91,32 +87,28 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 	return blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 }
 
-func isGouging(gs api.GougingSettings, rs api.RedundancySettings, h Host) (bool, string) {
-	if h.Settings == nil {
-		return false, ""
-	}
-
-	return worker.IsGouging(gs, *h.Settings, rs.MinShards, rs.TotalShards)
+func isGouging(gs api.GougingSettings, rs api.RedundancySettings, settings rhp.HostSettings) (bool, string) {
+	return worker.IsGouging(gs, settings, rs.MinShards, rs.TotalShards)
 }
 
-func hasBadSettings(cfg api.AutopilotConfig, h Host) (bool, string) {
+func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (rhp.HostSettings, bool, string) {
 	settings := h.Settings
 	if settings == nil {
-		return true, "no settings"
+		return rhp.HostSettings{}, true, "no settings"
 	}
 	if !settings.AcceptingContracts {
-		return true, "not accepting contracts"
+		return *settings, true, "not accepting contracts"
 	}
 	if cfg.Contracts.Period+cfg.Contracts.RenewWindow > settings.MaxDuration {
-		return true, fmt.Sprintf("max duration too low, %v > %v", cfg.Contracts.Period+cfg.Contracts.RenewWindow, settings.MaxDuration)
+		return *settings, true, fmt.Sprintf("max duration too low, %v > %v", cfg.Contracts.Period+cfg.Contracts.RenewWindow, settings.MaxDuration)
 	}
 	maxBaseRPCPrice := settings.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
 	if settings.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
-		return true, fmt.Sprintf("base RPC price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
+		return *settings, true, fmt.Sprintf("base RPC price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
 	}
 	maxSectorAccessPrice := settings.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
 	if settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
-		return true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
+		return *settings, true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
 	}
-	return false, ""
+	return *settings, false, ""
 }
