@@ -5,12 +5,12 @@ go 1.17
 require (
 	github.com/klauspost/reedsolomon v1.9.16
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.1.0
+	go.sia.tech/core v0.1.1
 	go.sia.tech/jape v0.7.0
 	go.sia.tech/mux v1.1.0
 	go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004
 	go.uber.org/zap v1.24.0
-	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa
+	golang.org/x/crypto v0.5.0
 	golang.org/x/sys v0.4.0
 	golang.org/x/term v0.4.0
 	gorm.io/driver/sqlite v1.4.3
