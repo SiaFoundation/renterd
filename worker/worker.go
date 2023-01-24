@@ -942,14 +942,9 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		bus:       b,
 		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey: masterKey,
-		accounts:  nil,
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
-	w.accounts = &accounts{
-		accounts: make(map[rhpv3.Account]*account),
-		workerID: w.id,
-		key:      w.deriveSubKey("accountkey"),
-	}
+	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"))
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,

@@ -32,6 +32,14 @@ type (
 	}
 )
 
+func newAccounts(workerID string, accountsKey types.PrivateKey) *accounts {
+	return &accounts{
+		accounts: make(map[rhpv3.Account]*account),
+		workerID: workerID,
+		key:      accountsKey,
+	}
+}
+
 // All returns information about all accounts to be returned in the API.
 func (a *accounts) All() ([]api.Account, error) {
 	// Make sure accounts are initialised.
