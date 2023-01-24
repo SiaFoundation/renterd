@@ -15,7 +15,7 @@ const (
 	ipv6FilterRange = 54
 
 	// resolverLookupTimeout is the timeout we apply when resolving a host's IP address
-	resolverLookupTimeout = 50 * time.Millisecond
+	resolverLookupTimeout = 5 * time.Second
 )
 
 type resolver interface {
