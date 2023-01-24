@@ -15,17 +15,24 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
+)
+
+const (
+	lockingPriorityRenew   = 100 // highest
+	lockingPriorityFunding = 90
+
+	lockingDurationRenew   = time.Minute
+	lockingDurationFunding = 30 * time.Second
 )
 
 // parseRange parses a Range header string as per RFC 7233. Only the first range
@@ -125,7 +132,7 @@ func (mr *ephemeralMetricsRecorder) interactions() []hostdb.Interaction {
 
 // MetricHostDial contains metrics relating to a host dial.
 type MetricHostDial struct {
-	HostKey   consensus.PublicKey
+	HostKey   types.PublicKey
 	HostIP    string
 	Timestamp time.Time
 	Elapsed   time.Duration
@@ -138,7 +145,7 @@ func (MetricHostDial) IsMetric() {}
 // IsSuccess implements metrics.Metric.
 func (m MetricHostDial) IsSuccess() bool { return m.Err == nil }
 
-func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.Conn, error) {
+func dial(ctx context.Context, hostIP string, hostKey types.PublicKey) (net.Conn, error) {
 	start := time.Now()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	metrics.Record(ctx, MetricHostDial{
@@ -152,7 +159,7 @@ func dial(ctx context.Context, hostIP string, hostKey consensus.PublicKey) (net.
 }
 
 func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
-	transform := func(hk consensus.PublicKey, timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
+	transform := func(hk types.PublicKey, timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
 		b, _ := json.Marshal(InteractionResult{Error: errToStr(err)})
 		hi := hostdb.Interaction{
 			Host:      hk,
@@ -195,34 +202,36 @@ type AccountStore interface {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	ActiveContracts() ([]api.ContractMetadata, error)
+	AcquireContract(id types.FileContractID, priority int, d time.Duration) (uint64, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordInteractions(interactions []hostdb.Interaction) error
+	ReleaseContract(id types.FileContractID, lockID uint64) error
 
-	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+	Host(hostKey types.PublicKey) (hostdb.Host, error)
 
 	DownloadParams() (api.DownloadParams, error)
 	GougingParams() (api.GougingParams, error)
 	UploadParams() (api.UploadParams, error)
 
 	Object(key string) (object.Object, []string, error)
-	AddObject(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error
+	AddObject(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
 
 	OwnerAccounts(owner string) ([]ephemeralaccounts.Account, error)
-	UpdateSlab(s object.Slab, goodContracts map[consensus.PublicKey]types.FileContractID) error
+	UpdateSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(txn types.Transaction) error
-	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+	WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
+	WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
 // masterkey to use for a specific purpose. Such as deriving more keys for
 // ephemeral accounts.
-func (w *worker) deriveSubKey(purpose string) consensus.PrivateKey {
+func (w *worker) deriveSubKey(purpose string) types.PrivateKey {
 	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
-	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	pk := types.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
 		seed[i] = 0
 	}
@@ -241,9 +250,9 @@ func (w *worker) deriveSubKey(purpose string) consensus.PrivateKey {
 //
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
-func (w *worker) deriveRenterKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 	seed := blake2b.Sum256(append(w.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	pk := types.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
 		seed[i] = 0
 	}
@@ -262,7 +271,7 @@ type worker struct {
 	priceTables *priceTables
 }
 
-func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSettings, err error) error {
+func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) error {
 	hi := hostdb.Interaction{
 		Host:      hostKey,
 		Timestamp: time.Now(),
@@ -281,7 +290,7 @@ func (w *worker) recordScan(hostKey consensus.PublicKey, settings rhpv2.HostSett
 	return w.bus.RecordInteractions([]hostdb.Interaction{hi})
 }
 
-func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
+func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
 		// TODO: handle error
@@ -314,7 +323,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey con
 	return fn(t)
 }
 
-func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey consensus.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
+func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
 	conn, err := dial(ctx, hostIP, hostKey)
 	if err != nil {
 		return err
@@ -466,6 +475,16 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 
+	lockID, err := w.bus.AcquireContract(rrr.ContractID, lockingPriorityRenew, lockingDurationRenew)
+	if jc.Check("could not lock contract for renewal", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(rrr.ContractID, lockID); err != nil {
+			// TODO: log
+		}
+	}()
+
 	hostIP, hostKey, toRenewID, renterFunds := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
 	rk := w.deriveRenterKey(hostKey)
@@ -530,9 +549,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	hostIP := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
-	// TODO: This is not a good solution. We should have some mechanism to
-	// lock contracts across protocol versions. This is abusing rhpv2's
-	// withHosts to get the revision.
+	lockID, err := w.bus.AcquireContract(rfr.ContractID, lockingPriorityRenew, lockingPriorityFunding)
+	if jc.Check("failed to acquire contract for funding EA", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(rfr.ContractID, lockID); err != nil {
+			// TODO: log
+		}
+	}()
+
+	// Get contract revision.
 	var revision types.FileContractRevision
 	cm := api.ContractMetadata{
 		ID:      rfr.ContractID,
@@ -639,7 +666,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
 	for _, ss := range slab.Shards {
 		if _, exists := usedContracts[ss.Host]; exists {
 			continue
@@ -746,7 +773,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		Key: object.GenerateEncryptionKey(),
 	}
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
 
 	// fetch contracts
 	contracts, err := w.bus.Contracts(up.ContractSet)
@@ -866,7 +893,7 @@ func joinErrors(errs []error) error {
 	}
 }
 
-func (w *worker) preparePayment(hk consensus.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
+func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
 	pk := w.accounts.deriveAccountKey(hk)
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
 }
@@ -887,10 +914,8 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey: masterKey,
 		accounts:  nil,
-		priceTables: &priceTables{
-			priceTables: make(map[consensus.PublicKey]*priceTable),
-		},
 	}
+	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = &accounts{
 		accounts: make(map[rhpv3.Account]*account),
 		workerID: w.id,

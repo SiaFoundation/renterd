@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
-	"go.sia.tech/siad/types"
 )
 
 const keyGougingChecker contextKey = "GougingChecker"
@@ -25,8 +25,9 @@ type (
 	}
 
 	gougingChecker struct {
-		settings   api.GougingSettings
-		redundancy float64
+		settings    api.GougingSettings
+		minShards   int
+		totalShards int
 	}
 
 	contextKey string
@@ -41,16 +42,17 @@ func PerformGougingChecks(ctx context.Context, hs rhpv2.HostSettings) GougingRes
 
 func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Context {
 	return context.WithValue(ctx, keyGougingChecker, gougingChecker{
-		settings:   gp.GougingSettings,
-		redundancy: gp.RedundancySettings.Redundancy(),
+		settings:    gp.GougingSettings,
+		minShards:   gp.RedundancySettings.MinShards,
+		totalShards: gp.RedundancySettings.TotalShards,
 	})
 }
 
-func IsGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64) (bool, string) {
+func IsGouging(gs api.GougingSettings, hs rhpv2.HostSettings, minShards, totalShards int) (bool, string) {
 	errs := filterErrors(
-		checkDownloadGouging(gs, hs, redundancy),
+		checkDownloadGouging(gs, hs, minShards, totalShards),
 		checkFormContractGouging(gs, hs),
-		checkUploadGouging(gs, hs, redundancy),
+		checkUploadGouging(gs, hs, minShards, totalShards),
 	)
 	if len(errs) == 0 {
 		return false, ""
@@ -65,9 +67,9 @@ func IsGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64
 
 func (gc gougingChecker) Check(hs rhpv2.HostSettings) GougingResults {
 	return GougingResults{
-		downloadErr:     checkDownloadGouging(gc.settings, hs, gc.redundancy),
+		downloadErr:     checkDownloadGouging(gc.settings, hs, gc.minShards, gc.totalShards),
 		formContractErr: checkFormContractGouging(gc.settings, hs),
-		uploadErr:       checkUploadGouging(gc.settings, hs, gc.redundancy),
+		uploadErr:       checkUploadGouging(gc.settings, hs, gc.minShards, gc.totalShards),
 	}
 }
 
@@ -89,14 +91,14 @@ func (gr GougingResults) CanUpload() []error {
 	)
 }
 
-func checkDownloadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {
+func checkDownloadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, minShards, totalShards int) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
 	}
 
 	// check download cost
-	downloadPrice := downloadPricePerTB(hs).MulFloat(redundancy)
+	downloadPrice := downloadPricePerTB(hs).Mul64(uint64(totalShards)).Div64(uint64(minShards))
 	if !gs.MaxDownloadPrice.IsZero() && downloadPrice.Cmp(gs.MaxDownloadPrice) > 0 {
 		return fmt.Errorf("cost per TiB exceeds max dl price: %v>%v", downloadPrice, gs.MaxDownloadPrice)
 	}
@@ -104,7 +106,7 @@ func checkDownloadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redunda
 	return nil
 }
 
-func checkUploadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundancy float64) error {
+func checkUploadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, minShards, totalShards int) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -116,7 +118,7 @@ func checkUploadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, redundanc
 	}
 
 	// check upload cost
-	uploadPrice := uploadPricePerTB(hs).MulFloat(redundancy)
+	uploadPrice := uploadPricePerTB(hs).Mul64(uint64(totalShards)).Div64(uint64(minShards))
 	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
 		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
 	}

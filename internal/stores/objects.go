@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -76,8 +75,8 @@ type (
 	dbSector struct {
 		Model
 
-		LatestHost consensus.PublicKey `gorm:"type:bytes;serializer:gob;NOT NULL"`
-		Root       consensus.Hash256   `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
+		LatestHost types.PublicKey `gorm:"type:bytes;serializer:gob;NOT NULL"`
+		Root       types.Hash256   `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
@@ -180,7 +179,7 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLStore) Put(key string, o object.Object, usedContracts map[consensus.PublicKey]types.FileContractID) error {
+func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
@@ -333,7 +332,7 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 	return obj, nil
 }
 
-func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey]types.FileContractID) error {
+func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error {
 	// extract the slab key
 	key, err := s.Key.MarshalText()
 	if err != nil {
@@ -341,7 +340,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey
 	}
 
 	// extract used contracts
-	usedContracts := make(map[consensus.PublicKey]types.FileContractID)
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
 	for _, shard := range s.Shards {
 		fcid, ok := goodContracts[shard.Host]
 		if !ok {
@@ -383,7 +382,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[consensus.PublicKey
 	}
 
 	// make a hosts map
-	hosts := make(map[consensus.PublicKey]*dbHost)
+	hosts := make(map[types.PublicKey]*dbHost)
 	for i := range dbHosts {
 		hosts[dbHosts[i].PublicKey] = &dbHosts[i]
 	}
@@ -473,14 +472,15 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 	}
 
 	if err := s.db.
+		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Where("c.fcid IN (?)", gobEncodeSlice(fcids)).
 		Group("slabs.id").
-		Having("COUNT(slabs.id) < slabs.total_shards").
-		Order("COUNT(slabs.id) DESC").
+		Having("num_good_sectors < num_required_sectors").
+		Order("num_bad_sectors DESC").
 		Limit(limit).
 		Preload("Shards.DBSector").
 		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {

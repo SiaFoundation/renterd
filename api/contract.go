@@ -1,8 +1,7 @@
 package api
 
 import (
-	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/siad/types"
+	"go.sia.tech/core/types"
 )
 
 type (
@@ -16,7 +15,7 @@ type (
 	ContractMetadata struct {
 		ID          types.FileContractID `json:"id"`
 		HostIP      string               `json:"hostIP"`
-		HostKey     consensus.PublicKey  `json:"hostKey"`
+		HostKey     types.PublicKey      `json:"hostKey"`
 		StartHeight uint64               `json:"startHeight"`
 
 		RenewedFrom types.FileContractID `json:"renewedFrom"`
@@ -35,7 +34,7 @@ type (
 	// that has been moved to the archive either due to expiring or being renewed.
 	ArchivedContract struct {
 		ID        types.FileContractID `json:"id"`
-		HostKey   consensus.PublicKey  `json:"hostKey"`
+		HostKey   types.PublicKey      `json:"hostKey"`
 		RenewedTo types.FileContractID `json:"renewedTo"`
 		Spending  ContractSpending     `json:"spending"`
 	}
@@ -51,22 +50,16 @@ func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
-func (c Contract) EndHeight() uint64 {
-	return uint64(c.Revision.EndHeight())
-}
+func (c Contract) EndHeight() uint64 { return c.Revision.EndHeight() }
 
 // FileSize returns the current Size of the contract.
-func (c Contract) FileSize() uint64 {
-	return c.Revision.NewFileSize
-}
+func (c Contract) FileSize() uint64 { return c.Revision.Filesize }
 
 // HostKey returns the public key of the host.
-func (c Contract) HostKey() (pk consensus.PublicKey) {
+func (c Contract) HostKey() (pk types.PublicKey) {
 	copy(pk[:], c.Revision.UnlockConditions.PublicKeys[1].Key)
 	return
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.
-func (c Contract) RenterFunds() types.Currency {
-	return c.Revision.NewValidProofOutputs[0].Value
-}
+func (c Contract) RenterFunds() types.Currency { return c.Revision.ValidRenterPayout() }

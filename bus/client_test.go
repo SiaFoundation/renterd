@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/internal/node"
 )
 
@@ -76,7 +76,7 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              node.NewMiner(client),
 		RedundancySettings: defaultSettings,
-	}, filepath.Join(dir, "bus"), consensus.GeneratePrivateKey())
+	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey())
 	if err != nil {
 		return nil, nil, nil, err
 	}

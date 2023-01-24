@@ -3,18 +3,28 @@ package stores
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"reflect"
 	"testing"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/types"
 	"gorm.io/gorm/schema"
+	"lukechampine.com/frand"
 )
+
+func generateMultisigUC(m, n uint64, salt string) types.UnlockConditions {
+	uc := types.UnlockConditions{
+		PublicKeys:         make([]types.UnlockKey, n),
+		SignaturesRequired: uint64(m),
+	}
+	for i := range uc.PublicKeys {
+		uc.PublicKeys[i].Algorithm = types.SpecifierEd25519
+		uc.PublicKeys[i].Key = frand.Bytes(32)
+	}
+	return uc
+}
 
 // TestSQLContractStore tests SQLContractStore functionality.
 func TestSQLContractStore(t *testing.T) {
@@ -24,7 +34,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Create a host for the contract.
-	hk := consensus.GeneratePrivateKey().PublicKey()
+	hk := types.GeneratePrivateKey().PublicKey()
 	err = cs.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +47,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Create random unlock conditions for the host.
-	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
+	uc := generateMultisigUC(1, 2, "salt")
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
@@ -45,40 +55,42 @@ func TestSQLContractStore(t *testing.T) {
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
 	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
-			ParentID:          fcid,
-			UnlockConditions:  uc,
-			NewRevisionNumber: 200,
-			NewFileSize:       4096,
-			NewFileMerkleRoot: crypto.Hash{222},
-			NewWindowStart:    400,
-			NewWindowEnd:      500,
-			NewValidProofOutputs: []types.SiacoinOutput{
-				{
-					Value:      types.NewCurrency64(121),
-					UnlockHash: types.UnlockHash{2, 1, 2},
+			ParentID:         fcid,
+			UnlockConditions: uc,
+			FileContract: types.FileContract{
+				RevisionNumber: 200,
+				Filesize:       4096,
+				FileMerkleRoot: types.Hash256{222},
+				WindowStart:    400,
+				WindowEnd:      500,
+				ValidProofOutputs: []types.SiacoinOutput{
+					{
+						Value:   types.NewCurrency64(121),
+						Address: types.Address{2, 1, 2},
+					},
 				},
-			},
-			NewMissedProofOutputs: []types.SiacoinOutput{
-				{
-					Value:      types.NewCurrency64(323),
-					UnlockHash: types.UnlockHash{2, 3, 2},
+				MissedProofOutputs: []types.SiacoinOutput{
+					{
+						Value:   types.NewCurrency64(323),
+						Address: types.Address{2, 3, 2},
+					},
 				},
+				UnlockHash: types.Hash256{6, 6, 6},
 			},
-			NewUnlockHash: types.UnlockHash{6, 6, 6},
 		},
 		Signatures: [2]types.TransactionSignature{
 			{
-				ParentID:       crypto.Hash(fcid),
+				ParentID:       types.Hash256(fcid),
 				PublicKeyIndex: 0,
 				Timelock:       100000,
-				CoveredFields:  types.FullCoveredFields,
+				CoveredFields:  types.CoveredFields{WholeTransaction: true},
 				Signature:      []byte("signature1"),
 			},
 			{
-				ParentID:       crypto.Hash(fcid),
+				ParentID:       types.Hash256(fcid),
 				PublicKeyIndex: 1,
 				Timelock:       200000,
-				CoveredFields:  types.FullCoveredFields,
+				CoveredFields:  types.CoveredFields{WholeTransaction: true},
 				Signature:      []byte("signature2"),
 			},
 		},
@@ -200,7 +212,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Create a host for the contract.
-	hk := consensus.GeneratePrivateKey().PublicKey()
+	hk := types.GeneratePrivateKey().PublicKey()
 	err = cs.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +225,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Create random unlock conditions for the host.
-	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
+	uc := generateMultisigUC(1, 2, "salt")
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
@@ -221,12 +233,14 @@ func TestRenewedContract(t *testing.T) {
 	fcid := types.FileContractID{1, 1, 1, 1, 1}
 	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
-			NewFileSize:       1,
-			NewWindowStart:    2,
-			NewWindowEnd:      3,
-			NewRevisionNumber: 4,
-			ParentID:          fcid,
-			UnlockConditions:  uc,
+			ParentID:         fcid,
+			UnlockConditions: uc,
+			FileContract: types.FileContract{
+				Filesize:       1,
+				WindowStart:    2,
+				WindowEnd:      3,
+				RevisionNumber: 4,
+			},
 		},
 	}
 	oldContractTotal := types.NewCurrency64(111)
@@ -245,10 +259,12 @@ func TestRenewedContract(t *testing.T) {
 	fcid2 := types.FileContractID{2, 2, 2, 2, 2}
 	renewed := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
-			ParentID:              fcid2,
-			UnlockConditions:      uc,
-			NewMissedProofOutputs: []types.SiacoinOutput{},
-			NewValidProofOutputs:  []types.SiacoinOutput{},
+			ParentID:         fcid2,
+			UnlockConditions: uc,
+			FileContract: types.FileContract{
+				MissedProofOutputs: []types.SiacoinOutput{},
+				ValidProofOutputs:  []types.SiacoinOutput{},
+			},
 		},
 	}
 	newContractTotal := types.NewCurrency64(222)
@@ -302,9 +318,9 @@ func TestRenewedContract(t *testing.T) {
 		RenewedTo:           fcid2,
 		Reason:              archivalReasonRenewed,
 		StartHeight:         100,
-		UploadSpending:      big.NewInt(0),
-		DownloadSpending:    big.NewInt(0),
-		FundAccountSpending: big.NewInt(0),
+		UploadSpending:      types.ZeroCurrency,
+		DownloadSpending:    types.ZeroCurrency,
+		FundAccountSpending: types.ZeroCurrency,
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
 		fmt.Println(ac)
@@ -316,10 +332,12 @@ func TestRenewedContract(t *testing.T) {
 	fcid3 := types.FileContractID{3, 3, 3, 3, 3}
 	renewed = rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
-			ParentID:              fcid3,
-			UnlockConditions:      uc,
-			NewMissedProofOutputs: []types.SiacoinOutput{},
-			NewValidProofOutputs:  []types.SiacoinOutput{},
+			ParentID:         fcid3,
+			UnlockConditions: uc,
+			FileContract: types.FileContract{
+				MissedProofOutputs: []types.SiacoinOutput{},
+				ValidProofOutputs:  []types.SiacoinOutput{},
+			},
 		},
 	}
 	newContractTotal = types.NewCurrency64(333)
@@ -343,7 +361,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hk := consensus.PublicKey{1, 2, 3}
+	hk := types.PublicKey{1, 2, 3}
 	if err := cs.addTestHost(hk); err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +399,7 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 }
 
-func (s *SQLStore) addTestContracts(keys []consensus.PublicKey) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
+func (s *SQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
 	cnt, err := s.contractsCount()
 	if err != nil {
 		return nil, nil, err
@@ -397,12 +415,12 @@ func (s *SQLStore) addTestContracts(keys []consensus.PublicKey) (fcids []types.F
 	return
 }
 
-func (s *SQLStore) addTestContract(fcid types.FileContractID, hk consensus.PublicKey) (api.ContractMetadata, error) {
+func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddContract(rev, types.ZeroCurrency, 0)
 }
 
-func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk consensus.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
+func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
 }
@@ -415,46 +433,48 @@ func (s *SQLStore) contractsCount() (cnt int64, err error) {
 	return
 }
 
-func testContractRevision(fcid types.FileContractID, hk consensus.PublicKey) rhpv2.ContractRevision {
-	uc, _ := types.GenerateDeterministicMultisig(1, 2, "salt")
+func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.ContractRevision {
+	uc := generateMultisigUC(1, 2, "salt")
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 	return rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
-			ParentID:          fcid,
-			UnlockConditions:  uc,
-			NewRevisionNumber: 200,
-			NewFileSize:       4096,
-			NewFileMerkleRoot: crypto.Hash{222},
-			NewWindowStart:    400,
-			NewWindowEnd:      500,
-			NewValidProofOutputs: []types.SiacoinOutput{
-				{
-					Value:      types.NewCurrency64(121),
-					UnlockHash: types.UnlockHash{2, 1, 2},
+			ParentID:         fcid,
+			UnlockConditions: uc,
+			FileContract: types.FileContract{
+				RevisionNumber: 200,
+				Filesize:       4096,
+				FileMerkleRoot: types.Hash256{222},
+				WindowStart:    400,
+				WindowEnd:      500,
+				ValidProofOutputs: []types.SiacoinOutput{
+					{
+						Value:   types.NewCurrency64(121),
+						Address: types.Address{2, 1, 2},
+					},
 				},
-			},
-			NewMissedProofOutputs: []types.SiacoinOutput{
-				{
-					Value:      types.NewCurrency64(323),
-					UnlockHash: types.UnlockHash{2, 3, 2},
+				MissedProofOutputs: []types.SiacoinOutput{
+					{
+						Value:   types.NewCurrency64(323),
+						Address: types.Address{2, 3, 2},
+					},
 				},
+				UnlockHash: types.Hash256{6, 6, 6},
 			},
-			NewUnlockHash: types.UnlockHash{6, 6, 6},
 		},
 		Signatures: [2]types.TransactionSignature{
 			{
-				ParentID:       crypto.Hash(fcid),
+				ParentID:       types.Hash256(fcid),
 				PublicKeyIndex: 0,
 				Timelock:       100000,
-				CoveredFields:  types.FullCoveredFields,
+				CoveredFields:  types.CoveredFields{WholeTransaction: true},
 				Signature:      []byte("signature1"),
 			},
 			{
-				ParentID:       crypto.Hash(fcid),
+				ParentID:       types.Hash256(fcid),
 				PublicKeyIndex: 1,
 				Timelock:       200000,
-				CoveredFields:  types.FullCoveredFields,
+				CoveredFields:  types.CoveredFields{WholeTransaction: true},
 				Signature:      []byte("signature2"),
 			},
 		},

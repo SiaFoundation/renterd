@@ -8,12 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/siad/types"
+	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
@@ -52,7 +51,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[consensus.PublicKey]types.FileContractID{})
+	}, map[types.PublicKey]types.FileContractID{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +228,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Fund account.
-	if err := w.RHPFund(contract.ID, contract.HostKey(), types.SiacoinPrecision); err != nil {
+	if err := w.RHPFund(contract.ID, contract.HostKey(), types.Siacoins(1)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -242,13 +241,13 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatalf("wrong number of accounts %v", len(accounts))
 	}
 	acc := accounts[0]
-	if !acc.Balance.Equals(types.SiacoinPrecision) {
-		t.Fatalf("wrong balance %v", acc.Balance.HumanString())
+	if acc.Balance.Cmp(types.Siacoins(1).Big()) != 0 {
+		t.Fatalf("wrong balance %v", acc.Balance)
 	}
-	if acc.ID == (rhp.Account{}) {
+	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
 	}
-	if acc.Host != consensus.PublicKey(hg.PublicKey.ToPublicKey()) {
+	if acc.Host != types.PublicKey(hg.PublicKey.ToPublicKey()) {
 		t.Fatal("wrong host")
 	}
 }

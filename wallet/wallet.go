@@ -1,17 +1,17 @@
 package wallet
 
 import (
+	"bytes"
 	"errors"
-	"math/big"
 	"reflect"
 	"sort"
 	"sync"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/types"
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/types"
+	stypes "go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
@@ -25,10 +25,10 @@ var ErrInsufficientBalance = errors.New("insufficient balance")
 
 // StandardUnlockConditions returns the standard unlock conditions for a single
 // Ed25519 key.
-func StandardUnlockConditions(pk consensus.PublicKey) types.UnlockConditions {
+func StandardUnlockConditions(pk types.PublicKey) types.UnlockConditions {
 	return types.UnlockConditions{
-		PublicKeys: []types.SiaPublicKey{{
-			Algorithm: types.SignatureEd25519,
+		PublicKeys: []types.UnlockKey{{
+			Algorithm: types.SpecifierEd25519,
 			Key:       pk[:],
 		}},
 		SignaturesRequired: 1,
@@ -36,16 +36,16 @@ func StandardUnlockConditions(pk consensus.PublicKey) types.UnlockConditions {
 }
 
 // StandardAddress returns the standard address for an Ed25519 key.
-func StandardAddress(pk consensus.PublicKey) types.UnlockHash {
+func StandardAddress(pk types.PublicKey) types.Address {
 	return StandardUnlockConditions(pk).UnlockHash()
 }
 
 // StandardTransactionSignature returns the standard signature object for a
 // siacoin or siafund input.
-func StandardTransactionSignature(id types.OutputID) types.TransactionSignature {
+func StandardTransactionSignature(id types.Hash256) types.TransactionSignature {
 	return types.TransactionSignature{
-		ParentID:       crypto.Hash(id),
-		CoveredFields:  types.FullCoveredFields,
+		ParentID:       id,
+		CoveredFields:  types.CoveredFields{WholeTransaction: true},
 		PublicKeyIndex: 0,
 	}
 }
@@ -80,8 +80,8 @@ func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
 	for i := range txn.ArbitraryData {
 		cf.ArbitraryData = append(cf.ArbitraryData, uint64(i))
 	}
-	for i := range txn.TransactionSignatures {
-		cf.TransactionSignatures = append(cf.TransactionSignatures, uint64(i))
+	for i := range txn.Signatures {
+		cf.Signatures = append(cf.Signatures, uint64(i))
 	}
 	return
 }
@@ -89,7 +89,7 @@ func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
 // A SiacoinElement is a SiacoinOutput along with its ID.
 type SiacoinElement struct {
 	types.SiacoinOutput
-	ID             types.OutputID
+	ID             types.Hash256
 	MaturityHeight uint64
 }
 
@@ -97,7 +97,7 @@ type SiacoinElement struct {
 // paired with useful metadata.
 type Transaction struct {
 	Raw       types.Transaction
-	Index     consensus.ChainIndex
+	Index     types.ChainIndex
 	ID        types.TransactionID
 	Inflow    types.Currency
 	Outflow   types.Currency
@@ -115,28 +115,28 @@ type SingleAddressStore interface {
 // A TransactionPool contains transactions that have not yet been included in a
 // block.
 type TransactionPool interface {
-	ContainsElement(id types.OutputID) bool
+	ContainsElement(id types.Hash256) bool
 }
 
 // A SingleAddressWallet is a hot wallet that manages the outputs controlled by
 // a single address.
 type SingleAddressWallet struct {
-	priv  consensus.PrivateKey
-	addr  types.UnlockHash
+	priv  types.PrivateKey
+	addr  types.Address
 	store SingleAddressStore
 
 	// for building transactions
 	mu   sync.Mutex
-	used map[types.OutputID]bool
+	used map[types.Hash256]bool
 }
 
 // PrivateKey returns the private key of the wallet.
-func (w *SingleAddressWallet) PrivateKey() consensus.PrivateKey {
+func (w *SingleAddressWallet) PrivateKey() types.PrivateKey {
 	return w.priv
 }
 
 // Address returns the address of the wallet.
-func (w *SingleAddressWallet) Address() types.UnlockHash {
+func (w *SingleAddressWallet) Address() types.Address {
 	return w.addr
 }
 
@@ -161,7 +161,7 @@ func (w *SingleAddressWallet) Transactions(since time.Time, max int) ([]Transact
 // the provided transaction. A change output is also added, if necessary. The
 // inputs will not be available to future calls to FundTransaction unless
 // ReleaseInputs is called.
-func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.OutputID, error) {
+func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if amount.IsZero() {
@@ -169,10 +169,10 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 	}
 
 	// avoid reusing any inputs currently in the transaction pool
-	inPool := make(map[types.OutputID]bool)
+	inPool := make(map[types.Hash256]bool)
 	for _, ptxn := range pool {
 		for _, in := range ptxn.SiacoinInputs {
-			inPool[types.OutputID(in.ParentID)] = true
+			inPool[types.Hash256(in.ParentID)] = true
 		}
 	}
 
@@ -199,12 +199,12 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 		return nil, ErrInsufficientBalance
 	} else if outputSum.Cmp(amount) > 0 {
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			Value:      outputSum.Sub(amount),
-			UnlockHash: w.addr,
+			Value:   outputSum.Sub(amount),
+			Address: w.addr,
 		})
 	}
 
-	toSign := make([]types.OutputID, len(fundingElements))
+	toSign := make([]types.Hash256, len(fundingElements))
 	for i, sce := range fundingElements {
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(sce.ID),
@@ -222,21 +222,47 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 // or will never be broadcast.
 func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
 	for _, in := range txn.SiacoinInputs {
-		delete(w.used, types.OutputID(in.ParentID))
+		delete(w.used, types.Hash256(in.ParentID))
+	}
+}
+
+func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	core.EncodeTo(e)
+	e.Flush()
+	if err := siad.UnmarshalSia(&buf); err != nil {
+		panic(err)
 	}
 }
 
 // SignTransaction adds a signature to each of the specified inputs.
-func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error {
+func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
+	// NOTE: siad uses different hardfork heights when -tags=testing is set,
+	// so we have to alter cs accordingly.
+	// TODO: remove this
+	switch {
+	case cs.Index.Height >= uint64(stypes.FoundationHardforkHeight):
+		cs.Index.Height = 298000
+	case cs.Index.Height >= uint64(stypes.ASICHardforkHeight):
+		cs.Index.Height = 179000
+	}
+
 	for _, id := range toSign {
-		i := len(txn.TransactionSignatures)
-		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
-			ParentID:       crypto.Hash(id),
+		ts := types.TransactionSignature{
+			ParentID:       id,
 			CoveredFields:  cf,
 			PublicKeyIndex: 0,
-		})
-		sig := w.priv.SignHash(cs.InputSigHash(*txn, i))
-		txn.TransactionSignatures[i].Signature = sig[:]
+		}
+		var h types.Hash256
+		if cf.WholeTransaction {
+			h = cs.WholeSigHash(*txn, ts.ParentID, ts.PublicKeyIndex, ts.Timelock, cf.Signatures)
+		} else {
+			h = cs.PartialSigHash(*txn, cf)
+		}
+		sig := w.priv.SignHash(h)
+		ts.Signature = sig[:]
+		txn.Signatures = append(txn.Signatures, ts)
 	}
 	return nil
 }
@@ -247,7 +273,7 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 //
 // NOTE: we can not reuse 'FundTransaction' because it randomizes the unspent
 // transaction outputs it uses and we need a minimal set of inputs
-func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.OutputID, error) {
+func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -255,8 +281,8 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	var txn types.Transaction
 	for i := 0; i < int(outputs); i++ {
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			Value:      amount,
-			UnlockHash: w.Address(),
+			Value:   amount,
+			Address: w.Address(),
 		})
 	}
 
@@ -272,10 +298,10 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	})
 
 	// map used outputs
-	inPool := make(map[types.OutputID]bool)
+	inPool := make(map[types.Hash256]bool)
 	for _, ptxn := range pool {
 		for _, in := range ptxn.SiacoinInputs {
-			inPool[types.OutputID(in.ParentID)] = true
+			inPool[types.Hash256(in.ParentID)] = true
 		}
 	}
 
@@ -314,13 +340,13 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	change := SumOutputs(inputs).Sub(want.Add(fee))
 	if !change.IsZero() {
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			Value:      change,
-			UnlockHash: w.addr,
+			Value:   change,
+			Address: w.addr,
 		})
 	}
 
 	// add the inputs
-	toSign := make([]types.OutputID, len(inputs))
+	toSign := make([]types.Hash256, len(inputs))
 	for i, sce := range inputs {
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(sce.ID),
@@ -334,20 +360,19 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 }
 
 // SumOutputs returns the total value of the supplied outputs.
-func SumOutputs(outputs []SiacoinElement) types.Currency {
-	sum := new(big.Int)
+func SumOutputs(outputs []SiacoinElement) (sum types.Currency) {
 	for _, o := range outputs {
-		sum.Add(sum, o.Value.Big())
+		sum = sum.Add(o.Value)
 	}
-	return types.NewCurrency(sum)
+	return
 }
 
 // NewSingleAddressWallet returns a new SingleAddressWallet using the provided private key and store.
-func NewSingleAddressWallet(priv consensus.PrivateKey, store SingleAddressStore) *SingleAddressWallet {
+func NewSingleAddressWallet(priv types.PrivateKey, store SingleAddressStore) *SingleAddressWallet {
 	return &SingleAddressWallet{
 		priv:  priv,
 		addr:  StandardAddress(priv.PublicKey()),
 		store: store,
-		used:  make(map[types.OutputID]bool),
+		used:  make(map[types.Hash256]bool),
 	}
 }

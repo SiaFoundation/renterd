@@ -5,15 +5,15 @@ import (
 	"io"
 
 	"github.com/klauspost/reedsolomon"
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"golang.org/x/crypto/chacha20"
 )
 
 // A Sector uniquely identifies a sector stored on a particular host.
 type Sector struct {
-	Host consensus.PublicKey
-	Root consensus.Hash256
+	Host types.PublicKey
+	Root types.Hash256
 }
 
 // A Slab is raw data that has been erasure-encoded into sector-sized shards,

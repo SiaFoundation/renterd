@@ -3,8 +3,8 @@ package stores
 import (
 	"math/big"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/ephemeralaccounts"
-	"go.sia.tech/renterd/internal/consensus"
 )
 
 type (
@@ -17,7 +17,7 @@ type (
 		AccountID ephemeralaccounts.AccountID `gorm:"unique;NOT NULL"`
 
 		// Host describes the host the account was created with.
-		Host consensus.PublicKey `gorm:"unique;NOT NULL"`
+		Host types.PublicKey `gorm:"unique;NOT NULL"`
 
 		// Balance is the balance of the account.
 		Balance *big.Int `gorm:"type:bytes;serializer:gob"`

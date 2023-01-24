@@ -1,6 +1,7 @@
 package rhp
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -12,8 +13,8 @@ import (
 	"sync"
 
 	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/core/types"
 	"go.sia.tech/mux"
-	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
@@ -31,7 +32,7 @@ type PriceTablePaymentFunc func(pt HostPriceTable) (PaymentMethod, error)
 
 // An RPCError may be sent instead of a response object to any RPC.
 type RPCError struct {
-	Type        Specifier
+	Type        types.Specifier
 	Data        []byte // structure depends on Type
 	Description string // human-readable error string
 }
@@ -54,33 +55,43 @@ type rpcResponse struct {
 }
 
 type protocolObject interface {
-	encoding.SiaMarshaler
-	encoding.SiaUnmarshaler
+	types.EncoderTo
+	types.DecoderFrom
 }
 
-func writeRequest(w io.Writer, id Specifier, req protocolObject) error {
-	if _, err := w.Write(id[:]); err != nil {
-		return err
-	}
-	return req.MarshalSia(w)
+func writeResponse(w io.Writer, resp protocolObject) error {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	e.WritePrefix(0) // placeholder
+	(&rpcResponse{nil, resp}).EncodeTo(e)
+	e.Flush()
+	b := buf.Bytes()
+	binary.LittleEndian.PutUint64(b[:8], uint64(len(b)-8))
+	_, err := w.Write(b)
+	return err
 }
 
 func readResponse(r io.Reader, resp protocolObject) error {
+	d := types.NewDecoder(io.LimitedReader{R: r, N: 1 << 20})
+	d.ReadPrefix() // ignored
 	rr := rpcResponse{nil, resp}
-	if err := encoding.ReadObject(r, &rr, 4096); err != nil {
-		return err
+	rr.DecodeFrom(d)
+	if d.Err() != nil {
+		return d.Err()
 	} else if rr.err != nil {
 		return rr.err
 	}
 	return nil
 }
 
-func writeResponse(w io.Writer, resp protocolObject) error {
-	return encoding.WriteObject(w, &rpcResponse{nil, resp})
-}
-
-func writeResponseErr(s *mux.Stream, err error) error {
-	return encoding.WriteObject(s, &rpcResponse{&RPCError{Description: err.Error()}, nil})
+func writeRequest(w io.Writer, id types.Specifier, req protocolObject) error {
+	if err := writeResponse(w, &id); err != nil {
+		return err
+	}
+	if req != nil {
+		return writeResponse(w, req)
+	}
+	return nil
 }
 
 func processPayment(rw io.ReadWriter, payment PaymentMethod) error {
@@ -189,7 +200,7 @@ func (t *Transport) Close() error {
 }
 
 // NewRenterTransport establishes a new RHPv3 session over the supplied connection.
-func NewRenterTransport(conn net.Conn, hostKey PublicKey) (*Transport, error) {
+func NewRenterTransport(conn net.Conn, hostKey types.PublicKey) (*Transport, error) {
 	m, err := mux.Dial(conn, hostKey[:])
 	if err != nil {
 		return nil, err
@@ -207,7 +218,7 @@ func RPCPriceTable(t *Transport, paymentFunc PriceTablePaymentFunc) (pt HostPric
 	defer s.Close()
 
 	var ptr rpcUpdatePriceTableResponse
-	if err := writeResponse(s, &rpcUpdatePriceTableID); err != nil {
+	if err := writeRequest(s, rpcUpdatePriceTableID, nil); err != nil {
 		return HostPriceTable{}, err
 	} else if err := readResponse(s, &ptr); err != nil {
 		return HostPriceTable{}, err
@@ -247,9 +258,7 @@ func RPCFundAccount(t *Transport, payment PaymentMethod, account Account, settin
 		Account: account,
 	}
 	var resp rpcFundAccountResponse
-	if err := writeResponse(s, &rpcFundAccountID); err != nil {
-		return err
-	} else if err := writeResponse(s, &settingsID); err != nil {
+	if err := writeRequest(s, rpcFundAccountID, &settingsID); err != nil {
 		return err
 	} else if err := writeResponse(s, &req); err != nil {
 		return err
@@ -271,7 +280,7 @@ func RPCReadRegistry(t *Transport, payment PaymentMethod, key RegistryKey) (rv R
 	req := &rpcExecuteProgramRequest{
 		FileContractID: types.FileContractID{},
 		Program: []instruction{{
-			Specifier: newSpecifier("ReadRegistry"),
+			Specifier: types.NewSpecifier("ReadRegistry"),
 			Args:      encoding.MarshalAll(0, 32),
 		}},
 		ProgramData: encoding.MarshalAll(key.PublicKey, key.Tweak),
@@ -284,7 +293,7 @@ func RPCReadRegistry(t *Transport, payment PaymentMethod, key RegistryKey) (rv R
 		return RegistryValue{}, err
 	}
 
-	var cancellationToken Specifier
+	var cancellationToken types.Specifier
 	readResponse(s, &cancellationToken) // unused
 
 	var resp rpcExecuteProgramResponse
@@ -297,7 +306,7 @@ func RPCReadRegistry(t *Transport, payment PaymentMethod, key RegistryKey) (rv R
 	if _, err := s.Read(buf); err != nil {
 		return RegistryValue{}, err
 	}
-	var sig Signature
+	var sig types.Signature
 	copy(sig[:], buf[:64])
 	rev := binary.BigEndian.Uint64(buf[64:72])
 	data := buf[72 : len(buf)-1]
@@ -320,7 +329,7 @@ func RPCUpdateRegistry(t *Transport, payment PaymentMethod, key RegistryKey, val
 	req := &rpcExecuteProgramRequest{
 		FileContractID: types.FileContractID{},
 		Program: []instruction{{
-			Specifier: newSpecifier("UpdateRegistry"),
+			Specifier: types.NewSpecifier("UpdateRegistry"),
 			Args:      encoding.Marshal(0),
 		}},
 		ProgramData: append(encoding.MarshalAll(key.Tweak, value.Revision, value.Signature, key.PublicKey), value.Data...),
@@ -333,7 +342,7 @@ func RPCUpdateRegistry(t *Transport, payment PaymentMethod, key RegistryKey, val
 		return err
 	}
 
-	var cancellationToken Specifier
+	var cancellationToken types.Specifier
 	readResponse(s, &cancellationToken) // unused
 
 	var resp rpcExecuteProgramResponse

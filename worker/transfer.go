@@ -6,21 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 
-	"go.sia.tech/renterd/internal/consensus"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 )
 
 // A sectorStore stores contract data.
 type sectorStore interface {
 	Contract() types.FileContractID
-	PublicKey() consensus.PublicKey
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (consensus.Hash256, error)
-	DownloadSector(ctx context.Context, w io.Writer, root consensus.Hash256, offset, length uint32) error
-	DeleteSectors(ctx context.Context, roots []consensus.Hash256) error
+	PublicKey() types.PublicKey
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error)
+	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
+	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }
 
 func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore) ([]object.Sector, error) {
@@ -34,7 +32,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	}
 	type resp struct {
 		req  req
-		root consensus.Hash256
+		root types.Hash256
 		err  error
 	}
 	reqChan := make(chan req, len(shards))
@@ -228,7 +226,7 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.S
 }
 
 func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) error {
-	rootsBysectorStore := make(map[consensus.PublicKey][]consensus.Hash256)
+	rootsBysectorStore := make(map[types.PublicKey][]types.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
 			rootsBysectorStore[sector.Host] = append(rootsBysectorStore[sector.Host], sector.Root)
@@ -262,20 +260,31 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 }
 
 func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error {
-	// keep some state, hosts in the state are considered good hosts, for every
-	// host we keep track of the amount of times they are used in the slab
-	state := make(map[string]int)
+	hostsmap := make(map[string]struct{})
+	usedmap := make(map[string]struct{})
+
+	// make a map of good hosts
 	for _, h := range hosts {
-		state[h.PublicKey().String()] = 0
+		hostsmap[h.PublicKey().String()] = struct{}{}
 	}
 
-	// loop all shards and collect the indices of those that need to be migrated
+	// collect indices of shards that need to be migrated
 	var shardIndices []int
 	for i, shard := range s.Shards {
-		if _, good := state[shard.Host.String()]; !good {
+		// bad host
+		if _, exists := hostsmap[shard.Host.String()]; !exists {
 			shardIndices = append(shardIndices, i)
+			continue
 		}
-		state[shard.Host.String()]++
+
+		// reused host
+		_, exists := usedmap[shard.Host.String()]
+		if exists {
+			shardIndices = append(shardIndices, i)
+			continue
+		}
+
+		usedmap[shard.Host.String()] = struct{}{}
 	}
 
 	// if all shards are on good hosts, we're done
@@ -312,13 +321,16 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error
 	}
 	shards = shards[:len(shardIndices)]
 
-	// sort the hosts in a way that frequently used hosts are at the end
-	sort.SliceStable(hosts, func(i, j int) bool {
-		return state[hosts[i].PublicKey().String()] < state[hosts[j].PublicKey().String()]
-	})
+	// filter out the hosts we used already
+	filtered := hosts[:0]
+	for _, h := range hosts {
+		if _, used := usedmap[h.PublicKey().String()]; !used {
+			filtered = append(filtered, h)
+		}
+	}
 
 	// reupload those shards
-	uploaded, err := parallelUploadSlab(ctx, shards, hosts)
+	uploaded, err := parallelUploadSlab(ctx, shards, filtered)
 	if err != nil {
 		return err
 	}

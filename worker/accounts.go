@@ -5,11 +5,10 @@ import (
 	"math/big"
 	"sync"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/rhp/v3"
-	"go.sia.tech/siad/types"
-	"golang.org/x/crypto/blake2b"
+	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
 type (
@@ -18,10 +17,10 @@ type (
 	accounts struct {
 		bus      AccountStore
 		workerID string
-		key      consensus.PrivateKey
+		key      types.PrivateKey
 
 		mu       sync.Mutex
-		accounts map[rhp.Account]*account
+		accounts map[rhpv3.Account]*account
 	}
 
 	// account contains information regarding a specific account of the
@@ -29,8 +28,8 @@ type (
 	account struct {
 		bus  AccountStore
 		id   rhp.Account
-		key  consensus.PrivateKey
-		host consensus.PublicKey
+		key  types.PrivateKey
+		host types.PublicKey
 
 		mu      sync.Mutex
 		balance *big.Int
@@ -59,19 +58,19 @@ func (a *accounts) All() ([]api.Account, error) {
 
 // ForHost returns an account to use for a given host. If the account
 // doesn't exist, a new one is created.
-func (a *accounts) ForHost(hk consensus.PublicKey) (*account, error) {
+func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 	// Make sure accounts are initialised.
 	if err := a.tryInitAccounts(); err != nil {
 		return nil, err
 	}
 
 	// Key should be set.
-	if hk == (consensus.PublicKey{}) {
+	if hk == (types.PublicKey{}) {
 		return nil, errors.New("empty host key provided")
 	}
 
 	// Create and or return account.
-	accountID := rhp.Account(a.key.PublicKey())
+	accountID := rhpv3.Account(a.key.PublicKey())
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -112,15 +111,15 @@ func (a *accounts) tryInitAccounts() error {
 	if a.accounts != nil {
 		return nil // already initialised
 	}
-	a.accounts = make(map[rhp.Account]*account)
+	a.accounts = make(map[rhpv3.Account]*account)
 	accounts, err := a.bus.Accounts(a.workerID)
 	if err != nil {
 		return err
 	}
 	for _, acc := range accounts {
-		a.accounts[rhp.Account(acc.ID)] = &account{
+		a.accounts[rhpv3.Account(acc.ID)] = &account{
 			bus:     a.bus,
-			id:      rhp.Account(acc.ID),
+			id:      rhpv3.Account(acc.ID),
 			key:     a.deriveAccountKey(acc.Host),
 			balance: acc.Balance.Big(),
 		}
@@ -132,7 +131,7 @@ func (a *accounts) tryInitAccounts() error {
 // Each worker has its own account for a given host. That makes concurrency
 // around keeping track of an accounts balance and refilling it a lot easier in
 // a multi-worker setup.
-func (a *accounts) deriveAccountKey(hostKey consensus.PublicKey) consensus.PrivateKey {
+func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	index := byte(0) // not used yet but can be used to derive more than 1 account per host
 
 	// Append the owner of the account (worker's id), the host for which to
@@ -142,8 +141,8 @@ func (a *accounts) deriveAccountKey(hostKey consensus.PublicKey) consensus.Priva
 	data = append(data, hostKey[:]...)
 	data = append(data, index)
 
-	seed := blake2b.Sum256(data)
-	pk := consensus.NewPrivateKeyFromSeed(seed[:])
+	seed := types.HashBytes(data)
+	pk := types.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
 		seed[i] = 0
 	}

@@ -1,51 +1,43 @@
 package rhp
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 
-	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/renterd/internal/consensus"
-	"go.sia.tech/siad/types"
+	"go.sia.tech/core/types"
 )
 
-// MarshalSia implements encoding.SiaMarshaler.
-func (s Specifier) MarshalSia(w io.Writer) error {
-	_, err := w.Write(s[:])
-	return err
+// EncodeTo implements types.EncoderTo.
+func (r *RPCError) EncodeTo(e *types.Encoder) {
+	r.Type.EncodeTo(e)
+	e.WriteBytes(r.Data)
+	e.WriteString(r.Description)
 }
 
-// UnmarshalSia implements encoding.SiaUnmarshaler.
-func (s *Specifier) UnmarshalSia(r io.Reader) error {
-	_, err := r.Read(s[:])
-	return err
+// DecodeFrom implements types.DecoderFrom.
+func (r *RPCError) DecodeFrom(d *types.Decoder) {
+	r.Type.DecodeFrom(d)
+	r.Data = d.ReadBytes()
+	r.Description = d.ReadString()
 }
 
-// MarshalSia implements encoding.SiaMarshaler.
-func (s SettingsID) MarshalSia(w io.Writer) error {
-	_, err := w.Write(s[:])
-	return err
-}
+// EncodeTo implements types.EncoderTo.
+func (s *SettingsID) EncodeTo(e *types.Encoder) { e.Write(s[:]) }
 
-// UnmarshalSia implements encoding.SiaUnmarshaler.
-func (s *SettingsID) UnmarshalSia(r io.Reader) error {
-	_, err := r.Read(s[:])
-	return err
-}
+// DecodeFrom implements types.DecoderFrom.
+func (s *SettingsID) DecodeFrom(d *types.Decoder) { d.Read(s[:]) }
 
-// String prints the uid in hex.
+// String implements fmt.Stringer.
 func (s SettingsID) String() string {
 	return hex.EncodeToString(s[:])
 }
 
-// LoadString loads the unique id from the given string. It is the inverse of
-// the `String` method.
+// LoadString loads the unique id from the given string.
 func (s *SettingsID) LoadString(input string) error {
-	// *2 because there are 2 hex characters per byte.
-	if len(input) != types.SpecifierLen*2 {
+	if len(input) != len(s)*2 {
 		return errors.New("incorrect length")
 	}
 	uidBytes, err := hex.DecodeString(input)
@@ -63,107 +55,128 @@ func (s SettingsID) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON decodes the json hex string of the id.
 func (s *SettingsID) UnmarshalJSON(b []byte) error {
-	// *2 because there are 2 hex characters per byte.
-	// +2 because the encoded JSON string is wrapped in `"`.
 	if len(b) != len(SettingsID{})*2+2 {
 		return errors.New("incorrect length")
 	}
-
-	// b[1 : len(b)-1] cuts off the leading and trailing `"` in the JSON string.
-	return s.LoadString(string(b[1 : len(b)-1]))
+	return s.LoadString(string(bytes.Trim(b, `"`)))
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
-func (resp rpcResponse) MarshalSia(w io.Writer) error {
+func (resp *rpcResponse) EncodeTo(e *types.Encoder) {
+	e.WriteBool(resp.err != nil)
 	if resp.err != nil {
-		return encoding.NewEncoder(w).EncodeAll(true, resp.err)
+		resp.err.EncodeTo(e)
+		return
 	}
-	return encoding.NewEncoder(w).EncodeAll(false, resp.data)
+	resp.data.EncodeTo(e)
 }
 
-func (resp *rpcResponse) UnmarshalSia(r io.Reader) error {
-	d := encoding.NewDecoder(r, 1<<20)
-	var isError bool
-	if err := d.Decode(&isError); err != nil {
-		return err
-	} else if isError {
+func (resp *rpcResponse) DecodeFrom(d *types.Decoder) {
+	if d.ReadBool() {
 		resp.err = new(RPCError)
-		return d.Decode(resp.err)
+		resp.err.DecodeFrom(d)
+		return
 	}
-	return d.Decode(resp.data)
+	resp.data.DecodeFrom(d)
 }
 
-// MarshalSia implements encoding.SiaMarshaler.
-func (a Account) MarshalSia(w io.Writer) error {
-	if a == (Account{}) {
-		return (types.SiaPublicKey{}).MarshalSia(w)
+// EncodeTo implements types.EncoderTo.
+func (a *Account) EncodeTo(e *types.Encoder) {
+	var uk types.UnlockKey
+	if *a != ZeroAccount {
+		uk.Algorithm = types.SpecifierEd25519
+		uk.Key = a[:]
 	}
-	return (types.SiaPublicKey{
-		Algorithm: types.SignatureEd25519,
-		Key:       a[:],
-	}).MarshalSia(w)
+	uk.EncodeTo(e)
 }
 
-// UnmarshalSia implements encoding.SiaUnmarshaler.
-func (a *Account) UnmarshalSia(r io.Reader) error {
-	var spk types.SiaPublicKey
-	if err := spk.UnmarshalSia(r); err != nil {
-		return err
-	} else if spk.Algorithm == (types.Specifier{}) && len(spk.Key) == 0 {
-		*a = Account{}
-		return nil
-	} else if spk.Algorithm != types.SignatureEd25519 {
-		return fmt.Errorf("unsupported signature algorithm: %v", spk.Algorithm)
+// DecodeFrom implements types.DecoderFrom.
+func (a *Account) DecodeFrom(d *types.Decoder) {
+	var spk types.UnlockKey
+	spk.DecodeFrom(d)
+	if spk.Algorithm == (types.Specifier{}) && len(spk.Key) == 0 {
+		*a = ZeroAccount
+		return
+	} else if spk.Algorithm != types.SpecifierEd25519 {
+		d.SetErr(fmt.Errorf("unsupported signature algorithm: %v", spk.Algorithm))
+		return
 	}
 	copy(a[:], spk.Key)
-	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
 func (a Account) MarshalJSON() ([]byte, error) {
-	return consensus.PublicKey(a).MarshalJSON()
+	return types.PublicKey(a).MarshalJSON()
 }
 
 // MarshalJSON implements json.Marshaler.
 func (a *Account) UnmarshalJSON(b []byte) error {
-	return (*consensus.PublicKey)(a).UnmarshalJSON(b)
+	return (*types.PublicKey)(a).UnmarshalJSON(b)
 }
 
-// MarshalSia implements encoding.SiaMarshaler.
-func (r PayByEphemeralAccountRequest) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.Account, r.Expiry, r.Account, r.Nonce, r.Signature[:], r.Priority)
+// EncodeTo implements types.EncoderTo.
+func (r *PayByEphemeralAccountRequest) EncodeTo(e *types.Encoder) {
+	r.Account.EncodeTo(e)
+	e.WriteUint64(r.Expiry)
+	r.Amount.EncodeTo(e)
+	e.Write(r.Nonce[:])
+	r.Signature.EncodeTo(e)
+	e.WriteUint64(uint64(r.Priority))
 }
 
-// UnmarshalSia implements encoding.SiaUnmarshaler.
-func (r *PayByEphemeralAccountRequest) UnmarshalSia(rd io.Reader) error {
-	var signature []byte
-	err := encoding.NewDecoder(rd, 4096).DecodeAll(&r.Account, &r.Expiry, &r.Account, &r.Nonce, &signature, &r.Priority)
-	copy(r.Signature[:], signature)
-	return err
+// DecodeFrom implements types.DecoderFrom.
+func (r *PayByEphemeralAccountRequest) DecodeFrom(d *types.Decoder) {
+	r.Account.DecodeFrom(d)
+	r.Expiry = d.ReadUint64()
+	r.Amount.DecodeFrom(d)
+	d.Read(r.Nonce[:])
+	r.Signature.DecodeFrom(d)
+	r.Priority = int64(d.ReadUint64())
 }
 
-// MarshalSia implements encoding.SiaMarshaler.
-func (r PayByContractRequest) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.ContractID, r.NewRevisionNumber, r.NewValidProofValues, r.NewMissedProofValues, r.RefundAccount, r.Signature[:])
+// EncodeTo implements types.EncoderTo.
+func (r *PayByContractRequest) EncodeTo(e *types.Encoder) {
+	r.ContractID.EncodeTo(e)
+	e.WriteUint64(r.RevisionNumber)
+	e.WritePrefix(len(r.ValidProofValues))
+	for i := range r.ValidProofValues {
+		r.ValidProofValues[i].EncodeTo(e)
+	}
+	e.WritePrefix(len(r.MissedProofValues))
+	for i := range r.MissedProofValues {
+		r.MissedProofValues[i].EncodeTo(e)
+	}
+	r.RefundAccount.EncodeTo(e)
+	e.WriteBytes(r.Signature[:])
+	r.HostSignature.EncodeTo(e)
 }
 
-// UnmarshalSia implements encoding.SiaUnmarshaler.
-func (r *PayByContractRequest) UnmarshalSia(rd io.Reader) error {
-	var signature []byte
-	err := encoding.NewDecoder(rd, 4096).DecodeAll(&r.ContractID, &r.NewRevisionNumber, &r.NewValidProofValues, &r.NewMissedProofValues, &r.RefundAccount, &signature)
-	copy(r.Signature[:], signature)
-	return err
+// DecodeFrom implements types.DecoderFrom.
+func (r *PayByContractRequest) DecodeFrom(d *types.Decoder) {
+	r.ContractID.DecodeFrom(d)
+	r.RevisionNumber = d.ReadUint64()
+	r.ValidProofValues = make([]types.Currency, d.ReadPrefix())
+	for i := range r.ValidProofValues {
+		r.ValidProofValues[i].DecodeFrom(d)
+	}
+	r.MissedProofValues = make([]types.Currency, d.ReadPrefix())
+	for i := range r.MissedProofValues {
+		r.MissedProofValues[i].DecodeFrom(d)
+	}
+	r.RefundAccount.DecodeFrom(d)
+	copy(r.Signature[:], d.ReadBytes())
+	r.HostSignature.DecodeFrom(d)
 }
 
-func (r paymentResponse) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.Signature)
+func (r *paymentResponse) EncodeTo(e *types.Encoder) {
+	r.Signature.EncodeTo(e)
 }
 
-func (r *paymentResponse) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.Signature)
+func (r *paymentResponse) DecodeFrom(d *types.Decoder) {
+	r.Signature.DecodeFrom(d)
 }
 
-func paymentType(payment PaymentMethod) *Specifier {
+func paymentType(payment PaymentMethod) *types.Specifier {
 	switch payment.(type) {
 	case *PayByContractRequest:
 		return &paymentTypeContract
@@ -174,45 +187,100 @@ func paymentType(payment PaymentMethod) *Specifier {
 	}
 }
 
-func (ptr rpcUpdatePriceTableResponse) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(ptr.PriceTableJSON)
+func (rpcPriceTableResponse) EncodeTo(e *types.Encoder)   {}
+func (rpcPriceTableResponse) DecodeFrom(d *types.Decoder) {}
+
+func (r *rpcUpdatePriceTableResponse) EncodeTo(e *types.Encoder) {
+	e.WriteBytes(r.PriceTableJSON)
+}
+func (r *rpcUpdatePriceTableResponse) DecodeFrom(d *types.Decoder) {
+	r.PriceTableJSON = d.ReadBytes()
 }
 
-func (ptr *rpcUpdatePriceTableResponse) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&ptr.PriceTableJSON)
+func (r *rpcFundAccountRequest) EncodeTo(e *types.Encoder) {
+	r.Account.EncodeTo(e)
 }
 
-func (rpcPriceTableResponse) MarshalSia(w io.Writer) error    { return nil }
-func (rpcPriceTableResponse) UnmarshalSia(rd io.Reader) error { return nil }
-
-func (r rpcFundAccountRequest) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.Account)
+func (r *rpcFundAccountRequest) DecodeFrom(d *types.Decoder) {
+	r.Account.DecodeFrom(d)
 }
 
-func (r *rpcFundAccountRequest) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.Account)
+func (r *rpcFundAccountResponse) EncodeTo(e *types.Encoder) {
+	r.Balance.EncodeTo(e)
+	r.Receipt.Host.EncodeTo(e)
+	r.Receipt.Account.EncodeTo(e)
+	r.Receipt.Amount.EncodeTo(e)
+	e.WriteTime(r.Receipt.Timestamp)
+	r.Signature.EncodeTo(e)
 }
 
-func (r rpcFundAccountResponse) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.Balance, r.Receipt, r.Signature)
+func (r *rpcFundAccountResponse) DecodeFrom(d *types.Decoder) {
+	r.Balance.DecodeFrom(d)
+	r.Receipt.Host.DecodeFrom(d)
+	r.Receipt.Account.DecodeFrom(d)
+	r.Receipt.Amount.DecodeFrom(d)
+	r.Receipt.Timestamp = d.ReadTime()
+	r.Signature.DecodeFrom(d)
 }
 
-func (r *rpcFundAccountResponse) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.Balance, &r.Receipt, &r.Signature)
+func (i *instruction) EncodeTo(e *types.Encoder) {
+	i.Specifier.EncodeTo(e)
+	e.WriteBytes(i.Args)
 }
 
-func (r rpcExecuteProgramRequest) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.FileContractID, r.Program, r.ProgramData)
+func (i *instruction) DecodeFrom(d *types.Decoder) {
+	i.Specifier.DecodeFrom(d)
+	i.Args = d.ReadBytes()
 }
 
-func (r *rpcExecuteProgramRequest) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.FileContractID, &r.Program, &r.ProgramData)
+func (r *rpcExecuteProgramRequest) EncodeTo(e *types.Encoder) {
+	r.FileContractID.EncodeTo(e)
+	e.WritePrefix(len(r.Program))
+	for i := range r.Program {
+		r.Program[i].EncodeTo(e)
+	}
+	e.WriteBytes(r.ProgramData)
 }
 
-func (r rpcExecuteProgramResponse) MarshalSia(w io.Writer) error {
-	return encoding.NewEncoder(w).EncodeAll(r.AdditionalCollateral, r.OutputLength, r.NewMerkleRoot, r.NewSize, r.Proof, r.Error, r.TotalCost, r.FailureRefund)
+func (r *rpcExecuteProgramRequest) DecodeFrom(d *types.Decoder) {
+	r.FileContractID.DecodeFrom(d)
+	r.Program = make([]instruction, d.ReadPrefix())
+	for i := range r.Program {
+		r.Program[i].DecodeFrom(d)
+	}
+	r.ProgramData = d.ReadBytes()
 }
 
-func (r *rpcExecuteProgramResponse) UnmarshalSia(rd io.Reader) error {
-	return encoding.NewDecoder(rd, 4096).DecodeAll(&r.AdditionalCollateral, &r.OutputLength, &r.NewMerkleRoot, &r.NewSize, &r.Proof, &r.Error, &r.TotalCost, &r.FailureRefund)
+func (r *rpcExecuteProgramResponse) EncodeTo(e *types.Encoder) {
+	r.AdditionalCollateral.EncodeTo(e)
+	e.WriteUint64(r.OutputLength)
+	r.NewMerkleRoot.EncodeTo(e)
+	e.WriteUint64(r.NewSize)
+	e.WritePrefix(len(r.Proof))
+	for i := range r.Proof {
+		r.Proof[i].EncodeTo(e)
+	}
+	var errString string
+	if r.Error != nil {
+		errString = r.Error.Error()
+	}
+	e.WriteString(errString)
+	r.TotalCost.EncodeTo(e)
+	r.FailureRefund.EncodeTo(e)
+}
+
+func (r *rpcExecuteProgramResponse) DecodeFrom(d *types.Decoder) {
+	r.AdditionalCollateral.DecodeFrom(d)
+	r.OutputLength = d.ReadUint64()
+	r.NewMerkleRoot.DecodeFrom(d)
+	r.NewSize = d.ReadUint64()
+	r.Proof = make([]types.Hash256, d.ReadPrefix())
+	for i := range r.Proof {
+		r.Proof[i].DecodeFrom(d)
+	}
+	if s := d.ReadString(); s != "" {
+		r.Error = errors.New(s)
+	}
+	r.TotalCost.DecodeFrom(d)
+	r.FailureRefund.DecodeFrom(d)
 }

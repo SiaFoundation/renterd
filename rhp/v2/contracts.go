@@ -1,62 +1,37 @@
 package rhp
 
 import (
-	"bytes"
-	"errors"
 	"math"
-	"math/big"
+	"math/bits"
 
-	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/types"
-	"golang.org/x/crypto/blake2b"
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/types"
+	stypes "go.sia.tech/siad/types"
 )
 
 // A TransactionSigner can sign transaction inputs.
 type TransactionSigner interface {
-	SignTransaction(cs ConsensusState, txn *types.Transaction, toSign []types.OutputID) error
+	SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256) error
 }
 
-// A SingleKeySigner signs transaction using a single key.
-type SingleKeySigner PrivateKey
-
-// SignTransaction implements TransactionSigner.
-func (s SingleKeySigner) SignTransaction(cs ConsensusState, txn *types.Transaction, toSign []types.OutputID) error {
-outer:
-	for _, id := range toSign {
-		for i := range txn.TransactionSignatures {
-			ts := &txn.TransactionSignatures[i]
-			if ts.ParentID == crypto.Hash(id) {
-				sig := PrivateKey(s).SignHash(cs.InputSigHash(*txn, i))
-				ts.Signature = sig[:]
-				continue outer
-			}
-		}
-		return errors.New("no signature with specified ID")
-	}
-	return nil
-}
-
-func hashRevision(rev types.FileContractRevision) Hash256 {
-	or := (*objFileContractRevision)(&rev)
-	var b objBuffer
-	b.buf = *bytes.NewBuffer(make([]byte, 0, 1024))
-	b.grow(or.marshalledSize()) // just in case 1024 is too small
-	or.marshalBuffer(&b)
-	return blake2b.Sum256(b.bytes())
+func hashRevision(rev types.FileContractRevision) types.Hash256 {
+	h := types.NewHasher()
+	rev.EncodeTo(h.E)
+	return h.Sum()
 }
 
 // ContractFormationCost returns the cost of forming a contract.
 func ContractFormationCost(fc types.FileContract, contractFee types.Currency) types.Currency {
-	return fc.ValidRenterPayout().Add(contractFee).Add(types.Tax(fc.WindowStart, fc.Payout))
+	return fc.ValidRenterPayout().Add(contractFee).Add(contractTax(fc))
 }
 
 // PrepareContractFormation constructs a contract formation transaction.
-func PrepareContractFormation(renterKey PrivateKey, hostKey PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
+func PrepareContractFormation(renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
 	renterPubkey := renterKey.PublicKey()
 	uc := types.UnlockConditions{
-		PublicKeys: []types.SiaPublicKey{
-			{Algorithm: types.SignatureEd25519, Key: renterPubkey[:]},
-			{Algorithm: types.SignatureEd25519, Key: hostKey[:]},
+		PublicKeys: []types.UnlockKey{
+			{Algorithm: types.SpecifierEd25519, Key: renterPubkey[:]},
+			{Algorithm: types.SpecifierEd25519, Key: hostKey[:]},
 		},
 		SignaturesRequired: 2,
 	}
@@ -65,45 +40,45 @@ func PrepareContractFormation(renterKey PrivateKey, hostKey PublicKey, renterPay
 	payout := taxAdjustedPayout(renterPayout.Add(hostPayout))
 
 	return types.FileContract{
-		FileSize:       0,
-		FileMerkleRoot: crypto.Hash{},
-		WindowStart:    types.BlockHeight(endHeight),
-		WindowEnd:      types.BlockHeight(endHeight + host.WindowSize),
+		Filesize:       0,
+		FileMerkleRoot: types.Hash256{},
+		WindowStart:    uint64(endHeight),
+		WindowEnd:      uint64(endHeight + host.WindowSize),
 		Payout:         payout,
-		UnlockHash:     uc.UnlockHash(),
+		UnlockHash:     types.Hash256(uc.UnlockHash()),
 		RevisionNumber: 0,
 		ValidProofOutputs: []types.SiacoinOutput{
 			// outputs need to account for tax
-			{Value: renterPayout, UnlockHash: refundAddr},
+			{Value: renterPayout, Address: refundAddr},
 			// collateral is returned to host
-			{Value: hostPayout, UnlockHash: host.UnlockHash},
+			{Value: hostPayout, Address: host.Address},
 		},
 		MissedProofOutputs: []types.SiacoinOutput{
 			// same as above
-			{Value: renterPayout, UnlockHash: refundAddr},
+			{Value: renterPayout, Address: refundAddr},
 			// same as above
-			{Value: hostPayout, UnlockHash: host.UnlockHash},
+			{Value: hostPayout, Address: host.Address},
 			// once we start doing revisions, we'll move some coins to the host and some to the void
-			{Value: types.ZeroCurrency, UnlockHash: types.UnlockHash{}},
+			{Value: types.ZeroCurrency, Address: types.Address{}},
 		},
 	}
 }
 
 // ContractRenewalCost returns the cost of renewing a contract.
 func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) types.Currency {
-	return fc.ValidRenterPayout().Add(contractFee).Add(types.Tax(fc.WindowStart, fc.Payout))
+	return fc.ValidRenterPayout().Add(contractFee).Add(contractTax(fc))
 }
 
 // PrepareContractRenewal constructs a contract renewal transaction.
-func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey PrivateKey, hostKey PublicKey, renterPayout types.Currency, endHeight uint64, host HostSettings, refundAddr types.UnlockHash) types.FileContract {
+func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
 	// calculate "base" price and collateral -- the storage cost and collateral
 	// contribution for the amount of data already in contract. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.
 	var basePrice, baseCollateral types.Currency
-	if contractEnd := types.BlockHeight(endHeight + host.WindowSize); contractEnd > currentRevision.NewWindowEnd {
-		timeExtension := uint64(contractEnd - currentRevision.NewWindowEnd)
-		basePrice = host.StoragePrice.Mul64(currentRevision.NewFileSize).Mul64(timeExtension)
-		baseCollateral = host.Collateral.Mul64(currentRevision.NewFileSize).Mul64(timeExtension)
+	if contractEnd := uint64(endHeight + host.WindowSize); contractEnd > currentRevision.WindowEnd {
+		timeExtension := uint64(contractEnd - currentRevision.WindowEnd)
+		basePrice = host.StoragePrice.Mul64(currentRevision.Filesize).Mul64(timeExtension)
+		baseCollateral = host.Collateral.Mul64(currentRevision.Filesize).Mul64(timeExtension)
 	}
 
 	// estimate collateral for new contract
@@ -142,41 +117,41 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 	hostMissedPayout := hostValidPayout.Sub(voidMissedPayout)
 
 	return types.FileContract{
-		FileSize:       currentRevision.NewFileSize,
-		FileMerkleRoot: currentRevision.NewFileMerkleRoot,
-		WindowStart:    types.BlockHeight(endHeight),
-		WindowEnd:      types.BlockHeight(endHeight + host.WindowSize),
+		Filesize:       currentRevision.Filesize,
+		FileMerkleRoot: currentRevision.FileMerkleRoot,
+		WindowStart:    uint64(endHeight),
+		WindowEnd:      uint64(endHeight + host.WindowSize),
 		Payout:         taxAdjustedPayout(renterPayout.Add(hostValidPayout)),
-		UnlockHash:     currentRevision.NewUnlockHash,
+		UnlockHash:     currentRevision.UnlockHash,
 		RevisionNumber: 0,
 		ValidProofOutputs: []types.SiacoinOutput{
-			{Value: renterPayout, UnlockHash: refundAddr},
-			{Value: hostValidPayout, UnlockHash: host.UnlockHash},
+			{Value: renterPayout, Address: refundAddr},
+			{Value: hostValidPayout, Address: host.Address},
 		},
 		MissedProofOutputs: []types.SiacoinOutput{
-			{Value: renterPayout, UnlockHash: refundAddr},
-			{Value: hostMissedPayout, UnlockHash: host.UnlockHash},
-			{Value: voidMissedPayout, UnlockHash: types.UnlockHash{}},
+			{Value: renterPayout, Address: refundAddr},
+			{Value: hostMissedPayout, Address: host.Address},
+			{Value: voidMissedPayout, Address: types.Address{}},
 		},
 	}
 }
 
 // RPCFormContract forms a contract with a host.
-func RPCFormContract(t *Transport, renterKey PrivateKey, txnSet []types.Transaction) (_ ContractRevision, _ []types.Transaction, err error) {
+func RPCFormContract(t *Transport, renterKey types.PrivateKey, txnSet []types.Transaction) (_ ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
 
 	hostKey := t.HostKey()
 
 	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
-	renterContractSignatures := txn.TransactionSignatures
-	txnSet[len(txnSet)-1].TransactionSignatures = nil
+	renterContractSignatures := txn.Signatures
+	txnSet[len(txnSet)-1].Signatures = nil
 
 	renterPubkey := renterKey.PublicKey()
 	req := &RPCFormContractRequest{
 		Transactions: txnSet,
-		RenterKey: types.SiaPublicKey{
-			Algorithm: types.SignatureEd25519,
+		RenterKey: types.UnlockKey{
+			Algorithm: types.SpecifierEd25519,
 			Key:       renterPubkey[:],
 		},
 	}
@@ -198,25 +173,26 @@ func RPCFormContract(t *Transport, renterKey PrivateKey, txnSet []types.Transact
 	initRevision := types.FileContractRevision{
 		ParentID: txn.FileContractID(0),
 		UnlockConditions: types.UnlockConditions{
-			PublicKeys: []types.SiaPublicKey{
-				{Algorithm: types.SignatureEd25519, Key: renterPubkey[:]},
-				{Algorithm: types.SignatureEd25519, Key: hostKey[:]},
+			PublicKeys: []types.UnlockKey{
+				{Algorithm: types.SpecifierEd25519, Key: renterPubkey[:]},
+				{Algorithm: types.SpecifierEd25519, Key: hostKey[:]},
 			},
 			SignaturesRequired: 2,
 		},
-		NewRevisionNumber: 1,
-
-		NewFileSize:           fc.FileSize,
-		NewFileMerkleRoot:     fc.FileMerkleRoot,
-		NewWindowStart:        fc.WindowStart,
-		NewWindowEnd:          fc.WindowEnd,
-		NewValidProofOutputs:  fc.ValidProofOutputs,
-		NewMissedProofOutputs: fc.MissedProofOutputs,
-		NewUnlockHash:         fc.UnlockHash,
+		FileContract: types.FileContract{
+			RevisionNumber:     1,
+			Filesize:           fc.Filesize,
+			FileMerkleRoot:     fc.FileMerkleRoot,
+			WindowStart:        fc.WindowStart,
+			WindowEnd:          fc.WindowEnd,
+			ValidProofOutputs:  fc.ValidProofOutputs,
+			MissedProofOutputs: fc.MissedProofOutputs,
+			UnlockHash:         fc.UnlockHash,
+		},
 	}
 	revSig := renterKey.SignHash(hashRevision(initRevision))
 	renterRevisionSig := types.TransactionSignature{
-		ParentID:       crypto.Hash(initRevision.ParentID),
+		ParentID:       types.Hash256(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
 		Signature:      revSig[:],
@@ -236,7 +212,7 @@ func RPCFormContract(t *Transport, renterKey PrivateKey, txnSet []types.Transact
 	if err := t.ReadResponse(&hostSigs, 4096); err != nil {
 		return ContractRevision{}, nil, err
 	}
-	txn.TransactionSignatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
+	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
 	return ContractRevision{
@@ -256,16 +232,16 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 
 	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
-	renterContractSignatures := txn.TransactionSignatures
-	txnSet[len(txnSet)-1].TransactionSignatures = nil
+	renterContractSignatures := txn.Signatures
+	txnSet[len(txnSet)-1].Signatures = nil
 
 	// construct the final revision of the old contract
 	finalOldRevision := s.revision.Revision
 	newValid, _ := updateRevisionOutputs(&finalOldRevision, finalPayment, types.ZeroCurrency)
-	finalOldRevision.NewMissedProofOutputs = finalOldRevision.NewValidProofOutputs
-	finalOldRevision.NewFileSize = 0
-	finalOldRevision.NewFileMerkleRoot = crypto.Hash{}
-	finalOldRevision.NewRevisionNumber = math.MaxUint64
+	finalOldRevision.MissedProofOutputs = finalOldRevision.ValidProofOutputs
+	finalOldRevision.Filesize = 0
+	finalOldRevision.FileMerkleRoot = types.Hash256{}
+	finalOldRevision.RevisionNumber = math.MaxUint64
 
 	req := &RPCRenewAndClearContractRequest{
 		Transactions:           txnSet,
@@ -289,21 +265,22 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 	// create initial (no-op) revision, transaction, and signature
 	fc := txn.FileContracts[0]
 	initRevision := types.FileContractRevision{
-		ParentID:          txn.FileContractID(0),
-		UnlockConditions:  s.revision.Revision.UnlockConditions,
-		NewRevisionNumber: 1,
-
-		NewFileSize:           fc.FileSize,
-		NewFileMerkleRoot:     fc.FileMerkleRoot,
-		NewWindowStart:        fc.WindowStart,
-		NewWindowEnd:          fc.WindowEnd,
-		NewValidProofOutputs:  fc.ValidProofOutputs,
-		NewMissedProofOutputs: fc.MissedProofOutputs,
-		NewUnlockHash:         fc.UnlockHash,
+		ParentID:         txn.FileContractID(0),
+		UnlockConditions: s.revision.Revision.UnlockConditions,
+		FileContract: types.FileContract{
+			RevisionNumber:     1,
+			Filesize:           fc.Filesize,
+			FileMerkleRoot:     fc.FileMerkleRoot,
+			WindowStart:        fc.WindowStart,
+			WindowEnd:          fc.WindowEnd,
+			ValidProofOutputs:  fc.ValidProofOutputs,
+			MissedProofOutputs: fc.MissedProofOutputs,
+			UnlockHash:         fc.UnlockHash,
+		},
 	}
 	revSig := s.key.SignHash(hashRevision(initRevision))
 	renterRevisionSig := types.TransactionSignature{
-		ParentID:       crypto.Hash(initRevision.ParentID),
+		ParentID:       types.Hash256(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
 		Signature:      revSig[:],
@@ -325,13 +302,25 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 	if err := s.transport.ReadResponse(&hostSigs, 4096); err != nil {
 		return ContractRevision{}, nil, err
 	}
-	txn.TransactionSignatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
+	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
 	return ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
 	}, signedTxnSet, nil
+}
+
+func contractTax(fc types.FileContract) types.Currency {
+	// NOTE: siad uses different hardfork heights when -tags=testing is set,
+	// so we have to alter cs accordingly.
+	// TODO: remove this
+	cs := consensus.State{Index: types.ChainIndex{Height: fc.WindowStart}}
+	switch {
+	case cs.Index.Height >= uint64(stypes.TaxHardforkHeight):
+		cs.Index.Height = 21000
+	}
+	return cs.FileContractTax(fc)
 }
 
 // NOTE: due to a bug in the transaction validation code, calculating payouts
@@ -351,9 +340,7 @@ func taxAdjustedPayout(target types.Currency) types.Currency {
 	// compute initial guess as target * (1 / 1-tax); since this does not take
 	// the siafund rounding into account, the guess will be up to
 	// types.SiafundCount greater than the actual payout value.
-	guess := target.Big()
-	guess.Mul(guess, big.NewInt(1000))
-	guess.Div(guess, big.NewInt(961))
+	guess := target.Mul64(1000).Div64(961)
 
 	// now, adjust the guess to remove the rounding error. We know that:
 	//
@@ -370,14 +357,22 @@ func taxAdjustedPayout(target types.Currency) types.Currency {
 	//                  = 91211572
 	//   target % 10000 =     4321
 	//   adjusted_guess = 91204321
-	sfc := types.SiafundCount.Big()
-	tm := new(big.Int).Mod(target.Big(), sfc)
-	gm := new(big.Int).Mod(guess, sfc)
-	if gm.Cmp(tm) < 0 {
-		guess.Sub(guess, sfc)
-	}
-	guess.Sub(guess, gm)
-	guess.Add(guess, tm)
 
-	return types.NewCurrency(guess)
+	mod64 := func(c types.Currency, v uint64) types.Currency {
+		var r uint64
+		if c.Hi < v {
+			_, r = bits.Div64(c.Hi, c.Lo, v)
+		} else {
+			_, r = bits.Div64(0, c.Hi, v)
+			_, r = bits.Div64(r, c.Lo, v)
+		}
+		return types.NewCurrency64(r)
+	}
+	sfc := (consensus.State{}).SiafundCount()
+	tm := mod64(target, sfc)
+	gm := mod64(guess, sfc)
+	if gm.Cmp(tm) < 0 {
+		guess = guess.Sub(types.NewCurrency64(sfc))
+	}
+	return guess.Add(tm).Sub(gm)
 }

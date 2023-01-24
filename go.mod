@@ -3,11 +3,10 @@ module go.sia.tech/renterd
 go 1.17
 
 require (
-	github.com/hdevalence/ed25519consensus v0.0.0-20220222234857-c00d1f31bab3
 	github.com/klauspost/reedsolomon v1.9.16
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40
-	go.sia.tech/core v0.0.0-20220524010238-790a68db5817
+	go.sia.tech/core v0.1.0
 	go.sia.tech/jape v0.5.0
 	go.sia.tech/mux v1.1.0
 	go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004
@@ -21,7 +20,6 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
@@ -53,7 +51,3 @@ require (
 	golang.org/x/net v0.0.0-20220809184613-07c6da5e1ced // indirect
 	golang.org/x/text v0.3.7 // indirect
 )
-
-// replace gitlab.com/NebulousLabs/siamux => ../../../gitlab.com/NebulousLabs/siamux
-
-// replace go.sia.tech/siad => ../siad

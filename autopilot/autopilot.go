@@ -6,13 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/consensus"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
 
@@ -23,21 +22,20 @@ type Store interface {
 
 type Bus interface {
 	// wallet
-	WalletAddress() (types.UnlockHash, error)
+	WalletAddress() (types.Address, error)
 	WalletDiscard(txn types.Transaction) error
-	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.OutputID, []types.Transaction, error)
-	WalletPrepareForm(renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterKey consensus.PrivateKey, hostKey consensus.PublicKey, renterFunds types.Currency, renterAddress types.UnlockHash, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
-	WalletSign(txn *types.Transaction, toSign []types.OutputID, cf types.CoveredFields) error
+	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
+	WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
+	WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+	WalletSign(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 
 	// hostdb
-	Host(hostKey consensus.PublicKey) (hostdb.Host, error)
+	Host(hostKey types.PublicKey) (hostdb.Host, error)
 	Hosts(offset, limit int) ([]hostdb.Host, error)
 	HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 	RecordInteractions(interactions []hostdb.Interaction) error
 
 	// contracts
-	AcquireContract(id types.FileContractID, priority int, d time.Duration) (uint64, error)
 	ActiveContracts() (contracts []api.ContractMetadata, err error)
 	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
@@ -45,7 +43,6 @@ type Bus interface {
 	Contract(id types.FileContractID) (contract api.ContractMetadata, err error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	DeleteContracts(ids []types.FileContractID) error
-	ReleaseContract(id types.FileContractID, lockID uint64) error
 	SetContractSet(set string, contracts []types.FileContractID) error
 
 	// txpool
@@ -65,9 +62,9 @@ type Bus interface {
 type Worker interface {
 	ActiveContracts(timeout time.Duration) (api.ContractsResponse, error)
 	MigrateSlab(s object.Slab) error
-	RHPForm(endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPRenew(fcid types.FileContractID, endHeight uint64, hk consensus.PublicKey, hostIP string, renterAddress types.UnlockHash, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPScan(hostKey consensus.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
+	RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
 type Autopilot struct {
