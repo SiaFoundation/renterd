@@ -155,6 +155,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	if resp.Error != "" {
 		c.logger.Error(resp.Error)
 	}
+	active := resp.Contracts
 
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings()
@@ -169,8 +170,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// run checks
-	contracts := resp.Contracts
-	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(cfg, blockHeight, gs, rs, contracts)
+	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(cfg, blockHeight, gs, rs, active)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -184,7 +184,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// find out how much we spent in the current period
-	spent, err := c.currentPeriodSpending(contracts, currentPeriod)
+	spent, err := c.currentPeriodSpending(active, currentPeriod)
 	if err != nil {
 		return err
 	}
@@ -203,12 +203,12 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// build the new contract set (excluding formed contracts)
-	contractset := buildContractSet(contracts, toDelete, toIgnore, toRefresh, toRenew, renewed)
+	contractset := buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew, renewed)
 	numContracts := uint64(len(contractset))
 
 	// check if we need to form contracts and add them to the contract set
 	if numContracts < addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts) {
-		if formed, err := c.runContractFormations(cfg, contracts, cfg.Contracts.Hosts-numContracts, blockHeight, currentPeriod, &remaining, address); err == nil {
+		if formed, err := c.runContractFormations(cfg, active, cfg.Contracts.Hosts-numContracts, blockHeight, currentPeriod, &remaining, address); err == nil {
 			contractset = append(contractset, formed...)
 		} else {
 			c.logger.Errorf("failed to form contracts, err: %v", err)
@@ -234,23 +234,14 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 
 	// check every active contract
 	for _, contract := range contracts {
+		hk := contract.HostKey()
+
 		// fetch host from hostdb
-		host, err := c.ap.bus.Host(contract.HostKey())
+		host, err := c.ap.bus.Host(hk)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("missing host, err: %v", err),
-				"hk", contract.HostKey(),
-			)
-			continue
-		}
-
-		// fetch contract from contract store
-		contractData, err := c.ap.bus.Contract(contract.ID)
-		if err != nil {
-			c.logger.Errorw(
-				fmt.Sprintf("missing contract, err: %v", err),
-				"hk", contract.HostKey(),
-				"fcid", contract.ID,
+				"hk", hk,
 			)
 			continue
 		}
@@ -260,7 +251,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 		if !usable {
 			c.logger.Infow(
 				"unusable host",
-				"hk", host.PublicKey,
+				"hk", hk,
 				"fcid", contract.ID,
 				"reasons", reasons,
 			)
@@ -275,7 +266,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
-				"hk", host.PublicKey,
+				"hk", hk,
 				"fcid", contract.ID,
 				"reasons", reasons,
 				"refresh", refresh,
@@ -302,7 +293,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 
 		// keep track of file size
 		contractIds = append(contractIds, contract.ID)
-		contractMap[contract.ID] = contractData
+		contractMap[contract.ID] = contract.ContractMetadata
 		contractSizes[contract.ID] = contract.FileSize()
 	}
 
@@ -458,26 +449,17 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 	}()
 
 	for h := 0; missing > 0 && h < len(candidates); h++ {
+		host := candidates[h]
+
 		// break if the contractor was stopped
 		if c.isStopped() {
 			break
 		}
 
-		// fetch host
-		candidate := candidates[h]
-		host, err := c.ap.bus.Host(candidate)
-		if err != nil {
-			c.logger.Errorw(
-				fmt.Sprintf("missing host, err: %v", err),
-				"hk", candidate,
-			)
-			continue
-		}
-
 		// fetch host settings
-		scan, err := c.ap.worker.RHPScan(candidate, host.NetAddress, 0)
+		scan, err := c.ap.worker.RHPScan(host.PublicKey, host.NetAddress, 0)
 		if err != nil {
-			c.logger.Debugw(err.Error(), "hk", candidate)
+			c.logger.Debugw(err.Error(), "hk", host.PublicKey)
 			continue
 		}
 		settings := scan.Settings
@@ -501,18 +483,18 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 			// TODO: keep track of consecutive failures and break at some point
 			c.logger.Errorw(
 				fmt.Sprintf("failed contract formation, err : %v", err),
-				"hk", candidate,
+				"hk", host.PublicKey,
 			)
 			continue
 		}
 
 		// form contract
-		contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), candidate, host.NetAddress, renterAddress, renterFunds, hostCollateral)
+		contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), host.PublicKey, host.NetAddress, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			c.logger.Errorw(
 				"failed contract formation",
-				"hk", candidate,
+				"hk", host.PublicKey,
 				"err", err,
 			)
 			if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
@@ -529,7 +511,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("new contract failed to persist, err: %v", err),
-				"hk", candidate,
+				"hk", host.PublicKey,
 			)
 			continue
 		}
@@ -669,7 +651,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	return estimatedCost, nil
 }
 
-func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]bool, wanted int) ([]types.PublicKey, error) {
+func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]bool, wanted int) ([]hostdb.Host, error) {
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings()
 	if err != nil {
@@ -713,10 +695,10 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]boo
 	}
 
 	// select hosts
-	var selected []types.PublicKey
+	var selected []hostdb.Host
 	for len(selected) < wanted && len(scored) > 0 {
 		i := randSelectByWeight(scores)
-		selected = append(selected, scored[i].PublicKey)
+		selected = append(selected, scored[i])
 
 		// remove selected host
 		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
