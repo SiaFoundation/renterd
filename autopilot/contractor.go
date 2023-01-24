@@ -47,7 +47,6 @@ type (
 	contractInfo struct {
 		contract api.Contract
 		settings rhpv2.HostSettings
-		host     hostdb.Host
 	}
 )
 
@@ -262,7 +261,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 		settings := *host.Settings
 
 		// decide whether the contract is still good
-		usable, refresh, renew, reasons := isUsableContract(cfg, *host.Settings, contract, blockHeight)
+		usable, refresh, renew, reasons := isUsableContract(cfg, settings, contract, blockHeight)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
@@ -276,13 +275,11 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 				renewIndices[contract.ID] = len(toRenew)
 				toRenew = append(toRenew, contractInfo{
 					contract: contract,
-					host:     host,
 					settings: settings,
 				})
 			} else if refresh {
 				toRefresh = append(toRefresh, contractInfo{
 					contract: contract,
-					host:     host,
 					settings: settings,
 				})
 			} else {
