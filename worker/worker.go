@@ -25,6 +25,14 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
+const (
+	lockingPriorityRenew   = 100 // highest
+	lockingPriorityFunding = 90
+
+	lockingDurationRenew   = time.Minute
+	lockingDurationFunding = 30 * time.Second
+)
+
 // parseRange parses a Range header string as per RFC 7233. Only the first range
 // is returned. If no range is specified, parseRange returns 0, size.
 func parseRange(s string, size int64) (offset, length int64, _ error) {
@@ -256,7 +264,8 @@ type worker struct {
 	pool      *sessionPool
 	masterKey [32]byte
 
-	accounts *accounts
+	accounts    *accounts
+	priceTables *priceTables
 }
 
 func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) error {
@@ -463,6 +472,16 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rrr.ContractID, lockingPriorityRenew, lockingDurationRenew)
+	if jc.Check("could not lock contract for renewal", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(rrr.ContractID, lockID); err != nil {
+			// TODO: log
+		}
+	}()
+
 	hostIP, hostKey, toRenewID, renterFunds := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
 	rk := w.deriveRenterKey(hostKey)
@@ -527,9 +546,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	hostIP := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
-	// TODO: This is not a good solution. We should have some mechanism to
-	// lock contracts across protocol versions. This is abusing rhpv2's
-	// withHosts to get the revision.
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityRenew, lockingPriorityFunding)
+	if jc.Check("failed to acquire contract for funding EA", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(rfr.ContractID, lockID); err != nil {
+			// TODO: log
+		}
+	}()
+
+	// Get contract revision.
 	var revision types.FileContractRevision
 	cm := api.ContractMetadata{
 		ID:      rfr.ContractID,
@@ -549,9 +576,13 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Get price table.
-	pt, err := w.hostPriceTableByContract(jc.Request.Context(), rfr.HostKey, hostIP, &revision)
-	if jc.Check("failed to fetch pricetable", err) != nil {
-		return
+	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
+	if !ptValid {
+		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, hostIP, rfr.HostKey)
+		if jc.Check("failed to update outdated price table", err) != nil {
+			return
+		}
 	}
 
 	// Fund account.
@@ -913,6 +944,7 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		masterKey: masterKey,
 		accounts:  nil,
 	}
+	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = &accounts{
 		accounts: make(map[rhpv3.Account]*account),
 		workerID: w.id,

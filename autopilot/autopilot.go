@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -37,7 +36,6 @@ type Bus interface {
 	RecordInteractions(interactions []hostdb.Interaction) error
 
 	// contracts
-	AcquireContract(ctx context.Context, id types.FileContractID, priority int, d time.Duration) (uint64, error)
 	ActiveContracts() (contracts []api.ContractMetadata, err error)
 	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
@@ -45,7 +43,6 @@ type Bus interface {
 	Contract(id types.FileContractID) (contract api.ContractMetadata, err error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	DeleteContracts(ids []types.FileContractID) error
-	ReleaseContract(id types.FileContractID, lockID uint64) error
 	SetContractSet(set string, contracts []types.FileContractID) error
 
 	// txpool
