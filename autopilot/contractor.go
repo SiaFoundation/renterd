@@ -19,14 +19,6 @@ import (
 )
 
 const (
-	// contractLockingDurationRenew is the amount of time we hold a contract
-	// lock when renewing a contract
-	contractLockingDurationRenew = 30 * time.Second
-
-	// contractLockingPriorityRenew is the priority used when locking a
-	// contract for renew.
-	contractLockingPriorityRenew = 10
-
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
@@ -50,6 +42,12 @@ type (
 
 		mu         sync.Mutex
 		currPeriod uint64
+	}
+
+	contractInfo struct {
+		contract api.Contract
+		settings rhpv2.HostSettings
+		host     hostdb.Host
 	}
 )
 
@@ -205,7 +203,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	}
 
 	// build the new contract set (excluding formed contracts)
-	contractset := buildContractSet(contractIds(contractMetadatas(contracts)), toDelete, toIgnore, contractIds(contractMetadatas(toRefresh)), contractIds(contractMetadatas(toRenew)), renewed)
+	contractset := buildContractSet(contracts, toDelete, toIgnore, toRefresh, toRenew, renewed)
 	numContracts := uint64(len(contractset))
 
 	// check if we need to form contracts and add them to the contract set
@@ -224,7 +222,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	return c.ap.bus.SetContractSet("autopilot", contractset)
 }
 
-func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []api.Contract, _ error) {
+func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	// create a new ip filter
 	f := newIPFilter()
 
@@ -270,6 +268,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 			toIgnore = append(toIgnore, contract.ID)
 			continue
 		}
+		settings := *host.Settings
 
 		// decide whether the contract is still good
 		usable, refresh, renew, reasons := isUsableContract(cfg, *host.Settings, contract, blockHeight)
@@ -284,9 +283,17 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 			)
 			if renew {
 				renewIndices[contract.ID] = len(toRenew)
-				toRenew = append(toRenew, contract)
+				toRenew = append(toRenew, contractInfo{
+					contract: contract,
+					host:     host,
+					settings: settings,
+				})
 			} else if refresh {
-				toRefresh = append(toRefresh, contract)
+				toRefresh = append(toRefresh, contractInfo{
+					contract: contract,
+					host:     host,
+					settings: settings,
+				})
 			} else {
 				toDelete = append(toDelete, contract.ID)
 				continue
@@ -320,7 +327,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.Address, toRefresh, toRenew []api.Contract) ([]api.ContractMetadata, error) {
+func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, currentPeriod uint64, budget *types.Currency, renterAddress types.Address, toRefresh, toRenew []contractInfo) ([]api.ContractMetadata, error) {
 	renewed := make([]api.ContractMetadata, 0, len(toRenew)+len(toRefresh))
 
 	// log contracts renewed
@@ -339,7 +346,7 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 	}()
 
 	// perform renewals first
-	for i, contract := range append(toRenew, toRefresh...) {
+	for i, ci := range append(toRenew, toRefresh...) {
 		isRefresh := i >= len(toRenew)
 
 		// break if the contractor was stopped
@@ -348,12 +355,12 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 		}
 
 		// calculate the renter funds
-		renterFunds, err := c.renterFundsEstimate(cfg, currentPeriod, blockHeight, contract, isRefresh)
+		renterFunds, err := c.renterFundsEstimate(cfg, currentPeriod, blockHeight, ci, isRefresh)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("could not get refresh funding estimate, err: %v", err),
-				"hk", contract.HostKey(),
-				"fcid", contract.ID,
+				"hk", ci.contract.HostKey(),
+				"fcid", ci.contract.ID,
 				"refresh", isRefresh,
 			)
 			continue
@@ -372,12 +379,12 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 		}
 
 		// derive the renter key
-		newRevision, err := c.renewContract(cfg, currentPeriod, contract, renterAddress, renterFunds, isRefresh)
+		newRevision, err := c.renewContract(cfg, currentPeriod, ci.contract, renterAddress, renterFunds, isRefresh)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed, err: %v", err),
-				"hk", contract.HostKey(),
-				"fcid", contract.ID,
+				"hk", ci.contract.HostKey(),
+				"fcid", ci.contract.ID,
 				"refresh", isRefresh,
 			)
 			if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
@@ -390,12 +397,12 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight, c
 		*budget = budget.Sub(renterFunds)
 
 		// persist the contract
-		renewedContract, err := c.ap.bus.AddRenewedContract(newRevision, renterFunds, blockHeight, contract.ID)
+		renewedContract, err := c.ap.bus.AddRenewedContract(newRevision, renterFunds, blockHeight, ci.contract.ID)
 		if err != nil {
 			c.logger.Errorw(
 				fmt.Sprintf("renewal failed to persist, err: %v", err),
-				"hk", contract.HostKey(),
-				"fcid", contract.ID,
+				"hk", ci.contract.HostKey(),
+				"fcid", ci.contract.ID,
 			)
 			return nil, err
 		}
@@ -565,33 +572,16 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) renterFundsEstimate(cfg api.AutopilotConfig, currentPeriod, blockHeight uint64, contract api.Contract, isRefresh bool) (types.Currency, error) {
+func (c *contractor) renterFundsEstimate(cfg api.AutopilotConfig, currentPeriod, blockHeight uint64, ci contractInfo, isRefresh bool) (types.Currency, error) {
 	if isRefresh {
-		return c.refreshFundingEstimate(cfg, contract)
+		return c.refreshFundingEstimate(cfg, ci)
 	}
-	return c.renewFundingEstimate(cfg, blockHeight, currentPeriod, contract)
+	return c.renewFundingEstimate(cfg, blockHeight, currentPeriod, ci)
 }
 
-func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract) (types.Currency, error) {
+func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contractInfo) (types.Currency, error) {
 	// refresh with double the funds
-	refreshAmount := contract.TotalCost.Mul64(2)
-
-	// fetch host
-	host, err := c.ap.bus.Host(contract.HostKey())
-	if err != nil {
-		c.logger.Errorw(
-			fmt.Sprintf("missing host, err: %v", err),
-			"hk", contract.HostKey,
-		)
-		return types.ZeroCurrency, err
-	}
-
-	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
-	if err != nil {
-		c.logger.Debugw(err.Error(), "hk", contract.HostKey())
-		return types.ZeroCurrency, err
-	}
+	refreshAmount := ci.contract.TotalCost.Mul64(2)
 
 	// estimate the txn fee
 	txnFee, err := c.ap.bus.RecommendedFee()
@@ -604,42 +594,25 @@ func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract ap
 	// but without an upper cap.
 	initialContractFunds := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
 	minInitialContractFunds := initialContractFunds.Div64(20) // TODO: arbitrary divisor
-	minimum := c.initialContractFunding(scan.Settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
+	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
 	if refreshAmount.Cmp(minimum) < 0 {
 		refreshAmount = minimum
 	}
 	return refreshAmount, nil
 }
 
-func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod, blockHeight uint64, contract api.Contract) (types.Currency, error) {
-	// fetch host
-	host, err := c.ap.bus.Host(contract.HostKey())
-	if err != nil {
-		c.logger.Errorw(
-			fmt.Sprintf("missing host, err: %v", err),
-			"hk", contract.HostKey,
-		)
-		return types.ZeroCurrency, err
-	}
-
-	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(contract.HostKey(), host.NetAddress, 0)
-	if err != nil {
-		c.logger.Debugw(err.Error(), "hk", contract.HostKey)
-		return types.ZeroCurrency, err
-	}
-
+func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod, blockHeight uint64, ci contractInfo) (types.Currency, error) {
 	// estimate the cost of the current data stored
-	dataStored := contract.FileSize()
-	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice)
+	dataStored := ci.contract.FileSize()
+	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(ci.settings.StoragePrice)
 
 	// fetch the spending of the contract we want to renew.
-	prevSpending, err := c.contractSpending(contract, currentPeriod)
+	prevSpending, err := c.contractSpending(ci.contract, currentPeriod)
 	if err != nil {
 		c.logger.Errorw(
 			fmt.Sprintf("could not retrieve contract spending, err: %v", err),
-			"hk", contract.HostKey,
-			"fcid", contract,
+			"hk", ci.contract.HostKey,
+			"fcid", ci.contract.ID,
 		)
 		return types.ZeroCurrency, err
 	}
@@ -649,8 +622,8 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	// TODO: estimate is not ideal because price can change, better would be to
 	// look at the amount of data stored in the contract from the previous cycle
 	prevUploadDataEstimate := prevSpending.Uploads
-	if !scan.Settings.UploadBandwidthPrice.IsZero() {
-		prevUploadDataEstimate = prevUploadDataEstimate.Div(scan.Settings.UploadBandwidthPrice)
+	if !ci.settings.UploadBandwidthPrice.IsZero() {
+		prevUploadDataEstimate = prevUploadDataEstimate.Div(ci.settings.UploadBandwidthPrice)
 	}
 	if prevUploadDataEstimate.Cmp(types.NewCurrency64(dataStored)) > 0 {
 		prevUploadDataEstimate = types.NewCurrency64(dataStored)
@@ -660,7 +633,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	// - upload cost: previous uploads + prev storage
 	// - download cost: assumed to be the same
 	// - fund acount cost: assumed to be the same
-	newUploadsCost := prevSpending.Uploads.Add(prevUploadDataEstimate.Mul64(cfg.Contracts.Period).Mul(scan.Settings.StoragePrice))
+	newUploadsCost := prevSpending.Uploads.Add(prevUploadDataEstimate.Mul64(cfg.Contracts.Period).Mul(ci.settings.StoragePrice))
 	newDownloadsCost := prevSpending.Downloads
 	newFundAccountCost := prevSpending.FundAccount
 
@@ -670,7 +643,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	// because users are not charged siafund fees on money that doesn't go into
 	// the file contract (and the transaction fee goes to the miners, not the
 	// file contract).
-	subTotal := storageCost.Add(newUploadsCost).Add(newDownloadsCost).Add(newFundAccountCost).Add(scan.Settings.ContractPrice)
+	subTotal := storageCost.Add(newUploadsCost).Add(newDownloadsCost).Add(newFundAccountCost).Add(ci.settings.ContractPrice)
 	siaFundFeeEstimate := (consensus.State{Index: types.ChainIndex{Height: blockHeight}}).FileContractTax(types.FileContract{Payout: subTotal})
 
 	// estimate the txn fee
@@ -689,7 +662,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 	// but without an upper cap.
 	initialContractFunds := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
 	minInitialContractFunds := initialContractFunds.Div64(20) // TODO: arbitrary divisor
-	minimum := c.initialContractFunding(scan.Settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
+	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
 	if estimatedCost.Cmp(minimum) < 0 {
 		estimatedCost = minimum
 	}
@@ -760,11 +733,21 @@ func (c *contractor) endHeight(cfg api.AutopilotConfig, currentPeriod uint64) ui
 	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 }
 
-func buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew []types.FileContractID, renewed []api.ContractMetadata) []types.FileContractID {
+func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
+	// collect ids
+	var activeIds []types.FileContractID
+	for _, c := range active {
+		activeIds = append(activeIds, c.ID)
+	}
+	var renewIds []types.FileContractID
+	for _, c := range append(toRefresh, toRenew...) {
+		renewIds = append(renewIds, c.contract.ID)
+	}
+
 	// build some maps
 	isDeleted := contractMapBool(toDelete)
 	isIgnored := contractMapBool(toIgnore)
-	isUpForRenew := contractMapBool(append(toRefresh, toRenew...))
+	isUpForRenew := contractMapBool(renewIds)
 
 	// renewed map is special case since we need renewed from
 	isRenewed := make(map[types.FileContractID]bool)
@@ -776,7 +759,7 @@ func buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew []types.Fil
 
 	// build new contract set
 	var contracts []types.FileContractID
-	for _, fcid := range append(active, renewedIDs...) {
+	for _, fcid := range append(activeIds, renewedIDs...) {
 		if isDeleted[fcid] {
 			continue // exclude deleted contracts
 		}
@@ -792,22 +775,6 @@ func buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew []types.Fil
 		contracts = append(contracts, fcid)
 	}
 	return contracts
-}
-
-func contractMetadatas(contracts []api.Contract) []api.ContractMetadata {
-	metadatas := make([]api.ContractMetadata, len(contracts))
-	for i, c := range contracts {
-		metadatas[i] = c.ContractMetadata
-	}
-	return metadatas
-}
-
-func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
-	ids := make([]types.FileContractID, len(contracts))
-	for i, c := range contracts {
-		ids[i] = c.ID
-	}
-	return ids
 }
 
 func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]bool {
