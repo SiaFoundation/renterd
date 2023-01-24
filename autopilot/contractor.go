@@ -389,21 +389,26 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 					settings: settings,
 				})
 			} else if refresh {
-				// if the contract is not usable because it is out of collateral, we
-				// want to refresh if and only if the new collateral does not exceed
-				// the host's max collateral and it exceeds our refresh threshold
-				var dontRefresh bool
+				// if the contract is running out of collateral we want to
+				// refresh if and only if the renewed collateral does not exceed
+				// the host's max collateral and is not below the collateral
+				// threshold
+				//
+				// TODO: keep track of why renewals fail and give up at some
+				// point
+				var ignore bool
 				if len(reasons) == 1 && containsError(reasons, errContractOutOfCollateral) {
-					funding, _ := c.refreshFundingEstimate(cfg, contractInfo{
+					if funding, err := c.refreshFundingEstimate(cfg, contractInfo{
 						contract: contract,
 						settings: settings,
-					}) // TODO: handle err
-					collateral := renewContractCollateral(settings, funding)
-					dontRefresh = collateral.Cmp(settings.MaxCollateral) > 0
-					dontRefresh = dontRefresh || isBelowCollateralThreshold(cfg, settings, collateral)
+					}); err == nil {
+						collateral := renewContractCollateral(settings, funding)
+						ignore = collateral.Cmp(settings.MaxCollateral) > 0
+						ignore = ignore || isBelowCollateralThreshold(cfg, settings, collateral)
+					}
 				}
 
-				if dontRefresh {
+				if ignore {
 					toIgnore = append(toIgnore, contract.ID)
 				} else {
 					toRefresh = append(toRefresh, contractInfo{
