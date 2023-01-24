@@ -66,8 +66,8 @@ func (c Contract) RenterFunds() types.Currency {
 	return c.Revision.ValidRenterPayout()
 }
 
-// HostCollateral returns the value of the host's collateral.
-func (c Contract) HostCollateral() types.Currency {
+// UnusedCollateral returns the remaining host collateral.
+func (c Contract) UnusedCollateral() types.Currency {
 	// TODO: use MissedHostValue
 	return c.Revision.MissedHostOutput().Value
 }

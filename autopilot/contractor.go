@@ -575,7 +575,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 
 		// check our budget
 		txnFee := fee.Mul64(estimatedFileContractTransactionSetSize)
-		renterFunds := c.initialContractFunding(settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
+		renterFunds := initialContractFunding(settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
 		if budget.Cmp(renterFunds) < 0 {
 			c.logger.Debugw(
 				"insufficient budget",
@@ -587,7 +587,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 		}
 
 		// calculate the host collateral
-		hostCollateral := calculateHostCollateral(cfg, settings)
+		hostCollateral := initialContractCollateral(cfg, settings)
 
 		// form contract
 		contract, _, err := c.ap.worker.RHPForm(c.endHeight(cfg, currentPeriod), host.PublicKey, host.NetAddress, renterAddress, renterFunds, hostCollateral)
@@ -884,13 +884,29 @@ func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]
 	return cmap
 }
 
-func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings) types.Currency {
+func initialContractCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings) types.Currency {
 	expectedStorage := cfg.Contracts.Storage / cfg.Contracts.Amount
-	hostCollateral := settings.Collateral.Mul64(expectedStorage)
+
+	hostCollateral := settings.Collateral.Mul64(expectedStorage).Mul64(cfg.Contracts.Period)
 	if hostCollateral.Cmp(settings.MaxCollateral) > 0 {
 		hostCollateral = settings.MaxCollateral
 	}
 	return hostCollateral
+}
+
+func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
+	if !max.IsZero() && min.Cmp(max) > 0 {
+		panic("given min is larger than max") // developer error
+	}
+
+	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
+	if !min.IsZero() && funding.Cmp(min) < 0 {
+		return min
+	}
+	if !max.IsZero() && funding.Cmp(max) > 0 {
+		return max
+	}
+	return funding
 }
 
 func addLeeway(n uint64, pct float64) uint64 {

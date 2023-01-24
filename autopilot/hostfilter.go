@@ -19,8 +19,10 @@ const (
 	minContractFundUploadThreshold = float64(0.05) // 5%
 
 	// minContractCollateralThreshold is the percentage of collateral remaining
-	// at which the contract gets refreshed
-	minContractCollateralThreshold = float64(0.02) // 2%
+	// at which the contract gets refreshed, the default threshold of 2% is
+	// defined by the following numerator and denominator constants.
+	minContractCollateralThresholdNumerator   = 2
+	minContractCollateralThresholdDenominator = 100
 )
 
 // isUsableHost returns whether the given host is usable along with a list of
@@ -93,9 +95,13 @@ func isOutOfFunds(cfg api.AutopilotConfig, settings rhp.HostSettings, c api.Cont
 }
 
 func isOutOfCollateral(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract) bool {
-	collateral := calculateHostCollateral(cfg, s)
-	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.HostCollateral().Big(), collateral.Big()).Float64()
-	return percentRemaining < minContractCollateralThreshold
+	return isBelowCollateralThreshold(cfg, s, c.UnusedCollateral())
+}
+
+func isBelowCollateralThreshold(cfg api.AutopilotConfig, s rhp.HostSettings, c types.Currency) bool {
+	collateral := big.NewRat(0, 1).SetFrac(c.Big(), initialContractCollateral(cfg, s).Big())
+	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)
+	return collateral.Cmp(threshold) < 0
 }
 
 func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) bool {
