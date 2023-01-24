@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"sync"
 
-	"gitlab.com/NebulousLabs/fastrand"
 	"go.sia.tech/core/types"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
+	"lukechampine.com/frand"
 )
 
 const solveAttempts = 1e4
@@ -84,7 +84,7 @@ func (m *Miner) mineBlock(addr stypes.UnlockHash) error {
 		Timestamp: stypes.CurrentTimestamp(),
 	}
 
-	randBytes := fastrand.Bytes(stypes.SpecifierLen)
+	randBytes := frand.Bytes(stypes.SpecifierLen)
 	randTxn := stypes.Transaction{
 		ArbitraryData: [][]byte{append(modules.PrefixNonSia[:], randBytes...)},
 	}

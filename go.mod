@@ -5,15 +5,14 @@ go 1.17
 require (
 	github.com/klauspost/reedsolomon v1.9.16
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40
 	go.sia.tech/core v0.1.0
-	go.sia.tech/jape v0.5.0
+	go.sia.tech/jape v0.6.0
 	go.sia.tech/mux v1.1.0
 	go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa
-	golang.org/x/sys v0.0.0-20220808155132-1c4a2a72c664
-	golang.org/x/term v0.0.0-20220526004731-065cf7ba2467
+	golang.org/x/sys v0.4.0
+	golang.org/x/term v0.4.0
 	gorm.io/driver/sqlite v1.4.3
 	gorm.io/gorm v1.24.3
 	lukechampine.com/frand v1.4.2
@@ -37,6 +36,7 @@ require (
 	gitlab.com/NebulousLabs/demotemutex v0.0.0-20151003192217-235395f71c40 // indirect
 	gitlab.com/NebulousLabs/entropy-mnemonics v0.0.0-20181018051301-7532f67e3500 // indirect
 	gitlab.com/NebulousLabs/errors v0.0.0-20200929122200-06c536cf6975 // indirect
+	gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40 // indirect
 	gitlab.com/NebulousLabs/go-upnp v0.0.0-20211002182029-11da932010b6 // indirect
 	gitlab.com/NebulousLabs/log v0.0.0-20210609172545-77f6775350e2 // indirect
 	gitlab.com/NebulousLabs/merkletree v0.0.0-20200118113624-07fbf710afc4 // indirect
@@ -48,6 +48,7 @@ require (
 	gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
-	golang.org/x/net v0.0.0-20220809184613-07c6da5e1ced // indirect
-	golang.org/x/text v0.3.7 // indirect
+	golang.org/x/net v0.5.0 // indirect
+	golang.org/x/text v0.6.0 // indirect
+	golang.org/x/tools v0.5.0 // indirect
 )
