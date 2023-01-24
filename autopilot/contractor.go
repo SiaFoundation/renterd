@@ -1,7 +1,6 @@
 package autopilot
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -361,7 +360,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 				"unusable host",
 				"hk", hk,
 				"fcid", contract.ID,
-				"reasons", toString(joinErrors(reasons)),
+				"reasons", errStr(joinErrors(reasons)),
 			)
 
 			toIgnore = append(toIgnore, contract.ID)
@@ -378,7 +377,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 				"unusable contract",
 				"hk", hk,
 				"fcid", contract.ID,
-				"reasons", toString(joinErrors(reasons)),
+				"reasons", errStr(joinErrors(reasons)),
 				"refresh", refresh,
 				"renew", renew,
 			)
@@ -952,42 +951,4 @@ func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, 
 	min = allowance.Div64(minInitialContractFundingDivisor)
 	max = allowance.Div64(maxInitialContractFundingDivisor)
 	return
-}
-
-func toString(err error) string {
-	if err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-func containsError(errs []error, err error) bool {
-	for _, e := range errs {
-		if e == err || errors.Unwrap(e) == err {
-			return true
-		}
-	}
-	return false
-}
-
-func joinErrors(errs []error) error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-
-	switch len(filtered) {
-	case 0:
-		return nil
-	case 1:
-		return filtered[0]
-	default:
-		strs := make([]string, len(filtered))
-		for i := range strs {
-			strs[i] = filtered[i].Error()
-		}
-		return errors.New(strings.Join(strs, ";"))
-	}
 }
