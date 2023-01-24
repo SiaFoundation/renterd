@@ -106,7 +106,8 @@ type (
 	}
 
 	EphemeralAccountStore interface {
-		OwnerAccounts(owner string) ([]ephemeralaccounts.Account, error)
+		Accounts() ([]ephemeralaccounts.Account, error)
+		SaveAccounts([]ephemeralaccounts.Account) error
 	}
 )
 
@@ -121,6 +122,7 @@ type bus struct {
 	ss  SettingStore
 	eas EphemeralAccountStore
 
+	accounts      *accounts
 	contractLocks *contractLocks
 
 	interactionsMu            sync.Mutex
@@ -712,15 +714,19 @@ func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("owner", &owner) != nil {
 		return
 	}
-	accounts, err := b.eas.OwnerAccounts(owner)
-	if jc.Check("failed to fetch accounts", err) != nil {
+	jc.Encode(b.accounts.Accounts(owner))
+}
+
+func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
+	var req api.AccountsUpdateBalanceRequest
+	if jc.Decode(&req) != nil {
 		return
 	}
-	jc.Encode(accounts)
+	b.accounts.UpdateBalance(req.AccountID, req.Owner, req.Host, req.Amount)
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings, interactionsFlushInterval time.Duration) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
 	b := &bus{
 		s:                         s,
 		cm:                        cm,
@@ -735,15 +741,27 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 	}
 
 	if err := b.setGougingSettings(gs); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := b.setRedundancySettings(rs); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	// Load the ephemeral accounts into memory and save them again on
+	// cleanup.
+	accounts, err := eas.Accounts()
+	if err != nil {
+		return nil, nil, err
+	}
+	b.accounts = newAccounts(accounts)
+	cleanup := func() error {
+		return eas.SaveAccounts(b.accounts.ToPersist())
 	}
 
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts/:owner": b.accountsOwnerHandlerGET,
+		"GET    /accounts/:owner":     b.accountsOwnerHandlerGET,
+		"POST   /accounts/:id/update": b.accountsUpdateHandlerPOST,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
@@ -801,7 +819,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
-	}), nil
+	}), cleanup, nil
 }
 
 func (b *bus) recordInteractions(interactions []hostdb.Interaction) error {

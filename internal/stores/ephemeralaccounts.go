@@ -5,6 +5,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/ephemeralaccounts"
+	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
 type (
@@ -14,7 +15,7 @@ type (
 		Owner string `gorm:"NOT NULL"`
 
 		// AccountID identifies an account. It's a public key.
-		AccountID ephemeralaccounts.AccountID `gorm:"unique;NOT NULL"`
+		AccountID rhpv3.Account `gorm:"unique;NOT NULL"`
 
 		// Host describes the host the account was created with.
 		Host types.PublicKey `gorm:"unique;NOT NULL"`
@@ -28,10 +29,10 @@ func (dbEphemeralAccount) TableName() string {
 	return "ephemeral_accounts"
 }
 
-func (dbEphemeralAccount) convert() ephemeralaccounts.Account {
-	panic("not implemented yet")
+func (s *SQLStore) Accounts() ([]ephemeralaccounts.Account, error) {
+	return []ephemeralaccounts.Account{}, nil // TODO: implement
 }
 
-func (s *SQLStore) OwnerAccounts(owner string) ([]ephemeralaccounts.Account, error) {
-	panic("not implemented yet")
+func (s *SQLStore) SaveAccounts([]ephemeralaccounts.Account) error {
+	return nil // TODO: implement
 }

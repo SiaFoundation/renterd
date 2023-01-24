@@ -196,11 +196,13 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 
 type AccountStore interface {
 	Accounts(owner string) ([]ephemeralaccounts.Account, error)
-	UpdateBalance(id rhpv3.Account, delta *big.Int) error
+	UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 }
 
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
+	AccountStore
+
 	ActiveContracts() ([]api.ContractMetadata, error)
 	AcquireContract(id types.FileContractID, priority int, d time.Duration) (uint64, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
@@ -218,7 +220,7 @@ type Bus interface {
 	AddObject(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
 
-	OwnerAccounts(owner string) ([]ephemeralaccounts.Account, error)
+	Accounts(owner string) ([]ephemeralaccounts.Account, error)
 	UpdateSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(txn types.Transaction) error
@@ -916,11 +918,7 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		accounts:  nil,
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
-	w.accounts = &accounts{
-		accounts: make(map[rhpv3.Account]*account),
-		workerID: w.id,
-		key:      w.deriveSubKey("accountkey"),
-	}
+	w.accounts = newAccounts(w.id, w.deriveSubKey("account"), w.bus)
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,

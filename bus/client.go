@@ -3,6 +3,7 @@ package bus
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/url"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/renterd/wallet"
 )
 
@@ -490,9 +492,20 @@ func (c *Client) GougingParams() (gp api.GougingParams, err error) {
 	return
 }
 
-// GougingParams returns parameters used for performing gouging checks.
-func (c *Client) OwnerAccounts(owner string) (accounts []ephemeralaccounts.Account, err error) {
+// Accounts returns the ephemeral accounts for a given owner.
+func (c *Client) Accounts(owner string) (accounts []ephemeralaccounts.Account, err error) {
 	err = c.c.GET(fmt.Sprintf("/accounts/%s", owner), &accounts)
+	return
+}
+
+// Accounts returns the ephemeral accounts for a given owner.
+func (c *Client) UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) (err error) {
+	err = c.c.POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
+		AccountID: id,
+		Host:      hk,
+		Owner:     owner,
+		Amount:    amt,
+	}, nil)
 	return
 }
 

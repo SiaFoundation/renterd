@@ -26,15 +26,25 @@ type (
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
-		bus  AccountStore
-		id   rhp.Account
-		key  types.PrivateKey
-		host types.PublicKey
+		bus   AccountStore
+		id    rhp.Account
+		key   types.PrivateKey
+		host  types.PublicKey
+		owner string
 
 		mu      sync.Mutex
 		balance *big.Int
 	}
 )
+
+func newAccounts(workerID string, accountsKey types.PrivateKey, as AccountStore) *accounts {
+	return &accounts{
+		bus:      as,
+		accounts: make(map[rhpv3.Account]*account),
+		workerID: workerID,
+		key:      accountsKey,
+	}
+}
 
 // All returns information about all accounts to be returned in the API.
 func (a *accounts) All() ([]api.Account, error) {
@@ -79,8 +89,9 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 		acc = &account{
 			bus:     a.bus,
 			id:      accountID,
-			host:    hk,
 			key:     a.key,
+			host:    hk,
+			owner:   a.workerID,
 			balance: types.ZeroCurrency.Big(),
 		}
 		a.accounts[accountID] = acc
@@ -93,7 +104,7 @@ func (a *account) Deposit(amt types.Currency) error {
 	a.mu.Lock()
 	a.balance = a.balance.Add(a.balance, amt.Big())
 	a.mu.Unlock()
-	return a.bus.UpdateBalance(a.id, amt.Big())
+	return a.bus.UpdateBalance(a.id, a.owner, a.host, amt.Big())
 }
 
 // Withdraw decreases the balance of an account.
@@ -101,7 +112,7 @@ func (a *account) Withdraw(amt types.Currency) error {
 	a.mu.Lock()
 	a.balance = a.balance.Sub(a.balance, amt.Big())
 	a.mu.Unlock()
-	return a.bus.UpdateBalance(a.id, new(big.Int).Neg(amt.Big()))
+	return a.bus.UpdateBalance(a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
 }
 
 // tryInitAccounts is used for lazily initialising the accounts from the bus.
@@ -121,7 +132,9 @@ func (a *accounts) tryInitAccounts() error {
 			bus:     a.bus,
 			id:      rhpv3.Account(acc.ID),
 			key:     a.deriveAccountKey(acc.Host),
-			balance: acc.Balance.Big(),
+			host:    acc.Host,
+			owner:   acc.Owner,
+			balance: acc.Balance,
 		}
 	}
 	return nil
