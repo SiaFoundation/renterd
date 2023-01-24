@@ -501,10 +501,9 @@ func (c *Client) Accounts(owner string) (accounts []ephemeralaccounts.Account, e
 // Accounts returns the ephemeral accounts for a given owner.
 func (c *Client) UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) (err error) {
 	err = c.c.POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
-		AccountID: id,
-		Host:      hk,
-		Owner:     owner,
-		Amount:    amt,
+		Host:   hk,
+		Owner:  owner,
+		Amount: amt,
 	}, nil)
 	return
 }

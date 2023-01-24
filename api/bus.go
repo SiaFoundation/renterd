@@ -8,7 +8,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
@@ -147,10 +146,9 @@ type UpdateBlocklistRequest struct {
 }
 
 type AccountsUpdateBalanceRequest struct {
-	AccountID rhpv3.Account   `json:"accountID"`
-	Host      types.PublicKey `json:"host"`
-	Owner     string          `json:"owner"`
-	Amount    *big.Int        `json:"amount"`
+	Host   types.PublicKey `json:"host"`
+	Owner  string          `json:"owner"`
+	Amount *big.Int        `json:"amount"`
 }
 
 // DownloadParams contains the metadata needed by a worker to download an object.

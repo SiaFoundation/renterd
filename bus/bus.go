@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/renterd/wallet"
 )
 
@@ -718,11 +719,27 @@ func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
 	var req api.AccountsUpdateBalanceRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	b.accounts.UpdateBalance(req.AccountID, req.Owner, req.Host, req.Amount)
+	if id == (rhpv3.Account{}) {
+		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Owner == "" {
+		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Host == (types.PublicKey{}) {
+		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
+		return
+	}
+	b.accounts.UpdateBalance(id, req.Owner, req.Host, req.Amount)
 }
 
 // New returns a new Bus.
