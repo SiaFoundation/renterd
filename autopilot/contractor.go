@@ -223,7 +223,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 
 func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	// create a new ip filter
-	f := newIPFilter()
+	f := newIPFilter(c.logger)
 
 	// state variables
 	contractIds := make([]types.FileContractID, 0, len(contracts))
@@ -662,7 +662,7 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]boo
 	}
 
 	// create IP filter
-	ipFilter := newIPFilter()
+	ipFilter := newIPFilter(c.logger)
 
 	// fetch all hosts
 	hosts, err := c.ap.bus.Hosts(0, -1)

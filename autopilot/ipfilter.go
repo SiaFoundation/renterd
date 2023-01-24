@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
+	"go.uber.org/zap"
 )
 
 const (
@@ -26,13 +27,17 @@ type ipFilter struct {
 	subnets  map[string]string
 	resolver resolver
 	timeout  time.Duration
+
+	logger *zap.SugaredLogger
 }
 
-func newIPFilter() *ipFilter {
+func newIPFilter(logger *zap.SugaredLogger) *ipFilter {
 	return &ipFilter{
 		subnets:  make(map[string]string),
 		resolver: &net.Resolver{},
 		timeout:  resolverLookupTimeout,
+
+		logger: logger,
 	}
 }
 
@@ -52,6 +57,7 @@ func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
 	}
 	addresses, err := f.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
+		f.logger.Errorw(fmt.Sprintf("failed to lookup IP, err: %v", err), "hk", h.PublicKey)
 		return true
 	}
 
