@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"go.sia.tech/renterd/hostdb"
 )
@@ -12,6 +13,9 @@ const (
 	// number of unique bits the host IP must have to prevent it from being filtered
 	ipv4FilterRange = 24
 	ipv6FilterRange = 54
+
+	// resolverLookupTimeout is the timeout we apply when resolving a host's IP address
+	resolverLookupTimeout = 50 * time.Millisecond
 )
 
 type resolver interface {
@@ -21,22 +25,32 @@ type resolver interface {
 type ipFilter struct {
 	subnets  map[string]string
 	resolver resolver
+	timeout  time.Duration
 }
 
 func newIPFilter() *ipFilter {
 	return &ipFilter{
 		subnets:  make(map[string]string),
 		resolver: &net.Resolver{},
+		timeout:  resolverLookupTimeout,
 	}
 }
 
 func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
+	// create a context
+	ctx := context.Background()
+	if f.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), f.timeout)
+		defer cancel()
+	}
+
 	// lookup all IP addresses for the given host
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
 		return true
 	}
-	addresses, err := f.resolver.LookupIPAddr(context.Background(), host) // TODO: pass in context (?) could define a default timeout on the ipFilter
+	addresses, err := f.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return true
 	}
