@@ -258,7 +258,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 		}
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, f, Host{host})
+		usable, reasons := isUsableHost(cfg, gs, rs, f, host)
 		if !usable {
 			c.logger.Infow(
 				"unusable host",
@@ -272,7 +272,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 		}
 
 		// decide whether the contract is still good
-		usable, refresh, renew, reasons := isUsableContract(cfg, Host{host}, contract, blockHeight)
+		usable, refresh, renew, reasons := isUsableContract(cfg, *host.Settings, contract, blockHeight)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
@@ -732,11 +732,11 @@ func (c *contractor) candidateHosts(cfg api.AutopilotConfig, used map[string]boo
 		if used[h.PublicKey.String()] {
 			continue
 		}
-		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, Host{h}); !usable {
+		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, h); !usable {
 			continue
 		}
 
-		score := hostScore(cfg, Host{h})
+		score := hostScore(cfg, h)
 		if score == 0 {
 			c.logger.DPanicw("sanity check failed", "score", score, "hk", h.PublicKey)
 			continue
