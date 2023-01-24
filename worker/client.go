@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -175,7 +176,7 @@ func (c *Client) ActiveContracts(timeout time.Duration) (resp api.ContractsRespo
 }
 
 // Accounts requests the worker's /accounts endpoint.
-func (c *Client) Accounts() (accounts []api.Account, err error) {
+func (c *Client) Accounts() (accounts []ephemeralaccounts.Account, err error) {
 	err = c.c.GET("/accounts", &accounts)
 	return
 }

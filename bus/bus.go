@@ -106,6 +106,9 @@ type (
 		UpdateSettings(settings map[string]string) error
 	}
 
+	// EphemeralAccountStore persists information about accounts. Since
+	// accounts are rapidly updated and can be recovered, they are only
+	// loaded upon startup and persisted upon shutdown.
 	EphemeralAccountStore interface {
 		Accounts() ([]ephemeralaccounts.Account, error)
 		SaveAccounts([]ephemeralaccounts.Account) error
@@ -121,7 +124,6 @@ type bus struct {
 	cs  ContractStore
 	os  ObjectStore
 	ss  SettingStore
-	eas EphemeralAccountStore
 
 	accounts      *accounts
 	contractLocks *contractLocks
@@ -711,11 +713,11 @@ func (b *bus) gougingParams() (api.GougingParams, error) {
 }
 
 func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
-	var owner string
+	var owner api.ParamString
 	if jc.DecodeParam("owner", &owner) != nil {
 		return
 	}
-	jc.Encode(b.accounts.Accounts(owner))
+	jc.Encode(b.accounts.Accounts(owner.String()))
 }
 
 func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {

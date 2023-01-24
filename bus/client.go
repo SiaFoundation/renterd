@@ -494,7 +494,7 @@ func (c *Client) GougingParams() (gp api.GougingParams, err error) {
 
 // Accounts returns the ephemeral accounts for a given owner.
 func (c *Client) Accounts(owner string) (accounts []ephemeralaccounts.Account, err error) {
-	err = c.c.GET(fmt.Sprintf("/accounts/%s", owner), &accounts)
+	err = c.c.GET(fmt.Sprintf("/accounts/%s", api.ParamString(owner)), &accounts)
 	return
 }
 

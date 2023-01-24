@@ -41,6 +41,10 @@ func newAccounts(accs []ephemeralaccounts.Account) *accounts {
 	return a
 }
 
+// UpdateBalance apples the provided amount to an account through addition. So
+// the input can be both a positive or negative number depending on whether a
+// withdrawal or deposit is recorded. If the account doesn't exist, it is
+// created.
 func (a *accounts) UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -64,6 +68,8 @@ func (a *accounts) UpdateBalance(id rhpv3.Account, owner string, hk types.Public
 	acc.Balance.Add(acc.Balance, amt)
 }
 
+// Accounts returns all accounts for a given owner. Usually called when workers
+// request their accounts on startup.
 func (a *accounts) Accounts(owner string) []ephemeralaccounts.Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -79,6 +85,7 @@ func (a *accounts) Accounts(owner string) []ephemeralaccounts.Account {
 	return accounts
 }
 
+// ToPersist returns all known accounts to be persisted by the storage backend.
 func (a *accounts) ToPersist() []ephemeralaccounts.Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()

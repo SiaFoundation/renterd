@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -249,5 +250,21 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 	if acc.Host != types.PublicKey(hg.PublicKey.ToPublicKey()) {
 		t.Fatal("wrong host")
+	}
+	if acc.Owner == "" {
+		t.Fatal("owner not set")
+	}
+
+	// Fetch account from bus directly.
+	busAccounts, err := cluster.Bus.Accounts("worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(busAccounts) != 1 {
+		t.Fatal("expected one account but got", len(busAccounts))
+	}
+	busAcc := busAccounts[0]
+	if !reflect.DeepEqual(busAcc, acc) {
+		t.Fatal("bus account doesn't match worker account")
 	}
 }

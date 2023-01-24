@@ -18,6 +18,8 @@ type (
 		// Balance is the balance of the account.
 		Balance *big.Int
 
+		// Owner marks the owner of an account. This is usually a unique
+		// identifier for a worker.
 		Owner string
 	}
 )

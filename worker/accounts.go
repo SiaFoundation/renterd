@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/rhp/v3"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
@@ -47,7 +47,7 @@ func newAccounts(workerID string, accountsKey types.PrivateKey, as AccountStore)
 }
 
 // All returns information about all accounts to be returned in the API.
-func (a *accounts) All() ([]api.Account, error) {
+func (a *accounts) All() ([]ephemeralaccounts.Account, error) {
 	// Make sure accounts are initialised.
 	if err := a.tryInitAccounts(); err != nil {
 		return nil, err
@@ -55,12 +55,13 @@ func (a *accounts) All() ([]api.Account, error) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	accounts := make([]api.Account, 0, len(a.accounts))
+	accounts := make([]ephemeralaccounts.Account, 0, len(a.accounts))
 	for _, acc := range a.accounts {
-		accounts = append(accounts, api.Account{
+		accounts = append(accounts, ephemeralaccounts.Account{
 			ID:      acc.id,
 			Balance: acc.balance,
 			Host:    acc.host,
+			Owner:   acc.owner,
 		})
 	}
 	return accounts, nil

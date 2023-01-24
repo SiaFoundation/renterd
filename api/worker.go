@@ -1,7 +1,6 @@
 package api
 
 import (
-	"math/big"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -96,11 +95,4 @@ type RHPRegistryUpdateRequest struct {
 	HostIP        string              `json:"hostIP"`
 	RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
-}
-
-// Account describes an ephemeral account as returned by the worker API.
-type Account struct {
-	ID      rhpv3.Account   `json:"id"`
-	Balance *big.Int        `json:"currency"`
-	Host    types.PublicKey `json:"host"`
 }
