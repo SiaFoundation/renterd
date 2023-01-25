@@ -250,7 +250,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	if len(contractset) < int(rs.TotalShards) {
 		c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
 	}
-	return c.ap.bus.SetContractSet("autopilot", contractset)
+	return c.ap.bus.SetContractSet(cfg.Contracts.ContractSet, contractset)
 }
 
 func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.ConsensusState) error {

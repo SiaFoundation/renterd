@@ -47,6 +47,8 @@ var (
 			Download: modules.SectorSize * 500,
 			Upload:   modules.SectorSize * 500,
 			Storage:  modules.SectorSize * 5e3,
+
+			ContractSet: "autopilot",
 		},
 		Hosts: api.HostsConfig{
 			IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.

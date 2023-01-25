@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -60,6 +61,7 @@ type Bus interface {
 	SlabsForMigration(set string, limit int) ([]object.Slab, error)
 
 	// settings
+	UpdateSetting(key string, value string) error
 	GougingSettings() (gs api.GougingSettings, err error)
 	RedundancySettings() (rs api.RedundancySettings, err error)
 }
@@ -123,6 +125,15 @@ func (ap *Autopilot) Run() error {
 		func() {
 			defer ap.logger.Info("autopilot iteration ended")
 
+			// use the same config for the entire iteration
+			cfg := ap.store.Config()
+
+			// update the contract set setting
+			err := ap.bus.UpdateSetting(bus.SettingContractSet, cfg.Contracts.ContractSet)
+			if err != nil {
+				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
+			}
+
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan()
@@ -140,9 +151,6 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// fetch config to ensure its not updated during maintenance
-			cfg := ap.store.Config()
-
 			// perform wallet maintenance
 			err = ap.c.performWalletMaintenance(cfg, cs)
 			if err != nil {
@@ -156,7 +164,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.TryPerformMigrations()
+			ap.m.TryPerformMigrations(cfg)
 		}()
 	}
 }

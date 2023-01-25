@@ -655,6 +655,14 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// allow overriding contract set
+	var contractset string
+	if jc.DecodeForm("contractset", &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
 	// attach gouging checker to the context
 	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
 
@@ -705,6 +713,14 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	dp, err := w.bus.DownloadParams()
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
 		return
+	}
+
+	// allow overriding contract set
+	var contractset string
+	if jc.DecodeForm("contractset", &contractset) != nil {
+		return
+	} else if contractset != "" {
+		dp.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context
@@ -769,6 +785,14 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
 		return
+	}
+
+	// allow overriding contract set
+	var contractset string
+	if jc.DecodeForm("contractset", &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context

@@ -34,6 +34,7 @@ type (
 
 	// ContractsConfig contains all contracts configuration parameters.
 	ContractsConfig struct {
+		ContractSet string         `json:"contractSet"`
 		Allowance   types.Currency `json:"allowance"`
 		Hosts       uint64         `json:"hosts"`
 		Period      uint64         `json:"period"`
@@ -54,6 +55,7 @@ type (
 func DefaultAutopilotConfig() (c AutopilotConfig) {
 	c.Wallet.DefragThreshold = 1000
 	c.Hosts.ScoreOverrides = make(map[types.PublicKey]float64)
+	c.Contracts.ContractSet = "autopilot"
 	c.Contracts.Allowance = types.Siacoins(1000)
 	c.Contracts.Hosts = 50
 	c.Contracts.Period = 144 * 7 * 6      // 6 weeks

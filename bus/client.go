@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/url"
@@ -257,6 +258,9 @@ func (c *Client) ActiveContracts() (contracts []api.ContractMetadata, err error)
 
 // Contracts returns the contracts for the given set from the contract store.
 func (c *Client) Contracts(set string) (contracts []api.ContractMetadata, err error) {
+	if set == "" {
+		return nil, errors.New("set cannot be empty")
+	}
 	err = c.c.GET(fmt.Sprintf("/contracts/set/%s", set), &contracts)
 	return
 }

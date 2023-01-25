@@ -4,12 +4,12 @@ import (
 	"math"
 	"sync"
 
+	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 )
 
 const (
-	migratorBatchSize   = math.MaxInt // TODO: change once we have a fix for the infinite loop
-	migratorContractset = "autopilot"
+	migratorBatchSize = math.MaxInt // TODO: change once we have a fix for the infinite loop
 )
 
 type migrator struct {
@@ -27,7 +27,7 @@ func newMigrator(ap *Autopilot) *migrator {
 	}
 }
 
-func (m *migrator) TryPerformMigrations() {
+func (m *migrator) TryPerformMigrations(cfg api.AutopilotConfig) {
 	m.mu.Lock()
 	if m.running {
 		m.mu.Unlock()
@@ -38,19 +38,19 @@ func (m *migrator) TryPerformMigrations() {
 
 	m.logger.Info("performing migrations")
 	go func() {
-		m.performMigrations()
+		m.performMigrations(cfg)
 		m.mu.Lock()
 		m.running = false
 		m.mu.Unlock()
 	}()
 }
 
-func (m *migrator) performMigrations() {
+func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 
 	// fetch slabs for migration
-	toMigrate, err := b.SlabsForMigration(migratorContractset, migratorBatchSize)
+	toMigrate, err := b.SlabsForMigration(cfg.Contracts.ContractSet, migratorBatchSize)
 	if err != nil {
 		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 		return
