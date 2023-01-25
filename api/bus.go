@@ -145,19 +145,19 @@ type UpdateBlocklistRequest struct {
 	Remove []string `json:"remove"`
 }
 
-// AccountsUpdateBalanceRequest is the request type for /accounts/:id/add
+// AccountsUpdateBalanceRequest is the request type for /accounts/:id/update
 // endpoint.
 type AccountsUpdateBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
-	Owner  string          `json:"owner"`
+	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
 }
 
-// AccountsAddBalanceRequest is the request type for /accounts/:id/update
+// AccountsAddBalanceRequest is the request type for /accounts/:id/add
 // endpoint.
 type AccountsAddBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
-	Owner  string          `json:"owner"`
+	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
 }
 

@@ -96,7 +96,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbSetting{},
 
 			// bus.EphemeralAccountStore tables
-			&dbEphemeralAccount{},
+			&dbAccount{},
 		}
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err

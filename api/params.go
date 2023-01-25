@@ -16,6 +16,8 @@ type (
 	// an integer number of milliseconds.
 	Duration time.Duration
 
+	// ParamString is a helper type since jape expects query params to
+	// implement the TextMarshaler interface.
 	ParamString string
 
 	// A SlabID uniquely identifies a slab.

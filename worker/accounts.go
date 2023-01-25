@@ -15,7 +15,7 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
-		bus      AccountStore
+		store    AccountStore
 		workerID string
 		key      types.PrivateKey
 
@@ -45,7 +45,7 @@ type (
 
 func newAccounts(workerID string, accountsKey types.PrivateKey, as AccountStore) *accounts {
 	return &accounts{
-		bus:      as,
+		store:    as,
 		accounts: make(map[rhpv3.Account]*account),
 		workerID: workerID,
 		key:      accountsKey,
@@ -94,7 +94,7 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 	acc, exists := a.accounts[accountID]
 	if !exists {
 		acc = &account{
-			bus:     a.bus,
+			bus:     a.store,
 			id:      accountID,
 			key:     a.key,
 			host:    hk,
@@ -119,9 +119,9 @@ func (a *account) WithDeposit(amtFn func() (types.Currency, error)) error {
 	return a.bus.AddBalance(a.id, a.owner, a.host, amt.Big())
 }
 
-// WithWithdraw decreases the balance of an account by the amount returned by
+// WithWithdrawal decreases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
-func (a *account) WithWithdraw(amtFn func() (types.Currency, error)) error {
+func (a *account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	amt, err := amtFn()
@@ -138,7 +138,7 @@ func (a *account) WithSync(balanceFn func() types.Currency) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.balance = balanceFn().Big()
-	err := a.bus.UpdateBalance(a.id, a.owner, a.host, a.balance)
+	err := a.bus.SetBalance(a.id, a.owner, a.host, a.balance)
 	return err
 }
 
@@ -150,13 +150,13 @@ func (a *accounts) tryInitAccounts() error {
 		return nil // already initialised
 	}
 	a.accounts = make(map[rhpv3.Account]*account)
-	accounts, err := a.bus.Accounts(a.workerID)
+	accounts, err := a.store.Accounts(a.workerID)
 	if err != nil {
 		return err
 	}
 	for _, acc := range accounts {
 		a.accounts[rhpv3.Account(acc.ID)] = &account{
-			bus:     a.bus,
+			bus:     a.store,
 			id:      rhpv3.Account(acc.ID),
 			key:     a.deriveAccountKey(acc.Host),
 			host:    acc.Host,

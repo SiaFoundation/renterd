@@ -9,7 +9,7 @@ import (
 )
 
 type (
-	dbEphemeralAccount struct {
+	dbAccount struct {
 		Model
 
 		Owner string `gorm:"NOT NULL"`
@@ -18,14 +18,14 @@ type (
 		AccountID rhpv3.Account `gorm:"unique;NOT NULL"`
 
 		// Host describes the host the account was created with.
-		Host types.PublicKey `gorm:"unique;NOT NULL"`
+		Host types.PublicKey `gorm:"NOT NULL"`
 
 		// Balance is the balance of the account.
 		Balance *big.Int `gorm:"type:bytes;serializer:gob"`
 	}
 )
 
-func (dbEphemeralAccount) TableName() string {
+func (dbAccount) TableName() string {
 	return "ephemeral_accounts"
 }
 

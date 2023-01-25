@@ -16,9 +16,10 @@ type accounts struct {
 }
 
 type account struct {
+	Owner string
+
 	mu sync.Mutex
 	ephemeralaccounts.Account
-	Owner string
 }
 
 func newAccounts(accs []ephemeralaccounts.Account) *accounts {
@@ -41,7 +42,7 @@ func newAccounts(accs []ephemeralaccounts.Account) *accounts {
 	return a
 }
 
-// AddAmount apples the provided amount to an account through addition. So the
+// AddAmount applies the provided amount to an account through addition. So the
 // input can be both a positive or negative number depending on whether a
 // withdrawal or deposit is recorded. If the account doesn't exist, it is
 // created.
@@ -54,9 +55,9 @@ func (a *accounts) AddAmount(id rhpv3.Account, owner string, hk types.PublicKey,
 	acc.mu.Unlock()
 }
 
-// UpdateBalance sets the balance of a given account to the provided amount. If
+// SetBalance sets the balance of a given account to the provided amount. If
 // the account doesn't exist, it is created.
-func (a *accounts) UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, balance *big.Int) {
+func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, balance *big.Int) {
 	acc := a.account(id, owner, hk)
 
 	// Update balance.

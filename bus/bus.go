@@ -746,7 +746,7 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.AddAmount(id, req.Owner, req.Host, req.Amount)
+	b.accounts.AddAmount(id, string(req.Owner), req.Host, req.Amount)
 }
 
 func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
@@ -770,7 +770,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.UpdateBalance(id, req.Owner, req.Host, req.Amount)
+	b.accounts.SetBalance(id, string(req.Owner), req.Host, req.Amount)
 }
 
 // New returns a new Bus.
