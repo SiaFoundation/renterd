@@ -51,8 +51,9 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		mu         sync.Mutex
-		currPeriod uint64
+		mu               sync.Mutex
+		currPeriod       uint64
+		maintenanceTxnID types.TransactionID
 	}
 
 	contractInfo struct {
@@ -260,6 +261,23 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 		return nil
 	}
 
+	// fetch pending transactions
+	pending, err := c.ap.bus.WalletPending()
+	if err != nil {
+		return nil
+	}
+
+	// pending maintenance transaction - nothing to do
+	c.mu.Lock()
+	currID := c.maintenanceTxnID
+	c.mu.Unlock()
+	for _, txn := range pending {
+		if currID == txn.ID() {
+			l.Debugf("wallet maintenance skipped, pending transaction found with id %v", currID)
+			return nil
+		}
+	}
+
 	// fetch wallet outputs
 	outputs, err := b.WalletOutputs()
 	if err != nil {
@@ -331,6 +349,10 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 	}
 
 	l.Debugf("wallet maintenance succeeded, tx %v", id)
+
+	c.mu.Lock()
+	c.maintenanceTxnID = id
+	c.mu.Unlock()
 	return nil
 }
 

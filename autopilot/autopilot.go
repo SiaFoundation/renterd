@@ -28,6 +28,7 @@ type Bus interface {
 	WalletDiscard(txn types.Transaction) error
 	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
 	WalletOutputs() (resp []wallet.SiacoinElement, err error)
+	WalletPending() (resp []types.Transaction, err error)
 	WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
 	WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
 	WalletRedistribute(outputs int, amount types.Currency) (id types.TransactionID, err error)
