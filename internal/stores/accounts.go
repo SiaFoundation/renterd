@@ -4,7 +4,7 @@ import (
 	"math/big"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/ephemeralaccounts"
+	"go.sia.tech/renterd/api"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
@@ -29,10 +29,10 @@ func (dbAccount) TableName() string {
 	return "ephemeral_accounts"
 }
 
-func (s *SQLStore) Accounts() ([]ephemeralaccounts.Account, error) {
-	return []ephemeralaccounts.Account{}, nil // TODO: implement
+func (s *SQLStore) Accounts() ([]api.Account, error) {
+	return []api.Account{}, nil // TODO: implement
 }
 
-func (s *SQLStore) SaveAccounts([]ephemeralaccounts.Account) error {
+func (s *SQLStore) SaveAccounts([]api.Account) error {
 	return nil // TODO: implement
 }

@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -110,8 +109,8 @@ type (
 	// accounts are rapidly updated and can be recovered, they are only
 	// loaded upon startup and persisted upon shutdown.
 	EphemeralAccountStore interface {
-		Accounts() ([]ephemeralaccounts.Account, error)
-		SaveAccounts([]ephemeralaccounts.Account) error
+		Accounts() ([]api.Account, error)
+		SaveAccounts([]api.Account) error
 	}
 )
 

@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/ephemeralaccounts"
+	"go.sia.tech/renterd/api"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
@@ -19,17 +19,17 @@ type account struct {
 	Owner string
 
 	mu sync.Mutex
-	ephemeralaccounts.Account
+	api.Account
 }
 
-func newAccounts(accs []ephemeralaccounts.Account) *accounts {
+func newAccounts(accs []api.Account) *accounts {
 	a := &accounts{
 		byID:    make(map[rhpv3.Account]*account),
 		byOwner: make(map[string][]*account),
 	}
 	for _, acc := range accs {
 		account := &account{
-			Account: ephemeralaccounts.Account{
+			Account: api.Account{
 				ID:      acc.ID,
 				Host:    acc.Host,
 				Balance: acc.Balance,
@@ -68,13 +68,13 @@ func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey
 
 // Accounts returns all accounts for a given owner. Usually called when workers
 // request their accounts on startup.
-func (a *accounts) Accounts(owner string) []ephemeralaccounts.Account {
+func (a *accounts) Accounts(owner string) []api.Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	accounts := make([]ephemeralaccounts.Account, len(a.byOwner[owner]))
+	accounts := make([]api.Account, len(a.byOwner[owner]))
 	for i, acc := range a.byOwner[owner] {
 		acc.mu.Lock()
-		accounts[i] = ephemeralaccounts.Account{
+		accounts[i] = api.Account{
 			ID:      acc.ID,
 			Balance: acc.Balance,
 			Host:    acc.Host,
@@ -87,13 +87,13 @@ func (a *accounts) Accounts(owner string) []ephemeralaccounts.Account {
 
 // ToPersist returns all known accounts to be persisted by the storage backend.
 // Called once on shutdown.
-func (a *accounts) ToPersist() []ephemeralaccounts.Account {
+func (a *accounts) ToPersist() []api.Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	accounts := make([]ephemeralaccounts.Account, 0, len(a.byID))
+	accounts := make([]api.Account, 0, len(a.byID))
 	for _, acc := range a.byID {
 		acc.mu.Lock()
-		accounts = append(accounts, ephemeralaccounts.Account{
+		accounts = append(accounts, api.Account{
 			ID:      acc.ID,
 			Balance: acc.Balance,
 			Host:    acc.Host,
@@ -112,7 +112,7 @@ func (a *accounts) account(id rhpv3.Account, owner string, hk types.PublicKey) *
 	acc, exists := a.byID[id]
 	if !exists {
 		acc = &account{
-			Account: ephemeralaccounts.Account{
+			Account: api.Account{
 				ID:      id,
 				Host:    hk,
 				Balance: big.NewInt(0),

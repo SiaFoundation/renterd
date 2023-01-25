@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
@@ -195,7 +194,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 }
 
 type AccountStore interface {
-	Accounts(owner string) ([]ephemeralaccounts.Account, error)
+	Accounts(owner string) ([]api.Account, error)
 	AddBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 	SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 }
@@ -225,7 +224,7 @@ type Bus interface {
 	AddObject(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
 
-	Accounts(owner string) ([]ephemeralaccounts.Account, error)
+	Accounts(owner string) ([]api.Account, error)
 	UpdateSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(txn types.Transaction) error

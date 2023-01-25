@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/ephemeralaccounts"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -495,7 +494,7 @@ func (c *Client) GougingParams() (gp api.GougingParams, err error) {
 }
 
 // Accounts returns the ephemeral accounts for a given owner.
-func (c *Client) Accounts(owner string) (accounts []ephemeralaccounts.Account, err error) {
+func (c *Client) Accounts(owner string) (accounts []api.Account, err error) {
 	err = c.c.GET(fmt.Sprintf("/accounts/%s", api.ParamString(owner)), &accounts)
 	return
 }
