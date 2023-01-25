@@ -200,16 +200,20 @@ type AccountStore interface {
 	UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 }
 
+type contractLocker interface {
+	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
+	ReleaseContract(fcid types.FileContractID, lockID uint64) (err error)
+}
+
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	AccountStore
+	contractLocker
 
 	ActiveContracts() ([]api.ContractMetadata, error)
-	AcquireContract(id types.FileContractID, priority int, d time.Duration) (uint64, error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordInteractions(interactions []hostdb.Interaction) error
-	ReleaseContract(id types.FileContractID, lockID uint64) error
 
 	Host(hostKey types.PublicKey) (hostdb.Host, error)
 
@@ -478,7 +482,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 
-	lockID, err := w.bus.AcquireContract(rrr.ContractID, lockingPriorityRenew, lockingDurationRenew)
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rrr.ContractID, lockingPriorityRenew, lockingDurationRenew)
 	if jc.Check("could not lock contract for renewal", err) != nil {
 		return
 	}
@@ -552,7 +556,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	hostIP := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
-	lockID, err := w.bus.AcquireContract(rfr.ContractID, lockingPriorityRenew, lockingPriorityFunding)
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityRenew, lockingPriorityFunding)
 	if jc.Check("failed to acquire contract for funding EA", err) != nil {
 		return
 	}
@@ -660,7 +664,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
 	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts)
+		return migrateSlab(ctx, &slab, hosts, w.bus)
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -737,7 +741,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		}
 
 		err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-			return downloadSlab(ctx, cw, ss, hosts)
+			return downloadSlab(ctx, cw, ss, hosts, w.bus)
 		})
 		if err != nil {
 			_ = err // NOTE: can't write error because we may have already written to the response
@@ -788,7 +792,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
 		if err := w.withHosts(ctx, contracts, func(hosts []sectorStore) (err error) {
-			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts)
+			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, w.bus)
 			return err
 		}); err == io.EOF {
 			break
@@ -913,10 +917,9 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		bus:       b,
 		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey: masterKey,
-		accounts:  nil,
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
-	w.accounts = newAccounts(w.id, w.deriveSubKey("account"), w.bus)
+	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/build"
 	"lukechampine.com/frand"
 )
@@ -27,17 +29,22 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
-func hostScore(cfg api.AutopilotConfig, h Host) float64 {
+func hostScore(cfg api.AutopilotConfig, h hostdb.Host) float64 {
+	// sanity check - host should have been filtered
+	if h.Settings == nil {
+		return 0
+	}
+
 	// TODO: priceAdjustmentScore
 	// TODO: storageRemainingScore
 	return ageScore(h) *
-		collateralScore(cfg, h) *
+		collateralScore(cfg, *h.Settings) *
 		interactionScore(h) *
 		uptimeScore(h) *
-		versionScore(h)
+		versionScore(*h.Settings)
 }
 
-func ageScore(h Host) float64 {
+func ageScore(h hostdb.Host) float64 {
 	// sanity check
 	if h.KnownSince.IsZero() {
 		return 0
@@ -70,13 +77,7 @@ func ageScore(h Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.AutopilotConfig, h Host) float64 {
-	// sanity check - host should have been filtered
-	settings := h.Settings
-	if settings == nil {
-		return 0
-	}
-
+func collateralScore(cfg api.AutopilotConfig, s rhp.HostSettings) float64 {
 	// NOTE: This math is copied directly from the old siad hostdb. It would
 	// probably benefit from a thorough review.
 
@@ -90,8 +91,8 @@ func collateralScore(cfg api.AutopilotConfig, h Host) float64 {
 	storage := cfg.Contracts.Storage
 
 	// calculate the collateral
-	contractCollateral := settings.Collateral.Mul64(storage).Mul64(duration)
-	contractCollateralMax := settings.MaxCollateral.Div64(2) // 2x buffer - renter may end up storing extra data
+	contractCollateral := s.Collateral.Mul64(storage).Mul64(duration)
+	contractCollateralMax := s.MaxCollateral.Div64(2) // 2x buffer - renter may end up storing extra data
 	if contractCollateral.Cmp(contractCollateralMax) > 0 {
 		contractCollateral = contractCollateralMax
 	}
@@ -112,14 +113,14 @@ func collateralScore(cfg api.AutopilotConfig, h Host) float64 {
 	return weight
 }
 
-func interactionScore(h Host) float64 {
+func interactionScore(h hostdb.Host) float64 {
 	success, fail := 30.0, 1.0
 	success += h.Interactions.SuccessfulInteractions
 	fail += h.Interactions.FailedInteractions
 	return math.Pow(success/(success+fail), 10)
 }
 
-func uptimeScore(h Host) float64 {
+func uptimeScore(h hostdb.Host) float64 {
 	secondToLastScanSuccess := h.Interactions.SecondToLastScanSuccess
 	lastScanSuccess := h.Interactions.LastScanSuccess
 	uptime := h.Interactions.Uptime
@@ -171,13 +172,7 @@ func uptimeScore(h Host) float64 {
 	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
 }
 
-func versionScore(h Host) float64 {
-	// sanity check - host should have been filtered
-	settings := h.Settings
-	if settings == nil {
-		return 0
-	}
-
+func versionScore(settings rhp.HostSettings) float64 {
 	versions := []struct {
 		version string
 		penalty float64

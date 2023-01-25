@@ -40,7 +40,6 @@ type Bus interface {
 	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
-	Contract(id types.FileContractID) (contract api.ContractMetadata, err error)
 	Contracts(set string) ([]api.ContractMetadata, error)
 	DeleteContracts(ids []types.FileContractID) error
 	SetContractSet(set string, contracts []types.FileContractID) error

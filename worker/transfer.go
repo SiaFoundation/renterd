@@ -6,10 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"lukechampine.com/frand"
+)
+
+const (
+	contractLockingUploadPriority   = 1
+	contractLockingDownloadPriority = 2
 )
 
 // A sectorStore stores contract data.
@@ -21,10 +28,14 @@ type sectorStore interface {
 	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }
 
-func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore) ([]object.Sector, error) {
+func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore, locker contractLocker) ([]object.Sector, error) {
 	if len(hosts) < len(shards) {
 		return nil, fmt.Errorf("fewer hosts than shards, %v<%v", len(hosts), len(shards))
 	}
+
+	// Randomize order of hosts to make sure we don't always start with the
+	// same one.
+	frand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
 	type req struct {
 		host       sectorStore
@@ -40,7 +51,13 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	respChan := make(chan resp, len(shards))
 	worker := func() {
 		for req := range reqChan {
+			lockID, err := locker.AcquireContract(ctx, req.host.Contract(), contractLockingUploadPriority, 30*time.Second)
+			if err != nil {
+				respChan <- resp{req, types.Hash256{}, err}
+				return
+			}
 			root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+			locker.ReleaseContract(req.host.Contract(), lockID)
 			respChan <- resp{req, root, err}
 		}
 	}
@@ -84,7 +101,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	return sectors, nil
 }
 
-func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStore) (object.Slab, int, error) {
+func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStore, locker contractLocker) (object.Slab, int, error) {
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	length, err := io.ReadFull(r, buf)
@@ -98,17 +115,21 @@ func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStor
 	s.Encode(buf, shards)
 	s.Encrypt(shards)
 
-	s.Shards, err = parallelUploadSlab(ctx, shards, hosts)
+	s.Shards, err = parallelUploadSlab(ctx, shards, hosts, locker)
 	if err != nil {
 		return object.Slab{}, 0, err
 	}
 	return s, length, nil
 }
 
-func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sectorStore) ([][]byte, error) {
+func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sectorStore, locker contractLocker) ([][]byte, error) {
 	if len(hosts) < int(ss.MinShards) {
 		return nil, errors.New("not enough hosts to recover shard")
 	}
+
+	// Randomize order of hosts to make sure we don't always start with the
+	// same one.
+	frand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
 	type req struct {
 		hostIndex int
@@ -137,7 +158,13 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			}
 			offset, length := ss.SectorRegion()
 			var buf bytes.Buffer
-			err := h.DownloadSector(ctx, &buf, shard.Root, offset, length)
+			lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
+			if err != nil {
+				respChan <- resp{req, nil, err}
+				return
+			}
+			err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
+			locker.ReleaseContract(h.Contract(), lockID)
 			respChan <- resp{req, buf.Bytes(), err}
 		}
 	}
@@ -183,8 +210,8 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 	return shards, nil
 }
 
-func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore) error {
-	shards, err := parallelDownloadSlab(ctx, ss, hosts)
+func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore, locker contractLocker) error {
+	shards, err := parallelDownloadSlab(ctx, ss, hosts, locker)
 	if err != nil {
 		return err
 	}
@@ -259,7 +286,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 	return nil
 }
 
-func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error {
+func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker) error {
 	hostsmap := make(map[string]struct{})
 	usedmap := make(map[string]struct{})
 
@@ -305,7 +332,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error
 		Offset: 0,
 		Length: uint32(s.MinShards) * rhpv2.SectorSize,
 	}
-	shards, err := parallelDownloadSlab(ctx, ss, hosts)
+	shards, err := parallelDownloadSlab(ctx, ss, hosts, locker)
 	if err != nil {
 		return err
 	}
@@ -330,7 +357,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore) error
 	}
 
 	// reupload those shards
-	uploaded, err := parallelUploadSlab(ctx, shards, filtered)
+	uploaded, err := parallelUploadSlab(ctx, shards, filtered, locker)
 	if err != nil {
 		return err
 	}

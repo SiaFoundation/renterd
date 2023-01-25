@@ -4,12 +4,19 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
+
+	"go.sia.tech/renterd/hostdb"
+	"go.uber.org/zap"
 )
 
 const (
 	// number of unique bits the host IP must have to prevent it from being filtered
 	ipv4FilterRange = 24
 	ipv6FilterRange = 54
+
+	// resolverLookupTimeout is the timeout we apply when resolving a host's IP address
+	resolverLookupTimeout = 5 * time.Second
 )
 
 type resolver interface {
@@ -19,23 +26,38 @@ type resolver interface {
 type ipFilter struct {
 	subnets  map[string]string
 	resolver resolver
+	timeout  time.Duration
+
+	logger *zap.SugaredLogger
 }
 
-func newIPFilter() *ipFilter {
+func newIPFilter(logger *zap.SugaredLogger) *ipFilter {
 	return &ipFilter{
 		subnets:  make(map[string]string),
 		resolver: &net.Resolver{},
+		timeout:  resolverLookupTimeout,
+
+		logger: logger,
 	}
 }
 
-func (f *ipFilter) isRedundantIP(h Host) bool {
+func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
+	// create a context
+	ctx := context.Background()
+	if f.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), f.timeout)
+		defer cancel()
+	}
+
 	// lookup all IP addresses for the given host
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
 		return true
 	}
-	addresses, err := f.resolver.LookupIPAddr(context.Background(), host) // TODO: pass in context (?) could define a default timeout on the ipFilter
+	addresses, err := f.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
+		f.logger.Errorw(fmt.Sprintf("failed to lookup IP, err: %v", err), "hk", h.PublicKey)
 		return true
 	}
 
