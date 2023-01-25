@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 )
 
@@ -23,10 +24,14 @@ type Store interface {
 type Bus interface {
 	// wallet
 	WalletAddress() (types.Address, error)
+	WalletBalance() (types.Currency, error)
 	WalletDiscard(txn types.Transaction) error
 	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
+	WalletOutputs() (resp []wallet.SiacoinElement, err error)
+	WalletPending() (resp []types.Transaction, err error)
 	WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
 	WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+	WalletRedistribute(outputs int, amount types.Currency) (id types.TransactionID, err error)
 	WalletSign(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 
 	// hostdb
@@ -46,6 +51,7 @@ type Bus interface {
 
 	// txpool
 	RecommendedFee() (types.Currency, error)
+	TransactionPool() (txns []types.Transaction, err error)
 
 	// consensus
 	ConsensusState() (api.ConsensusState, error)
@@ -137,11 +143,16 @@ func (ap *Autopilot) Run() error {
 			// fetch config to ensure its not updated during maintenance
 			cfg := ap.store.Config()
 
+			// perform wallet maintenance
+			err = ap.c.performWalletMaintenance(cfg, cs)
+			if err != nil {
+				ap.logger.Errorf("wallet maintenance failed, err: %v", err)
+			}
+
 			// perform maintenance
 			err = ap.c.performContractMaintenance(cfg, cs)
 			if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
-				return
 			}
 
 			// migration
