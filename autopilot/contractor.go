@@ -239,8 +239,8 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 	l := c.logger
 
 	// no contracts - nothing to do
-	numHostWanted := cfg.Contracts.Hosts
-	if numHostWanted == 0 {
+	numHostsWanted := cfg.Contracts.Hosts
+	if numHostsWanted == 0 {
 		l.Debug("wallet maintenance skipped, no contracts wanted")
 		return nil
 	}
@@ -258,6 +258,12 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 	}
 	if balance.IsZero() {
 		l.Debug("wallet maintenance skipped, zero balance in wallet")
+		return nil
+	}
+
+	// balance below allowance - nothing to do
+	if balance.Cmp(cfg.Contracts.Allowance) < 0 {
+		l.Debugf("wallet maintenance skipped, balance lower than allowance %v<%v", balance, cfg.Contracts.Allowance)
 		return nil
 	}
 
@@ -286,64 +292,13 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 	numOutputs := uint64(len(outputs))
 
 	// enough outputs - nothing to do
-	if numOutputs > numHostWanted {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>%v)", numOutputs, numHostWanted)
+	if numOutputs >= numHostsWanted {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", numOutputs, numHostsWanted)
 		return nil
-	}
-
-	// fetch active contracts
-	active, err := b.ActiveContracts()
-	if err != nil {
-		return err
-	}
-	numContracts := uint64(len(active))
-
-	// if enough contracts - check if we have enough outputs for refreshes
-	var missingForRefresh int
-	var missingForFormation int
-	if numContracts >= numHostWanted {
-		numOutputsForRefresh := uint64(math.Ceil(float64(numContracts) * minOutputsForRefreshesPct))
-		if numOutputs >= numOutputsForRefresh {
-			return nil
-		}
-		missingForRefresh = int(numOutputsForRefresh - numOutputs)
-	} else {
-		missingForFormation = int(numOutputs) - int(numHostWanted-numContracts)
-		missingForFormation = int(math.Max(float64(missingForFormation), 0))
-	}
-
-	// enough outputs - nothing to do
-	missing := missingForFormation + missingForRefresh
-	if missing == 0 {
-		l.Debugf("no wallet maintenance needed, enough outputs available (%d)", numOutputs)
-		return nil
-	}
-
-	// calculate a good amount to redistribute
-	amount := balance.Div64(uint64(missing))
-	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
-	avgInitialContractFunds := allowance.Div64((minInitialContractFundingDivisor + maxInitialContractFundingDivisor) / 2)
-	if amount.Cmp(avgInitialContractFunds) < 0 {
-		amount = avgInitialContractFunds
-	}
-
-	// not enough money left
-	if amount.Mul64(2).Cmp(balance) > 0 {
-		l.Debug("wallet maintenance skipped, wallet balance is too low to meaningfully redistribute money)")
-		return nil
-	}
-
-	// adjust the number of outputs if necessary
-	if amount.Mul64(uint64(missing)).Cmp(balance) > 0 {
-		err := fmt.Errorf("number of outputs is zero after adjusting the amount to redistribute, balance: %v, amount: %v, missing: %v", balance, amount, missing)
-		missing = int(balance.Div(amount).Big().Uint64())
-		if missing == 0 {
-			return err
-		}
 	}
 
 	// redistribute outputs
-	id, err := b.WalletRedistribute(missing, balance.Div64(uint64(missing)))
+	id, err := b.WalletRedistribute(int(numOutputs), balance.Div64(numOutputs))
 	if err != nil {
 		return err
 	}
