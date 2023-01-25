@@ -243,11 +243,17 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 		tp.TransactionPoolSubscribe(m)
 	}
 
+	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, cfg.InteractionFlushInterval)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	cleanup := func() error {
 		errs := []error{
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
+			busCleanup(),
 			sqlStore.Close(),
 		}
 		for _, err := range errs {
@@ -256,11 +262,6 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 			}
 		}
 		return nil
-	}
-
-	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, cfg.InteractionFlushInterval)
-	if err != nil {
-		return nil, nil, err
 	}
 	return b, cleanup, nil
 }

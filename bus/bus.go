@@ -120,12 +120,7 @@ type bus struct {
 	interactionsMu            sync.Mutex
 	interactions              []hostdb.Interaction
 	interactionsFlushInterval time.Duration
-	interactionsFlush         *interactionsFlush
-}
-
-type interactionsFlush struct {
-	c      chan struct{}
-	result error
+	interactionsFlushTimer    *time.Timer
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -404,9 +399,10 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var interactions []hostdb.Interaction
-	if jc.Decode(&interactions) == nil {
-		jc.Check("couldn't record interaction", b.recordInteractions(interactions))
+	if jc.Decode(&interactions) != nil {
+		return
 	}
+	b.recordInteractions(interactions)
 }
 
 func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
@@ -707,7 +703,7 @@ func (b *bus) gougingParams() (api.GougingParams, error) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings, interactionsFlushInterval time.Duration) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
 	b := &bus{
 		s:                         s,
 		cm:                        cm,
@@ -722,11 +718,22 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 	}
 
 	if err := b.setGougingSettings(gs); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := b.setRedundancySettings(rs); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	// Flush interactions in cleanup.
+	cleanup := func() error {
+		b.interactionsMu.Lock()
+		defer b.interactionsMu.Unlock()
+		if b.interactionsFlushTimer != nil {
+			b.interactionsFlushTimer.Stop()
+			b.flushInteractions()
+		}
+		return nil
 	}
 
 	return jape.Mux(map[string]jape.Handler{
@@ -786,45 +793,34 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
-	}), nil
+	}), cleanup, nil
 }
 
-func (b *bus) recordInteractions(interactions []hostdb.Interaction) error {
-	// Check whether someone else is flushing the interactions or if this
-	// thread needs to.
-	var shouldFlush bool
-
-	// No interactionsFlush exists so this thread needs to flush.
-	b.interactionsMu.Lock()
-	f := b.interactionsFlush
-	if f == nil {
-		f = &interactionsFlush{
-			c: make(chan struct{}),
-		}
-		b.interactionsFlush = f
-		shouldFlush = true
-	}
-	b.interactions = append(b.interactions, interactions...)
-	b.interactionsMu.Unlock()
-
-	// If we don't need to flush, we block on the flush channel and then
-	// return the result.
-	if !shouldFlush {
-		<-f.c // TODO: handle shutdown
-		return f.result
-	}
-
-	// Otherwise we wait for the interval and apply the interactions.
-	time.Sleep(b.interactionsFlushInterval) // TODO: handle shutdown
-
+func (b *bus) recordInteractions(interactions []hostdb.Interaction) {
 	b.interactionsMu.Lock()
 	defer b.interactionsMu.Unlock()
 
-	f.result = b.hdb.RecordInteractions(b.interactions)
-	close(f.c)
+	// Append interactions to buffer.
+	b.interactions = append(b.interactions, interactions...)
+
+	// If a thread was scheduled to flush the buffer we are done.
+	if b.interactionsFlushTimer != nil {
+		return
+	}
+	// Otherwise we schedule a flush.
+	b.interactionsFlushTimer = time.AfterFunc(b.interactionsFlushInterval, func() {
+		b.flushInteractions()
+	})
+}
+
+func (b *bus) flushInteractions() {
+	b.interactionsMu.Lock()
+	defer b.interactionsMu.Unlock()
+	if len(b.interactions) > 0 {
+		b.hdb.RecordInteractions(b.interactions) // TODO: log
+	}
 	b.interactions = nil
-	b.interactionsFlush = nil
-	return f.result
+	b.interactionsFlushTimer = nil
 }
 
 func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
