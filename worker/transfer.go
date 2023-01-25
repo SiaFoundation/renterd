@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -31,6 +32,10 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	if len(hosts) < len(shards) {
 		return nil, fmt.Errorf("fewer hosts than shards, %v<%v", len(hosts), len(shards))
 	}
+
+	// Randomize order of hosts to make sure we don't always start with the
+	// same one.
+	frand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
 	type req struct {
 		host       sectorStore
@@ -121,6 +126,10 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 	if len(hosts) < int(ss.MinShards) {
 		return nil, errors.New("not enough hosts to recover shard")
 	}
+
+	// Randomize order of hosts to make sure we don't always start with the
+	// same one.
+	frand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
 	type req struct {
 		hostIndex int
