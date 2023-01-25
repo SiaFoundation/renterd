@@ -725,7 +725,7 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	var req api.AccountsUpdateBalanceRequest
+	var req api.AccountsAddBalanceRequest
 	if jc.Decode(&req) != nil {
 		return
 	}

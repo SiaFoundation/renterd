@@ -136,9 +136,9 @@ func (a *account) WithWithdraw(amtFn func() (types.Currency, error)) error {
 // locked while the balance is fetched through balanceFn.
 func (a *account) WithSync(balanceFn func() types.Currency) error {
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.balance = balanceFn().Big()
 	err := a.bus.UpdateBalance(a.id, a.owner, a.host, a.balance)
-	a.mu.Unlock()
 	return err
 }
 
