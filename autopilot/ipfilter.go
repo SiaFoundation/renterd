@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
@@ -57,7 +58,9 @@ func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
 	}
 	addresses, err := f.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
-		f.logger.Errorw(fmt.Sprintf("failed to lookup IP, err: %v", err), "hk", h.PublicKey)
+		if !strings.Contains(err.Error(), "no such host") {
+			f.logger.Errorf("failed to lookup IP for host %v, err: %v", h.PublicKey, err)
+		}
 		return true
 	}
 
