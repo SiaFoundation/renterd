@@ -45,9 +45,10 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		mu               sync.Mutex
-		currPeriod       uint64
 		maintenanceTxnID types.TransactionID
+
+		mu         sync.Mutex
+		currPeriod uint64
 	}
 
 	contractInfo struct {
@@ -233,8 +234,7 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 	l := c.logger
 
 	// no contracts - nothing to do
-	numHostsWanted := cfg.Contracts.Hosts
-	if numHostsWanted == 0 {
+	if cfg.Contracts.Hosts == 0 {
 		l.Debug("wallet maintenance skipped, no contracts wanted")
 		return nil
 	}
@@ -245,70 +245,47 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 		return nil
 	}
 
-	// no money - nothing to do
-	balance, err := b.WalletBalance()
-	if err != nil {
-		return err
-	}
-	if balance.IsZero() {
-		l.Debug("wallet maintenance skipped, zero balance in wallet")
-		return nil
-	}
-
-	// balance below allowance - nothing to do
-	if balance.Cmp(cfg.Contracts.Allowance) < 0 {
-		l.Debugf("wallet maintenance skipped, balance lower than allowance %v<%v", balance, cfg.Contracts.Allowance)
-		return nil
-	}
-
-	// fetch pending transactions
+	// pending maintenance transaction - nothing to do
 	pending, err := c.ap.bus.WalletPending()
 	if err != nil {
 		return nil
 	}
-
-	// pending maintenance transaction - nothing to do
-	c.mu.Lock()
-	currID := c.maintenanceTxnID
-	c.mu.Unlock()
 	for _, txn := range pending {
-		if currID == txn.ID() {
-			l.Debugf("wallet maintenance skipped, pending transaction found with id %v", currID)
+		if c.maintenanceTxnID == txn.ID() {
+			l.Debugf("wallet maintenance skipped, pending transaction found with id %v", c.maintenanceTxnID)
 			return nil
 		}
 	}
 
-	// fetch wallet outputs
+	// enough outputs - nothing to do
 	outputs, err := b.WalletOutputs()
 	if err != nil {
 		return err
 	}
-	numOutputs := uint64(len(outputs))
-
-	// enough outputs - nothing to do
-	if numOutputs >= numHostsWanted {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", numOutputs, numHostsWanted)
+	if uint64(len(outputs)) >= cfg.Contracts.Hosts {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(outputs), cfg.Contracts.Hosts)
 		return nil
 	}
 
-	// check amount
-	amount := balance.Div64(numOutputs)
-	min, _ := initialContractFundingMinMax(cfg)
-	if amount.Cmp(min) < 0 {
-		amount = min.Mul64(2)
+	// not enough balance - nothing to do
+	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	balance, err := b.WalletBalance()
+	if err != nil {
+		return err
+	}
+	if balance.Cmp(amount.Mul64(cfg.Contracts.Hosts)) < 0 {
+		l.Debugf("wallet maintenance skipped, insufficient balance %v < (%v*%v)", balance, cfg.Contracts.Hosts, amount)
+		return nil
 	}
 
 	// redistribute outputs
-	id, err := b.WalletRedistribute(int(numOutputs), amount)
+	id, err := b.WalletRedistribute(int(cfg.Contracts.Hosts), amount)
 	if err != nil {
-		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", numOutputs, amount, balance, err)
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", cfg.Contracts.Hosts, amount, balance, err)
 	}
 
 	l.Debugf("wallet maintenance succeeded, tx %v", id)
-
-	c.mu.Lock()
 	c.maintenanceTxnID = id
-	c.mu.Unlock()
 	return nil
 }
 
