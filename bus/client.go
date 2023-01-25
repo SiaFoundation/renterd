@@ -149,15 +149,16 @@ func (c *Client) WalletSign(txn *types.Transaction, toSign []types.Hash256, cf t
 	return c.c.POST("/wallet/sign", req, txn)
 }
 
-// WalletRedistribute returns a signed transaction that redistributes the money
-// in the wallet in the desired number of outputs of given amount.
-func (c *Client) WalletRedistribute(outputs int, amount types.Currency) (txn types.Transaction, err error) {
+// WalletRedistribute broadcasts a transaction that redistributes the money in
+// the wallet in the desired number of outputs of given amount. If the
+// transaction was successfully broadcasted it will return the transaction ID.
+func (c *Client) WalletRedistribute(outputs int, amount types.Currency) (id types.TransactionID, err error) {
 	req := api.WalletRedistributeRequest{
 		Amount:  amount,
 		Outputs: outputs,
 	}
 
-	err = c.c.POST("/wallet/redistribute", req, &txn)
+	err = c.c.POST("/wallet/redistribute", req, &id)
 	return
 }
 

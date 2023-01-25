@@ -263,7 +263,12 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(txn)
+	if jc.Check("couldn't broadcast the transaction", b.tp.AddTransactionSet([]types.Transaction{txn})) != nil {
+		b.w.ReleaseInputs(txn)
+		return
+	}
+
+	jc.Encode(txn.ID())
 }
 
 func (b *bus) walletDiscardHandler(jc jape.Context) {

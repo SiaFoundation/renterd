@@ -33,6 +33,17 @@ const (
 	// contracts if the number of active contracts dips below 87.5% of the
 	// required contracts
 	leewayPctRequiredContracts = 0.875
+
+	// maxInitialContractFundingDivisor and minInitialContractFundingDivisor
+	// define the min and max range we use when calculating the initial contract
+	// funding
+	maxInitialContractFundingDivisor = uint64(10)
+	minInitialContractFundingDivisor = uint64(20)
+
+	// minOutputsForRefreshesPct defines the minimum amount of outputs we ensure
+	// to cover refreshes, so if we need 50 hosts and the percentage is .1 we
+	// make sure to maintain at least 5 outputs
+	minOutputsForRefreshesPct = 0.1
 )
 
 type (
@@ -219,6 +230,108 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 		c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
 	}
 	return c.ap.bus.SetContractSet("autopilot", contractset)
+}
+
+func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.ConsensusState) error {
+	c.logger.Info("performing wallet maintenance")
+	b := c.ap.bus
+	l := c.logger
+
+	// no contracts - nothing to do
+	numHostWanted := cfg.Contracts.Hosts
+	if numHostWanted == 0 {
+		l.Debug("wallet maintenance skipped, no contracts wanted")
+		return nil
+	}
+
+	// no allowance - nothing to do
+	if cfg.Contracts.Allowance.IsZero() {
+		l.Debug("wallet maintenance skipped, no allowance set")
+		return nil
+	}
+
+	// no money - nothing to do
+	balance, err := b.WalletBalance()
+	if err != nil {
+		return err
+	}
+	if balance.IsZero() {
+		l.Debug("wallet maintenance skipped, zero balance in wallet")
+		return nil
+	}
+
+	// fetch wallet outputs
+	outputs, err := b.WalletOutputs()
+	if err != nil {
+		return err
+	}
+	numOutputs := uint64(len(outputs))
+
+	// enough outputs - nothing to do
+	if numOutputs > numHostWanted {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>%v)", numOutputs, numHostWanted)
+		return nil
+	}
+
+	// fetch active contracts
+	active, err := b.ActiveContracts()
+	if err != nil {
+		return err
+	}
+	numContracts := uint64(len(active))
+
+	// if enough contracts - check if we have enough outputs for refreshes
+	var missingForRefresh int
+	var missingForFormation int
+	if numContracts >= numHostWanted {
+		numOutputsForRefresh := uint64(math.Ceil(float64(numContracts) * minOutputsForRefreshesPct))
+		if numOutputs >= numOutputsForRefresh {
+			return nil
+		}
+		missingForRefresh = int(numOutputsForRefresh - numOutputs)
+	} else {
+		missingForFormation = int(numOutputs) - int(numHostWanted-numContracts)
+		missingForFormation = int(math.Max(float64(missingForFormation), 0))
+	}
+
+	// enough outputs - nothing to do
+	missing := missingForFormation + missingForRefresh
+	if missing == 0 {
+		l.Debugf("no wallet maintenance needed, enough outputs available (%d)", numOutputs)
+		return nil
+	}
+
+	// calculate a good amount to redistribute
+	amount := balance.Div64(uint64(missing))
+	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	avgInitialContractFunds := allowance.Div64((minInitialContractFundingDivisor + maxInitialContractFundingDivisor) / 2)
+	if amount.Cmp(avgInitialContractFunds) < 0 {
+		amount = avgInitialContractFunds
+	}
+
+	// not enough money left
+	if amount.Mul64(2).Cmp(balance) > 0 {
+		l.Debug("wallet maintenance skipped, wallet balance is too low to meaningfully redistribute money)")
+		return nil
+	}
+
+	// adjust the number of outputs if necessary
+	if amount.Mul64(uint64(missing)).Cmp(balance) > 0 {
+		err := fmt.Errorf("number of outputs is zero after adjusting the amount to redistribute, balance: %v, amount: %v, missing: %v", balance, amount, missing)
+		missing = int(balance.Div(amount).Big().Uint64())
+		if missing == 0 {
+			return err
+		}
+	}
+
+	// redistribute outputs
+	id, err := b.WalletRedistribute(missing, balance.Div64(uint64(missing)))
+	if err != nil {
+		return err
+	}
+
+	l.Debugf("wallet maintenance succeeded, tx %v", id)
+	return nil
 }
 
 func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
@@ -423,8 +536,8 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 
 	// calculate min/max contract funds
 	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
-	maxInitialContractFunds := allowance.Div64(10) // TODO: arbitrary divisor
-	minInitialContractFunds := allowance.Div64(20) // TODO: arbitrary divisor
+	maxInitialContractFunds := allowance.Div64(maxInitialContractFundingDivisor)
+	minInitialContractFunds := allowance.Div64(minInitialContractFundingDivisor)
 
 	// form missing contracts
 	var formed []types.FileContractID
