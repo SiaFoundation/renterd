@@ -110,7 +110,7 @@ func (ap *Autopilot) Run() error {
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
 	// update the contract set setting
-	err := ap.bus.UpdateSetting(bus.SettingContractSet, ap.store.Config().Contracts.ContractSet)
+	err := ap.bus.UpdateSetting(bus.SettingContractSet, ap.store.Config().Contracts.Set)
 	if err != nil {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
@@ -135,7 +135,7 @@ func (ap *Autopilot) Run() error {
 			cfg := ap.store.Config()
 
 			// update the contract set setting
-			err := ap.bus.UpdateSetting(bus.SettingContractSet, cfg.Contracts.ContractSet)
+			err := ap.bus.UpdateSetting(bus.SettingContractSet, cfg.Contracts.Set)
 			if err != nil {
 				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 			}

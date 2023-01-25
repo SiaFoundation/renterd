@@ -40,7 +40,7 @@ var (
 	defaultAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
 			Allowance:   types.Siacoins(1).Mul64(1e3),
-			Hosts:       5,
+			Amount:      5,
 			Period:      50,
 			RenewWindow: 24,
 
@@ -48,7 +48,7 @@ var (
 			Upload:   modules.SectorSize * 500,
 			Storage:  modules.SectorSize * 5e3,
 
-			ContractSet: "autopilot",
+			Set: "autopilot",
 		},
 		Hosts: api.HostsConfig{
 			IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.

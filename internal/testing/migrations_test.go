@@ -36,7 +36,7 @@ func TestMigrations(t *testing.T) {
 	b := cluster.Bus
 
 	// add hosts
-	hosts, err := cluster.AddHostsBlocking(int(cfg.Contracts.Hosts))
+	hosts, err := cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -38,7 +38,7 @@ func TestGouging(t *testing.T) {
 	w := cluster.Worker
 
 	// add hosts
-	hosts, err := cluster.AddHostsBlocking(int(cfg.Hosts))
+	hosts, err := cluster.AddHostsBlocking(int(cfg.Amount))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,10 +53,10 @@ func TestGouging(t *testing.T) {
 	waitForContractSet := func() error {
 		t.Helper()
 		return Retry(30, time.Second, func() error {
-			if contracts, err := b.Contracts(cfg.ContractSet); err != nil {
+			if contracts, err := b.Contracts(cfg.Set); err != nil {
 				t.Fatal(err)
-			} else if len(contracts) != int(cfg.Hosts) {
-				return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), int(cfg.Hosts))
+			} else if len(contracts) != int(cfg.Amount) {
+				return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), int(cfg.Amount))
 			}
 			return nil
 		})
@@ -65,7 +65,7 @@ func TestGouging(t *testing.T) {
 	// helper that waits untail a certain host is removed from the contract set
 	waitForHostRemoval := func(hk types.PublicKey) error {
 		return Retry(30, time.Second, func() error {
-			if contracts, err := b.Contracts(cfg.ContractSet); err != nil {
+			if contracts, err := b.Contracts(cfg.Set); err != nil {
 				t.Fatal(err)
 			} else {
 				for _, c := range contracts {
@@ -112,7 +112,7 @@ func TestGouging(t *testing.T) {
 
 	for _, c := range cases {
 		// fetch current contract set
-		contracts, err := b.Contracts(cfg.ContractSet)
+		contracts, err := b.Contracts(cfg.Set)
 		if err != nil {
 			t.Fatal(err)
 		}

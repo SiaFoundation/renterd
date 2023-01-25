@@ -131,7 +131,7 @@ func TestUploadDownload(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if defaultAutopilotConfig.Contracts.Hosts < uint64(defaultRedundancy.MinShards) {
+	if defaultAutopilotConfig.Contracts.Amount < uint64(defaultRedundancy.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 

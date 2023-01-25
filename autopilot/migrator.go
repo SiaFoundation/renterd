@@ -50,7 +50,7 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	b := m.ap.bus
 
 	// fetch slabs for migration
-	toMigrate, err := b.SlabsForMigration(cfg.Contracts.ContractSet, migratorBatchSize)
+	toMigrate, err := b.SlabsForMigration(cfg.Contracts.Set, migratorBatchSize)
 	if err != nil {
 		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 		return
