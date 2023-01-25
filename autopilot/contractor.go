@@ -169,7 +169,6 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 
 	// fetch all active contracts from the worker
 	start := time.Now()
-	var contracts []api.Contract
 	resp, err := c.ap.worker.ActiveContracts(contractHostTimeout)
 	if err != nil {
 		return err
@@ -233,7 +232,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if numContracts < addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(cfg, contracts, cfg.Contracts.Hosts-numContracts, blockHeight, currentPeriod, &remaining, address); err != nil {
+		if formed, err = c.runContractFormations(cfg, active, cfg.Contracts.Hosts-numContracts, blockHeight, currentPeriod, &remaining, address); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err)
 			// continue - failing to form contracts should not prevent us from updating the contract set
 		}
@@ -633,6 +632,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 
 		c.logger.Debugw(
 			"formation succeeded",
+			"hk", host.PublicKey,
 			"fcid", formedContract.ID,
 		)
 	}
