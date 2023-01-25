@@ -33,12 +33,19 @@ const (
 	// contracts if the number of active contracts dips below 87.5% of the
 	// required contracts
 	leewayPctRequiredContracts = 0.875
+
+	// maxInitialContractFundingDivisor and minInitialContractFundingDivisor
+	// define a range we use when calculating the initial contract funding
+	maxInitialContractFundingDivisor = uint64(10)
+	minInitialContractFundingDivisor = uint64(20)
 )
 
 type (
 	contractor struct {
 		ap     *Autopilot
 		logger *zap.SugaredLogger
+
+		maintenanceTxnID types.TransactionID
 
 		mu         sync.Mutex
 		currPeriod uint64
@@ -219,6 +226,67 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 		c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
 	}
 	return c.ap.bus.SetContractSet("autopilot", contractset)
+}
+
+func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.ConsensusState) error {
+	c.logger.Info("performing wallet maintenance")
+	b := c.ap.bus
+	l := c.logger
+
+	// no contracts - nothing to do
+	if cfg.Contracts.Hosts == 0 {
+		l.Debug("wallet maintenance skipped, no contracts wanted")
+		return nil
+	}
+
+	// no allowance - nothing to do
+	if cfg.Contracts.Allowance.IsZero() {
+		l.Debug("wallet maintenance skipped, no allowance set")
+		return nil
+	}
+
+	// pending maintenance transaction - nothing to do
+	pending, err := c.ap.bus.WalletPending()
+	if err != nil {
+		return nil
+	}
+	for _, txn := range pending {
+		if c.maintenanceTxnID == txn.ID() {
+			l.Debugf("wallet maintenance skipped, pending transaction found with id %v", c.maintenanceTxnID)
+			return nil
+		}
+	}
+
+	// enough outputs - nothing to do
+	outputs, err := b.WalletOutputs()
+	if err != nil {
+		return err
+	}
+	if uint64(len(outputs)) >= cfg.Contracts.Hosts {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(outputs), cfg.Contracts.Hosts)
+		return nil
+	}
+
+	// not enough balance - nothing to do
+	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	balance, err := b.WalletBalance()
+	if err != nil {
+		return err
+	}
+	if balance.Cmp(amount.Mul64(cfg.Contracts.Hosts)) < 0 {
+		l.Debugf("wallet maintenance skipped, insufficient balance %v < (%v*%v)", balance, cfg.Contracts.Hosts, amount)
+		return nil
+	}
+
+	// redistribute outputs
+	id, err := b.WalletRedistribute(int(cfg.Contracts.Hosts), amount)
+	if err != nil {
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", cfg.Contracts.Hosts, amount, balance, err)
+	}
+
+	l.Debugf("wallet maintenance succeeded, tx %v", id)
+	c.maintenanceTxnID = id
+	return nil
 }
 
 func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
@@ -422,9 +490,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 	}
 
 	// calculate min/max contract funds
-	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
-	maxInitialContractFunds := allowance.Div64(10) // TODO: arbitrary divisor
-	minInitialContractFunds := allowance.Div64(20) // TODO: arbitrary divisor
+	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(cfg)
 
 	// form missing contracts
 	var formed []types.FileContractID
@@ -571,8 +637,7 @@ func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contract
 
 	// check for a sane minimum that is equal to the initial contract funding
 	// but without an upper cap.
-	initialContractFunds := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
-	minInitialContractFunds := initialContractFunds.Div64(20) // TODO: arbitrary divisor
+	minInitialContractFunds, _ := initialContractFundingMinMax(cfg)
 	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
 	if refreshAmount.Cmp(minimum) < 0 {
 		refreshAmount = minimum
@@ -639,8 +704,7 @@ func (c *contractor) renewFundingEstimate(cfg api.AutopilotConfig, currentPeriod
 
 	// check for a sane minimum that is equal to the initial contract funding
 	// but without an upper cap.
-	initialContractFunds := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
-	minInitialContractFunds := initialContractFunds.Div64(20) // TODO: arbitrary divisor
+	minInitialContractFunds, _ := initialContractFundingMinMax(cfg)
 	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
 	if estimatedCost.Cmp(minimum) < 0 {
 		estimatedCost = minimum
@@ -803,4 +867,11 @@ func addLeeway(n uint64, pct float64) uint64 {
 		panic("given leeway percent has to be positive")
 	}
 	return uint64(math.Ceil(float64(n) * pct))
+}
+
+func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, max types.Currency) {
+	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	min = allowance.Div64(minInitialContractFundingDivisor)
+	max = allowance.Div64(maxInitialContractFundingDivisor)
+	return
 }
