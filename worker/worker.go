@@ -196,6 +196,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 
 type AccountStore interface {
 	Accounts(owner string) ([]ephemeralaccounts.Account, error)
+	AddBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 	UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 }
 
@@ -591,20 +592,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Fund account.
-	err = w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
-		rk := w.deriveRenterKey(rfr.HostKey)
-		payment, ok := rhpv3.PayByContract(&revision, rfr.Amount, rhpv3.Account{}, rk) // no account needed for funding
-		if !ok {
-			return errors.New("insufficient funds")
-		}
-		return rhpv3.RPCFundAccount(t, &payment, account.id, pt.ID)
+	err = account.WithDeposit(func() (types.Currency, error) {
+		return rfr.Amount, w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
+			rk := w.deriveRenterKey(rfr.HostKey)
+			payment, ok := rhpv3.PayByContract(&revision, rfr.Amount.Add(pt.FundAccountCost), rhpv3.Account{}, rk) // no account needed for funding
+			if !ok {
+				return errors.New("insufficient funds")
+			}
+			return rhpv3.RPCFundAccount(t, &payment, account.id, pt.ID)
+		})
 	})
 	if jc.Check("couldn't fund account", err) != nil {
-		return
-	}
-
-	// Record deposit.
-	if jc.Check("failed to record account deposit", account.Deposit(rfr.Amount)) != nil {
 		return
 	}
 }

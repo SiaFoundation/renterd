@@ -16,8 +16,8 @@ type accounts struct {
 }
 
 type account struct {
+	mu sync.Mutex
 	ephemeralaccounts.Account
-
 	Owner string
 }
 
@@ -41,11 +41,69 @@ func newAccounts(accs []ephemeralaccounts.Account) *accounts {
 	return a
 }
 
-// UpdateBalance apples the provided amount to an account through addition. So
-// the input can be both a positive or negative number depending on whether a
+// AddAmount apples the provided amount to an account through addition. So the
+// input can be both a positive or negative number depending on whether a
 // withdrawal or deposit is recorded. If the account doesn't exist, it is
 // created.
-func (a *accounts) UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) {
+func (a *accounts) AddAmount(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) {
+	acc := a.account(id, owner, hk)
+
+	// Update balance.
+	acc.mu.Lock()
+	acc.Balance.Add(acc.Balance, amt)
+	acc.mu.Unlock()
+}
+
+// UpdateBalance sets the balance of a given account to the provided amount. If
+// the account doesn't exist, it is created.
+func (a *accounts) UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, balance *big.Int) {
+	acc := a.account(id, owner, hk)
+
+	// Update balance.
+	acc.mu.Lock()
+	acc.Balance = balance
+	acc.mu.Unlock()
+}
+
+// Accounts returns all accounts for a given owner. Usually called when workers
+// request their accounts on startup.
+func (a *accounts) Accounts(owner string) []ephemeralaccounts.Account {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	accounts := make([]ephemeralaccounts.Account, len(a.byOwner[owner]))
+	for i, acc := range a.byOwner[owner] {
+		acc.mu.Lock()
+		accounts[i] = ephemeralaccounts.Account{
+			ID:      acc.ID,
+			Balance: acc.Balance,
+			Host:    acc.Host,
+			Owner:   acc.Owner,
+		}
+		acc.mu.Unlock()
+	}
+	return accounts
+}
+
+// ToPersist returns all known accounts to be persisted by the storage backend.
+// Called once on shutdown.
+func (a *accounts) ToPersist() []ephemeralaccounts.Account {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	accounts := make([]ephemeralaccounts.Account, 0, len(a.byID))
+	for _, acc := range a.byID {
+		acc.mu.Lock()
+		accounts = append(accounts, ephemeralaccounts.Account{
+			ID:      acc.ID,
+			Balance: acc.Balance,
+			Host:    acc.Host,
+			Owner:   acc.Owner,
+		})
+		acc.mu.Unlock()
+	}
+	return accounts
+}
+
+func (a *accounts) account(id rhpv3.Account, owner string, hk types.PublicKey) *account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -63,40 +121,5 @@ func (a *accounts) UpdateBalance(id rhpv3.Account, owner string, hk types.Public
 		a.byID[id] = acc
 		a.byOwner[owner] = append(a.byOwner[owner], acc)
 	}
-
-	// Update balance.
-	acc.Balance.Add(acc.Balance, amt)
-}
-
-// Accounts returns all accounts for a given owner. Usually called when workers
-// request their accounts on startup.
-func (a *accounts) Accounts(owner string) []ephemeralaccounts.Account {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	accounts := make([]ephemeralaccounts.Account, len(a.byOwner[owner]))
-	for i, acc := range a.byOwner[owner] {
-		accounts[i] = ephemeralaccounts.Account{
-			ID:      acc.ID,
-			Balance: acc.Balance,
-			Host:    acc.Host,
-			Owner:   acc.Owner,
-		}
-	}
-	return accounts
-}
-
-// ToPersist returns all known accounts to be persisted by the storage backend.
-func (a *accounts) ToPersist() []ephemeralaccounts.Account {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	accounts := make([]ephemeralaccounts.Account, 0, len(a.byID))
-	for _, acc := range a.byID {
-		accounts = append(accounts, ephemeralaccounts.Account{
-			ID:      acc.ID,
-			Balance: acc.Balance,
-			Host:    acc.Host,
-			Owner:   acc.Owner,
-		})
-	}
-	return accounts
+	return acc
 }

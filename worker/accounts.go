@@ -32,7 +32,13 @@ type (
 		host  types.PublicKey
 		owner string
 
-		mu      sync.Mutex
+		// The balance is locked by a RWMutex since both withdrawals and
+		// deposits can happen in parallel during normal operations. If
+		// the account ever goes out of sync, the worker needs to be
+		// able to prevent any deposits or withdrawals from the host for
+		// the duration of the sync so only syncing acquires an
+		// exclusive lock on the mutex.
+		mu      sync.RWMutex
 		balance *big.Int
 	}
 )
@@ -100,20 +106,40 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 	return acc, nil
 }
 
-// Deposit increases the balance of an account.
-func (a *account) Deposit(amt types.Currency) error {
-	a.mu.Lock()
+// WithDeposit increases the balance of an account by the amount returned by
+// amtFn if amtFn doesn't return an error.
+func (a *account) WithDeposit(amtFn func() (types.Currency, error)) error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	amt, err := amtFn()
+	if err != nil {
+		return err
+	}
 	a.balance = a.balance.Add(a.balance, amt.Big())
-	a.mu.Unlock()
-	return a.bus.UpdateBalance(a.id, a.owner, a.host, amt.Big())
+	return a.bus.AddBalance(a.id, a.owner, a.host, amt.Big())
 }
 
-// Withdraw decreases the balance of an account.
-func (a *account) Withdraw(amt types.Currency) error {
-	a.mu.Lock()
+// WithWithdraw decreases the balance of an account by the amount returned by
+// amtFn if amtFn doesn't return an error.
+func (a *account) WithWithdraw(amtFn func() (types.Currency, error)) error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	amt, err := amtFn()
+	if err != nil {
+		return err
+	}
 	a.balance = a.balance.Sub(a.balance, amt.Big())
+	return a.bus.AddBalance(a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
+}
+
+// WithSync syncs an accounts balance with the bus. To do so, the account is
+// locked while the balance is fetched through balanceFn.
+func (a *account) WithSync(balanceFn func() types.Currency) error {
+	a.mu.Lock()
+	a.balance = balanceFn().Big()
+	err := a.bus.UpdateBalance(a.id, a.owner, a.host, a.balance)
 	a.mu.Unlock()
-	return a.bus.UpdateBalance(a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
+	return err
 }
 
 // tryInitAccounts is used for lazily initialising the accounts from the bus.

@@ -720,6 +720,30 @@ func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
 	jc.Encode(b.accounts.Accounts(owner.String()))
 }
 
+func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsUpdateBalanceRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if id == (rhpv3.Account{}) {
+		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Owner == "" {
+		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Host == (types.PublicKey{}) {
+		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
+		return
+	}
+	b.accounts.AddAmount(id, req.Owner, req.Host, req.Amount)
+}
+
 func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
@@ -780,6 +804,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts/:owner":     b.accountsOwnerHandlerGET,
+		"POST   /accounts/:id/add":    b.accountsAddHandlerPOST,
 		"POST   /accounts/:id/update": b.accountsUpdateHandlerPOST,
 
 		"GET    /syncer/address": b.syncerAddrHandler,

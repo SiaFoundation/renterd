@@ -498,7 +498,17 @@ func (c *Client) Accounts(owner string) (accounts []ephemeralaccounts.Account, e
 	return
 }
 
-// Accounts returns the ephemeral accounts for a given owner.
+// AddBalance adds the given amount to an account's balance.
+func (c *Client) AddBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) (err error) {
+	err = c.c.POST(fmt.Sprintf("/accounts/%s/add", id), api.AccountsUpdateBalanceRequest{
+		Host:   hk,
+		Owner:  owner,
+		Amount: amt,
+	}, nil)
+	return
+}
+
+// UpdateBalance sets the given account's balance to a certain amount.
 func (c *Client) UpdateBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) (err error) {
 	err = c.c.POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
 		Host:   hk,
