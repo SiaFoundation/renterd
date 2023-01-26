@@ -16,9 +16,27 @@ type (
 	// an integer number of milliseconds.
 	Duration time.Duration
 
+	// ParamString is a helper type since jape expects query params to
+	// implement the TextMarshaler interface.
+	ParamString string
+
 	// A SlabID uniquely identifies a slab.
 	SlabID uint
 )
+
+// String implements fmt.Stringer.
+func (s ParamString) String() string { return string(s) }
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ParamString) MarshalText() ([]byte, error) {
+	return []byte(s), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ParamString) UnmarshalText(b []byte) error {
+	*s = ParamString(b)
+	return nil
+}
 
 // String implements fmt.Stringer.
 func (t ParamTime) String() string { return url.QueryEscape((time.Time)(t).Format(time.RFC3339)) }

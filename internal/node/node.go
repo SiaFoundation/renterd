@@ -243,7 +243,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings)
+	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -253,6 +253,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
+			busCleanup(),
 			sqlStore.Close(),
 		}
 		for _, err := range errs {
@@ -290,6 +291,7 @@ func NewLogger(path string) (*zap.Logger, func(), error) {
 	config := zap.NewProductionEncoderConfig()
 	config.EncodeTime = zapcore.RFC3339TimeEncoder
 	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	config.StacktraceKey = ""
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
 
 	// file

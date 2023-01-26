@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/url"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/renterd/wallet"
 )
 
@@ -488,6 +490,32 @@ func (c *Client) UploadParams() (up api.UploadParams, err error) {
 // GougingParams returns parameters used for performing gouging checks.
 func (c *Client) GougingParams() (gp api.GougingParams, err error) {
 	err = c.c.GET("/params/gouging", &gp)
+	return
+}
+
+// Accounts returns the ephemeral accounts for a given owner.
+func (c *Client) Accounts(owner string) (accounts []api.Account, err error) {
+	err = c.c.GET(fmt.Sprintf("/accounts/%s", api.ParamString(owner)), &accounts)
+	return
+}
+
+// AddBalance adds the given amount to an account's balance.
+func (c *Client) AddBalance(id rhpv3.Account, owner string, hk types.PublicKey, amount *big.Int) (err error) {
+	err = c.c.POST(fmt.Sprintf("/accounts/%s/add", id), api.AccountsAddBalanceRequest{
+		Host:   hk,
+		Owner:  api.ParamString(owner),
+		Amount: amount,
+	}, nil)
+	return
+}
+
+// SetBalance sets the given account's balance to a certain amount.
+func (c *Client) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, amount *big.Int) (err error) {
+	err = c.c.POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
+		Host:   hk,
+		Owner:  api.ParamString(owner),
+		Amount: amount,
+	}, nil)
 	return
 }
 

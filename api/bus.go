@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"math/big"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -142,6 +143,22 @@ type UpdateSlabRequest struct {
 type UpdateBlocklistRequest struct {
 	Add    []string `json:"add"`
 	Remove []string `json:"remove"`
+}
+
+// AccountsUpdateBalanceRequest is the request type for /accounts/:id/update
+// endpoint.
+type AccountsUpdateBalanceRequest struct {
+	Host   types.PublicKey `json:"host"`
+	Owner  ParamString     `json:"owner"`
+	Amount *big.Int        `json:"amount"`
+}
+
+// AccountsAddBalanceRequest is the request type for /accounts/:id/add
+// endpoint.
+type AccountsAddBalanceRequest struct {
+	Host   types.PublicKey `json:"host"`
+	Owner  ParamString     `json:"owner"`
+	Amount *big.Int        `json:"amount"`
 }
 
 // DownloadParams contains the metadata needed by a worker to download an object.

@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/renterd/wallet"
 )
 
@@ -102,6 +103,14 @@ type (
 		UpdateSetting(key, value string) error
 		UpdateSettings(settings map[string]string) error
 	}
+
+	// EphemeralAccountStore persists information about accounts. Since
+	// accounts are rapidly updated and can be recovered, they are only
+	// loaded upon startup and persisted upon shutdown.
+	EphemeralAccountStore interface {
+		Accounts() ([]api.Account, error)
+		SaveAccounts([]api.Account) error
+	}
 )
 
 type bus struct {
@@ -114,6 +123,7 @@ type bus struct {
 	os  ObjectStore
 	ss  SettingStore
 
+	accounts      *accounts
 	contractLocks *contractLocks
 }
 
@@ -698,8 +708,64 @@ func (b *bus) gougingParams() (api.GougingParams, error) {
 	}, nil
 }
 
+func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
+	var owner api.ParamString
+	if jc.DecodeParam("owner", &owner) != nil {
+		return
+	}
+	jc.Encode(b.accounts.Accounts(owner.String()))
+}
+
+func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsAddBalanceRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if id == (rhpv3.Account{}) {
+		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Owner == "" {
+		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Host == (types.PublicKey{}) {
+		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
+		return
+	}
+	b.accounts.AddAmount(id, string(req.Owner), req.Host, req.Amount)
+}
+
+func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsUpdateBalanceRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if id == (rhpv3.Account{}) {
+		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Owner == "" {
+		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Host == (types.PublicKey{}) {
+		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
+		return
+	}
+	b.accounts.SetBalance(id, string(req.Owner), req.Host, req.Amount)
+}
+
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, func() error, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
@@ -713,14 +779,29 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 	}
 
 	if err := b.setGougingSettings(gs); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := b.setRedundancySettings(rs); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	// Load the ephemeral accounts into memory and save them again on
+	// cleanup.
+	accounts, err := eas.Accounts()
+	if err != nil {
+		return nil, nil, err
+	}
+	b.accounts = newAccounts(accounts)
+	cleanup := func() error {
+		return eas.SaveAccounts(b.accounts.ToPersist())
 	}
 
 	return jape.Mux(map[string]jape.Handler{
+		"GET    /accounts/:owner":     b.accountsOwnerHandlerGET,
+		"POST   /accounts/:id/add":    b.accountsAddHandlerPOST,
+		"POST   /accounts/:id/update": b.accountsUpdateHandlerPOST,
+
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
@@ -777,7 +858,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
-	}), nil
+	}), cleanup, nil
 }
 
 func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
