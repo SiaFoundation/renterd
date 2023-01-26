@@ -269,7 +269,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cluster2, err := newTestCluster(dir, zap.New(zapcore.NewNopCore()))
+	cluster2, err := newTestClusterWithFunding(dir, false, zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		t.Fatal(err)
 	}
