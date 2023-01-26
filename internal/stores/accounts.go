@@ -16,10 +16,10 @@ type (
 		Owner string `gorm:"NOT NULL"`
 
 		// AccountID identifies an account. It's a public key.
-		AccountID rhpv3.Account `gorm:"unique;NOT NULL"`
+		AccountID rhpv3.Account `gorm:"unique;NOT NULL;type:bytes;serializer:gob;column:account_id"`
 
 		// Host describes the host the account was created with.
-		Host types.PublicKey `gorm:"NOT NULL"`
+		Host types.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
 
 		// Balance is the balance of the account.
 		Balance *big.Int `gorm:"type:bytes;serializer:gob"`
@@ -61,6 +61,7 @@ func (s *SQLStore) SaveAccounts(accounts []api.Account) error {
 		}
 	}
 	return s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "account_id"}},
 		UpdateAll: true,
 	}).Create(&dbAccounts).Error
 }

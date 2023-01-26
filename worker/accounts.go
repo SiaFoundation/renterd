@@ -46,7 +46,6 @@ type (
 func newAccounts(workerID string, accountsKey types.PrivateKey, as AccountStore) *accounts {
 	return &accounts{
 		store:    as,
-		accounts: make(map[rhpv3.Account]*account),
 		workerID: workerID,
 		key:      accountsKey,
 	}
