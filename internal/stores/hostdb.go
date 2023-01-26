@@ -406,6 +406,10 @@ func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
 // RecordHostInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
 func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error {
+	if len(interactions) == 0 {
+		return nil // nothing to do
+	}
+
 	// Get keys from input.
 	keyMap := make(map[types.PublicKey]struct{})
 	var hks [][]byte
