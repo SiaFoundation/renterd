@@ -581,10 +581,6 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 
 		// calculate the host collateral
 		hostCollateral := renewContractCollateral(settings, renterFunds, contract.FileSize(), 0)
-		if isBelowCollateralThreshold(cfg, settings, hostCollateral) {
-			c.logger.Errorw(fmt.Sprintf("refresh failed, updated host collateral (%v) is below threshold", hostCollateral), "hk", hk, "fcid", fcid)
-			continue
-		}
 
 		// check if the added collateral is below the threshold
 		basePrice, baseCollateral := rhpv2.ContractBaseCosts(rev.FileContract, settings, contract.EndHeight())

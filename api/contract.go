@@ -67,7 +67,7 @@ func (c Contract) RenterFunds() types.Currency {
 	return c.Revision.ValidRenterPayout()
 }
 
-// RemainingCollateral returns the remaining host collateral.
+// RemainingCollateral returns the remaining collateral in the contract.
 func (c Contract) RemainingCollateral(s rhp.HostSettings) types.Currency {
 	if c.Revision.MissedHostPayout().Cmp(s.ContractPrice) < 0 {
 		return types.ZeroCurrency
