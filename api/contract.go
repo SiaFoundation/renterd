@@ -2,6 +2,7 @@ package api
 
 import (
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/rhp/v2"
 )
 
 type (
@@ -66,7 +67,10 @@ func (c Contract) RenterFunds() types.Currency {
 	return c.Revision.ValidRenterPayout()
 }
 
-// UnusedCollateral returns the remaining host collateral.
-func (c Contract) UnusedCollateral() types.Currency {
-	return c.Revision.MissedHostPayout()
+// RemainingCollateral returns the remaining host collateral.
+func (c Contract) RemainingCollateral(s rhp.HostSettings) types.Currency {
+	if c.Revision.MissedHostPayout().Cmp(s.ContractPrice) < 0 {
+		return types.ZeroCurrency
+	}
+	return c.Revision.MissedHostPayout().Sub(s.ContractPrice)
 }

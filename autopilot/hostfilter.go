@@ -109,7 +109,7 @@ func isOutOfFunds(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract) b
 }
 
 func isOutOfCollateral(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract) bool {
-	return isBelowCollateralThreshold(cfg, s, c.UnusedCollateral())
+	return isBelowCollateralThreshold(cfg, s, c.RemainingCollateral(s))
 }
 
 func isBelowCollateralThreshold(cfg api.AutopilotConfig, s rhp.HostSettings, c types.Currency) bool {

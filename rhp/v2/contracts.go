@@ -69,39 +69,51 @@ func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) type
 	return fc.ValidRenterPayout().Add(contractFee).Add(contractTax(fc))
 }
 
-// PrepareContractRenewal constructs a contract renewal transaction.
-func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
-	// calculate "base" price and collateral -- the storage cost and collateral
-	// contribution for the amount of data already in contract. If the contract
-	// height did not increase, basePrice and baseCollateral are zero.
+// ContractBaseCosts returns the base price and collateral for a contract.
+func ContractBaseCosts(fc types.FileContract, s HostSettings, endHeight uint64) (types.Currency, types.Currency) {
 	var basePrice, baseCollateral types.Currency
-	if contractEnd := uint64(endHeight + host.WindowSize); contractEnd > currentRevision.WindowEnd {
-		timeExtension := uint64(contractEnd - currentRevision.WindowEnd)
-		basePrice = host.StoragePrice.Mul64(currentRevision.Filesize).Mul64(timeExtension)
-		baseCollateral = host.Collateral.Mul64(currentRevision.Filesize).Mul64(timeExtension)
-	}
 
-	// Calculate payouts: the host gets their contract fee, plus the cost of the
-	// data already in the contract, plus their collateral. In the event of a
-	// missed payout, the cost and collateral of the data already in the
-	// contract is subtracted from the host, and sent to the void instead.
-	//
-	// However, it is possible for this subtraction to underflow; this can
-	// happen if baseCollateral is large and MaxCollateral is small. We cannot
-	// simply replace the underflow with a zero, because the host performs the
-	// same subtraction and returns an error on underflow. Nor can we increase
-	// the valid payout, because the host calculates its collateral contribution
-	// by subtracting the contract price and base price from this payout, and
-	// we're already at MaxCollateral. Thus the host has conflicting
-	// requirements, and renewing the contract is impossible until they change
-	// their settings.
-	hostValidPayout := host.ContractPrice.Add(basePrice).Add(hostCollateral)
+	// if the contract height did not increase both prices are zero
+	if contractEnd := uint64(endHeight + s.WindowSize); contractEnd > fc.WindowEnd {
+		timeExtension := uint64(contractEnd - fc.WindowEnd)
+		basePrice = s.StoragePrice.Mul64(fc.Filesize).Mul64(timeExtension)
+		baseCollateral = s.Collateral.Mul64(fc.Filesize).Mul64(timeExtension)
+	}
+	return basePrice, baseCollateral
+}
+
+// Calculate payouts: the host gets their contract fee, plus the cost of the
+// data already in the contract, plus their collateral. In the event of a
+// missed payout, the cost and collateral of the data already in the
+// contract is subtracted from the host, and sent to the void instead.
+//
+// However, it is possible for this subtraction to underflow; this can
+// happen if baseCollateral is large and MaxCollateral is small. We cannot
+// simply replace the underflow with a zero, because the host performs the
+// same subtraction and returns an error on underflow. Nor can we increase
+// the valid payout, because the host calculates its collateral contribution
+// by subtracting the contract price and base price from this payout, and
+// we're already at MaxCollateral. Thus the host has conflicting
+// requirements, and renewing the contract is impossible until they change
+// their settings.
+func CalculatePayouts(basePrice, baseCollateral, hostCollateral types.Currency, s HostSettings) (types.Currency, types.Currency, types.Currency) {
+	hostValidPayout := s.ContractPrice.Add(basePrice).Add(hostCollateral)
 	voidMissedPayout := basePrice.Add(baseCollateral)
 	if hostValidPayout.Cmp(voidMissedPayout) < 0 {
 		// TODO: detect this elsewhere
 		panic("host's settings are unsatisfiable")
 	}
 	hostMissedPayout := hostValidPayout.Sub(voidMissedPayout)
+	return hostValidPayout, hostMissedPayout, voidMissedPayout
+}
+
+// PrepareContractRenewal constructs a contract renewal transaction.
+func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
+	// calculate base price and collateral
+	basePrice, baseCollateral := ContractBaseCosts(currentRevision.FileContract, host, endHeight)
+
+	// calculate payouts
+	hostValidPayout, hostMissedPayout, voidMissedPayout := CalculatePayouts(basePrice, baseCollateral, hostCollateral, host)
 
 	return types.FileContract{
 		Filesize:       currentRevision.Filesize,

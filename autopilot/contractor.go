@@ -414,7 +414,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 		hostCollateral := initialContractCollateral(cfg, scan.Settings)
 
 		// form contract
-		contract, _, err := c.ap.worker.RHPForm(endHeight(cfg, c.currentPeriod()), host.PublicKey, host.NetAddress, renterAddress, renterFunds, hostCollateral)
+		contract, _, err := c.ap.worker.RHPForm(endHeight(cfg, c.currentPeriod()), hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			// TODO: keep track of consecutive failures and break at some point
 			c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
@@ -461,6 +461,8 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight ui
 	}()
 
 	for _, ci := range toRenew {
+		// TODO: keep track of consecutive failures and break at some point
+
 		// break if the contractor was stopped
 		if c.isStopped() {
 			break
@@ -492,6 +494,14 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight ui
 		timeExtension := endHeight - rev.WindowEnd
 		hostCollateral := renewContractCollateral(settings, renterFunds, fs, timeExtension)
 
+		// check if the added collateral is below the threshold
+		basePrice, baseCollateral := rhpv2.ContractBaseCosts(rev.FileContract, settings, endHeight)
+		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(basePrice, baseCollateral, hostCollateral, settings)
+		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
+			c.logger.Errorw(fmt.Sprintf("renew failed, added host collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
+			continue
+		}
+
 		// renew the contract
 		newRevision, _, err := c.ap.worker.RHPRenew(fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
@@ -518,7 +528,7 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight ui
 		c.logger.Debugw(
 			"renewal succeeded",
 			"fcid", renewedContract.ID,
-			"renewedFrom", contract.ID,
+			"renewedFrom", fcid,
 		)
 	}
 
@@ -542,6 +552,8 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 	}()
 
 	for _, ci := range toRefresh {
+		// TODO: keep track of consecutive failures and break at some point
+
 		// break if the contractor was stopped
 		if c.isStopped() {
 			break
@@ -551,6 +563,7 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 		contract := ci.contract
 		settings := ci.settings
 		fcid := contract.ID
+		rev := contract.Revision
 		hk := contract.HostKey()
 
 		// calculate the renter funds
@@ -568,14 +581,21 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 
 		// calculate the host collateral
 		hostCollateral := renewContractCollateral(settings, renterFunds, contract.FileSize(), 0)
-
 		if isBelowCollateralThreshold(cfg, settings, hostCollateral) {
-			c.logger.Errorw(fmt.Sprintf("refresh failed, host collateral is below threshold %v", hostCollateral), "hk", hk, "fcid", fcid)
+			c.logger.Errorw(fmt.Sprintf("refresh failed, updated host collateral (%v) is below threshold", hostCollateral), "hk", hk, "fcid", fcid)
+			continue
+		}
+
+		// check if the added collateral is below the threshold
+		basePrice, baseCollateral := rhpv2.ContractBaseCosts(rev.FileContract, settings, contract.EndHeight())
+		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(basePrice, baseCollateral, hostCollateral, settings)
+		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
+			c.logger.Errorw(fmt.Sprintf("renew failed, added host collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
 			continue
 		}
 
 		// renew the contract
-		newRevision, _, err := c.ap.worker.RHPRenew(contract.ID, contract.EndHeight(), contract.HostKey(), contract.HostIP, renterAddress, renterFunds, hostCollateral)
+		newRevision, _, err := c.ap.worker.RHPRenew(contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 			if containsError(err, wallet.ErrInsufficientBalance) {
