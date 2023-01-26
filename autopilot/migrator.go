@@ -48,8 +48,9 @@ func (m *migrator) performMigrations() {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 
-	for {
-		// fetch slabs for migration
+	var exhausted bool
+	for !exhausted {
+		// fetch next batch
 		toMigrate, err := b.SlabsForMigration(migratorContractset, migratorBatchSize)
 		if err != nil {
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
@@ -57,21 +58,29 @@ func (m *migrator) performMigrations() {
 		}
 		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
 
-		// return if there are no slabs to migrate
+		// no more slabs to migrate
 		if len(toMigrate) == 0 {
-			return
+			break
+		}
+		if len(toMigrate) < migratorBatchSize {
+			exhausted = true
 		}
 
 		// migrate the slabs one by one
-		//
-		// TODO: when we support parallel uploads we should parallelize this
+		var failed int
 		for i, slab := range toMigrate {
 			err := m.ap.worker.MigrateSlab(slab)
 			if err != nil {
+				failed++
 				m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
 				continue
 			}
 			m.logger.Debugf("successfully migrated slab %d/%d", i+1, len(toMigrate))
+		}
+
+		// all migrations failed
+		if len(toMigrate) == failed {
+			break
 		}
 	}
 }
