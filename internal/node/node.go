@@ -28,16 +28,16 @@ import (
 )
 
 type WorkerConfig struct {
-	SessionReconnectTimeout time.Duration
-	SessionTTL              time.Duration
+	InteractionFlushInterval time.Duration
+	SessionReconnectTimeout  time.Duration
+	SessionTTL               time.Duration
 }
 
 type BusConfig struct {
-	Bootstrap                bool
-	GatewayAddr              string
-	InteractionFlushInterval time.Duration
-	Miner                    *Miner
-	PersistInterval          time.Duration
+	Bootstrap       bool
+	GatewayAddr     string
+	Miner           *Miner
+	PersistInterval time.Duration
 
 	api.GougingSettings
 	api.RedundancySettings
@@ -243,7 +243,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, cfg.InteractionFlushInterval)
+	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -253,7 +253,6 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
-			busCleanup(),
 			sqlStore.Close(),
 		}
 		for _, err := range errs {
@@ -268,8 +267,8 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w, err := worker.New(workerKey, b, cfg.SessionReconnectTimeout, cfg.SessionTTL)
-	return w, func() error { return nil }, err
+	w, cleanup, err := worker.New(workerKey, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval)
+	return w, cleanup, err
 }
 
 func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
