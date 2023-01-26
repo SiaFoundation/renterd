@@ -51,6 +51,9 @@ func (s *SQLStore) Accounts() ([]api.Account, error) {
 // SaveAccounts saves the given accounts in the db, overwriting any existing
 // ones.
 func (s *SQLStore) SaveAccounts(accounts []api.Account) error {
+	if len(accounts) == 0 {
+		return nil
+	}
 	dbAccounts := make([]dbAccount, len(accounts))
 	for i, acc := range accounts {
 		dbAccounts[i] = dbAccount{
