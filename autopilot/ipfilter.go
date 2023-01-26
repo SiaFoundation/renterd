@@ -59,7 +59,7 @@ func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
 	addresses, err := f.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		if !strings.Contains(err.Error(), "no such host") {
-			f.logger.Errorf("failed to lookup IP for host %v, err: %v", h.PublicKey, err)
+			f.logger.Debugf("failed to lookup IP for host %v, err: %v", h.PublicKey, err)
 		}
 		return true
 	}
