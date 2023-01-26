@@ -30,8 +30,8 @@ type Bus interface {
 	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
 	WalletOutputs() (resp []wallet.SiacoinElement, err error)
 	WalletPending() (resp []types.Transaction, err error)
-	WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+	WalletPrepareForm(renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+	WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
 	WalletRedistribute(outputs int, amount types.Currency) (id types.TransactionID, err error)
 	WalletSign(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 
@@ -70,7 +70,7 @@ type Worker interface {
 	ActiveContracts(hostTimeout time.Duration) (api.ContractsResponse, error)
 	MigrateSlab(s object.Slab) error
 	RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
@@ -156,6 +156,9 @@ func (ap *Autopilot) Run() error {
 				ap.logger.Debug("iteration interrupted, consensus not synced")
 				return
 			}
+
+			// update current period
+			ap.c.updateCurrentPeriod(cfg, cs)
 
 			// perform wallet maintenance
 			err = ap.c.performWalletMaintenance(cfg, cs)

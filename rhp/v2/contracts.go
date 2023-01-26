@@ -70,7 +70,7 @@ func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) type
 }
 
 // PrepareContractRenewal constructs a contract renewal transaction.
-func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
+func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
 	// calculate "base" price and collateral -- the storage cost and collateral
 	// contribution for the amount of data already in contract. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.
@@ -79,19 +79,6 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 		timeExtension := uint64(contractEnd - currentRevision.WindowEnd)
 		basePrice = host.StoragePrice.Mul64(currentRevision.Filesize).Mul64(timeExtension)
 		baseCollateral = host.Collateral.Mul64(currentRevision.Filesize).Mul64(timeExtension)
-	}
-
-	// estimate collateral for new contract
-	var newCollateral types.Currency
-	if costPerByte := host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice); !costPerByte.IsZero() {
-		bytes := renterPayout.Div(costPerByte)
-		newCollateral = host.Collateral.Mul(bytes)
-	}
-
-	// the collateral can't be greater than MaxCollateral
-	totalCollateral := baseCollateral.Add(newCollateral)
-	if totalCollateral.Cmp(host.MaxCollateral) > 0 {
-		totalCollateral = host.MaxCollateral
 	}
 
 	// Calculate payouts: the host gets their contract fee, plus the cost of the
@@ -108,7 +95,7 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 	// we're already at MaxCollateral. Thus the host has conflicting
 	// requirements, and renewing the contract is impossible until they change
 	// their settings.
-	hostValidPayout := host.ContractPrice.Add(basePrice).Add(totalCollateral)
+	hostValidPayout := host.ContractPrice.Add(basePrice).Add(hostCollateral)
 	voidMissedPayout := basePrice.Add(baseCollateral)
 	if hostValidPayout.Cmp(voidMissedPayout) < 0 {
 		// TODO: detect this elsewhere

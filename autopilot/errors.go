@@ -5,13 +5,8 @@ import (
 	"strings"
 )
 
-func containsError(errs []error, err error) bool {
-	for _, e := range errs {
-		if e == err || errors.Unwrap(e) == err {
-			return true
-		}
-	}
-	return false
+func containsError(x, y error) bool {
+	return strings.Contains(x.Error(), y.Error())
 }
 
 func errStr(err error) string {
@@ -19,6 +14,15 @@ func errStr(err error) string {
 		return err.Error()
 	}
 	return ""
+}
+
+func includesError(errs []error, err error) bool {
+	for _, e := range errs {
+		if e == err || errors.Unwrap(e) == err {
+			return true
+		}
+	}
+	return false
 }
 
 func joinErrors(errs []error) error {

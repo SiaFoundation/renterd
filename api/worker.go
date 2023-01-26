@@ -47,12 +47,13 @@ type RHPFormResponse struct {
 
 // RHPRenewRequest is the request type for the /rhp/renew endpoint.
 type RHPRenewRequest struct {
-	ContractID    types.FileContractID `json:"contractID"`
-	EndHeight     uint64               `json:"endHeight"`
-	HostKey       types.PublicKey      `json:"hostKey"`
-	HostIP        string               `json:"hostIP"`
-	RenterAddress types.Address        `json:"renterAddress"`
-	RenterFunds   types.Currency       `json:"renterFunds"`
+	ContractID     types.FileContractID `json:"contractID"`
+	EndHeight      uint64               `json:"endHeight"`
+	HostCollateral types.Currency       `json:"hostCollateral"`
+	HostKey        types.PublicKey      `json:"hostKey"`
+	HostIP         string               `json:"hostIP"`
+	RenterAddress  types.Address        `json:"renterAddress"`
+	RenterFunds    types.Currency       `json:"renterFunds"`
 }
 
 // RHPRenewResponse is the response type for the /rhp/renew endpoint.
