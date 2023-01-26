@@ -96,10 +96,3 @@ type RHPRegistryUpdateRequest struct {
 	RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
 }
-
-// Account describes an ephemeral account as returned by the worker API.
-type Account struct {
-	ID      rhpv3.Account   `json:"id"`
-	Balance types.Currency  `json:"currency"`
-	Host    types.PublicKey `json:"host"`
-}

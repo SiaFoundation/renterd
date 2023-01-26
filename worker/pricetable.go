@@ -104,7 +104,6 @@ func (pts *priceTables) Update(ctx context.Context, payFn rhpv3.PriceTablePaymen
 		pt.pt = &hpt
 		pt.expiry = time.Now().Add(hpt.Validity)
 	}
-
 	// Signal that the update is over.
 	ongoing.err = err
 	close(ongoing.done)

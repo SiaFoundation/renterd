@@ -114,6 +114,15 @@ func (a *Account) UnmarshalJSON(b []byte) error {
 	return (*types.PublicKey)(a).UnmarshalJSON(b)
 }
 
+// UnmarshalText implements encoding.TextMarshaler.
+func (a Account) MarshalText() ([]byte, error) { return types.PublicKey(a).MarshalText() }
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (a *Account) UnmarshalText(b []byte) error { return (*types.PublicKey)(a).UnmarshalText(b) }
+
+// String implements fmt.Stringer.
+func (a Account) String() string { return types.PublicKey(a).String() }
+
 // EncodeTo implements types.EncoderTo.
 func (r *PayByEphemeralAccountRequest) EncodeTo(e *types.Encoder) {
 	r.Account.EncodeTo(e)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"net"
 	"net/http"
 	"strconv"
@@ -192,6 +193,12 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 	}
 }
 
+type AccountStore interface {
+	Accounts(owner string) ([]api.Account, error)
+	AddBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+}
+
 type contractLocker interface {
 	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
 	ReleaseContract(fcid types.FileContractID, lockID uint64) (err error)
@@ -199,6 +206,7 @@ type contractLocker interface {
 
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
+	AccountStore
 	contractLocker
 
 	ActiveContracts() ([]api.ContractMetadata, error)
@@ -216,6 +224,7 @@ type Bus interface {
 	AddObject(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(key string) error
 
+	Accounts(owner string) ([]api.Account, error)
 	UpdateSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(txn types.Transaction) error
@@ -586,20 +595,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Fund account.
-	err = w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
-		rk := w.deriveRenterKey(rfr.HostKey)
-		payment, ok := rhpv3.PayByContract(&revision, rfr.Amount, rhpv3.Account{}, rk) // no account needed for funding
-		if !ok {
-			return errors.New("insufficient funds")
-		}
-		return rhpv3.RPCFundAccount(t, &payment, account.id, pt.ID)
+	err = account.WithDeposit(func() (types.Currency, error) {
+		return rfr.Amount, w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
+			rk := w.deriveRenterKey(rfr.HostKey)
+			payment, ok := rhpv3.PayByContract(&revision, rfr.Amount.Add(pt.FundAccountCost), rhpv3.Account{}, rk) // no account needed for funding
+			if !ok {
+				return errors.New("insufficient funds")
+			}
+			return rhpv3.RPCFundAccount(t, &payment, account.id, pt.ID)
+		})
 	})
 	if jc.Check("couldn't fund account", err) != nil {
-		return
-	}
-
-	// Record deposit.
-	if jc.Check("failed to record account deposit", account.Deposit(rfr.Amount)) != nil {
 		return
 	}
 }
@@ -890,38 +896,6 @@ func joinErrors(errs []error) error {
 	}
 }
 
-func (w *worker) hostPriceTableByContract(ctx context.Context, hk types.PublicKey, hostIP string, revision *types.FileContractRevision) (pt rhpv3.HostPriceTable, err error) {
-	// TODO: Check if valid price table exists and handle the following edge cases.
-	// - If no price table exists, we fetch a new one.
-	// - If a price table exists that is valid but about to expire use it but launch an update.
-	// - If a price table exists that is valid and doesn't expire soon, use it.
-
-	// Get price table.
-	err = w.withTransportV3(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
-		// The FundAccount RPC requires a SettingsID, which we also have to pay
-		// for. To simplify things, we pay for the SettingsID using the full
-		// amount, with the "refund" going to the desired account; we then top
-		// up the account to cover the cost of the two RPCs.
-		pt, err = rhpv3.RPCPriceTable(t, func(priceTable rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
-			cost := priceTable.UpdatePriceTableCost.Add(priceTable.FundAccountCost)
-
-			// TODO: gouging check on price table
-
-			refundAccount := rhpv3.Account(w.accounts.deriveAccountKey(hk).PublicKey())
-			rk := w.deriveRenterKey(hk)
-			payment, ok := rhpv3.PayByContract(revision, cost, refundAccount, rk)
-			if !ok {
-				return nil, errors.New("insufficient funds")
-			}
-			return &payment, nil
-		})
-		return err
-	})
-
-	// TODO: update cached price table.
-	return pt, err
-}
-
 func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
 	pk := w.accounts.deriveAccountKey(hk)
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
@@ -944,7 +918,7 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		masterKey: masterKey,
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
-	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"))
+	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,
