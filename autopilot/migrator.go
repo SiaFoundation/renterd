@@ -1,13 +1,14 @@
 package autopilot
 
 import (
+	"math"
 	"sync"
 
 	"go.uber.org/zap"
 )
 
 const (
-	migratorBatchSize   = 100
+	migratorBatchSize   = math.MaxInt // TODO: change once we have a fix for the infinite loop
 	migratorContractset = "autopilot"
 )
 
