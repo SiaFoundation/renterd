@@ -480,6 +480,7 @@ func (s *SQLStore) SlabsForMigration(offset, limit int) ([]object.Slab, error) {
 	if err := s.db.Table("slabs_for_migrations").
 		Offset(offset).
 		Limit(limit).
+		Preload("Shards.DBSector").
 		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, dbSlab := range dbBatch {
 				if slab, err := dbSlab.convert(); err == nil {
@@ -516,8 +517,7 @@ func (s *SQLStore) PrepareSlabsForMigration(goodContracts []types.FileContractID
 			Where("c.fcid IN (?)", gobEncodeSlice(fcids)).
 			Group("slabs.id").
 			Having("num_good_sectors < num_required_sectors").
-			Order("num_bad_sectors DESC").
-			Preload("Shards.DBSector")).Error
+			Order("num_bad_sectors DESC")).Error
 		return err
 	})
 }
