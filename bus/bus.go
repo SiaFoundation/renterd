@@ -92,7 +92,8 @@ type (
 		Put(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		Delete(key string) error
 
-		SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error)
+		PrepareSlabsForMigration(goodContracts []types.FileContractID) error
+		SlabsForMigration(offset, limit int) ([]object.Slab, error)
 		PutSlab(s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
 
@@ -575,13 +576,22 @@ func (b *bus) slabHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) slabsMigrationPrepareHandlerPOST(jc jape.Context) {
+	var mpr api.MigrationPrepareRequest
+	if jc.Decode(&mpr) == nil {
+		if goodContracts, err := b.cs.Contracts(mpr.ContractSet); jc.Check("couldn't fetch contracts for migration", err) == nil {
+			if err := b.os.PrepareSlabsForMigration(contractIds(goodContracts)); jc.Check("couldn't prepare migration", err) != nil {
+				return
+			}
+		}
+	}
+}
+
 func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
-		if goodContracts, err := b.cs.Contracts(msr.ContractSet); jc.Check("couldn't fetch contracts for migration", err) == nil {
-			if slabs, err := b.os.SlabsForMigration(contractIds(goodContracts), msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
-				jc.Encode(slabs)
-			}
+		if slabs, err := b.os.SlabsForMigration(msr.Offset, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+			jc.Encode(slabs)
 		}
 	}
 }

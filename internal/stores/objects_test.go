@@ -460,7 +460,10 @@ func TestSlabsForMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slabs, err := db.SlabsForMigration(goodContracts, -1)
+	if err := db.PrepareSlabsForMigration(goodContracts); err != nil {
+		t.Fatal(err)
+	}
+	slabs, err := db.SlabsForMigration(0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +677,10 @@ func TestPutSlab(t *testing.T) {
 	goodContracts := []types.FileContractID{fcid1, fcid3}
 
 	// fetch slabs for migration and assert there is only one
-	toMigrate, err := db.SlabsForMigration(goodContracts, -1)
+	if err := db.PrepareSlabsForMigration(goodContracts); err != nil {
+		t.Fatal(err)
+	}
+	toMigrate, err := db.SlabsForMigration(0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +738,10 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there are none left
-	toMigrate, err = db.SlabsForMigration(goodContracts, -1)
+	if err := db.PrepareSlabsForMigration(goodContracts); err != nil {
+		t.Fatal(err)
+	}
+	toMigrate, err = db.SlabsForMigration(0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}

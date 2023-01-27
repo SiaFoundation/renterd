@@ -48,9 +48,16 @@ func (m *migrator) performMigrations() {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 
+	err := b.PrepareSlabsForMigration(migratorContractset)
+	if err != nil {
+		m.logger.Errorf("failed to prepare migration in bus", err)
+		return
+	}
+
+	var offset int
 	for {
 		// fetch slabs for migration
-		toMigrate, err := b.SlabsForMigration(migratorContractset, migratorBatchSize)
+		toMigrate, err := b.SlabsForMigration(offset, migratorBatchSize)
 		if err != nil {
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return
@@ -61,6 +68,7 @@ func (m *migrator) performMigrations() {
 		if len(toMigrate) == 0 {
 			return
 		}
+		offset += len(toMigrate)
 
 		// migrate the slabs one by one
 		//

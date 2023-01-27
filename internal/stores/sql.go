@@ -91,6 +91,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbSlab{},
 			&dbSector{},
 			&dbShard{},
+			&dbMigrations{},
 
 			// bus.SettingStore tables
 			&dbSetting{},

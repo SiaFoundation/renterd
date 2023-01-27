@@ -458,11 +458,15 @@ func (c *Client) DeleteObject(name string) (err error) {
 	return
 }
 
-// SlabsForMigration returns up to 'limit' slabs which require migration. A slab
-// needs to be migrated if it has sectors on contracts that are not part of the
-// given 'set'.
-func (c *Client) SlabsForMigration(set string, limit int) (slabs []object.Slab, err error) {
-	err = c.c.POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, Limit: limit}, &slabs)
+// SlabsForMigration returns up to 'limit' slabs which require migration
+// starting at offset 'offset'.
+func (c *Client) SlabsForMigration(offset, limit int) (slabs []object.Slab, err error) {
+	err = c.c.POST("/slabs/migration", api.MigrationSlabsRequest{Offset: offset, Limit: limit}, &slabs)
+	return
+}
+
+func (c *Client) PrepareSlabsForMigration(set string) (err error) {
+	err = c.c.POST("/slabs/migration", api.MigrationPrepareRequest{ContractSet: set}, nil)
 	return
 }
 

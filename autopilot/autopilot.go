@@ -57,7 +57,8 @@ type Bus interface {
 	ConsensusState() (api.ConsensusState, error)
 
 	// objects
-	SlabsForMigration(set string, limit int) ([]object.Slab, error)
+	PrepareSlabsForMigration(set string) error
+	SlabsForMigration(offset, limit int) ([]object.Slab, error)
 
 	// settings
 	GougingSettings() (gs api.GougingSettings, err error)

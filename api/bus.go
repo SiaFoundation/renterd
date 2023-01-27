@@ -128,9 +128,14 @@ type AddObjectRequest struct {
 }
 
 // MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
-type MigrationSlabsRequest struct {
+type MigrationPrepareRequest struct {
 	ContractSet string `json:"contractset"`
-	Limit       int    `json:"limit"`
+}
+
+// MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
+type MigrationSlabsRequest struct {
+	Offset int `json:"offset"`
+	Limit  int `json:"limit"`
 }
 
 // UpdateSlabRequest is the request type for the /slab endpoint.

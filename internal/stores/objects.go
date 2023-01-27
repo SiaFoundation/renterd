@@ -81,6 +81,17 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
 	}
+
+	// dbMigrations is a copy of dbSlab without relations. It temporarily stores
+	// slabs for migrations.
+	dbMigrations struct {
+		Model
+		DBSliceID   uint
+		Key         []byte    `gorm:"unique;NOT NULL"` // json string
+		LastFailure time.Time `gorm:"index"`
+		MinShards   uint8
+		TotalShards uint8
+	}
 )
 
 // TableName implements the gorm.Tabler interface.
@@ -97,6 +108,9 @@ func (dbSlab) TableName() string { return "slabs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
+
+// TableName implements the gorm.Tabler interface.
+func (m *dbMigrations) TableName() string { return "slabs_for_migrations" }
 
 // convert turns a dbObject into a object.Slab.
 func (s dbSlab) convert() (slab object.Slab, err error) {
@@ -457,32 +471,15 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 	})
 }
 
-// SlabsForMigration returns up to 'limit' slabs that do not belong to contracts
-// in the given set. These slabs need to be migrated to good contracts so they
-// are restored to full health.
-//
-// TODO: consider that we don't want to migrate slabs above a given health.
-func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error) {
+// SlabsForMigration returns up to 'limit' slabs starting at 'offset' from the
+// slabs_for_migrations table.
+func (s *SQLStore) SlabsForMigration(offset, limit int) ([]object.Slab, error) {
 	var dbBatch []dbSlab
 	var slabs []object.Slab
 
-	fcids := make([]interface{}, len(goodContracts))
-	for i, fcid := range goodContracts {
-		fcids[i] = fcid
-	}
-
-	if err := s.db.
-		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
-		Model(&dbSlab{}).
-		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
-		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
-		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
-		Where("c.fcid IN (?)", gobEncodeSlice(fcids)).
-		Group("slabs.id").
-		Having("num_good_sectors < num_required_sectors").
-		Order("num_bad_sectors DESC").
+	if err := s.db.Table("slabs_for_migrations").
+		Offset(offset).
 		Limit(limit).
-		Preload("Shards.DBSector").
 		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, dbSlab := range dbBatch {
 				if slab, err := dbSlab.convert(); err == nil {
@@ -492,10 +489,35 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 				}
 			}
 			return nil
-		}).
-		Error; err != nil {
+		}).Error; err != nil {
 		return nil, err
 	}
-
 	return slabs, nil
+}
+
+// PrepareSlabsForMigrations finds slabs that require migrating and stores them
+// in the slabs_for_migrations table.
+func (s *SQLStore) PrepareSlabsForMigration(goodContracts []types.FileContractID) error {
+	fcids := make([]interface{}, len(goodContracts))
+	for i, fcid := range goodContracts {
+		fcids[i] = fcid
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DELETE FROM slabs_for_migrations").Error; err != nil {
+			return err
+		}
+		err := tx.Exec("INSERT INTO slabs_for_migrations (id, created_at, updated_at, db_slice_id, key, last_failure, min_shards, total_shards) SELECT id, created_at, updated_at, db_slice_id, key, last_failure, min_shards, total_shards FROM (?)", tx.
+			Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
+			Model(&dbSlab{}).
+			Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
+			Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
+			Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
+			Where("c.fcid IN (?)", gobEncodeSlice(fcids)).
+			Group("slabs.id").
+			Having("num_good_sectors < num_required_sectors").
+			Order("num_bad_sectors DESC").
+			Preload("Shards.DBSector")).Error
+		return err
+	})
 }
