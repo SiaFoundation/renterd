@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
@@ -54,8 +53,7 @@ type (
 		Model
 		DBSliceID uint `gorm:"index"`
 
-		Key         []byte    `gorm:"unique;NOT NULL"` // json string
-		LastFailure time.Time `gorm:"index"`
+		Key         []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards   uint8
 		TotalShards uint8
 		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
@@ -87,8 +85,7 @@ type (
 	dbMigrations struct {
 		Model
 		DBSliceID   uint
-		Key         []byte    `gorm:"unique;NOT NULL"` // json string
-		LastFailure time.Time `gorm:"index"`
+		Key         []byte `gorm:"unique;NOT NULL"` // json string
 		MinShards   uint8
 		TotalShards uint8
 	}
@@ -508,7 +505,7 @@ func (s *SQLStore) PrepareSlabsForMigration(goodContracts []types.FileContractID
 		if err := tx.Exec("DELETE FROM slabs_for_migrations").Error; err != nil {
 			return err
 		}
-		err := tx.Exec("INSERT INTO slabs_for_migrations (id, created_at, updated_at, db_slice_id, key, last_failure, min_shards, total_shards) SELECT id, created_at, updated_at, db_slice_id, key, last_failure, min_shards, total_shards FROM (?)", tx.
+		err := tx.Exec("INSERT INTO slabs_for_migrations (id, created_at, updated_at, db_slice_id, key, min_shards, total_shards) SELECT id, created_at, updated_at, db_slice_id, key, min_shards, total_shards FROM (?)", tx.
 			Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
 			Model(&dbSlab{}).
 			Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
