@@ -857,8 +857,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"PUT    /objects/*key": b.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": b.objectsKeyHandlerDELETE,
 
-		"POST   /slabs/migration": b.slabsMigrationHandlerPOST,
-		"PUT    /slab":            b.slabHandlerPUT,
+		"POST   /slabs/migration":         b.slabsMigrationHandlerPOST,
+		"POST   /slabs/migration/prepare": b.slabsMigrationPrepareHandlerPOST,
+		"PUT    /slab":                    b.slabHandlerPUT,
 
 		"GET    /settings":     b.settingsHandlerGET,
 		"PUT    /settings":     b.settingsHandlerPUT,

@@ -466,7 +466,7 @@ func (c *Client) SlabsForMigration(offset, limit int) (slabs []object.Slab, err 
 }
 
 func (c *Client) PrepareSlabsForMigration(set string) (err error) {
-	err = c.c.POST("/slabs/migration", api.MigrationPrepareRequest{ContractSet: set}, nil)
+	err = c.c.POST("/slabs/migration/prepare", api.MigrationPrepareRequest{ContractSet: set}, nil)
 	return
 }
 
