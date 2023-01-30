@@ -285,9 +285,11 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	}
 	if wpfr.HostKey == (types.PublicKey{}) {
 		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
+		return
 	}
 	if wpfr.RenterKey == nil {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
+		return
 	}
 
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
@@ -321,9 +323,11 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	}
 	if wprr.HostKey == (types.PublicKey{}) {
 		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
+		return
 	}
 	if wprr.RenterKey == nil {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
+		return
 	}
 
 	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.HostCollateral, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)

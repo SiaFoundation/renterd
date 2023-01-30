@@ -69,19 +69,6 @@ func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) type
 	return fc.ValidRenterPayout().Add(contractFee).Add(contractTax(fc))
 }
 
-// ContractBaseCosts returns the base price and collateral for a contract.
-func ContractBaseCosts(fc types.FileContract, s HostSettings, endHeight uint64) (types.Currency, types.Currency) {
-	var basePrice, baseCollateral types.Currency
-
-	// if the contract height did not increase both prices are zero
-	if contractEnd := uint64(endHeight + s.WindowSize); contractEnd > fc.WindowEnd {
-		timeExtension := uint64(contractEnd - fc.WindowEnd)
-		basePrice = s.StoragePrice.Mul64(fc.Filesize).Mul64(timeExtension)
-		baseCollateral = s.Collateral.Mul64(fc.Filesize).Mul64(timeExtension)
-	}
-	return basePrice, baseCollateral
-}
-
 // Calculate payouts: the host gets their contract fee, plus the cost of the
 // data already in the contract, plus their collateral. In the event of a
 // missed payout, the cost and collateral of the data already in the
@@ -96,7 +83,16 @@ func ContractBaseCosts(fc types.FileContract, s HostSettings, endHeight uint64) 
 // we're already at MaxCollateral. Thus the host has conflicting
 // requirements, and renewing the contract is impossible until they change
 // their settings.
-func CalculatePayouts(basePrice, baseCollateral, hostCollateral types.Currency, s HostSettings) (types.Currency, types.Currency, types.Currency) {
+func CalculatePayouts(fc types.FileContract, hostCollateral types.Currency, s HostSettings, endHeight uint64) (types.Currency, types.Currency, types.Currency) {
+	var basePrice, baseCollateral types.Currency
+
+	// if the contract height did not increase both prices are zero
+	if contractEnd := uint64(endHeight + s.WindowSize); contractEnd > fc.WindowEnd {
+		timeExtension := uint64(contractEnd - fc.WindowEnd)
+		basePrice = s.StoragePrice.Mul64(fc.Filesize).Mul64(timeExtension)
+		baseCollateral = s.Collateral.Mul64(fc.Filesize).Mul64(timeExtension)
+	}
+
 	hostValidPayout := s.ContractPrice.Add(basePrice).Add(hostCollateral)
 	voidMissedPayout := basePrice.Add(baseCollateral)
 	if hostValidPayout.Cmp(voidMissedPayout) < 0 {
@@ -109,11 +105,13 @@ func CalculatePayouts(basePrice, baseCollateral, hostCollateral types.Currency, 
 
 // PrepareContractRenewal constructs a contract renewal transaction.
 func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
-	// calculate base price and collateral
-	basePrice, baseCollateral := ContractBaseCosts(currentRevision.FileContract, host, endHeight)
+	// the collateral can't be greater than MaxCollateral
+	if hostCollateral.Cmp(host.MaxCollateral) > 0 {
+		hostCollateral = host.MaxCollateral
+	}
 
-	// calculate payouts
-	hostValidPayout, hostMissedPayout, voidMissedPayout := CalculatePayouts(basePrice, baseCollateral, hostCollateral, host)
+	// calculate the payouts
+	hostValidPayout, hostMissedPayout, voidMissedPayout := CalculatePayouts(currentRevision.FileContract, hostCollateral, host, endHeight)
 
 	return types.FileContract{
 		Filesize:       currentRevision.Filesize,

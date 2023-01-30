@@ -494,14 +494,6 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight ui
 		timeExtension := endHeight - rev.WindowEnd
 		hostCollateral := renewContractCollateral(settings, renterFunds, fs, timeExtension)
 
-		// check if the added collateral is below the threshold
-		basePrice, baseCollateral := rhpv2.ContractBaseCosts(rev.FileContract, settings, endHeight)
-		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(basePrice, baseCollateral, hostCollateral, settings)
-		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
-			c.logger.Errorw(fmt.Sprintf("renew failed, added host collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
-			continue
-		}
-
 		// renew the contract
 		newRevision, _, err := c.ap.worker.RHPRenew(fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, hostCollateral)
 		if err != nil {
@@ -583,8 +575,7 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 		hostCollateral := renewContractCollateral(settings, renterFunds, contract.FileSize(), 0)
 
 		// check if the added collateral is below the threshold
-		basePrice, baseCollateral := rhpv2.ContractBaseCosts(rev.FileContract, settings, contract.EndHeight())
-		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(basePrice, baseCollateral, hostCollateral, settings)
+		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(rev.FileContract, hostCollateral, settings, contract.EndHeight())
 		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
 			c.logger.Errorw(fmt.Sprintf("renew failed, added host collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
 			continue
