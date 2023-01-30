@@ -271,7 +271,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.Publ
 				contractFound := true
 				var contract dbContract
 				err = tx.Model(&dbContract{}).
-					Where(&dbContract{FCID: fcid}).
+					Where(&dbContract{FCID: fileContractID(fcid)}).
 					Take(&contract).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					contractFound = false
@@ -388,9 +388,9 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 	}
 
 	// make a contracts map
-	contracts := make(map[types.FileContractID]*dbContract)
+	contracts := make(map[fileContractID]*dbContract)
 	for i := range dbContracts {
-		contracts[dbContracts[i].FCID] = &dbContracts[i]
+		contracts[fileContractID(dbContracts[i].FCID)] = &dbContracts[i]
 	}
 
 	return ss.db.Transaction(func(tx *gorm.DB) (err error) {
@@ -436,7 +436,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 			}
 
 			// ensure the associations are updated
-			if contract := contracts[usedContracts[shard.Host]]; contract != nil {
+			if contract := contracts[fileContractID(usedContracts[shard.Host])]; contract != nil {
 				if err := tx.
 					Model(&sector).
 					Association("Contracts").

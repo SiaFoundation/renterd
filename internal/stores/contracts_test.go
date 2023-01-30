@@ -313,9 +313,9 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:                fcid,
+		FCID:                fileContractID(fcid),
 		Host:                c.HostKey(),
-		RenewedTo:           fcid2,
+		RenewedTo:           fileContractID(fcid2),
 		Reason:              archivalReasonRenewed,
 		StartHeight:         100,
 		UploadSpending:      types.ZeroCurrency,

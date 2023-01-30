@@ -145,7 +145,7 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk1,
 										},
-										FCID:                fcid1,
+										FCID:                fileContractID(fcid1),
 										StartHeight:         startHeight1,
 										TotalCost:           totalCost1,
 										UploadSpending:      types.ZeroCurrency,
@@ -180,7 +180,7 @@ func TestSQLObjectStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: hk2,
 										},
-										FCID:                fcid2,
+										FCID:                fileContractID(fcid2),
 										StartHeight:         startHeight2,
 										TotalCost:           totalCost2,
 										UploadSpending:      types.ZeroCurrency,
@@ -643,9 +643,9 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// helper to extract the FCID from a list of contracts
-	contractIds := func(contracts []dbContract) (ids []types.FileContractID) {
+	contractIds := func(contracts []dbContract) (ids []fileContractID) {
 		for _, c := range contracts {
-			ids = append(ids, c.FCID)
+			ids = append(ids, fileContractID(c.FCID))
 		}
 		return
 	}
@@ -704,7 +704,7 @@ func TestPutSlab(t *testing.T) {
 	// assert the first sector is still only on one host, also assert it's h1
 	if cids := contractIds(updated.Shards[0].DBSector.Contracts); len(cids) != 1 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
-	} else if cids[0] != fcid1 {
+	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
 	} else if hks := hostKeys(updated.Shards[0].DBSector.Hosts); len(hks) != 1 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of hosts, %v!=1", len(hks))
@@ -715,7 +715,7 @@ func TestPutSlab(t *testing.T) {
 	// assert the second sector however is uploaded to two hosts, assert it's h2 and h3
 	if cids := contractIds(updated.Shards[1].DBSector.Contracts); len(cids) != 2 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
-	} else if cids[0] != fcid2 || cids[1] != fcid3 {
+	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
 	} else if hks := hostKeys(updated.Shards[1].DBSector.Hosts); len(hks) != 2 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of hosts, %v!=2", len(hks))
