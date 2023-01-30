@@ -32,10 +32,10 @@ type (
 		Host                dbHost
 		RenewedFrom         fileContractID `gorm:"index"`
 		StartHeight         uint64         `gorm:"index;NOT NULL"`
-		TotalCost           types.Currency `gorm:"type:bytes;serializer:gob"`
-		UploadSpending      types.Currency `gorm:"type:bytes;serializer:gob"`
-		DownloadSpending    types.Currency `gorm:"type:bytes;serializer:gob"`
-		FundAccountSpending types.Currency `gorm:"type:bytes;serializer:gob"`
+		TotalCost           currency
+		UploadSpending      currency
+		DownloadSpending    currency
+		FundAccountSpending currency
 	}
 
 	dbContractSet struct {
@@ -56,10 +56,10 @@ type (
 		Host                types.PublicKey `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
 		RenewedTo           fileContractID  `gorm:"unique;index"`
 		Reason              string
-		UploadSpending      types.Currency `gorm:"type:bytes;serializer:gob"`
-		DownloadSpending    types.Currency `gorm:"type:bytes;serializer:gob"`
-		FundAccountSpending types.Currency `gorm:"type:bytes;serializer:gob"`
-		StartHeight         uint64         `gorm:"index;NOT NULL"`
+		UploadSpending      currency
+		DownloadSpending    currency
+		FundAccountSpending currency
+		StartHeight         uint64 `gorm:"index;NOT NULL"`
 	}
 
 	dbContractSector struct {
@@ -88,11 +88,11 @@ func (c dbContract) convert() api.ContractMetadata {
 		HostKey:     c.Host.PublicKey,
 		StartHeight: c.StartHeight,
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
-		TotalCost:   c.TotalCost,
+		TotalCost:   types.Currency(c.TotalCost),
 		Spending: api.ContractSpending{
-			Uploads:     c.UploadSpending,
-			Downloads:   c.DownloadSpending,
-			FundAccount: c.FundAccountSpending,
+			Uploads:     types.Currency(c.UploadSpending),
+			Downloads:   types.Currency(c.DownloadSpending),
+			FundAccount: types.Currency(c.FundAccountSpending),
 		},
 	}
 }
@@ -105,9 +105,9 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 		RenewedTo: types.FileContractID(c.RenewedTo),
 
 		Spending: api.ContractSpending{
-			Uploads:     c.UploadSpending,
-			Downloads:   c.DownloadSpending,
-			FundAccount: c.FundAccountSpending,
+			Uploads:     types.Currency(c.UploadSpending),
+			Downloads:   types.Currency(c.DownloadSpending),
+			FundAccount: types.Currency(c.FundAccountSpending),
 		},
 	}
 }
@@ -145,12 +145,12 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		HostID:      host.ID,
 		RenewedFrom: fileContractID(renewedFrom),
 		StartHeight: startHeight,
-		TotalCost:   totalCost,
+		TotalCost:   currency(totalCost),
 
 		// Spending starts at 0.
-		UploadSpending:      types.ZeroCurrency,
-		DownloadSpending:    types.ZeroCurrency,
-		FundAccountSpending: types.ZeroCurrency,
+		UploadSpending:      zeroCurrency,
+		DownloadSpending:    zeroCurrency,
+		FundAccountSpending: zeroCurrency,
 	}
 
 	// Insert contract.

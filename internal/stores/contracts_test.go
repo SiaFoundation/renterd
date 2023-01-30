@@ -318,9 +318,9 @@ func TestRenewedContract(t *testing.T) {
 		RenewedTo:           fileContractID(fcid2),
 		Reason:              archivalReasonRenewed,
 		StartHeight:         100,
-		UploadSpending:      types.ZeroCurrency,
-		DownloadSpending:    types.ZeroCurrency,
-		FundAccountSpending: types.ZeroCurrency,
+		UploadSpending:      zeroCurrency,
+		DownloadSpending:    zeroCurrency,
+		FundAccountSpending: zeroCurrency,
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
 		fmt.Println(ac)
