@@ -191,7 +191,8 @@ func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 	}
 
 	// Wake the next candidate.
-	for next := heap.Pop(lock.queue).(*lockCandidate); next != nil; next = heap.Pop(lock.queue).(*lockCandidate) {
+	for lock.queue.Len() > 0 {
+		next := heap.Pop(lock.queue).(*lockCandidate)
 		// NOTE: We need to close the wake chan first and then check for
 		// the timeout. The code in Acquire does it the opposite way,
 		// also while holding the lock. That way we close a gap where a

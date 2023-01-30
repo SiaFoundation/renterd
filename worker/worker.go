@@ -275,9 +275,14 @@ type worker struct {
 
 	accounts    *accounts
 	priceTables *priceTables
+
+	interactionsMu            sync.Mutex
+	interactions              []hostdb.Interaction
+	interactionsFlushInterval time.Duration
+	interactionsFlushTimer    *time.Timer
 }
 
-func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) error {
+func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) {
 	hi := hostdb.Interaction{
 		Host:      hostKey,
 		Timestamp: time.Now(),
@@ -293,14 +298,13 @@ func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings
 			Error: errToStr(err),
 		})
 	}
-	return w.bus.RecordInteractions([]hostdb.Interaction{hi})
+	w.recordInteractions([]hostdb.Interaction{hi})
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
-		// TODO: handle error
-		_ = w.bus.RecordInteractions(mr.interactions())
+		w.recordInteractions(mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
 	conn, err := dial(ctx, hostIP, hostKey)
@@ -405,10 +409,8 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 	elapsed := time.Since(start)
 
-	err := w.recordScan(rsr.HostKey, settings, scanErr)
-	if jc.Check("failed to record scan", err) != nil {
-		return
-	}
+	w.recordScan(rsr.HostKey, settings, scanErr)
+
 	var scanErrStr string
 	if scanErr != nil {
 		scanErrStr = scanErr.Error()
@@ -910,15 +912,27 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Duration) (http.Handler, error) {
+func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
 	w := &worker{
-		id:        "worker", // TODO: make this configurable for multi-worker setup.
-		bus:       b,
-		pool:      newSessionPool(sessionReconectTimeout, sessionTTL),
-		masterKey: masterKey,
+		id:                        "worker", // TODO: make this configurable for multi-worker setup.
+		bus:                       b,
+		pool:                      newSessionPool(sessionReconectTimeout, sessionTTL),
+		masterKey:                 masterKey,
+		interactionsFlushInterval: interactionsFlushInterval,
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
+
+	// Flush interactions in cleanup.
+	cleanup := func() error {
+		w.interactionsMu.Lock()
+		defer w.interactionsMu.Unlock()
+		if w.interactionsFlushTimer != nil {
+			w.interactionsFlushTimer.Stop()
+			w.flushInteractions()
+		}
+		return nil
+	}
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,
@@ -936,5 +950,35 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL time.Dura
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
-	}), nil
+	}), cleanup, nil
+}
+
+func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
+	w.interactionsMu.Lock()
+	defer w.interactionsMu.Unlock()
+
+	// Append interactions to buffer.
+	w.interactions = append(w.interactions, interactions...)
+
+	// If a thread was scheduled to flush the buffer we are done.
+	if w.interactionsFlushTimer != nil {
+		return
+	}
+	// Otherwise we schedule a flush.
+	w.interactionsFlushTimer = time.AfterFunc(w.interactionsFlushInterval, func() {
+		w.interactionsMu.Lock()
+		w.flushInteractions()
+		w.interactionsMu.Unlock()
+	})
+}
+
+func (w *worker) flushInteractions() {
+	if len(w.interactions) > 0 {
+		if err := w.bus.RecordInteractions(w.interactions); err != nil {
+			// TODO: log
+		} else {
+			w.interactions = nil
+		}
+	}
+	w.interactionsFlushTimer = nil
 }

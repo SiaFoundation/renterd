@@ -15,14 +15,14 @@ type (
 
 		Owner string `gorm:"NOT NULL"`
 
-		// AccountID identifies an account. It's a public key.
-		AccountID rhpv3.Account `gorm:"unique;NOT NULL;type:bytes;serializer:gob;column:account_id"`
+		// AccountID identifies an account.
+		AccountID publicKey `gorm:"unique;NOT NULL"`
 
 		// Host describes the host the account was created with.
-		Host types.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		Host publicKey `gorm:"NOT NULL"`
 
 		// Balance is the balance of the account.
-		Balance *big.Int `gorm:"type:bytes;serializer:gob"`
+		Balance *balance
 	}
 )
 
@@ -39,9 +39,9 @@ func (s *SQLStore) Accounts() ([]api.Account, error) {
 	accounts := make([]api.Account, len(dbAccounts))
 	for i, acc := range dbAccounts {
 		accounts[i] = api.Account{
-			ID:      acc.AccountID,
-			Host:    acc.Host,
-			Balance: acc.Balance,
+			ID:      rhpv3.Account(acc.AccountID),
+			Host:    types.PublicKey(acc.Host),
+			Balance: (*big.Int)(acc.Balance),
 			Owner:   acc.Owner,
 		}
 	}
@@ -58,9 +58,9 @@ func (s *SQLStore) SaveAccounts(accounts []api.Account) error {
 	for i, acc := range accounts {
 		dbAccounts[i] = dbAccount{
 			Owner:     acc.Owner,
-			AccountID: acc.ID,
-			Host:      acc.Host,
-			Balance:   acc.Balance,
+			AccountID: publicKey(acc.ID),
+			Host:      publicKey(acc.Host),
+			Balance:   (*balance)(acc.Balance),
 		}
 	}
 	return s.db.Clauses(clause.OnConflict{

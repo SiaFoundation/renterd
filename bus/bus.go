@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
@@ -126,16 +125,6 @@ type bus struct {
 
 	accounts      *accounts
 	contractLocks *contractLocks
-
-	interactionsMu            sync.Mutex
-	interactions              []hostdb.Interaction
-	interactionsFlushInterval time.Duration
-	interactionsFlush         *interactionsFlush
-}
-
-type interactionsFlush struct {
-	c      chan struct{}
-	result error
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -414,8 +403,11 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	var interactions []hostdb.Interaction
-	if jc.Decode(&interactions) == nil {
-		jc.Check("couldn't record interaction", b.recordInteractions(interactions))
+	if jc.Decode(&interactions) != nil {
+		return
+	}
+	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(interactions)) != nil {
+		return
 	}
 }
 
@@ -773,18 +765,17 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, func() error, error) {
 	b := &bus{
-		s:                         s,
-		cm:                        cm,
-		tp:                        tp,
-		w:                         w,
-		hdb:                       hdb,
-		cs:                        cs,
-		os:                        os,
-		ss:                        ss,
-		contractLocks:             newContractLocks(),
-		interactionsFlushInterval: interactionsFlushInterval,
+		s:             s,
+		cm:            cm,
+		tp:            tp,
+		w:             w,
+		hdb:           hdb,
+		cs:            cs,
+		os:            os,
+		ss:            ss,
+		contractLocks: newContractLocks(),
 	}
 
 	if err := b.setGougingSettings(gs); err != nil {
@@ -868,44 +859,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
 	}), cleanup, nil
-}
-
-func (b *bus) recordInteractions(interactions []hostdb.Interaction) error {
-	// Check whether someone else is flushing the interactions or if this
-	// thread needs to.
-	var shouldFlush bool
-
-	// No interactionsFlush exists so this thread needs to flush.
-	b.interactionsMu.Lock()
-	f := b.interactionsFlush
-	if f == nil {
-		f = &interactionsFlush{
-			c: make(chan struct{}),
-		}
-		b.interactionsFlush = f
-		shouldFlush = true
-	}
-	b.interactions = append(b.interactions, interactions...)
-	b.interactionsMu.Unlock()
-
-	// If we don't need to flush, we block on the flush channel and then
-	// return the result.
-	if !shouldFlush {
-		<-f.c // TODO: handle shutdown
-		return f.result
-	}
-
-	// Otherwise we wait for the interval and apply the interactions.
-	time.Sleep(b.interactionsFlushInterval) // TODO: handle shutdown
-
-	b.interactionsMu.Lock()
-	defer b.interactionsMu.Unlock()
-
-	f.result = b.hdb.RecordInteractions(b.interactions)
-	close(f.c)
-	b.interactions = nil
-	b.interactionsFlush = nil
-	return f.result
 }
 
 func contractIds(contracts []api.ContractMetadata) []types.FileContractID {

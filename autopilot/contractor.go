@@ -859,7 +859,7 @@ func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileCont
 
 	// renewed map is special case since we need renewed from
 	isRenewed := make(map[types.FileContractID]bool)
-	renewedIDs := make([]types.FileContractID, len(renewed))
+	renewedIDs := make([]types.FileContractID, 0, len(renewed))
 	for _, c := range renewed {
 		isRenewed[c.RenewedFrom] = true
 		renewedIDs = append(renewedIDs, c.ID)

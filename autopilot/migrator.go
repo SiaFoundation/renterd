@@ -1,13 +1,14 @@
 package autopilot
 
 import (
+	"math"
 	"sync"
 
 	"go.uber.org/zap"
 )
 
 const (
-	migratorBatchSize   = 100
+	migratorBatchSize   = math.MaxInt // TODO: change once we have a fix for the infinite loop
 	migratorContractset = "autopilot"
 )
 
@@ -48,30 +49,28 @@ func (m *migrator) performMigrations() {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 
-	for {
-		// fetch slabs for migration
-		toMigrate, err := b.SlabsForMigration(migratorContractset, migratorBatchSize)
+	// fetch slabs for migration
+	toMigrate, err := b.SlabsForMigration(migratorContractset, migratorBatchSize)
+	if err != nil {
+		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
+		return
+	}
+	m.logger.Debugf("%d slabs to migrate", len(toMigrate))
+
+	// return if there are no slabs to migrate
+	if len(toMigrate) == 0 {
+		return
+	}
+
+	// migrate the slabs one by one
+	//
+	// TODO: when we support parallel uploads we should parallelize this
+	for i, slab := range toMigrate {
+		err := m.ap.worker.MigrateSlab(slab)
 		if err != nil {
-			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
-			return
+			m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
+			continue
 		}
-		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
-
-		// return if there are no slabs to migrate
-		if len(toMigrate) == 0 {
-			return
-		}
-
-		// migrate the slabs one by one
-		//
-		// TODO: when we support parallel uploads we should parallelize this
-		for i, slab := range toMigrate {
-			err := m.ap.worker.MigrateSlab(slab)
-			if err != nil {
-				m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
-				continue
-			}
-			m.logger.Debugf("successfully migrated slab %d/%d", i+1, len(toMigrate))
-		}
+		m.logger.Debugf("successfully migrated slab %d/%d", i+1, len(toMigrate))
 	}
 }

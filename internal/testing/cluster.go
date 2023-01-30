@@ -169,13 +169,12 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	// Create bus.
 	var cleanups []func(context.Context) error
 	b, bCleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:                false,
-		InteractionFlushInterval: testInteractionsFlushInterval,
-		GatewayAddr:              "127.0.0.1:0",
-		Miner:                    miner,
-		PersistInterval:          testPersistInterval,
-		GougingSettings:          defaultGouging,
-		RedundancySettings:       defaultRedundancy,
+		Bootstrap:          false,
+		GatewayAddr:        "127.0.0.1:0",
+		Miner:              miner,
+		PersistInterval:    testPersistInterval,
+		GougingSettings:    defaultGouging,
+		RedundancySettings: defaultRedundancy,
 	}, busDir, wk)
 	if err != nil {
 		return nil, err
@@ -189,8 +188,9 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 
 	// Create worker.
 	w, wCleanup, err := node.NewWorker(node.WorkerConfig{
-		SessionReconnectTimeout: 10 * time.Second,
-		SessionTTL:              2 * time.Minute,
+		InteractionFlushInterval: testInteractionsFlushInterval,
+		SessionReconnectTimeout:  10 * time.Second,
+		SessionTTL:               2 * time.Minute,
 	}, busClient, wk)
 	if err != nil {
 		return nil, err

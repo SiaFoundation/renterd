@@ -110,7 +110,6 @@ func main() {
 		node.BusConfig
 	}
 	busCfg.PersistInterval = 10 * time.Minute
-	busCfg.InteractionFlushInterval = 5 * time.Second
 
 	var workerCfg struct {
 		remoteAddr  string
@@ -135,6 +134,7 @@ func main() {
 	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.Siacoins(2500), "max allowed price to download one TiB")
 	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.Siacoins(2500), "max allowed price to upload one TiB")
 	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.Siacoins(1), "max allowed price to store one byte per block")
+	flag.DurationVar(&workerCfg.InteractionFlushInterval, "worker.interactionsFlushInterval", 5*time.Second, "time after a recorded host interaction is flushed to the bus")
 	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.DurationVar(&workerCfg.SessionReconnectTimeout, "worker.sessionReconnectTimeout", 10*time.Second, "the maximum of time reconnecting a session is allowed to take")
