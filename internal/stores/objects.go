@@ -332,21 +332,11 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 	return obj, nil
 }
 
-func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error {
+func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// extract the slab key
 	key, err := s.Key.MarshalText()
 	if err != nil {
 		return err
-	}
-
-	// extract used contracts
-	usedContracts := make(map[types.PublicKey]types.FileContractID)
-	for _, shard := range s.Shards {
-		fcid, ok := goodContracts[shard.Host]
-		if !ok {
-			return errors.New("could not find contract for host")
-		}
-		usedContracts[shard.Host] = fcid
 	}
 
 	// extract host keys
