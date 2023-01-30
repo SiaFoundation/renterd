@@ -18,7 +18,7 @@ import (
 func (s *SQLStore) insertTestAnnouncement(hk types.PublicKey, a hostdb.Announcement) error {
 	return insertAnnouncements(s.db, []announcement{
 		{
-			hostKey:      hk,
+			hostKey:      publicKey(hk),
 			announcement: a,
 		},
 	})
@@ -79,7 +79,7 @@ func TestSQLHostDB(t *testing.T) {
 	if tx.Error != nil {
 		t.Fatal(tx.Error)
 	}
-	if h.PublicKey != hk {
+	if types.PublicKey(h.PublicKey) != hk {
 		t.Fatal("wrong host returned")
 	}
 
@@ -235,7 +235,7 @@ func TestRecordInteractions(t *testing.T) {
 		if interaction.Type != "test" {
 			t.Fatal("type not set")
 		}
-		if interaction.Host != hk {
+		if types.PublicKey(interaction.Host) != hk {
 			t.Fatal("wrong host")
 		}
 	}
@@ -500,7 +500,7 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		hostKey: types.GeneratePrivateKey().PublicKey(),
+		hostKey: publicKey(types.GeneratePrivateKey().PublicKey()),
 		announcement: hostdb.Announcement{
 			Index:      types.ChainIndex{Height: 1, ID: types.BlockID{1}},
 			Timestamp:  time.Now(),
@@ -508,11 +508,11 @@ func TestInsertAnnouncements(t *testing.T) {
 		},
 	}
 	ann2 := announcement{
-		hostKey:      types.GeneratePrivateKey().PublicKey(),
+		hostKey:      publicKey(types.GeneratePrivateKey().PublicKey()),
 		announcement: hostdb.Announcement{},
 	}
 	ann3 := announcement{
-		hostKey:      types.GeneratePrivateKey().PublicKey(),
+		hostKey:      publicKey(types.GeneratePrivateKey().PublicKey()),
 		announcement: hostdb.Announcement{},
 	}
 
@@ -734,7 +734,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// delete the host and assert the delete cascaded properly
-	if err = hdb.db.Model(&dbHost{}).Where(&dbHost{PublicKey: hk2}).Delete(&dbHost{}).Error; err != nil {
+	if err = hdb.db.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk2)}).Delete(&dbHost{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if numHosts() != 2 {
@@ -812,7 +812,7 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 	return insertAnnouncements(s.db, []announcement{{
-		hostKey:      hk,
+		hostKey:      publicKey(hk),
 		announcement: hostdb.Announcement{NetAddress: na},
 	}})
 }

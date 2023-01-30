@@ -44,8 +44,8 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey types.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
-		Settings  hostSettings    `gorm:"type:bytes;serializer:gob"`
+		PublicKey publicKey `gorm:"unique;index;NOT NULL"`
+		Settings  hostSettings
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -76,7 +76,7 @@ type (
 	dbInteraction struct {
 		Model
 
-		Host      types.PublicKey `gorm:"type:bytes;serializer:gob"`
+		Host      publicKey
 		Result    json.RawMessage
 		Success   bool
 		Timestamp time.Time `gorm:"index; NOT NULL"`
@@ -88,41 +88,12 @@ type (
 		CCID []byte
 	}
 
-	// hostSettings are the settings and prices used when interacting with a host.
-	// TODO: might be useful to have this be a table.
-	// TODO: is this still necessary?
-	hostSettings struct {
-		AcceptingContracts         bool           `json:"acceptingcontracts"`
-		MaxDownloadBatchSize       uint64         `json:"maxdownloadbatchsize"`
-		MaxDuration                uint64         `json:"maxduration"`
-		MaxReviseBatchSize         uint64         `json:"maxrevisebatchsize"`
-		NetAddress                 string         `json:"netaddress"`
-		RemainingStorage           uint64         `json:"remainingstorage"`
-		SectorSize                 uint64         `json:"sectorsize"`
-		TotalStorage               uint64         `json:"totalstorage"`
-		Address                    types.Address  `json:"unlockhash"`
-		WindowSize                 uint64         `json:"windowsize"`
-		Collateral                 types.Currency `json:"collateral"`
-		MaxCollateral              types.Currency `json:"maxcollateral"`
-		BaseRPCPrice               types.Currency `json:"baserpcprice"`
-		ContractPrice              types.Currency `json:"contractprice"`
-		DownloadBandwidthPrice     types.Currency `json:"downloadbandwidthprice"`
-		SectorAccessPrice          types.Currency `json:"sectoraccessprice"`
-		StoragePrice               types.Currency `json:"storageprice"`
-		UploadBandwidthPrice       types.Currency `json:"uploadbandwidthprice"`
-		EphemeralAccountExpiry     time.Duration  `json:"ephemeralaccountexpiry"`
-		MaxEphemeralAccountBalance types.Currency `json:"maxephemeralaccountbalance"`
-		RevisionNumber             uint64         `json:"revisionnumber"`
-		Version                    string         `json:"version"`
-		SiaMuxPort                 string         `json:"siamuxport"`
-	}
-
 	// dbAnnouncement is a table used for storing all announcements. It
 	// doesn't have any relations to dbHost which means it won't
 	// automatically prune when a host is deleted.
 	dbAnnouncement struct {
 		Model
-		HostKey types.PublicKey `gorm:"NOT NULL;type:bytes;serializer:gob"`
+		HostKey publicKey `gorm:"NOT NULL"`
 
 		BlockHeight uint64
 		BlockID     string
@@ -131,7 +102,7 @@ type (
 
 	// announcement describes an announcement for a single host.
 	announcement struct {
-		hostKey      types.PublicKey
+		hostKey      publicKey
 		announcement hostdb.Announcement
 	}
 )
@@ -227,7 +198,7 @@ func (h dbHost) convert() hostdb.Host {
 			SuccessfulInteractions:  h.SuccessfulInteractions,
 			FailedInteractions:      h.FailedInteractions,
 		},
-		PublicKey: h.PublicKey,
+		PublicKey: types.PublicKey(h.PublicKey),
 	}
 	if h.Settings == (hostSettings{}) {
 		hdbHost.Settings = nil
@@ -310,7 +281,7 @@ func (ss *SQLStore) Host(hostKey types.PublicKey) (hostdb.Host, error) {
 
 	tx := ss.db.
 		Scopes(ExcludeBlockedHosts).
-		Where(&dbHost{PublicKey: hostKey}).
+		Where(&dbHost{PublicKey: publicKey(hostKey)}).
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return hostdb.Host{}, ErrHostNotFound
@@ -325,7 +296,7 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 	}
 
 	var hosts []struct {
-		PublicKey  types.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		PublicKey  publicKey `gorm:"unique;index;NOT NULL"`
 		NetAddress string
 	}
 	var hostAddresses []hostdb.HostAddress
@@ -340,7 +311,7 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, h := range hosts {
 				hostAddresses = append(hostAddresses, hostdb.HostAddress{
-					PublicKey:  h.PublicKey,
+					PublicKey:  types.PublicKey(h.PublicKey),
 					NetAddress: h.NetAddress,
 				})
 			}
@@ -381,7 +352,7 @@ func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 
 func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 	var h dbHost
-	err := tx.Where("public_key", gobEncode(hostKey)).
+	err := tx.Where("public_key", publicKey(hostKey)).
 		Take(&h).Error
 	return h, err
 }
@@ -411,12 +382,12 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 	}
 
 	// Get keys from input.
-	keyMap := make(map[types.PublicKey]struct{})
-	var hks [][]byte
+	keyMap := make(map[publicKey]struct{})
+	var hks []publicKey
 	for _, interaction := range interactions {
-		if _, exists := keyMap[interaction.Host]; !exists {
-			hks = append(hks, gobEncode(interaction.Host))
-			keyMap[interaction.Host] = struct{}{}
+		if _, exists := keyMap[publicKey(interaction.Host)]; !exists {
+			hks = append(hks, publicKey(interaction.Host))
+			keyMap[publicKey(interaction.Host)] = struct{}{}
 		}
 	}
 
@@ -429,7 +400,7 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 		Find(&hosts).Error; err != nil {
 		return err
 	}
-	hostMap := make(map[types.PublicKey]dbHost)
+	hostMap := make(map[publicKey]dbHost)
 	for _, h := range hosts {
 		hostMap[h.PublicKey] = h
 	}
@@ -440,13 +411,13 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 		// Apply all the interactions to the hosts.
 		dbInteractions := make([]dbInteraction, 0, len(interactions))
 		for _, interaction := range interactions {
-			host, exists := hostMap[interaction.Host]
+			host, exists := hostMap[publicKey(interaction.Host)]
 			if !exists {
 				continue // host doesn't exist
 			}
 			isScan := interaction.Type == hostdb.InteractionTypeScan
 			dbInteractions = append(dbInteractions, dbInteraction{
-				Host:      interaction.Host,
+				Host:      publicKey(interaction.Host),
 				Result:    interaction.Result,
 				Success:   interaction.Success,
 				Timestamp: interaction.Timestamp.UTC(),
@@ -488,7 +459,7 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 		}
 		for _, h := range hostMap {
 			err := tx.Model(&dbHost{}).
-				Where("public_key", gobEncode(h.PublicKey)).
+				Where("public_key", h.PublicKey).
 				Updates(map[string]interface{}{
 					"total_scans":                 h.TotalScans,
 					"second_to_last_scan_success": h.SecondToLastScanSuccess,
@@ -496,7 +467,7 @@ func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error 
 					"downtime":                    h.Downtime,
 					"uptime":                      h.Uptime,
 					"last_scan":                   h.LastScan,
-					"settings":                    gobEncode(h.Settings),
+					"settings":                    h.Settings,
 					"successful_interactions":     h.SuccessfulInteractions,
 					"failed_interactions":         h.FailedInteractions,
 				}).Error
@@ -522,7 +493,7 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		convertToCore(sb, &b)
 		hostdb.ForEachAnnouncement(b, height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
 			newAnnouncements = append(newAnnouncements, announcement{
-				hostKey:      hostKey,
+				hostKey:      publicKey(hostKey),
 				announcement: ha,
 			})
 		})

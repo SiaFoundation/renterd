@@ -1,8 +1,6 @@
 package stores
 
 import (
-	"bytes"
-	"encoding/gob"
 	"errors"
 
 	"go.sia.tech/core/types"
@@ -27,15 +25,15 @@ type (
 	dbContract struct {
 		Model
 
-		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
-		HostID              uint                 `gorm:"index"`
+		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid"`
+		HostID              uint           `gorm:"index"`
 		Host                dbHost
-		RenewedFrom         types.FileContractID `gorm:"index;type:bytes;serializer:gob"`
-		StartHeight         uint64               `gorm:"index;NOT NULL"`
-		TotalCost           types.Currency       `gorm:"type:bytes;serializer:gob"`
-		UploadSpending      types.Currency       `gorm:"type:bytes;serializer:gob"`
-		DownloadSpending    types.Currency       `gorm:"type:bytes;serializer:gob"`
-		FundAccountSpending types.Currency       `gorm:"type:bytes;serializer:gob"`
+		RenewedFrom         fileContractID `gorm:"index"`
+		StartHeight         uint64         `gorm:"index;NOT NULL"`
+		TotalCost           currency
+		UploadSpending      currency
+		DownloadSpending    currency
+		FundAccountSpending currency
 	}
 
 	dbContractSet struct {
@@ -47,14 +45,14 @@ type (
 
 	dbArchivedContract struct {
 		Model
-		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
-		Host                types.PublicKey      `gorm:"index;type:bytes;serializer:gob;NOT NULL"`
-		RenewedTo           types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob"`
+		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid"`
+		Host                publicKey      `gorm:"index;NOT NULL"`
+		RenewedTo           fileContractID `gorm:"unique;index"`
 		Reason              string
-		UploadSpending      types.Currency `gorm:"type:bytes;serializer:gob"`
-		DownloadSpending    types.Currency `gorm:"type:bytes;serializer:gob"`
-		FundAccountSpending types.Currency `gorm:"type:bytes;serializer:gob"`
-		StartHeight         uint64         `gorm:"index;NOT NULL"`
+		UploadSpending      currency
+		DownloadSpending    currency
+		FundAccountSpending currency
+		StartHeight         uint64 `gorm:"index;NOT NULL"`
 	}
 
 	dbContractSector struct {
@@ -78,16 +76,16 @@ func (dbContractSet) TableName() string { return "contract_sets" }
 // convert converts a dbContract to a ContractMetadata.
 func (c dbContract) convert() api.ContractMetadata {
 	return api.ContractMetadata{
-		ID:          c.FCID,
+		ID:          types.FileContractID(c.FCID),
 		HostIP:      c.Host.NetAddress,
-		HostKey:     c.Host.PublicKey,
+		HostKey:     types.PublicKey(c.Host.PublicKey),
 		StartHeight: c.StartHeight,
-		RenewedFrom: c.RenewedFrom,
-		TotalCost:   c.TotalCost,
+		RenewedFrom: types.FileContractID(c.RenewedFrom),
+		TotalCost:   types.Currency(c.TotalCost),
 		Spending: api.ContractSpending{
-			Uploads:     c.UploadSpending,
-			Downloads:   c.DownloadSpending,
-			FundAccount: c.FundAccountSpending,
+			Uploads:     types.Currency(c.UploadSpending),
+			Downloads:   types.Currency(c.DownloadSpending),
+			FundAccount: types.Currency(c.FundAccountSpending),
 		},
 	}
 }
@@ -95,31 +93,16 @@ func (c dbContract) convert() api.ContractMetadata {
 // convert converts a dbContract to an ArchivedContract.
 func (c dbArchivedContract) convert() api.ArchivedContract {
 	return api.ArchivedContract{
-		ID:        c.FCID,
-		HostKey:   c.Host,
-		RenewedTo: c.RenewedTo,
+		ID:        types.FileContractID(c.FCID),
+		HostKey:   types.PublicKey(c.Host),
+		RenewedTo: types.FileContractID(c.RenewedTo),
 
 		Spending: api.ContractSpending{
-			Uploads:     c.UploadSpending,
-			Downloads:   c.DownloadSpending,
-			FundAccount: c.FundAccountSpending,
+			Uploads:     types.Currency(c.UploadSpending),
+			Downloads:   types.Currency(c.DownloadSpending),
+			FundAccount: types.Currency(c.FundAccountSpending),
 		},
 	}
-}
-
-func gobEncode(i interface{}) []byte {
-	buf := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(buf).Encode(i); err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-func gobEncodeSlice(i []interface{}) [][]byte {
-	var res [][]byte
-	for _, v := range i {
-		res = append(res, gobEncode(v))
-	}
-	return res
 }
 
 // addContract implements the bus.ContractStore interface.
@@ -128,7 +111,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 
 	// Find host.
 	var host dbHost
-	err := tx.Where(&dbHost{PublicKey: c.HostKey()}).
+	err := tx.Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
 		Take(&host).Error
 	if err != nil {
 		return dbContract{}, err
@@ -136,20 +119,20 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 
 	// Create contract.
 	contract := dbContract{
-		FCID:        fcid,
+		FCID:        fileContractID(fcid),
 		HostID:      host.ID,
-		RenewedFrom: renewedFrom,
+		RenewedFrom: fileContractID(renewedFrom),
 		StartHeight: startHeight,
-		TotalCost:   totalCost,
+		TotalCost:   currency(totalCost),
 
 		// Spending starts at 0.
-		UploadSpending:      types.ZeroCurrency,
-		DownloadSpending:    types.ZeroCurrency,
-		FundAccountSpending: types.ZeroCurrency,
+		UploadSpending:      zeroCurrency,
+		DownloadSpending:    zeroCurrency,
+		FundAccountSpending: zeroCurrency,
 	}
 
 	// Insert contract.
-	err = tx.Where(&dbHost{PublicKey: c.HostKey()}).
+	err = tx.Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
 		Create(&contract).Error
 	if err != nil {
 		return dbContract{}, err
@@ -194,7 +177,7 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
-		oldContract, err := contract(tx, renewedFrom)
+		oldContract, err := contract(tx, fileContractID(renewedFrom))
 		if err != nil {
 			return err
 		}
@@ -202,9 +185,9 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 		// Create copy in archive.
 		err = tx.Create(&dbArchivedContract{
 			FCID:        oldContract.FCID,
-			Host:        oldContract.Host.PublicKey,
+			Host:        publicKey(oldContract.Host.PublicKey),
 			Reason:      archivalReasonRenewed,
-			RenewedTo:   c.ID(),
+			RenewedTo:   fileContractID(c.ID()),
 			StartHeight: oldContract.StartHeight,
 
 			UploadSpending:      oldContract.UploadSpending,
@@ -216,7 +199,7 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 		}
 
 		// Delete the contract from the regular table.
-		err = removeContract(tx, renewedFrom)
+		err = removeContract(tx, fileContractID(renewedFrom))
 		if err != nil {
 			return err
 		}
@@ -233,7 +216,7 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 
 func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	var ancestors []dbArchivedContract
-	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", gobEncode(id), startHeight).
+	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
 		Scan(&ancestors).
 		Error
 	if err != nil {
@@ -249,7 +232,7 @@ func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64
 // Contract implements the bus.ContractStore interface.
 func (s *SQLStore) Contract(id types.FileContractID) (api.ContractMetadata, error) {
 	// Fetch contract.
-	contract, err := s.contract(id)
+	contract, err := s.contract(fileContractID(id))
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -271,9 +254,9 @@ func (s *SQLStore) Contracts(set string) ([]api.ContractMetadata, error) {
 
 // SetContractSet implements the bus.ContractStore interface.
 func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
-	fcids := make([]interface{}, len(contractIds))
+	fcids := make([]fileContractID, len(contractIds))
 	for i, fcid := range contractIds {
-		fcids[i] = fcid
+		fcids[i] = fileContractID(fcid)
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
@@ -281,7 +264,7 @@ func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractI
 		var dbContracts []dbContract
 		err := tx.
 			Model(&dbContract{}).
-			Where("fcid IN (?)", gobEncodeSlice(fcids)).
+			Where("fcid IN (?)", fcids).
 			Find(&dbContracts).
 			Error
 		if err != nil {
@@ -309,10 +292,10 @@ func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractI
 
 // RemoveContract implements the bus.ContractStore interface.
 func (s *SQLStore) RemoveContract(id types.FileContractID) error {
-	return removeContract(s.db, id)
+	return removeContract(s.db, fileContractID(id))
 }
 
-func (s *SQLStore) contract(id types.FileContractID) (dbContract, error) {
+func (s *SQLStore) contract(id fileContractID) (dbContract, error) {
 	return contract(s.db, id)
 }
 
@@ -333,7 +316,7 @@ func (s *SQLStore) contracts(set string) ([]dbContract, error) {
 	return cs.Contracts, nil
 }
 
-func contract(tx *gorm.DB, id types.FileContractID) (contract dbContract, err error) {
+func contract(tx *gorm.DB, id fileContractID) (contract dbContract, err error) {
 	err = tx.
 		Where(&dbContract{FCID: id}).
 		Preload("Host").
@@ -346,7 +329,7 @@ func contract(tx *gorm.DB, id types.FileContractID) (contract dbContract, err er
 	return
 }
 
-func removeContract(tx *gorm.DB, id types.FileContractID) error {
+func removeContract(tx *gorm.DB, id fileContractID) error {
 	return tx.
 		Where(&dbContract{FCID: id}).
 		Delete(&dbContract{}).

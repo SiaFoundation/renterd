@@ -1,11 +1,7 @@
 package stores
 
 import (
-	"math/big"
-
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
 type (
@@ -14,14 +10,14 @@ type (
 
 		Owner string `gorm:"NOT NULL"`
 
-		// AccountID identifies an account. It's a public key.
-		AccountID rhpv3.Account `gorm:"unique;NOT NULL"`
+		// AccountID identifies an account.
+		AccountID publicKey `gorm:"unique;NOT NULL"`
 
 		// Host describes the host the account was created with.
-		Host types.PublicKey `gorm:"NOT NULL"`
+		Host publicKey `gorm:"NOT NULL"`
 
 		// Balance is the balance of the account.
-		Balance *big.Int `gorm:"type:bytes;serializer:gob"`
+		Balance string
 	}
 )
 

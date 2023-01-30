@@ -304,7 +304,7 @@ func TestRenewedContract(t *testing.T) {
 	// Archived contract should exist.
 	var ac dbArchivedContract
 	err = cs.db.Model(&dbArchivedContract{}).
-		Where("fcid", gobEncode(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Take(&ac).
 		Error
 	if err != nil {
@@ -313,14 +313,14 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:                fcid,
-		Host:                c.HostKey(),
-		RenewedTo:           fcid2,
+		FCID:                fileContractID(fcid),
+		Host:                publicKey(c.HostKey()),
+		RenewedTo:           fileContractID(fcid2),
 		Reason:              archivalReasonRenewed,
 		StartHeight:         100,
-		UploadSpending:      types.ZeroCurrency,
-		DownloadSpending:    types.ZeroCurrency,
-		FundAccountSpending: types.ZeroCurrency,
+		UploadSpending:      zeroCurrency,
+		DownloadSpending:    zeroCurrency,
+		FundAccountSpending: zeroCurrency,
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
 		fmt.Println(ac)
