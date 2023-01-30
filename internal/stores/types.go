@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"go.sia.tech/core/types"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -17,6 +18,7 @@ type (
 	fileContractID types.FileContractID
 	publicKey      types.PublicKey
 	hostSettings   rhpv2.HostSettings
+	balance        big.Int
 )
 
 // GormDataType implements gorm.GormDataTypeInterface.
@@ -103,4 +105,25 @@ func (hs *hostSettings) Scan(value interface{}) error {
 // Value returns a hostSettings value, implements driver.Valuer interface.
 func (hs hostSettings) Value() (driver.Value, error) {
 	return json.Marshal(hs)
+}
+
+func (balance) GormDataType() string {
+	return "string"
+}
+
+// Scan scan value into balance, implements sql.Scanner interface.
+func (hs *balance) Scan(value interface{}) error {
+	s, ok := value.(string)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal balance value:", value))
+	}
+	if _, success := (*big.Int)(hs).SetString(s, 10); !success {
+		return errors.New(fmt.Sprint("failed to scan balance value", value))
+	}
+	return nil
+}
+
+// Value returns a balance value, implements driver.Valuer interface.
+func (hs balance) Value() (driver.Value, error) {
+	return (*big.Int)(&hs).String(), nil
 }

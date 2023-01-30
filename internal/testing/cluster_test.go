@@ -189,15 +189,11 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
+	dir := t.TempDir()
+	cluster, err := newTestCluster(dir, zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := cluster.Shutdown(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}()
 	w := cluster.Worker
 
 	// add host
@@ -266,5 +262,28 @@ func TestEphemeralAccounts(t *testing.T) {
 	busAcc := busAccounts[0]
 	if !reflect.DeepEqual(busAcc, acc) {
 		t.Fatal("bus account doesn't match worker account")
+	}
+
+	// Shut down cluster.
+	if err := cluster.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	cluster2, err := newTestClusterWithFunding(dir, false, zap.New(zapcore.NewNopCore()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster2.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	accounts2, err := cluster2.Worker.Accounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(accounts, accounts2) {
+		t.Fatal("worker's accounts weren't persisted")
 	}
 }

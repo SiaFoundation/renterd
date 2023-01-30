@@ -124,6 +124,12 @@ func withCtx(f func() error) func(context.Context) error {
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
+	return newTestClusterWithFunding(dir, true, logger)
+}
+
+// newTestClusterWithFunding creates a new cluster without hosts that is funded
+// by mining multiple blocks if 'funding' is set.
+func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*TestCluster, error) {
 	// Use shared wallet key.
 	wk := types.GeneratePrivateKey()
 
@@ -253,8 +259,10 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	}()
 
 	// Fund the bus.
-	if err := cluster.MineBlocks(20); err != nil {
-		return nil, err
+	if funding {
+		if err := cluster.MineBlocks(20); err != nil {
+			return nil, err
+		}
 	}
 
 	// Set autopilot config.
