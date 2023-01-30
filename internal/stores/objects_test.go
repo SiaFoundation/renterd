@@ -137,7 +137,7 @@ func TestSQLObjectStore(t *testing.T) {
 							DBSlabID:   1,
 							DBSectorID: 1,
 							DBSector: dbSector{
-								Root:       obj1.Slabs[0].Shards[0].Root,
+								Root:       obj1.Slabs[0].Shards[0].Root[:],
 								LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
 								Contracts: []dbContract{
 									{
@@ -172,7 +172,7 @@ func TestSQLObjectStore(t *testing.T) {
 							DBSlabID:   2,
 							DBSectorID: 2,
 							DBSector: dbSector{
-								Root:       obj1.Slabs[1].Shards[0].Root,
+								Root:       obj1.Slabs[1].Shards[0].Root[:],
 								LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
 								Contracts: []dbContract{
 									{

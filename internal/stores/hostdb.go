@@ -325,7 +325,7 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 	}
 
 	var hosts []struct {
-		PublicKey  types.PublicKey `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL"`
+		PublicKey  publicKey `gorm:"unique;index;NOT NULL"`
 		NetAddress string
 	}
 	var hostAddresses []hostdb.HostAddress
@@ -340,7 +340,7 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, h := range hosts {
 				hostAddresses = append(hostAddresses, hostdb.HostAddress{
-					PublicKey:  h.PublicKey,
+					PublicKey:  types.PublicKey(h.PublicKey),
 					NetAddress: h.NetAddress,
 				})
 			}

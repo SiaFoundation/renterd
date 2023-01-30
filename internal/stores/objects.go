@@ -75,8 +75,8 @@ type (
 	dbSector struct {
 		Model
 
-		LatestHost publicKey     `gorm:"NOT NULL"`
-		Root       types.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
+		LatestHost publicKey `gorm:"NOT NULL"`
+		Root       []byte    `gorm:"index;unique;NOT NULL"`
 
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
@@ -117,7 +117,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 		}
 
 		slab.Shards[i].Host = types.PublicKey(shard.DBSector.LatestHost)
-		slab.Shards[i].Root = shard.DBSector.Root
+		slab.Shards[i].Root = *(*types.Hash256)(shard.DBSector.Root)
 	}
 
 	return
@@ -249,7 +249,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.Publ
 				// Create sector if it doesn't exist yet.
 				var sector dbSector
 				err := tx.
-					Where(dbSector{Root: shard.Root}).
+					Where(dbSector{Root: shard.Root[:]}).
 					Assign(dbSector{LatestHost: publicKey(shard.Host)}).
 					FirstOrCreate(&sector).
 					Error
@@ -416,7 +416,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 			// ensure the sector exists
 			var sector dbSector
 			if err := tx.
-				Where(dbSector{Root: shard.Root}).
+				Where(dbSector{Root: shard.Root[:]}).
 				Assign(dbSector{LatestHost: publicKey(shard.Host)}).
 				FirstOrCreate(&sector).
 				Error; err != nil {
