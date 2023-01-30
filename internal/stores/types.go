@@ -31,7 +31,7 @@ func (fcid *fileContractID) Scan(value interface{}) error {
 		return errors.New(fmt.Sprint("failed to unmarshal fcid value:", value))
 	}
 	if len(bytes) < len(fileContractID{}) {
-		return errors.New(fmt.Sprint("failed to unmarshal fcid value due to insufficient bytes", value))
+		return fmt.Errorf("failed to unmarshal fcid value due to insufficient bytes %v < %v: %v", len(bytes), len(fileContractID{}), value)
 	}
 	*fcid = *(*fileContractID)(bytes)
 	return nil
@@ -76,7 +76,7 @@ func (pk *publicKey) Scan(value interface{}) error {
 		return errors.New(fmt.Sprint("failed to unmarshal publicKey value:", value))
 	}
 	if len(bytes) < len(types.PublicKey{}) {
-		return errors.New(fmt.Sprint("failed to unmarshal publicKey value due to insufficient bytes", value))
+		return fmt.Errorf("failed to unmarshal publicKey value due to insufficient bytes %v < %v: %v", len(bytes), len(publicKey{}), value)
 	}
 	*pk = *(*publicKey)(bytes)
 	return nil

@@ -10,7 +10,7 @@ type (
 
 		Owner string `gorm:"NOT NULL"`
 
-		// AccountID identifies an account. It's a public key.
+		// AccountID identifies an account.
 		AccountID publicKey `gorm:"unique;NOT NULL"`
 
 		// Host describes the host the account was created with.
