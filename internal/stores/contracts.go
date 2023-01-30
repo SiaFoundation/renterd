@@ -238,7 +238,7 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 
 func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	var ancestors []dbArchivedContract
-	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", gobEncode(id), startHeight).
+	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
 		Scan(&ancestors).
 		Error
 	if err != nil {
@@ -276,9 +276,9 @@ func (s *SQLStore) Contracts(set string) ([]api.ContractMetadata, error) {
 
 // SetContractSet implements the bus.ContractStore interface.
 func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
-	encIds := make([][]byte, len(contractIds))
+	encIds := make([]fileContractID, len(contractIds))
 	for i, fcid := range contractIds {
-		encIds[i] = gobEncode(fcid)
+		encIds[i] = fileContractID(fcid)
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {

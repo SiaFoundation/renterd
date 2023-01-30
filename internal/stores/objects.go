@@ -356,9 +356,9 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 	}
 
 	// extract file contract ids
-	fcids := make([]interface{}, 0, len(usedContracts))
+	fcids := make([]fileContractID, 0, len(usedContracts))
 	for _, fcid := range usedContracts {
-		fcids = append(fcids, fcid)
+		fcids = append(fcids, fileContractID(fcid))
 	}
 
 	// find all hosts
@@ -375,7 +375,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 	var dbContracts []dbContract
 	if err := ss.db.
 		Model(&dbContract{}).
-		Where("fcid IN (?)", gobEncodeSlice(fcids)).
+		Where("fcid IN (?)", fcids).
 		Find(&dbContracts).
 		Error; err != nil {
 		return err
@@ -466,9 +466,9 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 	var dbBatch []dbSlab
 	var slabs []object.Slab
 
-	fcids := make([]interface{}, len(goodContracts))
+	fcids := make([]fileContractID, len(goodContracts))
 	for i, fcid := range goodContracts {
-		fcids[i] = fcid
+		fcids[i] = fileContractID(fcid)
 	}
 
 	if err := s.db.
@@ -477,7 +477,7 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
-		Where("c.fcid IN (?)", gobEncodeSlice(fcids)).
+		Where("c.fcid IN (?)", fcids).
 		Group("slabs.id").
 		Having("num_good_sectors < num_required_sectors").
 		Order("num_bad_sectors DESC").
