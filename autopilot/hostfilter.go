@@ -112,6 +112,9 @@ func isOutOfCollateral(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Cont
 	return isBelowCollateralThreshold(cfg, s, c.RemainingCollateral(s))
 }
 
+// isBelowCollateralThreshold returns true if the given collateral is below the
+// minimum contract collateral threshold, which is a percentage of the initial
+// collateral.
 func isBelowCollateralThreshold(cfg api.AutopilotConfig, s rhpv2.HostSettings, c types.Currency) bool {
 	collateral := big.NewRat(0, 1).SetFrac(c.Big(), initialContractCollateral(cfg, s).Big())
 	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)

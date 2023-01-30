@@ -577,7 +577,7 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 		// check if the added collateral is below the threshold
 		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(rev.FileContract, hostCollateral, settings, contract.EndHeight())
 		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
-			c.logger.Errorw(fmt.Sprintf("renew failed, added host collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
+			c.logger.Errorw(fmt.Sprintf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
 			continue
 		}
 
