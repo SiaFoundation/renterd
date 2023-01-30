@@ -9,7 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/rhp/v2"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
 )
@@ -66,7 +66,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []error) {
+func isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []error) {
 	if isOutOfCollateral(cfg, s, c) {
 		reasons = append(reasons, errContractOutOfCollateral)
 		renew = false
@@ -96,7 +96,7 @@ func isUsableContract(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contrac
 	return
 }
 
-func isOutOfFunds(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract) bool {
+func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract) bool {
 	blockBytes := types.NewCurrency64(modules.SectorSize * cfg.Contracts.Period)
 	sectorStoragePrice := s.StoragePrice.Mul(blockBytes)
 	sectorUploadBandwidthPrice := s.UploadBandwidthPrice.Mul64(modules.SectorSize)
@@ -108,11 +108,11 @@ func isOutOfFunds(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract) b
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func isOutOfCollateral(cfg api.AutopilotConfig, s rhp.HostSettings, c api.Contract) bool {
+func isOutOfCollateral(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract) bool {
 	return isBelowCollateralThreshold(cfg, s, c.RemainingCollateral(s))
 }
 
-func isBelowCollateralThreshold(cfg api.AutopilotConfig, s rhp.HostSettings, c types.Currency) bool {
+func isBelowCollateralThreshold(cfg api.AutopilotConfig, s rhpv2.HostSettings, c types.Currency) bool {
 	collateral := big.NewRat(0, 1).SetFrac(c.Big(), initialContractCollateral(cfg, s).Big())
 	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)
 	return collateral.Cmp(threshold) < 0
@@ -122,14 +122,14 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 	return blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 }
 
-func isGouging(gs api.GougingSettings, rs api.RedundancySettings, settings rhp.HostSettings) (bool, string) {
+func isGouging(gs api.GougingSettings, rs api.RedundancySettings, settings rhpv2.HostSettings) (bool, string) {
 	return worker.IsGouging(gs, settings, rs.MinShards, rs.TotalShards)
 }
 
-func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (rhp.HostSettings, bool, string) {
+func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (rhpv2.HostSettings, bool, string) {
 	settings := h.Settings
 	if settings == nil {
-		return rhp.HostSettings{}, true, "no settings"
+		return rhpv2.HostSettings{}, true, "no settings"
 	}
 	if !settings.AcceptingContracts {
 		return *settings, true, "not accepting contracts"
