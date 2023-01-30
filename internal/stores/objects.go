@@ -75,8 +75,8 @@ type (
 	dbSector struct {
 		Model
 
-		LatestHost types.PublicKey `gorm:"type:bytes;serializer:gob;NOT NULL"`
-		Root       types.Hash256   `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
+		LatestHost publicKey     `gorm:"NOT NULL"`
+		Root       types.Hash256 `gorm:"index;unique;NOT NULL;type:bytes;serializer:gob"`
 
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
@@ -116,7 +116,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 			continue // sector wasn't preloaded
 		}
 
-		slab.Shards[i].Host = shard.DBSector.LatestHost
+		slab.Shards[i].Host = types.PublicKey(shard.DBSector.LatestHost)
 		slab.Shards[i].Root = shard.DBSector.Root
 	}
 
@@ -250,7 +250,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.Publ
 				var sector dbSector
 				err := tx.
 					Where(dbSector{Root: shard.Root}).
-					Assign(dbSector{LatestHost: shard.Host}).
+					Assign(dbSector{LatestHost: publicKey(shard.Host)}).
 					FirstOrCreate(&sector).
 					Error
 				if err != nil {
@@ -283,7 +283,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.Publ
 				hostFound := true
 				var host dbHost
 				err = tx.Model(&dbHost{}).
-					Where(&dbHost{PublicKey: shard.Host}).
+					Where(&dbHost{PublicKey: publicKey(shard.Host)}).
 					Take(&host).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					hostFound = false
@@ -350,9 +350,9 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 	}
 
 	// extract host keys
-	hostkeys := make([]interface{}, 0, len(usedContracts))
+	hostkeys := make([]publicKey, 0, len(usedContracts))
 	for key := range usedContracts {
-		hostkeys = append(hostkeys, key)
+		hostkeys = append(hostkeys, publicKey(key))
 	}
 
 	// extract file contract ids
@@ -365,7 +365,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 	var dbHosts []dbHost
 	if err := ss.db.
 		Model(&dbHost{}).
-		Where("public_key IN (?)", gobEncodeSlice(hostkeys)).
+		Where("public_key IN (?)", hostkeys).
 		Find(&dbHosts).
 		Error; err != nil {
 		return err
@@ -382,7 +382,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 	}
 
 	// make a hosts map
-	hosts := make(map[types.PublicKey]*dbHost)
+	hosts := make(map[publicKey]*dbHost)
 	for i := range dbHosts {
 		hosts[dbHosts[i].PublicKey] = &dbHosts[i]
 	}
@@ -417,7 +417,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 			var sector dbSector
 			if err := tx.
 				Where(dbSector{Root: shard.Root}).
-				Assign(dbSector{LatestHost: shard.Host}).
+				Assign(dbSector{LatestHost: publicKey(shard.Host)}).
 				FirstOrCreate(&sector).
 				Error; err != nil {
 				return err
@@ -444,7 +444,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, goodContracts map[types.PublicKey]typ
 					return err
 				}
 			}
-			if host := hosts[shard.Host]; host != nil {
+			if host := hosts[publicKey(shard.Host)]; host != nil {
 				if err := tx.
 					Model(&sector).
 					Association("Hosts").

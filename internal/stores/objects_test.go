@@ -138,12 +138,12 @@ func TestSQLObjectStore(t *testing.T) {
 							DBSectorID: 1,
 							DBSector: dbSector{
 								Root:       obj1.Slabs[0].Shards[0].Root,
-								LatestHost: obj1.Slabs[0].Shards[0].Host,
+								LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
 								Contracts: []dbContract{
 									{
 										HostID: 1,
 										Host: dbHost{
-											PublicKey: hk1,
+											PublicKey: publicKey(hk1),
 										},
 										FCID:                fileContractID(fcid1),
 										StartHeight:         startHeight1,
@@ -173,12 +173,12 @@ func TestSQLObjectStore(t *testing.T) {
 							DBSectorID: 2,
 							DBSector: dbSector{
 								Root:       obj1.Slabs[1].Shards[0].Root,
-								LatestHost: obj1.Slabs[1].Shards[0].Host,
+								LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
 								Contracts: []dbContract{
 									{
 										HostID: 2,
 										Host: dbHost{
-											PublicKey: hk2,
+											PublicKey: publicKey(hk2),
 										},
 										FCID:                fileContractID(fcid2),
 										StartHeight:         startHeight2,
@@ -653,7 +653,7 @@ func TestPutSlab(t *testing.T) {
 	// helper to extract the hostkey from a list of hosts
 	hostKeys := func(hosts []dbHost) (ids []types.PublicKey) {
 		for _, h := range hosts {
-			ids = append(ids, h.PublicKey)
+			ids = append(ids, types.PublicKey(h.PublicKey))
 		}
 		return
 	}
