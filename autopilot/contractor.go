@@ -492,10 +492,10 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight ui
 		// calculate the host collateral
 		endHeight := endHeight(cfg, c.currentPeriod())
 		timeExtension := endHeight - rev.WindowEnd
-		hostCollateral := renewContractCollateral(settings, renterFunds, fs, timeExtension)
+		newCollateral := renewContractCollateral(settings, renterFunds, fs, timeExtension)
 
 		// renew the contract
-		newRevision, _, err := c.ap.worker.RHPRenew(fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, hostCollateral)
+		newRevision, _, err := c.ap.worker.RHPRenew(fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
 			if containsError(err, wallet.ErrInsufficientBalance) {
@@ -571,18 +571,18 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 			break
 		}
 
-		// calculate the host collateral
-		hostCollateral := renewContractCollateral(settings, renterFunds, contract.FileSize(), 0)
+		// calculate the new collateral
+		newCollateral := renewContractCollateral(settings, renterFunds, rev.Filesize, 0)
 
 		// check if the added collateral is below the threshold
-		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(rev.FileContract, hostCollateral, settings, contract.EndHeight())
+		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
 		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
 			c.logger.Errorw(fmt.Sprintf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
 			continue
 		}
 
 		// renew the contract
-		newRevision, _, err := c.ap.worker.RHPRenew(contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, hostCollateral)
+		newRevision, _, err := c.ap.worker.RHPRenew(contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 			if containsError(err, wallet.ErrInsufficientBalance) {
@@ -828,24 +828,32 @@ func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileCont
 	return contracts
 }
 
+// renewContractCollateral returns the collateral we add to the contract when we
+// renew a contract. This function will cap the collateral at the MaxCollateral
+// if possible, but returns the collateral we add, not the total collateral.
 func renewContractCollateral(settings rhpv2.HostSettings, renterFunds types.Currency, fileSize, extension uint64) types.Currency {
-	// calculate the base collateral, for refreshes this is zero
-	baseCollateral := settings.Collateral.Mul64(fileSize).Mul64(extension)
-
-	// estimate collateral for new contract
-	var newCollateral types.Currency
-	if costPerByte := settings.UploadBandwidthPrice.Add(settings.StoragePrice).Add(settings.DownloadBandwidthPrice); !costPerByte.IsZero() {
-		bytes := renterFunds.Div(costPerByte)
-		newCollateral = settings.Collateral.Mul(bytes)
+	// calculate cost per byte
+	costPerByte := settings.UploadBandwidthPrice.Add(settings.StoragePrice).Add(settings.DownloadBandwidthPrice)
+	if costPerByte.IsZero() {
+		return types.ZeroCurrency
 	}
 
-	// the collateral can't be greater than MaxCollateral
+	// calculate the base collateral - if it exceeds MaxCollateral we can't add more collateral
+	baseCollateral := settings.Collateral.Mul64(fileSize).Mul64(extension)
+	if baseCollateral.Cmp(settings.MaxCollateral) >= 0 {
+		return types.ZeroCurrency
+	}
+
+	// calculate the new collateral
+	newCollateral := settings.Collateral.Mul(renterFunds.Div(costPerByte))
+
+	// if the total collateral is more than the MaxCollateral, return the delta
 	totalCollateral := baseCollateral.Add(newCollateral)
 	if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
-		totalCollateral = settings.MaxCollateral
+		return totalCollateral.Sub(settings.MaxCollateral)
 	}
 
-	return totalCollateral
+	return newCollateral
 }
 
 func initialContractCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings) types.Currency {

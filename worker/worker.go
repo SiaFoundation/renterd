@@ -233,7 +233,7 @@ type Bus interface {
 
 	WalletDiscard(txn types.Transaction) error
 	WalletPrepareForm(renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
+	WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -495,7 +495,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		_ = w.bus.ReleaseContract(rrr.ContractID, lockID) // TODO: log error
 	}()
 
-	hostIP, hostKey, toRenewID, renterFunds, hostCollateral := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds, rrr.HostCollateral
+	hostIP, hostKey, toRenewID, renterFunds, newCollateral := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds, rrr.NewCollateral
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
 	renterKey := w.deriveRenterKey(hostKey)
 
@@ -518,7 +518,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		}
 		rev := session.Revision()
 
-		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
+		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, renterAddress, renterKey, renterFunds, newCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
 			return err
 		}

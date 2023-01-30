@@ -47,15 +47,15 @@ func (c *Client) RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, re
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPRenewRequest{
-		ContractID:     fcid,
-		EndHeight:      endHeight,
-		HostCollateral: hostCollateral,
-		HostKey:        hk,
-		HostIP:         hostIP,
-		RenterAddress:  renterAddress,
-		RenterFunds:    renterFunds,
+		ContractID:    fcid,
+		EndHeight:     endHeight,
+		HostKey:       hk,
+		HostIP:        hostIP,
+		NewCollateral: newCollateral,
+		RenterAddress: renterAddress,
+		RenterFunds:   renterFunds,
 	}
 	var resp api.RHPRenewResponse
 	err := c.c.POST("/rhp/renew", req, &resp)

@@ -330,7 +330,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		return
 	}
 
-	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.HostCollateral, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)
+	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.HostSettings, wprr.EndHeight)
 	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice)
 	finalPayment := wprr.HostSettings.BaseRPCPrice
 	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {

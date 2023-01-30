@@ -83,17 +83,19 @@ func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) type
 // we're already at MaxCollateral. Thus the host has conflicting
 // requirements, and renewing the contract is impossible until they change
 // their settings.
-func CalculatePayouts(fc types.FileContract, hostCollateral types.Currency, s HostSettings, endHeight uint64) (types.Currency, types.Currency, types.Currency) {
+func CalculatePayouts(fc types.FileContract, newCollateral types.Currency, settings HostSettings, endHeight uint64) (types.Currency, types.Currency, types.Currency) {
+	// calculate base price and collateral
 	var basePrice, baseCollateral types.Currency
 
 	// if the contract height did not increase both prices are zero
-	if contractEnd := uint64(endHeight + s.WindowSize); contractEnd > fc.WindowEnd {
+	if contractEnd := uint64(endHeight + settings.WindowSize); contractEnd > fc.WindowEnd {
 		timeExtension := uint64(contractEnd - fc.WindowEnd)
-		basePrice = s.StoragePrice.Mul64(fc.Filesize).Mul64(timeExtension)
-		baseCollateral = s.Collateral.Mul64(fc.Filesize).Mul64(timeExtension)
+		basePrice = settings.StoragePrice.Mul64(fc.Filesize).Mul64(timeExtension)
+		baseCollateral = settings.Collateral.Mul64(fc.Filesize).Mul64(timeExtension)
 	}
 
-	hostValidPayout := s.ContractPrice.Add(basePrice).Add(hostCollateral)
+	// calculate payouts
+	hostValidPayout := settings.ContractPrice.Add(basePrice).Add(baseCollateral).Add(newCollateral)
 	voidMissedPayout := basePrice.Add(baseCollateral)
 	if hostValidPayout.Cmp(voidMissedPayout) < 0 {
 		// TODO: detect this elsewhere
@@ -104,14 +106,8 @@ func CalculatePayouts(fc types.FileContract, hostCollateral types.Currency, s Ho
 }
 
 // PrepareContractRenewal constructs a contract renewal transaction.
-func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout, hostCollateral types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
-	// the collateral can't be greater than MaxCollateral
-	if hostCollateral.Cmp(host.MaxCollateral) > 0 {
-		hostCollateral = host.MaxCollateral
-	}
-
-	// calculate the payouts
-	hostValidPayout, hostMissedPayout, voidMissedPayout := CalculatePayouts(currentRevision.FileContract, hostCollateral, host, endHeight)
+func PrepareContractRenewal(currentRevision types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterPayout, newCollateral types.Currency, hostKey types.PublicKey, host HostSettings, endHeight uint64) types.FileContract {
+	hostValidPayout, hostMissedPayout, voidMissedPayout := CalculatePayouts(currentRevision.FileContract, newCollateral, host, endHeight)
 
 	return types.FileContract{
 		Filesize:       currentRevision.Filesize,
@@ -122,11 +118,11 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 		UnlockHash:     currentRevision.UnlockHash,
 		RevisionNumber: 0,
 		ValidProofOutputs: []types.SiacoinOutput{
-			{Value: renterPayout, Address: refundAddr},
+			{Value: renterPayout, Address: renterAddress},
 			{Value: hostValidPayout, Address: host.Address},
 		},
 		MissedProofOutputs: []types.SiacoinOutput{
-			{Value: renterPayout, Address: refundAddr},
+			{Value: renterPayout, Address: renterAddress},
 			{Value: hostMissedPayout, Address: host.Address},
 			{Value: voidMissedPayout, Address: types.Address{}},
 		},
