@@ -352,7 +352,7 @@ func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 
 func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 	var h dbHost
-	err := tx.Where("public_key", hostKey).
+	err := tx.Where("public_key", publicKey(hostKey)).
 		Take(&h).Error
 	return h, err
 }
