@@ -304,7 +304,7 @@ func TestRenewedContract(t *testing.T) {
 	// Archived contract should exist.
 	var ac dbArchivedContract
 	err = cs.db.Model(&dbArchivedContract{}).
-		Where("fcid", gobEncode(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Take(&ac).
 		Error
 	if err != nil {
