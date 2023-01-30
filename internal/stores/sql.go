@@ -76,7 +76,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbArchivedContract{},
 			&dbContract{},
 			&dbContractSet{},
-			&dbContractSetContract{},
 
 			// bus.HostDB tables
 			&dbAnnouncement{},

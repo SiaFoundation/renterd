@@ -45,11 +45,6 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
-	dbContractSetContract struct {
-		DBContractID    uint `gorm:"primaryKey"`
-		DBContractSetID uint `gorm:"primaryKey"`
-	}
-
 	dbArchivedContract struct {
 		Model
 		FCID                types.FileContractID `gorm:"unique;index;type:bytes;serializer:gob;NOT NULL;column:fcid"`
@@ -276,34 +271,39 @@ func (s *SQLStore) Contracts(set string) ([]api.ContractMetadata, error) {
 
 // SetContractSet implements the bus.ContractStore interface.
 func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
-	encIds := make([][]byte, len(contractIds))
+	fcids := make([]interface{}, len(contractIds))
 	for i, fcid := range contractIds {
-		encIds[i] = gobEncode(fcid)
+		fcids[i] = fcid
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// Delete existing set.
-		err := tx.Model(&dbContractSet{}).
-			Where("name", name).
-			Delete(&dbContractSet{}).
+		// fetch contracts
+		var dbContracts []dbContract
+		err := tx.
+			Model(&dbContract{}).
+			Where("fcid IN (?)", gobEncodeSlice(fcids)).
+			Find(&dbContracts).
 			Error
 		if err != nil {
 			return err
 		}
-		// Fetch contracts.
-		var dbContracts []dbContract
-		err = tx.Model(&dbContract{}).
-			Where("fcid in ?", encIds).
-			Find(&dbContracts).Error
+
+		// create contract set
+		var contractset dbContractSet
+		err = tx.
+			Where(dbContractSet{Name: name}).
+			FirstOrCreate(&contractset).
+			Error
 		if err != nil {
 			return err
 		}
 
-		// Create set.
-		return tx.Create(&dbContractSet{
-			Name:      name,
-			Contracts: dbContracts,
-		}).Error
+		// update contracts
+		err = tx.Model(&contractset).Association("Contracts").Replace(&dbContracts)
+		if err != nil {
+			return err
+		}
+		return err
 	})
 }
 
@@ -333,23 +333,22 @@ func (s *SQLStore) contracts(set string) ([]dbContract, error) {
 	return cs.Contracts, nil
 }
 
-func contract(tx *gorm.DB, id types.FileContractID) (dbContract, error) {
-	var contract dbContract
-	err := tx.Where(&dbContract{FCID: id}).
+func contract(tx *gorm.DB, id types.FileContractID) (contract dbContract, err error) {
+	err = tx.
+		Where(&dbContract{FCID: id}).
 		Preload("Host").
-		Take(&contract).Error
+		Take(&contract).
+		Error
+
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return contract, ErrContractNotFound
+		err = ErrContractNotFound
 	}
-	return contract, err
+	return
 }
 
 func removeContract(tx *gorm.DB, id types.FileContractID) error {
-	var contract dbContract
-	if err := tx.Where(&dbContract{FCID: id}).
-		Take(&contract).Error; err != nil {
-		return err
-	}
-	return tx.Where(&dbContract{Model: Model{ID: contract.ID}}).
-		Delete(&contract).Error
+	return tx.
+		Where(&dbContract{FCID: id}).
+		Delete(&dbContract{}).
+		Error
 }
