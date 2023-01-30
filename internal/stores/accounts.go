@@ -30,6 +30,15 @@ func (dbAccount) TableName() string {
 	return "ephemeral_accounts"
 }
 
+func (a dbAccount) convert() api.Account {
+	return api.Account{
+		ID:      rhpv3.Account(a.AccountID),
+		Host:    types.PublicKey(a.Host),
+		Balance: (*big.Int)(a.Balance),
+		Owner:   a.Owner,
+	}
+}
+
 // Accounts returns all accoutns from the db.
 func (s *SQLStore) Accounts() ([]api.Account, error) {
 	var dbAccounts []dbAccount
@@ -38,12 +47,7 @@ func (s *SQLStore) Accounts() ([]api.Account, error) {
 	}
 	accounts := make([]api.Account, len(dbAccounts))
 	for i, acc := range dbAccounts {
-		accounts[i] = api.Account{
-			ID:      rhpv3.Account(acc.AccountID),
-			Host:    types.PublicKey(acc.Host),
-			Balance: (*big.Int)(acc.Balance),
-			Owner:   acc.Owner,
-		}
+		accounts[i] = acc.convert()
 	}
 	return accounts, nil
 }
