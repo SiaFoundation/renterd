@@ -2,10 +2,12 @@ package stores
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"go.sia.tech/core/types"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
 
 var zeroCurrency = currency(types.ZeroCurrency)
@@ -14,6 +16,7 @@ type (
 	currency       types.Currency
 	fileContractID types.FileContractID
 	publicKey      types.PublicKey
+	hostSettings   rhpv2.HostSettings
 )
 
 // GormDataType implements gorm.GormDataTypeInterface.
@@ -82,4 +85,22 @@ func (pk *publicKey) Scan(value interface{}) error {
 // Value returns a publicKey value, implements driver.Valuer interface.
 func (pk publicKey) Value() (driver.Value, error) {
 	return pk[:], nil
+}
+
+func (hostSettings) GormDataType() string {
+	return "string"
+}
+
+// Scan scan value into hostSettings, implements sql.Scanner interface.
+func (hs *hostSettings) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal hostSettings value:", value))
+	}
+	return json.Unmarshal(bytes, hs)
+}
+
+// Value returns a hostSettings value, implements driver.Valuer interface.
+func (hs hostSettings) Value() (driver.Value, error) {
+	return json.Marshal(hs)
 }

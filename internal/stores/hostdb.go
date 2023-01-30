@@ -44,8 +44,8 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey publicKey    `gorm:"unique;index;NOT NULL"`
-		Settings  hostSettings `gorm:"type:bytes;serializer:gob"`
+		PublicKey publicKey `gorm:"unique;index;NOT NULL"`
+		Settings  hostSettings
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -86,35 +86,6 @@ type (
 	dbConsensusInfo struct {
 		Model
 		CCID []byte
-	}
-
-	// hostSettings are the settings and prices used when interacting with a host.
-	// TODO: might be useful to have this be a table.
-	// TODO: is this still necessary?
-	hostSettings struct {
-		AcceptingContracts         bool           `json:"acceptingcontracts"`
-		MaxDownloadBatchSize       uint64         `json:"maxdownloadbatchsize"`
-		MaxDuration                uint64         `json:"maxduration"`
-		MaxReviseBatchSize         uint64         `json:"maxrevisebatchsize"`
-		NetAddress                 string         `json:"netaddress"`
-		RemainingStorage           uint64         `json:"remainingstorage"`
-		SectorSize                 uint64         `json:"sectorsize"`
-		TotalStorage               uint64         `json:"totalstorage"`
-		Address                    types.Address  `json:"unlockhash"`
-		WindowSize                 uint64         `json:"windowsize"`
-		Collateral                 types.Currency `json:"collateral"`
-		MaxCollateral              types.Currency `json:"maxcollateral"`
-		BaseRPCPrice               types.Currency `json:"baserpcprice"`
-		ContractPrice              types.Currency `json:"contractprice"`
-		DownloadBandwidthPrice     types.Currency `json:"downloadbandwidthprice"`
-		SectorAccessPrice          types.Currency `json:"sectoraccessprice"`
-		StoragePrice               types.Currency `json:"storageprice"`
-		UploadBandwidthPrice       types.Currency `json:"uploadbandwidthprice"`
-		EphemeralAccountExpiry     time.Duration  `json:"ephemeralaccountexpiry"`
-		MaxEphemeralAccountBalance types.Currency `json:"maxephemeralaccountbalance"`
-		RevisionNumber             uint64         `json:"revisionnumber"`
-		Version                    string         `json:"version"`
-		SiaMuxPort                 string         `json:"siamuxport"`
 	}
 
 	// dbAnnouncement is a table used for storing all announcements. It

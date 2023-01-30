@@ -50,29 +50,29 @@ func (c ContractRevision) NumSectors() uint64 {
 
 // HostSettings are the settings and prices used when interacting with a host.
 type HostSettings struct {
-	AcceptingContracts         bool           `json:"acceptingcontracts"`
-	MaxDownloadBatchSize       uint64         `json:"maxdownloadbatchsize"`
-	MaxDuration                uint64         `json:"maxduration"`
-	MaxReviseBatchSize         uint64         `json:"maxrevisebatchsize"`
-	NetAddress                 string         `json:"netaddress"`
-	RemainingStorage           uint64         `json:"remainingstorage"`
-	SectorSize                 uint64         `json:"sectorsize"`
-	TotalStorage               uint64         `json:"totalstorage"`
-	Address                    types.Address  `json:"unlockhash"`
-	WindowSize                 uint64         `json:"windowsize"`
-	Collateral                 types.Currency `json:"collateral"`
-	MaxCollateral              types.Currency `json:"maxcollateral"`
-	BaseRPCPrice               types.Currency `json:"baserpcprice"`
-	ContractPrice              types.Currency `json:"contractprice"`
-	DownloadBandwidthPrice     types.Currency `json:"downloadbandwidthprice"`
-	SectorAccessPrice          types.Currency `json:"sectoraccessprice"`
-	StoragePrice               types.Currency `json:"storageprice"`
-	UploadBandwidthPrice       types.Currency `json:"uploadbandwidthprice"`
-	EphemeralAccountExpiry     time.Duration  `json:"ephemeralaccountexpiry"`
-	MaxEphemeralAccountBalance types.Currency `json:"maxephemeralaccountbalance"`
-	RevisionNumber             uint64         `json:"revisionnumber"`
-	Version                    string         `json:"version"`
-	SiaMuxPort                 string         `json:"siamuxport"`
+	AcceptingContracts         bool           `json:"acceptingcontracts,omitempty"`
+	MaxDownloadBatchSize       uint64         `json:"maxdownloadbatchsize,omitempty"`
+	MaxDuration                uint64         `json:"maxduration,omitempty"`
+	MaxReviseBatchSize         uint64         `json:"maxrevisebatchsize,omitempty"`
+	NetAddress                 string         `json:"netaddress,omitempty"`
+	RemainingStorage           uint64         `json:"remainingstorage,omitempty"`
+	SectorSize                 uint64         `json:"sectorsize,omitempty"`
+	TotalStorage               uint64         `json:"totalstorage,omitempty"`
+	Address                    types.Address  `json:"unlockhash,omitempty"`
+	WindowSize                 uint64         `json:"windowsize,omitempty"`
+	Collateral                 types.Currency `json:"collateral,omitempty"`
+	MaxCollateral              types.Currency `json:"maxcollateral,omitempty"`
+	BaseRPCPrice               types.Currency `json:"baserpcprice,omitempty"`
+	ContractPrice              types.Currency `json:"contractprice,omitempty"`
+	DownloadBandwidthPrice     types.Currency `json:"downloadbandwidthprice,omitempty"`
+	SectorAccessPrice          types.Currency `json:"sectoraccessprice,omitempty"`
+	StoragePrice               types.Currency `json:"storageprice,omitempty"`
+	UploadBandwidthPrice       types.Currency `json:"uploadbandwidthprice,omitempty"`
+	EphemeralAccountExpiry     time.Duration  `json:"ephemeralaccountexpiry,omitempty"`
+	MaxEphemeralAccountBalance types.Currency `json:"maxephemeralaccountbalance,omitempty"`
+	RevisionNumber             uint64         `json:"revisionnumber,omitempty"`
+	Version                    string         `json:"version,omitempty"`
+	SiaMuxPort                 string         `json:"siamuxport,omitempty"`
 }
 
 // SiamuxAddr is a helper which returns an address that can be used to connect
