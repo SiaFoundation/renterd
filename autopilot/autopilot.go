@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -84,11 +85,14 @@ type Autopilot struct {
 	m *migrator
 	s *scanner
 
-	ticker         *time.Ticker
 	tickerDuration time.Duration
 	stopChan       chan struct{}
 	triggerChan    chan struct{}
 	wg             sync.WaitGroup
+
+	mu      sync.Mutex
+	running bool
+	ticker  *time.Ticker
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -107,7 +111,16 @@ func (ap *Autopilot) SetConfig(c api.AutopilotConfig) error {
 }
 
 func (ap *Autopilot) Run() error {
+	ap.mu.Lock()
+	if ap.running {
+		ap.mu.Unlock()
+		return errors.New("already running")
+	}
+	ap.running = true
+	ap.stopChan = make(chan struct{})
+	ap.triggerChan = make(chan struct{})
 	ap.ticker = time.NewTicker(ap.tickerDuration)
+	ap.mu.Unlock()
 
 	// update the contract set setting
 	err := ap.bus.UpdateSetting(bus.SettingContractSet, ap.store.Config().Contracts.Set)
@@ -179,12 +192,16 @@ func (ap *Autopilot) Run() error {
 }
 
 func (ap *Autopilot) Stop() error {
-	if ap.ticker != nil {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+
+	if ap.running {
 		ap.ticker.Stop()
+		close(ap.stopChan)
+		close(ap.triggerChan)
+		ap.wg.Wait()
+		ap.running = false
 	}
-	close(ap.stopChan)
-	close(ap.triggerChan)
-	ap.wg.Wait()
 	return nil
 }
 
@@ -252,8 +269,6 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		worker: worker,
 
 		tickerDuration: heartbeat,
-		stopChan:       make(chan struct{}),
-		triggerChan:    make(chan struct{}),
 	}
 
 	scanner, err := newScanner(
