@@ -312,7 +312,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 	return nil
 }
 
-func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker) error {
+func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker, uploadSectorTimeout time.Duration) error {
 	hostsmap := make(map[string]struct{})
 	usedmap := make(map[string]struct{})
 
@@ -383,7 +383,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 	}
 
 	// reupload those shards
-	uploaded, _, err := parallelUploadSlab(ctx, shards, filtered, locker, 0)
+	uploaded, _, err := parallelUploadSlab(ctx, shards, filtered, locker, uploadSectorTimeout)
 	if err != nil {
 		return err
 	}

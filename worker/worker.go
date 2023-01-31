@@ -678,7 +678,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
 	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts, w.bus)
+		return migrateSlab(ctx, &slab, hosts, w.bus, w.uploadSectorTimeout)
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
