@@ -411,7 +411,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 		}
 
 		// calculate the host collateral
-		hostCollateral := initialContractCollateral(cfg, scan.Settings)
+		hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Storage/cfg.Contracts.Amount, cfg.Contracts.Period, scan.Settings)
 
 		// form contract
 		contract, _, err := c.ap.worker.RHPForm(endHeight(cfg, c.currentPeriod()), hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
@@ -474,7 +474,6 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight ui
 		fcid := contract.ID
 		rev := contract.Revision
 		hk := contract.HostKey()
-		fs := contract.FileSize()
 
 		// calculate the renter funds
 		renterFunds, err := c.renewFundingEstimate(cfg, blockHeight, ci)
@@ -491,8 +490,7 @@ func (c *contractor) runContractRenewals(cfg api.AutopilotConfig, blockHeight ui
 
 		// calculate the host collateral
 		endHeight := endHeight(cfg, c.currentPeriod())
-		timeExtension := endHeight - rev.WindowEnd
-		newCollateral := renewContractCollateral(settings, renterFunds, fs, timeExtension)
+		newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, endHeight)
 
 		// renew the contract
 		newRevision, _, err := c.ap.worker.RHPRenew(fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
@@ -572,9 +570,9 @@ func (c *contractor) runContractRefreshes(cfg api.AutopilotConfig, blockHeight u
 		}
 
 		// calculate the new collateral
-		newCollateral := renewContractCollateral(settings, renterFunds, rev.Filesize, 0)
+		newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, contract.EndHeight())
 
-		// check if the added collateral is below the threshold
+		// do not refresh if the contract's updated collateral will fall below the threshold anyway
 		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
 		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
 			c.logger.Errorw(fmt.Sprintf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
@@ -826,44 +824,6 @@ func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileCont
 		contracts = append(contracts, fcid)
 	}
 	return contracts
-}
-
-// renewContractCollateral returns the collateral we add to the contract when we
-// renew a contract. This function will cap the collateral at the MaxCollateral
-// if possible, but returns the collateral we add, not the total collateral.
-func renewContractCollateral(settings rhpv2.HostSettings, renterFunds types.Currency, fileSize, extension uint64) types.Currency {
-	// calculate cost per byte
-	costPerByte := settings.UploadBandwidthPrice.Add(settings.StoragePrice).Add(settings.DownloadBandwidthPrice)
-	if costPerByte.IsZero() {
-		return types.ZeroCurrency
-	}
-
-	// calculate the base collateral - if it exceeds MaxCollateral we can't add more collateral
-	baseCollateral := settings.Collateral.Mul64(fileSize).Mul64(extension)
-	if baseCollateral.Cmp(settings.MaxCollateral) >= 0 {
-		return types.ZeroCurrency
-	}
-
-	// calculate the new collateral
-	newCollateral := settings.Collateral.Mul(renterFunds.Div(costPerByte))
-
-	// if the total collateral is more than the MaxCollateral, return the delta
-	totalCollateral := baseCollateral.Add(newCollateral)
-	if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
-		return totalCollateral.Sub(settings.MaxCollateral)
-	}
-
-	return newCollateral
-}
-
-func initialContractCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSettings) types.Currency {
-	expectedStorage := cfg.Contracts.Storage / cfg.Contracts.Amount
-
-	hostCollateral := settings.Collateral.Mul64(expectedStorage).Mul64(cfg.Contracts.Period)
-	if hostCollateral.Cmp(settings.MaxCollateral) > 0 {
-		hostCollateral = settings.MaxCollateral
-	}
-	return hostCollateral
 }
 
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
