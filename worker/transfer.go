@@ -55,13 +55,14 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 				}
 				defer locker.ReleaseContract(req.host.Contract(), lockID)
 
+				detachedCtx := Detach(ctx)
 				if uploadSectorTimeout > 0 {
 					var cancel context.CancelFunc
-					ctx, cancel = context.WithTimeout(ctx, uploadSectorTimeout)
+					detachedCtx, cancel = context.WithTimeout(detachedCtx, uploadSectorTimeout)
 					defer cancel()
 				}
 
-				root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+				root, err := req.host.UploadSector(detachedCtx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
 				respChan <- resp{req, root, err}
 			}()
 		}
