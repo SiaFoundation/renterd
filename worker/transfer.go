@@ -19,6 +19,8 @@ const (
 	contractLockingDownloadPriority = 2
 )
 
+var errUploadSectorTimeout = errors.New("upload sector timed out")
+
 // A sectorStore stores contract data.
 type sectorStore interface {
 	Contract() types.FileContractID
@@ -46,8 +48,11 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	defer close(reqChan)
 	respChan := make(chan resp, len(shards))
 	worker := func() {
-		for req := range reqChan {
-			func() {
+		for r := range reqChan {
+			doneChan := make(chan struct{})
+			go func(req req) {
+				defer close(doneChan)
+
 				lockID, err := locker.AcquireContract(ctx, req.host.Contract(), contractLockingUploadPriority, 30*time.Second)
 				if err != nil {
 					respChan <- resp{req, types.Hash256{}, err}
@@ -55,16 +60,21 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 				}
 				defer locker.ReleaseContract(req.host.Contract(), lockID)
 
-				detachedCtx := Detach(ctx)
-				if uploadSectorTimeout > 0 {
-					var cancel context.CancelFunc
-					detachedCtx, cancel = context.WithTimeout(detachedCtx, uploadSectorTimeout)
-					defer cancel()
-				}
-
-				root, err := req.host.UploadSector(detachedCtx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+				root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
 				respChan <- resp{req, root, err}
-			}()
+			}(r)
+
+			if uploadSectorTimeout > 0 {
+				select {
+				case <-time.After(uploadSectorTimeout):
+					respChan <- resp{
+						req: r,
+						err: errUploadSectorTimeout}
+				case <-doneChan:
+				}
+			}
+
+			<-doneChan
 		}
 	}
 
@@ -84,7 +94,9 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	rem := len(shards)
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
-		inflight--
+		if resp.err != errUploadSectorTimeout {
+			inflight--
+		}
 
 		if resp.err != nil {
 			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
@@ -94,7 +106,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 				hostIndex++
 				inflight++
 			}
-		} else {
+		} else if sectors[resp.req.shardIndex].Root == (types.Hash256{}) {
 			sectors[resp.req.shardIndex] = object.Sector{
 				Host: resp.req.host.PublicKey(),
 				Root: resp.root,
