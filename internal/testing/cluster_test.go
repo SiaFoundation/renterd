@@ -170,6 +170,22 @@ func TestUploadDownload(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// Should be registered in bus.
+		_, entries, err := cluster.Bus.Object("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, entry := range entries {
+			if entry == fmt.Sprintf("/%s", name) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("uploaded object not found in bus")
+		}
+
 		// download the data
 		var buffer bytes.Buffer
 		if err := w.DownloadObject(&buffer, name); err != nil {

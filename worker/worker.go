@@ -693,7 +693,8 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []string{})
 
-	o, es, err := w.bus.Object(jc.PathParam("key"))
+	key := strings.TrimPrefix(jc.PathParam("key"), "/")
+	o, es, err := w.bus.Object(key)
 	if jc.Check("couldn't get object or entries", err) != nil {
 		return
 	}
@@ -819,7 +820,8 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	if jc.Check("couldn't add object", w.bus.AddObject(jc.PathParam("key"), o, usedContracts)) != nil {
+	key := strings.TrimPrefix(jc.PathParam("key"), "/")
+	if jc.Check("couldn't add object", w.bus.AddObject(key, o, usedContracts)) != nil {
 		return
 	}
 }
