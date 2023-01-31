@@ -86,7 +86,7 @@ func collateralScore(cfg api.AutopilotConfig, s rhp.HostSettings) float64 {
 
 	// convenience variables
 	allowance := cfg.Contracts.Allowance
-	numhosts := cfg.Contracts.Hosts
+	numContracts := cfg.Contracts.Amount
 	duration := cfg.Contracts.Period
 	storage := cfg.Contracts.Storage
 
@@ -100,7 +100,7 @@ func collateralScore(cfg api.AutopilotConfig, s rhp.HostSettings) float64 {
 	collateral = math.Max(1, collateral) // ensure collateral is at least 1
 
 	// calculate the cutoff
-	expectedFundsPerHost := allowance.Div64(numhosts)
+	expectedFundsPerHost := allowance.Div64(numContracts)
 	cutoff, _ := new(big.Rat).SetInt(expectedFundsPerHost.Div64(5).Big()).Float64()
 	cutoff = math.Max(1, cutoff)          // ensure cutoff is at least 1
 	cutoff = math.Min(cutoff, collateral) // ensure cutoff is not greater than collateral

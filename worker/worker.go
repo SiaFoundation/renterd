@@ -32,6 +32,10 @@ const (
 
 	lockingDurationRenew   = time.Minute
 	lockingDurationFunding = 30 * time.Second
+
+	queryStringParamContractSet = "contractset"
+	queryStringParamMinShards   = "minshards"
+	queryStringParamTotalShards = "totalshards"
 )
 
 // parseRange parses a Range header string as per RFC 7233. Only the first range
@@ -488,9 +492,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 	defer func() {
-		if err := w.bus.ReleaseContract(rrr.ContractID, lockID); err != nil {
-			// TODO: log
-		}
+		_ = w.bus.ReleaseContract(rrr.ContractID, lockID) // TODO: log error
 	}()
 
 	hostIP, hostKey, toRenewID, renterFunds := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
@@ -562,9 +564,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 	defer func() {
-		if err := w.bus.ReleaseContract(rfr.ContractID, lockID); err != nil {
-			// TODO: log
-		}
+		_ = w.bus.ReleaseContract(rfr.ContractID, lockID) // TODO: log error
 	}()
 
 	// Get contract revision.
@@ -655,6 +655,14 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// allow overriding contract set
+	var contractset string
+	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
 	// attach gouging checker to the context
 	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
 
@@ -705,6 +713,14 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	dp, err := w.bus.DownloadParams()
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
 		return
+	}
+
+	// allow overriding contract set
+	var contractset string
+	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		dp.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context
@@ -761,14 +777,22 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	rs := up.RedundancySettings
 
 	// allow overriding the redundancy settings
-	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
+	if jc.DecodeForm(queryStringParamMinShards, &rs.MinShards) != nil {
 		return
 	}
-	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
+	if jc.DecodeForm(queryStringParamTotalShards, &rs.TotalShards) != nil {
 		return
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
 		return
+	}
+
+	// allow overriding contract set
+	var contractset string
+	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context

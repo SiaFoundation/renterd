@@ -155,8 +155,8 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	currentPeriod := c.updateCurrentPeriod(cfg, cs)
 	blockHeight := cs.BlockHeight
 
-	// no maintenance if no hosts are requested
-	if cfg.Contracts.Hosts == 0 {
+	// return early if no hosts are requested
+	if cfg.Contracts.Amount == 0 {
 		c.logger.Debug("no hosts requested, skipping contract maintenance")
 		return nil
 	}
@@ -231,8 +231,8 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
-	if numContracts < addLeeway(cfg.Contracts.Hosts, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(cfg, active, cfg.Contracts.Hosts-numContracts, blockHeight, currentPeriod, &remaining, address); err != nil {
+	if numContracts < addLeeway(cfg.Contracts.Amount, leewayPctRequiredContracts) {
+		if formed, err = c.runContractFormations(cfg, active, cfg.Contracts.Amount-numContracts, blockHeight, currentPeriod, &remaining, address); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err)
 			// continue - failing to form contracts should not prevent us from updating the contract set
 		}
@@ -250,7 +250,7 @@ func (c *contractor) performContractMaintenance(cfg api.AutopilotConfig, cs api.
 	if len(contractset) < int(rs.TotalShards) {
 		c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
 	}
-	return c.ap.bus.SetContractSet("autopilot", contractset)
+	return c.ap.bus.SetContractSet(cfg.Contracts.Set, contractset)
 }
 
 func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.ConsensusState) error {
@@ -259,7 +259,7 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 	l := c.logger
 
 	// no contracts - nothing to do
-	if cfg.Contracts.Hosts == 0 {
+	if cfg.Contracts.Amount == 0 {
 		l.Debug("wallet maintenance skipped, no contracts wanted")
 		return nil
 	}
@@ -287,26 +287,26 @@ func (c *contractor) performWalletMaintenance(cfg api.AutopilotConfig, cs api.Co
 	if err != nil {
 		return err
 	}
-	if uint64(len(outputs)) >= cfg.Contracts.Hosts {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(outputs), cfg.Contracts.Hosts)
+	if uint64(len(outputs)) >= cfg.Contracts.Amount {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(outputs), cfg.Contracts.Amount)
 		return nil
 	}
 
 	// not enough balance - nothing to do
-	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
 	balance, err := b.WalletBalance()
 	if err != nil {
 		return err
 	}
-	if balance.Cmp(amount.Mul64(cfg.Contracts.Hosts)) < 0 {
-		l.Debugf("wallet maintenance skipped, insufficient balance %v < (%v*%v)", balance, cfg.Contracts.Hosts, amount)
+	if balance.Cmp(amount.Mul64(cfg.Contracts.Amount)) < 0 {
+		l.Debugf("wallet maintenance skipped, insufficient balance %v < (%v*%v)", balance, cfg.Contracts.Amount, amount)
 		return nil
 	}
 
 	// redistribute outputs
-	id, err := b.WalletRedistribute(int(cfg.Contracts.Hosts), amount)
+	id, err := b.WalletRedistribute(int(cfg.Contracts.Amount), amount)
 	if err != nil {
-		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", cfg.Contracts.Hosts, amount, balance, err)
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", cfg.Contracts.Amount, amount, balance, err)
 	}
 
 	l.Debugf("wallet maintenance succeeded, tx %v", id)
@@ -404,7 +404,7 @@ func (c *contractor) runContractChecks(cfg api.AutopilotConfig, blockHeight uint
 	}
 
 	// apply active contract limit
-	numContractsTooMany := len(contracts) - len(toIgnore) - len(toDelete) - int(cfg.Contracts.Hosts)
+	numContractsTooMany := len(contracts) - len(toIgnore) - len(toDelete) - int(cfg.Contracts.Amount)
 	if numContractsTooMany > 0 {
 		// sort by contract size
 		sort.Slice(contractIds, func(i, j int) bool {
@@ -524,7 +524,7 @@ func (c *contractor) runContractFormations(cfg api.AutopilotConfig, active []api
 	c.logger.Debugw(
 		"run contract formations",
 		"active", len(active),
-		"required", cfg.Contracts.Hosts,
+		"required", cfg.Contracts.Amount,
 		"missing", missing,
 		"budget", budget,
 	)
@@ -910,7 +910,7 @@ func calculateHostCollateral(cfg api.AutopilotConfig, settings rhpv2.HostSetting
 	if !settings.StoragePrice.IsZero() {
 		maxStorage = renterPayout.Div(settings.StoragePrice)
 	}
-	expectedStorage := cfg.Contracts.Storage / cfg.Contracts.Hosts
+	expectedStorage := cfg.Contracts.Storage / cfg.Contracts.Amount
 	hostCollateral := maxStorage.Mul(settings.Collateral)
 
 	// don't add more than 5x the collateral for the expected storage to save on fees
@@ -935,7 +935,7 @@ func addLeeway(n uint64, pct float64) uint64 {
 }
 
 func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, max types.Currency) {
-	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Hosts)
+	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
 	min = allowance.Div64(minInitialContractFundingDivisor)
 	max = allowance.Div64(maxInitialContractFundingDivisor)
 	return

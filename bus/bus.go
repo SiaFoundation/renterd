@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	SettingGouging    = "gouging"
-	SettingRedundancy = "redundancy"
+	SettingContractSet = "contract_set"
+	SettingGouging     = "gouging"
+	SettingRedundancy  = "redundancy"
 )
 
 type (
@@ -660,8 +661,13 @@ func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
 		return
 	}
 
+	cs, err := b.ss.Setting(SettingContractSet)
+	if jc.Check("could not get contract set setting", err) != nil {
+		return
+	}
+
 	jc.Encode(api.DownloadParams{
-		ContractSet:   "autopilot", // TODO
+		ContractSet:   cs,
 		GougingParams: gp,
 	})
 }
@@ -672,8 +678,13 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
+	cs, err := b.ss.Setting(SettingContractSet)
+	if jc.Check("could not get contract set setting", err) != nil {
+		return
+	}
+
 	jc.Encode(api.UploadParams{
-		ContractSet:   "autopilot", // TODO
+		ContractSet:   cs,
 		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
 	})
