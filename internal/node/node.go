@@ -32,6 +32,7 @@ type WorkerConfig struct {
 	InteractionFlushInterval time.Duration
 	SessionReconnectTimeout  time.Duration
 	SessionTTL               time.Duration
+	UploadSectorTimeout      time.Duration
 }
 
 type BusConfig struct {
@@ -269,7 +270,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval)
+	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval, cfg.UploadSectorTimeout)
 	return w, cleanup, err
 }
 

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,8 @@ import (
 	"go.sia.tech/core/types"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
+
+var errUploadSectorTimeout = errors.New("upload sector timed out")
 
 // A HostError associates an error with a given host.
 type HostError struct {
@@ -137,20 +140,35 @@ func (s *session) Revision(ctx context.Context) (rhpv2.ContractRevision, error) 
 	return ss.sess.Revision(), nil
 }
 
-func (s *session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
+func (s *session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (hash types.Hash256, err error) {
 	currentHeight := s.pool.currentHeight()
 	if currentHeight == 0 {
 		panic("cannot upload without knowing current height") // developer error
 	}
+
 	ss, err := s.pool.acquire(ctx, s)
 	if err != nil {
 		return types.Hash256{}, err
 	}
 	defer s.pool.release(ss)
-	if errs := PerformGougingChecks(ctx, ss.settings).CanUpload(); len(errs) > 0 {
+
+	errs := PerformGougingChecks(ctx, ss.settings).CanUpload()
+	if len(errs) > 0 {
 		return types.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
 	}
-	return ss.appendSector(ctx, sector, currentHeight)
+
+	doneChan := make(chan struct{})
+	go func() {
+		hash, err = ss.appendSector(ctx, sector, currentHeight)
+		close(doneChan)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return types.Hash256{}, errUploadSectorTimeout
+	case <-doneChan:
+	}
+	return
 }
 
 func (s *session) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
