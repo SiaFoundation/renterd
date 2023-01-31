@@ -141,26 +141,29 @@ func (s *session) Revision(ctx context.Context) (rhpv2.ContractRevision, error) 
 }
 
 func (s *session) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (hash types.Hash256, err error) {
-	currentHeight := s.pool.currentHeight()
-	if currentHeight == 0 {
-		panic("cannot upload without knowing current height") // developer error
-	}
-
-	ss, err := s.pool.acquire(ctx, s)
-	if err != nil {
-		return types.Hash256{}, err
-	}
-	defer s.pool.release(ss)
-
-	errs := PerformGougingChecks(ctx, ss.settings).CanUpload()
-	if len(errs) > 0 {
-		return types.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
-	}
-
 	doneChan := make(chan struct{})
 	go func() {
+		defer close(doneChan)
+
+		currentHeight := s.pool.currentHeight()
+		if currentHeight == 0 {
+			panic("cannot upload without knowing current height") // developer error
+		}
+
+		var ss *sharedSession
+		ss, err = s.pool.acquire(ctx, s)
+		if err != nil {
+			return
+		}
+		defer s.pool.release(ss)
+
+		errs := PerformGougingChecks(ctx, ss.settings).CanUpload()
+		if len(errs) > 0 {
+			err = fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
+			return
+		}
+
 		hash, err = ss.appendSector(ctx, sector, currentHeight)
-		close(doneChan)
 	}()
 
 	select {
