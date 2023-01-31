@@ -11,7 +11,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/rhp/v2"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 )
 
@@ -241,7 +241,7 @@ func TestRecordInteractions(t *testing.T) {
 	}
 }
 
-func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhp.HostSettings) error {
+func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhpv2.HostSettings) error {
 	var sr hostdb.ScanResult
 	if err == nil {
 		sr.Settings = settings
@@ -297,13 +297,13 @@ func TestSQLHosts(t *testing.T) {
 
 	// Add a scan for each host.
 	n := time.Now()
-	if err := db.addTestScan(hk1, n.Add(-time.Minute), nil, rhp.HostSettings{}); err != nil {
+	if err := db.addTestScan(hk1, n.Add(-time.Minute), nil, rhpv2.HostSettings{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.addTestScan(hk2, n.Add(-2*time.Minute), nil, rhp.HostSettings{}); err != nil {
+	if err := db.addTestScan(hk2, n.Add(-2*time.Minute), nil, rhpv2.HostSettings{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.addTestScan(hk3, n.Add(-3*time.Minute), nil, rhp.HostSettings{}); err != nil {
+	if err := db.addTestScan(hk3, n.Add(-3*time.Minute), nil, rhpv2.HostSettings{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,14 +380,14 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("creation time not set")
 	}
 
-	scanInteraction := func(hk types.PublicKey, scanTime time.Time, settings rhp.HostSettings, success bool) []hostdb.Interaction {
+	scanInteraction := func(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) []hostdb.Interaction {
 		var err string
 		if !success {
 			err = "failure"
 		}
 		result, _ := json.Marshal(struct {
-			Settings rhp.HostSettings `json:"settings"`
-			Error    string           `json:"error"`
+			Settings rhpv2.HostSettings `json:"settings"`
+			Error    string             `json:"error"`
 		}{
 			Settings: settings,
 			Error:    err,
@@ -404,7 +404,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
-	settings := rhp.HostSettings{NetAddress: "host.com"}
+	settings := rhpv2.HostSettings{NetAddress: "host.com"}
 	if err := hdb.RecordInteractions(scanInteraction(hk, firstScanTime, settings, true)); err != nil {
 		t.Fatal(err)
 	}

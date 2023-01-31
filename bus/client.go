@@ -173,30 +173,31 @@ func (c *Client) WalletDiscard(txn types.Transaction) error {
 }
 
 // WalletPrepareForm funds and signs a contract transaction.
-func (c *Client) WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error) {
+func (c *Client) WalletPrepareForm(renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error) {
 	req := api.WalletPrepareFormRequest{
-		RenterKey:      renterKey,
-		HostKey:        hostKey,
-		RenterFunds:    renterFunds,
-		RenterAddress:  renterAddress,
-		HostCollateral: hostCollateral,
 		EndHeight:      endHeight,
+		HostCollateral: hostCollateral,
+		HostKey:        hostKey,
 		HostSettings:   hostSettings,
+		RenterAddress:  renterAddress,
+		RenterFunds:    renterFunds,
+		RenterKey:      renterKey,
 	}
 	err = c.c.POST("/wallet/prepare/form", req, &txns)
 	return
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error) {
+func (c *Client) WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error) {
 	req := api.WalletPrepareRenewRequest{
 		Contract:      contract,
-		RenterKey:     renterKey,
-		HostKey:       hostKey,
-		RenterFunds:   renterFunds,
-		RenterAddress: renterAddress,
 		EndHeight:     endHeight,
+		HostKey:       hostKey,
 		HostSettings:  hostSettings,
+		NewCollateral: newCollateral,
+		RenterAddress: renterAddress,
+		RenterFunds:   renterFunds,
+		RenterKey:     renterKey,
 	}
 	var resp api.WalletPrepareRenewResponse
 	err := c.c.POST("/wallet/prepare/renew", req, &resp)

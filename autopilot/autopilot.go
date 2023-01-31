@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -30,8 +31,8 @@ type Bus interface {
 	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
 	WalletOutputs() (resp []wallet.SiacoinElement, err error)
 	WalletPending() (resp []types.Transaction, err error)
-	WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+	WalletPrepareForm(renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+	WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
 	WalletRedistribute(outputs int, amount types.Currency) (id types.TransactionID, err error)
 	WalletSign(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 
@@ -70,7 +71,7 @@ type Worker interface {
 	ActiveContracts(hostTimeout time.Duration) (api.ContractsResponse, error)
 	MigrateSlab(s object.Slab) error
 	RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
@@ -84,11 +85,14 @@ type Autopilot struct {
 	m *migrator
 	s *scanner
 
-	ticker         *time.Ticker
 	tickerDuration time.Duration
 	stopChan       chan struct{}
 	triggerChan    chan struct{}
 	wg             sync.WaitGroup
+
+	startStopMu sync.Mutex
+	running     bool
+	ticker      *time.Ticker
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -107,7 +111,16 @@ func (ap *Autopilot) SetConfig(c api.AutopilotConfig) error {
 }
 
 func (ap *Autopilot) Run() error {
+	ap.startStopMu.Lock()
+	if ap.running {
+		ap.startStopMu.Unlock()
+		return errors.New("already running")
+	}
+	ap.running = true
+	ap.stopChan = make(chan struct{})
+	ap.triggerChan = make(chan struct{})
 	ap.ticker = time.NewTicker(ap.tickerDuration)
+	ap.startStopMu.Unlock()
 
 	// update the contract set setting
 	err := ap.bus.UpdateSetting(bus.SettingContractSet, ap.store.Config().Contracts.Set)
@@ -157,6 +170,9 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
+			// update current period
+			ap.c.updateCurrentPeriod(cfg, cs)
+
 			// perform wallet maintenance
 			err = ap.c.performWalletMaintenance(cfg, cs)
 			if err != nil {
@@ -176,12 +192,16 @@ func (ap *Autopilot) Run() error {
 }
 
 func (ap *Autopilot) Stop() error {
-	if ap.ticker != nil {
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
+
+	if ap.running {
 		ap.ticker.Stop()
+		close(ap.stopChan)
+		close(ap.triggerChan)
+		ap.wg.Wait()
+		ap.running = false
 	}
-	close(ap.stopChan)
-	close(ap.triggerChan)
-	ap.wg.Wait()
 	return nil
 }
 
@@ -249,8 +269,6 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		worker: worker,
 
 		tickerDuration: heartbeat,
-		stopChan:       make(chan struct{}),
-		triggerChan:    make(chan struct{}),
 	}
 
 	scanner, err := newScanner(

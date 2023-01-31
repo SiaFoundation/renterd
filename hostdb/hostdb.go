@@ -6,7 +6,7 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/rhp/v2"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 )
@@ -25,7 +25,7 @@ type hostAnnouncement struct {
 
 type ScanResult struct {
 	Error    string
-	Settings rhp.HostSettings `json:"settings,omitempty"`
+	Settings rhpv2.HostSettings `json:"settings,omitempty"`
 }
 
 const InteractionTypeScan = "scan"
@@ -91,11 +91,11 @@ type HostAddress struct {
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	KnownSince   time.Time         `json:"knownSince"`
-	PublicKey    types.PublicKey   `json:"public_key"`
-	NetAddress   string            `json:"netAddress"`
-	Settings     *rhp.HostSettings `json:"settings"`
-	Interactions Interactions      `json:"interactions"`
+	KnownSince   time.Time           `json:"knownSince"`
+	PublicKey    types.PublicKey     `json:"public_key"`
+	NetAddress   string              `json:"netAddress"`
+	Settings     *rhpv2.HostSettings `json:"settings"`
+	Interactions Interactions        `json:"interactions"`
 }
 
 // IsOnline returns whether a host is considered online.

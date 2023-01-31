@@ -10,7 +10,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/rhp/v2"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -108,8 +108,8 @@ type (
 )
 
 // convert converts hostSettings to rhp.HostSettings
-func (s hostSettings) convert() rhp.HostSettings {
-	return rhp.HostSettings{
+func (s hostSettings) convert() rhpv2.HostSettings {
+	return rhpv2.HostSettings{
 		AcceptingContracts:         s.AcceptingContracts,
 		MaxDownloadBatchSize:       s.MaxDownloadBatchSize,
 		MaxDuration:                s.MaxDuration,
@@ -136,7 +136,7 @@ func (s hostSettings) convert() rhp.HostSettings {
 	}
 }
 
-func convertHostSettings(settings rhp.HostSettings) hostSettings {
+func convertHostSettings(settings rhpv2.HostSettings) hostSettings {
 	return hostSettings{
 		AcceptingContracts:         settings.AcceptingContracts,
 		MaxDownloadBatchSize:       settings.MaxDownloadBatchSize,

@@ -283,6 +283,15 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	if jc.Decode(&wpfr) != nil {
 		return
 	}
+	if wpfr.HostKey == (types.PublicKey{}) {
+		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
+		return
+	}
+	if wpfr.RenterKey == nil {
+		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
+		return
+	}
+
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
 	cost := rhpv2.ContractFormationCost(fc, wpfr.HostSettings.ContractPrice)
 	txn := types.Transaction{
@@ -312,7 +321,16 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	if jc.Decode(&wprr) != nil {
 		return
 	}
-	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterKey, wprr.HostKey, wprr.RenterFunds, wprr.EndHeight, wprr.HostSettings, wprr.RenterAddress)
+	if wprr.HostKey == (types.PublicKey{}) {
+		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
+		return
+	}
+	if wprr.RenterKey == nil {
+		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
+		return
+	}
+
+	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.HostSettings, wprr.EndHeight)
 	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice)
 	finalPayment := wprr.HostSettings.BaseRPCPrice
 	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {

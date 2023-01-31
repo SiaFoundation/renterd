@@ -20,9 +20,89 @@ func hashRevision(rev types.FileContractRevision) types.Hash256 {
 	return h.Sum()
 }
 
+// Calculate payouts: the host gets their contract fee, plus the cost of the
+// data already in the contract, plus their collateral. In the event of a
+// missed payout, the cost and collateral of the data already in the
+// contract is subtracted from the host, and sent to the void instead.
+//
+// However, it is possible for this subtraction to underflow; this can
+// happen if baseCollateral is large and MaxCollateral is small. We cannot
+// simply replace the underflow with a zero, because the host performs the
+// same subtraction and returns an error on underflow. Nor can we increase
+// the valid payout, because the host calculates its collateral contribution
+// by subtracting the contract price and base price from this payout, and
+// we're already at MaxCollateral. Thus the host has conflicting
+// requirements, and renewing the contract is impossible until they change
+// their settings.
+func CalculatePayouts(fc types.FileContract, newCollateral types.Currency, settings HostSettings, endHeight uint64) (types.Currency, types.Currency, types.Currency) {
+	// calculate base price and collateral
+	var basePrice, baseCollateral types.Currency
+
+	// if the contract height did not increase both prices are zero
+	if contractEnd := uint64(endHeight + settings.WindowSize); contractEnd > fc.WindowEnd {
+		timeExtension := uint64(contractEnd - fc.WindowEnd)
+		basePrice = settings.StoragePrice.Mul64(fc.Filesize).Mul64(timeExtension)
+		baseCollateral = settings.Collateral.Mul64(fc.Filesize).Mul64(timeExtension)
+	}
+
+	// calculate payouts
+	hostValidPayout := settings.ContractPrice.Add(basePrice).Add(baseCollateral).Add(newCollateral)
+	voidMissedPayout := basePrice.Add(baseCollateral)
+	if hostValidPayout.Cmp(voidMissedPayout) < 0 {
+		// TODO: detect this elsewhere
+		panic("host's settings are unsatisfiable")
+	}
+	hostMissedPayout := hostValidPayout.Sub(voidMissedPayout)
+	return hostValidPayout, hostMissedPayout, voidMissedPayout
+}
+
 // ContractFormationCost returns the cost of forming a contract.
 func ContractFormationCost(fc types.FileContract, contractFee types.Currency) types.Currency {
 	return fc.ValidRenterPayout().Add(contractFee).Add(contractTax(fc))
+}
+
+// ContractFormationCollateral returns the amount of collateral we add when forming a contract.
+func ContractFormationCollateral(expectedStorage, period uint64, host HostSettings) types.Currency {
+	hostCollateral := host.Collateral.Mul64(expectedStorage).Mul64(period)
+	if hostCollateral.Cmp(host.MaxCollateral) > 0 {
+		hostCollateral = host.MaxCollateral
+	}
+	return hostCollateral
+}
+
+// ContractRenewalCost returns the cost of renewing a contract.
+func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) types.Currency {
+	return fc.ValidRenterPayout().Add(contractFee).Add(contractTax(fc))
+}
+
+// ContractRenewalCollateral returns the amount of collateral we add when
+// renewing a contract. It takes into account the host's max collateral setting
+// and ensures the total collateral does not exceed it.
+func ContractRenewalCollateral(fc types.FileContract, renterFunds types.Currency, host HostSettings, endHeight uint64) types.Currency {
+	extension := endHeight - fc.WindowEnd
+
+	// calculate cost per byte
+	costPerByte := host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice)
+	if costPerByte.IsZero() {
+		return types.ZeroCurrency
+	}
+
+	// calculate the base collateral - if it exceeds MaxCollateral we can't add more collateral
+	baseCollateral := host.Collateral.Mul64(fc.Filesize).Mul64(extension)
+	if baseCollateral.Cmp(host.MaxCollateral) >= 0 {
+		return types.ZeroCurrency
+	}
+
+	// calculate the new collateral
+	newCollateral := host.Collateral.Mul(renterFunds.Div(costPerByte))
+
+	// if the total collateral is more than the MaxCollateral, return the delta
+	totalCollateral := baseCollateral.Add(newCollateral)
+	if totalCollateral.Cmp(host.MaxCollateral) > 0 {
+		return totalCollateral.Sub(host.MaxCollateral)
+	}
+
+	return newCollateral
 }
 
 // PrepareContractFormation constructs a contract formation transaction.
@@ -64,57 +144,9 @@ func PrepareContractFormation(renterKey types.PrivateKey, hostKey types.PublicKe
 	}
 }
 
-// ContractRenewalCost returns the cost of renewing a contract.
-func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) types.Currency {
-	return fc.ValidRenterPayout().Add(contractFee).Add(contractTax(fc))
-}
-
 // PrepareContractRenewal constructs a contract renewal transaction.
-func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterPayout types.Currency, endHeight uint64, host HostSettings, refundAddr types.Address) types.FileContract {
-	// calculate "base" price and collateral -- the storage cost and collateral
-	// contribution for the amount of data already in contract. If the contract
-	// height did not increase, basePrice and baseCollateral are zero.
-	var basePrice, baseCollateral types.Currency
-	if contractEnd := uint64(endHeight + host.WindowSize); contractEnd > currentRevision.WindowEnd {
-		timeExtension := uint64(contractEnd - currentRevision.WindowEnd)
-		basePrice = host.StoragePrice.Mul64(currentRevision.Filesize).Mul64(timeExtension)
-		baseCollateral = host.Collateral.Mul64(currentRevision.Filesize).Mul64(timeExtension)
-	}
-
-	// estimate collateral for new contract
-	var newCollateral types.Currency
-	if costPerByte := host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice); !costPerByte.IsZero() {
-		bytes := renterPayout.Div(costPerByte)
-		newCollateral = host.Collateral.Mul(bytes)
-	}
-
-	// the collateral can't be greater than MaxCollateral
-	totalCollateral := baseCollateral.Add(newCollateral)
-	if totalCollateral.Cmp(host.MaxCollateral) > 0 {
-		totalCollateral = host.MaxCollateral
-	}
-
-	// Calculate payouts: the host gets their contract fee, plus the cost of the
-	// data already in the contract, plus their collateral. In the event of a
-	// missed payout, the cost and collateral of the data already in the
-	// contract is subtracted from the host, and sent to the void instead.
-	//
-	// However, it is possible for this subtraction to underflow; this can
-	// happen if baseCollateral is large and MaxCollateral is small. We cannot
-	// simply replace the underflow with a zero, because the host performs the
-	// same subtraction and returns an error on underflow. Nor can we increase
-	// the valid payout, because the host calculates its collateral contribution
-	// by subtracting the contract price and base price from this payout, and
-	// we're already at MaxCollateral. Thus the host has conflicting
-	// requirements, and renewing the contract is impossible until they change
-	// their settings.
-	hostValidPayout := host.ContractPrice.Add(basePrice).Add(totalCollateral)
-	voidMissedPayout := basePrice.Add(baseCollateral)
-	if hostValidPayout.Cmp(voidMissedPayout) < 0 {
-		// TODO: detect this elsewhere
-		panic("host's settings are unsatisfiable")
-	}
-	hostMissedPayout := hostValidPayout.Sub(voidMissedPayout)
+func PrepareContractRenewal(currentRevision types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterPayout, newCollateral types.Currency, hostKey types.PublicKey, host HostSettings, endHeight uint64) types.FileContract {
+	hostValidPayout, hostMissedPayout, voidMissedPayout := CalculatePayouts(currentRevision.FileContract, newCollateral, host, endHeight)
 
 	return types.FileContract{
 		Filesize:       currentRevision.Filesize,
@@ -125,11 +157,11 @@ func PrepareContractRenewal(currentRevision types.FileContractRevision, renterKe
 		UnlockHash:     currentRevision.UnlockHash,
 		RevisionNumber: 0,
 		ValidProofOutputs: []types.SiacoinOutput{
-			{Value: renterPayout, Address: refundAddr},
+			{Value: renterPayout, Address: renterAddress},
 			{Value: hostValidPayout, Address: host.Address},
 		},
 		MissedProofOutputs: []types.SiacoinOutput{
-			{Value: renterPayout, Address: refundAddr},
+			{Value: renterPayout, Address: renterAddress},
 			{Value: hostMissedPayout, Address: host.Address},
 			{Value: voidMissedPayout, Address: types.Address{}},
 		},

@@ -232,8 +232,8 @@ type Bus interface {
 	UpdateSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(txn types.Transaction) error
-	WalletPrepareForm(renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, hostCollateral types.Currency, endHeight uint64, hostSettings rhpv2.HostSettings) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, renterFunds types.Currency, renterAddress types.Address, endHeight uint64, hostSettings rhpv2.HostSettings) ([]types.Transaction, types.Currency, error)
+	WalletPrepareForm(renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+	WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -439,27 +439,27 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 	hostIP, hostKey, renterFunds := rfr.HostIP, rfr.HostKey, rfr.RenterFunds
 	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
-	rk := w.deriveRenterKey(hostKey)
+	renterKey := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	ctx := WithGougingChecker(jc.Request.Context(), gp)
 	err = w.withTransportV2(ctx, hostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
-		settings, err := rhpv2.RPCSettings(ctx, t)
+		hostSettings, err := rhpv2.RPCSettings(ctx, t)
 		if err != nil {
 			return err
 		}
 
-		if errs := PerformGougingChecks(ctx, settings).CanForm(); len(errs) > 0 {
+		if errs := PerformGougingChecks(ctx, hostSettings).CanForm(); len(errs) > 0 {
 			return fmt.Errorf("failed to form contract, gouging check failed: %v", errs)
 		}
 
-		renterTxnSet, err := w.bus.WalletPrepareForm(rk, hostKey, renterFunds, renterAddress, hostCollateral, endHeight, settings)
+		renterTxnSet, err := w.bus.WalletPrepareForm(renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
 			return err
 		}
 
-		contract, txnSet, err = rhpv2.RPCFormContract(t, rk, renterTxnSet)
+		contract, txnSet, err = rhpv2.RPCFormContract(t, renterKey, renterTxnSet)
 		if err != nil {
 			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
 			return err
@@ -495,30 +495,30 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		_ = w.bus.ReleaseContract(rrr.ContractID, lockID) // TODO: log error
 	}()
 
-	hostIP, hostKey, toRenewID, renterFunds := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds
+	hostIP, hostKey, toRenewID, renterFunds, newCollateral := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds, rrr.NewCollateral
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
-	rk := w.deriveRenterKey(hostKey)
+	renterKey := w.deriveRenterKey(hostKey)
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	ctx := WithGougingChecker(jc.Request.Context(), gp)
 	err = w.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		settings, err := rhpv2.RPCSettings(ctx, t)
+		hostSettings, err := rhpv2.RPCSettings(ctx, t)
 		if err != nil {
 			return err
 		}
 
-		if errs := PerformGougingChecks(ctx, settings).CanForm(); len(errs) > 0 {
+		if errs := PerformGougingChecks(ctx, hostSettings).CanForm(); len(errs) > 0 {
 			return fmt.Errorf("failed to renew contract, gouging check failed: %v", errs)
 		}
 
-		session, err := rhpv2.RPCLock(ctx, t, toRenewID, rk, 5*time.Second)
+		session, err := rhpv2.RPCLock(ctx, t, toRenewID, renterKey, 5*time.Second)
 		if err != nil {
 			return err
 		}
 		rev := session.Revision()
 
-		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, rk, hostKey, renterFunds, renterAddress, endHeight, settings)
+		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, renterAddress, renterKey, renterFunds, newCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
 			return err
 		}

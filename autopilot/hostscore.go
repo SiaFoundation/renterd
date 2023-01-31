@@ -7,7 +7,7 @@ import (
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/rhp/v2"
+	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/build"
 	"lukechampine.com/frand"
 )
@@ -30,11 +30,6 @@ const (
 )
 
 func hostScore(cfg api.AutopilotConfig, h hostdb.Host) float64 {
-	// sanity check - host should have been filtered
-	if h.Settings == nil {
-		return 0
-	}
-
 	// TODO: priceAdjustmentScore
 	// TODO: storageRemainingScore
 	return ageScore(h) *
@@ -77,7 +72,7 @@ func ageScore(h hostdb.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.AutopilotConfig, s rhp.HostSettings) float64 {
+func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings) float64 {
 	// NOTE: This math is copied directly from the old siad hostdb. It would
 	// probably benefit from a thorough review.
 
@@ -172,7 +167,7 @@ func uptimeScore(h hostdb.Host) float64 {
 	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
 }
 
-func versionScore(settings rhp.HostSettings) float64 {
+func versionScore(settings rhpv2.HostSettings) float64 {
 	versions := []struct {
 		version string
 		penalty float64

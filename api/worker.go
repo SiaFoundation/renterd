@@ -51,6 +51,7 @@ type RHPRenewRequest struct {
 	EndHeight     uint64               `json:"endHeight"`
 	HostKey       types.PublicKey      `json:"hostKey"`
 	HostIP        string               `json:"hostIP"`
+	NewCollateral types.Currency       `json:"newCollateral"`
 	RenterAddress types.Address        `json:"renterAddress"`
 	RenterFunds   types.Currency       `json:"renterFunds"`
 }
