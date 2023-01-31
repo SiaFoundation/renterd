@@ -5,8 +5,11 @@ import (
 	"net/http"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -24,17 +27,27 @@ var (
 // environment and process. For more information on available environment
 // variables for configuration, check out
 // https://opentelemetry.io/docs/reference/specification/sdk-environment-variables/.
-func Init() error {
-	resources, err := resource.New(context.Background(),
-		resource.WithFromEnv(),
-		resource.WithProcess(),
+// https://github.com/open-telemetry/opentelemetry-go/tree/main/exporters/otlp/otlptrace
+func Init(workerID string) error {
+	// Create resources.
+	resources := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceNameKey.String(service),
+		semconv.ServiceVersionKey.String(serviceVersion),
+		semconv.ServiceInstanceIDKey.String(workerID),
 	)
+	// Create exporter.
+	client := otlptracehttp.NewClient()
+	exporter, err := otlptrace.New(context.Background(), client)
 	if err != nil {
 		return err
 	}
+
+	// Create provider
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithResource(resources),
+		sdktrace.WithBatcher(exporter),
 	)
 	otel.SetTracerProvider(provider)
 

@@ -939,9 +939,9 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
 	w := &worker{
-		id:                        "worker", // TODO: make this configurable for multi-worker setup.
+		id:                        id,
 		bus:                       b,
 		pool:                      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey:                 masterKey,
