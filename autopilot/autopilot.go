@@ -90,9 +90,9 @@ type Autopilot struct {
 	triggerChan    chan struct{}
 	wg             sync.WaitGroup
 
-	mu      sync.Mutex
-	running bool
-	ticker  *time.Ticker
+	startStopMu sync.Mutex
+	running     bool
+	ticker      *time.Ticker
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -111,16 +111,16 @@ func (ap *Autopilot) SetConfig(c api.AutopilotConfig) error {
 }
 
 func (ap *Autopilot) Run() error {
-	ap.mu.Lock()
+	ap.startStopMu.Lock()
 	if ap.running {
-		ap.mu.Unlock()
+		ap.startStopMu.Unlock()
 		return errors.New("already running")
 	}
 	ap.running = true
 	ap.stopChan = make(chan struct{})
 	ap.triggerChan = make(chan struct{})
 	ap.ticker = time.NewTicker(ap.tickerDuration)
-	ap.mu.Unlock()
+	ap.startStopMu.Unlock()
 
 	// update the contract set setting
 	err := ap.bus.UpdateSetting(bus.SettingContractSet, ap.store.Config().Contracts.Set)
@@ -192,8 +192,8 @@ func (ap *Autopilot) Run() error {
 }
 
 func (ap *Autopilot) Stop() error {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
 
 	if ap.running {
 		ap.ticker.Stop()
