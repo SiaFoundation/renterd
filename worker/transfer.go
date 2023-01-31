@@ -10,10 +10,10 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"lukechampine.com/frand"
 )
 

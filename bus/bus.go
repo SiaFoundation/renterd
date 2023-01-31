@@ -11,14 +11,14 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
+	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 )
@@ -393,25 +393,30 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 }
 
 func (b *bus) hostsHandlerGET(jc jape.Context) {
-	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
-		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
-			if hosts, err := b.hdb.Hosts(jc.Request.Context(), offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
-				jc.Encode(hosts)
-			}
-		}
+	offset := 0
+	limit := -1
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
+		return
 	}
+	hosts, err := b.hdb.Hosts(jc.Request.Context(), offset, limit)
+	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
+		return
+	}
+	jc.Encode(hosts)
 }
 
 func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
-	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
-		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
-			if maxLastScan := time.Now(); jc.DecodeForm("lastScan", (*api.ParamTime)(&maxLastScan)) == nil {
-				if hosts, err := b.hdb.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
-					jc.Encode(hosts)
-				}
-			}
-		}
+	offset := 0
+	limit := -1
+	maxLastScan := time.Now()
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.ParamTime)(&maxLastScan)) != nil {
+		return
 	}
+	hosts, err := b.hdb.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
+	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
+		return
+	}
+	jc.Encode(hosts)
 }
 
 func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {

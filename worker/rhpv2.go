@@ -1,20 +1,20 @@
-package rhp
+package worker
 
 import (
 	"bufio"
 	"context"
-	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
-	"math/bits"
-	"net"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/metrics"
 )
@@ -47,17 +47,79 @@ var (
 	ErrContractFinalized = errors.New("contract cannot be revised further")
 )
 
+// A HostError associates an error with a given host.
+type HostError struct {
+	HostKey types.PublicKey
+	Err     error
+}
+
+// Error implements error.
+func (he HostError) Error() string {
+	return fmt.Sprintf("%x: %v", he.HostKey[:4], he.Err.Error())
+}
+
+// Unwrap returns the underlying error.
+func (he HostError) Unwrap() error {
+	return he.Err
+}
+
+// A HostErrorSet is a collection of errors from various hosts.
+type HostErrorSet []*HostError
+
+// Error implements error.
+func (hes HostErrorSet) Error() string {
+	strs := make([]string, len(hes))
+	for i := range strs {
+		strs[i] = hes[i].Error()
+	}
+	// include a leading newline so that the first error isn't printed on the
+	// same line as the error context
+	return "\n" + strings.Join(strs, "\n")
+}
+
+func wrapErr(err *error, fnName string) {
+	if *err != nil {
+		*err = fmt.Errorf("%s: %w", fnName, *err)
+	}
+}
+
 // wrapResponseErr formats RPC response errors nicely, wrapping them in either
 // readCtx or rejectCtx depending on whether we encountered an I/O error or the
 // host sent an explicit error message.
 func wrapResponseErr(err error, readCtx, rejectCtx string) error {
-	if errors.As(err, new(*RPCError)) {
+	if errors.As(err, new(*rhpv2.RPCError)) {
 		return fmt.Errorf("%s: %w", rejectCtx, err)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", readCtx, err)
 	}
 	return nil
+}
+
+// MetricRPC contains metrics relating to a single RPC.
+type MetricRPC struct {
+	HostKey    types.PublicKey
+	RPC        types.Specifier
+	Timestamp  time.Time
+	Elapsed    time.Duration
+	Contract   types.FileContractID // possibly empty
+	Uploaded   uint64
+	Downloaded uint64
+	Cost       types.Currency
+	Collateral types.Currency
+	Err        error
+}
+
+// IsMetric implements metrics.Metric.
+func (MetricRPC) IsMetric() {}
+
+// IsSuccess implements metrics.Metric.
+func (m MetricRPC) IsSuccess() bool { return m.Err == nil }
+
+func hashRevision(rev types.FileContractRevision) types.Hash256 {
+	h := types.NewHasher()
+	rev.EncodeTo(h.E)
+	return h.Sum()
 }
 
 func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral types.Currency) (valid, missed []types.Currency) {
@@ -81,66 +143,26 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 		[]types.Currency{rev.MissedProofOutputs[0].Value, rev.MissedProofOutputs[1].Value, rev.MissedProofOutputs[2].Value}
 }
 
-// RPCSectorRootsCost returns the price of a SectorRoots RPC.
-func RPCSectorRootsCost(settings HostSettings, n uint64) types.Currency {
-	return settings.BaseRPCPrice.
-		Add(settings.DownloadBandwidthPrice.Mul64(n * 32)).  // roots
-		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
-}
-
-// RPCReadCost returns the price of a Read RPC.
-func RPCReadCost(settings HostSettings, sections []RPCReadRequestSection) types.Currency {
-	sectorAccessPrice := settings.SectorAccessPrice.Mul64(uint64(len(sections)))
-	var bandwidth uint64
-	for _, sec := range sections {
-		bandwidth += sec.Length
-		bandwidth += 2 * uint64(bits.Len64(LeavesPerSector)) * 32 // proof
-	}
-	if bandwidth < minMessageSize {
-		bandwidth = minMessageSize
-	}
-	bandwidthPrice := settings.DownloadBandwidthPrice.Mul64(bandwidth)
-	return settings.BaseRPCPrice.Add(sectorAccessPrice).Add(bandwidthPrice)
-}
-
-// RPCAppendCost returns the price and collateral of a Write RPC with a single
-// append operation.
-func RPCAppendCost(settings HostSettings, storageDuration uint64) (price, collateral types.Currency) {
-	price = settings.BaseRPCPrice.
-		Add(settings.StoragePrice.Mul64(SectorSize).Mul64(storageDuration)).
-		Add(settings.UploadBandwidthPrice.Mul64(SectorSize)).
-		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
-	collateral = settings.Collateral.Mul64(SectorSize).Mul64(storageDuration)
-	// add some leeway to reduce chance of host rejecting
-	price = price.Mul64(125).Div64(100)
-	collateral = collateral.Mul64(95).Div64(100)
-	return
-}
-
-// RPCDeleteCost returns the price of a Write RPC that deletes n sectors.
-func RPCDeleteCost(settings HostSettings, n int) types.Currency {
-	price := settings.BaseRPCPrice.
-		Add(settings.DownloadBandwidthPrice.Mul64(128 * 32)) // proof
-	return price.Mul64(105).Div64(100)
-}
-
 // A Session pairs a Transport with a Contract, enabling RPCs that modify the
 // Contract.
 type Session struct {
-	transport   *Transport
-	revision    ContractRevision
+	transport   *rhpv2.Transport
+	revision    rhpv2.ContractRevision
 	key         types.PrivateKey
 	appendRoots []types.Hash256
+	settings    rhpv2.HostSettings
+	lastSeen    time.Time
+	mu          sync.Mutex
 }
-
-// Transport returns the underlying Transport of the session.
-func (s *Session) Transport() *Transport { return s.transport }
 
 // HostKey returns the public key of the host.
 func (s *Session) HostKey() types.PublicKey { return s.revision.HostKey() }
 
 // Revision returns the current revision of the contract.
-func (s *Session) Revision() ContractRevision { return s.revision }
+func (s *Session) Revision() rhpv2.ContractRevision { return s.revision }
+
+// Revision returns the host's current settings.
+func (s *Session) Settings() rhpv2.HostSettings { return s.settings }
 
 func (s *Session) isRevisable() bool {
 	return s.revision.Revision.RevisionNumber < math.MaxUint64
@@ -154,7 +176,7 @@ func (s *Session) sufficientCollateral(collateral types.Currency) bool {
 	return s.revision.Revision.MissedProofOutputs[1].Value.Cmp(collateral) >= 0
 }
 
-func recordRPC(ctx context.Context, t *Transport, c ContractRevision, id types.Specifier, err *error) func() {
+func recordRPC(ctx context.Context, t *rhpv2.Transport, c rhpv2.ContractRevision, id types.Specifier, err *error) func() {
 	startTime := time.Now()
 	contractID := c.ID()
 	var startFunds types.Currency
@@ -191,7 +213,7 @@ func recordRPC(ctx context.Context, t *Transport, c ContractRevision, id types.S
 // sector Merkle roots of the currently-locked contract.
 func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []types.Hash256, err error) {
 	defer wrapErr(&err, "SectorRoots")
-	defer recordRPC(ctx, s.transport, s.revision, RPCSectorRootsID, &err)()
+	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCSectorRootsID, &err)()
 
 	if !s.isRevisable() {
 		return nil, ErrContractFinalized
@@ -209,7 +231,7 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
 	revisionHash := hashRevision(rev)
 
-	req := &RPCSectorRootsRequest{
+	req := &rhpv2.RPCSectorRootsRequest{
 		RootOffset: uint64(offset),
 		NumRoots:   uint64(n),
 
@@ -218,13 +240,13 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 		MissedProofValues: newMissed,
 		Signature:         s.key.SignHash(revisionHash),
 	}
-	var resp RPCSectorRootsResponse
-	if err := s.transport.WriteRequest(RPCSectorRootsID, req); err != nil {
+	var resp rhpv2.RPCSectorRootsResponse
+	if err := s.transport.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
 		return nil, err
 	}
 	if err := s.transport.ReadResponse(&resp, uint64(4096+32*n)); err != nil {
-		readCtx := fmt.Sprintf("couldn't read %v response", RPCSectorRootsID)
-		rejectCtx := fmt.Sprintf("host rejected %v request", RPCSectorRootsID)
+		readCtx := fmt.Sprintf("couldn't read %v response", rhpv2.RPCSectorRootsID)
+		rejectCtx := fmt.Sprintf("host rejected %v request", rhpv2.RPCSectorRootsID)
 		return nil, wrapResponseErr(err, readCtx, rejectCtx)
 	}
 
@@ -237,7 +259,7 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 	s.revision.Signatures[1].Signature = resp.Signature[:]
 
 	// verify the proof
-	if !VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, s.revision.NumSectors(), rev.FileMerkleRoot) {
+	if !rhpv2.VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, s.revision.NumSectors(), rev.FileMerkleRoot) {
 		return nil, ErrInvalidMerkleProof
 	}
 	return resp.SectorRoots, nil
@@ -247,7 +269,7 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 // which is required by e.g. (renter.EncryptionKey).XORKeyStream
 type segWriter struct {
 	w   io.Writer
-	buf [LeafSize * 64]byte
+	buf [rhpv2.LeafSize * 64]byte
 	len int
 }
 
@@ -257,7 +279,7 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 		n := copy(sw.buf[sw.len:], p)
 		sw.len += n
 		p = p[n:]
-		segs := sw.buf[:sw.len-(sw.len%LeafSize)]
+		segs := sw.buf[:sw.len-(sw.len%rhpv2.LeafSize)]
 		if _, err := sw.w.Write(segs); err != nil {
 			return 0, err
 		}
@@ -272,9 +294,9 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 // Note that sector data is streamed to w before it has been validated. Callers
 // MUST check the returned error, and discard any data written to w if the error
 // is non-nil. Failure to do so may allow an attacker to inject malicious data.
-func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadRequestSection, price types.Currency) (err error) {
+func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCReadRequestSection, price types.Currency) (err error) {
 	defer wrapErr(&err, "Read")
-	defer recordRPC(ctx, s.transport, s.revision, RPCReadID, &err)()
+	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCReadID, &err)()
 
 	empty := true
 	for _, s := range sections {
@@ -298,7 +320,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 	renterSig := s.key.SignHash(revisionHash)
 
 	// send request
-	req := &RPCReadRequest{
+	req := &rhpv2.RPCReadRequest{
 		Sections:    sections,
 		MerkleProof: true,
 
@@ -307,13 +329,13 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 		MissedProofValues: newMissed,
 		Signature:         renterSig,
 	}
-	if err := s.transport.WriteRequest(RPCReadID, req); err != nil {
+	if err := s.transport.WriteRequest(rhpv2.RPCReadID, req); err != nil {
 		return err
 	}
 
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
-	defer s.transport.WriteResponse(&RPCReadStop)
+	defer s.transport.WriteResponse(&rhpv2.RPCReadStop)
 	var hostSig *types.Signature
 	for _, sec := range sections {
 		// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
@@ -343,9 +365,9 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 		} else if binary.LittleEndian.Uint64(lenbuf) != uint64(sec.Length) {
 			return errors.New("host sent wrong amount of sector data")
 		}
-		proofStart := sec.Offset / LeafSize
-		proofEnd := proofStart + sec.Length/LeafSize
-		rpv := NewRangeProofVerifier(proofStart, proofEnd)
+		proofStart := sec.Offset / rhpv2.LeafSize
+		proofEnd := proofStart + sec.Length/rhpv2.LeafSize
+		rpv := rhpv2.NewRangeProofVerifier(proofStart, proofEnd)
 		tee := io.TeeReader(io.LimitReader(msgReader, int64(sec.Length)), &segWriter{w: w})
 		// the proof verifier Reads one segment at a time, so bufio is crucial
 		// for performance here
@@ -356,7 +378,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
 			return fmt.Errorf("couldn't read proof len: %w", err)
 		}
-		if binary.LittleEndian.Uint64(lenbuf) != uint64(RangeProofSize(LeavesPerSector, proofStart, proofEnd)) {
+		if binary.LittleEndian.Uint64(lenbuf) != uint64(rhpv2.RangeProofSize(rhpv2.LeavesPerSector, proofStart, proofEnd)) {
 			return errors.New("invalid proof size")
 		}
 		proof := make([]types.Hash256, binary.LittleEndian.Uint64(lenbuf))
@@ -382,7 +404,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 		// the host is required to send a signature; if they haven't sent one
 		// yet, they should send an empty ReadResponse containing just the
 		// signature.
-		var resp RPCReadResponse
+		var resp rhpv2.RPCReadResponse
 		if err := s.transport.ReadResponse(&resp, 4096); err != nil {
 			return wrapResponseErr(err, "couldn't read signature", "host rejected Read request")
 		}
@@ -402,9 +424,9 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []RPCReadReque
 
 // Write implements the Write RPC, except for ActionUpdate. A Merkle proof is
 // always requested.
-func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, collateral types.Currency) (err error) {
+func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, price, collateral types.Currency) (err error) {
 	defer wrapErr(&err, "Write")
-	defer recordRPC(ctx, s.transport, s.revision, RPCWriteID, &err)()
+	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCWriteID, &err)()
 
 	if !s.isRevisable() {
 		return ErrContractFinalized
@@ -420,10 +442,10 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 	newFilesize := rev.Filesize
 	for _, action := range actions {
 		switch action.Type {
-		case RPCWriteActionAppend:
-			newFilesize += SectorSize
-		case RPCWriteActionTrim:
-			newFilesize -= SectorSize * action.A
+		case rhpv2.RPCWriteActionAppend:
+			newFilesize += rhpv2.SectorSize
+		case rhpv2.RPCWriteActionTrim:
+			newFilesize -= rhpv2.SectorSize * action.A
 		}
 	}
 
@@ -433,14 +455,19 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 	// compute appended roots in parallel with I/O
 	precompChan := make(chan struct{})
 	go func() {
-		s.appendRoots = precomputeAppendRoots(actions)
+		s.appendRoots = s.appendRoots[:0]
+		for _, action := range actions {
+			if action.Type == rhpv2.RPCWriteActionAppend {
+				s.appendRoots = append(s.appendRoots, rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(action.Data)))
+			}
+		}
 		close(precompChan)
 	}()
 	// ensure that the goroutine has exited before we return
 	defer func() { <-precompChan }()
 
 	// send request
-	req := &RPCWriteRequest{
+	req := &rhpv2.RPCWriteRequest{
 		Actions:     actions,
 		MerkleProof: true,
 
@@ -448,12 +475,12 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 		ValidProofValues:  newValid,
 		MissedProofValues: newMissed,
 	}
-	if err := s.transport.WriteRequest(RPCWriteID, req); err != nil {
+	if err := s.transport.WriteRequest(rhpv2.RPCWriteID, req); err != nil {
 		return err
 	}
 
 	// read and verify Merkle proof
-	var merkleResp RPCWriteMerkleProof
+	var merkleResp rhpv2.RPCWriteMerkleProof
 	if err := s.transport.ReadResponse(&merkleResp, 4096); err != nil {
 		return wrapResponseErr(err, "couldn't read Merkle proof response", "host rejected Write request")
 	}
@@ -461,7 +488,7 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 	leafHashes := merkleResp.OldLeafHashes
 	oldRoot, newRoot := types.Hash256(rev.FileMerkleRoot), merkleResp.NewMerkleRoot
 	<-precompChan
-	if newFilesize > 0 && !VerifyDiffProof(actions, s.revision.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
+	if newFilesize > 0 && !rhpv2.VerifyDiffProof(actions, s.revision.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
 		err := ErrInvalidMerkleProof
 		s.transport.WriteResponseErr(err)
 		return err
@@ -472,13 +499,13 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 	rev.Filesize = newFilesize
 	copy(rev.FileMerkleRoot[:], newRoot[:])
 	revisionHash := hashRevision(rev)
-	renterSig := &RPCWriteResponse{
+	renterSig := &rhpv2.RPCWriteResponse{
 		Signature: s.key.SignHash(revisionHash),
 	}
 	if err := s.transport.WriteResponse(renterSig); err != nil {
 		return fmt.Errorf("couldn't write signature response: %w", err)
 	}
-	var hostSig RPCWriteResponse
+	var hostSig rhpv2.RPCWriteResponse
 	if err := s.transport.ReadResponse(&hostSig, 4096); err != nil {
 		return wrapResponseErr(err, "couldn't read signature response", "host rejected Write signature")
 	}
@@ -496,9 +523,9 @@ func (s *Session) Write(ctx context.Context, actions []RPCWriteAction, price, co
 
 // Append calls the Write RPC with a single action, appending the provided
 // sector. It returns the Merkle root of the sector.
-func (s *Session) Append(ctx context.Context, sector *[SectorSize]byte, price, collateral types.Currency) (types.Hash256, error) {
-	err := s.Write(ctx, []RPCWriteAction{{
-		Type: RPCWriteActionAppend,
+func (s *Session) Append(ctx context.Context, sector *[rhpv2.SectorSize]byte, price, collateral types.Currency) (types.Hash256, error) {
+	err := s.Write(ctx, []rhpv2.RPCWriteAction{{
+		Type: rhpv2.RPCWriteActionAppend,
 		Data: sector[:],
 	}}, price, collateral)
 	if err != nil {
@@ -521,13 +548,13 @@ func (s *Session) Delete(ctx context.Context, sectorIndices []uint64, price type
 
 	// iterate backwards from the end of the contract, swapping each "good"
 	// sector with one of the "bad" sectors.
-	var actions []RPCWriteAction
+	var actions []rhpv2.RPCWriteAction
 	cIndex := s.revision.NumSectors() - 1
 	for _, rIndex := range sectorIndices {
 		if cIndex != rIndex {
 			// swap a "good" sector for a "bad" sector
-			actions = append(actions, RPCWriteAction{
-				Type: RPCWriteActionSwap,
+			actions = append(actions, rhpv2.RPCWriteAction{
+				Type: rhpv2.RPCWriteActionSwap,
 				A:    uint64(cIndex),
 				B:    uint64(rIndex),
 			})
@@ -535,8 +562,8 @@ func (s *Session) Delete(ctx context.Context, sectorIndices []uint64, price type
 		cIndex--
 	}
 	// trim all "bad" sectors
-	actions = append(actions, RPCWriteAction{
-		Type: RPCWriteActionTrim,
+	actions = append(actions, rhpv2.RPCWriteAction{
+		Type: rhpv2.RPCWriteActionTrim,
 		A:    uint64(len(sectorIndices)),
 	})
 
@@ -555,9 +582,9 @@ func (s *Session) Delete(ctx context.Context, sectorIndices []uint64, price type
 // host will do so automatically when the connection closes.
 func (s *Session) Unlock() (err error) {
 	defer wrapErr(&err, "Unlock")
-	s.revision = ContractRevision{}
+	s.revision = rhpv2.ContractRevision{}
 	s.key = nil
-	return s.transport.WriteRequest(RPCUnlockID, nil)
+	return s.transport.WriteRequest(rhpv2.RPCUnlockID, nil)
 }
 
 // Close gracefully terminates the session and closes the underlying connection.
@@ -567,145 +594,235 @@ func (s *Session) Close() (err error) {
 }
 
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
-func RPCSettings(ctx context.Context, t *Transport) (settings HostSettings, err error) {
+func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
 	defer wrapErr(&err, "Settings")
-	defer recordRPC(ctx, t, ContractRevision{}, RPCSettingsID, &err)()
-	var resp RPCSettingsResponse
-	if err := t.Call(RPCSettingsID, nil, &resp); err != nil {
-		return HostSettings{}, err
+	defer recordRPC(ctx, t, rhpv2.ContractRevision{}, rhpv2.RPCSettingsID, &err)()
+	var resp rhpv2.RPCSettingsResponse
+	if err := t.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {
+		return rhpv2.HostSettings{}, err
 	} else if err := json.Unmarshal(resp.Settings, &settings); err != nil {
-		return HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
+		return rhpv2.HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
 	}
 	return settings, nil
 }
 
-// RPCLock calls the Lock RPC, returning a Session that can modify the specified
-// contract. The timeout specifies how long the host should wait while
-// attempting to acquire the lock. Note that timeouts are serialized in
-// milliseconds, so a timeout of less than 1ms will be rounded down to 0. (A
-// timeout of 0 is valid: it means that the lock will only be acquired if the
-// contract is unlocked at the moment the host receives the RPC.)
-func RPCLock(ctx context.Context, t *Transport, id types.FileContractID, key types.PrivateKey, timeout time.Duration) (_ *Session, err error) {
+// RPCLock calls the Lock RPC, returning the current contract revision. The
+// timeout specifies how long the host should wait while attempting to acquire
+// the lock. Note that timeouts are serialized in milliseconds, so a timeout of
+// less than 1ms will be rounded down to 0. (A timeout of 0 is valid: it means
+// that the lock will only be acquired if the contract is unlocked at the moment
+// the host receives the RPC.)
+func RPCLock(ctx context.Context, t *rhpv2.Transport, id types.FileContractID, key types.PrivateKey, timeout time.Duration) (_ rhpv2.ContractRevision, err error) {
 	defer wrapErr(&err, "Lock")
-	defer recordRPC(ctx, t, ContractRevision{}, RPCLockID, &err)()
-	req := &RPCLockRequest{
+	defer recordRPC(ctx, t, rhpv2.ContractRevision{}, rhpv2.RPCLockID, &err)()
+	req := &rhpv2.RPCLockRequest{
 		ContractID: id,
 		Signature:  t.SignChallenge(key),
 		Timeout:    uint64(timeout.Milliseconds()),
 	}
-	var resp RPCLockResponse
-	if err := t.Call(RPCLockID, req, &resp); err != nil {
-		return nil, err
+	var resp rhpv2.RPCLockResponse
+	if err := t.Call(rhpv2.RPCLockID, req, &resp); err != nil {
+		return rhpv2.ContractRevision{}, err
 	}
 	t.SetChallenge(resp.NewChallenge)
 	// verify claimed revision
 	if len(resp.Signatures) != 2 {
-		return nil, fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
+		return rhpv2.ContractRevision{}, fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
+	} else if len(resp.Signatures[0].Signature) != 64 || len(resp.Signatures[1].Signature) != 64 {
+		return rhpv2.ContractRevision{}, errors.New("signatures on claimed revision have wrong length")
 	}
 	revHash := hashRevision(resp.Revision)
 	if !key.PublicKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[0].Signature)) {
-		return nil, errors.New("renter's signature on claimed revision is invalid")
-	} else if !ed25519.Verify(resp.Revision.UnlockConditions.PublicKeys[1].Key, revHash[:], resp.Signatures[1].Signature) {
-		return nil, errors.New("host's signature on claimed revision is invalid")
+		return rhpv2.ContractRevision{}, errors.New("renter's signature on claimed revision is invalid")
+	} else if !t.HostKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[1].Signature)) {
+		return rhpv2.ContractRevision{}, errors.New("host's signature on claimed revision is invalid")
 	} else if !resp.Acquired {
-		return nil, ErrContractLocked
+		return rhpv2.ContractRevision{}, ErrContractLocked
 	} else if resp.Revision.RevisionNumber == math.MaxUint64 {
-		return nil, ErrContractFinalized
+		return rhpv2.ContractRevision{}, ErrContractFinalized
 	}
-	return &Session{
-		transport: t,
-		revision: ContractRevision{
-			Revision:   resp.Revision,
-			Signatures: [2]types.TransactionSignature{resp.Signatures[0], resp.Signatures[1]},
-		},
-		key: key,
+	return rhpv2.ContractRevision{
+		Revision:   resp.Revision,
+		Signatures: [2]types.TransactionSignature{resp.Signatures[0], resp.Signatures[1]},
 	}, nil
 }
 
-// DialSession is a convenience function that connects to the specified host and
-// locks the specified contract.
-func DialSession(ctx context.Context, hostIP string, hostKey types.PublicKey, id types.FileContractID, renterKey types.PrivateKey) (_ *Session, err error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
-	if err != nil {
-		return nil, err
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			conn.Close()
-		}
-	}()
-	defer func() {
-		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-	}()
+// RPCFormContract forms a contract with a host.
+func RPCFormContract(t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []types.Transaction) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	defer wrapErr(&err, "FormContract")
 
-	t, err := NewRenterTransport(conn, hostKey)
-	if err != nil {
-		conn.Close()
-		return nil, err
+	// strip our signatures before sending
+	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
+	renterContractSignatures := txn.Signatures
+	txnSet[len(txnSet)-1].Signatures = nil
+
+	renterPubkey := renterKey.PublicKey()
+	req := &rhpv2.RPCFormContractRequest{
+		Transactions: txnSet,
+		RenterKey:    renterPubkey.UnlockKey(),
 	}
-	var timeout time.Duration
-	if d, ok := ctx.Deadline(); ok {
-		timeout = time.Until(d)
+	if err := t.WriteRequest(rhpv2.RPCFormContractID, req); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
 	}
-	s, err := RPCLock(ctx, t, id, renterKey, timeout)
-	if err != nil {
-		t.Close()
-		return nil, err
+
+	var resp rhpv2.RPCFormContractAdditions
+	if err := t.ReadResponse(&resp, 65536); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
 	}
-	return s, nil
+
+	// merge host additions with txn
+	txn.SiacoinInputs = append(txn.SiacoinInputs, resp.Inputs...)
+	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
+
+	// create initial (no-op) revision, transaction, and signature
+	fc := txn.FileContracts[0]
+	initRevision := types.FileContractRevision{
+		ParentID: txn.FileContractID(0),
+		UnlockConditions: types.UnlockConditions{
+			PublicKeys: []types.UnlockKey{
+				renterPubkey.UnlockKey(),
+				t.HostKey().UnlockKey(),
+			},
+			SignaturesRequired: 2,
+		},
+		FileContract: types.FileContract{
+			RevisionNumber:     1,
+			Filesize:           fc.Filesize,
+			FileMerkleRoot:     fc.FileMerkleRoot,
+			WindowStart:        fc.WindowStart,
+			WindowEnd:          fc.WindowEnd,
+			ValidProofOutputs:  fc.ValidProofOutputs,
+			MissedProofOutputs: fc.MissedProofOutputs,
+			UnlockHash:         fc.UnlockHash,
+		},
+	}
+	revSig := renterKey.SignHash(hashRevision(initRevision))
+	renterRevisionSig := types.TransactionSignature{
+		ParentID:       types.Hash256(initRevision.ParentID),
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
+		PublicKeyIndex: 0,
+		Signature:      revSig[:],
+	}
+
+	// write our signatures
+	renterSigs := &rhpv2.RPCFormContractSignatures{
+		ContractSignatures: renterContractSignatures,
+		RevisionSignature:  renterRevisionSig,
+	}
+	if err := t.WriteResponse(renterSigs); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// read the host's signatures and merge them with our own
+	var hostSigs rhpv2.RPCFormContractSignatures
+	if err := t.ReadResponse(&hostSigs, 4096); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
+	signedTxnSet := append(resp.Parents, append(parents, txn)...)
+
+	return rhpv2.ContractRevision{
+		Revision: initRevision,
+		Signatures: [2]types.TransactionSignature{
+			renterRevisionSig,
+			hostSigs.RevisionSignature,
+		},
+	}, signedTxnSet, nil
 }
 
-// DeleteSectorActions calculates a set of Write actions that will delete the
-// specified sectors from the contract.
-func DeleteSectorActions(allRoots, toDelete []types.Hash256) []RPCWriteAction {
-	rootIndices := make(map[types.Hash256]uint64, len(allRoots))
-	for i, root := range allRoots {
-		rootIndices[root] = uint64(i)
+// RenewContract negotiates a new file contract and initial revision for data
+// already stored with a host. The old contract is "cleared," reverting its
+// filesize to zero.
+func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.Currency) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	defer wrapErr(&err, "RenewContract")
+
+	// strip our signatures before sending
+	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
+	renterContractSignatures := txn.Signatures
+	txnSet[len(txnSet)-1].Signatures = nil
+
+	// construct the final revision of the old contract
+	finalOldRevision := s.revision.Revision
+	newValid, _ := updateRevisionOutputs(&finalOldRevision, finalPayment, types.ZeroCurrency)
+	finalOldRevision.MissedProofOutputs = finalOldRevision.ValidProofOutputs
+	finalOldRevision.Filesize = 0
+	finalOldRevision.FileMerkleRoot = types.Hash256{}
+	finalOldRevision.RevisionNumber = math.MaxUint64
+
+	req := &rhpv2.RPCRenewAndClearContractRequest{
+		Transactions:           txnSet,
+		RenterKey:              s.revision.Revision.UnlockConditions.PublicKeys[0],
+		FinalValidProofValues:  newValid,
+		FinalMissedProofValues: newValid,
+	}
+	if err := s.transport.WriteRequest(rhpv2.RPCRenewClearContractID, req); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
 	}
 
-	// look up the index of each sector to delete
-	deleteIndices := make([]uint64, 0, len(toDelete))
-	for _, r := range toDelete {
-		// if a root isn't present, skip it; the caller probably deleted it
-		// previously
-		if index, ok := rootIndices[r]; ok {
-			deleteIndices = append(deleteIndices, index)
-			// deleting here ensures that we only add each root index once, i.e.
-			// it guards against duplicates in roots
-			delete(rootIndices, r)
-		}
+	var resp rhpv2.RPCFormContractAdditions
+	if err := s.transport.ReadResponse(&resp, 65536); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
 	}
-	// sort in descending order so that we can use 'range'
-	sort.Slice(deleteIndices, func(i, j int) bool {
-		return deleteIndices[i] > deleteIndices[j]
-	})
 
-	// iterate backwards from the end of the contract, swapping each "good"
-	// sector with one of the "bad" sectors, such that all "bad" sectors end up
-	// at the end of the contract
-	var actions []RPCWriteAction
-	cIndex := uint64(len(allRoots) - 1)
-	for _, rIndex := range deleteIndices {
-		if cIndex != rIndex {
-			actions = append(actions, RPCWriteAction{
-				Type: RPCWriteActionSwap,
-				A:    cIndex,
-				B:    rIndex,
-			})
-		}
-		cIndex--
+	// merge host additions with txn
+	txn.SiacoinInputs = append(txn.SiacoinInputs, resp.Inputs...)
+	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
+
+	// create initial (no-op) revision, transaction, and signature
+	fc := txn.FileContracts[0]
+	initRevision := types.FileContractRevision{
+		ParentID:         txn.FileContractID(0),
+		UnlockConditions: s.revision.Revision.UnlockConditions,
+		FileContract: types.FileContract{
+			RevisionNumber:     1,
+			Filesize:           fc.Filesize,
+			FileMerkleRoot:     fc.FileMerkleRoot,
+			WindowStart:        fc.WindowStart,
+			WindowEnd:          fc.WindowEnd,
+			ValidProofOutputs:  fc.ValidProofOutputs,
+			MissedProofOutputs: fc.MissedProofOutputs,
+			UnlockHash:         fc.UnlockHash,
+		},
 	}
-	// trim all "bad" sectors
-	actions = append(actions, RPCWriteAction{
-		Type: RPCWriteActionTrim,
-		A:    uint64(len(deleteIndices)),
-	})
+	revSig := s.key.SignHash(hashRevision(initRevision))
+	renterRevisionSig := types.TransactionSignature{
+		ParentID:       types.Hash256(initRevision.ParentID),
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
+		PublicKeyIndex: 0,
+		Signature:      revSig[:],
+	}
 
-	return actions
+	// send signatures
+	finalRevSig := s.key.SignHash(hashRevision(finalOldRevision))
+	renterSigs := &rhpv2.RPCRenewAndClearContractSignatures{
+		ContractSignatures:     renterContractSignatures,
+		RevisionSignature:      renterRevisionSig,
+		FinalRevisionSignature: finalRevSig,
+	}
+	if err := s.transport.WriteResponse(renterSigs); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// read the host signatures and merge them with our own
+	var hostSigs rhpv2.RPCRenewAndClearContractSignatures
+	if err := s.transport.ReadResponse(&hostSigs, 4096); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
+	signedTxnSet := append(resp.Parents, append(parents, txn)...)
+
+	return rhpv2.ContractRevision{
+		Revision:   initRevision,
+		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
+	}, signedTxnSet, nil
+}
+
+// NewSession returns a Session locking the provided contract.
+func NewSession(t *rhpv2.Transport, key types.PrivateKey, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) *Session {
+	return &Session{
+		transport: t,
+		key:       key,
+		revision:  rev,
+		settings:  settings,
+	}
 }

@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"lukechampine.com/frand"
 )
 

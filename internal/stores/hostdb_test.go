@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 )
@@ -833,14 +833,6 @@ func (db *SQLStore) hosts() ([]dbHost, error) {
 		return nil, tx.Error
 	}
 	return hosts, nil
-}
-
-func (s *SQLStore) hostsCount() (cnt int64, err error) {
-	err = s.db.
-		Model(&dbHost{}).
-		Count(&cnt).
-		Error
-	return
 }
 
 func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {

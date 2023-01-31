@@ -5,9 +5,9 @@ import (
 	"math/big"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
 
 // ConsensusState holds the current blockheight and whether we are synced or not.

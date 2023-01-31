@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 )

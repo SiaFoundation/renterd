@@ -18,6 +18,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -25,8 +27,6 @@ import (
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
@@ -187,7 +187,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 			Timestamp time.Time     `json:"timestamp"`
 			Elapsed   time.Duration `json:"elapsed"`
 		}{m.HostIP, m.Timestamp, m.Elapsed})
-	case rhpv2.MetricRPC:
+	case MetricRPC:
 		return transform(m.HostKey, m.Timestamp, "rhpv2 rpc", m.Err, struct {
 			RPC        string         `json:"RPC"`
 			Timestamp  time.Time      `json:"timestamp"`
@@ -384,11 +384,11 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 		select {
 		case <-done:
 			for _, h := range hosts {
-				w.pool.unlockContract(h.(*session))
+				w.pool.unlockContract(h.(*sharedSession))
 			}
 		case <-ctx.Done():
 			for _, h := range hosts {
-				w.pool.forceClose(h.(*session))
+				w.pool.forceClose(h.(*sharedSession))
 			}
 		}
 	}()
@@ -418,7 +418,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	var settings rhpv2.HostSettings
 	start := time.Now()
 	scanErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
-		settings, err = rhpv2.RPCSettings(ctx, t)
+		settings, err = RPCSettings(ctx, t)
 		return err
 	})
 	elapsed := time.Since(start)
@@ -456,7 +456,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	ctx = WithGougingChecker(ctx, gp)
 	err = w.withTransportV2(ctx, hostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
-		hostSettings, err := rhpv2.RPCSettings(ctx, t)
+		hostSettings, err := RPCSettings(ctx, t)
 		if err != nil {
 			return err
 		}
@@ -470,7 +470,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return err
 		}
 
-		contract, txnSet, err = rhpv2.RPCFormContract(t, renterKey, renterTxnSet)
+		contract, txnSet, err = RPCFormContract(t, renterKey, renterTxnSet)
 		if err != nil {
 			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
 			return err
@@ -515,7 +515,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	ctx = WithGougingChecker(jc.Request.Context(), gp)
 	err = w.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
-		hostSettings, err := rhpv2.RPCSettings(ctx, t)
+		hostSettings, err := RPCSettings(ctx, t)
 		if err != nil {
 			return err
 		}
@@ -524,11 +524,11 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 			return fmt.Errorf("failed to renew contract, gouging check failed: %v", errs)
 		}
 
-		session, err := rhpv2.RPCLock(ctx, t, toRenewID, renterKey, 5*time.Second)
+		rev, err := RPCLock(ctx, t, toRenewID, renterKey, 5*time.Second)
 		if err != nil {
 			return err
 		}
-		rev := session.Revision()
+		session := NewSession(t, renterKey, rev, hostSettings)
 
 		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev.Revision, renterAddress, renterKey, renterFunds, newCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
@@ -588,7 +588,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		HostKey: rfr.HostKey,
 	}
 	err = w.withHosts(jc.Request.Context(), []api.ContractMetadata{cm}, func(ss []sectorStore) error {
-		rev, err := ss[0].(*session).Revision(jc.Request.Context())
+		rev, err := ss[0].(*sharedSession).Revision(jc.Request.Context())
 		if err != nil {
 			return err
 		}
@@ -617,7 +617,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			if !ok {
 				return errors.New("insufficient funds")
 			}
-			return rhpv3.RPCFundAccount(t, &payment, account.id, pt.ID)
+			return RPCFundAccount(t, &payment, account.id, pt.UID)
 		})
 	})
 	if jc.Check("couldn't fund account", err) != nil {
@@ -632,7 +632,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 	}
 	var value rhpv3.RegistryValue
 	err := w.withTransportV3(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
-		value, err = rhpv3.RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
+		value, err = RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
 	if jc.Check("couldn't read registry", err) != nil {
@@ -650,7 +650,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	cost, _ := pt.UpdateRegistryCost() // TODO: handle refund
 	payment := w.preparePayment(rrur.HostKey, cost)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
-		return rhpv3.RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
+		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
 		return
@@ -901,7 +901,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	// fetch all contracts
 	var contracts []api.Contract
 	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
-		var errs []error
+		var errs HostErrorSet
 		for i, store := range ss {
 			func() {
 				ctx := jc.Request.Context()
@@ -911,9 +911,9 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 					defer cancel()
 				}
 
-				rev, err := store.(*session).Revision(ctx)
+				rev, err := store.(*sharedSession).Revision(ctx)
 				if err != nil {
-					errs = append(errs, err)
+					errs = append(errs, &HostError{HostKey: store.PublicKey(), Err: err})
 					return
 				}
 				contracts = append(contracts, api.Contract{
@@ -922,8 +922,8 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 				})
 			}()
 		}
-		if err := joinErrors(errs); err != nil {
-			return fmt.Errorf("couldn't retrieve %d contract(s): %w", len(errs), err)
+		if len(errs) > 0 {
+			return fmt.Errorf("couldn't retrieve contract(s): %w", err)
 		}
 		return nil
 	})
@@ -933,28 +933,6 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		resp.Error = err.Error()
 	}
 	jc.Encode(resp)
-}
-
-func joinErrors(errs []error) error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-
-	switch len(filtered) {
-	case 0:
-		return nil
-	case 1:
-		return filtered[0]
-	default:
-		strs := make([]string, len(filtered))
-		for i := range strs {
-			strs[i] = filtered[i].Error()
-		}
-		return errors.New(strings.Join(strs, ";"))
-	}
 }
 
 func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
