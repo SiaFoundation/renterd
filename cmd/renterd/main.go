@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"golang.org/x/term"
@@ -103,6 +104,8 @@ func flagCurrencyVar(c *types.Currency, name string, d types.Currency, usage str
 
 func main() {
 	log.SetFlags(0)
+
+	tracing.Init()
 
 	var busCfg struct {
 		remoteAddr  string

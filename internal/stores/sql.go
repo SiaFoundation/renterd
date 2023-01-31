@@ -65,7 +65,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		PrepareStmt:              true,                                // caches queries as prepared statements
 		Logger:                   logger.Default.LogMode(logger.Warn), // default log level
 	})
-
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
