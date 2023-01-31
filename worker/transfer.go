@@ -382,6 +382,9 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 		}
 	}
 
+	// randomize order of hosts to make sure we don't migrate to the same hosts all the time
+	frand.Shuffle(len(filtered), func(i, j int) { filtered[i], filtered[j] = filtered[j], filtered[i] })
+
 	// reupload those shards
 	uploaded, _, err := parallelUploadSlab(ctx, shards, filtered, locker, uploadSectorTimeout)
 	if err != nil {
