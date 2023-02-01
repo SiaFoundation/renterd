@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -11,6 +12,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.sia.tech/jape"
 )
 
 const (
@@ -60,11 +62,14 @@ func Init(workerID string) error {
 // TracedHandler is a piece of http middleware that attaches a tracing span to
 // every incoming request. The name used for the span is the path of the
 // endpoint.
-func TracedHandler(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		ctx, span := Tracer.Start(req.Context(), req.URL.Path)
-		defer span.End()
-
-		h.ServeHTTP(w, req.WithContext(ctx))
-	})
+func TracedRoutes(routes map[string]jape.Handler) http.Handler {
+	adapt := func(route string, h jape.Handler) jape.Handler {
+		return jape.Adapt(func(h http.Handler) http.Handler {
+			return otelhttp.NewHandler(h, route)
+		})(h)
+	}
+	for route, handler := range routes {
+		routes[route] = adapt(route, handler)
+	}
+	return jape.Mux(routes)
 }

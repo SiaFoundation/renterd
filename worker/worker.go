@@ -961,7 +961,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		return nil
 	}
 
-	h := jape.Mux(map[string]jape.Handler{
+	return tracing.TracedRoutes(map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
@@ -977,8 +977,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
-	})
-	return tracing.TracedHandler(h), cleanup, nil
+	}), cleanup, nil
 }
 
 func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
