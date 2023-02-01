@@ -547,7 +547,6 @@ func (c *TestCluster) waitForHostContracts(hosts map[string]struct{}) error {
 
 		for hpk := range hosts {
 			if _, exists := existing[hpk]; !exists {
-				c.MineBlocks(1)
 				return fmt.Errorf("missing contract for host %v", hpk)
 			}
 		}
