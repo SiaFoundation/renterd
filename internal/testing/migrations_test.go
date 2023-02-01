@@ -55,15 +55,15 @@ func TestMigrations(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		hostmap := make(map[types.PublicKey]struct{})
+		hostsMap := make(map[types.PublicKey]struct{})
 		for _, slab := range obj.Slabs {
 			for _, sector := range slab.Shards {
-				hostmap[sector.Host] = struct{}{}
+				hostsMap[sector.Host] = struct{}{}
 			}
 		}
 
-		hks := make([]types.PublicKey, 0, len(hostmap))
-		for hk := range hostmap {
+		hks := make([]types.PublicKey, 0, len(hostsMap))
+		for hk := range hostsMap {
 			hks = append(hks, hk)
 		}
 

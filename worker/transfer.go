@@ -65,12 +65,16 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 			}(r)
 
 			if uploadSectorTimeout > 0 {
+				timer := time.NewTimer(uploadSectorTimeout)
 				select {
-				case <-time.After(uploadSectorTimeout):
+				case <-timer.C:
 					respChan <- resp{
 						req: r,
 						err: errUploadSectorTimeout}
 				case <-doneChan:
+					if !timer.Stop() {
+						<-timer.C
+					}
 				}
 			}
 
@@ -94,7 +98,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	rem := len(shards)
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
-		if resp.err != errUploadSectorTimeout {
+		if errors.Is(resp.err, errUploadSectorTimeout) {
 			inflight--
 		}
 
@@ -119,19 +123,19 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	}
 
 	// make hosts map
-	hostsmap := make(map[types.PublicKey]int)
+	hostsMap := make(map[types.PublicKey]int)
 	for i, h := range hosts {
-		hostsmap[h.PublicKey()] = i
+		hostsMap[h.PublicKey()] = i
 	}
 
 	// collect slow host indices
 	var slowHosts []int
 	for _, he := range errs {
 		if errors.Is(he, errUploadSectorTimeout) {
-			if _, exists := hostsmap[he.HostKey]; !exists {
+			if _, exists := hostsMap[he.HostKey]; !exists {
 				panic("host not found in hostsmap")
 			}
-			slowHosts = append(slowHosts, hostsmap[he.HostKey])
+			slowHosts = append(slowHosts, hostsMap[he.HostKey])
 		}
 	}
 	return sectors, slowHosts, nil
@@ -325,31 +329,31 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 }
 
 func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker, uploadSectorTimeout time.Duration) error {
-	hostsmap := make(map[string]struct{})
-	usedmap := make(map[string]struct{})
+	hostsMap := make(map[string]struct{})
+	usedMap := make(map[string]struct{})
 
 	// make a map of good hosts
 	for _, h := range hosts {
-		hostsmap[h.PublicKey().String()] = struct{}{}
+		hostsMap[h.PublicKey().String()] = struct{}{}
 	}
 
 	// collect indices of shards that need to be migrated
 	var shardIndices []int
 	for i, shard := range s.Shards {
 		// bad host
-		if _, exists := hostsmap[shard.Host.String()]; !exists {
+		if _, exists := hostsMap[shard.Host.String()]; !exists {
 			shardIndices = append(shardIndices, i)
 			continue
 		}
 
 		// reused host
-		_, exists := usedmap[shard.Host.String()]
+		_, exists := usedMap[shard.Host.String()]
 		if exists {
 			shardIndices = append(shardIndices, i)
 			continue
 		}
 
-		usedmap[shard.Host.String()] = struct{}{}
+		usedMap[shard.Host.String()] = struct{}{}
 	}
 
 	// if all shards are on good hosts, we're done
@@ -389,7 +393,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 	// filter out the hosts we used already
 	filtered := hosts[:0]
 	for _, h := range hosts {
-		if _, used := usedmap[h.PublicKey().String()]; !used {
+		if _, used := usedMap[h.PublicKey().String()]; !used {
 			filtered = append(filtered, h)
 		}
 	}

@@ -856,11 +856,11 @@ func addLeeway(n uint64, pct float64) uint64 {
 }
 
 func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]bool {
-	cmap := make(map[types.FileContractID]bool)
+	contractsMap := make(map[types.FileContractID]bool)
 	for _, fcid := range contracts {
-		cmap[fcid] = true
+		contractsMap[fcid] = true
 	}
-	return cmap
+	return contractsMap
 }
 
 func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {

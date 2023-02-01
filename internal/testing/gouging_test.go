@@ -44,9 +44,9 @@ func TestGouging(t *testing.T) {
 	}
 
 	// build a hosts map
-	hostsmap := make(map[string]*TestNode)
+	hostsMap := make(map[string]*TestNode)
 	for _, h := range hosts {
-		hostsmap[h.HostKey().String()] = h
+		hostsMap[h.HostKey().String()] = h
 	}
 
 	// helper that waits until the contract set is ready
@@ -119,7 +119,7 @@ func TestGouging(t *testing.T) {
 
 		// update the host settings so it's gouging
 		hk := contracts[0].HostKey
-		if err := hostsmap[hk.String()].HostModifySettingPost(c.param, c.value); err != nil {
+		if err := hostsMap[hk.String()].HostModifySettingPost(c.param, c.value); err != nil {
 			t.Fatal(err)
 		}
 
