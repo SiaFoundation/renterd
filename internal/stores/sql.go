@@ -77,7 +77,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		PrepareStmt:              true,   // caches queries as prepared statements
 		Logger:                   logger, // custom logger
 	})
-
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}

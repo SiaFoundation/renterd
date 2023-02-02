@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
@@ -938,9 +939,9 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
 	w := &worker{
-		id:                        "worker", // TODO: make this configurable for multi-worker setup.
+		id:                        id,
 		bus:                       b,
 		pool:                      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey:                 masterKey,
@@ -960,7 +961,7 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL, interact
 		return nil
 	}
 
-	return jape.Mux(map[string]jape.Handler{
+	return jape.Mux(tracing.TracedRoutes(map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
@@ -976,7 +977,7 @@ func New(masterKey [32]byte, b Bus, sessionReconectTimeout, sessionTTL, interact
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
-	}), cleanup, nil
+	})), cleanup, nil
 }
 
 func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
