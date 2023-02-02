@@ -177,7 +177,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 		PersistInterval:    testPersistInterval,
 		GougingSettings:    defaultGouging,
 		RedundancySettings: defaultRedundancy,
-	}, busDir, wk)
+	}, busDir, wk, logger)
 	if err != nil {
 		return nil, err
 	}

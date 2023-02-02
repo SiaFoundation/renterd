@@ -177,7 +177,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, logger *zap.Logger) (http.Handler, func() error, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -231,7 +231,8 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 	}
 	dbConn := stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval)
+	sqlLogger := stores.NewLogger(logger.Named("db"), nil)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	} else if err := cs.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {

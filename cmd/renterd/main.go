@@ -188,11 +188,27 @@ func main() {
 
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		b, cleanup, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey())
+		busDir := filepath.Join(*dir, "bus")
+		if err := os.MkdirAll(busDir, 0700); err != nil {
+			log.Fatal(err)
+		}
+
+		busLog := filepath.Join(busDir, "bus.log")
+		l, closeFn, err := node.NewLogger(busLog)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanup()
+
+		b, cleanup, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), l)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer func() {
+			cleanup()
+			_ = l.Sync() // ignore error
+			closeFn()
+		}()
+
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
 		busPassword = getAPIPassword()
