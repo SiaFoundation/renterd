@@ -19,7 +19,10 @@ const (
 	contractLockingDownloadPriority = 2
 )
 
-var errUploadSectorTimeout = errors.New("upload sector timed out")
+var (
+	errUnusedHost          = errors.New("host not used")
+	errUploadSectorTimeout = errors.New("upload sector timed out")
+)
 
 // A sectorStore stores contract data.
 type sectorStore interface {
@@ -165,12 +168,12 @@ func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStor
 }
 
 func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sectorStore, locker contractLocker) ([][]byte, error) {
+	// check whether we can recover the slab
 	if len(hosts) < int(ss.MinShards) {
 		return nil, errors.New("not enough hosts to recover shard")
 	}
 
-	// Randomize order of hosts to make sure we don't always start with the
-	// same one.
+	// randomize hosts so we don't always download from the same ones
 	frand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
 	type req struct {
@@ -195,7 +198,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 				}
 			}
 			if shard == nil {
-				respChan <- resp{req, nil, errors.New("slab is not stored on this host")}
+				respChan <- resp{req, nil, fmt.Errorf("host %v, err: %w", h.PublicKey(), errUnusedHost)}
 				continue
 			}
 			offset, length := ss.SectorRegion()
@@ -362,8 +365,8 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 	}
 
 	// perform some sanity checks
-	if len(s.Shards)-len(shardIndices) > int(s.MinShards) {
-		return errors.New("not enough hosts to download unhealthy shard")
+	if len(s.Shards)-len(shardIndices) < int(s.MinShards) {
+		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
 	} else if len(shardIndices) > len(hosts) {
 		return errors.New("not enough hosts to migrate shard")
 	}

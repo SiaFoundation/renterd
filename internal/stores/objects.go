@@ -465,6 +465,7 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
+		Joins("INNER JOIN sectors s ON sh.db_sector_id = s.id").
 		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Where("c.fcid IN (?)", fcids).
