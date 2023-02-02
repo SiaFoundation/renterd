@@ -157,9 +157,11 @@ func main() {
 	}
 
 	// Init tracing.
-	if err := tracing.Init(workerCfg.ID); err != nil {
+	shutdown, err := tracing.Init(workerCfg.ID)
+	if err != nil {
 		log.Fatal("failed to init tracing", err)
 	}
+	defer shutdown(context.Background())
 
 	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
 		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")

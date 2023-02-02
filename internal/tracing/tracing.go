@@ -18,7 +18,6 @@ import (
 const (
 	service        = "renterd"
 	serviceVersion = "0.1.0"
-	name           = "renterd"
 )
 
 var (
@@ -30,7 +29,7 @@ var (
 // variables for configuration, check out
 // https://opentelemetry.io/docs/reference/specification/sdk-environment-variables/.
 // https://github.com/open-telemetry/opentelemetry-go/tree/main/exporters/otlp/otlptrace
-func Init(workerID string) error {
+func Init(workerID string) (func(ctx context.Context) error, error) {
 	// Create resources.
 	resources := resource.NewWithAttributes(
 		semconv.SchemaURL,
@@ -38,11 +37,12 @@ func Init(workerID string) error {
 		semconv.ServiceVersionKey.String(serviceVersion),
 		semconv.ServiceInstanceIDKey.String(workerID),
 	)
+
 	// Create exporter.
 	client := otlptracehttp.NewClient()
 	exporter, err := otlptrace.New(context.Background(), client)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Create provider
@@ -54,15 +54,13 @@ func Init(workerID string) error {
 	otel.SetTracerProvider(provider)
 
 	// Set global tracer.
-	Tracer = otel.Tracer(name)
+	Tracer = otel.Tracer(service)
 
-	return nil
+	return provider.Shutdown, nil
 }
 
-// TracedHandler is a piece of http middleware that attaches a tracing span to
-// every incoming request. The name used for the span is the path of the
-// endpoint.
-func TracedRoutes(routes map[string]jape.Handler) http.Handler {
+// TracedHandler attaches a tracing handler to http routes.
+func TracedRoutes(routes map[string]jape.Handler) map[string]jape.Handler {
 	adapt := func(route string, h jape.Handler) jape.Handler {
 		return jape.Adapt(func(h http.Handler) http.Handler {
 			return otelhttp.NewHandler(h, route)
@@ -71,5 +69,5 @@ func TracedRoutes(routes map[string]jape.Handler) http.Handler {
 	for route, handler := range routes {
 		routes[route] = adapt(route, handler)
 	}
-	return jape.Mux(routes)
+	return routes
 }
