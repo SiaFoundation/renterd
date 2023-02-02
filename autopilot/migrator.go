@@ -1,10 +1,12 @@
 package autopilot
 
 import (
+	"context"
 	"math"
 	"sync"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/tracing"
 	"go.uber.org/zap"
 )
 
@@ -48,9 +50,11 @@ func (m *migrator) TryPerformMigrations(cfg api.AutopilotConfig) {
 func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
+	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
+	defer span.End()
 
 	// fetch slabs for migration
-	toMigrate, err := b.SlabsForMigration(cfg.Contracts.Set, migratorBatchSize)
+	toMigrate, err := b.SlabsForMigration(ctx, cfg.Contracts.Set, migratorBatchSize)
 	if err != nil {
 		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 		return
@@ -66,7 +70,7 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	//
 	// TODO: when we support parallel uploads we should parallelize this
 	for i, slab := range toMigrate {
-		err := m.ap.worker.MigrateSlab(slab)
+		err := m.ap.worker.MigrateSlab(ctx, slab)
 		if err != nil {
 			m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
 			continue

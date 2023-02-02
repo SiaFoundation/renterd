@@ -76,7 +76,7 @@ func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.Fil
 	return 0, nil
 }
 
-func (l *mockContractLocker) ReleaseContract(fcid types.FileContractID, lockID uint64) (err error) {
+func (l *mockContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.released++

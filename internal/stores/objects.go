@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -148,7 +149,7 @@ func (o dbObject) convert() (object.Object, error) {
 }
 
 // List implements the bus.ObjectStore interface.
-func (s *SQLStore) List(path string) ([]string, error) {
+func (s *SQLStore) List(ctx context.Context, path string) ([]string, error) {
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
 	}
@@ -162,7 +163,7 @@ func (s *SQLStore) List(path string) ([]string, error) {
 		Group("result")
 
 	var ids []string
-	err := outer.Find(&ids).Error
+	err := outer.WithContext(ctx).Find(&ids).Error
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +171,8 @@ func (s *SQLStore) List(path string) ([]string, error) {
 }
 
 // Get implements the bus.ObjectStore interface.
-func (s *SQLStore) Get(key string) (object.Object, error) {
-	obj, err := s.get(key)
+func (s *SQLStore) Get(ctx context.Context, key string) (object.Object, error) {
+	obj, err := s.get(ctx, key)
 	if err != nil {
 		return object.Object{}, err
 	}
@@ -179,7 +180,7 @@ func (s *SQLStore) Get(key string) (object.Object, error) {
 }
 
 // Put implements the bus.ObjectStore interface.
-func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (s *SQLStore) Put(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
@@ -192,7 +193,7 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.Publ
 	}
 
 	// Put is ACID.
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
 		// slabs if it exists.
 		err := deleteObject(tx, key)
@@ -311,8 +312,8 @@ func (s *SQLStore) Put(key string, o object.Object, usedContracts map[types.Publ
 }
 
 // Delete implements the bus.ObjectStore interface.
-func (s *SQLStore) Delete(key string) error {
-	return deleteObject(s.db, key)
+func (s *SQLStore) Delete(ctx context.Context, key string) error {
+	return deleteObject(s.db.WithContext(ctx), key)
 }
 
 // deleteObject deletes an object from the store.
@@ -321,9 +322,10 @@ func deleteObject(tx *gorm.DB, key string) error {
 }
 
 // get retrieves an object from the database.
-func (s *SQLStore) get(key string) (dbObject, error) {
+func (s *SQLStore) get(ctx context.Context, key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
+		WithContext(ctx).
 		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -332,7 +334,7 @@ func (s *SQLStore) get(key string) (dbObject, error) {
 	return obj, nil
 }
 
-func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (ss *SQLStore) PutSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// extract the slab key
 	key, err := s.Key.MarshalText()
 	if err != nil {
@@ -354,6 +356,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[types.PublicKey]typ
 	// find all hosts
 	var dbHosts []dbHost
 	if err := ss.db.
+		WithContext(ctx).
 		Model(&dbHost{}).
 		Where("public_key IN (?)", hostkeys).
 		Find(&dbHosts).
@@ -364,6 +367,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[types.PublicKey]typ
 	// find all contracts
 	var dbContracts []dbContract
 	if err := ss.db.
+		WithContext(ctx).
 		Model(&dbContract{}).
 		Where("fcid IN (?)", fcids).
 		Find(&dbContracts).
@@ -383,7 +387,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[types.PublicKey]typ
 		contracts[fileContractID(dbContracts[i].FCID)] = &dbContracts[i]
 	}
 
-	return ss.db.Transaction(func(tx *gorm.DB) (err error) {
+	return ss.db.WithContext(ctx).Transaction(func(tx *gorm.DB) (err error) {
 		// find existing slab
 		var slab dbSlab
 		if err = tx.
@@ -452,7 +456,7 @@ func (ss *SQLStore) PutSlab(s object.Slab, usedContracts map[types.PublicKey]typ
 // are restored to full health.
 //
 // TODO: consider that we don't want to migrate slabs above a given health.
-func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error) {
+func (s *SQLStore) SlabsForMigration(ctx context.Context, goodContracts []types.FileContractID, limit int) ([]object.Slab, error) {
 	var dbBatch []dbSlab
 	var slabs []object.Slab
 
@@ -462,6 +466,7 @@ func (s *SQLStore) SlabsForMigration(goodContracts []types.FileContractID, limit
 	}
 
 	if err := s.db.
+		WithContext(ctx).
 		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").

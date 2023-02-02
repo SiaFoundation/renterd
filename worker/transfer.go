@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"lukechampine.com/frand"
@@ -58,7 +59,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 					respChan <- resp{req, types.Hash256{}, err}
 					return
 				}
-				defer locker.ReleaseContract(req.host.Contract(), lockID)
+				defer locker.ReleaseContract(ctx, req.host.Contract(), lockID)
 
 				root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
 				respChan <- resp{req, root, err}
@@ -142,6 +143,9 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 }
 
 func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStore, locker contractLocker, uploadSectorTimeout time.Duration) (object.Slab, int, []int, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
+	defer span.End()
+
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	length, err := io.ReadFull(r, buf)
@@ -206,7 +210,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 				return
 			}
 			err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
-			locker.ReleaseContract(h.Contract(), lockID)
+			locker.ReleaseContract(ctx, h.Contract(), lockID)
 			respChan <- resp{req, buf.Bytes(), err}
 		}
 	}
@@ -253,6 +257,9 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 }
 
 func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore, locker contractLocker) error {
+	ctx, span := tracing.Tracer.Start(ctx, "parallelDownloadSlab")
+	defer span.End()
+
 	shards, err := parallelDownloadSlab(ctx, ss, hosts, locker)
 	if err != nil {
 		return err

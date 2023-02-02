@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -78,6 +79,9 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		Logger:                   logger, // custom logger
 	})
 	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	if err := db.Use(otelgorm.NewPlugin()); err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
 	if migrate {

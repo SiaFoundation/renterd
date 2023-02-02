@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
@@ -29,14 +31,14 @@ const (
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
-		AcceptBlock(types.Block) error
-		Synced() bool
-		TipState() consensus.State
+		AcceptBlock(context.Context, types.Block) error
+		Synced(ctx context.Context) bool
+		TipState(ctx context.Context) consensus.State
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
 	Syncer interface {
-		SyncerAddress() (string, error)
+		SyncerAddress(ctx context.Context) (string, error)
 		Peers() []string
 		Connect(addr string) error
 		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
@@ -64,53 +66,53 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Host(hostKey types.PublicKey) (hostdb.Host, error)
-		Hosts(offset, limit int) ([]hostdb.Host, error)
-		HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
-		RecordInteractions(interactions []hostdb.Interaction) error
+		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error)
+		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
+		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
+		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 
-		HostBlocklist() ([]string, error)
-		AddHostBlocklistEntry(entry string) error
-		RemoveHostBlocklistEntry(entry string) error
+		HostBlocklist(ctx context.Context) ([]string, error)
+		AddHostBlocklistEntry(ctx context.Context, entry string) error
+		RemoveHostBlocklistEntry(ctx context.Context, entry string) error
 	}
 
 	// A ContractStore stores contracts.
 	ContractStore interface {
-		AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
-		AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		ActiveContracts() ([]api.ContractMetadata, error)
-		AncestorContracts(fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
-		Contract(id types.FileContractID) (api.ContractMetadata, error)
-		Contracts(set string) ([]api.ContractMetadata, error)
-		RemoveContract(id types.FileContractID) error
-		SetContractSet(set string, contracts []types.FileContractID) error
+		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
+		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+		ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
+		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+		RemoveContract(ctx context.Context, id types.FileContractID) error
+		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 	}
 
 	// An ObjectStore stores objects.
 	ObjectStore interface {
-		Get(key string) (object.Object, error)
-		List(key string) ([]string, error)
-		Put(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-		Delete(key string) error
+		Get(ctx context.Context, key string) (object.Object, error)
+		List(ctx context.Context, key string) ([]string, error)
+		Put(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		Delete(ctx context.Context, key string) error
 
-		SlabsForMigration(goodContracts []types.FileContractID, limit int) ([]object.Slab, error)
-		PutSlab(s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
+		SlabsForMigration(ctx context.Context, goodContracts []types.FileContractID, limit int) ([]object.Slab, error)
+		PutSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		Setting(key string) (string, error)
-		Settings() ([]string, error)
-		UpdateSetting(key, value string) error
-		UpdateSettings(settings map[string]string) error
+		Setting(ctx context.Context, key string) (string, error)
+		Settings(ctx context.Context) ([]string, error)
+		UpdateSetting(ctx context.Context, key, value string) error
+		UpdateSettings(ctx context.Context, settings map[string]string) error
 	}
 
 	// EphemeralAccountStore persists information about accounts. Since
 	// accounts are rapidly updated and can be recovered, they are only
 	// loaded upon startup and persisted upon shutdown.
 	EphemeralAccountStore interface {
-		Accounts() ([]api.Account, error)
-		SaveAccounts([]api.Account) error
+		Accounts(context.Context) ([]api.Account, error)
+		SaveAccounts(context.Context, []api.Account) error
 	}
 )
 
@@ -133,13 +135,13 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 	if jc.Decode(&block) != nil {
 		return
 	}
-	if jc.Check("failed to accept block", b.cm.AcceptBlock(block)) != nil {
+	if jc.Check("failed to accept block", b.cm.AcceptBlock(jc.Request.Context(), block)) != nil {
 		return
 	}
 }
 
 func (b *bus) syncerAddrHandler(jc jape.Context) {
-	addr, err := b.s.SyncerAddress()
+	addr, err := b.s.SyncerAddress(jc.Request.Context())
 	if jc.Check("failed to fetch syncer's address", err) != nil {
 		return
 	}
@@ -159,8 +161,8 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
 	jc.Encode(api.ConsensusState{
-		BlockHeight: b.cm.TipState().Index.Height,
-		Synced:      b.cm.Synced(),
+		BlockHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
+		Synced:      b.cm.Synced(jc.Request.Context()),
 	})
 }
 
@@ -215,7 +217,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	txn := wfr.Transaction
 	fee := b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
 	txn.MinerFees = []types.Currency{fee}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
@@ -236,7 +238,7 @@ func (b *bus) walletSignHandler(jc jape.Context) {
 	if jc.Decode(&wsr) != nil {
 		return
 	}
-	err := b.w.SignTransaction(b.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
+	err := b.w.SignTransaction(b.cm.TipState(jc.Request.Context()), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
 	if jc.Check("couldn't sign transaction", err) == nil {
 		jc.Encode(wsr.Transaction)
 	}
@@ -252,7 +254,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	cs := b.cm.TipState()
+	cs := b.cm.TipState(jc.Request.Context())
 	txn, toSign, err := b.w.Redistribute(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
 	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 		return
@@ -279,6 +281,7 @@ func (b *bus) walletDiscardHandler(jc jape.Context) {
 }
 
 func (b *bus) walletPrepareFormHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
 	var wpfr api.WalletPrepareFormRequest
 	if jc.Decode(&wpfr) != nil {
 		return
@@ -298,12 +301,12 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(b.cm.TipState(ctx), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(b.cm.TipState(), &txn, toSign, cf)
+	err = b.w.SignTransaction(b.cm.TipState(ctx), &txn, toSign, cf)
 	if jc.Check("couldn't sign transaction", err) != nil {
 		b.w.ReleaseInputs(txn)
 		return
@@ -340,12 +343,12 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(b.cm.TipState(), &txn, toSign, cf)
+	err = b.w.SignTransaction(b.cm.TipState(jc.Request.Context()), &txn, toSign, cf)
 	if jc.Check("couldn't sign transaction", err) != nil {
 		b.w.ReleaseInputs(txn)
 		return
@@ -390,7 +393,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 func (b *bus) hostsHandlerGET(jc jape.Context) {
 	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
 		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
-			if hosts, err := b.hdb.Hosts(offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
+			if hosts, err := b.hdb.Hosts(jc.Request.Context(), offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
 				jc.Encode(hosts)
 			}
 		}
@@ -401,7 +404,7 @@ func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
 	if offset := 0; jc.DecodeForm("offset", &offset) == nil {
 		if limit := -1; jc.DecodeForm("limit", &limit) == nil {
 			if maxLastScan := time.Now(); jc.DecodeForm("lastScan", (*api.ParamTime)(&maxLastScan)) == nil {
-				if hosts, err := b.hdb.HostsForScanning(maxLastScan, offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
+				if hosts, err := b.hdb.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit); jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) == nil {
 					jc.Encode(hosts)
 				}
 			}
@@ -414,7 +417,7 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	host, err := b.hdb.Host(hostKey)
+	host, err := b.hdb.Host(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
@@ -425,28 +428,29 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&interactions) != nil {
 		return
 	}
-	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(interactions)) != nil {
+	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(jc.Request.Context(), interactions)) != nil {
 		return
 	}
 }
 
 func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
-	blocklist, err := b.hdb.HostBlocklist()
+	blocklist, err := b.hdb.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
 		jc.Encode(blocklist)
 	}
 }
 
 func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
+	ctx := jc.Request.Context()
 	var req api.UpdateBlocklistRequest
 	if jc.Decode(&req) == nil {
 		for _, entry := range req.Add {
-			if jc.Check(fmt.Sprintf("couldn't add blocklist entry '%s'", entry), b.hdb.AddHostBlocklistEntry(entry)) != nil {
+			if jc.Check(fmt.Sprintf("couldn't add blocklist entry '%s'", entry), b.hdb.AddHostBlocklistEntry(ctx, entry)) != nil {
 				return
 			}
 		}
 		for _, entry := range req.Remove {
-			if jc.Check(fmt.Sprintf("couldn't remove blocklist entry '%s'", entry), b.hdb.RemoveHostBlocklistEntry(entry)) != nil {
+			if jc.Check(fmt.Sprintf("couldn't remove blocklist entry '%s'", entry), b.hdb.RemoveHostBlocklistEntry(ctx, entry)) != nil {
 				return
 			}
 		}
@@ -454,14 +458,14 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
-	cs, err := b.cs.ActiveContracts()
+	cs, err := b.cs.ActiveContracts(jc.Request.Context())
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
 }
 
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {
-	cs, err := b.cs.Contracts(jc.PathParam("set"))
+	cs, err := b.cs.Contracts(jc.Request.Context(), jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
@@ -472,7 +476,7 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("param 'set' can not be empty"), http.StatusBadRequest)
 	} else if jc.Decode(&contractIds) == nil {
-		jc.Check("could not add contracts to set", b.cs.SetContractSet(set, contractIds))
+		jc.Check("could not add contracts to set", b.cs.SetContractSet(jc.Request.Context(), set, contractIds))
 	}
 }
 
@@ -514,7 +518,7 @@ func (b *bus) contractIDHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	c, err := b.cs.Contract(id)
+	c, err := b.cs.Contract(jc.Request.Context(), id)
 	if jc.Check("couldn't load contract", err) == nil {
 		jc.Encode(c)
 	}
@@ -531,7 +535,7 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	a, err := b.cs.AddContract(req.Contract, req.TotalCost, req.StartHeight)
+	a, err := b.cs.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(a)
 	}
@@ -548,7 +552,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	r, err := b.cs.AddRenewedContract(req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
+	r, err := b.cs.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
@@ -559,18 +563,19 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	jc.Check("couldn't remove contract", b.cs.RemoveContract(id))
+	jc.Check("couldn't remove contract", b.cs.RemoveContract(jc.Request.Context(), id))
 }
 
 func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
+	ctx := jc.Request.Context()
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
-		keys, err := b.os.List(jc.PathParam("key"))
+		keys, err := b.os.List(ctx, jc.PathParam("key"))
 		if jc.Check("couldn't list objects", err) == nil {
 			jc.Encode(api.ObjectsResponse{Entries: keys})
 		}
 		return
 	}
-	o, err := b.os.Get(jc.PathParam("key"))
+	o, err := b.os.Get(ctx, jc.PathParam("key"))
 	if jc.Check("couldn't load object", err) == nil {
 		jc.Encode(api.ObjectsResponse{Object: &o})
 	}
@@ -579,26 +584,26 @@ func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 func (b *bus) objectsKeyHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.os.Put(jc.PathParam("key"), aor.Object, aor.UsedContracts))
+		jc.Check("couldn't store object", b.os.Put(jc.Request.Context(), jc.PathParam("key"), aor.Object, aor.UsedContracts))
 	}
 }
 
 func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", b.os.Delete(jc.PathParam("key")))
+	jc.Check("couldn't delete object", b.os.Delete(jc.Request.Context(), jc.PathParam("key")))
 }
 
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.os.PutSlab(usr.Slab, usr.UsedContracts))
+		jc.Check("couldn't update slab", b.os.PutSlab(jc.Request.Context(), usr.Slab, usr.UsedContracts))
 	}
 }
 
 func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
-		if goodContracts, err := b.cs.Contracts(msr.ContractSet); jc.Check("couldn't fetch contracts for migration", err) == nil {
-			if slabs, err := b.os.SlabsForMigration(contractIds(goodContracts), msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+		if goodContracts, err := b.cs.Contracts(jc.Request.Context(), msr.ContractSet); jc.Check("couldn't fetch contracts for migration", err) == nil {
+			if slabs, err := b.os.SlabsForMigration(jc.Request.Context(), contractIds(goodContracts), msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
 				jc.Encode(slabs)
 			}
 		}
@@ -606,7 +611,7 @@ func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) settingsHandlerGET(jc jape.Context) {
-	if settings, err := b.ss.Settings(); jc.Check("couldn't load settings", err) == nil {
+	if settings, err := b.ss.Settings(jc.Request.Context()); jc.Check("couldn't load settings", err) == nil {
 		jc.Encode(settings)
 	}
 }
@@ -614,14 +619,14 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 func (b *bus) settingsHandlerPUT(jc jape.Context) {
 	var settings map[string]string
 	if jc.Decode(&settings) == nil {
-		jc.Check("couldn't update settings", b.ss.UpdateSettings(settings))
+		jc.Check("couldn't update settings", b.ss.UpdateSettings(jc.Request.Context(), settings))
 	}
 }
 
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.PathParam("key")); errors.Is(err, api.ErrSettingNotFound) {
+	} else if setting, err := b.ss.Setting(jc.Request.Context(), jc.PathParam("key")); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -635,25 +640,25 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	if key := jc.PathParam("key"); key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
 	} else if jc.Decode(&value) == nil {
-		jc.Check("could not update setting", b.ss.UpdateSetting(key, value))
+		jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, value))
 	}
 }
 
-func (b *bus) setGougingSettings(gs api.GougingSettings) error {
+func (b *bus) setGougingSettings(ctx context.Context, gs api.GougingSettings) error {
 	if js, err := json.Marshal(gs); err != nil {
 		panic(err)
 	} else {
-		return b.ss.UpdateSetting(SettingGouging, string(js))
+		return b.ss.UpdateSetting(ctx, SettingGouging, string(js))
 	}
 }
 
-func (b *bus) setRedundancySettings(rs api.RedundancySettings) error {
+func (b *bus) setRedundancySettings(ctx context.Context, rs api.RedundancySettings) error {
 	if err := rs.Validate(); err != nil {
 		return err
 	} else if js, err := json.Marshal(rs); err != nil {
 		panic(err)
 	} else {
-		return b.ss.UpdateSetting(SettingRedundancy, string(js))
+		return b.ss.UpdateSetting(ctx, SettingRedundancy, string(js))
 	}
 }
 
@@ -666,7 +671,7 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	if jc.DecodeForm("startHeight", &minStartHeight) != nil {
 		return
 	}
-	ancestors, err := b.cs.AncestorContracts(fcid, minStartHeight)
+	ancestors, err := b.cs.AncestorContracts(jc.Request.Context(), fcid, minStartHeight)
 	if jc.Check("failed to fetch ancestor contracts", err) != nil {
 		return
 	}
@@ -674,12 +679,12 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 }
 
 func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
-	gp, err := b.gougingParams()
+	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 
-	cs, err := b.ss.Setting(SettingContractSet)
+	cs, err := b.ss.Setting(jc.Request.Context(), SettingContractSet)
 	if jc.Check("could not get contract set setting", err) != nil {
 		return
 	}
@@ -691,41 +696,41 @@ func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
 }
 
 func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
-	gp, err := b.gougingParams()
+	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 
-	cs, err := b.ss.Setting(SettingContractSet)
+	cs, err := b.ss.Setting(jc.Request.Context(), SettingContractSet)
 	if jc.Check("could not get contract set setting", err) != nil {
 		return
 	}
 
 	jc.Encode(api.UploadParams{
 		ContractSet:   cs,
-		CurrentHeight: b.cm.TipState().Index.Height,
+		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams: gp,
 	})
 }
 
 func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
-	gp, err := b.gougingParams()
+	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 	jc.Encode(gp)
 }
 
-func (b *bus) gougingParams() (api.GougingParams, error) {
+func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(SettingGouging); err != nil {
+	if gss, err := b.ss.Setting(ctx, SettingGouging); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
 		panic(err)
 	}
 
 	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(SettingRedundancy); err != nil {
+	if rss, err := b.ss.Setting(ctx, SettingRedundancy); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
 		panic(err)
@@ -806,27 +811,28 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		ss:            ss,
 		contractLocks: newContractLocks(),
 	}
-
-	if err := b.setGougingSettings(gs); err != nil {
+	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
+	defer span.End()
+	if err := b.setGougingSettings(ctx, gs); err != nil {
 		return nil, nil, err
 	}
 
-	if err := b.setRedundancySettings(rs); err != nil {
+	if err := b.setRedundancySettings(ctx, rs); err != nil {
 		return nil, nil, err
 	}
 
 	// Load the ephemeral accounts into memory and save them again on
 	// cleanup.
-	accounts, err := eas.Accounts()
+	accounts, err := eas.Accounts(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	b.accounts = newAccounts(accounts)
 	cleanup := func() error {
-		return eas.SaveAccounts(b.accounts.ToPersist())
+		return eas.SaveAccounts(ctx, b.accounts.ToPersist())
 	}
 
-	return jape.Mux(map[string]jape.Handler{
+	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
 		"GET    /accounts/:owner":     b.accountsOwnerHandlerGET,
 		"POST   /accounts/:id/add":    b.accountsAddHandlerPOST,
 		"POST   /accounts/:id/update": b.accountsUpdateHandlerPOST,
@@ -887,7 +893,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
-	}), cleanup, nil
+	})), cleanup, nil
 }
 
 func contractIds(contracts []api.ContractMetadata) []types.FileContractID {

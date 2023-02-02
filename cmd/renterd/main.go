@@ -248,7 +248,7 @@ func main() {
 	go srv.Serve(l)
 	log.Println("api: Listening on", l.Addr())
 
-	syncerAddress, err := bc.SyncerAddress()
+	syncerAddress, err := bc.SyncerAddress(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}

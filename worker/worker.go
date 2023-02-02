@@ -201,14 +201,14 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 }
 
 type AccountStore interface {
-	Accounts(owner string) ([]api.Account, error)
-	AddBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
-	SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	Accounts(ctx context.Context, owner string) ([]api.Account, error)
+	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 }
 
 type contractLocker interface {
 	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
-	ReleaseContract(fcid types.FileContractID, lockID uint64) (err error)
+	ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error)
 }
 
 // A Bus is the source of truth within a renterd system.
@@ -216,27 +216,27 @@ type Bus interface {
 	AccountStore
 	contractLocker
 
-	ActiveContracts() ([]api.ContractMetadata, error)
-	Contracts(set string) ([]api.ContractMetadata, error)
-	ContractsForSlab(shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
-	RecordInteractions(interactions []hostdb.Interaction) error
+	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
+	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	ContractsForSlab(ctx context.Context, shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
+	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 
-	Host(hostKey types.PublicKey) (hostdb.Host, error)
+	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error)
 
-	DownloadParams() (api.DownloadParams, error)
-	GougingParams() (api.GougingParams, error)
-	UploadParams() (api.UploadParams, error)
+	DownloadParams(ctx context.Context) (api.DownloadParams, error)
+	GougingParams(ctx context.Context) (api.GougingParams, error)
+	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(key string) (object.Object, []string, error)
-	AddObject(key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-	DeleteObject(key string) error
+	Object(ctx context.Context, key string) (object.Object, []string, error)
+	AddObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	DeleteObject(ctx context.Context, key string) error
 
-	Accounts(owner string) ([]api.Account, error)
-	UpdateSlab(s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
+	Accounts(ctx context.Context, owner string) ([]api.Account, error)
+	UpdateSlab(ctx context.Context, s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
-	WalletDiscard(txn types.Transaction) error
-	WalletPrepareForm(renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
+	WalletDiscard(ctx context.Context, txn types.Transaction) error
+	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+	WalletPrepareRenew(ctx context.Context, contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -432,12 +432,13 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpFormHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
 	var rfr api.RHPFormRequest
 	if jc.Decode(&rfr) != nil {
 		return
 	}
 
-	gp, err := w.bus.GougingParams()
+	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
@@ -448,7 +449,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	ctx := WithGougingChecker(jc.Request.Context(), gp)
+	ctx = WithGougingChecker(ctx, gp)
 	err = w.withTransportV2(ctx, hostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
 		hostSettings, err := rhpv2.RPCSettings(ctx, t)
 		if err != nil {
@@ -459,14 +460,14 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return fmt.Errorf("failed to form contract, gouging check failed: %v", errs)
 		}
 
-		renterTxnSet, err := w.bus.WalletPrepareForm(renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
+		renterTxnSet, err := w.bus.WalletPrepareForm(ctx, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
 			return err
 		}
 
 		contract, txnSet, err = rhpv2.RPCFormContract(t, renterKey, renterTxnSet)
 		if err != nil {
-			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
+			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
 			return err
 		}
 		return
@@ -482,12 +483,13 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpRenewHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
 	var rrr api.RHPRenewRequest
 	if jc.Decode(&rrr) != nil {
 		return
 	}
 
-	gp, err := w.bus.GougingParams()
+	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
@@ -497,7 +499,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 	defer func() {
-		_ = w.bus.ReleaseContract(rrr.ContractID, lockID) // TODO: log error
+		_ = w.bus.ReleaseContract(ctx, rrr.ContractID, lockID) // TODO: log error
 	}()
 
 	hostIP, hostKey, toRenewID, renterFunds, newCollateral := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds, rrr.NewCollateral
@@ -506,7 +508,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	ctx := WithGougingChecker(jc.Request.Context(), gp)
+	ctx = WithGougingChecker(jc.Request.Context(), gp)
 	err = w.withTransportV2(ctx, hostIP, hostKey, func(t *rhpv2.Transport) error {
 		hostSettings, err := rhpv2.RPCSettings(ctx, t)
 		if err != nil {
@@ -523,14 +525,14 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		}
 		rev := session.Revision()
 
-		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(rev.Revision, renterAddress, renterKey, renterFunds, newCollateral, hostKey, hostSettings, endHeight)
+		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev.Revision, renterAddress, renterKey, renterFunds, newCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
 			return err
 		}
 
 		contract, txnSet, err = session.RenewContract(renterTxnSet, finalPayment)
 		if err != nil {
-			w.bus.WalletDiscard(renterTxnSet[len(renterTxnSet)-1])
+			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
 			return err
 		}
 		return nil
@@ -546,6 +548,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpFundHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
 	var rfr api.RHPFundRequest
 	if jc.Decode(&rfr) != nil {
 		return
@@ -557,7 +560,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Get IP of host.
-	h, err := w.bus.Host(rfr.HostKey)
+	h, err := w.bus.Host(ctx, rfr.HostKey)
 	if jc.Check("failed to fetch host", err) != nil {
 		return
 	}
@@ -569,7 +572,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 	defer func() {
-		_ = w.bus.ReleaseContract(rfr.ContractID, lockID) // TODO: log error
+		_ = w.bus.ReleaseContract(ctx, rfr.ContractID, lockID) // TODO: log error
 	}()
 
 	// Get contract revision.
@@ -602,7 +605,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Fund account.
-	err = account.WithDeposit(func() (types.Currency, error) {
+	err = account.WithDeposit(ctx, func() (types.Currency, error) {
 		return rfr.Amount, w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(rfr.HostKey)
 			payment, ok := rhpv3.PayByContract(&revision, rfr.Amount.Add(pt.FundAccountCost), rhpv3.Account{}, rk) // no account needed for funding
@@ -650,12 +653,13 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 }
 
 func (w *worker) slabMigrateHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
 	var slab object.Slab
 	if jc.Decode(&slab) != nil {
 		return
 	}
 
-	up, err := w.bus.UploadParams()
+	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
@@ -669,9 +673,9 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// attach gouging checker to the context
-	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
+	ctx = WithGougingChecker(ctx, up.GougingParams)
 
-	contracts, err := w.bus.Contracts(up.ContractSet)
+	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -698,16 +702,17 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		}
 	}
 
-	if jc.Check("couldn't update slab", w.bus.UpdateSlab(slab, usedContracts)) != nil {
+	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, usedContracts)) != nil {
 		return
 	}
 }
 
 func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
+	ctx := jc.Request.Context()
 	jc.Custom(nil, []string{})
 
 	key := strings.TrimPrefix(jc.PathParam("key"), "/")
-	o, es, err := w.bus.Object(key)
+	o, es, err := w.bus.Object(ctx, key)
 	if jc.Check("couldn't get object or entries", err) != nil {
 		return
 	}
@@ -716,7 +721,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		return
 	}
 
-	dp, err := w.bus.DownloadParams()
+	dp, err := w.bus.DownloadParams(ctx)
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
 		return
 	}
@@ -730,7 +735,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	}
 
 	// attach gouging checker to the context
-	ctx := WithGougingChecker(jc.Request.Context(), dp.GougingParams)
+	ctx = WithGougingChecker(ctx, dp.GougingParams)
 
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
@@ -751,7 +756,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
 	for _, ss := range slabsForDownload(o.Slabs, offset, length) {
-		contracts, err := w.bus.ContractsForSlab(ss.Shards, dp.ContractSet)
+		contracts, err := w.bus.ContractsForSlab(ctx, ss.Shards, dp.ContractSet)
 		if err != nil {
 			_ = err // NOTE: can't write error because we may have already written to the response
 			return
@@ -775,8 +780,9 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 
 func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
+	ctx := jc.Request.Context()
 
-	up, err := w.bus.UploadParams()
+	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
@@ -802,7 +808,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	}
 
 	// attach gouging checker to the context
-	ctx := WithGougingChecker(jc.Request.Context(), up.GougingParams)
+	ctx = WithGougingChecker(ctx, up.GougingParams)
 
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -811,7 +817,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[types.PublicKey]types.FileContractID)
 
 	// fetch contracts
-	contracts, err := w.bus.Contracts(up.ContractSet)
+	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -866,17 +872,18 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	}
 
 	key := strings.TrimPrefix(jc.PathParam("key"), "/")
-	if jc.Check("couldn't add object", w.bus.AddObject(key, o, usedContracts)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, key, o, usedContracts)) != nil {
 		return
 	}
 }
 
 func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.PathParam("key")))
+	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("key")))
 }
 
 func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
-	busContracts, err := w.bus.ActiveContracts()
+	ctx := jc.Request.Context()
+	busContracts, err := w.bus.ActiveContracts(ctx)
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
@@ -982,7 +989,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		return nil
 	}
 
-	return jape.Mux(tracing.TracedRoutes(map[string]jape.Handler{
+	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
@@ -1022,7 +1029,9 @@ func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
 
 func (w *worker) flushInteractions() {
 	if len(w.interactions) > 0 {
-		if err := w.bus.RecordInteractions(w.interactions); err != nil {
+		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushInteractions")
+		defer span.End()
+		if err := w.bus.RecordInteractions(ctx, w.interactions); err != nil {
 			// TODO: log
 		} else {
 			w.interactions = nil

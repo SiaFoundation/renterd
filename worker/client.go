@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,8 +23,8 @@ type Client struct {
 }
 
 // RHPScan scans a host, returning its current settings.
-func (c *Client) RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
-	err = c.c.POST("/rhp/scan", api.RHPScanRequest{
+func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
+	err = c.c.WithContext(ctx).POST("/rhp/scan", api.RHPScanRequest{
 		HostKey: hostKey,
 		HostIP:  hostIP,
 		Timeout: timeout,
@@ -32,7 +33,7 @@ func (c *Client) RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Du
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
@@ -42,12 +43,12 @@ func (c *Client) RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, re
 		RenterAddress:  renterAddress,
 	}
 	var resp api.RHPFormResponse
-	err := c.c.POST("/rhp/form", req, &resp)
+	err := c.c.WithContext(ctx).POST("/rhp/form", req, &resp)
 	return resp.Contract, resp.TransactionSet, err
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPRenewRequest{
 		ContractID:    fcid,
 		EndHeight:     endHeight,
@@ -58,58 +59,58 @@ func (c *Client) RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.
 		RenterFunds:   renterFunds,
 	}
 	var resp api.RHPRenewResponse
-	err := c.c.POST("/rhp/renew", req, &resp)
+	err := c.c.WithContext(ctx).POST("/rhp/renew", req, &resp)
 	return resp.Contract, resp.TransactionSet, err
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error) {
+func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error) {
 	req := api.RHPFundRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
 		Amount:     amount,
 	}
-	err = c.c.POST("/rhp/fund", req, nil)
+	err = c.c.WithContext(ctx).POST("/rhp/fund", req, nil)
 	return
 }
 
 // RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(hostKey types.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
+func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
 	req := api.RHPRegistryReadRequest{
 		HostKey:     hostKey,
 		HostIP:      hostIP,
 		RegistryKey: key,
 		Payment:     payment,
 	}
-	err = c.c.POST("/rhp/registry/read", req, &resp)
+	err = c.c.WithContext(ctx).POST("/rhp/registry/read", req, &resp)
 	return
 }
 
 // RHPUpdateRegistry updates a registry value.
-func (c *Client) RHPUpdateRegistry(hostKey types.PublicKey, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
+func (c *Client) RHPUpdateRegistry(ctx context.Context, hostKey types.PublicKey, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
 	req := api.RHPRegistryUpdateRequest{
 		HostKey:       hostKey,
 		RegistryKey:   key,
 		RegistryValue: value,
 	}
-	err = c.c.POST("/rhp/registry/update", req, nil)
+	err = c.c.WithContext(ctx).POST("/rhp/registry/update", req, nil)
 	return
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(slab object.Slab) error {
-	return c.c.POST("/slab/migrate", slab, nil)
+func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
+	return c.c.WithContext(ctx).POST("/slab/migrate", slab, nil)
 }
 
 // UploadObject uploads the data in r, creating an object with the given name.
-func (c *Client) UploadObject(r io.Reader, name string) (err error) {
+func (c *Client) UploadObject(ctx context.Context, r io.Reader, name string) (err error) {
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", name), []byte{}, nil)
 
 	req, err := http.NewRequest("PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, name), r)
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.Password)
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -123,14 +124,14 @@ func (c *Client) UploadObject(r io.Reader, name string) (err error) {
 	return
 }
 
-func (c *Client) object(path string, w io.Writer, entries *[]string) (err error) {
+func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *[]string) (err error) {
 	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]string)(nil))
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.Password)
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -150,34 +151,34 @@ func (c *Client) object(path string, w io.Writer, entries *[]string) (err error)
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(path string) (entries []string, err error) {
-	err = c.object(path, nil, &entries)
+func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []string, err error) {
+	err = c.object(ctx, path, nil, &entries)
 	return
 }
 
 // DownloadObject downloads the object at the given path, writing its data to
 // w.
-func (c *Client) DownloadObject(w io.Writer, path string) (err error) {
-	err = c.object(path, w, nil)
+func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (err error) {
+	err = c.object(ctx, path, w, nil)
 	return
 }
 
 // DeleteObject deletes the object with the given name.
-func (c *Client) DeleteObject(name string) (err error) {
-	err = c.c.DELETE(fmt.Sprintf("/objects/%s", name))
+func (c *Client) DeleteObject(ctx context.Context, name string) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", name))
 	return
 }
 
 // ActiveContracts returns all active contracts from the worker. These contracts
 // decorate a bus contract with the contract's latest revision.
-func (c *Client) ActiveContracts(hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
-	err = c.c.GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.Duration(hostTimeout)), &resp)
+func (c *Client) ActiveContracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.Duration(hostTimeout)), &resp)
 	return
 }
 
 // Accounts requests the worker's /accounts endpoint.
-func (c *Client) Accounts() (accounts []api.Account, err error) {
-	err = c.c.GET("/accounts", &accounts)
+func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
+	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
 	return
 }
 

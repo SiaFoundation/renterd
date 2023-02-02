@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"math/big"
 
 	"go.sia.tech/core/types"
@@ -40,9 +41,9 @@ func (a dbAccount) convert() api.Account {
 }
 
 // Accounts returns all accoutns from the db.
-func (s *SQLStore) Accounts() ([]api.Account, error) {
+func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
 	var dbAccounts []dbAccount
-	if err := s.db.Find(&dbAccounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Find(&dbAccounts).Error; err != nil {
 		return nil, err
 	}
 	accounts := make([]api.Account, len(dbAccounts))
@@ -54,7 +55,7 @@ func (s *SQLStore) Accounts() ([]api.Account, error) {
 
 // SaveAccounts saves the given accounts in the db, overwriting any existing
 // ones.
-func (s *SQLStore) SaveAccounts(accounts []api.Account) error {
+func (s *SQLStore) SaveAccounts(ctx context.Context, accounts []api.Account) error {
 	if len(accounts) == 0 {
 		return nil
 	}
@@ -67,7 +68,7 @@ func (s *SQLStore) SaveAccounts(accounts []api.Account) error {
 			Balance:   (*balance)(acc.Balance),
 		}
 	}
-	return s.db.Clauses(clause.OnConflict{
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "account_id"}},
 		UpdateAll: true,
 	}).Create(&dbAccounts).Error

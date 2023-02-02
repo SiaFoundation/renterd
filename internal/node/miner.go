@@ -3,6 +3,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ type (
 	// Consensus defines a minimal interface needed by the miner to interact
 	// with the consensus set
 	Consensus interface {
-		AcceptBlock(types.Block) error
+		AcceptBlock(context.Context, types.Block) error
 	}
 
 	// A Miner is a CPU miner that can mine blocks, sending the reward to a
@@ -120,7 +121,7 @@ func (m *Miner) mineBlock(addr stypes.UnlockHash) error {
 
 	var b types.Block
 	convertToCore(&block, &b)
-	if err := m.consensus.AcceptBlock(b); err != nil {
+	if err := m.consensus.AcceptBlock(context.Background(), b); err != nil {
 		return fmt.Errorf("failed to get block accepted: %w", err)
 	}
 	return nil

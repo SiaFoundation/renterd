@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
@@ -25,54 +27,54 @@ type Store interface {
 
 type Bus interface {
 	// wallet
-	WalletAddress() (types.Address, error)
-	WalletBalance() (types.Currency, error)
-	WalletDiscard(txn types.Transaction) error
-	WalletFund(txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
-	WalletOutputs() (resp []wallet.SiacoinElement, err error)
-	WalletPending() (resp []types.Transaction, err error)
-	WalletPrepareForm(renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
-	WalletRedistribute(outputs int, amount types.Currency) (id types.TransactionID, err error)
-	WalletSign(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
+	WalletAddress(ctx context.Context) (types.Address, error)
+	WalletBalance(ctx context.Context) (types.Currency, error)
+	WalletDiscard(ctx context.Context, txn types.Transaction) error
+	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
+	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
+	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
+	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+	WalletPrepareRenew(ctx context.Context, contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
+	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error)
+	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 
 	// hostdb
-	Host(hostKey types.PublicKey) (hostdb.Host, error)
-	Hosts(offset, limit int) ([]hostdb.Host, error)
-	HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
-	RecordInteractions(interactions []hostdb.Interaction) error
+	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error)
+	Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
+	HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
+	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 
 	// contracts
-	ActiveContracts() (contracts []api.ContractMetadata, err error)
-	AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
-	AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-	AncestorContracts(id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
-	Contracts(set string) ([]api.ContractMetadata, error)
-	DeleteContracts(ids []types.FileContractID) error
-	SetContractSet(set string, contracts []types.FileContractID) error
+	ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
+	AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
+	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	DeleteContracts(ctx context.Context, ids []types.FileContractID) error
+	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 	// txpool
-	RecommendedFee() (types.Currency, error)
-	TransactionPool() (txns []types.Transaction, err error)
+	RecommendedFee(ctx context.Context) (types.Currency, error)
+	TransactionPool(ctx context.Context) (txns []types.Transaction, err error)
 
 	// consensus
-	ConsensusState() (api.ConsensusState, error)
+	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// objects
-	SlabsForMigration(set string, limit int) ([]object.Slab, error)
+	SlabsForMigration(ctx context.Context, set string, limit int) ([]object.Slab, error)
 
 	// settings
-	UpdateSetting(key string, value string) error
-	GougingSettings() (gs api.GougingSettings, err error)
-	RedundancySettings() (rs api.RedundancySettings, err error)
+	UpdateSetting(ctx context.Context, key string, value string) error
+	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
+	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
 }
 
 type Worker interface {
-	ActiveContracts(hostTimeout time.Duration) (api.ContractsResponse, error)
-	MigrateSlab(s object.Slab) error
-	RHPForm(endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPRenew(fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPScan(hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
+	ActiveContracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
+	MigrateSlab(ctx context.Context, s object.Slab) error
+	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
 type Autopilot struct {
@@ -123,7 +125,7 @@ func (ap *Autopilot) Run() error {
 	ap.startStopMu.Unlock()
 
 	// update the contract set setting
-	err := ap.bus.UpdateSetting(bus.SettingContractSet, ap.store.Config().Contracts.Set)
+	err := ap.bus.UpdateSetting(context.Background(), bus.SettingContractSet, ap.store.Config().Contracts.Set)
 	if err != nil {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
@@ -143,22 +145,24 @@ func (ap *Autopilot) Run() error {
 
 		func() {
 			defer ap.logger.Info("autopilot iteration ended")
+			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
+			defer span.End()
 
 			// use the same config for the entire iteration
 			cfg := ap.store.Config()
 
 			// update the contract set setting
-			err := ap.bus.UpdateSetting(bus.SettingContractSet, cfg.Contracts.Set)
+			err := ap.bus.UpdateSetting(ctx, bus.SettingContractSet, cfg.Contracts.Set)
 			if err != nil {
 				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 			}
 
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan()
+			ap.s.tryPerformHostScan(ctx)
 
 			// fetch consensus state
-			cs, err := ap.bus.ConsensusState()
+			cs, err := ap.bus.ConsensusState(ctx)
 			if err != nil {
 				ap.logger.Errorf("iteration interrupted, could not fetch consensus state, err: %v", err)
 				return
@@ -174,13 +178,13 @@ func (ap *Autopilot) Run() error {
 			ap.c.updateCurrentPeriod(cfg, cs)
 
 			// perform wallet maintenance
-			err = ap.c.performWalletMaintenance(cfg, cs)
+			err = ap.c.performWalletMaintenance(ctx, cfg, cs)
 			if err != nil {
 				ap.logger.Errorf("wallet maintenance failed, err: %v", err)
 			}
 
 			// perform maintenance
-			err = ap.c.performContractMaintenance(cfg, cs)
+			err = ap.c.performContractMaintenance(ctx, cfg, cs)
 			if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
@@ -250,14 +254,14 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 
 // NewServer returns an HTTP handler that serves the renterd autopilot api.
 func NewServer(ap *Autopilot) http.Handler {
-	return jape.Mux(map[string]jape.Handler{
+	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
 		"GET    /actions": ap.actionsHandler,
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
 		"GET    /status":  ap.statusHandlerGET,
 
 		"POST    /debug/trigger": ap.triggerHandlerPOST,
-	})
+	}))
 }
 
 // New initializes an Autopilot.

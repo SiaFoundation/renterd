@@ -39,7 +39,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject("/foo", object.Object{
+	err = b.AddObject(context.Background(), "/foo", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -58,7 +58,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the worker and request the object.
-	err = w.DeleteObject("/foo")
+	err = w.DeleteObject(context.Background(), "/foo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Wait for the contract to be renewed.
 	err = Retry(100, 100*time.Millisecond, func() error {
-		resp, err := w.ActiveContracts(time.Minute)
+		resp, err := w.ActiveContracts(context.Background(), time.Minute)
 		if err != nil {
 			return err
 		}
@@ -166,12 +166,12 @@ func TestUploadDownload(t *testing.T) {
 
 		// upload the data
 		name := fmt.Sprintf("data_%v", len(data))
-		if err := w.UploadObject(bytes.NewReader(data), name); err != nil {
+		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 			t.Fatal(err)
 		}
 
 		// Should be registered in bus.
-		_, entries, err := cluster.Bus.Object("")
+		_, entries, err := cluster.Bus.Object(context.Background(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -188,7 +188,7 @@ func TestUploadDownload(t *testing.T) {
 
 		// download the data
 		var buffer bytes.Buffer
-		if err := w.DownloadObject(&buffer, name); err != nil {
+		if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
 			t.Fatal(err)
 		}
 
@@ -232,7 +232,8 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Account shouldnt' exist.
-	accounts, err := w.Accounts()
+	ctx := context.Background()
+	accounts, err := w.Accounts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,12 +242,12 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Fund account.
-	if err := w.RHPFund(contract.ID, contract.HostKey(), types.Siacoins(1)); err != nil {
+	if err := w.RHPFund(ctx, contract.ID, contract.HostKey(), types.Siacoins(1)); err != nil {
 		t.Fatal(err)
 	}
 
 	// Expected account balance should have increased.
-	accounts, err = w.Accounts()
+	accounts, err = w.Accounts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +269,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Fetch account from bus directly.
-	busAccounts, err := cluster.Bus.Accounts("worker")
+	busAccounts, err := cluster.Bus.Accounts(context.Background(), "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +296,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 	}()
 
-	accounts2, err := cluster2.Worker.Accounts()
+	accounts2, err := cluster2.Worker.Accounts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

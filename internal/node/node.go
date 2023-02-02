@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -76,17 +77,17 @@ type chainManager struct {
 	cs modules.ConsensusSet
 }
 
-func (cm chainManager) AcceptBlock(b types.Block) error {
+func (cm chainManager) AcceptBlock(ctx context.Context, b types.Block) error {
 	var sb stypes.Block
 	convertToSiad(b, &sb)
 	return cm.cs.AcceptBlock(sb)
 }
 
-func (cm chainManager) Synced() bool {
+func (cm chainManager) Synced(ctx context.Context) bool {
 	return cm.cs.Synced()
 }
 
-func (cm chainManager) TipState() consensus.State {
+func (cm chainManager) TipState(ctx context.Context) consensus.State {
 	return consensus.State{
 		Index: types.ChainIndex{
 			Height: uint64(cm.cs.Height()),
@@ -125,7 +126,7 @@ func (s syncer) BroadcastTransaction(txn types.Transaction, dependsOn []types.Tr
 	s.tp.Broadcast(txnSet)
 }
 
-func (s syncer) SyncerAddress() (string, error) {
+func (s syncer) SyncerAddress(ctx context.Context) (string, error) {
 	return string(s.g.Address()), nil
 }
 

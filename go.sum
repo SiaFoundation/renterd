@@ -630,6 +630,10 @@ github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKs
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/tmc/grpc-websocket-proxy v0.0.0-20190109142713-0ad062ec5ee5/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
 github.com/ugorji/go v1.1.4/go.mod h1:uQMGLiO92mf5W77hV/PUCpI3pbzQx3CRekS0kk+RGrc=
+github.com/uptrace/opentelemetry-go-extra/otelgorm v0.1.20 h1:QnFfKHCIYJw1QpAg8rZooVw2WD/Q0WYMvyzEh7bJQyY=
+github.com/uptrace/opentelemetry-go-extra/otelgorm v0.1.20/go.mod h1:kGsu/ZH0fkdW6HtWmvGTyVEXmLD0+wghp63oSMBRNc8=
+github.com/uptrace/opentelemetry-go-extra/otelsql v0.1.20 h1:bXQsVba4IXUPXJ52L1gbf2UKnQNDJnFcKVGpMVxdEl8=
+github.com/uptrace/opentelemetry-go-extra/otelsql v0.1.20/go.mod h1:3XcQM/RUexQhoij+IILnuBxfUvmnufbzGDp14Q4ETK4=
 github.com/vbauerster/mpb/v5 v5.0.3/go.mod h1:h3YxU5CSr8rZP4Q3xZPVB3jJLhWPou63lHEdr9ytH4Y=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=

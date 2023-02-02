@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -22,9 +23,9 @@ type (
 func (dbSetting) TableName() string { return "settings" }
 
 // Setting implements the bus.SettingStore interface.
-func (s *SQLStore) Setting(key string) (string, error) {
+func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	var entry dbSetting
-	err := s.db.Where(&dbSetting{Key: key}).
+	err := s.db.WithContext(ctx).Where(&dbSetting{Key: key}).
 		Take(&entry).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", fmt.Errorf("key '%s' err: %w", key, api.ErrSettingNotFound)
@@ -36,15 +37,15 @@ func (s *SQLStore) Setting(key string) (string, error) {
 }
 
 // Settings implements the bus.SettingStore interface.
-func (s *SQLStore) Settings() ([]string, error) {
+func (s *SQLStore) Settings(ctx context.Context) ([]string, error) {
 	var keys []string
-	tx := s.db.Model(&dbSetting{}).Select("Key").Find(&keys)
+	tx := s.db.WithContext(ctx).Model(&dbSetting{}).Select("Key").Find(&keys)
 	return keys, tx.Error
 }
 
 // UpdateSetting implements the bus.SettingStore interface.
-func (s *SQLStore) UpdateSetting(key, value string) error {
-	return s.db.Clauses(clause.OnConflict{
+func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
 	}).Create(&dbSetting{
@@ -54,7 +55,7 @@ func (s *SQLStore) UpdateSetting(key, value string) error {
 }
 
 // UpdateSettings implements the bus.SettingStore interface.
-func (s *SQLStore) UpdateSettings(settings map[string]string) error {
+func (s *SQLStore) UpdateSettings(ctx context.Context, settings map[string]string) error {
 	var dbSettings []dbSetting
 	for key, value := range settings {
 		dbSettings = append(dbSettings, dbSetting{
@@ -63,7 +64,7 @@ func (s *SQLStore) UpdateSettings(settings map[string]string) error {
 		})
 	}
 
-	return s.db.Clauses(clause.OnConflict{
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
 	}).Create(&dbSettings).Error

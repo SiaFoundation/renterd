@@ -44,13 +44,13 @@ func TestMigrations(t *testing.T) {
 	// add an object
 	data := make([]byte, rhpv2.SectorSize*4)
 	frand.Read(data)
-	if err := w.UploadObject(bytes.NewReader(data), "foo"); err != nil {
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
 		t.Fatal(err)
 	}
 
 	usedHosts := func() []types.PublicKey {
 		t.Helper()
-		obj, _, err := b.Object("foo")
+		obj, _, err := b.Object(context.Background(), "foo")
 		if err != nil {
 			t.Fatal(err)
 		}

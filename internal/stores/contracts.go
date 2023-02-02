@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"errors"
 
 	"go.sia.tech/core/types"
@@ -141,8 +142,8 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 }
 
 // AddContract implements the bus.ContractStore interface.
-func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
-	added, err := addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
+func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
+	added, err := addContract(s.db.WithContext(ctx), c, totalCost, startHeight, types.FileContractID{})
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -150,9 +151,10 @@ func (s *SQLStore) AddContract(c rhpv2.ContractRevision, totalCost types.Currenc
 }
 
 // ActiveContracts implements the bus.ContractStore interface.
-func (s *SQLStore) ActiveContracts() ([]api.ContractMetadata, error) {
+func (s *SQLStore) ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error) {
 	var dbContracts []dbContract
 	err := s.db.
+		WithContext(ctx).
 		Model(&dbContract{}).
 		Preload("Host").
 		Find(&dbContracts).
@@ -172,10 +174,10 @@ func (s *SQLStore) ActiveContracts() ([]api.ContractMetadata, error) {
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
 	var renewed dbContract
 
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, fileContractID(renewedFrom))
 		if err != nil {
@@ -214,9 +216,9 @@ func (s *SQLStore) AddRenewedContract(c rhpv2.ContractRevision, totalCost types.
 	return renewed.convert(), nil
 }
 
-func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	var ancestors []dbArchivedContract
-	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
+	err := s.db.WithContext(ctx).Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
 		Scan(&ancestors).
 		Error
 	if err != nil {
@@ -230,9 +232,9 @@ func (s *SQLStore) AncestorContracts(id types.FileContractID, startHeight uint64
 }
 
 // Contract implements the bus.ContractStore interface.
-func (s *SQLStore) Contract(id types.FileContractID) (api.ContractMetadata, error) {
+func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error) {
 	// Fetch contract.
-	contract, err := s.contract(fileContractID(id))
+	contract, err := s.contract(ctx, fileContractID(id))
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -240,8 +242,8 @@ func (s *SQLStore) Contract(id types.FileContractID) (api.ContractMetadata, erro
 }
 
 // Contracts implements the bus.ContractStore interface.
-func (s *SQLStore) Contracts(set string) ([]api.ContractMetadata, error) {
-	dbContracts, err := s.contracts(set)
+func (s *SQLStore) Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error) {
+	dbContracts, err := s.contracts(ctx, set)
 	if err != nil {
 		return nil, err
 	}
@@ -253,13 +255,13 @@ func (s *SQLStore) Contracts(set string) ([]api.ContractMetadata, error) {
 }
 
 // SetContractSet implements the bus.ContractStore interface.
-func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractID) error {
+func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
 	fcids := make([]fileContractID, len(contractIds))
 	for i, fcid := range contractIds {
 		fcids[i] = fileContractID(fcid)
 	}
 
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// fetch contracts
 		var dbContracts []dbContract
 		err := tx.
@@ -291,17 +293,18 @@ func (s *SQLStore) SetContractSet(name string, contractIds []types.FileContractI
 }
 
 // RemoveContract implements the bus.ContractStore interface.
-func (s *SQLStore) RemoveContract(id types.FileContractID) error {
-	return removeContract(s.db, fileContractID(id))
+func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) error {
+	return removeContract(s.db.WithContext(ctx), fileContractID(id))
 }
 
-func (s *SQLStore) contract(id fileContractID) (dbContract, error) {
-	return contract(s.db, id)
+func (s *SQLStore) contract(ctx context.Context, id fileContractID) (dbContract, error) {
+	return contract(s.db.WithContext(ctx), id)
 }
 
-func (s *SQLStore) contracts(set string) ([]dbContract, error) {
+func (s *SQLStore) contracts(ctx context.Context, set string) ([]dbContract, error) {
 	var cs dbContractSet
 	err := s.db.
+		WithContext(ctx).
 		Where(&dbContractSet{Name: set}).
 		Preload("Contracts.Host").
 		Take(&cs).

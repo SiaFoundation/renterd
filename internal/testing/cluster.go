@@ -307,7 +307,7 @@ func announceHosts(hosts []*TestNode) error {
 // MineToRenewWindow is a helper which mines enough blocks for the autopilot to
 // reach its renew window.
 func (c *TestCluster) MineToRenewWindow() error {
-	cs, err := c.Bus.ConsensusState()
+	cs, err := c.Bus.ConsensusState(context.Background())
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func (c *TestCluster) sync(hosts []*TestNode) error {
 
 // synced returns true if bus and hosts are at the same blockheight.
 func (c *TestCluster) synced(hosts []*TestNode) (bool, error) {
-	cs, err := c.Bus.ConsensusState()
+	cs, err := c.Bus.ConsensusState(context.Background())
 	if err != nil {
 		return false, err
 	}
@@ -363,7 +363,7 @@ func (c *TestCluster) synced(hosts []*TestNode) (bool, error) {
 
 // MineBlocks uses the bus' miner to mine n blocks.
 func (c *TestCluster) MineBlocks(n int) error {
-	addr, err := c.Bus.WalletAddress()
+	addr, err := c.Bus.WalletAddress(context.Background())
 	if err != nil {
 		return err
 	}
@@ -383,7 +383,7 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	}
 
 	// fetch active contracts
-	resp, err := c.Worker.ActiveContracts(time.Minute)
+	resp, err := c.Worker.ActiveContracts(context.Background(), time.Minute)
 	if err != nil {
 		return nil, err
 	}
@@ -419,13 +419,13 @@ func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 		newHosts = append(newHosts, &TestNode{n})
 
 		// Connect gateways.
-		if err := c.Bus.SyncerConnect(string(n.GatewayAddress())); err != nil {
+		if err := c.Bus.SyncerConnect(context.Background(), string(n.GatewayAddress())); err != nil {
 			return nil, err
 		}
 	}
 
 	// Fund host from bus.
-	balance, err := c.Bus.WalletBalance()
+	balance, err := c.Bus.WalletBalance(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +441,7 @@ func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 			Address: types.Address(wag.Address),
 		})
 	}
-	if err := c.Bus.SendSiacoins(scos); err != nil {
+	if err := c.Bus.SendSiacoins(context.Background(), scos); err != nil {
 		return nil, err
 	}
 
@@ -470,7 +470,7 @@ func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 		}
 
 		for _, h := range newHosts {
-			_, err = c.Bus.Host(h.HostKey())
+			_, err = c.Bus.Host(context.Background(), h.HostKey())
 			if err != nil {
 				return err
 			}
@@ -535,7 +535,7 @@ func (c *TestCluster) Sync() error {
 // until we have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[string]struct{}) error {
 	return Retry(30, time.Second, func() error {
-		contracts, err := c.Bus.ActiveContracts()
+		contracts, err := c.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			return err
 		}

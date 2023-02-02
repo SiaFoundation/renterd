@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -79,18 +80,19 @@ func TestSQLObjectStore(t *testing.T) {
 	}
 
 	// Store it.
+	ctx := context.Background()
 	objID := "key1"
-	if err := db.Put(objID, obj1, usedHosts); err != nil {
+	if err := db.Put(ctx, objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.Put(objID, obj1, usedHosts); err != nil {
+	if err := db.Put(ctx, objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Fetch it using get and verify every field.
-	obj, err := db.get(objID)
+	obj, err := db.get(ctx, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +206,7 @@ func TestSQLObjectStore(t *testing.T) {
 	}
 
 	// Fetch it using Get and verify again.
-	fullObj, err := db.Get(objID)
+	fullObj, err := db.Get(ctx, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,10 +218,10 @@ func TestSQLObjectStore(t *testing.T) {
 	// second one.
 	obj1.Slabs = obj1.Slabs[1:]
 	obj1.Slabs[0].Slab.MinShards = 123
-	if err := db.Put(objID, obj1, usedHosts); err != nil {
+	if err := db.Put(ctx, objID, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
-	fullObj, err = db.Get(objID)
+	fullObj, err = db.Get(ctx, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +271,7 @@ func TestSQLObjectStore(t *testing.T) {
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
-	if err := db.Delete(objID); err != nil {
+	if err := db.Delete(ctx, objID); err != nil {
 		t.Fatal(err)
 	}
 	if err := countCheck(0, 0, 0, 0, 2, 0); err != nil {
@@ -290,9 +292,10 @@ func TestSQLList(t *testing.T) {
 		"/foo/baz/quuz",
 		"/gab/guub",
 	}
+	ctx := context.Background()
 	for _, path := range paths {
 		obj, ucs := newTestObject(frand.Intn(10))
-		os.Put(path, obj, ucs)
+		os.Put(ctx, path, obj, ucs)
 	}
 	tests := []struct {
 		prefix string
@@ -304,7 +307,7 @@ func TestSQLList(t *testing.T) {
 		{"/gab/", []string{"/gab/guub"}},
 	}
 	for _, test := range tests {
-		got, err := os.List(test.prefix)
+		got, err := os.List(ctx, test.prefix)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -450,7 +453,8 @@ func TestSlabsForMigration(t *testing.T) {
 		},
 	}
 
-	if err := db.Put("foo", obj, map[types.PublicKey]types.FileContractID{
+	ctx := context.Background()
+	if err := db.Put(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -460,7 +464,7 @@ func TestSlabsForMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slabs, err := db.SlabsForMigration(goodContracts, -1)
+	slabs, err := db.SlabsForMigration(ctx, goodContracts, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,12 +528,13 @@ func TestContractSectors(t *testing.T) {
 			},
 		},
 	}
-	if err := db.Put("foo", obj, usedContracts); err != nil {
+	ctx := context.Background()
+	if err := db.Put(ctx, "foo", obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Delete the contract.
-	err = db.RemoveContract(fcid1)
+	err = db.RemoveContract(ctx, fcid1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,12 +555,12 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.Put("foo", obj, usedContracts); err != nil {
+	if err := db.Put(ctx, "foo", obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Delete the object.
-	if err := db.Delete("foo"); err != nil {
+	if err := db.Delete(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -614,7 +619,8 @@ func TestPutSlab(t *testing.T) {
 			},
 		},
 	}
-	if err := db.Put("foo", obj, map[types.PublicKey]types.FileContractID{
+	ctx := context.Background()
+	if err := db.Put(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -674,7 +680,7 @@ func TestPutSlab(t *testing.T) {
 	goodContracts := []types.FileContractID{fcid1, fcid3}
 
 	// fetch slabs for migration and assert there is only one
-	toMigrate, err := db.SlabsForMigration(goodContracts, -1)
+	toMigrate, err := db.SlabsForMigration(ctx, goodContracts, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -690,7 +696,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// update the slab to reflect the migration
-	err = db.PutSlab(slab, map[types.PublicKey]types.FileContractID{
+	err = db.PutSlab(ctx, slab, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk3: fcid3,
 	})
@@ -732,7 +738,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there are none left
-	toMigrate, err = db.SlabsForMigration(goodContracts, -1)
+	toMigrate, err = db.SlabsForMigration(ctx, goodContracts, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -740,7 +746,7 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := db.get("foo"); err != nil {
+	if obj, err := db.get(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
