@@ -122,6 +122,9 @@ func (ap *Autopilot) Run() error {
 	ap.stopChan = make(chan struct{})
 	ap.triggerChan = make(chan struct{})
 	ap.ticker = time.NewTicker(ap.tickerDuration)
+
+	ap.wg.Add(1)
+	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
 
 	// update the contract set setting
@@ -130,8 +133,6 @@ func (ap *Autopilot) Run() error {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
 
-	ap.wg.Add(1)
-	defer ap.wg.Done()
 	for {
 		select {
 		case <-ap.stopChan:
