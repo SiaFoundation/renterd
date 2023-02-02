@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -285,6 +287,8 @@ type worker struct {
 	interactions              []hostdb.Interaction
 	interactionsFlushInterval time.Duration
 	interactionsFlushTimer    *time.Timer
+
+	uploadSectorTimeout time.Duration
 }
 
 func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) {
@@ -674,7 +678,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
 	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts, w.bus)
+		return migrateSlab(ctx, &slab, hosts, w.bus, w.uploadSectorTimeout)
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -812,14 +816,30 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// randomize order of contracts so we don't always upload to the same hosts
+	frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
+
+	// keep track of slow hosts so we can avoid them in consecutive slab uploads
+	slow := make(map[types.PublicKey]int)
+
 	cr := o.Key.Encrypt(jc.Request.Body)
 	for {
 		var s object.Slab
 		var length int
+		var slowHosts []int
 
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
 		if err := w.withHosts(ctx, contracts, func(hosts []sectorStore) (err error) {
-			s, length, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, w.bus)
+			// move slow hosts to the back of the array
+			sort.SliceStable(hosts, func(i, j int) bool {
+				return slow[hosts[i].PublicKey()] < slow[hosts[j].PublicKey()]
+			})
+
+			// upload the slab
+			s, length, slowHosts, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, w.bus, w.uploadSectorTimeout)
+			for _, h := range slowHosts {
+				slow[hosts[h].PublicKey()]++
+			}
 			return err
 		}); err == io.EOF {
 			break
@@ -939,13 +959,14 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval time.Duration) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval, uploadSectorTimeout time.Duration) (http.Handler, func() error, error) {
 	w := &worker{
 		id:                        id,
 		bus:                       b,
 		pool:                      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey:                 masterKey,
 		interactionsFlushInterval: interactionsFlushInterval,
+		uploadSectorTimeout:       uploadSectorTimeout,
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)

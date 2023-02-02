@@ -372,13 +372,13 @@ func (c *TestCluster) MineBlocks(n int) error {
 
 func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	// build hosts map
-	hostsmap := make(map[string]struct{})
+	hostsMap := make(map[string]struct{})
 	for _, host := range c.hosts {
-		hostsmap[host.HostKey().String()] = struct{}{}
+		hostsMap[host.HostKey().String()] = struct{}{}
 	}
 
 	//  wait for the contracts to form
-	if err := c.waitForHostContracts(hostsmap); err != nil {
+	if err := c.waitForHostContracts(hostsMap); err != nil {
 		return nil, err
 	}
 
@@ -547,7 +547,6 @@ func (c *TestCluster) waitForHostContracts(hosts map[string]struct{}) error {
 
 		for hpk := range hosts {
 			if _, exists := existing[hpk]; !exists {
-				c.MineBlocks(1)
 				return fmt.Errorf("missing contract for host %v", hpk)
 			}
 		}

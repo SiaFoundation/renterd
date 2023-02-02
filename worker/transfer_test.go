@@ -110,7 +110,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 	var slabs []object.Slab
 	for {
-		s, _, err := uploadSlab(context.Background(), r, 3, 10, hosts, mockLocker)
+		s, _, _, err := uploadSlab(context.Background(), r, 3, 10, hosts, mockLocker, 0)
 		if err == io.EOF {
 			break
 		} else if err != nil {

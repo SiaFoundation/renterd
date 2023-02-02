@@ -187,10 +187,11 @@ func (s *scanner) tryUpdateTimeout() {
 		updated = s.timeoutMinTimeout
 	}
 
-	prev := s.timeout
-	s.timeout = updated
+	if s.timeout != updated {
+		s.logger.Debugf("updated timeout %v->%v", s.timeout, updated)
+		s.timeout = updated
+	}
 	s.timeoutLastUpdate = time.Now()
-	s.logger.Debugf("updated timeout %v->%v", prev, s.timeout)
 }
 
 func (s *scanner) launchHostScans() chan scanReq {
