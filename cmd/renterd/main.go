@@ -222,7 +222,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		workerLog := filepath.Join(workerDir, fmt.Sprintf("worker_%s.log", workerCfg.WorkerConfig.ID))
+		workerLog := filepath.Join(workerDir, workerCfg.WorkerConfig.ID)
 		l, closeFn, err := node.NewLogger(workerLog)
 		if err != nil {
 			log.Fatal(err)
