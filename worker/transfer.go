@@ -56,8 +56,8 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 
 			// Trace the upload.
 			ctx, span := tracing.Tracer.Start(ctx, "upload-request")
-			span.SetAttributes(attribute.String("host", r.host.PublicKey().String()))
-			span.SetAttributes(attribute.String("contract", r.host.Contract().String()))
+			span.SetAttributes(attribute.Stringer("host", r.host.PublicKey()))
+			span.SetAttributes(attribute.Stringer("contract", r.host.Contract()))
 
 			go func(req req) {
 				defer close(doneChan)

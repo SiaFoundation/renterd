@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -769,7 +771,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		}
 
 		err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-			return downloadSlab(ctx, cw, ss, hosts, w.bus)
+			return downloadSlab(ctx, cw, ss, hosts, &tracedContractLocker{w.bus})
 		})
 		if err != nil {
 			_ = err // NOTE: can't write error because we may have already written to the response
@@ -842,7 +844,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 			})
 
 			// upload the slab
-			s, length, slowHosts, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, w.bus, w.uploadSectorTimeout)
+			s, length, slowHosts, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout)
 			for _, h := range slowHosts {
 				slow[hosts[h].PublicKey()]++
 			}
@@ -1038,4 +1040,34 @@ func (w *worker) flushInteractions() {
 		}
 	}
 	w.interactionsFlushTimer = nil
+}
+
+// tracedContractLocker is a helper type that wraps a contractLocker and adds tracing to its methods.
+type tracedContractLocker struct {
+	l contractLocker
+}
+
+func (l *tracedContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
+	defer span.End()
+	lockID, err = l.l.AcquireContract(ctx, fcid, priority, d)
+	if err != nil {
+		span.SetStatus(codes.Error, "failed to acquire contract")
+		span.RecordError(err)
+	}
+	span.SetAttributes(attribute.Stringer("contract", fcid))
+	span.SetAttributes(attribute.Int("priority", priority))
+	return
+}
+
+func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
+	defer span.End()
+	err = l.l.ReleaseContract(ctx, fcid, lockID)
+	if err != nil {
+		span.SetStatus(codes.Error, "failed to release contract")
+		span.RecordError(err)
+	}
+	span.SetAttributes(attribute.Stringer("contract", fcid))
+	return
 }
