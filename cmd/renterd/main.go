@@ -123,6 +123,7 @@ func main() {
 	}
 
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
+	tracingEnabled := flag.Bool("tracing-enabled", false, "Enables tracing through OpenTelemetry. It can be configured using the standard OpenTelemetry environment variables. https://github.com/open-telemetry/opentelemetry-specification/blob/v1.8.0/specification/protocol/exporter.md")
 	dir := flag.String("dir", ".", "directory to store node state in")
 	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service")
 	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service")
@@ -158,11 +159,13 @@ func main() {
 	}
 
 	// Init tracing.
-	shutdown, err := tracing.Init(workerCfg.ID)
-	if err != nil {
-		log.Fatal("failed to init tracing", err)
+	if *tracingEnabled {
+		shutdown, err := tracing.Init(workerCfg.ID)
+		if err != nil {
+			log.Fatal("failed to init tracing", err)
+		}
+		defer shutdown(context.Background())
 	}
-	defer shutdown(context.Background())
 
 	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
 		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
