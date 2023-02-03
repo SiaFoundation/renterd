@@ -197,13 +197,21 @@ func main() {
 		sub: make(map[string]treeMux),
 	}
 
+	renterdLog := filepath.Join(*dir, "renterd.log")
+	logger, closeFn, err := node.NewLogger(renterdLog)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer closeFn()
+
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		b, cleanup, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey())
+		b, cleanupFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanup()
+		defer cleanupFn()
+
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
 		busPassword = getAPIPassword()
@@ -212,11 +220,12 @@ func main() {
 
 	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
 	if workerAddr == "" {
-		w, cleanup, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey())
+		w, cleanupFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanup()
+		defer cleanupFn()
+
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
 		workerAddr = *apiAddr + "/api/worker"
 		workerPassword = getAPIPassword()
@@ -230,26 +239,16 @@ func main() {
 			log.Fatal(err)
 		}
 
-		autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
-		l, closeFn, err := node.NewLogger(autopilotLog)
-		if err != nil {
-			log.Fatal(err)
-		}
-
 		s, err := stores.NewJSONAutopilotStore(autopilotDir)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		ap, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, l)
+		ap, cleanupFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer func() {
-			cleanup()
-			_ = l.Sync() // ignore error
-			closeFn()
-		}()
+		defer cleanupFn()
 
 		go func() { autopilotErr <- ap.Run() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}

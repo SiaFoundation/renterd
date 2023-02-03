@@ -9,8 +9,6 @@ import (
 
 	"go.sia.tech/core/types"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -20,7 +18,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}

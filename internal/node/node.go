@@ -178,7 +178,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -232,7 +232,8 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 	}
 	dbConn := stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval)
+	sqlLogger := stores.NewSQLLogger(l.Named("db"), nil)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	} else if err := cs.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
@@ -246,7 +247,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings)
+	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, l)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -269,9 +270,9 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey) (http.Handler
 	return b, cleanup, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey) (http.Handler, func() error, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval, cfg.UploadSectorTimeout)
+	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval, cfg.UploadSectorTimeout, l)
 	return w, cleanup, err
 }
 
@@ -311,9 +312,14 @@ func NewLogger(path string) (*zap.Logger, func(), error) {
 		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel),
 	)
 
-	return zap.New(
+	logger := zap.New(
 		core,
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
-	), closeFn, nil
+	)
+
+	return logger, func() {
+		_ = logger.Sync() // ignore Error
+		closeFn()
+	}, nil
 }

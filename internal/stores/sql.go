@@ -2,14 +2,12 @@ package stores
 
 import (
 	"fmt"
-	"log"
-	"os"
 	"time"
 
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	glogger "gorm.io/gorm/logger"
 )
 
 type (
@@ -61,17 +59,7 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration) (*SQLStore, modules.ConsensusChangeID, error) {
-	logger := logger.New(
-		log.New(os.Stdout, "\r\n", log.LstdFlags),
-		logger.Config{
-			SlowThreshold:             200 * time.Millisecond,
-			LogLevel:                  logger.Warn,
-			IgnoreRecordNotFoundError: true,
-			Colorful:                  false,
-		},
-	)
-
+func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
 		DisableNestedTransaction: true,   // disable nesting transactions
 		PrepareStmt:              true,   // caches queries as prepared statements

@@ -140,7 +140,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second)
+	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestUploadDownload(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster, err := newTestCluster(t.TempDir(), zap.New(zapcore.NewNopCore()))
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,4 +304,19 @@ func TestEphemeralAccounts(t *testing.T) {
 	if !reflect.DeepEqual(accounts, accounts2) {
 		t.Fatal("worker's accounts weren't persisted")
 	}
+}
+
+// newTestLogger creates a console logger used for testing.
+func newTestLogger() *zap.Logger {
+	config := zap.NewProductionEncoderConfig()
+	config.EncodeTime = zapcore.RFC3339TimeEncoder
+	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	config.StacktraceKey = ""
+	consoleEncoder := zapcore.NewConsoleEncoder(config)
+
+	return zap.New(
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.ErrorLevel),
+		zap.AddCaller(),
+		zap.AddStacktrace(zapcore.ErrorLevel),
+	)
 }

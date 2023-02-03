@@ -20,6 +20,7 @@ import (
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
 	"go.sia.tech/renterd/wallet"
+	"go.uber.org/zap"
 )
 
 const (
@@ -126,6 +127,7 @@ type bus struct {
 	os  ObjectStore
 	ss  SettingStore
 
+	logger        *zap.SugaredLogger
 	accounts      *accounts
 	contractLocks *contractLocks
 }
@@ -799,7 +801,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings) (http.Handler, func() error, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, l *zap.Logger) (http.Handler, func() error, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
@@ -810,6 +812,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs
 		os:            os,
 		ss:            ss,
 		contractLocks: newContractLocks(),
+		logger:        l.Sugar().Named("bus"),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
