@@ -8,6 +8,8 @@ import (
 	"io"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
@@ -51,17 +53,29 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	worker := func() {
 		for r := range reqChan {
 			doneChan := make(chan struct{})
+
+			// Trace the upload.
+			ctx, span := tracing.Tracer.Start(ctx, "upload-request")
+			span.SetAttributes(attribute.String("host", r.host.PublicKey().String()))
+			span.SetAttributes(attribute.String("contract", r.host.Contract().String()))
+
 			go func(req req) {
 				defer close(doneChan)
 
 				lockID, err := locker.AcquireContract(ctx, req.host.Contract(), contractLockingUploadPriority, 30*time.Second)
 				if err != nil {
 					respChan <- resp{req, types.Hash256{}, err}
+					span.SetStatus(codes.Error, "acquiring the contract failed")
+					span.RecordError(err)
 					return
 				}
 				defer locker.ReleaseContract(ctx, req.host.Contract(), lockID)
 
 				root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+				if err != nil {
+					span.SetStatus(codes.Error, "uploading the sector failed")
+					span.RecordError(err)
+				}
 				respChan <- resp{req, root, err}
 			}(r)
 
@@ -69,6 +83,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 				timer := time.NewTimer(uploadSectorTimeout)
 				select {
 				case <-timer.C:
+					span.SetAttributes(attribute.Bool("slow", true))
 					respChan <- resp{
 						req: r,
 						err: errUploadSectorTimeout}
@@ -80,6 +95,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 			}
 
 			<-doneChan
+			span.End()
 		}
 	}
 
