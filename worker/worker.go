@@ -970,7 +970,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		masterKey:                 masterKey,
 		interactionsFlushInterval: interactionsFlushInterval,
 		uploadSectorTimeout:       uploadSectorTimeout,
-		logger:                    l.Sugar().Named(id),
+		logger:                    l.Sugar().Named("worker").Named(id),
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
