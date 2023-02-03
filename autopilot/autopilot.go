@@ -191,7 +191,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.TryPerformMigrations(ctx, cfg)
+			ap.m.tryPerformMigrations(ctx, cfg)
 		}()
 	}
 }
@@ -213,6 +213,15 @@ func (ap *Autopilot) Stop() error {
 func (ap *Autopilot) Trigger() bool {
 	select {
 	case ap.triggerChan <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (ap *Autopilot) isStopped() bool {
+	select {
+	case <-ap.stopChan:
 		return true
 	default:
 		return false

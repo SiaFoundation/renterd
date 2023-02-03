@@ -71,19 +71,11 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) isStopped() bool {
-	select {
-	case <-c.ap.stopChan:
-		return true
-	default:
-		return false
-	}
-}
-
 func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState) error {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
-	if !cs.Synced {
+
+	if c.ap.isStopped() || !cs.Synced {
 		return nil // skip contract maintenance if we're not synced
 	}
 
@@ -187,6 +179,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState) error {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performWalletMaintenance")
 	defer span.End()
+
+	if c.ap.isStopped() || !cs.Synced {
+		return nil // skip contract maintenance if we're not synced
+	}
 
 	c.logger.Info("performing wallet maintenance")
 	b := c.ap.bus
@@ -402,8 +398,8 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 	for h := 0; missing > 0 && h < len(candidates); h++ {
 		host := candidates[h]
 
-		// break if the contractor was stopped
-		if c.isStopped() {
+		// break if the autopilot is stopped
+		if c.ap.isStopped() {
 			break
 		}
 
@@ -443,8 +439,8 @@ func (c *contractor) runContractRenewals(ctx context.Context, cfg api.AutopilotC
 	for _, ci := range toRenew {
 		// TODO: keep track of consecutive failures and break at some point
 
-		// break if the contractor was stopped
-		if c.isStopped() {
+		// break if the autopilot is stopped
+		if c.ap.isStopped() {
 			break
 		}
 
@@ -482,8 +478,8 @@ func (c *contractor) runContractRefreshes(ctx context.Context, cfg api.Autopilot
 	for _, ci := range toRefresh {
 		// TODO: keep track of consecutive failures and break at some point
 
-		// break if the contractor was stopped
-		if c.isStopped() {
+		// break if the autopilot is stopped
+		if c.ap.isStopped() {
 			break
 		}
 
