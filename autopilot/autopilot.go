@@ -191,7 +191,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.TryPerformMigrations(cfg)
+			ap.m.TryPerformMigrations(ctx, cfg)
 		}()
 	}
 }

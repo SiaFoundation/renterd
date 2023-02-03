@@ -281,7 +281,6 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.H
 	var h dbHost
 
 	tx := ss.db.
-		WithContext(ctx).
 		Scopes(ExcludeBlockedHosts).
 		Where(&dbHost{PublicKey: publicKey(hostKey)}).
 		Take(&h)
@@ -304,7 +303,6 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	var hostAddresses []hostdb.HostAddress
 
 	err := ss.db.
-		WithContext(ctx).
 		Scopes(ExcludeBlockedHosts).
 		Model(&dbHost{}).
 		Where("last_scan < ?", maxLastScan.UnixNano()).
@@ -337,7 +335,6 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 	var fullHosts []dbHost
 
 	err := ss.db.
-		WithContext(ctx).
 		Scopes(ExcludeBlockedHosts).
 		Offset(offset).
 		Limit(limit).
@@ -355,17 +352,16 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 }
 
 func (ss *SQLStore) AddHostBlocklistEntry(ctx context.Context, entry string) error {
-	return ss.db.WithContext(ctx).Create(&dbBlocklistEntry{Entry: entry}).Error
+	return ss.db.Create(&dbBlocklistEntry{Entry: entry}).Error
 }
 
 func (db *SQLStore) RemoveHostBlocklistEntry(ctx context.Context, entry string) (err error) {
-	err = db.db.WithContext(ctx).Where(&dbBlocklistEntry{Entry: entry}).Delete(&dbBlocklistEntry{}).Error
+	err = db.db.Where(&dbBlocklistEntry{Entry: entry}).Delete(&dbBlocklistEntry{}).Error
 	return
 }
 
 func (db *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
 	err = db.db.
-		WithContext(ctx).
 		Model(&dbBlocklistEntry{}).
 		Pluck("entry", &blocklist).
 		Error
@@ -394,7 +390,7 @@ func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 	// transaction since we don't need it to be perfectly
 	// consistent.
 	var hosts []dbHost
-	if err := db.db.WithContext(ctx).Where("public_key IN ?", hks).
+	if err := db.db.Where("public_key IN ?", hks).
 		Find(&hosts).Error; err != nil {
 		return err
 	}
@@ -405,7 +401,7 @@ func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 
 	// Write the interactions and update to the hosts atmomically within a
 	// single transaction.
-	return db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return db.db.Transaction(func(tx *gorm.DB) error {
 		// Apply all the interactions to the hosts.
 		dbInteractions := make([]dbInteraction, 0, len(interactions))
 		for _, interaction := range interactions {

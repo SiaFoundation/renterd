@@ -163,7 +163,7 @@ func (s *SQLStore) List(ctx context.Context, path string) ([]string, error) {
 		Group("result")
 
 	var ids []string
-	err := outer.WithContext(ctx).Find(&ids).Error
+	err := outer.Find(&ids).Error
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (s *SQLStore) Put(ctx context.Context, key string, o object.Object, usedCon
 	}
 
 	// Put is ACID.
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
 		// slabs if it exists.
 		err := deleteObject(tx, key)
@@ -313,7 +313,7 @@ func (s *SQLStore) Put(ctx context.Context, key string, o object.Object, usedCon
 
 // Delete implements the bus.ObjectStore interface.
 func (s *SQLStore) Delete(ctx context.Context, key string) error {
-	return deleteObject(s.db.WithContext(ctx), key)
+	return deleteObject(s.db, key)
 }
 
 // deleteObject deletes an object from the store.
@@ -325,7 +325,6 @@ func deleteObject(tx *gorm.DB, key string) error {
 func (s *SQLStore) get(ctx context.Context, key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		WithContext(ctx).
 		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -356,7 +355,6 @@ func (ss *SQLStore) PutSlab(ctx context.Context, s object.Slab, usedContracts ma
 	// find all hosts
 	var dbHosts []dbHost
 	if err := ss.db.
-		WithContext(ctx).
 		Model(&dbHost{}).
 		Where("public_key IN (?)", hostkeys).
 		Find(&dbHosts).
@@ -367,7 +365,6 @@ func (ss *SQLStore) PutSlab(ctx context.Context, s object.Slab, usedContracts ma
 	// find all contracts
 	var dbContracts []dbContract
 	if err := ss.db.
-		WithContext(ctx).
 		Model(&dbContract{}).
 		Where("fcid IN (?)", fcids).
 		Find(&dbContracts).
@@ -387,7 +384,7 @@ func (ss *SQLStore) PutSlab(ctx context.Context, s object.Slab, usedContracts ma
 		contracts[fileContractID(dbContracts[i].FCID)] = &dbContracts[i]
 	}
 
-	return ss.db.WithContext(ctx).Transaction(func(tx *gorm.DB) (err error) {
+	return ss.db.Transaction(func(tx *gorm.DB) (err error) {
 		// find existing slab
 		var slab dbSlab
 		if err = tx.
@@ -466,7 +463,6 @@ func (s *SQLStore) SlabsForMigration(ctx context.Context, goodContracts []types.
 	}
 
 	if err := s.db.
-		WithContext(ctx).
 		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").

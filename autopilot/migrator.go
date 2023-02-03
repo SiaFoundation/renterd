@@ -29,7 +29,7 @@ func newMigrator(ap *Autopilot) *migrator {
 	}
 }
 
-func (m *migrator) TryPerformMigrations(cfg api.AutopilotConfig) {
+func (m *migrator) TryPerformMigrations(ctx context.Context, cfg api.AutopilotConfig) {
 	m.mu.Lock()
 	if m.running {
 		m.mu.Unlock()

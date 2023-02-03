@@ -106,7 +106,7 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, name string) (err error) {
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", name), []byte{}, nil)
 
-	req, err := http.NewRequest("PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, name), r)
+	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, name), r)
 	if err != nil {
 		panic(err)
 	}
