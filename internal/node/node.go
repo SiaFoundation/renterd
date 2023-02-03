@@ -311,9 +311,14 @@ func NewLogger(path string) (*zap.Logger, func(), error) {
 		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel),
 	)
 
-	return zap.New(
+	logger := zap.New(
 		core,
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
-	), closeFn, nil
+	)
+
+	return logger, func() {
+		_ = logger.Sync() // ignore Error
+		closeFn()
+	}, nil
 }

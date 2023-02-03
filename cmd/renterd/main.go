@@ -186,28 +186,20 @@ func main() {
 		sub: make(map[string]treeMux),
 	}
 
+	renterdLog := filepath.Join(*dir, "renterd.log")
+	logger, closeFn, err := node.NewLogger(renterdLog)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer closeFn()
+
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		busDir := filepath.Join(*dir, "bus")
-		if err := os.MkdirAll(busDir, 0700); err != nil {
-			log.Fatal(err)
-		}
-
-		busLog := filepath.Join(busDir, "bus.log")
-		l, closeFn, err := node.NewLogger(busLog)
+		b, cleanupFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		b, cleanup, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), l)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer func() {
-			cleanup()
-			_ = l.Sync() // ignore error
-			closeFn()
-		}()
+		defer cleanupFn()
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
@@ -217,26 +209,11 @@ func main() {
 
 	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
 	if workerAddr == "" {
-		workerDir := filepath.Join(*dir, "worker")
-		if err := os.MkdirAll(workerDir, 0700); err != nil {
-			log.Fatal(err)
-		}
-
-		workerLog := filepath.Join(workerDir, workerCfg.WorkerConfig.ID)
-		l, closeFn, err := node.NewLogger(workerLog)
+		w, cleanupFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		w, cleanup, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), l)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer func() {
-			cleanup()
-			_ = l.Sync() // ignore error
-			closeFn()
-		}()
+		defer cleanupFn()
 
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
 		workerAddr = *apiAddr + "/api/worker"
@@ -251,26 +228,16 @@ func main() {
 			log.Fatal(err)
 		}
 
-		autopilotLog := filepath.Join(autopilotDir, "autopilot.log")
-		l, closeFn, err := node.NewLogger(autopilotLog)
-		if err != nil {
-			log.Fatal(err)
-		}
-
 		s, err := stores.NewJSONAutopilotStore(autopilotDir)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		ap, cleanup, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, l)
+		ap, cleanupFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer func() {
-			cleanup()
-			_ = l.Sync() // ignore error
-			closeFn()
-		}()
+		defer cleanupFn()
 
 		go func() { autopilotErr <- ap.Run() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}
