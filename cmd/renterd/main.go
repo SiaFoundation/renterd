@@ -333,6 +333,8 @@ func main() {
 
 	// Execute all shutdown functions
 	for shutdowns.Len() > 0 {
-		heap.Pop(shutdowns).(*shutdownEntry).fn(context.Background())
+		if err := heap.Pop(shutdowns).(*shutdownEntry).fn(context.Background()); err != nil {
+			log.Println("Error during shutdown:", err)
+		}
 	}
 }
