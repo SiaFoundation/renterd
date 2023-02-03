@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	rhpv3 "go.sia.tech/renterd/rhp/v3"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 )
@@ -289,6 +290,8 @@ type worker struct {
 	interactionsFlushTimer    *time.Timer
 
 	uploadSectorTimeout time.Duration
+
+	logger *zap.SugaredLogger
 }
 
 func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) {
@@ -959,7 +962,7 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval, uploadSectorTimeout time.Duration) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval, uploadSectorTimeout time.Duration, l *zap.Logger) (http.Handler, func() error, error) {
 	w := &worker{
 		id:                        id,
 		bus:                       b,
@@ -967,6 +970,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		masterKey:                 masterKey,
 		interactionsFlushInterval: interactionsFlushInterval,
 		uploadSectorTimeout:       uploadSectorTimeout,
+		logger:                    l.Sugar().Named(fmt.Sprintf("worker_%s", id)),
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)

@@ -22,8 +22,8 @@ type gormLogger struct {
 	logger *zap.SugaredLogger
 }
 
-func NewLogger(l *zap.Logger, config *LoggerConfig) logger.Interface {
-	l = l.WithOptions(zap.AddCallerSkip(1))
+func NewSQLLogger(l *zap.Logger, config *LoggerConfig) logger.Interface {
+	l = l.WithOptions(zap.AddCallerSkip(3))
 
 	if config == nil {
 		config = &LoggerConfig{

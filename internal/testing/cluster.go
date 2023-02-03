@@ -194,7 +194,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 		InteractionFlushInterval: testInteractionsFlushInterval,
 		SessionReconnectTimeout:  10 * time.Second,
 		SessionTTL:               2 * time.Minute,
-	}, busClient, wk)
+	}, busClient, wk, logger)
 	if err != nil {
 		return nil, err
 	}

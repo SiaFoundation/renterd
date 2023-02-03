@@ -217,11 +217,27 @@ func main() {
 
 	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
 	if workerAddr == "" {
-		w, cleanup, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey())
+		workerDir := filepath.Join(*dir, "worker")
+		if err := os.MkdirAll(workerDir, 0700); err != nil {
+			log.Fatal(err)
+		}
+
+		workerLog := filepath.Join(workerDir, fmt.Sprintf("worker_%s.log", workerCfg.WorkerConfig.ID))
+		l, closeFn, err := node.NewLogger(workerLog)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanup()
+
+		w, cleanup, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), l)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer func() {
+			cleanup()
+			_ = l.Sync() // ignore error
+			closeFn()
+		}()
+
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
 		workerAddr = *apiAddr + "/api/worker"
 		workerPassword = getAPIPassword()

@@ -177,7 +177,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, logger *zap.Logger) (http.Handler, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -231,7 +231,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, logger *zap.L
 	}
 	dbConn := stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 
-	sqlLogger := stores.NewLogger(logger.Named("db"), nil)
+	sqlLogger := stores.NewSQLLogger(l.Named("db"), nil)
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, sqlLogger)
 	if err != nil {
 		return nil, nil, err
@@ -246,7 +246,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, logger *zap.L
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings)
+	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, l)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -269,9 +269,9 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, logger *zap.L
 	return b, cleanup, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey) (http.Handler, func() error, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval, cfg.UploadSectorTimeout)
+	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval, cfg.UploadSectorTimeout, l)
 	return w, cleanup, err
 }
 
