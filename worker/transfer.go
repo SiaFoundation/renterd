@@ -120,7 +120,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	rem := len(shards)
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
-		if errors.Is(resp.err, errUploadSectorTimeout) {
+		if !errors.Is(resp.err, errUploadSectorTimeout) {
 			inflight--
 		}
 
@@ -271,7 +271,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 	rem := ss.MinShards
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
-		if errors.Is(resp.err, errDownloadSectorTimeout) {
+		if !errors.Is(resp.err, errDownloadSectorTimeout) {
 			inflight--
 		}
 
