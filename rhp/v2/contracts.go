@@ -79,7 +79,10 @@ func ContractRenewalCost(fc types.FileContract, contractFee types.Currency) type
 // renewing a contract. It takes into account the host's max collateral setting
 // and ensures the total collateral does not exceed it.
 func ContractRenewalCollateral(fc types.FileContract, renterFunds types.Currency, host HostSettings, endHeight uint64) types.Currency {
-	extension := endHeight - fc.WindowEnd
+	if endHeight < fc.EndHeight() {
+		panic("endHeight should be at least the current end height of the contract")
+	}
+	extension := endHeight - fc.EndHeight()
 
 	// calculate cost per byte
 	costPerByte := host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice)
