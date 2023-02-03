@@ -129,7 +129,9 @@ func TestScanner(t *testing.T) {
 }
 
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
+	ap := &Autopilot{stopChan: make(chan struct{})}
 	return &scanner{
+		ap:     ap,
 		bus:    b,
 		worker: w,
 		logger: zap.New(zapcore.NewNopCore()).Sugar(),
