@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/heap"
 	"context"
 	"flag"
 	"fmt"
@@ -102,6 +103,51 @@ func flagCurrencyVar(c *types.Currency, name string, d types.Currency, usage str
 	flag.Var(newCurrencyVar(c, d), name, usage)
 }
 
+type (
+	shutdownFn    = func(context.Context) error
+	shutdownEntry struct {
+		fn       shutdownFn
+		priority int
+	}
+	shutdownFnHeap []*shutdownEntry
+)
+
+func (h *shutdownFnHeap) Register(fn shutdownFn, priority int) {
+	heap.Push(h, &shutdownEntry{
+		fn:       fn,
+		priority: priority,
+	})
+}
+
+func (h shutdownFnHeap) Len() int           { return len(h) }
+func (h shutdownFnHeap) Less(i, j int) bool { return h[i].priority > h[j].priority }
+func (h shutdownFnHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h shutdownFnHeap) Peek() *shutdownEntry {
+	if h.Len() == 0 {
+		return nil
+	}
+	return h[0]
+}
+
+func (h *shutdownFnHeap) Push(x interface{}) {
+	*h = append(*h, x.(*shutdownEntry))
+}
+
+func (h *shutdownFnHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+func withCtx(fn func() error) shutdownFn {
+	return func(_ context.Context) error {
+		return fn()
+	}
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -162,6 +208,9 @@ func main() {
 		return
 	}
 
+	// Register shutdowns in a priority heap so we can easily control the order
+	shutdowns := &shutdownFnHeap{}
+
 	// Alternative way to enable tracing.
 	if tracingStr := os.Getenv("RENTERD_TRACING_ENABLED"); tracingStr != "" {
 		_, err := fmt.Sscan(tracingStr, tracingEnabled)
@@ -176,7 +225,7 @@ func main() {
 		if err != nil {
 			log.Fatal("failed to init tracing", err)
 		}
-		defer shutdown(context.Background())
+		shutdowns.Register(shutdown, 0)
 	}
 
 	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
@@ -192,7 +241,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer l.Close()
+	shutdowns.Register(withCtx(l.Close), 98)
 	*apiAddr = "http://" + l.Addr().String()
 
 	auth := jape.BasicAuth(getAPIPassword())
@@ -201,12 +250,16 @@ func main() {
 		sub: make(map[string]treeMux),
 	}
 
+	// Create logger.
 	renterdLog := filepath.Join(*dir, "renterd.log")
 	logger, closeFn, err := node.NewLogger(renterdLog)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer closeFn()
+	shutdowns.Register((func(_ context.Context) error {
+		closeFn()
+		return nil
+	}), 0)
 
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
@@ -214,7 +267,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanupFn()
+		shutdowns.Register(withCtx(cleanupFn), 10)
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
@@ -228,7 +281,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanupFn()
+		shutdowns.Register(withCtx(cleanupFn), 20)
 
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
 		workerAddr = *apiAddr + "/api/worker"
@@ -252,7 +305,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanupFn()
+		shutdowns.Register(withCtx(cleanupFn), 100)
 
 		go func() { autopilotErr <- ap.Run() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}
@@ -273,8 +326,13 @@ func main() {
 	select {
 	case <-signalCh:
 		log.Println("Shutting down...")
-		srv.Shutdown(context.Background())
+		shutdowns.Register(srv.Shutdown, 99)
 	case err := <-autopilotErr:
 		log.Fatalln("Fatal autopilot error:", err)
+	}
+
+	// Execute all shutdown functions
+	for shutdowns.Len() > 0 {
+		heap.Pop(shutdowns).(*shutdownEntry).fn(context.Background())
 	}
 }
