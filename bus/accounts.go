@@ -4,9 +4,9 @@ import (
 	"math/big"
 	"sync"
 
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
 type accounts struct {

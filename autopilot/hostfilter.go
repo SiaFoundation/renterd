@@ -6,10 +6,10 @@ import (
 	"math"
 	"math/big"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
 )

@@ -5,9 +5,9 @@ import (
 	"math/big"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/siad/build"
 	"lukechampine.com/frand"
 )

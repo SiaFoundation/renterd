@@ -1,8 +1,8 @@
 package api
 
 import (
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 )
 
 type (

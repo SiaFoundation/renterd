@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -15,7 +16,6 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 )

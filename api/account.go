@@ -3,8 +3,8 @@ package api
 import (
 	"math/big"
 
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
 type (

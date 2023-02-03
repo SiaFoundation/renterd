@@ -3,9 +3,9 @@ package api
 import (
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
-	rhpv3 "go.sia.tech/renterd/rhp/v3"
 )
 
 // ContractsResponse is the response type for the /rhp/contracts/active endpoint.

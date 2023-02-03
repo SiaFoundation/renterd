@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/tracing"
-	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 )
@@ -580,7 +580,7 @@ func (c *contractor) runContractRefreshes(ctx context.Context, cfg api.Autopilot
 		newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, contract.EndHeight())
 
 		// do not refresh if the contract's updated collateral will fall below the threshold anyway
-		_, hostMissedPayout, _ := rhpv2.CalculatePayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
+		_, hostMissedPayout, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
 		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
 			c.logger.Errorw(fmt.Sprintf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
 			continue
