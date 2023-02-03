@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -23,8 +24,9 @@ const (
 )
 
 var (
-	errUnusedHost          = errors.New("host not used")
-	errUploadSectorTimeout = errors.New("upload sector timed out")
+	errUnusedHost            = errors.New("host not used")
+	errDownloadSectorTimeout = errors.New("download sector timed out")
+	errUploadSectorTimeout   = errors.New("upload sector timed out")
 )
 
 // A sectorStore stores contract data.
@@ -38,7 +40,7 @@ type sectorStore interface {
 
 func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStore, locker contractLocker, uploadSectorTimeout time.Duration) ([]object.Sector, []int, error) {
 	if len(hosts) < len(shards) {
-		return nil, nil, fmt.Errorf("fewer hosts than shards, %v<%v", len(hosts), len(shards))
+		return nil, nil, fmt.Errorf("not enough hosts to upload slab, %v<%v", len(hosts), len(shards))
 	}
 
 	type req struct {
@@ -187,14 +189,11 @@ func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStor
 	return s, length, slowHosts, nil
 }
 
-func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sectorStore, locker contractLocker) ([][]byte, error) {
+func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sectorStore, locker contractLocker, downloadSectorTimeout time.Duration) ([][]byte, []int, error) {
 	// check whether we can recover the slab
 	if len(hosts) < int(ss.MinShards) {
-		return nil, errors.New("not enough hosts to recover shard")
+		return nil, nil, errors.New("not enough hosts to recover slab")
 	}
-
-	// randomize hosts so we don't always download from the same ones
-	frand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
 	type req struct {
 		hostIndex int
@@ -208,29 +207,52 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 	defer close(reqChan)
 	respChan := make(chan resp, ss.MinShards)
 	worker := func() {
-		for req := range reqChan {
-			h := hosts[req.hostIndex]
-			var shard *object.Sector
-			for i := range ss.Shards {
-				if ss.Shards[i].Host == h.PublicKey() {
-					shard = &ss.Shards[i]
-					break
+		for r := range reqChan {
+			doneChan := make(chan struct{})
+
+			go func(req req) {
+				defer close(doneChan)
+
+				h := hosts[req.hostIndex]
+				var shard *object.Sector
+				for i := range ss.Shards {
+					if ss.Shards[i].Host == h.PublicKey() {
+						shard = &ss.Shards[i]
+						break
+					}
+				}
+				if shard == nil {
+					respChan <- resp{req, nil, fmt.Errorf("host %v, err: %w", h.PublicKey(), errUnusedHost)}
+					return
+				}
+
+				offset, length := ss.SectorRegion()
+				var buf bytes.Buffer
+				lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
+				if err != nil {
+					respChan <- resp{req, nil, err}
+					return
+				}
+				err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
+				locker.ReleaseContract(ctx, h.Contract(), lockID)
+				respChan <- resp{req, buf.Bytes(), err}
+			}(r)
+
+			if downloadSectorTimeout > 0 {
+				timer := time.NewTimer(downloadSectorTimeout)
+				select {
+				case <-timer.C:
+					respChan <- resp{
+						req: r,
+						err: errDownloadSectorTimeout}
+				case <-doneChan:
+					if !timer.Stop() {
+						<-timer.C
+					}
 				}
 			}
-			if shard == nil {
-				respChan <- resp{req, nil, fmt.Errorf("host %v, err: %w", h.PublicKey(), errUnusedHost)}
-				continue
-			}
-			offset, length := ss.SectorRegion()
-			var buf bytes.Buffer
-			lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
-			if err != nil {
-				respChan <- resp{req, nil, err}
-				return
-			}
-			err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
-			locker.ReleaseContract(ctx, h.Contract(), lockID)
-			respChan <- resp{req, buf.Bytes(), err}
+
+			<-doneChan
 		}
 	}
 
@@ -249,7 +271,9 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 	rem := ss.MinShards
 	for rem > 0 && inflight > 0 {
 		resp := <-respChan
-		inflight--
+		if errors.Is(resp.err, errDownloadSectorTimeout) {
+			inflight--
+		}
 
 		if resp.err != nil {
 			errs = append(errs, &HostError{hosts[resp.req.hostIndex].PublicKey(), resp.err})
@@ -261,7 +285,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			}
 		} else {
 			for i := range ss.Shards {
-				if ss.Shards[i].Host == hosts[resp.req.hostIndex].PublicKey() {
+				if ss.Shards[i].Host == hosts[resp.req.hostIndex].PublicKey() && len(shards[i]) == 0 {
 					shards[i] = resp.shard
 					rem--
 					break
@@ -270,25 +294,43 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 		}
 	}
 	if rem > 0 {
-		return nil, errs
+		return nil, nil, errs
 	}
-	return shards, nil
+
+	// make hosts map
+	hostsMap := make(map[types.PublicKey]int)
+	for i, h := range hosts {
+		hostsMap[h.PublicKey()] = i
+	}
+
+	// collect slow host indices
+	var slowHosts []int
+	for _, he := range errs {
+		if errors.Is(he, errDownloadSectorTimeout) {
+			if _, exists := hostsMap[he.HostKey]; !exists {
+				panic("host not found in hostsmap")
+			}
+			slowHosts = append(slowHosts, hostsMap[he.HostKey])
+		}
+	}
+
+	return shards, slowHosts, nil
 }
 
-func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore, locker contractLocker) error {
+func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore, locker contractLocker, downloadSectorTimeout time.Duration) ([]int, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "parallelDownloadSlab")
 	defer span.End()
 
-	shards, err := parallelDownloadSlab(ctx, ss, hosts, locker)
+	shards, slowHosts, err := parallelDownloadSlab(ctx, ss, hosts, locker, downloadSectorTimeout)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ss.Decrypt(shards)
 	err = ss.Recover(w, shards)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return slowHosts, nil
 }
 
 // slabsForDownload returns the slices that comprise the specified offset-length
@@ -354,7 +396,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 	return nil
 }
 
-func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker, uploadSectorTimeout time.Duration) error {
+func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration) error {
 	hostsMap := make(map[string]struct{})
 	usedMap := make(map[string]struct{})
 
@@ -400,7 +442,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 		Offset: 0,
 		Length: uint32(s.MinShards) * rhpv2.SectorSize,
 	}
-	shards, err := parallelDownloadSlab(ctx, ss, hosts, locker)
+	shards, slowHosts, err := parallelDownloadSlab(ctx, ss, hosts, locker, downloadSectorTimeout)
 	if err != nil {
 		return err
 	}
@@ -426,6 +468,15 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 
 	// randomize order of hosts to make sure we don't migrate to the same hosts all the time
 	frand.Shuffle(len(filtered), func(i, j int) { filtered[i], filtered[j] = filtered[j], filtered[i] })
+
+	// move slow hosts to the back of the array
+	slow := make(map[types.PublicKey]int)
+	for _, h := range slowHosts {
+		slow[hosts[h].PublicKey()]++
+	}
+	sort.SliceStable(hosts, func(i, j int) bool {
+		return slow[hosts[i].PublicKey()] < slow[hosts[j].PublicKey()]
+	})
 
 	// reupload those shards
 	uploaded, _, err := parallelUploadSlab(ctx, shards, filtered, locker, uploadSectorTimeout)
