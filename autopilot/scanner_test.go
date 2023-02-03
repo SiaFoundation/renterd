@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -18,7 +19,7 @@ type mockBus struct {
 	reqs  []string
 }
 
-func (b *mockBus) Hosts(offset, limit int) ([]hostdb.Host, error) {
+func (b *mockBus) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
 	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", offset, offset+limit))
 
 	start := offset
@@ -34,8 +35,8 @@ func (b *mockBus) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	return b.hosts[start:end], nil
 }
 
-func (b *mockBus) HostsForScanning(_ time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
-	hosts, err := b.Hosts(offset, limit)
+func (b *mockBus) HostsForScanning(ctx context.Context, _ time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
+	hosts, err := b.Hosts(ctx, offset, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +57,7 @@ type mockWorker struct {
 	scanCount int
 }
 
-func (w *mockWorker) RHPScan(hostKey types.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
+func (w *mockWorker) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
 	if w.blockChan != nil {
 		<-w.blockChan
 	}
@@ -84,7 +85,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	s.tryPerformHostScan()
+	s.tryPerformHostScan(context.Background())
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -112,7 +113,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.tryPerformHostScan()
+	s.tryPerformHostScan(context.Background())
 	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -121,7 +122,7 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// assert it started a host scan
-	s.tryPerformHostScan()
+	s.tryPerformHostScan(context.Background())
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}

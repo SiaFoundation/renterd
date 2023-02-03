@@ -8,7 +8,10 @@ import (
 	"io"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
 	rhpv2 "go.sia.tech/renterd/rhp/v2"
 	"lukechampine.com/frand"
@@ -50,17 +53,29 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	worker := func() {
 		for r := range reqChan {
 			doneChan := make(chan struct{})
+
+			// Trace the upload.
+			ctx, span := tracing.Tracer.Start(ctx, "upload-request")
+			span.SetAttributes(attribute.Stringer("host", r.host.PublicKey()))
+			span.SetAttributes(attribute.Stringer("contract", r.host.Contract()))
+
 			go func(req req) {
 				defer close(doneChan)
 
 				lockID, err := locker.AcquireContract(ctx, req.host.Contract(), contractLockingUploadPriority, 30*time.Second)
 				if err != nil {
 					respChan <- resp{req, types.Hash256{}, err}
+					span.SetStatus(codes.Error, "acquiring the contract failed")
+					span.RecordError(err)
 					return
 				}
-				defer locker.ReleaseContract(req.host.Contract(), lockID)
+				defer locker.ReleaseContract(ctx, req.host.Contract(), lockID)
 
 				root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
+				if err != nil {
+					span.SetStatus(codes.Error, "uploading the sector failed")
+					span.RecordError(err)
+				}
 				respChan <- resp{req, root, err}
 			}(r)
 
@@ -68,6 +83,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 				timer := time.NewTimer(uploadSectorTimeout)
 				select {
 				case <-timer.C:
+					span.SetAttributes(attribute.Bool("slow", true))
 					respChan <- resp{
 						req: r,
 						err: errUploadSectorTimeout}
@@ -79,6 +95,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 			}
 
 			<-doneChan
+			span.End()
 		}
 	}
 
@@ -142,6 +159,9 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 }
 
 func uploadSlab(ctx context.Context, r io.Reader, m, n uint8, hosts []sectorStore, locker contractLocker, uploadSectorTimeout time.Duration) (object.Slab, int, []int, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
+	defer span.End()
+
 	buf := make([]byte, int(m)*rhpv2.SectorSize)
 	shards := make([][]byte, n)
 	length, err := io.ReadFull(r, buf)
@@ -206,7 +226,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 				return
 			}
 			err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
-			locker.ReleaseContract(h.Contract(), lockID)
+			locker.ReleaseContract(ctx, h.Contract(), lockID)
 			respChan <- resp{req, buf.Bytes(), err}
 		}
 	}
@@ -253,6 +273,9 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 }
 
 func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore, locker contractLocker) error {
+	ctx, span := tracing.Tracer.Start(ctx, "parallelDownloadSlab")
+	defer span.End()
+
 	shards, err := parallelDownloadSlab(ctx, ss, hosts, locker)
 	if err != nil {
 		return err

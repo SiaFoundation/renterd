@@ -2,12 +2,14 @@ package tracing
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
@@ -53,17 +55,25 @@ func Init(workerID string) (func(ctx context.Context) error, error) {
 	)
 	otel.SetTracerProvider(provider)
 
+	// Set TextMapPropagator. That's the component that defines how contexts are
+	// propagated over http.
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
 	// Set global tracer.
 	Tracer = otel.Tracer(service)
+
+	// Overwrite the default transport to make sure all requests attach tracing
+	// headers.
+	http.DefaultTransport = otelhttp.NewTransport(http.DefaultTransport)
 
 	return provider.Shutdown, nil
 }
 
 // TracedHandler attaches a tracing handler to http routes.
-func TracedRoutes(routes map[string]jape.Handler) map[string]jape.Handler {
+func TracedRoutes(component string, routes map[string]jape.Handler) map[string]jape.Handler {
 	adapt := func(route string, h jape.Handler) jape.Handler {
 		return jape.Adapt(func(h http.Handler) http.Handler {
-			return otelhttp.NewHandler(h, route)
+			return otelhttp.NewHandler(h, fmt.Sprintf("%s: %s", component, route))
 		})(h)
 	}
 	for route, handler := range routes {

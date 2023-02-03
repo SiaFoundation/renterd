@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -276,7 +277,7 @@ func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
 }
 
 // Host returns information about a host.
-func (ss *SQLStore) Host(hostKey types.PublicKey) (hostdb.Host, error) {
+func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error) {
 	var h dbHost
 
 	tx := ss.db.
@@ -290,7 +291,7 @@ func (ss *SQLStore) Host(hostKey types.PublicKey) (hostdb.Host, error) {
 }
 
 // HostsForScanning returns the address of hosts for scanning.
-func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
+func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -325,7 +326,7 @@ func (ss *SQLStore) HostsForScanning(maxLastScan time.Time, offset, limit int) (
 }
 
 // Hosts returns hosts at given offset and limit.
-func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
+func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -350,23 +351,16 @@ func (ss *SQLStore) Hosts(offset, limit int) ([]hostdb.Host, error) {
 	return hosts, err
 }
 
-func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
-	var h dbHost
-	err := tx.Where("public_key", publicKey(hostKey)).
-		Take(&h).Error
-	return h, err
-}
-
-func (ss *SQLStore) AddHostBlocklistEntry(entry string) error {
+func (ss *SQLStore) AddHostBlocklistEntry(ctx context.Context, entry string) error {
 	return ss.db.Create(&dbBlocklistEntry{Entry: entry}).Error
 }
 
-func (db *SQLStore) RemoveHostBlocklistEntry(entry string) (err error) {
+func (db *SQLStore) RemoveHostBlocklistEntry(ctx context.Context, entry string) (err error) {
 	err = db.db.Where(&dbBlocklistEntry{Entry: entry}).Delete(&dbBlocklistEntry{}).Error
 	return
 }
 
-func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
+func (db *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
 	err = db.db.
 		Model(&dbBlocklistEntry{}).
 		Pluck("entry", &blocklist).
@@ -376,7 +370,7 @@ func (db *SQLStore) HostBlocklist() (blocklist []string, err error) {
 
 // RecordHostInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
-func (db *SQLStore) RecordInteractions(interactions []hostdb.Interaction) error {
+func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
 	if len(interactions) == 0 {
 		return nil // nothing to do
 	}

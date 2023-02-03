@@ -1,6 +1,8 @@
 package autopilot
 
 import (
+	"context"
+
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -27,8 +29,8 @@ func (c *contractor) updateCurrentPeriod(cfg api.AutopilotConfig, cs api.Consens
 	}
 }
 
-func (c *contractor) contractSpending(contract api.Contract, currentPeriod uint64) (api.ContractSpending, error) {
-	ancestors, err := c.ap.bus.AncestorContracts(contract.ID, currentPeriod)
+func (c *contractor) contractSpending(ctx context.Context, contract api.Contract, currentPeriod uint64) (api.ContractSpending, error) {
+	ancestors, err := c.ap.bus.AncestorContracts(ctx, contract.ID, currentPeriod)
 	if err != nil {
 		return api.ContractSpending{}, err
 	}

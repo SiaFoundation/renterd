@@ -37,24 +37,24 @@ func TestClient(t *testing.T) {
 	go serveFn()
 
 	// assert setting 'foo' is not found
-	if _, err := c.Setting("foo"); err == nil || !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
+	if _, err := c.Setting(ctx, "foo"); err == nil || !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
 		t.Fatal("unexpected err", err)
 	}
 
 	// update setting 'foo'
-	if err := c.UpdateSetting("foo", "bar"); err != nil {
+	if err := c.UpdateSetting(ctx, "foo", "bar"); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch setting 'foo' and assert it matches
-	if value, err := c.Setting("foo"); err != nil {
+	if value, err := c.Setting(ctx, "foo"); err != nil {
 		t.Fatal("unexpected err", err)
 	} else if value != "bar" {
 		t.Fatal("unexpected result", value)
 	}
 
 	// fetch redundancy settings and assert they're configured to the default values
-	if rs, err := c.RedundancySettings(); err != nil {
+	if rs, err := c.RedundancySettings(ctx); err != nil {
 		t.Fatal(err)
 	} else if rs.MinShards != defaultSettings.MinShards || rs.TotalShards != defaultSettings.TotalShards {
 		t.Fatal("unexpected redundancy settings", rs)

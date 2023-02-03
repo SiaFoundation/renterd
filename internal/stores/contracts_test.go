@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -97,11 +98,12 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Look it up. Should fail.
-	_, err = cs.Contract(c.ID())
+	ctx := context.Background()
+	_, err = cs.Contract(ctx, c.ID())
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := cs.ActiveContracts()
+	contracts, err := cs.ActiveContracts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +114,12 @@ func TestSQLContractStore(t *testing.T) {
 	// Insert it.
 	totalCost := types.NewCurrency64(456)
 	startHeight := uint64(100)
-	if _, err := cs.AddContract(c, totalCost, startHeight); err != nil {
+	if _, err := cs.AddContract(ctx, c, totalCost, startHeight); err != nil {
 		t.Fatal(err)
 	}
 
 	// Look it up again.
-	fetched, err := cs.Contract(c.ID())
+	fetched, err := cs.Contract(ctx, c.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +139,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
 	}
-	contracts, err = cs.ActiveContracts()
+	contracts, err = cs.ActiveContracts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,29 +151,29 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add a contract set with our contract and assert we can fetch it using the set name
-	if err := cs.SetContractSet("foo", []types.FileContractID{contracts[0].ID}); err != nil {
+	if err := cs.SetContractSet(ctx, "foo", []types.FileContractID{contracts[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	if contracts, err := cs.Contracts("foo"); err != nil {
+	if contracts, err := cs.Contracts(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := cs.Contracts("bar"); err != ErrContractSetNotFound {
+	if _, err := cs.Contracts(ctx, "bar"); err != ErrContractSetNotFound {
 		t.Fatal(err)
 	}
 
 	// Delete the contract.
-	if err := cs.RemoveContract(c.ID()); err != nil {
+	if err := cs.RemoveContract(ctx, c.ID()); err != nil {
 		t.Fatal(err)
 	}
 
 	// Look it up. Should fail.
-	_, err = cs.Contract(c.ID())
+	_, err = cs.Contract(ctx, c.ID())
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = cs.ActiveContracts()
+	contracts, err = cs.ActiveContracts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +247,8 @@ func TestRenewedContract(t *testing.T) {
 	}
 	oldContractTotal := types.NewCurrency64(111)
 	oldContractStartHeight := uint64(100)
-	added, err := cs.AddContract(c, oldContractTotal, oldContractStartHeight)
+	ctx := context.Background()
+	added, err := cs.AddContract(ctx, c, oldContractTotal, oldContractStartHeight)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,18 +272,18 @@ func TestRenewedContract(t *testing.T) {
 	}
 	newContractTotal := types.NewCurrency64(222)
 	newContractStartHeight := uint64(200)
-	if _, err := cs.AddRenewedContract(renewed, newContractTotal, newContractStartHeight, fcid); err != nil {
+	if _, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid); err != nil {
 		t.Fatal(err)
 	}
 
 	// Contract should be gone from active contracts.
-	_, err = cs.Contract(fcid)
+	_, err = cs.Contract(ctx, fcid)
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
 
 	// New contract should exist.
-	newContract, err := cs.Contract(fcid2)
+	newContract, err := cs.Contract(ctx, fcid2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +347,7 @@ func TestRenewedContract(t *testing.T) {
 	newContractStartHeight = uint64(300)
 
 	// Assert the renewed contract is returned
-	renewedContract, err := cs.AddRenewedContract(renewed, newContractTotal, newContractStartHeight, fcid2)
+	renewedContract, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +384,7 @@ func TestAncestorsContracts(t *testing.T) {
 	// Fetch the ancestors but only the ones with a startHeight >= 1. That
 	// should return 2 contracts. The active one with height 3 isn't
 	// returned and the one with height 0 is also not returned.
-	contracts, err := cs.AncestorContracts(fcids[len(fcids)-1], 1)
+	contracts, err := cs.AncestorContracts(context.Background(), fcids[len(fcids)-1], 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,12 +420,12 @@ func (s *SQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.FileC
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
-	return s.AddContract(rev, types.ZeroCurrency, 0)
+	return s.AddContract(context.Background(), rev, types.ZeroCurrency, 0)
 }
 
 func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
-	return s.AddRenewedContract(rev, types.ZeroCurrency, startHeight, renewedFrom)
+	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, startHeight, renewedFrom)
 }
 
 func (s *SQLStore) contractsCount() (cnt int64, err error) {

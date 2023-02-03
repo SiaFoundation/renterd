@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"math/big"
 	"sync"
@@ -107,7 +108,7 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 
 // WithDeposit increases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
-func (a *account) WithDeposit(amtFn func() (types.Currency, error)) error {
+func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency, error)) error {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	amt, err := amtFn()
@@ -115,12 +116,12 @@ func (a *account) WithDeposit(amtFn func() (types.Currency, error)) error {
 		return err
 	}
 	a.balance = a.balance.Add(a.balance, amt.Big())
-	return a.bus.AddBalance(a.id, a.owner, a.host, amt.Big())
+	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, amt.Big())
 }
 
 // WithWithdrawal decreases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
-func (a *account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
+func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Currency, error)) error {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	amt, err := amtFn()
@@ -128,16 +129,16 @@ func (a *account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 		return err
 	}
 	a.balance = a.balance.Sub(a.balance, amt.Big())
-	return a.bus.AddBalance(a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
+	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is
 // locked while the balance is fetched through balanceFn.
-func (a *account) WithSync(balanceFn func() types.Currency) error {
+func (a *account) WithSync(ctx context.Context, balanceFn func() types.Currency) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.balance = balanceFn().Big()
-	err := a.bus.SetBalance(a.id, a.owner, a.host, a.balance)
+	err := a.bus.SetBalance(ctx, a.id, a.owner, a.host, a.balance)
 	return err
 }
 
@@ -149,7 +150,7 @@ func (a *accounts) tryInitAccounts() error {
 		return nil // already initialised
 	}
 	a.accounts = make(map[rhpv3.Account]*account)
-	accounts, err := a.store.Accounts(a.workerID)
+	accounts, err := a.store.Accounts(context.Background(), a.workerID)
 	if err != nil {
 		return err
 	}
