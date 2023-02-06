@@ -170,10 +170,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	)
 
 	// update contract set
-	if len(contractset) < int(rs.TotalShards) {
-		c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
+	if !c.ap.isStopped() {
+		if len(contractset) < int(rs.TotalShards) {
+			c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
+		}
+		return c.ap.bus.SetContractSet(ctx, cfg.Contracts.Set, contractset)
 	}
-	return c.ap.bus.SetContractSet(ctx, cfg.Contracts.Set, contractset)
+	return nil
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState) error {
@@ -245,6 +248,9 @@ func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.Autop
 }
 
 func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+	if c.ap.isStopped() {
+		return
+	}
 	c.logger.Debug("running contract checks")
 
 	var notfound int
@@ -356,6 +362,9 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
+	if c.ap.isStopped() {
+		return nil, nil
+	}
 	var formed []types.FileContractID
 
 	c.logger.Debugw(
