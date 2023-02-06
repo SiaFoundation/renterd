@@ -16,6 +16,15 @@ type EncryptionKey struct {
 	entropy *[32]byte
 }
 
+// String implements fmt.Stringer.
+func (k EncryptionKey) String() string {
+	b, err := k.MarshalText()
+	if err != nil {
+		panic("failed to marshal key")
+	}
+	return string(b)
+}
+
 // MarshalText implements the encoding.TextMarshaler interface.
 func (k EncryptionKey) MarshalText() ([]byte, error) {
 	return []byte("key:" + hex.EncodeToString(k.entropy[:])), nil

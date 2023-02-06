@@ -101,6 +101,11 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		}
 	}
 
+	// Ensure the join table has an index on `db_host_id`.
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS `idx_host_blocklist_entry_hosts` ON `host_blocklist_entry_hosts`(`db_host_id`)").Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+
 	// Get latest consensus change ID or init db.
 	var ci dbConsensusInfo
 	err = db.Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).

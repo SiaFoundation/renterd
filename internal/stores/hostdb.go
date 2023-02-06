@@ -248,14 +248,12 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) (err error) {
 		"like_entry":  fmt.Sprintf("%%.%s", e.Entry),
 	}
 
-	err = tx.Exec(`
-	INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-	SELECT @entry_id, id FROM (
-		SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
-		FROM hosts
-		WHERE net_host == @exact_entry OR net_host LIKE @like_entry
-	)
-	`, params).Error
+	err = tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+	SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
+	FROM hosts
+	WHERE net_host == @exact_entry OR net_host LIKE @like_entry
+)`, params).Error
 	return
 }
 
