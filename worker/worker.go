@@ -291,7 +291,8 @@ type worker struct {
 	interactionsFlushInterval time.Duration
 	interactionsFlushTimer    *time.Timer
 
-	uploadSectorTimeout time.Duration
+	downloadSectorTimeout time.Duration
+	uploadSectorTimeout   time.Duration
 
 	logger *zap.SugaredLogger
 }
@@ -687,7 +688,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
 	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts, w.bus, w.uploadSectorTimeout)
+		return migrateSlab(ctx, &slab, hosts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -759,6 +760,9 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 
+	// keep track of slow hosts so we can avoid them in consecutive slab uploads
+	slow := make(map[types.PublicKey]int)
+
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
 	for _, ss := range slabsForDownload(o.Slabs, offset, length) {
 		contracts, err := w.bus.ContractsForSlab(ctx, ss.Shards, dp.ContractSet)
@@ -773,8 +777,20 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return
 		}
 
+		// randomize order of contracts so we don't always download from the same hosts
+		frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
+
+		// move slow hosts to the back of the array
+		sort.SliceStable(contracts, func(i, j int) bool {
+			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
+		})
+
 		err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-			return downloadSlab(ctx, cw, ss, hosts, &tracedContractLocker{w.bus})
+			slowHosts, err := downloadSlab(ctx, cw, ss, hosts, &tracedContractLocker{w.bus}, w.downloadSectorTimeout)
+			for _, h := range slowHosts {
+				slow[hosts[h].PublicKey()]++
+			}
+			return err
 		})
 		if err != nil {
 			_ = err // NOTE: can't write error because we may have already written to the response
@@ -949,13 +965,14 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval, uploadSectorTimeout time.Duration, l *zap.Logger) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) (http.Handler, func() error, error) {
 	w := &worker{
 		id:                        id,
 		bus:                       b,
 		pool:                      newSessionPool(sessionReconectTimeout, sessionTTL),
 		masterKey:                 masterKey,
 		interactionsFlushInterval: interactionsFlushInterval,
+		downloadSectorTimeout:     downloadSectorTimeout,
 		uploadSectorTimeout:       uploadSectorTimeout,
 		logger:                    l.Sugar().Named("worker").Named(id),
 	}
