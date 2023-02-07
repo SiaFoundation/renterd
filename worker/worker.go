@@ -726,6 +726,10 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		jc.Encode(es)
 		return
 	}
+	if len(o.Slabs) == 0 {
+		jc.Error(errors.New("object has no data"), http.StatusInternalServerError)
+		return
+	}
 
 	dp, err := w.bus.DownloadParams(ctx)
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
