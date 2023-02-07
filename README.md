@@ -148,3 +148,18 @@ The Sia Foundation does not ship `renterd` with a default blocklist, the followi
 ## Logging
 
 `renterd` has both console and file logging, the logs are stored in `renterd.log` and contain logs from all of the components that are enabled, e.g. if only the `bus` and `worker` are enabled it will only contain the logs from those two components.
+
+## Debug
+
+### Contract Set Contracts
+
+The autopilot forms and manages contracts in the contract set with name configured in the autopilot's configuration object, by default this is called the `autopilot` contract set. This contract set should contain the amount of contracts configured in the contracts sectino of the configuration.
+
+That means that, if everything is running smoothly, the following curl call should return that number:
+`curl -u ":[YOUR_PASSWORD]"  [BASE_URL]/api/bus/contracts/set/autopilot | jq '.|length'`
+
+### Autopilot Trigger
+
+For debugging purposes, the autopilot allows triggering the main loop using the following endpoint:
+
+- `POST /api/autopilot/debug/trigger`
