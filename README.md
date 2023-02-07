@@ -60,3 +60,91 @@ Run `renterd` in the background as a container named `renterd` that exposes its
 API to the host system and the gateway to the world.
 
 `docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_WALLET_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp <IMAGE_ID>`
+
+# Usage
+
+## Wallet
+
+Make sure the wallet is funded. Fetch the wallet's address and transfer some money. Verify the wallet's balance is not zero using the following endpoints:
+
+- `GET /api/bus/wallet/address`
+- `GET /api/bus/wallet/balance`
+
+The autopilot will automatically redistribute the wallet funds over a certain of outputs that make sense with regards to the autopilot's configuration. Contract formation and renewals work best when the autopilot has a good amount of outputs at its disposal. It's definitely a good idea to verify whether this is the case because if not it means that it's likely the autopilot is misconfigured, in which case the logs should be of help.
+
+- `GET /api/bus/wallet/outputs`
+
+## Consensus
+
+In order for the contracts to get formed, your node has to be synced with the blockchain. If you are not bootstrapping your node this can take a while. Verify your node's consensus state using the following endpoint:
+
+- `GET /api/bus/consensus/state`
+
+## Config
+
+To have a working autopilot, it must be configured with a sane config. The
+autopilot's configuration is configurable through the following endpoints:
+
+- `GET /api/autopilot/config`
+- `PUT /api/autopilot/config`
+
+Especially the `contracts` section is important, make sure the `amount` is set to the amount of hosts with which you want to form a contract. The `allowance` is the amount of money the autopilot can spend per period, make sure it is not set to zero or contracts won't get formed.
+
+```json
+{
+	"wallet": {
+		"defragThreshold": 1000
+	},
+	"hosts": {
+		"ignoreRedundantIPs": false,
+		"scoreOverrides": {}
+	},
+	"contracts": {
+		"set": "autopilot",
+		"amount": 50,
+		"allowance": "10000000000000000000000000000",
+		"period": 6048,
+		"renewWindow": 2016,
+		"download": 1099511627776,
+		"upload": 1099511627776,
+		"storage": 1099511627776
+	}
+}
+```
+
+## Redundancy
+
+The redundancy is configurable in a couple of ways, the first one is through two CLI options:
+
+- **`bus.minShards`**: min amount of shards needed to reconstruct the slab
+- **`bus.totalShards`**: total amount of shards for each slab
+
+The default redundancy is 30-10. The redunancy can be updated using the settings API:
+
+- `GET /api/bus/setting/redundancy`
+- `PUT /api/bus/setting/redundancy`
+
+Lastly, the redundancy can be passed through query string parameters on the
+upload endpoint in the worker API:
+
+- `PUT /api/worker/objects/foo?minshards=2&totalshards=5`
+
+It is important to note that on every restart of `renterd` the setting is overwritten with the default values, if you want to run `renterd` using a redundancy which is not the default we advise to use the CLI options.
+
+## Blocklist
+
+Unfortunately the Sia blockchain contains a large amount of hosts that announced themselves with faulty parameters and/or bad intentions, something which is unavoidable of course in a decentralized environment. To make sure the autopilot does not have to scan/loop through all ~80.000 hosts on every iteration of the loop, we added a blocklist.
+
+- `GET /api/bus/hosts/blocklist`
+- `PUT /api/bus/hosts/blocklist`
+
+The Sia Foundation does not ship `renterd` with a default blocklist, the following entries exclude a decent amount of bad/old/malicious hosts:
+
+- 45.148.30.56
+- 51.158.108.244
+- siacentral.ddnsfree.com
+- siacentral.mooo.com
+
+## Logging
+
+`renterd` has both console and file logging, the logs are stored in `renterd.log` and contain logs from all of the components that are enabled, e.g. if only the `bus` and `worker` are enabled it will only contain the logs from those two components.
