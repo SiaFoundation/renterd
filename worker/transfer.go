@@ -210,6 +210,11 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 		for r := range reqChan {
 			doneChan := make(chan struct{})
 
+			// Trace the download.
+			ctx, span := tracing.Tracer.Start(ctx, "download-request")
+			span.SetAttributes(attribute.Stringer("host", hosts[r.hostIndex].PublicKey()))
+			span.SetAttributes(attribute.Stringer("contract", hosts[r.hostIndex].Contract()))
+
 			go func(req req) {
 				defer close(doneChan)
 
@@ -231,9 +236,15 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 				lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
 				if err != nil {
 					respChan <- resp{req, nil, err}
+					span.SetStatus(codes.Error, "acquiring the contract failed")
+					span.RecordError(err)
 					return
 				}
 				err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
+				if err != nil {
+					span.SetStatus(codes.Error, "downloading the sector failed")
+					span.RecordError(err)
+				}
 				locker.ReleaseContract(ctx, h.Contract(), lockID)
 				respChan <- resp{req, buf.Bytes(), err}
 			}(r)
@@ -242,6 +253,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 				timer := time.NewTimer(downloadSectorTimeout)
 				select {
 				case <-timer.C:
+					span.SetAttributes(attribute.Bool("slow", true))
 					respChan <- resp{
 						req: r,
 						err: errDownloadSectorTimeout}
@@ -253,6 +265,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			}
 
 			<-doneChan
+			span.End()
 		}
 	}
 
