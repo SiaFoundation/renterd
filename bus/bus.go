@@ -124,6 +124,8 @@ type bus struct {
 	ms  MetadataStore
 	ss  SettingStore
 
+	eas EphemeralAccountStore
+
 	logger        *zap.SugaredLogger
 	accounts      *accounts
 	contractLocks *contractLocks
@@ -811,7 +813,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, l *zap.Logger) (http.Handler, func() error, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
@@ -820,30 +822,31 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 		hdb:           hdb,
 		ms:            ms,
 		ss:            ss,
+		eas:           eas,
 		contractLocks: newContractLocks(),
 		logger:        l.Sugar().Named("bus"),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
 	if err := b.setGougingSettings(ctx, gs); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := b.setRedundancySettings(ctx, rs); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	// Load the ephemeral accounts into memory and save them again on
-	// cleanup.
+	// Load the accounts into memory. They're saved when the bus is stopped.
 	accounts, err := eas.Accounts(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	b.accounts = newAccounts(accounts)
-	cleanup := func() error {
-		return eas.SaveAccounts(ctx, b.accounts.ToPersist())
-	}
+	return b, nil
+}
 
+// Handler returns an HTTP handler that serves the bus API.
+func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
 		"GET    /accounts/:owner":     b.accountsOwnerHandlerGET,
 		"POST   /accounts/:id/add":    b.accountsAddHandlerPOST,
@@ -906,5 +909,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
-	})), cleanup, nil
+	}))
+}
+
+func (b *bus) Stop(ctx context.Context) error {
+	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
 }

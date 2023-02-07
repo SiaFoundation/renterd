@@ -196,16 +196,26 @@ func (ap *Autopilot) Run() error {
 	}
 }
 
-func (ap *Autopilot) Stop() error {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
+func (ap *Autopilot) Stop(ctx context.Context) error {
+	doneChan := make(chan struct{})
+	go func() {
+		defer close(doneChan)
 
-	if ap.running {
-		ap.ticker.Stop()
-		close(ap.stopChan)
-		close(ap.triggerChan)
-		ap.wg.Wait()
-		ap.running = false
+		ap.startStopMu.Lock()
+		if ap.running {
+			ap.ticker.Stop()
+			close(ap.stopChan)
+			close(ap.triggerChan)
+			ap.wg.Wait()
+			ap.running = false
+		}
+		ap.startStopMu.Unlock()
+	}()
+
+	select {
+	case <-ctx.Done():
+		return errors.New("autopilot shutdown timed out")
+	case <-doneChan:
 	}
 	return nil
 }
@@ -262,18 +272,6 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	jc.Encode(fmt.Sprintf("triggered: %t", ap.Trigger()))
 }
 
-// NewServer returns an HTTP handler that serves the renterd autopilot api.
-func NewServer(ap *Autopilot) http.Handler {
-	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
-		"GET    /actions": ap.actionsHandler,
-		"GET    /config":  ap.configHandlerGET,
-		"PUT    /config":  ap.configHandlerPUT,
-		"GET    /status":  ap.statusHandlerGET,
-
-		"POST    /debug/trigger": ap.triggerHandlerPOST,
-	}))
-}
-
 // New initializes an Autopilot.
 func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64) (*Autopilot, error) {
 	ap := &Autopilot{
@@ -302,4 +300,16 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 	ap.m = newMigrator(ap)
 
 	return ap, nil
+}
+
+// Handler returns an HTTP handler that serves the autopilot api.
+func (ap *Autopilot) Handler() http.Handler {
+	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
+		"GET    /actions": ap.actionsHandler,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+		"GET    /status":  ap.statusHandlerGET,
+
+		"POST    /debug/trigger": ap.triggerHandlerPOST,
+	}))
 }

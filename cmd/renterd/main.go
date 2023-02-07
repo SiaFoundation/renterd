@@ -16,7 +16,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
@@ -151,6 +150,10 @@ func withCtx(fn func() error) shutdownFn {
 func main() {
 	log.SetFlags(0)
 
+	var nodeCfg struct {
+		shutdownTimeout time.Duration
+	}
+
 	var busCfg struct {
 		remoteAddr  string
 		apiPassword string
@@ -195,6 +198,7 @@ func main() {
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerBatchSize, "autopilot.scannerBatchSize", 1000, "size of the batch with which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerNumThreads, "autopilot.scannerNumThreads", 100, "number of threads that scan hosts")
+	flag.DurationVar(&nodeCfg.shutdownTimeout, "node.shutdownTimeout", 5*time.Minute, "the timeout applied to the node shutdown")
 
 	flag.Parse()
 
@@ -263,11 +267,11 @@ func main() {
 
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		b, cleanupFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
+		b, stopFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		shutdowns.Register(withCtx(cleanupFn), 10)
+		shutdowns.Register(stopFn, 10)
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
@@ -277,11 +281,11 @@ func main() {
 
 	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
 	if workerAddr == "" {
-		w, cleanupFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
+		w, stopFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		shutdowns.Register(withCtx(cleanupFn), 20)
+		shutdowns.Register(stopFn, 20)
 
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
 		workerAddr = *apiAddr + "/api/worker"
@@ -301,14 +305,14 @@ func main() {
 			log.Fatal(err)
 		}
 
-		ap, cleanupFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
+		ap, startFn, stopFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		shutdowns.Register(withCtx(cleanupFn), 100)
+		shutdowns.Register(stopFn, 100)
 
-		go func() { autopilotErr <- ap.Run() }()
-		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}
+		go func() { autopilotErr <- startFn() }()
+		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
 	}
 
 	srv := &http.Server{Handler: mux}
@@ -332,8 +336,10 @@ func main() {
 	}
 
 	// Execute all shutdown functions
+	ctx, cancel := context.WithTimeout(context.Background(), nodeCfg.shutdownTimeout)
+	defer cancel()
 	for shutdowns.Len() > 0 {
-		if err := heap.Pop(shutdowns).(*shutdownEntry).fn(context.Background()); err != nil {
+		if err := heap.Pop(shutdowns).(*shutdownEntry).fn(ctx); err != nil {
 			log.Println("Error during shutdown:", err)
 		}
 	}
