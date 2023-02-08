@@ -65,12 +65,12 @@ API to the host system and the gateway to the world.
 
 ## Wallet
 
-Make sure the wallet is funded. Fetch the wallet's address and transfer some money. Verify the wallet's balance is not zero using the following endpoints:
+Make sure the wallet is funded, it's a good rule of thumb to have at least twice the allowance in the wallet. Fetch the wallet's address and transfer some money. Verify the wallet's balance is not zero using the following endpoints:
 
 - `GET /api/bus/wallet/address`
 - `GET /api/bus/wallet/balance`
 
-The autopilot will automatically redistribute the wallet funds over a certain of outputs that make sense with regards to the autopilot's configuration. Contract formation and renewals work best when the autopilot has a good amount of outputs at its disposal. It's definitely a good idea to verify whether this is the case because if not it means that it's likely the autopilot is misconfigured, in which case the logs should be of help.
+The autopilot will automatically redistribute the wallet funds over a certain number of outputs that make sense with regards to the autopilot's configuration. Contract formation and renewals work best when the autopilot has a good amount of outputs at its disposal. It's definitely a good idea to verify whether this is the case because if not it means that it's likely the autopilot is misconfigured, in which case the logs should be of help.
 
 - `GET /api/bus/wallet/outputs`
 
@@ -105,9 +105,9 @@ Especially the `contracts` section is important, make sure the `amount` is set t
 		"allowance": "10000000000000000000000000000",
 		"period": 6048,
 		"renewWindow": 2016,
-		"download": 1099511627776,
-		"upload": 1099511627776,
-		"storage": 1099511627776
+		"download": 1099511627776, // 1TiB
+		"upload": 1099511627776, // 1TiB
+		"storage": 1099511627776 // 1TiB
 	}
 }
 ```
@@ -153,7 +153,7 @@ The Sia Foundation does not ship `renterd` with a default blocklist, the followi
 
 ### Contract Set Contracts
 
-The autopilot forms and manages contracts in the contract set with name configured in the autopilot's configuration object, by default this is called the `autopilot` contract set. This contract set should contain the amount of contracts configured in the contracts sectino of the configuration.
+The autopilot forms and manages contracts in the contract set with name configured in the autopilot's configuration object, by default this is called the `autopilot` contract set. This contract set should contain the amount of contracts configured in the contracts section of the configuration.
 
 That means that, if everything is running smoothly, the following curl call should return that number:
 `curl -u ":[YOUR_PASSWORD]"  [BASE_URL]/api/bus/contracts/set/autopilot | jq '.|length'`
