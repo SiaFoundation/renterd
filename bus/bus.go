@@ -912,6 +912,7 @@ func (b *bus) Handler() http.Handler {
 	}))
 }
 
+// Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
 }

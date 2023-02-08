@@ -196,6 +196,7 @@ func (ap *Autopilot) Run() error {
 	}
 }
 
+// Shutdown shuts down the autopilot.
 func (ap *Autopilot) Shutdown(ctx context.Context) error {
 	doneChan := make(chan struct{})
 	go func() {

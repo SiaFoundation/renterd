@@ -1025,7 +1025,7 @@ func (w *worker) Handler() http.Handler {
 	}))
 }
 
-// Shutdown stops the worker.
+// Shutdown shuts down the worker.
 func (w *worker) Shutdown(_ context.Context) error {
 	w.interactionsMu.Lock()
 	if w.interactionsFlushTimer != nil {

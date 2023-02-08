@@ -405,6 +405,10 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(cfg)
 
 	for h := 0; missing > 0 && h < len(candidates); h++ {
+		if c.ap.isStopped() {
+			break
+		}
+
 		host := candidates[h]
 
 		// break if the autopilot is stopped
