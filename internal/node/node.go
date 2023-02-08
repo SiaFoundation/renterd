@@ -56,10 +56,7 @@ type AutopilotConfig struct {
 	ScannerNumThreads uint64
 }
 
-type (
-	StartFn = func() error
-	StopFn  = func(context.Context) error
-)
+type ShutdownFn = func(context.Context) error
 
 func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	var buf bytes.Buffer
@@ -186,7 +183,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, StopFn, error) {
+func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -260,33 +257,33 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 		return nil, nil, err
 	}
 
-	stopFn := func(ctx context.Context) error {
+	shutdownFn := func(ctx context.Context) error {
 		return joinErrors([]error{
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
-			b.Stop(ctx),
+			b.Shutdown(ctx),
 			sqlStore.Close(),
 		})
 	}
-	return b.Handler(), stopFn, nil
+	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, StopFn, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
 	w := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, l)
-	return w.Handler(), w.Stop, nil
+	return w.Handler(), w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (http.Handler, StartFn, StopFn, error) {
+func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
 	ap, err := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return ap.Handler(), ap.Run, ap.Stop, nil
+	return ap.Handler(), ap.Run, ap.Shutdown, nil
 }
 
-func NewLogger(path string) (*zap.Logger, func(), error) {
+func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {
 	writer, closeFn, err := zap.Open(path)
 	if err != nil {
 		return nil, nil, err
@@ -319,9 +316,10 @@ func NewLogger(path string) (*zap.Logger, func(), error) {
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	)
 
-	return logger, func() {
+	return logger, func(_ context.Context) error {
 		_ = logger.Sync() // ignore Error
 		closeFn()
+		return nil
 	}, nil
 }
 

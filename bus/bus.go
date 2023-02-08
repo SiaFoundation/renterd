@@ -912,6 +912,6 @@ func (b *bus) Handler() http.Handler {
 	}))
 }
 
-func (b *bus) Stop(ctx context.Context) error {
+func (b *bus) Shutdown(ctx context.Context) error {
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
 }

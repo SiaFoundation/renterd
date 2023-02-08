@@ -196,7 +196,7 @@ func (ap *Autopilot) Run() error {
 	}
 }
 
-func (ap *Autopilot) Stop(ctx context.Context) error {
+func (ap *Autopilot) Shutdown(ctx context.Context) error {
 	doneChan := make(chan struct{})
 	go func() {
 		defer close(doneChan)

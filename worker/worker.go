@@ -1025,9 +1025,8 @@ func (w *worker) Handler() http.Handler {
 	}))
 }
 
-// Stop stops the worker.
-func (w *worker) Stop(_ context.Context) error {
-	// Flush interactions on cleanup.
+// Shutdown stops the worker.
+func (w *worker) Shutdown(_ context.Context) error {
 	w.interactionsMu.Lock()
 	if w.interactionsFlushTimer != nil {
 		w.interactionsFlushTimer.Stop()
