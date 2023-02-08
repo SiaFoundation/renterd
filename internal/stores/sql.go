@@ -69,13 +69,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
-	// Disable connection pool.
-	sql, err := db.DB()
-	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
-	}
-	sql.SetMaxOpenConns(1)
-
 	if migrate {
 		// Create the tables.
 		tables := []interface{}{

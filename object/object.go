@@ -18,16 +18,12 @@ type EncryptionKey struct {
 
 // String implements fmt.Stringer.
 func (k EncryptionKey) String() string {
-	b, err := k.MarshalText()
-	if err != nil {
-		panic("failed to marshal key")
-	}
-	return string(b)
+	return "key:" + hex.EncodeToString(k.entropy[:])
 }
 
 // MarshalText implements the encoding.TextMarshaler interface.
 func (k EncryptionKey) MarshalText() ([]byte, error) {
-	return []byte("key:" + hex.EncodeToString(k.entropy[:])), nil
+	return []byte(k.String()), nil
 }
 
 // UnmarshalText implements the encoding.TextUnmarshaler interface.
