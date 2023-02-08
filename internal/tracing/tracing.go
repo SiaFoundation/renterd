@@ -71,9 +71,14 @@ func Init(workerID string) (func(ctx context.Context) error, error) {
 
 // TracedHandler attaches a tracing handler to http routes.
 func TracedRoutes(component string, routes map[string]jape.Handler) map[string]jape.Handler {
+	cache := make(map[string]http.Handler)
 	adapt := func(route string, h jape.Handler) jape.Handler {
 		return jape.Adapt(func(h http.Handler) http.Handler {
-			return otelhttp.NewHandler(h, fmt.Sprintf("%s: %s", component, route))
+			operation := fmt.Sprintf("%s: %s", component, route)
+			if _, exists := cache[operation]; !exists {
+				cache[operation] = otelhttp.NewHandler(h, operation)
+			}
+			return cache[operation]
 		})(h)
 	}
 	for route, handler := range routes {
