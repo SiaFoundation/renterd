@@ -2,12 +2,15 @@ package autopilot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -354,6 +357,9 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 }
 
 func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address) ([]types.FileContractID, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
+	defer span.End()
+
 	var formed []types.FileContractID
 
 	c.logger.Debugw(
@@ -395,63 +401,30 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 
 	for h := 0; missing > 0 && h < len(candidates); h++ {
 		host := candidates[h]
-		hk := host.PublicKey
 
 		// break if the contractor was stopped
 		if c.isStopped() {
 			break
 		}
 
-		// fetch host settings
-		scan, err := c.ap.worker.RHPScan(ctx, hk, host.NetAddress, 0)
-		if err != nil {
-			c.logger.Debugw(err.Error(), "hk", hk)
-			continue
+		formedContract, proceed, err := c.formContract(ctx, host, fee, minInitialContractFunds, maxInitialContractFunds, blockHeight, budget, renterAddress, cfg)
+		if err == nil {
+			// add contract to contract set
+			formed = append(formed, formedContract.ID)
+			missing--
 		}
-
-		// check our budget
-		txnFee := fee.Mul64(estimatedFileContractTransactionSetSize)
-		renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
-		if budget.Cmp(renterFunds) < 0 {
-			c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		if !proceed {
 			break
 		}
-
-		// calculate the host collateral
-		hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Storage/cfg.Contracts.Amount, cfg.Contracts.Period, scan.Settings)
-
-		// form contract
-		contract, _, err := c.ap.worker.RHPForm(ctx, endHeight(cfg, c.currentPeriod()), hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
-		if err != nil {
-			// TODO: keep track of consecutive failures and break at some point
-			c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-			if containsError(err, wallet.ErrInsufficientBalance) {
-				break
-			}
-			continue
-		}
-
-		// update the budget
-		*budget = budget.Sub(renterFunds)
-
-		// persist contract in store
-		formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, blockHeight)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-			continue
-		}
-
-		// add contract to contract set
-		formed = append(formed, formedContract.ID)
-		missing--
-
-		c.logger.Debugw("formation succeeded", "hk", hk, "fcid", formedContract.ID)
 	}
 
 	return formed, nil
 }
 
 func (c *contractor) runContractRenewals(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo) ([]api.ContractMetadata, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
+	defer span.End()
+
 	renewed := make([]api.ContractMetadata, 0, len(toRenew))
 
 	c.logger.Debugw(
@@ -475,64 +448,22 @@ func (c *contractor) runContractRenewals(ctx context.Context, cfg api.AutopilotC
 			break
 		}
 
-		// convenience variables
-		contract := ci.contract
-		settings := ci.settings
-		fcid := contract.ID
-		rev := contract.Revision
-		hk := contract.HostKey()
-
-		// calculate the renter funds
-		renterFunds, err := c.renewFundingEstimate(ctx, cfg, blockHeight, ci)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("could not get renew funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
-			continue
+		contract, proceed, err := c.renewContract(ctx, ci, cfg, blockHeight, budget, renterAddress)
+		if err == nil {
+			renewed = append(renewed, contract)
 		}
-
-		// check our budget
-		if budget.Cmp(renterFunds) < 0 {
-			c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		if !proceed {
 			break
 		}
-
-		// calculate the host collateral
-		endHeight := endHeight(cfg, c.currentPeriod())
-		newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, endHeight)
-
-		// renew the contract
-		newRevision, _, err := c.ap.worker.RHPRenew(ctx, fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
-			if containsError(err, wallet.ErrInsufficientBalance) {
-				break
-			}
-			continue
-		}
-
-		// update the budget
-		*budget = budget.Sub(renterFunds)
-
-		// persist the contract
-		renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, blockHeight, fcid)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
-			return nil, err
-		}
-
-		// add to renewed set
-		renewed = append(renewed, renewedContract)
-
-		c.logger.Debugw(
-			"renewal succeeded",
-			"fcid", renewedContract.ID,
-			"renewedFrom", fcid,
-		)
 	}
 
 	return renewed, nil
 }
 
 func (c *contractor) runContractRefreshes(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) ([]api.ContractMetadata, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "runContractRefreshes")
+	defer span.End()
+
 	refreshed := make([]api.ContractMetadata, 0, len(toRefresh))
 
 	c.logger.Debugw(
@@ -556,59 +487,13 @@ func (c *contractor) runContractRefreshes(ctx context.Context, cfg api.Autopilot
 			break
 		}
 
-		// convenience variables
-		contract := ci.contract
-		settings := ci.settings
-		fcid := contract.ID
-		rev := contract.Revision
-		hk := contract.HostKey()
-
-		// calculate the renter funds
-		renterFunds, err := c.refreshFundingEstimate(ctx, cfg, ci)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
-			continue
+		contract, proceed, err := c.refreshContract(ctx, ci, cfg, blockHeight, budget, renterAddress)
+		if err == nil {
+			refreshed = append(refreshed, contract)
 		}
-
-		// check our budget
-		if budget.Cmp(renterFunds) < 0 {
-			c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		if !proceed {
 			break
 		}
-
-		// calculate the new collateral
-		newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, contract.EndHeight())
-
-		// do not refresh if the contract's updated collateral will fall below the threshold anyway
-		_, hostMissedPayout, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
-		if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
-			c.logger.Errorw(fmt.Sprintf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout), "hk", hk, "fcid", fcid)
-			continue
-		}
-
-		// renew the contract
-		newRevision, _, err := c.ap.worker.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
-			if containsError(err, wallet.ErrInsufficientBalance) {
-				break
-			}
-			continue
-		}
-
-		// update the budget
-		*budget = budget.Sub(renterFunds)
-
-		// persist the contract
-		refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, blockHeight, contract.ID)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
-			break
-		}
-
-		// add to renewed set
-		refreshed = append(refreshed, refreshedContract)
-		c.logger.Debugw("refresh succeeded", "fcid", refreshedContract.ID, "renewedFrom", contract.ID)
 	}
 
 	return refreshed, nil
@@ -644,10 +529,15 @@ func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.Autopil
 	// but without an upper cap.
 	minInitialContractFunds, _ := initialContractFundingMinMax(cfg)
 	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
-	if refreshAmount.Cmp(minimum) < 0 {
-		refreshAmount = minimum
+	refreshAmountCapped := refreshAmount
+	if refreshAmountCapped.Cmp(minimum) < 0 {
+		refreshAmountCapped = minimum
 	}
-	return refreshAmount, nil
+	c.logger.Debugw("refresh estimate",
+		"fcid", ci.contract.ID,
+		"refreshAmount", refreshAmount,
+		"refreshAmountCapped", refreshAmountCapped)
+	return refreshAmountCapped, nil
 }
 
 func (c *contractor) renewFundingEstimate(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, ci contractInfo) (types.Currency, error) {
@@ -711,10 +601,21 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, cfg api.Autopilot
 	// but without an upper cap.
 	minInitialContractFunds, _ := initialContractFundingMinMax(cfg)
 	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
-	if estimatedCost.Cmp(minimum) < 0 {
-		estimatedCost = minimum
+	cappedEstimatedCost := estimatedCost
+	if cappedEstimatedCost.Cmp(minimum) < 0 {
+		cappedEstimatedCost = minimum
 	}
-	return estimatedCost, nil
+	c.logger.Debugw("renew estimate",
+		"fcid", ci.contract.ID,
+		"dataStored", dataStored,
+		"storageCost", storageCost.String(),
+		"prevUploadDataEstimate", prevUploadDataEstimate.String(),
+		"estimatedCost", estimatedCost.String(),
+		"minInitialContractFunds", minInitialContractFunds.String(),
+		"minimum", minimum.String(),
+		"cappedEstimatedCost", cappedEstimatedCost.String(),
+	)
+	return cappedEstimatedCost, nil
 }
 
 func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig, used map[types.PublicKey]bool, wanted int) ([]hostdb.Host, error) {
@@ -787,6 +688,197 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		c.logger.Debugf("could not fetch 'wanted' candidate hosts, %d<%d", len(selected), wanted)
 	}
 	return selected, nil
+}
+
+func (c *contractor) renewContract(ctx context.Context, ci contractInfo, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
+	ctx, span := tracing.Tracer.Start(ctx, "renewContract")
+	defer span.End()
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to renew contract")
+		}
+	}()
+	span.SetAttributes(attribute.Stringer("host", ci.contract.HostKey()))
+	span.SetAttributes(attribute.Stringer("contract", ci.contract.ID))
+
+	// convenience variables
+	contract := ci.contract
+	settings := ci.settings
+	fcid := contract.ID
+	rev := contract.Revision
+	hk := contract.HostKey()
+
+	// calculate the renter funds
+	renterFunds, err := c.renewFundingEstimate(ctx, cfg, blockHeight, ci)
+	if err != nil {
+		c.logger.Errorw(fmt.Sprintf("could not get renew funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
+		return api.ContractMetadata{}, true, err
+	}
+
+	// check our budget
+	if budget.Cmp(renterFunds) < 0 {
+		c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		return api.ContractMetadata{}, false, errors.New("insufficient budget")
+	}
+
+	// calculate the host collateral
+	endHeight := endHeight(cfg, c.currentPeriod())
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, endHeight)
+
+	// renew the contract
+	newRevision, _, err := c.ap.worker.RHPRenew(ctx, fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
+	if err != nil {
+		c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
+		if containsError(err, wallet.ErrInsufficientBalance) {
+			return api.ContractMetadata{}, false, err
+		}
+		return api.ContractMetadata{}, true, err
+	}
+
+	// update the budget
+	*budget = budget.Sub(renterFunds)
+
+	// persist the contract
+	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, blockHeight, fcid)
+	if err != nil {
+		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
+		return api.ContractMetadata{}, false, err
+	}
+
+	c.logger.Debugw(
+		"renewal succeeded",
+		"fcid", renewedContract.ID,
+		"renewedFrom", fcid,
+	)
+	return renewedContract, true, nil
+}
+
+func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
+	ctx, span := tracing.Tracer.Start(ctx, "refreshContract")
+	defer span.End()
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to refresh contract")
+		}
+	}()
+	span.SetAttributes(attribute.Stringer("host", ci.contract.HostKey()))
+	span.SetAttributes(attribute.Stringer("contract", ci.contract.ID))
+
+	// convenience variables
+	contract := ci.contract
+	settings := ci.settings
+	fcid := contract.ID
+	rev := contract.Revision
+	hk := contract.HostKey()
+
+	// calculate the renter funds
+	renterFunds, err := c.refreshFundingEstimate(ctx, cfg, ci)
+	if err != nil {
+		c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
+		return api.ContractMetadata{}, true, err
+	}
+
+	// check our budget
+	if budget.Cmp(renterFunds) < 0 {
+		c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
+	}
+
+	// calculate the new collateral
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, contract.EndHeight())
+
+	// do not refresh if the contract's updated collateral will fall below the threshold anyway
+	_, hostMissedPayout, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
+	if isBelowCollateralThreshold(cfg, settings, hostMissedPayout) {
+		err := fmt.Errorf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout)
+		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid)
+		return api.ContractMetadata{}, true, err
+	}
+
+	// renew the contract
+	newRevision, _, err := c.ap.worker.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
+	if err != nil {
+		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
+		if containsError(err, wallet.ErrInsufficientBalance) {
+			return api.ContractMetadata{}, false, err
+		}
+		return api.ContractMetadata{}, true, err
+	}
+
+	// update the budget
+	*budget = budget.Sub(renterFunds)
+
+	// persist the contract
+	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, blockHeight, contract.ID)
+	if err != nil {
+		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
+		return api.ContractMetadata{}, false, err
+	}
+
+	// add to renewed set
+	c.logger.Debugw("refresh succeeded",
+		"fcid", refreshedContract.ID,
+		"renewedFrom", contract.ID)
+	return refreshedContract, true, nil
+}
+
+func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, minInitialContractFunds, maxInitialContractFunds types.Currency, blockHeight uint64, budget *types.Currency, renterAddress types.Address, cfg api.AutopilotConfig) (cm api.ContractMetadata, proceed bool, err error) {
+	ctx, span := tracing.Tracer.Start(ctx, "formContract")
+	defer span.End()
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to form contract")
+		}
+	}()
+	hk := host.PublicKey
+	span.SetAttributes(attribute.Stringer("host", hk))
+
+	// fetch host settings
+	scan, err := c.ap.worker.RHPScan(ctx, hk, host.NetAddress, 0)
+	if err != nil {
+		c.logger.Debugw(err.Error(), "hk", hk)
+		return api.ContractMetadata{}, true, err
+	}
+
+	// check our budget
+	txnFee := fee.Mul64(estimatedFileContractTransactionSetSize)
+	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
+	if budget.Cmp(renterFunds) < 0 {
+		c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		return api.ContractMetadata{}, false, errors.New("insufficient budget")
+	}
+
+	// calculate the host collateral
+	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Storage/cfg.Contracts.Amount, cfg.Contracts.Period, scan.Settings)
+
+	// form contract
+	contract, _, err := c.ap.worker.RHPForm(ctx, endHeight(cfg, c.currentPeriod()), hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
+	if err != nil {
+		// TODO: keep track of consecutive failures and break at some point
+		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
+		if containsError(err, wallet.ErrInsufficientBalance) {
+			return api.ContractMetadata{}, false, err
+		}
+		return api.ContractMetadata{}, true, err
+	}
+
+	// update the budget
+	*budget = budget.Sub(renterFunds)
+
+	// persist contract in store
+	formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, blockHeight)
+	if err != nil {
+		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
+		return api.ContractMetadata{}, true, err
+	}
+
+	c.logger.Debugw("formation succeeded",
+		"hk", hk,
+		"fcid", formedContract.ID)
+	return formedContract, true, nil
 }
 
 func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
