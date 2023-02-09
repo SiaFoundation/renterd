@@ -560,6 +560,11 @@ func TestRemoveHosts(t *testing.T) {
 	if removed != 1 {
 		t.Fatal("expected 1 host to be removed")
 	}
+
+	// assert host is removed from the database
+	if _, err = hostByPubKey(hdb.db, hk); err != gorm.ErrRecordNotFound {
+		t.Fatal("expected record not found error")
+	}
 }
 
 // TestInsertAnnouncements is a test for insertAnnouncements.
