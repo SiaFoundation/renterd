@@ -50,6 +50,10 @@ func (b *mockBus) HostsForScanning(ctx context.Context, _ time.Time, offset, lim
 	return hostAddresses, nil
 }
 
+func (b *mockBus) RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (uint64, error) {
+	return 0, nil
+}
+
 type mockWorker struct {
 	blockChan chan struct{}
 
@@ -85,7 +89,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), 0)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -113,7 +117,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), 0)
 	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -122,7 +126,7 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), 0)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}

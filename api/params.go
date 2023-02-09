@@ -12,9 +12,9 @@ type (
 	// and format a time in the RFC3339 format.
 	ParamTime time.Time
 
-	// A Duration is the elapsed time between two instants. Durations are encoded as
-	// an integer number of milliseconds.
-	Duration time.Duration
+	// A ParamDuration is the elapsed time between two instants. ParamDurations
+	// are encoded as an integer number of milliseconds.
+	ParamDuration time.Duration
 
 	// ParamString is a helper type since jape expects query params to
 	// implement the TextMarshaler interface.
@@ -45,22 +45,22 @@ func (t ParamTime) String() string { return url.QueryEscape((time.Time)(t).Forma
 func (t *ParamTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
 // String implements fmt.Stringer.
-func (d Duration) String() string {
+func (d ParamDuration) String() string {
 	return strconv.FormatInt(time.Duration(d).Milliseconds(), 10)
 }
 
 // MarshalText implements encoding.TextMarshaler.
-func (d Duration) MarshalText() ([]byte, error) {
+func (d ParamDuration) MarshalText() ([]byte, error) {
 	return []byte(d.String()), nil
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (d *Duration) UnmarshalText(b []byte) error {
+func (d *ParamDuration) UnmarshalText(b []byte) error {
 	ms, err := strconv.ParseInt(string(b), 10, 64)
 	if err != nil {
 		return err
 	}
-	*d = Duration(time.Duration(ms) * time.Millisecond)
+	*d = ParamDuration(time.Duration(ms) * time.Millisecond)
 	return nil
 }
 

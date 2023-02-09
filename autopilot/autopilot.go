@@ -43,6 +43,7 @@ type Bus interface {
 	Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 	HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
+	RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (uint64, error)
 
 	// contracts
 	ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
@@ -160,7 +161,7 @@ func (ap *Autopilot) Run() error {
 
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ctx)
+			ap.s.tryPerformHostScan(ctx, time.Duration(cfg.Hosts.MaxDowntimeHours)*time.Hour)
 
 			// fetch consensus state
 			cs, err := ap.bus.ConsensusState(ctx)

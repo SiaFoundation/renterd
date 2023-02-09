@@ -233,6 +233,12 @@ func (c *Client) HostsForScanning(ctx context.Context, maxLastScan time.Time, of
 	return
 }
 
+// RemoveOfflineHosts removes all hosts that have been offline for longer than the given max downtime.
+func (c *Client) RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (removed uint64, err error) {
+	err = c.c.WithContext(ctx).POST("/hosts/remove", api.HostsRemoveRequest{MaxDowntime: api.ParamDuration(maxDowntime)}, &removed)
+	return
+}
+
 // HostBlocklist returns a host blocklist.
 func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
 	err = c.c.WithContext(ctx).GET("/hosts/blocklist", &blocklist)
@@ -335,7 +341,7 @@ func (c *Client) DeleteContract(ctx context.Context, id types.FileContractID) (e
 func (c *Client) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
-		Duration: api.Duration(d),
+		Duration: api.ParamDuration(d),
 		Priority: priority,
 	}, &resp)
 	lockID = resp.LockID

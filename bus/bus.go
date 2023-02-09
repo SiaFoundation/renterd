@@ -71,6 +71,7 @@ type (
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
+		RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (uint64, error)
 
 		HostBlocklist(ctx context.Context) ([]string, error)
 		AddHostBlocklistEntry(ctx context.Context, entry string) error
@@ -400,6 +401,22 @@ func (b *bus) hostsHandlerGET(jc jape.Context) {
 		return
 	}
 	jc.Encode(hosts)
+}
+
+func (b *bus) hostsRemoveHandlerPOST(jc jape.Context) {
+	var hrr api.HostsRemoveRequest
+	if jc.Decode(&hrr) != nil {
+		return
+	}
+	if hrr.MaxDowntime == 0 {
+		jc.Error(errors.New("maxDowntime must be non-zero"), http.StatusBadRequest)
+		return
+	}
+	removed, err := b.hdb.RemoveOfflineHosts(jc.Request.Context(), time.Duration(hrr.MaxDowntime))
+	if jc.Check("couldn't remove offline hosts", err) != nil {
+		return
+	}
+	jc.Encode(removed)
 }
 
 func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
@@ -875,6 +892,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 		"GET    /hosts":              b.hostsHandlerGET,
 		"GET    /host/:hostkey":      b.hostsPubkeyHandlerGET,
 		"POST   /hosts/interactions": b.hostsPubkeyHandlerPOST,
+		"POST   /hosts/remove":       b.hostsRemoveHandlerPOST,
 		"GET    /hosts/blocklist":    b.hostsBlocklistHandlerGET,
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,

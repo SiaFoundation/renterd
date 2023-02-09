@@ -172,7 +172,7 @@ func (c *Client) DeleteObject(ctx context.Context, name string) (err error) {
 // ActiveContracts returns all active contracts from the worker. These contracts
 // decorate a bus contract with the contract's latest revision.
 func (c *Client) ActiveContracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.Duration(hostTimeout)), &resp)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.ParamDuration(hostTimeout)), &resp)
 	return
 }
 

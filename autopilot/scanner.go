@@ -33,6 +33,7 @@ type (
 		bus interface {
 			Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 			HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
+			RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (uint64, error)
 		}
 		worker interface {
 			RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -146,7 +147,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context) {
+func (s *scanner) tryPerformHostScan(ctx context.Context, hostsMaxDowntime time.Duration) {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
@@ -165,6 +166,15 @@ func (s *scanner) tryPerformHostScan(ctx context.Context) {
 			}
 			if resp.err != nil {
 				s.logger.Error(resp.err)
+			}
+		}
+
+		if !s.isStopped() && hostsMaxDowntime > 0 {
+			s.logger.Debugf("removing hosts that have been offline for more than %v hours", hostsMaxDowntime.Hours())
+			if removed, err := s.bus.RemoveOfflineHosts(ctx, hostsMaxDowntime); err != nil {
+				s.logger.Error(err)
+			} else if removed > 0 {
+				s.logger.Debugf("removed %v offline hosts", removed)
 			}
 		}
 
