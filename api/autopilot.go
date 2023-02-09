@@ -55,6 +55,7 @@ type (
 // DefaultAutopilotConfig returns a configuration with sane default values.
 func DefaultAutopilotConfig() (c AutopilotConfig) {
 	c.Wallet.DefragThreshold = 1000
+	c.Hosts.MaxDowntimeHours = 24 * 7 * 2 // 2 weeks
 	c.Hosts.ScoreOverrides = make(map[types.PublicKey]float64)
 	c.Contracts.Set = "autopilot"
 	c.Contracts.Allowance = types.Siacoins(1000)
