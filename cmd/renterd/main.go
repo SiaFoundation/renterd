@@ -157,6 +157,9 @@ func main() {
 		log.Println("Commit:", githash)
 		log.Println("Build Date:", builddate)
 		return
+	} else if flag.Arg(0) == "seed" {
+		log.Println("Seed phrase:", wallet.NewSeedPhrase())
+		return
 	}
 
 	// Alternative way to enable tracing.
