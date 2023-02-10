@@ -251,13 +251,13 @@ func (c *Client) RecordInteractions(ctx context.Context, interactions []hostdb.I
 	return
 }
 
-// ActiveContracts returns all active contracts in the contract store.
+// ActiveContracts returns all active contracts in the metadata store.
 func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/active", &contracts)
 	return
 }
 
-// Contracts returns the contracts for the given set from the contract store.
+// Contracts returns the contracts for the given set from the metadata store.
 func (c *Client) Contracts(ctx context.Context, set string) (contracts []api.ContractMetadata, err error) {
 	if set == "" {
 		return nil, errors.New("set cannot be empty")
@@ -272,7 +272,7 @@ func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contrac
 	return
 }
 
-// AddContract adds the provided contract to the contract store.
+// AddContract adds the provided contract to the metadata store.
 func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
 		Contract:    contract,
@@ -282,7 +282,7 @@ func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevisio
 	return
 }
 
-// AddRenewedContract adds the provided contract to the contract store.
+// AddRenewedContract adds the provided contract to the metadata store.
 func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
 		Contract:    contract,
