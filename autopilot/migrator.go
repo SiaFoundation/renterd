@@ -75,6 +75,6 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 			m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
 			continue
 		}
-		m.logger.Debugf("successfully migrated slab %d/%d", i+1, len(toMigrate))
+		m.logger.Debugf("successfully migrated slab '%v' %d/%d", slab.Key, i+1, len(toMigrate))
 	}
 }

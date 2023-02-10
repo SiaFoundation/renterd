@@ -68,6 +68,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+
 	if migrate {
 		// Create the tables.
 		tables := []interface{}{
@@ -99,6 +100,11 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		if err := db.AutoMigrate(tables...); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
+	}
+
+	// Ensure the join table has an index on `db_host_id`.
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS `idx_host_blocklist_entry_hosts` ON `host_blocklist_entry_hosts`(`db_host_id`)").Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
 	}
 
 	// Get latest consensus change ID or init db.
