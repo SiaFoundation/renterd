@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	_ "net/http/pprof"
 	"strings"
 )
 
@@ -37,6 +38,11 @@ type treeMux struct {
 }
 
 func (t treeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if strings.HasPrefix(req.URL.Path, "/debug/pprof") {
+		http.DefaultServeMux.ServeHTTP(w, req)
+		return
+	}
+
 	for prefix, c := range t.sub {
 		if strings.HasPrefix(req.URL.Path, prefix) {
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
