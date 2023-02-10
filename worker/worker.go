@@ -382,16 +382,26 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 	}
 	done := make(chan struct{})
 	go func() {
+		var wg sync.WaitGroup
 		select {
 		case <-done:
 			for _, h := range hosts {
-				w.pool.unlockContract(h.(*sharedSession))
+				wg.Add(1)
+				go func(ss *sharedSession) {
+					w.pool.unlockContract(ss)
+					wg.Done()
+				}(h.(*sharedSession))
 			}
 		case <-ctx.Done():
 			for _, h := range hosts {
-				w.pool.forceClose(h.(*sharedSession))
+				wg.Add(1)
+				go func(ss *sharedSession) {
+					w.pool.forceClose(ss)
+					wg.Done()
+				}(h.(*sharedSession))
 			}
 		}
+		wg.Wait()
 	}()
 	defer func() {
 		close(done)
