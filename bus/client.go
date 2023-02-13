@@ -251,6 +251,12 @@ func (c *Client) RecordInteractions(ctx context.Context, interactions []hostdb.I
 	return
 }
 
+// RecordContractSpending records contract spending metrics for contrats.
+func (c *Client) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) (err error) {
+	err = c.c.WithContext(ctx).POST("/contracts/spending", records, nil)
+	return
+}
+
 // ActiveContracts returns all active contracts in the metadata store.
 func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/active", &contracts)

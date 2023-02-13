@@ -223,6 +223,7 @@ type Bus interface {
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(ctx context.Context, shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
+	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error)
 
@@ -286,10 +287,15 @@ type worker struct {
 	accounts    *accounts
 	priceTables *priceTables
 
-	interactionsMu            sync.Mutex
-	interactions              []hostdb.Interaction
-	interactionsFlushInterval time.Duration
-	interactionsFlushTimer    *time.Timer
+	busFlushInterval time.Duration
+
+	interactionsMu         sync.Mutex
+	interactions           []hostdb.Interaction
+	interactionsFlushTimer *time.Timer
+
+	contractSpendingsMu         sync.Mutex
+	contractSpendings           map[types.FileContractID]api.ContractSpending
+	contractSpendingsFlushTimer *time.Timer
 
 	downloadSectorTimeout time.Duration
 	uploadSectorTimeout   time.Duration
@@ -622,12 +628,14 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// Fund account.
 	err = account.WithDeposit(ctx, func() (types.Currency, error) {
-		return rfr.Amount, w.withTransportV3(jc.Request.Context(), hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
+		return rfr.Amount, w.withTransportV3(ctx, hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(rfr.HostKey)
-			payment, ok := rhpv3.PayByContract(&revision, rfr.Amount.Add(pt.FundAccountCost), rhpv3.Account{}, rk) // no account needed for funding
+			cost := rfr.Amount.Add(pt.FundAccountCost)
+			payment, ok := rhpv3.PayByContract(&revision, cost, rhpv3.Account{}, rk) // no account needed for funding
 			if !ok {
 				return errors.New("insufficient funds")
 			}
+			w.recordContractSpending(rfr.ContractID, api.ContractSpending{FundAccount: cost})
 			return RPCFundAccount(t, &payment, account.id, pt.UID)
 		})
 	})
@@ -979,28 +987,36 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, interactionsFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) (http.Handler, func() error, error) {
 	w := &worker{
-		id:                        id,
-		bus:                       b,
-		pool:                      newSessionPool(sessionReconectTimeout, sessionTTL),
-		masterKey:                 masterKey,
-		interactionsFlushInterval: interactionsFlushInterval,
-		downloadSectorTimeout:     downloadSectorTimeout,
-		uploadSectorTimeout:       uploadSectorTimeout,
-		logger:                    l.Sugar().Named("worker").Named(id),
+		id:                    id,
+		bus:                   b,
+		pool:                  newSessionPool(sessionReconectTimeout, sessionTTL),
+		masterKey:             masterKey,
+		busFlushInterval:      busFlushInterval,
+		downloadSectorTimeout: downloadSectorTimeout,
+		uploadSectorTimeout:   uploadSectorTimeout,
+		contractSpendings:     make(map[types.FileContractID]api.ContractSpending),
+		logger:                l.Sugar().Named("worker").Named(id),
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
 
-	// Flush interactions in cleanup.
 	cleanup := func() error {
+		// Flush interactions on cleanup.
 		w.interactionsMu.Lock()
-		defer w.interactionsMu.Unlock()
 		if w.interactionsFlushTimer != nil {
 			w.interactionsFlushTimer.Stop()
 			w.flushInteractions()
 		}
+		w.interactionsMu.Unlock()
+		// Flush contract spending on cleanup.
+		w.contractSpendingsMu.Lock()
+		if w.contractSpendingsFlushTimer != nil {
+			w.contractSpendingsFlushTimer.Stop()
+			w.flushContractSpending()
+		}
+		w.contractSpendingsMu.Unlock()
 		return nil
 	}
 
@@ -1023,6 +1039,45 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	})), cleanup, nil
 }
 
+func (w *worker) recordContractSpending(fcid types.FileContractID, cs api.ContractSpending) {
+	w.contractSpendingsMu.Lock()
+	defer w.contractSpendingsMu.Unlock()
+
+	// Add spending to buffer.
+	w.contractSpendings[fcid] = w.contractSpendings[fcid].Add(cs)
+
+	// If a thread was scheduled to flush the buffer we are done.
+	if w.contractSpendingsFlushTimer != nil {
+		return
+	}
+	// Otherwise we schedule a flush.
+	w.contractSpendingsFlushTimer = time.AfterFunc(w.busFlushInterval, func() {
+		w.contractSpendingsMu.Lock()
+		w.flushContractSpending()
+		w.contractSpendingsMu.Unlock()
+	})
+}
+
+func (w *worker) flushContractSpending() {
+	if len(w.contractSpendings) > 0 {
+		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushContractSpending")
+		defer span.End()
+		records := make([]api.ContractSpendingRecord, 0, len(w.contractSpendings))
+		for fcid, cs := range w.contractSpendings {
+			records = append(records, api.ContractSpendingRecord{
+				ContractID:       fcid,
+				ContractSpending: cs,
+			})
+		}
+		if err := w.bus.RecordContractSpending(ctx, records); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to record contract spending: %v", err))
+		} else {
+			w.contractSpendings = make(map[types.FileContractID]api.ContractSpending)
+		}
+	}
+	w.contractSpendingsFlushTimer = nil
+}
+
 func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
 	w.interactionsMu.Lock()
 	defer w.interactionsMu.Unlock()
@@ -1035,7 +1090,7 @@ func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
 		return
 	}
 	// Otherwise we schedule a flush.
-	w.interactionsFlushTimer = time.AfterFunc(w.interactionsFlushInterval, func() {
+	w.interactionsFlushTimer = time.AfterFunc(w.busFlushInterval, func() {
 		w.interactionsMu.Lock()
 		w.flushInteractions()
 		w.interactionsMu.Unlock()
@@ -1047,7 +1102,7 @@ func (w *worker) flushInteractions() {
 		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushInteractions")
 		defer span.End()
 		if err := w.bus.RecordInteractions(ctx, w.interactions); err != nil {
-			// TODO: log
+			w.logger.Errorw(fmt.Sprintf("failed to record interactions: %v", err))
 		} else {
 			w.interactions = nil
 		}

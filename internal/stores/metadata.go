@@ -414,6 +414,30 @@ func (s *SQLStore) Object(ctx context.Context, key string) (object.Object, error
 	return obj.convert()
 }
 
+func (db *SQLStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
+	for _, r := range records {
+		err := db.db.Transaction(func(tx *gorm.DB) error {
+			var c dbContract
+			err := tx.Model(&dbContract{}).
+				Where("fcid = ?", fileContractID(r.ContractID)).
+				Take(&c).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil // contract not found, continue with next one
+			} else if err != nil {
+				return err
+			}
+			c.UploadSpending = currency(types.Currency(c.UploadSpending).Add(r.Uploads))
+			c.DownloadSpending = currency(types.Currency(c.DownloadSpending).Add(r.Downloads))
+			c.FundAccountSpending = currency(types.Currency(c.FundAccountSpending).Add(r.FundAccount))
+			return tx.Save(&c).Error
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {

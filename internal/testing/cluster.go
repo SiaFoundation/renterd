@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	testInteractionsFlushInterval = 100 * time.Millisecond
-	testPersistInterval           = 2 * time.Second
+	testBusFlushInterval = 100 * time.Millisecond
+	testPersistInterval  = 2 * time.Second
 )
 
 var (
@@ -190,10 +190,10 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 
 	// Create worker.
 	w, wCleanup, err := node.NewWorker(node.WorkerConfig{
-		ID:                       "worker",
-		InteractionFlushInterval: testInteractionsFlushInterval,
-		SessionReconnectTimeout:  10 * time.Second,
-		SessionTTL:               2 * time.Minute,
+		ID:                      "worker",
+		BusFlushInterval:        testBusFlushInterval,
+		SessionReconnectTimeout: 10 * time.Second,
+		SessionTTL:              2 * time.Minute,
 	}, busClient, wk, logger)
 	if err != nil {
 		return nil, err
