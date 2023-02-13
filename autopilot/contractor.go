@@ -756,6 +756,8 @@ func (c *contractor) renewContract(ctx context.Context, ci contractInfo, cfg api
 		"renewal succeeded",
 		"fcid", renewedContract.ID,
 		"renewedFrom", fcid,
+		"renterFunds", renterFunds.String(),
+		"newCollateral", newCollateral.String(),
 	)
 	return renewedContract, true, nil
 }
@@ -826,7 +828,10 @@ func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg a
 	// add to renewed set
 	c.logger.Debugw("refresh succeeded",
 		"fcid", refreshedContract.ID,
-		"renewedFrom", contract.ID)
+		"renewedFrom", contract.ID,
+		"renterFunds", renterFunds.String(),
+		"newCollateral", newCollateral.String(),
+	)
 	return refreshedContract, true, nil
 }
 
@@ -883,7 +888,10 @@ func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, mi
 
 	c.logger.Debugw("formation succeeded",
 		"hk", hk,
-		"fcid", formedContract.ID)
+		"fcid", formedContract.ID,
+		"renterFunds", renterFunds.String(),
+		"collateral", hostCollateral.String(),
+	)
 	return formedContract, true, nil
 }
 
