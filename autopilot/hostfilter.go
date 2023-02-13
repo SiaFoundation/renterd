@@ -117,6 +117,9 @@ func isOutOfCollateral(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Cont
 // collateral.
 func isBelowCollateralThreshold(cfg api.AutopilotConfig, s rhpv2.HostSettings, c types.Currency) bool {
 	initialCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Storage/cfg.Contracts.Amount, cfg.Contracts.Period, s)
+	if initialCollateral.IsZero() {
+		return true // protect against division-by-zero
+	}
 	collateral := big.NewRat(0, 1).SetFrac(c.Big(), initialCollateral.Big())
 	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)
 	return collateral.Cmp(threshold) < 0

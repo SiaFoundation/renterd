@@ -52,64 +52,59 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 		root types.Hash256
 		err  error
 	}
-	reqChan := make(chan req, len(shards))
-	defer close(reqChan)
-	respChan := make(chan resp, len(shards))
-	worker := func() {
-		for r := range reqChan {
-			doneChan := make(chan struct{})
+	respChan := make(chan resp, 2*len(hosts)) // every host can send up to 2 responses
+	worker := func(r req) {
+		doneChan := make(chan struct{})
 
-			// Trace the upload.
-			ctx, span := tracing.Tracer.Start(ctx, "upload-request")
-			span.SetAttributes(attribute.Stringer("host", r.host.PublicKey()))
-			span.SetAttributes(attribute.Stringer("contract", r.host.Contract()))
+		// Trace the upload.
+		ctx, span := tracing.Tracer.Start(ctx, "upload-request")
+		span.SetAttributes(attribute.Stringer("host", r.host.PublicKey()))
+		span.SetAttributes(attribute.Stringer("contract", r.host.Contract()))
 
-			go func(req req) {
-				defer close(doneChan)
+		go func(r req) {
+			defer close(doneChan)
 
-				lockID, err := locker.AcquireContract(ctx, req.host.Contract(), contractLockingUploadPriority, 30*time.Second)
-				if err != nil {
-					respChan <- resp{req, types.Hash256{}, err}
-					span.SetStatus(codes.Error, "acquiring the contract failed")
-					span.RecordError(err)
-					return
-				}
-				defer locker.ReleaseContract(ctx, req.host.Contract(), lockID)
+			lockID, err := locker.AcquireContract(ctx, r.host.Contract(), contractLockingUploadPriority, 30*time.Second)
+			if err != nil {
+				respChan <- resp{r, types.Hash256{}, err}
+				span.SetStatus(codes.Error, "acquiring the contract failed")
+				span.RecordError(err)
+				return
+			}
+			defer locker.ReleaseContract(ctx, r.host.Contract(), lockID)
 
-				root, err := req.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[req.shardIndex]))
-				if err != nil {
-					span.SetStatus(codes.Error, "uploading the sector failed")
-					span.RecordError(err)
-				}
-				respChan <- resp{req, root, err}
-			}(r)
+			root, err := r.host.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]))
+			if err != nil {
+				span.SetStatus(codes.Error, "uploading the sector failed")
+				span.RecordError(err)
+			}
+			respChan <- resp{r, root, err}
+		}(r)
 
-			if uploadSectorTimeout > 0 {
-				timer := time.NewTimer(uploadSectorTimeout)
-				select {
-				case <-timer.C:
-					span.SetAttributes(attribute.Bool("slow", true))
-					respChan <- resp{
-						req: r,
-						err: errUploadSectorTimeout}
-				case <-doneChan:
-					if !timer.Stop() {
-						<-timer.C
-					}
+		if uploadSectorTimeout > 0 {
+			timer := time.NewTimer(uploadSectorTimeout)
+			select {
+			case <-timer.C:
+				span.SetAttributes(attribute.Bool("slow", true))
+				respChan <- resp{
+					req: r,
+					err: errUploadSectorTimeout}
+			case <-doneChan:
+				if !timer.Stop() {
+					<-timer.C
 				}
 			}
-
-			<-doneChan
-			span.End()
 		}
+
+		<-doneChan
+		span.End()
 	}
 
 	// spawn workers and send initial requests
 	hostIndex := 0
 	inflight := 0
 	for i := range shards {
-		go worker()
-		reqChan <- req{hosts[hostIndex], i}
+		go worker(req{hosts[hostIndex], i})
 		hostIndex++
 		inflight++
 	}
@@ -128,7 +123,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
 			// try next host
 			if hostIndex < len(hosts) {
-				reqChan <- req{hosts[hostIndex], resp.req.shardIndex}
+				go worker(req{hosts[hostIndex], resp.req.shardIndex})
 				hostIndex++
 				inflight++
 			}
@@ -203,78 +198,73 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 		shard []byte
 		err   error
 	}
-	reqChan := make(chan req, ss.MinShards)
-	defer close(reqChan)
-	respChan := make(chan resp, ss.MinShards)
-	worker := func() {
-		for r := range reqChan {
-			doneChan := make(chan struct{})
+	respChan := make(chan resp, 2*len(hosts)) // every host can send up to 2 responses
+	worker := func(r req) {
+		doneChan := make(chan struct{})
 
-			// Trace the download.
-			ctx, span := tracing.Tracer.Start(ctx, "download-request")
-			span.SetAttributes(attribute.Stringer("host", hosts[r.hostIndex].PublicKey()))
-			span.SetAttributes(attribute.Stringer("contract", hosts[r.hostIndex].Contract()))
+		// Trace the download.
+		ctx, span := tracing.Tracer.Start(ctx, "download-request")
+		span.SetAttributes(attribute.Stringer("host", hosts[r.hostIndex].PublicKey()))
+		span.SetAttributes(attribute.Stringer("contract", hosts[r.hostIndex].Contract()))
 
-			go func(req req) {
-				defer close(doneChan)
+		go func(r req) {
+			defer close(doneChan)
 
-				h := hosts[req.hostIndex]
-				var shard *object.Sector
-				for i := range ss.Shards {
-					if ss.Shards[i].Host == h.PublicKey() {
-						shard = &ss.Shards[i]
-						break
-					}
-				}
-				if shard == nil {
-					respChan <- resp{req, nil, fmt.Errorf("host %v, err: %w", h.PublicKey(), errUnusedHost)}
-					return
-				}
-
-				offset, length := ss.SectorRegion()
-				var buf bytes.Buffer
-				lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
-				if err != nil {
-					respChan <- resp{req, nil, err}
-					span.SetStatus(codes.Error, "acquiring the contract failed")
-					span.RecordError(err)
-					return
-				}
-				err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
-				if err != nil {
-					span.SetStatus(codes.Error, "downloading the sector failed")
-					span.RecordError(err)
-				}
-				locker.ReleaseContract(ctx, h.Contract(), lockID)
-				respChan <- resp{req, buf.Bytes(), err}
-			}(r)
-
-			if downloadSectorTimeout > 0 {
-				timer := time.NewTimer(downloadSectorTimeout)
-				select {
-				case <-timer.C:
-					span.SetAttributes(attribute.Bool("slow", true))
-					respChan <- resp{
-						req: r,
-						err: errDownloadSectorTimeout}
-				case <-doneChan:
-					if !timer.Stop() {
-						<-timer.C
-					}
+			h := hosts[r.hostIndex]
+			var shard *object.Sector
+			for i := range ss.Shards {
+				if ss.Shards[i].Host == h.PublicKey() {
+					shard = &ss.Shards[i]
+					break
 				}
 			}
+			if shard == nil {
+				respChan <- resp{r, nil, fmt.Errorf("host %v, err: %w", h.PublicKey(), errUnusedHost)}
+				return
+			}
 
-			<-doneChan
-			span.End()
+			offset, length := ss.SectorRegion()
+			var buf bytes.Buffer
+			lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
+			if err != nil {
+				respChan <- resp{r, nil, err}
+				span.SetStatus(codes.Error, "acquiring the contract failed")
+				span.RecordError(err)
+				return
+			}
+			err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
+			if err != nil {
+				span.SetStatus(codes.Error, "downloading the sector failed")
+				span.RecordError(err)
+			}
+			locker.ReleaseContract(ctx, h.Contract(), lockID)
+			respChan <- resp{r, buf.Bytes(), err}
+		}(r)
+
+		if downloadSectorTimeout > 0 {
+			timer := time.NewTimer(downloadSectorTimeout)
+			select {
+			case <-timer.C:
+				span.SetAttributes(attribute.Bool("slow", true))
+				respChan <- resp{
+					req: r,
+					err: errDownloadSectorTimeout}
+			case <-doneChan:
+				if !timer.Stop() {
+					<-timer.C
+				}
+			}
 		}
+
+		<-doneChan
+		span.End()
 	}
 
 	// spawn workers and send initial requests
 	hostIndex := 0
 	inflight := 0
 	for i := uint8(0); i < ss.MinShards; i++ {
-		go worker()
-		reqChan <- req{hostIndex}
+		go worker(req{hostIndex})
 		hostIndex++
 		inflight++
 	}
@@ -292,7 +282,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			errs = append(errs, &HostError{hosts[resp.req.hostIndex].PublicKey(), resp.err})
 			// try next host
 			if hostIndex < len(hosts) {
-				reqChan <- req{hostIndex}
+				go worker(req{hostIndex})
 				hostIndex++
 				inflight++
 			}
@@ -410,6 +400,9 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 }
 
 func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locker contractLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration) error {
+	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
+	defer span.End()
+
 	hostsMap := make(map[string]struct{})
 	usedMap := make(map[string]struct{})
 
