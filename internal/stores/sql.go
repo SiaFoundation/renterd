@@ -72,10 +72,15 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	if migrate {
 		// Create the tables.
 		tables := []interface{}{
-			// bus.ContractStore tables
+			// bus.MetadataStore tables
 			&dbArchivedContract{},
 			&dbContract{},
 			&dbContractSet{},
+			&dbObject{},
+			&dbSector{},
+			&dbShard{},
+			&dbSlab{},
+			&dbSlice{},
 
 			// bus.HostDB tables
 			&dbAnnouncement{},
@@ -83,13 +88,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbHost{},
 			&dbInteraction{},
 			&dbBlocklistEntry{},
-
-			// bus.ObjectStore tables
-			&dbObject{},
-			&dbSlice{},
-			&dbSlab{},
-			&dbSector{},
-			&dbShard{},
 
 			// bus.SettingStore tables
 			&dbSetting{},

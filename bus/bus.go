@@ -77,8 +77,8 @@ type (
 		RemoveHostBlocklistEntry(ctx context.Context, entry string) error
 	}
 
-	// A ContractStore stores contracts.
-	ContractStore interface {
+	// A MetadataStore stores information about contracts and objects.
+	MetadataStore interface {
 		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
@@ -87,17 +87,14 @@ type (
 		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		RemoveContract(ctx context.Context, id types.FileContractID) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
-	}
 
-	// An ObjectStore stores objects.
-	ObjectStore interface {
-		Get(ctx context.Context, key string) (object.Object, error)
-		List(ctx context.Context, key string) ([]string, error)
-		Put(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-		Delete(ctx context.Context, key string) error
+		Object(ctx context.Context, key string) (object.Object, error)
+		Objects(ctx context.Context, key string) ([]string, error)
+		UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		RemoveObject(ctx context.Context, key string) error
 
-		SlabsForMigration(ctx context.Context, goodContracts []types.FileContractID, limit int) ([]object.Slab, error)
-		PutSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
+		UnhealthySlabs(ctx context.Context, set string, limit int) ([]object.Slab, error)
+		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
 
 	// A SettingStore stores settings.
@@ -123,8 +120,7 @@ type bus struct {
 	tp  TransactionPool
 	w   Wallet
 	hdb HostDB
-	cs  ContractStore
-	os  ObjectStore
+	ms  MetadataStore
 	ss  SettingStore
 
 	logger        *zap.SugaredLogger
@@ -465,14 +461,14 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
-	cs, err := b.cs.ActiveContracts(jc.Request.Context())
+	cs, err := b.ms.ActiveContracts(jc.Request.Context())
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
 }
 
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {
-	cs, err := b.cs.Contracts(jc.Request.Context(), jc.PathParam("set"))
+	cs, err := b.ms.Contracts(jc.Request.Context(), jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
@@ -483,7 +479,7 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("param 'set' can not be empty"), http.StatusBadRequest)
 	} else if jc.Decode(&contractIds) == nil {
-		jc.Check("could not add contracts to set", b.cs.SetContractSet(jc.Request.Context(), set, contractIds))
+		jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds))
 	}
 }
 
@@ -525,7 +521,7 @@ func (b *bus) contractIDHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	c, err := b.cs.Contract(jc.Request.Context(), id)
+	c, err := b.ms.Contract(jc.Request.Context(), id)
 	if jc.Check("couldn't load contract", err) == nil {
 		jc.Encode(c)
 	}
@@ -542,7 +538,7 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	a, err := b.cs.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
+	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(a)
 	}
@@ -559,7 +555,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	r, err := b.cs.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
+	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
@@ -570,19 +566,19 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	jc.Check("couldn't remove contract", b.cs.RemoveContract(jc.Request.Context(), id))
+	jc.Check("couldn't remove contract", b.ms.RemoveContract(jc.Request.Context(), id))
 }
 
 func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
-		keys, err := b.os.List(ctx, jc.PathParam("key"))
+		keys, err := b.ms.Objects(ctx, jc.PathParam("key"))
 		if jc.Check("couldn't list objects", err) == nil {
 			jc.Encode(api.ObjectsResponse{Entries: keys})
 		}
 		return
 	}
-	o, err := b.os.Get(ctx, jc.PathParam("key"))
+	o, err := b.ms.Object(ctx, jc.PathParam("key"))
 	if jc.Check("couldn't load object", err) == nil {
 		jc.Encode(api.ObjectsResponse{Object: &o})
 	}
@@ -591,28 +587,26 @@ func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 func (b *bus) objectsKeyHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.os.Put(jc.Request.Context(), jc.PathParam("key"), aor.Object, aor.UsedContracts))
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("key"), aor.Object, aor.UsedContracts))
 	}
 }
 
 func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", b.os.Delete(jc.Request.Context(), jc.PathParam("key")))
+	jc.Check("couldn't delete object", b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("key")))
 }
 
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.os.PutSlab(jc.Request.Context(), usr.Slab, usr.UsedContracts))
+		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.UsedContracts))
 	}
 }
 
 func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
-		if goodContracts, err := b.cs.Contracts(jc.Request.Context(), msr.ContractSet); jc.Check("couldn't fetch contracts for migration", err) == nil {
-			if slabs, err := b.os.SlabsForMigration(jc.Request.Context(), contractIds(goodContracts), msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
-				jc.Encode(slabs)
-			}
+		if slabs, err := b.ms.UnhealthySlabs(jc.Request.Context(), msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+			jc.Encode(slabs)
 		}
 	}
 }
@@ -678,7 +672,7 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	if jc.DecodeForm("startHeight", &minStartHeight) != nil {
 		return
 	}
-	ancestors, err := b.cs.AncestorContracts(jc.Request.Context(), fcid, minStartHeight)
+	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, minStartHeight)
 	if jc.Check("failed to fetch ancestor contracts", err) != nil {
 		return
 	}
@@ -806,15 +800,14 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, cs ContractStore, os ObjectStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, l *zap.Logger) (http.Handler, func() error, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, l *zap.Logger) (http.Handler, func() error, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
 		tp:            tp,
 		w:             w,
 		hdb:           hdb,
-		cs:            cs,
-		os:            os,
+		ms:            ms,
 		ss:            ss,
 		contractLocks: newContractLocks(),
 		logger:        l.Sugar().Named("bus"),
