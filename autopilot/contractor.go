@@ -730,7 +730,7 @@ func (c *contractor) renewContract(ctx context.Context, ci contractInfo, cfg api
 
 	// calculate the host collateral
 	endHeight := endHeight(cfg, c.currentPeriod())
-	newCollateral := ContractRenewalCollateral(rev.FileContract, renterFunds, settings, endHeight)
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, blockHeight, endHeight)
 
 	// renew the contract
 	newRevision, _, err := c.ap.worker.RHPRenew(ctx, fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
@@ -793,7 +793,7 @@ func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg a
 	}
 
 	// calculate the new collateral
-	newCollateral := ContractRenewalCollateral(rev.FileContract, renterFunds, settings, contract.EndHeight())
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, blockHeight, contract.EndHeight())
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
 	_, hostMissedPayout, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
@@ -858,7 +858,7 @@ func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, mi
 	}
 
 	// calculate the host collateral
-	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Storage/cfg.Contracts.Amount, cfg.Contracts.Period, scan.Settings)
+	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, renterFunds, scan.Settings)
 
 	// form contract
 	contract, _, err := c.ap.worker.RHPForm(ctx, endHeight(cfg, c.currentPeriod()), hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
@@ -970,40 +970,4 @@ func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]
 
 func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-}
-
-// TODO: remove this after merging the fix in the core package.
-func ContractRenewalCollateral(fc types.FileContract, renterFunds types.Currency, host rhpv2.HostSettings, endHeight uint64) types.Currency {
-	if endHeight < fc.EndHeight() {
-		panic("endHeight should be at least the current end height of the contract")
-	}
-	extension := endHeight - fc.EndHeight()
-
-	// calculate cost per byte
-	costPerByte := host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice)
-	if costPerByte.IsZero() {
-		return types.ZeroCurrency
-	}
-
-	// calculate the base collateral - if it exceeds MaxCollateral we can't add more collateral
-	baseCollateral := host.Collateral.Mul64(fc.Filesize).Mul64(extension)
-	if baseCollateral.Cmp(host.MaxCollateral) >= 0 {
-		return types.ZeroCurrency
-	}
-
-	// calculate the new collateral
-	newCollateral := host.Collateral.Mul(renterFunds.Div(costPerByte))
-
-	// if the total collateral is more than the MaxCollateral subtract the delta.
-	totalCollateral := baseCollateral.Add(newCollateral)
-	if totalCollateral.Cmp(host.MaxCollateral) > 0 {
-		delta := totalCollateral.Sub(host.MaxCollateral)
-		if delta.Cmp(newCollateral) > 0 {
-			newCollateral = types.ZeroCurrency
-		} else {
-			newCollateral = newCollateral.Sub(delta)
-		}
-	}
-
-	return newCollateral
 }

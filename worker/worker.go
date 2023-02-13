@@ -657,8 +657,9 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	if jc.Decode(&rrur) != nil {
 		return
 	}
-	var pt rhpv3.HostPriceTable        // TODO
-	cost, _ := pt.UpdateRegistryCost() // TODO: handle refund
+	var pt rhpv3.HostPriceTable   // TODO
+	rc := pt.UpdateRegistryCost() // TODO: handle refund
+	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)

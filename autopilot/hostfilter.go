@@ -69,7 +69,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 // can be renewed, along with a list of reasons why it was deemed unusable.
 func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable bool, refresh bool, renew bool, reasons []error) {
 	c, s := ci.contract, ci.settings
-	if isOutOfCollateral(c, s, renterFunds) {
+	if isOutOfCollateral(c, s, renterFunds, bh) {
 		reasons = append(reasons, errContractOutOfCollateral)
 		renew = false
 		refresh = true
@@ -113,8 +113,8 @@ func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract)
 // isOutOfCollateral returns 'true' if the remaining/unallocated collateral in
 // the contract is below a certain threshold of the collateral we would try to
 // put into a contract upon renew.
-func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, renterFunds types.Currency) bool {
-	expectedCollateral := ContractRenewalCollateral(c.Revision.FileContract, renterFunds, s, c.EndHeight())
+func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, renterFunds types.Currency, blockHeight uint64) bool {
+	expectedCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, renterFunds, s, blockHeight, c.EndHeight())
 	return isBelowCollateralThreshold(expectedCollateral, c.RemainingCollateral(s))
 }
 
