@@ -224,7 +224,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			}
 
 			offset, length := ss.SectorRegion()
-			var buf bytes.Buffer
+			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 			lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
 			if err != nil {
 				respChan <- resp{r, nil, err}
@@ -232,7 +232,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 				span.RecordError(err)
 				return
 			}
-			err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
+			err = h.DownloadSector(ctx, buf, shard.Root, offset, length)
 			if err != nil {
 				span.SetStatus(codes.Error, "downloading the sector failed")
 				span.RecordError(err)
