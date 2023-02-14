@@ -499,7 +499,7 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	// assert no hosts are removed
-	removed, err := hdb.RemoveOfflineHosts(context.Background(), time.Hour)
+	removed, err := hdb.RemoveOfflineHosts(context.Background(), 0, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,17 +518,20 @@ func TestRemoveHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch the host and assert the recent downtime is zero
+	// fetch the host and assert the recent downtime is 30 minutes and he has 2 recent scan failures
 	h, err = hostByPubKey(hdb.db, hk)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if h.RecentDowntime.Minutes() != 30 {
-		t.Fatal("downtime is not 30 minutes")
+		t.Fatal("downtime is not 30 minutes", h.RecentDowntime.Minutes())
+	}
+	if h.RecentScanFailures != 2 {
+		t.Fatal("recent scan failures is not 2", h.RecentScanFailures)
 	}
 
 	// assert no hosts are removed
-	removed, err = hdb.RemoveOfflineHosts(context.Background(), time.Hour)
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 0, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +547,7 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	// assert no hosts are removed at 61 minutes
-	removed, err = hdb.RemoveOfflineHosts(context.Background(), time.Minute*61)
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 0, time.Minute*61)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,8 +555,17 @@ func TestRemoveHosts(t *testing.T) {
 		t.Fatal("expected no hosts to be removed")
 	}
 
-	// assert hosts gets removed at 60 minutes
-	removed, err = hdb.RemoveOfflineHosts(context.Background(), time.Minute*60)
+	// assert no hosts are removed at 60 minutes if we require at least 4 failed scans
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 4, time.Minute*60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Fatal("expected no hosts to be removed")
+	}
+
+	// assert hosts gets removed at 60 minutes if we require at least 3 failed scans
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 3, time.Minute*60)
 	if err != nil {
 		t.Fatal(err)
 	}

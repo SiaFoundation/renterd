@@ -71,7 +71,7 @@ type (
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
-		RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (uint64, error)
+		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
 		HostBlocklist(ctx context.Context) ([]string, error)
 		AddHostBlocklistEntry(ctx context.Context, entry string) error
@@ -408,11 +408,11 @@ func (b *bus) hostsRemoveHandlerPOST(jc jape.Context) {
 	if jc.Decode(&hrr) != nil {
 		return
 	}
-	if hrr.MaxDowntime == 0 {
+	if hrr.MaxDowntimeHours == 0 {
 		jc.Error(errors.New("maxDowntime must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hdb.RemoveOfflineHosts(jc.Request.Context(), time.Duration(hrr.MaxDowntime))
+	removed, err := b.hdb.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
 	if jc.Check("couldn't remove offline hosts", err) != nil {
 		return
 	}

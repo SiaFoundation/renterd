@@ -12,6 +12,10 @@ type (
 	// and format a time in the RFC3339 format.
 	ParamTime time.Time
 
+	// A ParamDurationHour aliases time.Duration to add marshaling functions
+	// that format the duration in hours.
+	ParamDurationHour time.Duration
+
 	// A ParamDuration is the elapsed time between two instants. ParamDurations
 	// are encoded as an integer number of milliseconds.
 	ParamDuration time.Duration
@@ -61,6 +65,26 @@ func (d *ParamDuration) UnmarshalText(b []byte) error {
 		return err
 	}
 	*d = ParamDuration(time.Duration(ms) * time.Millisecond)
+	return nil
+}
+
+// String implements fmt.Stringer.
+func (d ParamDurationHour) String() string {
+	return strconv.Itoa(int(time.Duration(d).Hours()))
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (d ParamDurationHour) MarshalText() ([]byte, error) {
+	return []byte(d.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (d *ParamDurationHour) UnmarshalText(b []byte) error {
+	h, err := strconv.ParseInt(string(b), 10, 64)
+	if err != nil {
+		return err
+	}
+	*d = ParamDurationHour(time.Duration(h) * time.Hour)
 	return nil
 }
 

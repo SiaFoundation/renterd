@@ -50,7 +50,7 @@ func (b *mockBus) HostsForScanning(ctx context.Context, _ time.Time, offset, lim
 	return hostAddresses, nil
 }
 
-func (b *mockBus) RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (uint64, error) {
+func (b *mockBus) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error) {
 	return 0, nil
 }
 
@@ -80,6 +80,8 @@ func (s *scanner) isScanning() bool {
 }
 
 func TestScanner(t *testing.T) {
+	cfg := api.DefaultAutopilotConfig()
+
 	// prepare 100 hosts
 	hosts := newTestHosts(100)
 
@@ -89,7 +91,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background(), 0)
+	s.tryPerformHostScan(context.Background(), cfg)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -117,7 +119,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.tryPerformHostScan(context.Background(), 0)
+	s.tryPerformHostScan(context.Background(), cfg)
 	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -126,9 +128,32 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background(), 0)
+	s.tryPerformHostScan(context.Background(), cfg)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
+	}
+}
+
+func TestMinRecentScanFailures(t *testing.T) {
+	day := time.Hour * 24
+	week := day * 7
+
+	cases := []struct {
+		scanInterval time.Duration
+		maxDowntime  time.Duration
+		expected     uint64
+	}{
+		{day, week * 2, 10},
+		{day, week, 5},
+		{day, day, 1},
+		{day, time.Hour, 0},
+	}
+
+	for _, c := range cases {
+		actual := minRecentScanFailures(c.scanInterval, c.maxDowntime)
+		if actual != c.expected {
+			t.Errorf("unexpected minRecentScanFailures, %v != %v", actual, c.expected)
+		}
 	}
 }
 

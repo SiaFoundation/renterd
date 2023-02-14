@@ -52,7 +52,8 @@ type ContractAcquireResponse struct {
 
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.
 type HostsRemoveRequest struct {
-	MaxDowntime ParamDuration `json:"maxDowntime"`
+	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
+	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.

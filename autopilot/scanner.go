@@ -15,6 +15,8 @@ import (
 )
 
 const (
+	defaultMinRecentScanFailures = uint64(10)
+
 	// TODO: make these configurable
 	scannerTimeoutInterval   = 10 * time.Minute
 	scannerTimeoutMinTimeout = time.Second * 5
@@ -33,7 +35,7 @@ type (
 		bus interface {
 			Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 			HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
-			RemoveOfflineHosts(ctx context.Context, maxDowntime time.Duration) (uint64, error)
+			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
 		worker interface {
 			RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -147,7 +149,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context, hostsMaxDowntime time.Duration) {
+func (s *scanner) tryPerformHostScan(ctx context.Context, cfg api.AutopilotConfig) {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
@@ -169,9 +171,11 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, hostsMaxDowntime time.
 			}
 		}
 
-		if !s.isStopped() && hostsMaxDowntime > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v hours", hostsMaxDowntime.Hours())
-			if removed, err := s.bus.RemoveOfflineHosts(ctx, hostsMaxDowntime); err != nil {
+		if !s.isStopped() && cfg.Hosts.MaxDowntimeHours > 0 {
+			s.logger.Debugf("removing hosts that have been offline for more than %v hours", cfg.Hosts.MaxDowntimeHours)
+			maxDowntime := time.Hour * time.Duration(cfg.Hosts.MaxDowntimeHours)
+			minFailures := minRecentScanFailures(s.scanMinInterval, maxDowntime)
+			if removed, err := s.bus.RemoveOfflineHosts(ctx, minFailures, maxDowntime); err != nil {
 				s.logger.Error(err)
 			} else if removed > 0 {
 				s.logger.Debugf("removed %v offline hosts", removed)
@@ -289,4 +293,12 @@ func (s *scanner) currentTimeout() time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.timeout
+}
+
+func minRecentScanFailures(scanInterval, maxDowntime time.Duration) uint64 {
+	min := defaultMinRecentScanFailures
+	for time.Duration(min)*scanInterval > maxDowntime {
+		min /= 2
+	}
+	return min
 }
