@@ -10,6 +10,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 )
 
 func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, currentHeight uint64) (types.Hash256, error) {
@@ -18,7 +19,12 @@ func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	}
 	storageDuration := uint64(s.Revision().Revision.WindowStart) - currentHeight
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
-	return s.Append(ctx, sector, price, collateral)
+	root, err := s.Append(ctx, sector, price, collateral)
+	if err != nil {
+		return root, err
+	}
+	RecordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Uploads: price})
+	return root, nil
 }
 
 func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
@@ -28,7 +34,11 @@ func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash25
 		Length:     uint64(length),
 	}}
 	price := rhpv2.RPCReadCost(s.settings, sections)
-	return s.Read(ctx, w, sections, price)
+	if err := s.Read(ctx, w, sections, price); err != nil {
+		return err
+	}
+	RecordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Downloads: price})
+	return nil
 }
 
 func (s *Session) deleteSectors(ctx context.Context, roots []types.Hash256) error {

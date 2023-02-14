@@ -198,6 +198,21 @@ func TestUploadDownload(t *testing.T) {
 			t.Fatal("unexpected")
 		}
 	}
+
+	// Check that the spending was recorded.
+	time.Sleep(testBusFlushInterval)
+	contracts, err := cluster.Bus.ActiveContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range contracts {
+		if c.Spending.Uploads.IsZero() {
+			t.Fatal("no upload spending recorded")
+		}
+		if c.Spending.Downloads.IsZero() {
+			t.Fatal("no download spending recorded")
+		}
+	}
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.

@@ -765,6 +765,9 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, dp.GougingParams)
 
+	// attach contract spending recorder to the context.
+	ctx = WithContractSpendingRecorder(ctx, w)
+
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
 	// straightforward fashion, we would need one (or more!) RHP RPCs for each
@@ -852,6 +855,9 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, up.GougingParams)
+
+	// attach contract spending recorder to the context.
+	ctx = WithContractSpendingRecorder(ctx, w)
 
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -1037,45 +1043,6 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
 	})), cleanup, nil
-}
-
-func (w *worker) recordContractSpending(fcid types.FileContractID, cs api.ContractSpending) {
-	w.contractSpendingsMu.Lock()
-	defer w.contractSpendingsMu.Unlock()
-
-	// Add spending to buffer.
-	w.contractSpendings[fcid] = w.contractSpendings[fcid].Add(cs)
-
-	// If a thread was scheduled to flush the buffer we are done.
-	if w.contractSpendingsFlushTimer != nil {
-		return
-	}
-	// Otherwise we schedule a flush.
-	w.contractSpendingsFlushTimer = time.AfterFunc(w.busFlushInterval, func() {
-		w.contractSpendingsMu.Lock()
-		w.flushContractSpending()
-		w.contractSpendingsMu.Unlock()
-	})
-}
-
-func (w *worker) flushContractSpending() {
-	if len(w.contractSpendings) > 0 {
-		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushContractSpending")
-		defer span.End()
-		records := make([]api.ContractSpendingRecord, 0, len(w.contractSpendings))
-		for fcid, cs := range w.contractSpendings {
-			records = append(records, api.ContractSpendingRecord{
-				ContractID:       fcid,
-				ContractSpending: cs,
-			})
-		}
-		if err := w.bus.RecordContractSpending(ctx, records); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to record contract spending: %v", err))
-		} else {
-			w.contractSpendings = make(map[types.FileContractID]api.ContractSpending)
-		}
-	}
-	w.contractSpendingsFlushTimer = nil
 }
 
 func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
