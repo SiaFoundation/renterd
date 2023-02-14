@@ -450,11 +450,11 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 	}
 	shards, slowHosts, err := parallelDownloadSlab(ctx, ss, hosts, locker, downloadSectorTimeout)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	ss.Decrypt(shards)
 	if err := s.Reconstruct(shards); err != nil {
-		return err
+		return fmt.Errorf("failed to reconstruct shards downloaded for migration: %w", err)
 	}
 	s.Encrypt(shards)
 
@@ -487,7 +487,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 	// reupload those shards
 	uploaded, _, err := parallelUploadSlab(ctx, shards, filtered, locker, uploadSectorTimeout)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
 	// overwrite the unhealthy shards with the newly migrated ones
