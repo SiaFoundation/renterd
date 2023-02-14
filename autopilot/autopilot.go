@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
@@ -198,6 +199,8 @@ func (ap *Autopilot) Run() error {
 
 // Shutdown shuts down the autopilot.
 func (ap *Autopilot) Shutdown(ctx context.Context) error {
+	ctx, span := tracing.Tracer.Start(ctx, "autopilot: shutdown")
+
 	doneChan := make(chan struct{})
 	go func() {
 		defer close(doneChan)
@@ -207,14 +210,19 @@ func (ap *Autopilot) Shutdown(ctx context.Context) error {
 			ap.ticker.Stop()
 			close(ap.stopChan)
 			close(ap.triggerChan)
+
+			span.AddEvent("waiting for waitgroup")
 			ap.wg.Wait()
+
 			ap.running = false
 		}
 		ap.startStopMu.Unlock()
+		span.End()
 	}()
 
 	select {
 	case <-ctx.Done():
+		span.SetAttributes(attribute.Bool("timeout", true))
 		return errors.New("autopilot shutdown timed out")
 	case <-doneChan:
 	}
