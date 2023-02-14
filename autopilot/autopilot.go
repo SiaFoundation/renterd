@@ -88,13 +88,13 @@ type Autopilot struct {
 	s *scanner
 
 	tickerDuration time.Duration
-	stopChan       chan struct{}
-	triggerChan    chan struct{}
 	wg             sync.WaitGroup
 
 	startStopMu sync.Mutex
 	running     bool
 	ticker      *time.Ticker
+	triggerChan chan struct{}
+	stopChan    chan struct{}
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -212,6 +212,9 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 }
 
 func (ap *Autopilot) Trigger() bool {
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
+
 	select {
 	case ap.triggerChan <- struct{}{}:
 		return true
