@@ -200,18 +200,23 @@ func TestUploadDownload(t *testing.T) {
 	}
 
 	// Check that the spending was recorded.
-	time.Sleep(testBusFlushInterval)
-	contracts, err := cluster.Bus.ActiveContracts(context.Background())
+	err = Retry(100, testBusFlushInterval, func() error {
+		contracts, err := cluster.Bus.ActiveContracts(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range contracts {
+			if c.Spending.Uploads.IsZero() {
+				return errors.New("no upload spending recorded")
+			}
+			if c.Spending.Downloads.IsZero() {
+				return errors.New("no download spending recorded")
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	for _, c := range contracts {
-		if c.Spending.Uploads.IsZero() {
-			t.Fatal("no upload spending recorded")
-		}
-		if c.Spending.Downloads.IsZero() {
-			t.Fatal("no download spending recorded")
-		}
 	}
 }
 
