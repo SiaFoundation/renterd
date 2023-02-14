@@ -85,6 +85,7 @@ type (
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContract(ctx context.Context, id types.FileContractID) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
@@ -432,6 +433,16 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 		return
 	}
 	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(jc.Request.Context(), interactions)) != nil {
+		return
+	}
+}
+
+func (b *bus) contractsSpendingHandlerPOST(jc jape.Context) {
+	var records []api.ContractSpendingRecord
+	if jc.Decode(&records) != nil {
+		return
+	}
+	if jc.Check("failed to record spending metrics for contract", b.ms.RecordContractSpending(jc.Request.Context(), records)) != nil {
 		return
 	}
 }
@@ -871,6 +882,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
@@ -895,12 +907,4 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
 		"GET    /params/gouging":  b.paramsHandlerGougingGET,
 	})), cleanup, nil
-}
-
-func contractIds(contracts []api.ContractMetadata) []types.FileContractID {
-	ids := make([]types.FileContractID, len(contracts))
-	for i, c := range contracts {
-		ids[i] = c.ID
-	}
-	return ids
 }

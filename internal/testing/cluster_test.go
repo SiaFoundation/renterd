@@ -243,7 +243,8 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Fund account.
-	if err := w.RHPFund(ctx, contract.ID, contract.HostKey(), types.Siacoins(1)); err != nil {
+	fundAmt := types.Siacoins(1)
+	if err := w.RHPFund(ctx, contract.ID, contract.HostKey(), fundAmt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -280,6 +281,18 @@ func TestEphemeralAccounts(t *testing.T) {
 	busAcc := busAccounts[0]
 	if !reflect.DeepEqual(busAcc, acc) {
 		t.Fatal("bus account doesn't match worker account")
+	}
+
+	// Check that the spending was recorded for the contract. The recorded
+	// spending should be > the fundAmt since it consists of the fundAmt plus
+	// fee.
+	time.Sleep(testBusFlushInterval)
+	cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
+		t.Fatalf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
 	}
 
 	// Shut down cluster.

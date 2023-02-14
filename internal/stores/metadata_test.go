@@ -1261,3 +1261,80 @@ func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileCont
 	}
 	return obj, usedContracts
 }
+
+// TestRecordContractSpending tests RecordContractSpending.
+func TestRecordContractSpending(t *testing.T) {
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a host for the contract.
+	hk := types.GeneratePrivateKey().PublicKey()
+	err = cs.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an announcement.
+	err = cs.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fcid := types.FileContractID{1, 1, 1, 1, 1}
+	cm, err := cs.addTestContract(fcid, hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Spending != (api.ContractSpending{}) {
+		t.Fatal("spending should be all 0")
+	}
+
+	// Record some spending.
+	expectedSpending := api.ContractSpending{
+		Uploads:     types.Siacoins(1),
+		Downloads:   types.Siacoins(2),
+		FundAccount: types.Siacoins(3),
+	}
+	err = cs.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
+		// non-existent contract
+		{
+			ContractID: types.FileContractID{1, 2, 3},
+		},
+		// valid spending
+		{
+			ContractID:       fcid,
+			ContractSpending: expectedSpending,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm2, err := cs.Contract(context.Background(), fcid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm2.Spending != expectedSpending {
+		t.Fatal("invalid spending")
+	}
+
+	// Record the same spending again.
+	err = cs.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
+		{
+			ContractID:       fcid,
+			ContractSpending: expectedSpending,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSpending = expectedSpending.Add(expectedSpending)
+	cm3, err := cs.Contract(context.Background(), fcid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm3.Spending != expectedSpending {
+		t.Fatal("invalid spending")
+	}
+}
