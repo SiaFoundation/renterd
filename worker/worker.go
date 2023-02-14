@@ -293,9 +293,7 @@ type worker struct {
 	interactions           []hostdb.Interaction
 	interactionsFlushTimer *time.Timer
 
-	contractSpendingsMu         sync.Mutex
-	contractSpendings           map[types.FileContractID]api.ContractSpending
-	contractSpendingsFlushTimer *time.Timer
+	contractSpendingRecorder *contractSpendingRecorder
 
 	downloadSectorTimeout time.Duration
 	uploadSectorTimeout   time.Duration
@@ -635,7 +633,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			if !ok {
 				return errors.New("insufficient funds")
 			}
-			w.recordContractSpending(rfr.ContractID, api.ContractSpending{FundAccount: cost})
+			w.contractSpendingRecorder.record(rfr.ContractID, api.ContractSpending{FundAccount: cost})
 			return RPCFundAccount(t, &payment, account.id, pt.UID)
 		})
 	})
@@ -698,6 +696,9 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, up.GougingParams)
+
+	// attach contract spending recorder to the context.
+	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
 	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
@@ -766,7 +767,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, dp.GougingParams)
 
 	// attach contract spending recorder to the context.
-	ctx = WithContractSpendingRecorder(ctx, w)
+	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
@@ -857,7 +858,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, up.GougingParams)
 
 	// attach contract spending recorder to the context.
-	ctx = WithContractSpendingRecorder(ctx, w)
+	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
 	o := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -1002,11 +1003,11 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		busFlushInterval:      busFlushInterval,
 		downloadSectorTimeout: downloadSectorTimeout,
 		uploadSectorTimeout:   uploadSectorTimeout,
-		contractSpendings:     make(map[types.FileContractID]api.ContractSpending),
 		logger:                l.Sugar().Named("worker").Named(id),
 	}
 	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
+	w.contractSpendingRecorder = w.newContractSpendingRecorder()
 
 	cleanup := func() error {
 		// Flush interactions on cleanup.
@@ -1017,12 +1018,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		}
 		w.interactionsMu.Unlock()
 		// Flush contract spending on cleanup.
-		w.contractSpendingsMu.Lock()
-		if w.contractSpendingsFlushTimer != nil {
-			w.contractSpendingsFlushTimer.Stop()
-			w.flushContractSpending()
-		}
-		w.contractSpendingsMu.Unlock()
+		w.contractSpendingRecorder.flush()
 		return nil
 	}
 

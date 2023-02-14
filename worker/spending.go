@@ -3,24 +3,36 @@ package worker
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/tracing"
+	"go.uber.org/zap"
 )
 
 const keyContractSpendingRecorder contextKey = "ContractSpendingRecorder"
 
 type (
 	ContractSpendingRecorder interface {
-		recordContractSpending(fcid types.FileContractID, cs api.ContractSpending)
+		record(fcid types.FileContractID, cs api.ContractSpending)
+	}
+
+	contractSpendingRecorder struct {
+		bus           Bus
+		flushInterval time.Duration
+		logger        *zap.SugaredLogger
+
+		mu                          sync.Mutex
+		contractSpendings           map[types.FileContractID]api.ContractSpending
+		contractSpendingsFlushTimer *time.Timer
 	}
 )
 
 func RecordContractSpending(ctx context.Context, fcid types.FileContractID, cs api.ContractSpending) {
 	if sr, ok := ctx.Value(keyContractSpendingRecorder).(ContractSpendingRecorder); ok {
-		sr.recordContractSpending(fcid, cs)
+		sr.record(fcid, cs)
 		return
 	}
 	panic("no spending recorder attached to the context") // developer error
@@ -29,9 +41,19 @@ func RecordContractSpending(ctx context.Context, fcid types.FileContractID, cs a
 func WithContractSpendingRecorder(ctx context.Context, sr ContractSpendingRecorder) context.Context {
 	return context.WithValue(ctx, keyContractSpendingRecorder, sr)
 }
-func (w *worker) recordContractSpending(fcid types.FileContractID, cs api.ContractSpending) {
-	w.contractSpendingsMu.Lock()
-	defer w.contractSpendingsMu.Unlock()
+
+func (w *worker) newContractSpendingRecorder() *contractSpendingRecorder {
+	return &contractSpendingRecorder{
+		bus:               w.bus,
+		contractSpendings: make(map[types.FileContractID]api.ContractSpending),
+		flushInterval:     w.busFlushInterval,
+		logger:            w.logger,
+	}
+}
+
+func (w *contractSpendingRecorder) record(fcid types.FileContractID, cs api.ContractSpending) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	// Add spending to buffer.
 	w.contractSpendings[fcid] = w.contractSpendings[fcid].Add(cs)
@@ -41,14 +63,14 @@ func (w *worker) recordContractSpending(fcid types.FileContractID, cs api.Contra
 		return
 	}
 	// Otherwise we schedule a flush.
-	w.contractSpendingsFlushTimer = time.AfterFunc(w.busFlushInterval, func() {
-		w.contractSpendingsMu.Lock()
-		w.flushContractSpending()
-		w.contractSpendingsMu.Unlock()
+	w.contractSpendingsFlushTimer = time.AfterFunc(w.flushInterval, func() {
+		w.mu.Lock()
+		w.flush()
+		w.mu.Unlock()
 	})
 }
 
-func (w *worker) flushContractSpending() {
+func (w *contractSpendingRecorder) flush() {
 	if len(w.contractSpendings) > 0 {
 		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushContractSpending")
 		defer span.End()
