@@ -51,41 +51,50 @@ func (w *worker) newContractSpendingRecorder() *contractSpendingRecorder {
 	}
 }
 
-func (w *contractSpendingRecorder) record(fcid types.FileContractID, cs api.ContractSpending) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (sr *contractSpendingRecorder) record(fcid types.FileContractID, cs api.ContractSpending) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
 
 	// Add spending to buffer.
-	w.contractSpendings[fcid] = w.contractSpendings[fcid].Add(cs)
+	sr.contractSpendings[fcid] = sr.contractSpendings[fcid].Add(cs)
 
 	// If a thread was scheduled to flush the buffer we are done.
-	if w.contractSpendingsFlushTimer != nil {
+	if sr.contractSpendingsFlushTimer != nil {
 		return
 	}
 	// Otherwise we schedule a flush.
-	w.contractSpendingsFlushTimer = time.AfterFunc(w.flushInterval, func() {
-		w.mu.Lock()
-		w.flush()
-		w.mu.Unlock()
+	sr.contractSpendingsFlushTimer = time.AfterFunc(sr.flushInterval, func() {
+		sr.mu.Lock()
+		sr.flush()
+		sr.mu.Unlock()
 	})
 }
 
-func (w *contractSpendingRecorder) flush() {
-	if len(w.contractSpendings) > 0 {
+func (sr *contractSpendingRecorder) flush() {
+	if len(sr.contractSpendings) > 0 {
 		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushContractSpending")
 		defer span.End()
-		records := make([]api.ContractSpendingRecord, 0, len(w.contractSpendings))
-		for fcid, cs := range w.contractSpendings {
+		records := make([]api.ContractSpendingRecord, 0, len(sr.contractSpendings))
+		for fcid, cs := range sr.contractSpendings {
 			records = append(records, api.ContractSpendingRecord{
 				ContractID:       fcid,
 				ContractSpending: cs,
 			})
 		}
-		if err := w.bus.RecordContractSpending(ctx, records); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to record contract spending: %v", err))
+		if err := sr.bus.RecordContractSpending(ctx, records); err != nil {
+			sr.logger.Errorw(fmt.Sprintf("failed to record contract spending: %v", err))
 		} else {
-			w.contractSpendings = make(map[types.FileContractID]api.ContractSpending)
+			sr.contractSpendings = make(map[types.FileContractID]api.ContractSpending)
 		}
 	}
-	w.contractSpendingsFlushTimer = nil
+	sr.contractSpendingsFlushTimer = nil
+}
+
+func (sr *contractSpendingRecorder) Stop() {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	if sr.contractSpendingsFlushTimer != nil {
+		sr.contractSpendingsFlushTimer.Stop()
+		sr.flush()
+	}
 }

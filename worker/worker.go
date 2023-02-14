@@ -1017,8 +1017,8 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 			w.flushInteractions()
 		}
 		w.interactionsMu.Unlock()
-		// Flush contract spending on cleanup.
-		w.contractSpendingRecorder.flush()
+		// Stop contract spending recorder.
+		w.contractSpendingRecorder.Stop()
 		return nil
 	}
 
