@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -162,50 +163,75 @@ type Session struct {
 	mu          sync.Mutex
 }
 
-// transport wraps rhpv2.Transport to add a context to its methods and ensure
-// developers don't accidentally use the underlying transport directly.
+// transport wraps rhpv2.Transport to make sure we always apply the context's
+// deadline as read/write deadline to the transport's underlying connection.
 type transport struct {
 	t *rhpv2.Transport
 }
 
-func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req rhpv2.ProtocolObject) error {
+func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req rhpv2.ProtocolObject) (err error) {
 	if deadline, ok := ctx.Deadline(); ok {
-		t.t.SetDeadline(deadline)
-		defer t.t.SetDeadline(time.Time{})
+		t.t.SetWriteDeadline(deadline)
+		defer func() {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				if cErr := t.t.Close(); cErr != nil {
+					err = fmt.Errorf("failed to close transport after write deadline exceeded, err %v; close: %w", cErr, err)
+				}
+			} else if err == nil {
+				t.t.SetWriteDeadline(time.Time{})
+			}
+		}()
 	}
 	return t.t.WriteRequest(rpcID, req)
 }
 
-func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject) error {
+func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject) (err error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		t.t.SetWriteDeadline(deadline)
-		defer t.t.SetWriteDeadline(time.Time{})
+		defer func() {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				if cErr := t.t.Close(); cErr != nil {
+					err = fmt.Errorf("failed to close transport after write deadline exceeded, err %v; close: %w", cErr, err)
+				}
+			} else if err == nil {
+				t.t.SetWriteDeadline(time.Time{})
+			}
+		}()
 	}
 	return t.t.WriteResponse(resp)
 }
 
-func (t *transport) writeResponseErr(ctx context.Context, rErr error) error {
+func (t *transport) writeResponseErr(ctx context.Context, rErr error) (err error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		t.t.SetWriteDeadline(deadline)
-		defer t.t.SetWriteDeadline(time.Time{})
+		defer func() {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				if cErr := t.t.Close(); cErr != nil {
+					err = fmt.Errorf("failed to close transport after write deadline exceeded, err %v; close: %w", cErr, err)
+				}
+			} else if err == nil {
+				t.t.SetWriteDeadline(time.Time{})
+			}
+		}()
 	}
 	return t.t.WriteResponseErr(rErr)
 }
 
-func (t *transport) readResponse(ctx context.Context, resp rhpv2.ProtocolObject, maxLen uint64) error {
+func (t *transport) readResponse(ctx context.Context, resp rhpv2.ProtocolObject, maxLen uint64) (err error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		t.t.SetReadDeadline(deadline)
-		defer t.t.SetReadDeadline(time.Time{})
+		defer func() {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				t.t.SetWriteDeadline(time.Now().Add(time.Second)) // make sure we don't block on write when gracefully closing the transport
+				if cErr := t.t.Close(); cErr != nil {
+					err = fmt.Errorf("failed to close transport after read deadline exceeded, err %v; close: %w", cErr, err)
+				}
+			} else if err == nil {
+				t.t.SetReadDeadline(time.Time{})
+			}
+		}()
 	}
 	return t.t.ReadResponse(resp, maxLen)
-}
-
-func (t *transport) readRequest(ctx context.Context, req rhpv2.ProtocolObject, maxLen uint64) (err error) {
-	if deadline, ok := ctx.Deadline(); ok {
-		t.t.SetReadDeadline(deadline)
-		defer t.t.SetReadDeadline(time.Time{})
-	}
-	return t.t.ReadRequest(req, maxLen)
 }
 
 // HostKey returns the public key of the host.
