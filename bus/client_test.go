@@ -96,7 +96,7 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 
 	shutdownFn := func(ctx context.Context) error {
 		server.Shutdown(ctx)
-		return cleanup()
+		return cleanup(ctx)
 	}
 	return client, serveFn, shutdownFn, nil
 }

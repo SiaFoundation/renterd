@@ -3,10 +3,12 @@ package node
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
@@ -53,6 +55,8 @@ type AutopilotConfig struct {
 	ScannerBatchSize  uint64
 	ScannerNumThreads uint64
 }
+
+type ShutdownFn = func(context.Context) error
 
 func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	var buf bytes.Buffer
@@ -179,7 +183,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -248,45 +252,38 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, l)
+	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, l)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cleanup := func() error {
-		errs := []error{
+	shutdownFn := func(ctx context.Context) error {
+		return joinErrors([]error{
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
-			busCleanup(),
+			b.Shutdown(ctx),
 			sqlStore.Close(),
-		}
-		for _, err := range errs {
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+		})
 	}
-	return b, cleanup, nil
+	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, l)
-	return w, cleanup, err
+	w := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, l)
+	return w.Handler(), w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
+func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
 	ap, err := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-
-	return ap, ap.Stop, nil
+	return ap.Handler(), ap.Run, ap.Shutdown, nil
 }
 
-func NewLogger(path string) (*zap.Logger, func(), error) {
+func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {
 	writer, closeFn, err := zap.Open(path)
 	if err != nil {
 		return nil, nil, err
@@ -319,8 +316,31 @@ func NewLogger(path string) (*zap.Logger, func(), error) {
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	)
 
-	return logger, func() {
+	return logger, func(_ context.Context) error {
 		_ = logger.Sync() // ignore Error
 		closeFn()
+		return nil
 	}, nil
+}
+
+func joinErrors(errs []error) error {
+	filtered := errs[:0]
+	for _, err := range errs {
+		if err != nil {
+			filtered = append(filtered, err)
+		}
+	}
+
+	switch len(filtered) {
+	case 0:
+		return nil
+	case 1:
+		return filtered[0]
+	default:
+		strs := make([]string, len(filtered))
+		for i := range strs {
+			strs[i] = filtered[i].Error()
+		}
+		return errors.New(strings.Join(strs, ";"))
+	}
 }

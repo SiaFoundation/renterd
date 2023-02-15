@@ -118,12 +118,6 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 	return fn()
 }
 
-func withCtx(f func() error) func(context.Context) error {
-	return func(context.Context) error {
-		return f()
-	}
-}
-
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	return newTestClusterWithFunding(dir, true, logger)
@@ -169,8 +163,8 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	miner := node.NewMiner(busClient)
 
 	// Create bus.
-	var cleanups []func(context.Context) error
-	b, bCleanup, err := node.NewBus(node.BusConfig{
+	var shutdownFns []func(context.Context) error
+	b, bStopFn, err := node.NewBus(node.BusConfig{
 		Bootstrap:          false,
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              miner,
@@ -185,11 +179,11 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	busServer := http.Server{
 		Handler: busAuth(b),
 	}
-	cleanups = append(cleanups, withCtx(bCleanup))
-	cleanups = append(cleanups, busServer.Shutdown)
+	shutdownFns = append(shutdownFns, bStopFn)
+	shutdownFns = append(shutdownFns, busServer.Shutdown)
 
 	// Create worker.
-	w, wCleanup, err := node.NewWorker(node.WorkerConfig{
+	w, wStopFn, err := node.NewWorker(node.WorkerConfig{
 		ID:                      "worker",
 		BusFlushInterval:        testBusFlushInterval,
 		SessionReconnectTimeout: 10 * time.Second,
@@ -202,8 +196,8 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	workerServer := http.Server{
 		Handler: workerAuth(w),
 	}
-	cleanups = append(cleanups, withCtx(wCleanup))
-	cleanups = append(cleanups, workerServer.Shutdown)
+	shutdownFns = append(shutdownFns, wStopFn)
+	shutdownFns = append(shutdownFns, workerServer.Shutdown)
 
 	// Create autopilot store.
 	autopilotStore, err := stores.NewJSONAutopilotStore(autopilotDir)
@@ -212,7 +206,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	}
 
 	// Create autopilot.
-	ap, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
+	ap, aStartFn, aStopFn, err := node.NewAutopilot(node.AutopilotConfig{
 		Heartbeat:         time.Second,
 		ScannerInterval:   time.Second,
 		ScannerBatchSize:  10,
@@ -223,10 +217,10 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	}
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
 	autopilotServer := http.Server{
-		Handler: autopilotAuth(autopilot.NewServer(ap)),
+		Handler: autopilotAuth(ap),
 	}
-	cleanups = append(cleanups, withCtx(aCleanup))
-	cleanups = append(cleanups, autopilotServer.Shutdown)
+	shutdownFns = append(shutdownFns, aStopFn)
+	shutdownFns = append(shutdownFns, autopilotServer.Shutdown)
 
 	cluster := &TestCluster{
 		dir:   dir,
@@ -236,7 +230,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 		Bus:       busClient,
 		Worker:    workerClient,
 
-		cleanups: cleanups,
+		cleanups: shutdownFns,
 	}
 
 	// Spin up the servers.
@@ -257,7 +251,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	}()
 	cluster.wg.Add(1)
 	go func() {
-		_ = ap.Run()
+		_ = aStartFn()
 		cluster.wg.Done()
 	}()
 
