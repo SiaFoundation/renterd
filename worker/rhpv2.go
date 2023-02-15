@@ -46,6 +46,10 @@ var (
 	// question has reached its maximum revision number, meaning the contract
 	// can no longer be revised.
 	ErrContractFinalized = errors.New("contract cannot be revised further")
+
+	// errNoMoreData is used as a sentinel value to indicate the host has no
+	// more data to send and we can break out of a loop
+	errNoMoreData = errors.New("no more data")
 )
 
 // A HostError associates an error with a given host.
@@ -147,7 +151,7 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 // A Session pairs a Transport with a Contract, enabling RPCs that modify the
 // Contract.
 type Session struct {
-	transport   *rhpv2.Transport
+	transport   *transport
 	renewedFrom types.FileContractID
 	renewedTo   types.FileContractID
 	revision    rhpv2.ContractRevision
@@ -158,6 +162,12 @@ type Session struct {
 	mu          sync.Mutex
 }
 
+// transport wraps rhpv2.Transport to add a context to its methods and ensure
+// developers don't accidentally use the underlying transport directly.
+type transport struct {
+	t *rhpv2.Transport
+}
+
 // HostKey returns the public key of the host.
 func (s *Session) HostKey() types.PublicKey { return s.revision.HostKey() }
 
@@ -166,6 +176,14 @@ func (s *Session) Revision() rhpv2.ContractRevision { return s.revision }
 
 // Revision returns the host's current settings.
 func (s *Session) Settings() rhpv2.HostSettings { return s.settings }
+
+// Transport returns the underlying transport.
+func (s *Session) Transport() *rhpv2.Transport {
+	if s.transport != nil {
+		return s.transport.t
+	}
+	return nil
+}
 
 func (s *Session) isRevisable() bool {
 	return s.revision.Revision.RevisionNumber < math.MaxUint64
@@ -216,7 +234,7 @@ func recordRPC(ctx context.Context, t *rhpv2.Transport, c rhpv2.ContractRevision
 // sector Merkle roots of the currently-locked contract.
 func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []types.Hash256, err error) {
 	defer wrapErr(&err, "SectorRoots")
-	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCSectorRootsID, &err)()
+	defer recordRPC(ctx, s.Transport(), s.revision, rhpv2.RPCSectorRootsID, &err)()
 
 	if !s.isRevisable() {
 		return nil, ErrContractFinalized
@@ -244,10 +262,10 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 		Signature:         s.key.SignHash(revisionHash),
 	}
 	var resp rhpv2.RPCSectorRootsResponse
-	if err := s.transport.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
+	if err := s.transport.writeRequest(ctx, rhpv2.RPCSectorRootsID, req); err != nil {
 		return nil, err
 	}
-	if err := s.transport.ReadResponse(&resp, uint64(4096+32*n)); err != nil {
+	if err := s.transport.readResponse(ctx, &resp, uint64(4096+32*n)); err != nil {
 		readCtx := fmt.Sprintf("couldn't read %v response", rhpv2.RPCSectorRootsID)
 		rejectCtx := fmt.Sprintf("host rejected %v request", rhpv2.RPCSectorRootsID)
 		return nil, wrapResponseErr(err, readCtx, rejectCtx)
@@ -299,7 +317,7 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 // is non-nil. Failure to do so may allow an attacker to inject malicious data.
 func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCReadRequestSection, price types.Currency) (err error) {
 	defer wrapErr(&err, "Read")
-	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCReadID, &err)()
+	defer recordRPC(ctx, s.Transport(), s.revision, rhpv2.RPCReadID, &err)()
 	defer recordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Downloads: price}, &err)
 
 	empty := true
@@ -333,83 +351,107 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 		MissedProofValues: newMissed,
 		Signature:         renterSig,
 	}
-	if err := s.transport.WriteRequest(rhpv2.RPCReadID, req); err != nil {
+	if err := s.transport.writeRequest(ctx, rhpv2.RPCReadID, req); err != nil {
 		return err
 	}
 
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
-	defer s.transport.WriteResponse(&rhpv2.RPCReadStop)
+	defer s.transport.writeResponse(ctx, &rhpv2.RPCReadStop)
 	var hostSig *types.Signature
+
 	for _, sec := range sections {
-		// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
-		// message, verify the tag and decrypt, and then pass the data to
-		// VerifyProof. As an optimization, we instead stream the message
-		// through a Merkle proof verifier before verifying the AEAD tag.
-		// Security therefore depends on the caller of Read discarding any data
-		// written to w in the event that verification fails.
-		msgReader, err := s.transport.RawResponse(4096 + uint64(sec.Length))
-		if err != nil {
-			return wrapResponseErr(err, "couldn't read sector data", "host rejected Read request")
-		}
-		// Read the signature, which may or may not be present.
-		lenbuf := make([]byte, 8)
-		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-			return fmt.Errorf("couldn't read signature len: %w", err)
-		}
-		if n := binary.LittleEndian.Uint64(lenbuf); n > 0 {
-			hostSig = new(types.Signature)
-			if _, err := io.ReadFull(msgReader, hostSig[:]); err != nil {
-				return fmt.Errorf("couldn't read signature: %w", err)
+		errChan := make(chan error, 1)
+		go func() {
+			defer close(errChan)
+
+			// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
+			// message, verify the tag and decrypt, and then pass the data to
+			// VerifyProof. As an optimization, we instead stream the message
+			// through a Merkle proof verifier before verifying the AEAD tag.
+			// Security therefore depends on the caller of Read discarding any data
+			// written to w in the event that verification fails.
+			msgReader, err := s.Transport().RawResponse(4096 + uint64(sec.Length))
+			if err != nil {
+				errChan <- wrapResponseErr(err, "couldn't read sector data", "host rejected Read request")
+				return
 			}
-		}
-		// stream the sector data into w and the proof verifier
-		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-			return fmt.Errorf("couldn't read data len: %w", err)
-		} else if binary.LittleEndian.Uint64(lenbuf) != uint64(sec.Length) {
-			return errors.New("host sent wrong amount of sector data")
-		}
-		proofStart := sec.Offset / rhpv2.LeafSize
-		proofEnd := proofStart + sec.Length/rhpv2.LeafSize
-		rpv := rhpv2.NewRangeProofVerifier(proofStart, proofEnd)
-		tee := io.TeeReader(io.LimitReader(msgReader, int64(sec.Length)), &segWriter{w: w})
-		// the proof verifier Reads one segment at a time, so bufio is crucial
-		// for performance here
-		if _, err := rpv.ReadFrom(bufio.NewReaderSize(tee, 1<<16)); err != nil {
-			return fmt.Errorf("couldn't stream sector data: %w", err)
-		}
-		// read the Merkle proof
-		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-			return fmt.Errorf("couldn't read proof len: %w", err)
-		}
-		if binary.LittleEndian.Uint64(lenbuf) != uint64(rhpv2.RangeProofSize(rhpv2.LeavesPerSector, proofStart, proofEnd)) {
-			return errors.New("invalid proof size")
-		}
-		proof := make([]types.Hash256, binary.LittleEndian.Uint64(lenbuf))
-		for i := range proof {
-			if _, err := io.ReadFull(msgReader, proof[i][:]); err != nil {
-				return fmt.Errorf("couldn't read Merkle proof: %w", err)
+			// Read the signature, which may or may not be present.
+			lenbuf := make([]byte, 8)
+			if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
+				errChan <- fmt.Errorf("couldn't read signature len: %w", err)
+				return
 			}
-		}
-		// verify the message tag and the Merkle proof
-		if err := msgReader.VerifyTag(); err != nil {
+			if n := binary.LittleEndian.Uint64(lenbuf); n > 0 {
+				hostSig = new(types.Signature)
+				if _, err := io.ReadFull(msgReader, hostSig[:]); err != nil {
+					errChan <- fmt.Errorf("couldn't read signature: %w", err)
+					return
+				}
+			}
+			// stream the sector data into w and the proof verifier
+			if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
+				errChan <- fmt.Errorf("couldn't read data len: %w", err)
+				return
+			} else if binary.LittleEndian.Uint64(lenbuf) != uint64(sec.Length) {
+				errChan <- errors.New("host sent wrong amount of sector data")
+				return
+			}
+			proofStart := sec.Offset / rhpv2.LeafSize
+			proofEnd := proofStart + sec.Length/rhpv2.LeafSize
+			rpv := rhpv2.NewRangeProofVerifier(proofStart, proofEnd)
+			tee := io.TeeReader(io.LimitReader(msgReader, int64(sec.Length)), &segWriter{w: w})
+			// the proof verifier Reads one segment at a time, so bufio is crucial
+			// for performance here
+			if _, err := rpv.ReadFrom(bufio.NewReaderSize(tee, 1<<16)); err != nil {
+				errChan <- fmt.Errorf("couldn't stream sector data: %w", err)
+				return
+			}
+			// read the Merkle proof
+			if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
+				errChan <- fmt.Errorf("couldn't read proof len: %w", err)
+				return
+			}
+			if binary.LittleEndian.Uint64(lenbuf) != uint64(rhpv2.RangeProofSize(rhpv2.LeavesPerSector, proofStart, proofEnd)) {
+				errChan <- errors.New("invalid proof size")
+				return
+			}
+			proof := make([]types.Hash256, binary.LittleEndian.Uint64(lenbuf))
+			for i := range proof {
+				if _, err := io.ReadFull(msgReader, proof[i][:]); err != nil {
+					errChan <- fmt.Errorf("couldn't read Merkle proof: %w", err)
+					return
+				}
+			}
+			// verify the message tag and the Merkle proof
+			if err := msgReader.VerifyTag(); err != nil {
+				errChan <- err
+				return
+			}
+			if !rpv.Verify(proof, sec.MerkleRoot) {
+				errChan <- ErrInvalidMerkleProof
+				return
+			}
+			// if the host sent a signature, exit the loop; they won't be sending
+			// any more data
+			if hostSig != nil {
+				errChan <- errNoMoreData
+				return
+			}
+		}()
+		if err := <-errChan; err == errNoMoreData {
+			break
+		} else if err != nil {
 			return err
 		}
-		if !rpv.Verify(proof, sec.MerkleRoot) {
-			return ErrInvalidMerkleProof
-		}
-		// if the host sent a signature, exit the loop; they won't be sending
-		// any more data
-		if hostSig != nil {
-			break
-		}
 	}
+
 	if hostSig == nil {
 		// the host is required to send a signature; if they haven't sent one
 		// yet, they should send an empty ReadResponse containing just the
 		// signature.
 		var resp rhpv2.RPCReadResponse
-		if err := s.transport.ReadResponse(&resp, 4096); err != nil {
+		if err := s.transport.readResponse(ctx, &resp, 4096); err != nil {
 			return wrapResponseErr(err, "couldn't read signature", "host rejected Read request")
 		}
 		hostSig = &resp.Signature
@@ -430,7 +472,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 // always requested.
 func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, price, collateral types.Currency) (err error) {
 	defer wrapErr(&err, "Write")
-	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCWriteID, &err)()
+	defer recordRPC(ctx, s.Transport(), s.revision, rhpv2.RPCWriteID, &err)()
 	defer recordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Uploads: price}, &err)
 
 	if !s.isRevisable() {
@@ -480,13 +522,13 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 		ValidProofValues:  newValid,
 		MissedProofValues: newMissed,
 	}
-	if err := s.transport.WriteRequest(rhpv2.RPCWriteID, req); err != nil {
+	if err := s.transport.writeRequest(ctx, rhpv2.RPCWriteID, req); err != nil {
 		return err
 	}
 
 	// read and verify Merkle proof
 	var merkleResp rhpv2.RPCWriteMerkleProof
-	if err := s.transport.ReadResponse(&merkleResp, 4096); err != nil {
+	if err := s.transport.readResponse(ctx, &merkleResp, 4096); err != nil {
 		return wrapResponseErr(err, "couldn't read Merkle proof response", "host rejected Write request")
 	}
 	proofHashes := merkleResp.OldSubtreeHashes
@@ -495,7 +537,7 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 	<-precompChan
 	if newFilesize > 0 && !rhpv2.VerifyDiffProof(actions, s.revision.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
 		err := ErrInvalidMerkleProof
-		s.transport.WriteResponseErr(err)
+		s.transport.writeResponseErr(ctx, err)
 		return err
 	}
 
@@ -507,11 +549,11 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 	renterSig := &rhpv2.RPCWriteResponse{
 		Signature: s.key.SignHash(revisionHash),
 	}
-	if err := s.transport.WriteResponse(renterSig); err != nil {
+	if err := s.transport.writeResponse(ctx, renterSig); err != nil {
 		return fmt.Errorf("couldn't write signature response: %w", err)
 	}
 	var hostSig rhpv2.RPCWriteResponse
-	if err := s.transport.ReadResponse(&hostSig, 4096); err != nil {
+	if err := s.transport.readResponse(ctx, &hostSig, 4096); err != nil {
 		return wrapResponseErr(err, "couldn't read signature response", "host rejected Write signature")
 	}
 
@@ -585,17 +627,17 @@ func (s *Session) Delete(ctx context.Context, sectorIndices []uint64, price type
 //
 // Note that it is typically not necessary to explicitly unlock a contract; the
 // host will do so automatically when the connection closes.
-func (s *Session) Unlock() (err error) {
+func (s *Session) Unlock(ctx context.Context) (err error) {
 	defer wrapErr(&err, "Unlock")
 	s.revision = rhpv2.ContractRevision{}
 	s.key = nil
-	return s.transport.WriteRequest(rhpv2.RPCUnlockID, nil)
+	return s.transport.writeRequest(ctx, rhpv2.RPCUnlockID, nil)
 }
 
 // Close gracefully terminates the session and closes the underlying connection.
-func (s *Session) Close() (err error) {
+func (s *Session) Close(ctx context.Context) (err error) {
 	defer wrapErr(&err, "Close")
-	return s.transport.Close()
+	return s.Transport().Close()
 }
 
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
@@ -738,7 +780,7 @@ func RPCFormContract(t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []ty
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host. The old contract is "cleared," reverting its
 // filesize to zero.
-func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.Currency) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction, finalPayment types.Currency) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 
 	// strip our signatures before sending
@@ -760,12 +802,12 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 		FinalValidProofValues:  newValid,
 		FinalMissedProofValues: newValid,
 	}
-	if err := s.transport.WriteRequest(rhpv2.RPCRenewClearContractID, req); err != nil {
+	if err := s.transport.writeRequest(ctx, rhpv2.RPCRenewClearContractID, req); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
 	var resp rhpv2.RPCFormContractAdditions
-	if err := s.transport.ReadResponse(&resp, 65536); err != nil {
+	if err := s.transport.readResponse(ctx, &resp, 65536); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
@@ -804,13 +846,13 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 		RevisionSignature:      renterRevisionSig,
 		FinalRevisionSignature: finalRevSig,
 	}
-	if err := s.transport.WriteResponse(renterSigs); err != nil {
+	if err := s.transport.writeResponse(ctx, renterSigs); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
 	// read the host signatures and merge them with our own
 	var hostSigs rhpv2.RPCRenewAndClearContractSignatures
-	if err := s.transport.ReadResponse(&hostSigs, 4096); err != nil {
+	if err := s.transport.readResponse(ctx, &hostSigs, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
@@ -829,7 +871,7 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 
 	// unlock the session after a renew to make sure the next use of the Session
 	// locks the new contract. If it fails, we close the transport directly.
-	if err := s.Unlock(); err != nil {
+	if err := s.Unlock(ctx); err != nil {
 		s.transport.Close()
 		s.transport = nil
 	}
@@ -839,9 +881,99 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 // NewSession returns a Session locking the provided contract.
 func NewSession(t *rhpv2.Transport, key types.PrivateKey, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) *Session {
 	return &Session{
-		transport: t,
+		transport: &transport{t},
 		key:       key,
 		revision:  rev,
 		settings:  settings,
 	}
+}
+
+func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req rhpv2.ProtocolObject) (err error) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err = t.t.WriteRequest(rpcID, req)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		// TODO: should be able to close the underlying connection
+	}
+	return
+}
+
+func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject) (err error) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err = t.t.WriteResponse(resp)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		// TODO: should be able to close the underlying connection
+	}
+	return
+}
+
+func (t *transport) writeResponseErr(ctx context.Context, rErr error) (err error) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err = t.t.WriteResponseErr(rErr)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		// TODO: should be able to close the underlying connection
+	}
+	return
+}
+
+func (t *transport) readResponse(ctx context.Context, resp rhpv2.ProtocolObject, maxLen uint64) (err error) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err = t.t.ReadResponse(resp, maxLen)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		// TODO: should be able to close the underlying connection
+	}
+	return
+}
+
+func (t *transport) readRequest(ctx context.Context, req rhpv2.ProtocolObject, maxLen uint64) (err error) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err = t.t.ReadRequest(req, maxLen)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		// TODO: should be able to close the underlying connection
+	}
+	return
 }

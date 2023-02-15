@@ -112,7 +112,7 @@ func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev t
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
-	rev, txnSet, err := s.RenewContract(renterTxnSet, finalPayment)
+	rev, txnSet, err := s.RenewContract(ctx, renterTxnSet, finalPayment)
 	if err != nil {
 		discard()
 		return rhpv2.ContractRevision{}, nil, err
@@ -189,7 +189,7 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 	}
 
 	// reuse existing transport if possible
-	if t := s.transport; t != nil {
+	if t := s.Transport(); t != nil {
 		if time.Since(s.lastSeen) >= sp.sessionTTL {
 			// use RPCSettings as a generic "ping"
 			s.settings, err = RPCSettings(ctx, t)
@@ -201,7 +201,7 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 		if s.Revision().ID() != ss.contractID {
 			// connected, but not locking the correct contract
 			if s.Revision().ID() != (types.FileContractID{}) {
-				if err := s.Unlock(); err != nil {
+				if err := s.Unlock(ctx); err != nil {
 					t.Close()
 					goto reconnect
 				}
@@ -233,22 +233,23 @@ reconnect:
 	if err != nil {
 		return nil, err
 	}
-	s.transport, err = rhpv2.NewRenterTransport(conn, ss.hostKey)
+	t, err := rhpv2.NewRenterTransport(conn, ss.hostKey)
 	if err != nil {
 		return nil, err
 	}
 	s.key = ss.renterKey
-	s.revision, err = RPCLock(ctx, s.transport, ss.contractID, ss.renterKey, 10*time.Second)
+	s.revision, err = RPCLock(ctx, t, ss.contractID, ss.renterKey, 10*time.Second)
 	if err != nil {
-		s.transport.Close()
+		t.Close()
 		return nil, err
 	}
-	s.settings, err = RPCSettings(ctx, s.transport)
+	s.settings, err = RPCSettings(ctx, t)
 	if err != nil {
-		s.transport.Close()
+		t.Close()
 		return nil, err
 	}
 	s.lastSeen = time.Now()
+	s.transport = &transport{t}
 	return s, nil
 }
 
@@ -283,7 +284,7 @@ func (sp *sessionPool) session(hostKey types.PublicKey, hostIP string, contractI
 	}
 }
 
-func (sp *sessionPool) unlockContract(ss *sharedSession) {
+func (sp *sessionPool) unlockContract(ctx context.Context, ss *sharedSession) {
 	sp.mu.Lock()
 	s, ok := ss.pool.hosts[ss.hostKey]
 	sp.mu.Unlock()
@@ -293,11 +294,11 @@ func (sp *sessionPool) unlockContract(ss *sharedSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.transport != nil && s.Revision().ID() == ss.contractID {
-		s.Unlock()
+		s.Unlock(ctx)
 	}
 }
 
-func (sp *sessionPool) forceClose(ss *sharedSession) {
+func (sp *sessionPool) forceClose(ctx context.Context, ss *sharedSession) {
 	sp.mu.Lock()
 	s, ok := ss.pool.hosts[ss.hostKey]
 	sp.mu.Unlock()
@@ -307,15 +308,15 @@ func (sp *sessionPool) forceClose(ss *sharedSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.transport != nil {
-		s.Close()
+		s.Close(ctx)
 		s.transport = nil
 	}
 }
 
 // Close gracefully closes all of the sessions in the pool.
-func (sp *sessionPool) Close() error {
+func (sp *sessionPool) Close(ctx context.Context) error {
 	for hostKey, sess := range sp.hosts {
-		sess.Close()
+		sess.Close(ctx)
 		delete(sp.hosts, hostKey)
 	}
 	return nil
