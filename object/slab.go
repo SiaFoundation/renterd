@@ -73,7 +73,9 @@ func (s Slab) Reconstruct(shards [][]byte) error {
 		}
 	}
 
-	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
+	// TODO: enable AVX2 again once the corresponding bug is fixed.
+	// https://github.com/klauspost/reedsolomon/issues/240
+	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards), reedsolomon.WithAVX2(false))
 	if err := rsc.Reconstruct(shards); err != nil {
 		return err
 	}

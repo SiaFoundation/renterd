@@ -31,6 +31,11 @@ type (
 		FundAccount types.Currency `json:"fundAccount"`
 	}
 
+	ContractSpendingRecord struct {
+		ContractSpending
+		ContractID types.FileContractID `json:"contractID"`
+	}
+
 	// An ArchivedContract contains all information about a contract with a host
 	// that has been moved to the archive either due to expiring or being renewed.
 	ArchivedContract struct {

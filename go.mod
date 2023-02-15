@@ -3,7 +3,7 @@ module go.sia.tech/renterd
 go 1.17
 
 require (
-	github.com/klauspost/reedsolomon v1.9.16
+	github.com/klauspost/reedsolomon v1.11.6
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.38.0
 	go.opentelemetry.io/otel v1.12.0
@@ -40,7 +40,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 // indirect
-	github.com/klauspost/cpuid/v2 v2.0.6 // indirect
+	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/mattn/go-sqlite3 v1.14.16 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	gitlab.com/NebulousLabs/bolt v1.4.4 // indirect
