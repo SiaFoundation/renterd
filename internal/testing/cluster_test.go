@@ -198,6 +198,34 @@ func TestUploadDownload(t *testing.T) {
 			t.Fatal("unexpected")
 		}
 	}
+
+	// Check that the spending was recorded.
+	err = Retry(100, testBusFlushInterval, func() error {
+		contracts, err := cluster.Bus.ActiveContracts(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		nUploaded := 0
+		nDownloaded := 0
+		for _, c := range contracts {
+			if !c.Spending.Uploads.IsZero() {
+				nUploaded++
+			}
+			if !c.Spending.Downloads.IsZero() {
+				nDownloaded++
+			}
+		}
+		if nUploaded < rs.TotalShards {
+			return fmt.Errorf("expected at least %v contracts to contain upload spending", rs.TotalShards)
+		}
+		if nDownloaded < rs.MinShards {
+			return fmt.Errorf("expected at least %v contracts to contain download spending", rs.MinShards)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.
