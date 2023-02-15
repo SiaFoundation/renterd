@@ -15,7 +15,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
@@ -105,6 +104,10 @@ func flagCurrencyVar(c *types.Currency, name string, d types.Currency, usage str
 func main() {
 	log.SetFlags(0)
 
+	var nodeCfg struct {
+		shutdownTimeout time.Duration
+	}
+
 	var busCfg struct {
 		remoteAddr  string
 		apiPassword string
@@ -149,6 +152,7 @@ func main() {
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerBatchSize, "autopilot.scannerBatchSize", 1000, "size of the batch with which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerNumThreads, "autopilot.scannerNumThreads", 100, "number of threads that scan hosts")
+	flag.DurationVar(&nodeCfg.shutdownTimeout, "node.shutdownTimeout", 5*time.Minute, "the timeout applied to the node shutdown")
 
 	flag.Parse()
 
@@ -162,6 +166,9 @@ func main() {
 		return
 	}
 
+	var autopilotShutdownFn func(context.Context) error
+	var shutdownFns []func(context.Context) error
+
 	// Alternative way to enable tracing.
 	if tracingStr := os.Getenv("RENTERD_TRACING_ENABLED"); tracingStr != "" {
 		_, err := fmt.Sscan(tracingStr, tracingEnabled)
@@ -172,11 +179,11 @@ func main() {
 
 	// Init tracing.
 	if *tracingEnabled {
-		shutdown, err := tracing.Init(workerCfg.ID)
+		shutdownFn, err := tracing.Init(workerCfg.ID)
 		if err != nil {
 			log.Fatal("failed to init tracing", err)
 		}
-		defer shutdown(context.Background())
+		shutdownFns = append(shutdownFns, shutdownFn)
 	}
 
 	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
@@ -192,7 +199,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer l.Close()
+	shutdownFns = append(shutdownFns, func(_ context.Context) error { return l.Close() })
 	*apiAddr = "http://" + l.Addr().String()
 
 	auth := jape.BasicAuth(getAPIPassword())
@@ -201,20 +208,21 @@ func main() {
 		sub: make(map[string]treeMux),
 	}
 
+	// Create logger.
 	renterdLog := filepath.Join(*dir, "renterd.log")
 	logger, closeFn, err := node.NewLogger(renterdLog)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer closeFn()
+	shutdownFns = append(shutdownFns, closeFn)
 
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		b, cleanupFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
+		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanupFn()
+		shutdownFns = append(shutdownFns, shutdownFn)
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
@@ -224,11 +232,11 @@ func main() {
 
 	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
 	if workerAddr == "" {
-		w, cleanupFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
+		w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanupFn()
+		shutdownFns = append(shutdownFns, shutdownFn)
 
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
 		workerAddr = *apiAddr + "/api/worker"
@@ -248,14 +256,16 @@ func main() {
 			log.Fatal(err)
 		}
 
-		ap, cleanupFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
+		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer cleanupFn()
+		// NOTE: the autopilot shutdown function is not added to the shutdown
+		// functions array because it needs to be called first
+		autopilotShutdownFn = shutdownFn
 
-		go func() { autopilotErr <- ap.Run() }()
-		mux.sub["/api/autopilot"] = treeMux{h: auth(autopilot.NewServer(ap))}
+		go func() { autopilotErr <- runFn() }()
+		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
 	}
 
 	srv := &http.Server{Handler: mux}
@@ -273,8 +283,22 @@ func main() {
 	select {
 	case <-signalCh:
 		log.Println("Shutting down...")
-		srv.Shutdown(context.Background())
+		shutdownFns = append(shutdownFns, srv.Shutdown)
 	case err := <-autopilotErr:
 		log.Fatalln("Fatal autopilot error:", err)
+	}
+
+	// Shut down the autopilot first, then the rest of the services in reverse order.
+	ctx, cancel := context.WithTimeout(context.Background(), nodeCfg.shutdownTimeout)
+	defer cancel()
+	if autopilotShutdownFn != nil {
+		if err := autopilotShutdownFn(ctx); err != nil {
+			log.Fatal(err)
+		}
+	}
+	for i := len(shutdownFns) - 1; i >= 0; i-- {
+		if err := shutdownFns[i](ctx); err != nil {
+			log.Fatal(err)
+		}
 	}
 }

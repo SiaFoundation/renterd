@@ -3,6 +3,7 @@ package autopilot
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,7 @@ type (
 
 		tracker *tracker
 		logger  *zap.SugaredLogger
+		ap      *Autopilot
 
 		scanBatchSize   uint64
 		scanThreads     uint64
@@ -47,8 +49,6 @@ type (
 
 		timeoutMinInterval time.Duration
 		timeoutMinTimeout  time.Duration
-
-		stopChan chan struct{}
 
 		mu                sync.Mutex
 		scanning          bool
@@ -134,8 +134,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 			trackerTimeoutPercentile,
 		),
 		logger: ap.logger.Named("scanner"),
-
-		stopChan: ap.stopChan,
+		ap:     ap,
 
 		scanBatchSize:   scanBatchSize,
 		scanThreads:     scanThreads,
@@ -148,7 +147,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 
 func (s *scanner) tryPerformHostScan(ctx context.Context) {
 	s.mu.Lock()
-	if s.scanning || !s.isScanRequired() {
+	if s.scanning || !s.isScanRequired() || s.ap.isStopped() {
 		s.mu.Unlock()
 		return
 	}
@@ -160,10 +159,10 @@ func (s *scanner) tryPerformHostScan(ctx context.Context) {
 
 	go func() {
 		for resp := range s.launchScanWorkers(ctx, s.launchHostScans()) {
-			if s.isStopped() {
+			if s.ap.isStopped() {
 				break
 			}
-			if resp.err != nil {
+			if resp.err != nil && !strings.Contains(resp.err.Error(), "connection refused") {
 				s.logger.Error(resp.err)
 			}
 		}
@@ -198,11 +197,14 @@ func (s *scanner) tryUpdateTimeout() {
 func (s *scanner) launchHostScans() chan scanReq {
 	reqChan := make(chan scanReq, s.scanBatchSize)
 
+	s.ap.wg.Add(1)
 	go func() {
+		defer s.ap.wg.Done()
+
 		var offset int
 		var exhausted bool
 		cutoff := time.Now().Add(-s.scanMinInterval)
-		for !s.isStopped() && !exhausted {
+		for !s.ap.isStopped() && !exhausted {
 			// fetch next batch
 			hosts, err := s.bus.HostsForScanning(context.Background(), cutoff, offset, int(s.scanBatchSize))
 			if err != nil {
@@ -240,7 +242,7 @@ func (s *scanner) launchScanWorkers(ctx context.Context, reqs chan scanReq) chan
 	for i := uint64(0); i < s.scanThreads; i++ {
 		go func() {
 			for req := range reqs {
-				if s.isStopped() {
+				if s.ap.isStopped() {
 					break
 				}
 
@@ -260,15 +262,6 @@ func (s *scanner) launchScanWorkers(ctx context.Context, reqs chan scanReq) chan
 
 func (s *scanner) isScanRequired() bool {
 	return s.scanningLastStart.IsZero() || time.Since(s.scanningLastStart) > s.scanMinInterval/20 // check 20 times per minInterval, so every 30 minutes
-}
-
-func (s *scanner) isStopped() bool {
-	select {
-	case <-s.stopChan:
-		return true
-	default:
-	}
-	return false
 }
 
 func (s *scanner) isTimeoutUpdateRequired() bool {

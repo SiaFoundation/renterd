@@ -988,7 +988,7 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) *worker {
 	w := &worker{
 		id:                    id,
 		bus:                   b,
@@ -1000,27 +1000,13 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		contractSpendings:     make(map[types.FileContractID]api.ContractSpending),
 		logger:                l.Sugar().Named("worker").Named(id),
 	}
-	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
+	w.priceTables = newPriceTables(w.withTransportV3)
+	return w
+}
 
-	cleanup := func() error {
-		// Flush interactions on cleanup.
-		w.interactionsMu.Lock()
-		if w.interactionsFlushTimer != nil {
-			w.interactionsFlushTimer.Stop()
-			w.flushInteractions()
-		}
-		w.interactionsMu.Unlock()
-		// Flush contract spending on cleanup.
-		w.contractSpendingsMu.Lock()
-		if w.contractSpendingsFlushTimer != nil {
-			w.contractSpendingsFlushTimer.Stop()
-			w.flushContractSpending()
-		}
-		w.contractSpendingsMu.Unlock()
-		return nil
-	}
-
+// Handler returns an HTTP handler that serves the worker API.
+func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,
 
@@ -1037,7 +1023,26 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
-	})), cleanup, nil
+	}))
+}
+
+// Shutdown shuts down the worker.
+func (w *worker) Shutdown(_ context.Context) error {
+	w.interactionsMu.Lock()
+	if w.interactionsFlushTimer != nil {
+		w.interactionsFlushTimer.Stop()
+		w.flushInteractions()
+	}
+	w.interactionsMu.Unlock()
+
+	// Flush contract spending on cleanup.
+	w.contractSpendingsMu.Lock()
+	if w.contractSpendingsFlushTimer != nil {
+		w.contractSpendingsFlushTimer.Stop()
+		w.flushContractSpending()
+	}
+	w.contractSpendingsMu.Unlock()
+	return nil
 }
 
 func (w *worker) recordContractSpending(fcid types.FileContractID, cs api.ContractSpending) {

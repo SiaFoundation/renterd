@@ -88,13 +88,13 @@ type Autopilot struct {
 	s *scanner
 
 	tickerDuration time.Duration
-	stopChan       chan struct{}
-	triggerChan    chan struct{}
 	wg             sync.WaitGroup
 
 	startStopMu sync.Mutex
 	running     bool
 	ticker      *time.Ticker
+	triggerChan chan struct{}
+	stopChan    chan struct{}
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -191,12 +191,13 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.TryPerformMigrations(ctx, cfg)
+			ap.m.tryPerformMigrations(ctx, cfg)
 		}()
 	}
 }
 
-func (ap *Autopilot) Stop() error {
+// Shutdown shuts down the autopilot.
+func (ap *Autopilot) Shutdown(_ context.Context) error {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 
@@ -211,8 +212,20 @@ func (ap *Autopilot) Stop() error {
 }
 
 func (ap *Autopilot) Trigger() bool {
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
+
 	select {
 	case ap.triggerChan <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (ap *Autopilot) isStopped() bool {
+	select {
+	case <-ap.stopChan:
 		return true
 	default:
 		return false
@@ -253,18 +266,6 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	jc.Encode(fmt.Sprintf("triggered: %t", ap.Trigger()))
 }
 
-// NewServer returns an HTTP handler that serves the renterd autopilot api.
-func NewServer(ap *Autopilot) http.Handler {
-	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
-		"GET    /actions": ap.actionsHandler,
-		"GET    /config":  ap.configHandlerGET,
-		"PUT    /config":  ap.configHandlerPUT,
-		"GET    /status":  ap.statusHandlerGET,
-
-		"POST    /debug/trigger": ap.triggerHandlerPOST,
-	}))
-}
-
 // New initializes an Autopilot.
 func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64) (*Autopilot, error) {
 	ap := &Autopilot{
@@ -293,4 +294,16 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 	ap.m = newMigrator(ap)
 
 	return ap, nil
+}
+
+// Handler returns an HTTP handler that serves the autopilot api.
+func (ap *Autopilot) Handler() http.Handler {
+	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
+		"GET    /actions": ap.actionsHandler,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+		"GET    /status":  ap.statusHandlerGET,
+
+		"POST    /debug/trigger": ap.triggerHandlerPOST,
+	}))
 }

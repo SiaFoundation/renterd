@@ -71,19 +71,11 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) isStopped() bool {
-	select {
-	case <-c.ap.stopChan:
-		return true
-	default:
-		return false
-	}
-}
-
 func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState) error {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
-	if !cs.Synced {
+
+	if c.ap.isStopped() || !cs.Synced {
 		return nil // skip contract maintenance if we're not synced
 	}
 
@@ -178,15 +170,22 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	)
 
 	// update contract set
-	if len(contractset) < int(rs.TotalShards) {
-		c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
+	if !c.ap.isStopped() {
+		if len(contractset) < int(rs.TotalShards) {
+			c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), rs.TotalShards)
+		}
+		return c.ap.bus.SetContractSet(ctx, cfg.Contracts.Set, contractset)
 	}
-	return c.ap.bus.SetContractSet(ctx, cfg.Contracts.Set, contractset)
+	return nil
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState) error {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performWalletMaintenance")
 	defer span.End()
+
+	if c.ap.isStopped() || !cs.Synced {
+		return nil // skip contract maintenance if we're not synced
+	}
 
 	c.logger.Info("performing wallet maintenance")
 	b := c.ap.bus
@@ -249,6 +248,9 @@ func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.Autop
 }
 
 func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+	if c.ap.isStopped() {
+		return
+	}
 	c.logger.Debug("running contract checks")
 
 	var notfound int
@@ -366,6 +368,9 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
+	if c.ap.isStopped() {
+		return nil, nil
+	}
 	var formed []types.FileContractID
 
 	c.logger.Debugw(
@@ -406,10 +411,14 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(cfg)
 
 	for h := 0; missing > 0 && h < len(candidates); h++ {
+		if c.ap.isStopped() {
+			break
+		}
+
 		host := candidates[h]
 
-		// break if the contractor was stopped
-		if c.isStopped() {
+		// break if the autopilot is stopped
+		if c.ap.isStopped() {
 			break
 		}
 
@@ -449,8 +458,8 @@ func (c *contractor) runContractRenewals(ctx context.Context, cfg api.AutopilotC
 	for _, ci := range toRenew {
 		// TODO: keep track of consecutive failures and break at some point
 
-		// break if the contractor was stopped
-		if c.isStopped() {
+		// break if the autopilot is stopped
+		if c.ap.isStopped() {
 			break
 		}
 
@@ -488,8 +497,8 @@ func (c *contractor) runContractRefreshes(ctx context.Context, cfg api.Autopilot
 	for _, ci := range toRefresh {
 		// TODO: keep track of consecutive failures and break at some point
 
-		// break if the contractor was stopped
-		if c.isStopped() {
+		// break if the autopilot is stopped
+		if c.ap.isStopped() {
 			break
 		}
 
