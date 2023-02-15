@@ -30,7 +30,10 @@ type (
 	}
 )
 
-func RecordContractSpending(ctx context.Context, fcid types.FileContractID, cs api.ContractSpending) {
+func RecordContractSpending(ctx context.Context, fcid types.FileContractID, cs api.ContractSpending, err *error) {
+	if err != nil && *err != nil {
+		return
+	}
 	if sr, ok := ctx.Value(keyContractSpendingRecorder).(ContractSpendingRecorder); ok {
 		sr.record(fcid, cs)
 		return

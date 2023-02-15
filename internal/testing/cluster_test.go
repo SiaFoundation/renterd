@@ -205,13 +205,21 @@ func TestUploadDownload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		nUploaded := 0
+		nDownloaded := 0
 		for _, c := range contracts {
-			if c.Spending.Uploads.IsZero() {
-				return errors.New("no upload spending recorded")
+			if !c.Spending.Uploads.IsZero() {
+				nUploaded++
 			}
-			if c.Spending.Downloads.IsZero() {
-				return errors.New("no download spending recorded")
+			if !c.Spending.Downloads.IsZero() {
+				nDownloaded++
 			}
+		}
+		if nUploaded < rs.TotalShards {
+			return fmt.Errorf("expected at least %v contracts to contain upload spending", rs.TotalShards)
+		}
+		if nDownloaded < rs.MinShards {
+			return fmt.Errorf("expected at least %v contracts to contain download spending", rs.MinShards)
 		}
 		return nil
 	})

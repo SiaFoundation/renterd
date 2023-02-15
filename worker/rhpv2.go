@@ -16,6 +16,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/metrics"
 )
 
@@ -297,6 +298,7 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCReadRequestSection, price types.Currency) (err error) {
 	defer wrapErr(&err, "Read")
 	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCReadID, &err)()
+	defer RecordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Downloads: price}, &err)
 
 	empty := true
 	for _, s := range sections {
@@ -427,6 +429,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, price, collateral types.Currency) (err error) {
 	defer wrapErr(&err, "Write")
 	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCWriteID, &err)()
+	defer RecordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Uploads: price}, &err)
 
 	if !s.isRevisable() {
 		return ErrContractFinalized
