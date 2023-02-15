@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	defaultMinRecentScanFailures = uint64(10)
+	// minRecentScanFailures is the minimum amount of (consecutive) failed scans
+	// a host must have before it is removed for exceeding the max downtime.
+	minRecentScanFailures = 10
 
 	// TODO: make these configurable
 	scannerTimeoutInterval   = 10 * time.Minute
@@ -174,11 +176,10 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, cfg api.AutopilotConfi
 		if !s.isStopped() && cfg.Hosts.MaxDowntimeHours > 0 {
 			s.logger.Debugf("removing hosts that have been offline for more than %v hours", cfg.Hosts.MaxDowntimeHours)
 			maxDowntime := time.Hour * time.Duration(cfg.Hosts.MaxDowntimeHours)
-			minFailures := minRecentScanFailures(s.scanMinInterval, maxDowntime)
-			if removed, err := s.bus.RemoveOfflineHosts(ctx, minFailures, maxDowntime); err != nil {
+			if removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime); err != nil {
 				s.logger.Error(err)
 			} else if removed > 0 {
-				s.logger.Debugf("removed %v offline hosts", removed)
+				s.logger.Infof("removed %v offline hosts", removed)
 			}
 		}
 
@@ -293,12 +294,4 @@ func (s *scanner) currentTimeout() time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.timeout
-}
-
-func minRecentScanFailures(scanInterval, maxDowntime time.Duration) uint64 {
-	min := defaultMinRecentScanFailures
-	for time.Duration(min)*scanInterval > maxDowntime {
-		min /= 2
-	}
-	return min
 }

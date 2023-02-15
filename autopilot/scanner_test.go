@@ -134,29 +134,6 @@ func TestScanner(t *testing.T) {
 	}
 }
 
-func TestMinRecentScanFailures(t *testing.T) {
-	day := time.Hour * 24
-	week := day * 7
-
-	cases := []struct {
-		scanInterval time.Duration
-		maxDowntime  time.Duration
-		expected     uint64
-	}{
-		{day, week * 2, 10},
-		{day, week, 5},
-		{day, day, 1},
-		{day, time.Hour, 0},
-	}
-
-	for _, c := range cases {
-		actual := minRecentScanFailures(c.scanInterval, c.maxDowntime)
-		if actual != c.expected {
-			t.Errorf("unexpected minRecentScanFailures, %v != %v", actual, c.expected)
-		}
-	}
-}
-
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	return &scanner{
 		bus:    b,
