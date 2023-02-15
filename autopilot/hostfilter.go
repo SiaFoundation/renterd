@@ -114,7 +114,8 @@ func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract)
 // the contract is below a certain threshold of the collateral we would try to
 // put into a contract upon renew.
 func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, renterFunds types.Currency, blockHeight uint64) bool {
-	expectedCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, renterFunds, s, blockHeight, c.EndHeight())
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, c.EndHeight()-blockHeight, s)
+	expectedCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, expectedStorage, s, blockHeight, c.EndHeight())
 	return isBelowCollateralThreshold(expectedCollateral, c.RemainingCollateral(s))
 }
 

@@ -730,7 +730,8 @@ func (c *contractor) renewContract(ctx context.Context, ci contractInfo, cfg api
 
 	// calculate the host collateral
 	endHeight := endHeight(cfg, c.currentPeriod())
-	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, blockHeight, endHeight)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-blockHeight, settings)
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, blockHeight, endHeight)
 
 	// renew the contract
 	newRevision, _, err := c.ap.worker.RHPRenew(ctx, fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
@@ -795,7 +796,8 @@ func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg a
 	}
 
 	// calculate the new collateral
-	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, renterFunds, settings, blockHeight, contract.EndHeight())
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-blockHeight, settings)
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, blockHeight, contract.EndHeight())
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
 	_, hostMissedPayout, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
@@ -863,10 +865,12 @@ func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, mi
 	}
 
 	// calculate the host collateral
-	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, renterFunds, scan.Settings)
+	endHeight := endHeight(cfg, c.currentPeriod())
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-blockHeight, scan.Settings)
+	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, expectedStorage, scan.Settings)
 
 	// form contract
-	contract, _, err := c.ap.worker.RHPForm(ctx, endHeight(cfg, c.currentPeriod()), hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
+	contract, _, err := c.ap.worker.RHPForm(ctx, endHeight, hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
@@ -978,4 +982,20 @@ func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]
 
 func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+}
+
+// renterFundsToExpectedStorage returns how much storage a renter is expected to
+// be able to afford given the provided 'renterFunds'.
+func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, host rhpv2.HostSettings) uint64 {
+	costPerByte := host.UploadBandwidthPrice.Add(host.StoragePrice.Mul64(duration)).Add(host.DownloadBandwidthPrice)
+	// If storage is free, we can afford 'unlimited' data.
+	if costPerByte.IsZero() {
+		return math.MaxUint64
+	}
+	// Catch overflow.
+	expectedStorage := renterFunds.Div(costPerByte)
+	if expectedStorage.Cmp(types.NewCurrency64(math.MaxUint64)) > 0 {
+		return math.MaxUint64
+	}
+	return expectedStorage.Big().Uint64()
 }
