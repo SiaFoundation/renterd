@@ -396,6 +396,12 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 	}
 	done := make(chan struct{})
 	go func() {
+		// apply a sane (pessimistic) timeout, ensuring unlocking the contract
+		// or force closing the session does not deadlock and keep this
+		// goroutine around forever
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+
 		var wg sync.WaitGroup
 		select {
 		case <-done:

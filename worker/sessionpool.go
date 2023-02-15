@@ -249,7 +249,7 @@ reconnect:
 		return nil, err
 	}
 	s.lastSeen = time.Now()
-	s.transport = &transport{t}
+	s.transport = &transport{t: t}
 	return s, nil
 }
 

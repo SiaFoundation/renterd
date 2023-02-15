@@ -166,10 +166,14 @@ type Session struct {
 // transport wraps rhpv2.Transport to make sure we always apply the context's
 // deadline as read/write deadline to the transport's underlying connection.
 type transport struct {
-	t *rhpv2.Transport
+	mu sync.Mutex
+	t  *rhpv2.Transport
 }
 
 func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req rhpv2.ProtocolObject) (err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if deadline, ok := ctx.Deadline(); ok {
 		t.t.SetWriteDeadline(deadline)
 		defer t.resetWriteDeadline(&err)
@@ -178,6 +182,9 @@ func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req
 }
 
 func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject) (err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if deadline, ok := ctx.Deadline(); ok {
 		t.t.SetWriteDeadline(deadline)
 		defer t.resetWriteDeadline(&err)
@@ -186,6 +193,9 @@ func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject
 }
 
 func (t *transport) writeResponseErr(ctx context.Context, rErr error) (err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if deadline, ok := ctx.Deadline(); ok {
 		t.t.SetWriteDeadline(deadline)
 		defer t.resetWriteDeadline(&err)
@@ -194,6 +204,9 @@ func (t *transport) writeResponseErr(ctx context.Context, rErr error) (err error
 }
 
 func (t *transport) readResponse(ctx context.Context, resp rhpv2.ProtocolObject, maxLen uint64) (err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if deadline, ok := ctx.Deadline(); ok {
 		t.t.SetReadDeadline(deadline)
 		defer t.resetReadDeadline(&err)
@@ -415,9 +428,19 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 	var hostSig *types.Signature
 
 	for _, sec := range sections {
-		errChan := make(chan error, 1)
-		go func() {
-			defer close(errChan)
+		if err := func() (err error) {
+			// Apply a deadline to the transport
+			t := s.Transport()
+			if deadline, ok := ctx.Deadline(); ok {
+				t.SetDeadline(deadline)
+				defer func() {
+					if errors.Is(err, os.ErrDeadlineExceeded) {
+						err = t.Close()
+					} else if err == nil {
+						t.SetDeadline(time.Time{})
+					}
+				}()
+			}
 
 			// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
 			// message, verify the tag and decrypt, and then pass the data to
@@ -425,31 +448,26 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 			// through a Merkle proof verifier before verifying the AEAD tag.
 			// Security therefore depends on the caller of Read discarding any data
 			// written to w in the event that verification fails.
-			msgReader, err := s.Transport().RawResponse(4096 + uint64(sec.Length))
+			msgReader, err := t.RawResponse(4096 + uint64(sec.Length))
 			if err != nil {
-				errChan <- wrapResponseErr(err, "couldn't read sector data", "host rejected Read request")
-				return
+				return wrapResponseErr(err, "couldn't read sector data", "host rejected Read request")
 			}
 			// Read the signature, which may or may not be present.
 			lenbuf := make([]byte, 8)
 			if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-				errChan <- fmt.Errorf("couldn't read signature len: %w", err)
-				return
+				return fmt.Errorf("couldn't read signature len: %w", err)
 			}
 			if n := binary.LittleEndian.Uint64(lenbuf); n > 0 {
 				hostSig = new(types.Signature)
 				if _, err := io.ReadFull(msgReader, hostSig[:]); err != nil {
-					errChan <- fmt.Errorf("couldn't read signature: %w", err)
-					return
+					return fmt.Errorf("couldn't read signature: %w", err)
 				}
 			}
 			// stream the sector data into w and the proof verifier
 			if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-				errChan <- fmt.Errorf("couldn't read data len: %w", err)
-				return
+				return fmt.Errorf("couldn't read data len: %w", err)
 			} else if binary.LittleEndian.Uint64(lenbuf) != uint64(sec.Length) {
-				errChan <- errors.New("host sent wrong amount of sector data")
-				return
+				return errors.New("host sent wrong amount of sector data")
 			}
 			proofStart := sec.Offset / rhpv2.LeafSize
 			proofEnd := proofStart + sec.Length/rhpv2.LeafSize
@@ -458,42 +476,35 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 			// the proof verifier Reads one segment at a time, so bufio is crucial
 			// for performance here
 			if _, err := rpv.ReadFrom(bufio.NewReaderSize(tee, 1<<16)); err != nil {
-				errChan <- fmt.Errorf("couldn't stream sector data: %w", err)
-				return
+				return fmt.Errorf("couldn't stream sector data: %w", err)
 			}
 			// read the Merkle proof
 			if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-				errChan <- fmt.Errorf("couldn't read proof len: %w", err)
-				return
+				return fmt.Errorf("couldn't read proof len: %w", err)
 			}
 			if binary.LittleEndian.Uint64(lenbuf) != uint64(rhpv2.RangeProofSize(rhpv2.LeavesPerSector, proofStart, proofEnd)) {
-				errChan <- errors.New("invalid proof size")
-				return
+				return errors.New("invalid proof size")
 			}
 			proof := make([]types.Hash256, binary.LittleEndian.Uint64(lenbuf))
 			for i := range proof {
 				if _, err := io.ReadFull(msgReader, proof[i][:]); err != nil {
-					errChan <- fmt.Errorf("couldn't read Merkle proof: %w", err)
-					return
+					return fmt.Errorf("couldn't read Merkle proof: %w", err)
 				}
 			}
 			// verify the message tag and the Merkle proof
 			if err := msgReader.VerifyTag(); err != nil {
-				errChan <- err
-				return
+				return err
 			}
 			if !rpv.Verify(proof, sec.MerkleRoot) {
-				errChan <- ErrInvalidMerkleProof
-				return
+				return ErrInvalidMerkleProof
 			}
 			// if the host sent a signature, exit the loop; they won't be sending
 			// any more data
 			if hostSig != nil {
-				errChan <- errNoMoreData
-				return
+				return errNoMoreData
 			}
-		}()
-		if err := <-errChan; err == errNoMoreData {
+			return nil
+		}(); err == errNoMoreData {
 			break
 		} else if err != nil {
 			return err
@@ -935,7 +946,7 @@ func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction,
 // NewSession returns a Session locking the provided contract.
 func NewSession(t *rhpv2.Transport, key types.PrivateKey, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) *Session {
 	return &Session{
-		transport: &transport{t},
+		transport: &transport{t: t},
 		key:       key,
 		revision:  rev,
 		settings:  settings,
