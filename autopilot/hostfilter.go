@@ -19,10 +19,11 @@ const (
 	// remaining at which the contract gets marked as not good for upload
 	minContractFundUploadThreshold = float64(0.05) // 5%
 
-	// minContractCollateralThreshold is the percentage of collateral remaining
-	// at which the contract gets refreshed, the default threshold of 2% is
-	// defined by the following numerator and denominator constants.
-	minContractCollateralThresholdNumerator   = 2
+	// minContractCollateralThreshold is 10% of the collateral that we would put
+	// into a contract upon renewing it. That means, we consider a contract
+	// worth renewing when that results in 10x the collateral of what it
+	// currently has remaining.
+	minContractCollateralThresholdNumerator   = 10
 	minContractCollateralThresholdDenominator = 100
 )
 
@@ -66,8 +67,9 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract, bh uint64) (usable bool, refresh bool, renew bool, reasons []error) {
-	if isOutOfCollateral(cfg, s, c) {
+func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable bool, refresh bool, renew bool, reasons []error) {
+	c, s := ci.contract, ci.settings
+	if isOutOfCollateral(c, s, renterFunds, bh) {
 		reasons = append(reasons, errContractOutOfCollateral)
 		renew = false
 		refresh = true
@@ -108,19 +110,25 @@ func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract)
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
 
-func isOutOfCollateral(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract) bool {
-	return isBelowCollateralThreshold(cfg, s, c.RemainingCollateral(s))
+// isOutOfCollateral returns 'true' if the remaining/unallocated collateral in
+// the contract is below a certain threshold of the collateral we would try to
+// put into a contract upon renew.
+func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, renterFunds types.Currency, blockHeight uint64) bool {
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, c.EndHeight()-blockHeight, s)
+	expectedCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, expectedStorage, s, blockHeight, c.EndHeight())
+	return isBelowCollateralThreshold(expectedCollateral, c.RemainingCollateral(s))
 }
 
-// isBelowCollateralThreshold returns true if the given collateral is below the
-// minimum contract collateral threshold, which is a percentage of the initial
-// collateral.
-func isBelowCollateralThreshold(cfg api.AutopilotConfig, s rhpv2.HostSettings, c types.Currency) bool {
-	initialCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Storage/cfg.Contracts.Amount, cfg.Contracts.Period, s)
-	if initialCollateral.IsZero() {
+// isBelowCollateralThreshold returns true if the actualCollateral is below a
+// certain percentage of expectedCollateral. The expectedCollateral is the
+// amount of new collateral we intend to put into a contract when refreshing it
+// and the actualCollateral is the amount we can actually put in after adjusting
+// our expectation using the host settings.
+func isBelowCollateralThreshold(expectedCollateral, actualCollateral types.Currency) bool {
+	if expectedCollateral.IsZero() {
 		return true // protect against division-by-zero
 	}
-	collateral := big.NewRat(0, 1).SetFrac(c.Big(), initialCollateral.Big())
+	collateral := big.NewRat(0, 1).SetFrac(actualCollateral.Big(), expectedCollateral.Big())
 	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)
 	return collateral.Cmp(threshold) < 0
 }

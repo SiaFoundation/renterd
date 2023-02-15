@@ -29,17 +29,18 @@ func newMigrator(ap *Autopilot) *migrator {
 	}
 }
 
-func (m *migrator) TryPerformMigrations(ctx context.Context, cfg api.AutopilotConfig) {
+func (m *migrator) tryPerformMigrations(ctx context.Context, cfg api.AutopilotConfig) {
 	m.mu.Lock()
-	if m.running {
+	if m.running || m.ap.isStopped() {
 		m.mu.Unlock()
 		return
 	}
 	m.running = true
 	m.mu.Unlock()
 
-	m.logger.Info("performing migrations")
+	m.ap.wg.Add(1)
 	go func() {
+		defer m.ap.wg.Done()
 		m.performMigrations(cfg)
 		m.mu.Lock()
 		m.running = false
@@ -70,6 +71,10 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	//
 	// TODO: when we support parallel uploads we should parallelize this
 	for i, slab := range toMigrate {
+		if m.ap.isStopped() {
+			break
+		}
+
 		err := m.ap.worker.MigrateSlab(ctx, slab)
 		if err != nil {
 			m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)

@@ -663,8 +663,9 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	if jc.Decode(&rrur) != nil {
 		return
 	}
-	var pt rhpv3.HostPriceTable        // TODO
-	cost, _ := pt.UpdateRegistryCost() // TODO: handle refund
+	var pt rhpv3.HostPriceTable   // TODO
+	rc := pt.UpdateRegistryCost() // TODO: handle refund
+	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
@@ -994,7 +995,7 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) (http.Handler, func() error, error) {
+func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) *worker {
 	w := &worker{
 		id:                    id,
 		bus:                   b,
@@ -1005,23 +1006,14 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		uploadSectorTimeout:   uploadSectorTimeout,
 		logger:                l.Sugar().Named("worker").Named(id),
 	}
-	w.priceTables = newPriceTables(w.withTransportV3)
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
 	w.contractSpendingRecorder = w.newContractSpendingRecorder()
+	w.priceTables = newPriceTables(w.withTransportV3)
+	return w
+}
 
-	cleanup := func() error {
-		// Flush interactions on cleanup.
-		w.interactionsMu.Lock()
-		if w.interactionsFlushTimer != nil {
-			w.interactionsFlushTimer.Stop()
-			w.flushInteractions()
-		}
-		w.interactionsMu.Unlock()
-		// Stop contract spending recorder.
-		w.contractSpendingRecorder.Stop()
-		return nil
-	}
-
+// Handler returns an HTTP handler that serves the worker API.
+func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
 		"GET    /accounts": w.accountsHandlerGET,
 
@@ -1038,7 +1030,21 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		"GET    /objects/*key": w.objectsKeyHandlerGET,
 		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
 		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
-	})), cleanup, nil
+	}))
+}
+
+// Shutdown shuts down the worker.
+func (w *worker) Shutdown(_ context.Context) error {
+	w.interactionsMu.Lock()
+	if w.interactionsFlushTimer != nil {
+		w.interactionsFlushTimer.Stop()
+		w.flushInteractions()
+	}
+	w.interactionsMu.Unlock()
+
+	// Stop contract spending recorder.
+	w.contractSpendingRecorder.Stop()
+	return nil
 }
 
 func (w *worker) recordInteractions(interactions []hostdb.Interaction) {

@@ -20,7 +20,9 @@ const (
 
 	// slabRetrievalBatchSize is the number of slabs we fetch from the
 	// database per batch
-	slabRetrievalBatchSize = 10000
+	// NOTE: This value can't be too big or otherwise UnhealthySlabs will fail
+	// due to "too many SQL variables".
+	slabRetrievalBatchSize = 100
 )
 
 var (
