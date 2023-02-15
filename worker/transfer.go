@@ -224,7 +224,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			}
 
 			offset, length := ss.SectorRegion()
-			var buf bytes.Buffer
+			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 			lockID, err := locker.AcquireContract(ctx, h.Contract(), contractLockingDownloadPriority, 30*time.Second)
 			if err != nil {
 				respChan <- resp{r, nil, err}
@@ -232,7 +232,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 				span.RecordError(err)
 				return
 			}
-			err = h.DownloadSector(ctx, &buf, shard.Root, offset, length)
+			err = h.DownloadSector(ctx, buf, shard.Root, offset, length)
 			if err != nil {
 				span.SetStatus(codes.Error, "downloading the sector failed")
 				span.RecordError(err)
@@ -450,11 +450,11 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 	}
 	shards, slowHosts, err := parallelDownloadSlab(ctx, ss, hosts, locker, downloadSectorTimeout)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	ss.Decrypt(shards)
 	if err := s.Reconstruct(shards); err != nil {
-		return err
+		return fmt.Errorf("failed to reconstruct shards downloaded for migration: %w", err)
 	}
 	s.Encrypt(shards)
 
@@ -487,7 +487,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, hosts []sectorStore, locke
 	// reupload those shards
 	uploaded, _, err := parallelUploadSlab(ctx, shards, filtered, locker, uploadSectorTimeout)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
 	// overwrite the unhealthy shards with the newly migrated ones
