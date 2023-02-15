@@ -45,7 +45,7 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey publicKey `gorm:"unique;index;NOT NULL"`
+		PublicKey publicKey `gorm:"unique;index;NOT NULL;size:32"`
 		Settings  hostSettings
 
 		TotalScans              uint64

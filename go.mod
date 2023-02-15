@@ -18,6 +18,7 @@ require (
 	golang.org/x/crypto v0.5.0
 	golang.org/x/sys v0.5.0
 	golang.org/x/term v0.4.0
+	gorm.io/driver/mysql v1.4.6
 	gorm.io/driver/sqlite v1.4.3
 	gorm.io/gorm v1.24.3
 	lukechampine.com/frand v1.4.2
@@ -31,6 +32,7 @@ require (
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-sql-driver/mysql v1.7.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.7.0 // indirect

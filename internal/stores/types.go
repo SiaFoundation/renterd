@@ -50,9 +50,14 @@ func (currency) GormDataType() string {
 
 // Scan scan value into currency, implements sql.Scanner interface.
 func (c *currency) Scan(value interface{}) error {
-	s, ok := value.(string)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal currency value:", value))
+	var s string
+	switch value.(type) {
+	case string:
+		s = value.(string)
+	case []byte:
+		s = string(value.([]byte))
+	default:
+		return errors.New(fmt.Sprintf("failed to unmarshal currency value: %v %t", value, value))
 	}
 	curr, err := types.ParseCurrency(s)
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -46,9 +45,9 @@ var (
 type (
 	dbArchivedContract struct {
 		Model
-		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid"`
-		Host                publicKey      `gorm:"index;NOT NULL"`
-		RenewedTo           fileContractID `gorm:"unique;index"`
+		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
+		Host                publicKey      `gorm:"index;NOT NULL;size:32"`
+		RenewedTo           fileContractID `gorm:"unique;index;size:32"`
 		Reason              string
 		UploadSpending      currency
 		DownloadSpending    currency
@@ -59,10 +58,10 @@ type (
 	dbContract struct {
 		Model
 
-		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid"`
+		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		HostID              uint           `gorm:"index"`
 		Host                dbHost
-		RenewedFrom         fileContractID `gorm:"index"`
+		RenewedFrom         fileContractID `gorm:"index;size:32"`
 		StartHeight         uint64         `gorm:"index;NOT NULL"`
 		TotalCost           currency
 		UploadSpending      currency
@@ -99,8 +98,7 @@ type (
 		Model
 		DBSliceID uint `gorm:"index"`
 
-		Key         []byte    `gorm:"unique;NOT NULL"` // json string
-		LastFailure time.Time `gorm:"index"`
+		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
 		TotalShards uint8
 		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
@@ -110,7 +108,7 @@ type (
 		Model
 
 		LatestHost publicKey `gorm:"NOT NULL"`
-		Root       []byte    `gorm:"index;unique;NOT NULL"`
+		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
@@ -313,7 +311,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 
 func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	var ancestors []dbArchivedContract
-	err := s.db.Raw("WITH ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
+	err := s.db.Raw("WITH recursive ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
 		Scan(&ancestors).
 		Error
 	if err != nil {

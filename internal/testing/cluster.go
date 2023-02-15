@@ -23,6 +23,7 @@ import (
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
@@ -126,6 +127,22 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 // newTestClusterWithFunding creates a new cluster without hosts that is funded
 // by mining multiple blocks if 'funding' is set.
 func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*TestCluster, error) {
+	// Check if we are testing against an external database. If so, we create a
+	// database with a random name first.
+	var dialector gorm.Dialector
+	uri, user, password, _ := stores.DBConfigFromEnv()
+	if uri != "" {
+		dbName := hex.EncodeToString(frand.Bytes(16))
+		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
+		if err != nil {
+			return nil, err
+		}
+		if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE %s", dbName)).Error; err != nil {
+			return nil, err
+		}
+		dialector = stores.NewMySQLConnection(user, password, uri, dbName)
+	}
+
 	// Use shared wallet key.
 	wk := types.GeneratePrivateKey()
 
@@ -165,6 +182,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	// Create bus.
 	var shutdownFns []func(context.Context) error
 	b, bStopFn, err := node.NewBus(node.BusConfig{
+		DBDialector:        dialector,
 		Bootstrap:          false,
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              miner,
