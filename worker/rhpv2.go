@@ -168,6 +168,46 @@ type transport struct {
 	t *rhpv2.Transport
 }
 
+func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req rhpv2.ProtocolObject) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		t.t.SetDeadline(deadline)
+		defer t.t.SetDeadline(time.Time{})
+	}
+	return t.t.WriteRequest(rpcID, req)
+}
+
+func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		t.t.SetWriteDeadline(deadline)
+		defer t.t.SetWriteDeadline(time.Time{})
+	}
+	return t.t.WriteResponse(resp)
+}
+
+func (t *transport) writeResponseErr(ctx context.Context, rErr error) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		t.t.SetWriteDeadline(deadline)
+		defer t.t.SetWriteDeadline(time.Time{})
+	}
+	return t.t.WriteResponseErr(rErr)
+}
+
+func (t *transport) readResponse(ctx context.Context, resp rhpv2.ProtocolObject, maxLen uint64) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		t.t.SetReadDeadline(deadline)
+		defer t.t.SetReadDeadline(time.Time{})
+	}
+	return t.t.ReadResponse(resp, maxLen)
+}
+
+func (t *transport) readRequest(ctx context.Context, req rhpv2.ProtocolObject, maxLen uint64) (err error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		t.t.SetReadDeadline(deadline)
+		defer t.t.SetReadDeadline(time.Time{})
+	}
+	return t.t.ReadRequest(req, maxLen)
+}
+
 // HostKey returns the public key of the host.
 func (s *Session) HostKey() types.PublicKey { return s.revision.HostKey() }
 
@@ -886,94 +926,4 @@ func NewSession(t *rhpv2.Transport, key types.PrivateKey, rev rhpv2.ContractRevi
 		revision:  rev,
 		settings:  settings,
 	}
-}
-
-func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req rhpv2.ProtocolObject) (err error) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		err = t.t.WriteRequest(rpcID, req)
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-		// TODO: should be able to close the underlying connection
-	}
-	return
-}
-
-func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject) (err error) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		err = t.t.WriteResponse(resp)
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-		// TODO: should be able to close the underlying connection
-	}
-	return
-}
-
-func (t *transport) writeResponseErr(ctx context.Context, rErr error) (err error) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		err = t.t.WriteResponseErr(rErr)
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-		// TODO: should be able to close the underlying connection
-	}
-	return
-}
-
-func (t *transport) readResponse(ctx context.Context, resp rhpv2.ProtocolObject, maxLen uint64) (err error) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		err = t.t.ReadResponse(resp, maxLen)
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-		// TODO: should be able to close the underlying connection
-	}
-	return
-}
-
-func (t *transport) readRequest(ctx context.Context, req rhpv2.ProtocolObject, maxLen uint64) (err error) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		err = t.t.ReadRequest(req, maxLen)
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-		// TODO: should be able to close the underlying connection
-	}
-	return
 }
