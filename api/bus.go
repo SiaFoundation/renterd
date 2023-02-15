@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"math/big"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -35,8 +34,8 @@ type ContractsIDRenewedRequest struct {
 // ContractAcquireRequest is the request type for the /contract/acquire
 // endpoint.
 type ContractAcquireRequest struct {
-	Duration Duration `json:"duration"`
-	Priority int      `json:"priority"`
+	Duration ParamDuration `json:"duration"`
+	Priority int           `json:"priority"`
 }
 
 // ContractAcquireRequest is the request type for the /contract/:id/release
@@ -51,10 +50,10 @@ type ContractAcquireResponse struct {
 	LockID uint64 `json:"lockID"`
 }
 
-type HostsScanPubkeyHandlerPOSTRequest struct {
-	Time     time.Time          `json:"time"`
-	Success  bool               `json:"success"`
-	Settings rhpv2.HostSettings `json:"settings"`
+// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
+type HostsRemoveRequest struct {
+	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
+	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.

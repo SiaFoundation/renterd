@@ -55,6 +55,11 @@ type (
 		Uptime                  time.Duration
 		Downtime                time.Duration
 
+		// RecentDowntime and RecentScanFailures are used to determine whether a
+		// host is eligible for pruning.
+		RecentDowntime     time.Duration `gorm:"index"`
+		RecentScanFailures uint64        `gorm:"index"`
+
 		SuccessfulInteractions float64
 		FailedInteractions     float64
 
@@ -349,6 +354,17 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 	return hosts, err
 }
 
+func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
+	tx := ss.db.
+		Model(&dbHost{}).
+		Where("recent_downtime >= ? AND recent_scan_failures >= ?", maxDowntime, minRecentFailures).
+		Delete(&dbHost{})
+
+	removed = uint64(tx.RowsAffected)
+	err = tx.Error
+	return
+}
+
 func (ss *SQLStore) AddHostBlocklistEntry(ctx context.Context, entry string) error {
 	return ss.db.Create(&dbBlocklistEntry{Entry: entry}).Error
 }
@@ -421,10 +437,16 @@ func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
 					host.Uptime += time.Duration(interactionTime - host.LastScan)
 				}
+				host.RecentDowntime = 0
+				host.RecentScanFailures = 0
 			} else {
 				host.FailedInteractions++
-				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
-					host.Downtime += time.Duration(interactionTime - host.LastScan)
+				if isScan {
+					host.RecentScanFailures++
+					if host.LastScan > 0 && host.LastScan < interactionTime {
+						host.Downtime += time.Duration(interactionTime - host.LastScan)
+						host.RecentDowntime += time.Duration(interactionTime - host.LastScan)
+					}
 				}
 			}
 			if isScan {
@@ -456,6 +478,8 @@ func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					"total_scans":                 h.TotalScans,
 					"second_to_last_scan_success": h.SecondToLastScanSuccess,
 					"last_scan_success":           h.LastScanSuccess,
+					"recent_downtime":             h.RecentDowntime,
+					"recent_scan_failures":        h.RecentScanFailures,
 					"downtime":                    h.Downtime,
 					"uptime":                      h.Uptime,
 					"last_scan":                   h.LastScan,

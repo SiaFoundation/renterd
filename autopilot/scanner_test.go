@@ -50,6 +50,10 @@ func (b *mockBus) HostsForScanning(ctx context.Context, _ time.Time, offset, lim
 	return hostAddresses, nil
 }
 
+func (b *mockBus) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error) {
+	return 0, nil
+}
+
 type mockWorker struct {
 	blockChan chan struct{}
 
@@ -76,6 +80,8 @@ func (s *scanner) isScanning() bool {
 }
 
 func TestScanner(t *testing.T) {
+	cfg := api.DefaultAutopilotConfig()
+
 	// prepare 100 hosts
 	hosts := newTestHosts(100)
 
@@ -85,7 +91,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), cfg)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -113,7 +119,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), cfg)
 	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -122,7 +128,7 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), cfg)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}

@@ -16,6 +16,10 @@ import (
 )
 
 const (
+	// minRecentScanFailures is the minimum amount of (consecutive) failed scans
+	// a host must have before it is removed for exceeding the max downtime.
+	minRecentScanFailures = 10
+
 	// TODO: make these configurable
 	scannerTimeoutInterval   = 10 * time.Minute
 	scannerTimeoutMinTimeout = time.Second * 5
@@ -34,6 +38,7 @@ type (
 		bus interface {
 			Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 			HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
+			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
 		worker interface {
 			RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -145,7 +150,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context) {
+func (s *scanner) tryPerformHostScan(ctx context.Context, cfg api.AutopilotConfig) {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() || s.ap.isStopped() {
 		s.mu.Unlock()
@@ -164,6 +169,16 @@ func (s *scanner) tryPerformHostScan(ctx context.Context) {
 			}
 			if resp.err != nil && !strings.Contains(resp.err.Error(), "connection refused") {
 				s.logger.Error(resp.err)
+			}
+		}
+
+		if !s.ap.isStopped() && cfg.Hosts.MaxDowntimeHours > 0 {
+			s.logger.Debugf("removing hosts that have been offline for more than %v hours", cfg.Hosts.MaxDowntimeHours)
+			maxDowntime := time.Hour * time.Duration(cfg.Hosts.MaxDowntimeHours)
+			if removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime); err != nil {
+				s.logger.Error(err)
+			} else if removed > 0 {
+				s.logger.Infof("removed %v offline hosts", removed)
 			}
 		}
 

@@ -386,32 +386,10 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("creation time not set")
 	}
 
-	scanInteraction := func(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) []hostdb.Interaction {
-		var err string
-		if !success {
-			err = "failure"
-		}
-		result, _ := json.Marshal(struct {
-			Settings rhpv2.HostSettings `json:"settings"`
-			Error    string             `json:"error"`
-		}{
-			Settings: settings,
-			Error:    err,
-		})
-		return []hostdb.Interaction{
-			{
-				Host:      hk,
-				Result:    result,
-				Success:   success,
-				Timestamp: scanTime,
-				Type:      hostdb.InteractionTypeScan,
-			}}
-	}
-
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
-	if err := hdb.RecordInteractions(ctx, scanInteraction(hk, firstScanTime, settings, true)); err != nil {
+	if err := hdb.RecordInteractions(ctx, []hostdb.Interaction{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(ctx, hk)
@@ -444,7 +422,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := hdb.RecordInteractions(ctx, scanInteraction(hk, secondScanTime, settings, true)); err != nil {
+	if err := hdb.RecordInteractions(ctx, []hostdb.Interaction{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(ctx, hk)
@@ -471,7 +449,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := hdb.RecordInteractions(ctx, scanInteraction(hk, thirdScanTime, settings, false)); err != nil {
+	if err := hdb.RecordInteractions(ctx, []hostdb.Interaction{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(ctx, hk)
@@ -494,6 +472,110 @@ func TestRecordScan(t *testing.T) {
 		FailedInteractions:      1,
 	}) {
 		t.Fatal("mismatch")
+	}
+}
+
+func TestRemoveHosts(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hdb.Close()
+
+	// add a host
+	hk := types.GeneratePrivateKey().PublicKey()
+	err = hdb.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the host and assert the recent downtime is zero
+	h, err := hostByPubKey(hdb.db, hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.RecentDowntime != 0 {
+		t.Fatal("downtime is not zero")
+	}
+
+	// assert no hosts are removed
+	removed, err := hdb.RemoveOfflineHosts(context.Background(), 0, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Fatal("expected no hosts to be removed")
+	}
+
+	now := time.Now().UTC()
+	t1 := now.Add(-time.Minute * 120) // 2 hours ago
+	t2 := now.Add(-time.Minute * 90)  // 1.5 hours ago (30min downtime)
+	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, false)
+	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, false)
+
+	// record interactions
+	if err := hdb.RecordInteractions(context.Background(), []hostdb.Interaction{hi1, hi2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the host and assert the recent downtime is 30 minutes and he has 2 recent scan failures
+	h, err = hostByPubKey(hdb.db, hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.RecentDowntime.Minutes() != 30 {
+		t.Fatal("downtime is not 30 minutes", h.RecentDowntime.Minutes())
+	}
+	if h.RecentScanFailures != 2 {
+		t.Fatal("recent scan failures is not 2", h.RecentScanFailures)
+	}
+
+	// assert no hosts are removed
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 0, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Fatal("expected no hosts to be removed")
+	}
+
+	// record interactions
+	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
+	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, false)
+	if err := hdb.RecordInteractions(context.Background(), []hostdb.Interaction{hi3}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert no hosts are removed at 61 minutes
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 0, time.Minute*61)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Fatal("expected no hosts to be removed")
+	}
+
+	// assert no hosts are removed at 60 minutes if we require at least 4 failed scans
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 4, time.Minute*60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Fatal("expected no hosts to be removed")
+	}
+
+	// assert hosts gets removed at 60 minutes if we require at least 3 failed scans
+	removed, err = hdb.RemoveOfflineHosts(context.Background(), 3, time.Minute*60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatal("expected 1 host to be removed")
+	}
+
+	// assert host is removed from the database
+	if _, err = hostByPubKey(hdb.db, hk); err != gorm.ErrRecordNotFound {
+		t.Fatal("expected record not found error")
 	}
 }
 
@@ -840,4 +922,26 @@ func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 	err := tx.Where("public_key", publicKey(hostKey)).
 		Take(&h).Error
 	return h, err
+}
+
+// newTestScan returns a host interaction with given parameters.
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) hostdb.Interaction {
+	var err string
+	if !success {
+		err = "failure"
+	}
+	result, _ := json.Marshal(struct {
+		Settings rhpv2.HostSettings `json:"settings"`
+		Error    string             `json:"error"`
+	}{
+		Settings: settings,
+		Error:    err,
+	})
+	return hostdb.Interaction{
+		Host:      hk,
+		Result:    result,
+		Success:   success,
+		Timestamp: scanTime,
+		Type:      hostdb.InteractionTypeScan,
+	}
 }

@@ -6,6 +6,12 @@ import (
 	"go.sia.tech/core/types"
 )
 
+const (
+	// blocksPerDay defines the amount of blocks that are mined in a day (one
+	// block every 10 minutes roughly)
+	blocksPerDay = 144
+)
+
 type (
 	// An Action is an autopilot operation.
 	Action struct {
@@ -29,6 +35,7 @@ type (
 	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
 		IgnoreRedundantIPs bool                        `json:"ignoreRedundantIPs"`
+		MaxDowntimeHours   uint64                      `json:"maxDowntimeHours"`
 		ScoreOverrides     map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 
@@ -54,14 +61,15 @@ type (
 // DefaultAutopilotConfig returns a configuration with sane default values.
 func DefaultAutopilotConfig() (c AutopilotConfig) {
 	c.Wallet.DefragThreshold = 1000
+	c.Hosts.MaxDowntimeHours = 24 * 7 * 2 // 2 weeks
 	c.Hosts.ScoreOverrides = make(map[types.PublicKey]float64)
 	c.Contracts.Set = "autopilot"
 	c.Contracts.Allowance = types.Siacoins(1000)
 	c.Contracts.Amount = 50
-	c.Contracts.Period = 144 * 7 * 6      // 6 weeks
-	c.Contracts.RenewWindow = 144 * 7 * 2 // 2 weeks
-	c.Contracts.Upload = 1 << 40          // 1 TiB
-	c.Contracts.Download = 1 << 40        // 1 TiB
-	c.Contracts.Storage = 1 << 42         // 4 TiB
+	c.Contracts.Period = blocksPerDay * 7 * 6      // 6 weeks
+	c.Contracts.RenewWindow = blocksPerDay * 7 * 2 // 2 weeks
+	c.Contracts.Upload = 1 << 40                   // 1 TiB
+	c.Contracts.Download = 1 << 40                 // 1 TiB
+	c.Contracts.Storage = 1 << 42                  // 4 TiB
 	return
 }

@@ -23,7 +23,7 @@ type RHPScanRequest struct {
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
 type RHPScanResponse struct {
-	Ping      Duration           `json:"ping"`
+	Ping      ParamDuration      `json:"ping"`
 	ScanError string             `json:"scanError,omitempty"`
 	Settings  rhpv2.HostSettings `json:"settings,omitempty"`
 }

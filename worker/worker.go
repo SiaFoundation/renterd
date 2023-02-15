@@ -445,7 +445,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		scanErrStr = scanErr.Error()
 	}
 	jc.Encode(api.RHPScanResponse{
-		Ping:      api.Duration(elapsed),
+		Ping:      api.ParamDuration(elapsed),
 		ScanError: scanErrStr,
 		Settings:  settings,
 	})
@@ -939,7 +939,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var hosttimeout api.Duration
+	var hosttimeout api.ParamDuration
 	if jc.DecodeForm("hosttimeout", &hosttimeout) != nil {
 		return
 	}
