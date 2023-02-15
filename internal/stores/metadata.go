@@ -620,21 +620,21 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 		contracts[fileContractID(dbContracts[i].FCID)] = &dbContracts[i]
 	}
 
-	return ss.db.Transaction(func(tx *gorm.DB) (err error) {
-		// find existing slab
-		var slab dbSlab
-		if err = tx.
-			Where(&dbSlab{Key: key}).
-			Assign(&dbSlab{TotalShards: uint8(len(slab.Shards))}).
-			Preload("Shards.DBSector").
-			Take(&slab).
-			Error; err == gorm.ErrRecordNotFound {
-			err = fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
-			return
-		} else if err != nil {
-			return
-		}
+	// find existing slab
+	var slab dbSlab
+	if err = ss.db.
+		Where(&dbSlab{Key: key}).
+		Assign(&dbSlab{TotalShards: uint8(len(slab.Shards))}).
+		Preload("Shards.DBSector").
+		Take(&slab).
+		Error; err == gorm.ErrRecordNotFound {
+		return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
+	} else if err != nil {
+		return err
+	}
 
+	// Update slab.
+	return ss.db.Transaction(func(tx *gorm.DB) (err error) {
 		// build map out of current shards
 		shards := make(map[uint]struct{})
 		for _, shard := range slab.Shards {

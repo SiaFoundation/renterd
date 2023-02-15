@@ -969,7 +969,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 			}()
 		}
 		if len(errs) > 0 {
-			return fmt.Errorf("couldn't retrieve contract(s): %w", err)
+			return fmt.Errorf("couldn't retrieve contract(s): %s", errs.Error())
 		}
 		return nil
 	})
