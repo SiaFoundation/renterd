@@ -352,35 +352,29 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		fcids[i] = fileContractID(fcid)
 	}
 
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		// fetch contracts
-		var dbContracts []dbContract
-		err := tx.
-			Model(&dbContract{}).
-			Where("fcid IN (?)", fcids).
-			Find(&dbContracts).
-			Error
-		if err != nil {
-			return err
-		}
-
-		// create contract set
-		var contractset dbContractSet
-		err = tx.
-			Where(dbContractSet{Name: name}).
-			FirstOrCreate(&contractset).
-			Error
-		if err != nil {
-			return err
-		}
-
-		// update contracts
-		err = tx.Model(&contractset).Association("Contracts").Replace(&dbContracts)
-		if err != nil {
-			return err
-		}
+	// fetch contracts
+	var dbContracts []dbContract
+	err := s.db.
+		Model(&dbContract{}).
+		Where("fcid IN (?)", fcids).
+		Find(&dbContracts).
+		Error
+	if err != nil {
 		return err
-	})
+	}
+
+	// create contract set
+	var contractset dbContractSet
+	err = s.db.
+		Where(dbContractSet{Name: name}).
+		FirstOrCreate(&contractset).
+		Error
+	if err != nil {
+		return err
+	}
+
+	// update contracts
+	return s.db.Model(&contractset).Association("Contracts").Replace(&dbContracts)
 }
 
 func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) error {
