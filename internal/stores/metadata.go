@@ -384,16 +384,19 @@ func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
 		panic("path must end in /")
 	}
 
-	inner := s.db.Model(&dbObject{}).Select("SUBSTR(object_id, ?) AS trimmed", len(path)+1).
-		Where("object_id LIKE ?", path+"%")
-	middle := s.db.Table("(?)", inner).
-		Select("trimmed, INSTR(trimmed, ?) AS slashindex", "/")
-	outer := s.db.Table("(?)", middle).
-		Select("CASE slashindex WHEN 0 THEN ? || trimmed ELSE ? || substr(trimmed, 0, slashindex+1) END AS result", path, path).
-		Group("result")
+	query := s.db.Raw(`SELECT CASE slashindex WHEN 0 THEN ? || trimmed ELSE ? || substr(trimmed, 0, slashindex+1) END AS result
+	FROM (
+		SELECT trimmed, INSTR(trimmed, ?) AS slashindex
+		FROM (
+			SELECT SUBSTR(object_id, ?) AS trimmed
+			FROM objects
+			WHERE object_id LIKE ?
+		) AS i
+	) AS m
+	GROUP BY result`, path, path, "/", len(path)+1, path+"%")
 
 	var ids []string
-	err := outer.Find(&ids).Error
+	err := query.Scan(&ids).Error
 	if err != nil {
 		return nil, err
 	}
