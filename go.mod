@@ -5,12 +5,12 @@ go 1.17
 require (
 	github.com/klauspost/reedsolomon v1.11.7
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.38.0
-	go.opentelemetry.io/otel v1.12.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.39.0
+	go.opentelemetry.io/otel v1.13.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.12.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.12.0
 	go.opentelemetry.io/otel/sdk v1.12.0
-	go.opentelemetry.io/otel/trace v1.12.0
+	go.opentelemetry.io/otel/trace v1.13.0
 	go.sia.tech/core v0.1.7
 	go.sia.tech/jape v0.8.0
 	go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004
@@ -58,7 +58,7 @@ require (
 	gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213 // indirect
 	gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.12.0 // indirect
-	go.opentelemetry.io/otel/metric v0.35.0 // indirect
+	go.opentelemetry.io/otel/metric v0.36.0 // indirect
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
 	go.sia.tech/mux v1.1.1 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
