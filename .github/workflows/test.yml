@@ -37,6 +37,7 @@ jobs:
         with:
           args: "-race;-short"
       - name: Test Integration
+        if: matrix.os == 'linux-latest' # service containers only work on linux
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
