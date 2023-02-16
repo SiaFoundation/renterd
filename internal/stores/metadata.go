@@ -384,7 +384,14 @@ func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
 		panic("path must end in /")
 	}
 
-	query := s.db.Raw(`SELECT CASE slashindex WHEN 0 THEN ? || trimmed ELSE ? || substr(trimmed, 0, slashindex+1) END AS result
+	concat := func(a, b string) string {
+		if s.isSQLite() {
+			return fmt.Sprintf("%s || %s", a, b)
+		}
+		return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+	}
+
+	query := s.db.Raw(fmt.Sprintf(`SELECT CASE slashindex WHEN 0 THEN %s ELSE %s END AS result
 	FROM (
 		SELECT trimmed, INSTR(trimmed, ?) AS slashindex
 		FROM (
@@ -393,7 +400,7 @@ func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
 			WHERE object_id LIKE ?
 		) AS i
 	) AS m
-	GROUP BY result`, path, path, "/", len(path)+1, path+"%")
+	GROUP BY result`, concat("?", "trimmed"), concat("?", "substr(trimmed, 0, slashindex+1)")), path, path, "/", len(path)+1, path+"%")
 
 	var ids []string
 	err := query.Scan(&ids).Error

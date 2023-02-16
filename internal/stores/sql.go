@@ -117,17 +117,19 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 
 	// Ensure the join table has an index on `db_host_id`.
 	switch conn.(type) {
-	case sqlite.Dialector:
+	case *sqlite.Dialector:
 		if err := db.Exec("CREATE INDEX IF NOT EXIST idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
-	case mysql.Dialector:
+	case *mysql.Dialector:
 		indexFound := db.Exec("SELECT COUNT(1) IndexIsThere FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema=DATABASE() AND table_name='host_blocklist_entry_hosts' AND index_name='idx_host_blocklist_entry_hosts'").RowsAffected
 		if indexFound == 0 {
 			if err := db.Exec("CREATE INDEX idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
 				return nil, modules.ConsensusChangeID{}, err
 			}
 		}
+	default:
+		panic("unknown dialector")
 	}
 
 	// Get latest consensus change ID or init db.
@@ -152,6 +154,17 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		persistInterval:      persistInterval,
 	}
 	return ss, ccid, nil
+}
+
+func (s *SQLStore) isSQLite() bool {
+	switch s.db.Dialector.(type) {
+	case *sqlite.Dialector:
+		return true
+	case *mysql.Dialector:
+		return false
+	default:
+		panic(fmt.Sprintf("unknown dialector: %t", s.db.Dialector))
+	}
 }
 
 // Close closes the underlying database connection of the store.
