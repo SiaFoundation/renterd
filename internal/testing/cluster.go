@@ -132,6 +132,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	var dialector gorm.Dialector
 	uri, user, password, _ := stores.DBConfigFromEnv()
 	if uri != "" {
+		fmt.Println("using database for testing", uri, user, password)
 		dbName := hex.EncodeToString(frand.Bytes(16))
 		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
 		if err != nil {
