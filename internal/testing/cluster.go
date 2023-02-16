@@ -94,9 +94,10 @@ type TestCluster struct {
 
 	cleanups []func(context.Context) error
 
-	miner *node.Miner
-	dir   string
-	wg    sync.WaitGroup
+	miner  *node.Miner
+	dbName string
+	dir    string
+	wg     sync.WaitGroup
 }
 
 // randomPassword creates a random 32 byte password encoded as a string.
@@ -121,12 +122,12 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
-	return newTestClusterWithFunding(dir, true, logger)
+	return newTestClusterWithFunding(dir, "", true, logger)
 }
 
 // newTestClusterWithFunding creates a new cluster without hosts that is funded
 // by mining multiple blocks if 'funding' is set.
-func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*TestCluster, error) {
+func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Logger) (*TestCluster, error) {
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
 	var dialector gorm.Dialector
@@ -136,8 +137,10 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 		if err != nil {
 			return nil, err
 		}
-		dbName := "db" + hex.EncodeToString(frand.Bytes(16))
-		if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE %s;", dbName)).Error; err != nil {
+		if dbName == "" {
+			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
+		}
+		if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error; err != nil {
 			return nil, err
 		}
 		dialector = stores.NewMySQLConnection(user, password, uri, dbName)
@@ -241,8 +244,9 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	shutdownFns = append(shutdownFns, autopilotServer.Shutdown)
 
 	cluster := &TestCluster{
-		dir:   dir,
-		miner: miner,
+		dir:    dir,
+		dbName: dbName,
+		miner:  miner,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,

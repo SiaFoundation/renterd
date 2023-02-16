@@ -314,7 +314,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// Check that the spending was recorded for the contract. The recorded
 	// spending should be > the fundAmt since it consists of the fundAmt plus
 	// fee.
-	time.Sleep(testBusFlushInterval)
+	time.Sleep(2 * testBusFlushInterval)
 	cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +328,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cluster2, err := newTestClusterWithFunding(dir, false, zap.New(zapcore.NewNopCore()))
+	cluster2, err := newTestClusterWithFunding(dir, cluster.dbName, false, zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		t.Fatal(err)
 	}
