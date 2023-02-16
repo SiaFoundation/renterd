@@ -21,6 +21,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: mirromutth/mysql-action@v1.1
         with:
+          host port: 3800
           mysql version: '8'
           mysql root password: test
       - name: Checkout
@@ -44,7 +45,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: n8maninger/action-golang-test@v1
         env:
-          RENTER_DB_URI: mysql:3306  
+          RENTER_DB_URI: 127.0.0.1:3800  
           RENTER_DB_USER: root
           RENTER_DB_PASSWORD: test
         with:
