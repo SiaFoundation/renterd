@@ -396,10 +396,10 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 	}
 	done := make(chan struct{})
 	go func() {
-		// apply a sane (pessimistic) timeout, ensuring unlocking the contract
-		// or force closing the session does not deadlock and keep this
-		// goroutine around forever
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		// apply a pessimistic timeout, ensuring unlocking the contract or force
+		// closing the session does not deadlock and keep this goroutine around
+		// forever
+		ctx, cancel := context.WithTimeout(ctx, time.Hour)
 		defer cancel()
 
 		var wg sync.WaitGroup
@@ -501,7 +501,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return err
 		}
 
-		contract, txnSet, err = RPCFormContract(t, renterKey, renterTxnSet)
+		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
 		if err != nil {
 			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
 			return err

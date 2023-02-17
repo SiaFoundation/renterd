@@ -189,7 +189,7 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 	}
 
 	// reuse existing transport if possible
-	if t := s.Transport(); t != nil {
+	if t := s.transport; t != nil {
 		if time.Since(s.lastSeen) >= sp.sessionTTL {
 			// use RPCSettings as a generic "ping"
 			s.settings, err = RPCSettings(ctx, t)
@@ -233,23 +233,22 @@ reconnect:
 	if err != nil {
 		return nil, err
 	}
-	t, err := rhpv2.NewRenterTransport(conn, ss.hostKey)
+	s.transport, err = rhpv2.NewRenterTransport(conn, ss.hostKey)
 	if err != nil {
 		return nil, err
 	}
 	s.key = ss.renterKey
-	s.revision, err = RPCLock(ctx, t, ss.contractID, ss.renterKey, 10*time.Second)
+	s.revision, err = RPCLock(ctx, s.transport, ss.contractID, ss.renterKey, 10*time.Second)
 	if err != nil {
-		t.Close()
+		s.transport.Close()
 		return nil, err
 	}
-	s.settings, err = RPCSettings(ctx, t)
+	s.settings, err = RPCSettings(ctx, s.transport)
 	if err != nil {
-		t.Close()
+		s.transport.Close()
 		return nil, err
 	}
 	s.lastSeen = time.Now()
-	s.transport = &transport{t: t}
 	return s, nil
 }
 
@@ -308,15 +307,15 @@ func (sp *sessionPool) forceClose(ctx context.Context, ss *sharedSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.transport != nil {
-		s.Close(ctx)
+		s.Close()
 		s.transport = nil
 	}
 }
 
 // Close gracefully closes all of the sessions in the pool.
-func (sp *sessionPool) Close(ctx context.Context) error {
+func (sp *sessionPool) Close() error {
 	for hostKey, sess := range sp.hosts {
-		sess.Close(ctx)
+		sess.Close()
 		delete(sp.hosts, hostKey)
 	}
 	return nil

@@ -47,10 +47,6 @@ var (
 	// question has reached its maximum revision number, meaning the contract
 	// can no longer be revised.
 	ErrContractFinalized = errors.New("contract cannot be revised further")
-
-	// errNoMoreData is used as a sentinel value to indicate the host has no
-	// more data to send and we can break out of a loop
-	errNoMoreData = errors.New("no more data")
 )
 
 // A HostError associates an error with a given host.
@@ -152,7 +148,7 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 // A Session pairs a Transport with a Contract, enabling RPCs that modify the
 // Contract.
 type Session struct {
-	transport   *transport
+	transport   *rhpv2.Transport
 	renewedFrom types.FileContractID
 	renewedTo   types.FileContractID
 	revision    rhpv2.ContractRevision
@@ -163,76 +159,25 @@ type Session struct {
 	mu          sync.Mutex
 }
 
-// transport wraps rhpv2.Transport to make sure we always apply the context's
-// deadline as read/write deadline to the transport's underlying connection.
 type transport struct {
-	mu sync.Mutex
-	t  *rhpv2.Transport
+	*rhpv2.Transport
 }
 
-func (t *transport) writeRequest(ctx context.Context, rpcID types.Specifier, req rhpv2.ProtocolObject) (err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if deadline, ok := ctx.Deadline(); ok {
-		t.t.SetWriteDeadline(deadline)
-		defer t.resetWriteDeadline(&err)
-	}
-	return t.t.WriteRequest(rpcID, req)
-}
-
-func (t *transport) writeResponse(ctx context.Context, resp rhpv2.ProtocolObject) (err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if deadline, ok := ctx.Deadline(); ok {
-		t.t.SetWriteDeadline(deadline)
-		defer t.resetWriteDeadline(&err)
-	}
-	return t.t.WriteResponse(resp)
-}
-
-func (t *transport) writeResponseErr(ctx context.Context, rErr error) (err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if deadline, ok := ctx.Deadline(); ok {
-		t.t.SetWriteDeadline(deadline)
-		defer t.resetWriteDeadline(&err)
-	}
-	return t.t.WriteResponseErr(rErr)
-}
-
-func (t *transport) readResponse(ctx context.Context, resp rhpv2.ProtocolObject, maxLen uint64) (err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if deadline, ok := ctx.Deadline(); ok {
-		t.t.SetReadDeadline(deadline)
-		defer t.resetReadDeadline(&err)
-	}
-	return t.t.ReadResponse(resp, maxLen)
-}
-
-func (t *transport) resetWriteDeadline(err *error) {
+func (t *transport) resetDeadline(err *error) {
 	if errors.Is(*err, os.ErrDeadlineExceeded) {
-		if cErr := t.t.Close(); cErr != nil {
-			*err = fmt.Errorf("failed to close transport after write deadline exceeded, err %v; close: %w", cErr, *err)
+		if cErr := t.Close(); cErr != nil {
+			*err = fmt.Errorf("failed to close transport after deadline exceeded, err %v; close: %w", cErr, *err)
 		}
 	} else if *err == nil {
-		t.t.SetWriteDeadline(time.Time{})
+		t.SetDeadline(time.Time{})
 	}
 }
 
-func (t *transport) resetReadDeadline(err *error) {
-	if errors.Is(*err, os.ErrDeadlineExceeded) {
-		t.t.SetWriteDeadline(time.Now().Add(time.Second)) // make sure we don't block on write when gracefully closing the transport
-		if cErr := t.t.Close(); cErr != nil {
-			*err = fmt.Errorf("failed to close transport after read deadline exceeded, err %v; close: %w", cErr, *err)
-		}
-	} else if *err == nil {
-		t.t.SetReadDeadline(time.Time{})
+func withDeadlineFromCtx(ctx context.Context, t *rhpv2.Transport) *transport {
+	if deadline, ok := ctx.Deadline(); ok {
+		t.SetDeadline(deadline)
 	}
+	return &transport{t}
 }
 
 // HostKey returns the public key of the host.
@@ -243,14 +188,6 @@ func (s *Session) Revision() rhpv2.ContractRevision { return s.revision }
 
 // Revision returns the host's current settings.
 func (s *Session) Settings() rhpv2.HostSettings { return s.settings }
-
-// Transport returns the underlying transport.
-func (s *Session) Transport() *rhpv2.Transport {
-	if s.transport != nil {
-		return s.transport.t
-	}
-	return nil
-}
 
 func (s *Session) isRevisable() bool {
 	return s.revision.Revision.RevisionNumber < math.MaxUint64
@@ -301,7 +238,7 @@ func recordRPC(ctx context.Context, t *rhpv2.Transport, c rhpv2.ContractRevision
 // sector Merkle roots of the currently-locked contract.
 func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types.Currency) (_ []types.Hash256, err error) {
 	defer wrapErr(&err, "SectorRoots")
-	defer recordRPC(ctx, s.Transport(), s.revision, rhpv2.RPCSectorRootsID, &err)()
+	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCSectorRootsID, &err)()
 
 	if !s.isRevisable() {
 		return nil, ErrContractFinalized
@@ -312,6 +249,10 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 	} else if !s.sufficientFunds(price) {
 		return nil, ErrInsufficientFunds
 	}
+
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, s.transport)
+	defer transport.resetDeadline(&err)
 
 	// construct new revision
 	rev := s.revision.Revision
@@ -329,10 +270,10 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 		Signature:         s.key.SignHash(revisionHash),
 	}
 	var resp rhpv2.RPCSectorRootsResponse
-	if err := s.transport.writeRequest(ctx, rhpv2.RPCSectorRootsID, req); err != nil {
+	if err := transport.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
 		return nil, err
 	}
-	if err := s.transport.readResponse(ctx, &resp, uint64(4096+32*n)); err != nil {
+	if err := transport.ReadResponse(&resp, uint64(4096+32*n)); err != nil {
 		readCtx := fmt.Sprintf("couldn't read %v response", rhpv2.RPCSectorRootsID)
 		rejectCtx := fmt.Sprintf("host rejected %v request", rhpv2.RPCSectorRootsID)
 		return nil, wrapResponseErr(err, readCtx, rejectCtx)
@@ -384,7 +325,7 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 // is non-nil. Failure to do so may allow an attacker to inject malicious data.
 func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCReadRequestSection, price types.Currency) (err error) {
 	defer wrapErr(&err, "Read")
-	defer recordRPC(ctx, s.Transport(), s.revision, rhpv2.RPCReadID, &err)()
+	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCReadID, &err)()
 	defer recordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Downloads: price}, &err)
 
 	empty := true
@@ -400,6 +341,10 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 	} else if !s.sufficientFunds(price) {
 		return ErrInsufficientFunds
 	}
+
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, s.transport)
+	defer transport.resetDeadline(&err)
 
 	// construct new revision
 	rev := s.revision.Revision
@@ -418,37 +363,25 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 		MissedProofValues: newMissed,
 		Signature:         renterSig,
 	}
-	if err := s.transport.writeRequest(ctx, rhpv2.RPCReadID, req); err != nil {
+	if err := transport.WriteRequest(rhpv2.RPCReadID, req); err != nil {
 		return err
 	}
 
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
-	defer s.transport.writeResponse(ctx, &rhpv2.RPCReadStop)
+	defer transport.WriteResponse(&rhpv2.RPCReadStop)
 	var hostSig *types.Signature
 
+	var noMoreData bool
 	for _, sec := range sections {
 		if err := func() (err error) {
-			// Apply a deadline to the transport
-			t := s.Transport()
-			if deadline, ok := ctx.Deadline(); ok {
-				t.SetDeadline(deadline)
-				defer func() {
-					if errors.Is(err, os.ErrDeadlineExceeded) {
-						err = t.Close()
-					} else if err == nil {
-						t.SetDeadline(time.Time{})
-					}
-				}()
-			}
-
 			// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
 			// message, verify the tag and decrypt, and then pass the data to
 			// VerifyProof. As an optimization, we instead stream the message
 			// through a Merkle proof verifier before verifying the AEAD tag.
 			// Security therefore depends on the caller of Read discarding any data
 			// written to w in the event that verification fails.
-			msgReader, err := t.RawResponse(4096 + uint64(sec.Length))
+			msgReader, err := transport.RawResponse(4096 + uint64(sec.Length))
 			if err != nil {
 				return wrapResponseErr(err, "couldn't read sector data", "host rejected Read request")
 			}
@@ -500,14 +433,13 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 			}
 			// if the host sent a signature, exit the loop; they won't be sending
 			// any more data
-			if hostSig != nil {
-				return errNoMoreData
-			}
+			noMoreData = hostSig != nil
 			return nil
-		}(); err == errNoMoreData {
-			break
-		} else if err != nil {
+		}(); err != nil {
 			return err
+		}
+		if noMoreData {
+			break
 		}
 	}
 
@@ -516,7 +448,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 		// yet, they should send an empty ReadResponse containing just the
 		// signature.
 		var resp rhpv2.RPCReadResponse
-		if err := s.transport.readResponse(ctx, &resp, 4096); err != nil {
+		if err := transport.ReadResponse(&resp, 4096); err != nil {
 			return wrapResponseErr(err, "couldn't read signature", "host rejected Read request")
 		}
 		hostSig = &resp.Signature
@@ -537,7 +469,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 // always requested.
 func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, price, collateral types.Currency) (err error) {
 	defer wrapErr(&err, "Write")
-	defer recordRPC(ctx, s.Transport(), s.revision, rhpv2.RPCWriteID, &err)()
+	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCWriteID, &err)()
 	defer recordContractSpending(ctx, s.revision.ID(), api.ContractSpending{Uploads: price}, &err)
 
 	if !s.isRevisable() {
@@ -560,6 +492,10 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 			newFilesize -= rhpv2.SectorSize * action.A
 		}
 	}
+
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, s.transport)
+	defer transport.resetDeadline(&err)
 
 	// calculate new revision outputs
 	newValid, newMissed := updateRevisionOutputs(&rev, price, collateral)
@@ -587,13 +523,13 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 		ValidProofValues:  newValid,
 		MissedProofValues: newMissed,
 	}
-	if err := s.transport.writeRequest(ctx, rhpv2.RPCWriteID, req); err != nil {
+	if err := transport.WriteRequest(rhpv2.RPCWriteID, req); err != nil {
 		return err
 	}
 
 	// read and verify Merkle proof
 	var merkleResp rhpv2.RPCWriteMerkleProof
-	if err := s.transport.readResponse(ctx, &merkleResp, 4096); err != nil {
+	if err := transport.ReadResponse(&merkleResp, 4096); err != nil {
 		return wrapResponseErr(err, "couldn't read Merkle proof response", "host rejected Write request")
 	}
 	proofHashes := merkleResp.OldSubtreeHashes
@@ -602,7 +538,7 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 	<-precompChan
 	if newFilesize > 0 && !rhpv2.VerifyDiffProof(actions, s.revision.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
 		err := ErrInvalidMerkleProof
-		s.transport.writeResponseErr(ctx, err)
+		transport.WriteResponseErr(err)
 		return err
 	}
 
@@ -614,11 +550,11 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 	renterSig := &rhpv2.RPCWriteResponse{
 		Signature: s.key.SignHash(revisionHash),
 	}
-	if err := s.transport.writeResponse(ctx, renterSig); err != nil {
+	if err := transport.WriteResponse(renterSig); err != nil {
 		return fmt.Errorf("couldn't write signature response: %w", err)
 	}
 	var hostSig rhpv2.RPCWriteResponse
-	if err := s.transport.readResponse(ctx, &hostSig, 4096); err != nil {
+	if err := transport.ReadResponse(&hostSig, 4096); err != nil {
 		return wrapResponseErr(err, "couldn't read signature response", "host rejected Write signature")
 	}
 
@@ -696,21 +632,31 @@ func (s *Session) Unlock(ctx context.Context) (err error) {
 	defer wrapErr(&err, "Unlock")
 	s.revision = rhpv2.ContractRevision{}
 	s.key = nil
-	return s.transport.writeRequest(ctx, rhpv2.RPCUnlockID, nil)
+
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, s.transport)
+	defer transport.resetDeadline(&err)
+
+	return transport.WriteRequest(rhpv2.RPCUnlockID, nil)
 }
 
 // Close gracefully terminates the session and closes the underlying connection.
-func (s *Session) Close(ctx context.Context) (err error) {
+func (s *Session) Close() (err error) {
 	defer wrapErr(&err, "Close")
-	return s.Transport().Close()
+	return s.transport.Close()
 }
 
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
 func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
 	defer wrapErr(&err, "Settings")
 	defer recordRPC(ctx, t, rhpv2.ContractRevision{}, rhpv2.RPCSettingsID, &err)()
+
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, t)
+	defer transport.resetDeadline(&err)
+
 	var resp rhpv2.RPCSettingsResponse
-	if err := t.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {
+	if err := transport.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {
 		return rhpv2.HostSettings{}, err
 	} else if err := json.Unmarshal(resp.Settings, &settings); err != nil {
 		return rhpv2.HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
@@ -732,11 +678,16 @@ func RPCLock(ctx context.Context, t *rhpv2.Transport, id types.FileContractID, k
 		Signature:  t.SignChallenge(key),
 		Timeout:    uint64(timeout.Milliseconds()),
 	}
+
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, t)
+	defer transport.resetDeadline(&err)
+
 	var resp rhpv2.RPCLockResponse
-	if err := t.Call(rhpv2.RPCLockID, req, &resp); err != nil {
+	if err := transport.Call(rhpv2.RPCLockID, req, &resp); err != nil {
 		return rhpv2.ContractRevision{}, err
 	}
-	t.SetChallenge(resp.NewChallenge)
+	transport.SetChallenge(resp.NewChallenge)
 	// verify claimed revision
 	if len(resp.Signatures) != 2 {
 		return rhpv2.ContractRevision{}, fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
@@ -746,7 +697,7 @@ func RPCLock(ctx context.Context, t *rhpv2.Transport, id types.FileContractID, k
 	revHash := hashRevision(resp.Revision)
 	if !key.PublicKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[0].Signature)) {
 		return rhpv2.ContractRevision{}, errors.New("renter's signature on claimed revision is invalid")
-	} else if !t.HostKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[1].Signature)) {
+	} else if !transport.HostKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[1].Signature)) {
 		return rhpv2.ContractRevision{}, errors.New("host's signature on claimed revision is invalid")
 	} else if !resp.Acquired {
 		return rhpv2.ContractRevision{}, ErrContractLocked
@@ -760,8 +711,12 @@ func RPCLock(ctx context.Context, t *rhpv2.Transport, id types.FileContractID, k
 }
 
 // RPCFormContract forms a contract with a host.
-func RPCFormContract(t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []types.Transaction) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []types.Transaction) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
+
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, t)
+	defer transport.resetDeadline(&err)
 
 	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
@@ -773,12 +728,12 @@ func RPCFormContract(t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []ty
 		Transactions: txnSet,
 		RenterKey:    renterPubkey.UnlockKey(),
 	}
-	if err := t.WriteRequest(rhpv2.RPCFormContractID, req); err != nil {
+	if err := transport.WriteRequest(rhpv2.RPCFormContractID, req); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
 	var resp rhpv2.RPCFormContractAdditions
-	if err := t.ReadResponse(&resp, 65536); err != nil {
+	if err := transport.ReadResponse(&resp, 65536); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
@@ -793,7 +748,7 @@ func RPCFormContract(t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []ty
 		UnlockConditions: types.UnlockConditions{
 			PublicKeys: []types.UnlockKey{
 				renterPubkey.UnlockKey(),
-				t.HostKey().UnlockKey(),
+				transport.HostKey().UnlockKey(),
 			},
 			SignaturesRequired: 2,
 		},
@@ -821,13 +776,13 @@ func RPCFormContract(t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []ty
 		ContractSignatures: renterContractSignatures,
 		RevisionSignature:  renterRevisionSig,
 	}
-	if err := t.WriteResponse(renterSigs); err != nil {
+	if err := transport.WriteResponse(renterSigs); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
 	// read the host's signatures and merge them with our own
 	var hostSigs rhpv2.RPCFormContractSignatures
-	if err := t.ReadResponse(&hostSigs, 4096); err != nil {
+	if err := transport.ReadResponse(&hostSigs, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
@@ -848,6 +803,10 @@ func RPCFormContract(t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []ty
 func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction, finalPayment types.Currency) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 
+	// get a transport with the correct deadline
+	transport := withDeadlineFromCtx(ctx, s.transport)
+	defer transport.resetDeadline(&err)
+
 	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
 	renterContractSignatures := txn.Signatures
@@ -867,12 +826,12 @@ func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction,
 		FinalValidProofValues:  newValid,
 		FinalMissedProofValues: newValid,
 	}
-	if err := s.transport.writeRequest(ctx, rhpv2.RPCRenewClearContractID, req); err != nil {
+	if err := transport.WriteRequest(rhpv2.RPCRenewClearContractID, req); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
 	var resp rhpv2.RPCFormContractAdditions
-	if err := s.transport.readResponse(ctx, &resp, 65536); err != nil {
+	if err := transport.ReadResponse(&resp, 65536); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
@@ -911,13 +870,13 @@ func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction,
 		RevisionSignature:      renterRevisionSig,
 		FinalRevisionSignature: finalRevSig,
 	}
-	if err := s.transport.writeResponse(ctx, renterSigs); err != nil {
+	if err := transport.WriteResponse(renterSigs); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
 	// read the host signatures and merge them with our own
 	var hostSigs rhpv2.RPCRenewAndClearContractSignatures
-	if err := s.transport.readResponse(ctx, &hostSigs, 4096); err != nil {
+	if err := transport.ReadResponse(&hostSigs, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
@@ -946,7 +905,7 @@ func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction,
 // NewSession returns a Session locking the provided contract.
 func NewSession(t *rhpv2.Transport, key types.PrivateKey, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) *Session {
 	return &Session{
-		transport: &transport{t: t},
+		transport: t,
 		key:       key,
 		revision:  rev,
 		settings:  settings,
