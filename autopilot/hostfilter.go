@@ -160,5 +160,11 @@ func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (rhpv2.HostSettings,
 	if settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
 		return *settings, true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
 	}
+	if settings.MaxCollateral.IsZero() {
+		return *settings, true, "max collateral of host is 0"
+	}
+	if settings.MaxCollateral.Cmp(cfg.Hosts.MinMaxCollateral) < 0 {
+		return *settings, true, fmt.Sprintf("max collateral of host is below the minimum: %v < %v", settings.MaxCollateral, cfg.Hosts.MinMaxCollateral)
+	}
 	return *settings, false, ""
 }
