@@ -678,7 +678,6 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 
 		score := hostScore(cfg, h, 0, float64(rs.TotalShards)/float64(rs.MinShards))
 		if score == 0 {
-			c.logger.DPanicw("sanity check failed", "score", score, "hk", h.PublicKey)
 			continue
 		}
 
