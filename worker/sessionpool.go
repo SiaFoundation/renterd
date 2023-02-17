@@ -88,6 +88,15 @@ func (ss *sharedSession) PublicKey() types.PublicKey {
 	return ss.hostKey
 }
 
+func (ss *sharedSession) RenewContract(ctx context.Context, txnSet []types.Transaction, finalPayment types.Currency) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	s, err := ss.pool.acquire(ctx, ss)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	defer ss.pool.release(s)
+	return s.RenewContract(txnSet, finalPayment)
+}
+
 func (ss *sharedSession) Revision(ctx context.Context) (rhpv2.ContractRevision, error) {
 	s, err := ss.pool.acquire(ctx, ss)
 	if err != nil {
@@ -95,6 +104,15 @@ func (ss *sharedSession) Revision(ctx context.Context) (rhpv2.ContractRevision, 
 	}
 	defer ss.pool.release(s)
 	return s.Revision(), nil
+}
+
+func (ss *sharedSession) Settings(ctx context.Context) (rhpv2.HostSettings, error) {
+	s, err := ss.pool.acquire(ctx, ss)
+	if err != nil {
+		return rhpv2.HostSettings{}, err
+	}
+	defer ss.pool.release(s)
+	return s.Settings(), nil
 }
 
 func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
