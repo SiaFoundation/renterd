@@ -23,6 +23,7 @@ import (
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
@@ -93,9 +94,10 @@ type TestCluster struct {
 
 	cleanups []func(context.Context) error
 
-	miner *node.Miner
-	dir   string
-	wg    sync.WaitGroup
+	miner  *node.Miner
+	dbName string
+	dir    string
+	wg     sync.WaitGroup
 }
 
 // randomPassword creates a random 32 byte password encoded as a string.
@@ -120,12 +122,30 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
-	return newTestClusterWithFunding(dir, true, logger)
+	return newTestClusterWithFunding(dir, "", true, logger)
 }
 
 // newTestClusterWithFunding creates a new cluster without hosts that is funded
 // by mining multiple blocks if 'funding' is set.
-func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*TestCluster, error) {
+func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Logger) (*TestCluster, error) {
+	// Check if we are testing against an external database. If so, we create a
+	// database with a random name first.
+	var dialector gorm.Dialector
+	uri, user, password, _ := stores.DBConfigFromEnv()
+	if uri != "" {
+		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
+		if err != nil {
+			return nil, err
+		}
+		if dbName == "" {
+			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
+		}
+		if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error; err != nil {
+			return nil, err
+		}
+		dialector = stores.NewMySQLConnection(user, password, uri, dbName)
+	}
+
 	// Use shared wallet key.
 	wk := types.GeneratePrivateKey()
 
@@ -165,6 +185,7 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	// Create bus.
 	var shutdownFns []func(context.Context) error
 	b, bStopFn, err := node.NewBus(node.BusConfig{
+		DBDialector:        dialector,
 		Bootstrap:          false,
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              miner,
@@ -223,8 +244,9 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	shutdownFns = append(shutdownFns, autopilotServer.Shutdown)
 
 	cluster := &TestCluster{
-		dir:   dir,
-		miner: miner,
+		dir:    dir,
+		dbName: dbName,
+		miner:  miner,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,

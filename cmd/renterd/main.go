@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"golang.org/x/term"
+	"gorm.io/gorm"
 )
 
 var (
@@ -101,6 +102,14 @@ func flagCurrencyVar(c *types.Currency, name string, d types.Currency, usage str
 	flag.Var(newCurrencyVar(c, d), name, usage)
 }
 
+func getDBDialectorFromEnv() gorm.Dialector {
+	uri, user, password, dbName := stores.DBConfigFromEnv()
+	if uri == "" {
+		return nil
+	}
+	return stores.NewMySQLConnection(user, password, uri, dbName)
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -114,6 +123,7 @@ func main() {
 		node.BusConfig
 	}
 	busCfg.PersistInterval = 10 * time.Minute
+	busCfg.DBDialector = getDBDialectorFromEnv()
 
 	var workerCfg struct {
 		remoteAddr  string
