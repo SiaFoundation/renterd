@@ -88,15 +88,6 @@ func (ss *sharedSession) PublicKey() types.PublicKey {
 	return ss.hostKey
 }
 
-func (ss *sharedSession) RenewContract(ctx context.Context, txnSet []types.Transaction, finalPayment types.Currency) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
-	s, err := ss.pool.acquire(ctx, ss)
-	if err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-	defer ss.pool.release(s)
-	return s.RenewContract(txnSet, finalPayment)
-}
-
 func (ss *sharedSession) Revision(ctx context.Context) (rhpv2.ContractRevision, error) {
 	s, err := ss.pool.acquire(ctx, ss)
 	if err != nil {
@@ -106,13 +97,23 @@ func (ss *sharedSession) Revision(ctx context.Context) (rhpv2.ContractRevision, 
 	return s.Revision(), nil
 }
 
-func (ss *sharedSession) Settings(ctx context.Context) (rhpv2.HostSettings, error) {
+func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error)) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	s, err := ss.pool.acquire(ctx, ss)
 	if err != nil {
-		return rhpv2.HostSettings{}, err
+		return rhpv2.ContractRevision{}, nil, err
 	}
 	defer ss.pool.release(s)
-	return s.Settings(), nil
+
+	renterTxnSet, finalPayment, discard, err := prepareFn(s.Revision().Revision, s.Settings())
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	rev, txnSet, err := s.RenewContract(renterTxnSet, finalPayment)
+	if err != nil {
+		discard()
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	return rev, txnSet, nil
 }
 
 func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {

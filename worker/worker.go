@@ -541,23 +541,13 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	ctx = WithGougingChecker(jc.Request.Context(), gp)
 	err = w.withHost(ctx, toRenewID, hostKey, hostIP, func(ss sectorStore) error {
 		session := ss.(*sharedSession)
-		rev, err := session.Revision(ctx)
-		if err != nil {
-			return err
-		}
-		hostSettings, err := session.Settings(ctx)
-		if err != nil {
-			return err
-		}
-		renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev.Revision, renterAddress, renterKey, renterFunds, newCollateral, hostKey, hostSettings, endHeight)
-		if err != nil {
-			return err
-		}
-		contract, txnSet, err = session.RenewContract(ctx, renterTxnSet, finalPayment)
-		if err != nil {
-			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
-			return err
-		}
+		contract, txnSet, err = session.RenewContract(ctx, func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error) {
+			renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev, renterAddress, renterKey, renterFunds, newCollateral, hostKey, host, endHeight)
+			if err != nil {
+				return nil, types.Currency{}, nil, err
+			}
+			return txnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
+		})
 		return nil
 	})
 	if jc.Check("couldn't renew contract", err) != nil {
@@ -600,13 +590,8 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// Get contract revision.
 	var revision types.FileContractRevision
-	cm := api.ContractMetadata{
-		ID:      rfr.ContractID,
-		HostIP:  hostIP,
-		HostKey: rfr.HostKey,
-	}
-	err = w.withHosts(jc.Request.Context(), []api.ContractMetadata{cm}, func(ss []sectorStore) error {
-		rev, err := ss[0].(*sharedSession).Revision(jc.Request.Context())
+	err = w.withHost(jc.Request.Context(), rfr.ContractID, rfr.HostKey, hostIP, func(ss sectorStore) error {
+		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
 		if err != nil {
 			return err
 		}
