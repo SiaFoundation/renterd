@@ -546,7 +546,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 			if err != nil {
 				return nil, types.Currency{}, nil, err
 			}
-			return txnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
+			return renterTxnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
 		})
 		return nil
 	})
