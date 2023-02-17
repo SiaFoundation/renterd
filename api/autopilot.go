@@ -36,7 +36,6 @@ type (
 	HostsConfig struct {
 		IgnoreRedundantIPs bool                        `json:"ignoreRedundantIPs"`
 		MaxDowntimeHours   uint64                      `json:"maxDowntimeHours"`
-		MinMaxCollateral   types.Currency              `json:"minMaxCollateral"`
 		ScoreOverrides     map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 

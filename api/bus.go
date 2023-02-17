@@ -183,6 +183,7 @@ type GougingParams struct {
 
 // GougingSettings contain some price settings used in price gouging.
 type GougingSettings struct {
+	MinMaxCollateral types.Currency
 	MaxRPCPrice      types.Currency
 	MaxContractPrice types.Currency
 	MaxDownloadPrice types.Currency // per TiB

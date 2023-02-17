@@ -76,12 +76,6 @@ func TestHostScore(t *testing.T) {
 	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
 		t.Fatal("unexpected")
 	}
-	h2 = newHost(newTestHostSettings()) // reset
-	h1.Settings.MaxCollateral = newTestHostSettings().MaxCollateral.Mul64(2)
-	cfg.Hosts.MinMaxCollateral = newTestHostSettings().MaxCollateral.Mul64(2)
-	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
-		t.Fatal("unexpected")
-	}
 }
 
 func TestRandSelectByWeight(t *testing.T) {

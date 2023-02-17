@@ -104,8 +104,8 @@ func ageScore(h hostdb.Host) float64 {
 }
 
 func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings, expectedRedundancy float64) float64 {
-	// Ignore hosts which have set their max collateral too low.
-	if s.MaxCollateral.IsZero() || s.MaxCollateral.Cmp(cfg.Hosts.MinMaxCollateral) < 0 {
+	// Ignore hosts which have set their max collateral to 0.
+	if s.MaxCollateral.IsZero() {
 		return 0
 	}
 
