@@ -97,12 +97,16 @@ func (ss *sharedSession) Revision(ctx context.Context) (rhpv2.ContractRevision, 
 	return s.Revision(), nil
 }
 
-func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error)) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error)) (rhpv2.ContractRevision, []types.Transaction, error) {
 	s, err := ss.pool.acquire(ctx, ss)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 	defer ss.pool.release(s)
+
+	if errs := PerformGougingChecks(ctx, s.settings).CanUpload(); len(errs) > 0 {
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed reneww contract, gouging check failed: %v", errs)
+	}
 
 	renterTxnSet, finalPayment, discard, err := prepareFn(s.Revision().Revision, s.Settings())
 	if err != nil {
