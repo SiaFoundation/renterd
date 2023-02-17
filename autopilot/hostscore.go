@@ -29,14 +29,45 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
-func hostScore(cfg api.AutopilotConfig, h hostdb.Host) float64 {
+func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) float64 {
 	// TODO: priceAdjustmentScore
-	// TODO: storageRemainingScore
 	return ageScore(h) *
-		collateralScore(cfg, *h.Settings) *
+		collateralScore(cfg, *h.Settings, expectedRedundancy) *
 		interactionScore(h) *
+		storageRemainingScore(cfg, *h.Settings, 0, 3) *
 		uptimeScore(h) *
 		versionScore(*h.Settings)
+}
+
+func storageRemainingScore(cfg api.AutopilotConfig, h rhpv2.HostSettings, storedData uint64, expectedRedundancy float64) float64 {
+	// idealDataPerHost is the amount of data that we would have to put on each
+	// host assuming that our storage requirements were spread evenly across
+	// every single host.
+	idealDataPerHost := float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount)
+	// allocationPerHost is the amount of data that we would like to be able to
+	// put on each host, because data is not always spread evenly across the
+	// hosts during upload. Slower hosts may get very little data, more
+	// expensive hosts may get very little data, and other factors can skew the
+	// distribution. allocationPerHost takes into account the skew and tries to
+	// ensure that there's enough allocation per host to accommodate for a skew.
+	// NOTE: assume that data is not spread evenly and the host with the most
+	// data will store twice the expectation
+	allocationPerHost := idealDataPerHost * 2
+	// hostExpectedStorage is the amount of storage that we expect to be able to
+	// store on this host overall, which should include the stored data that is
+	// already on the host.
+	hostExpectedStorage := (float64(h.RemainingStorage) * 0.25) + float64(storedData)
+	// The score for the host is the square of the amount of storage we
+	// expected divided by the amount of storage we want. If we expect to be
+	// able to store more data on the host than we need to allocate, the host
+	// gets full score for storage.
+	if hostExpectedStorage >= allocationPerHost {
+		return 1
+	}
+	// Otherwise, the score of the host is the fraction of the data we expect
+	// raised to the storage penalty exponentiation.
+	storageRatio := hostExpectedStorage / allocationPerHost
+	return math.Pow(storageRatio, 2.0)
 }
 
 func ageScore(h hostdb.Host) float64 {
@@ -72,21 +103,23 @@ func ageScore(h hostdb.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings) float64 {
+func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings, expectedRedundancy float64) float64 {
+	// Ignore hosts which have set their max collateral too low.
+	if s.MaxCollateral.IsZero() || s.MaxCollateral.Cmp(cfg.Hosts.MinMaxCollateral) < 0 {
+		return 0
+	}
+
 	// NOTE: This math is copied directly from the old siad hostdb. It would
 	// probably benefit from a thorough review.
-
-	// NOTE: We are not multiplying the `Storage` with redundancy, which is
-	// different from the siad implementation
 
 	// convenience variables
 	allowance := cfg.Contracts.Allowance
 	numContracts := cfg.Contracts.Amount
 	duration := cfg.Contracts.Period
-	storage := cfg.Contracts.Storage
+	storage := float64(cfg.Contracts.Storage) * expectedRedundancy
 
 	// calculate the collateral
-	contractCollateral := s.Collateral.Mul64(storage).Mul64(duration)
+	contractCollateral := s.Collateral.Mul64(uint64(storage)).Mul64(duration)
 	contractCollateralMax := s.MaxCollateral.Div64(2) // 2x buffer - renter may end up storing extra data
 	if contractCollateral.Cmp(contractCollateralMax) > 0 {
 		contractCollateral = contractCollateralMax
