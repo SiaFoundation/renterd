@@ -297,7 +297,7 @@ func (sp *sessionPool) unlockContract(ctx context.Context, ss *sharedSession) {
 	}
 }
 
-func (sp *sessionPool) forceClose(ctx context.Context, ss *sharedSession) {
+func (sp *sessionPool) forceClose(ss *sharedSession) {
 	sp.mu.Lock()
 	s, ok := ss.pool.hosts[ss.hostKey]
 	sp.mu.Unlock()
