@@ -50,9 +50,6 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	if !h.IsOnline() {
 		reasons = append(reasons, errHostOffline)
 	}
-	if hostScore(cfg, h, storedData, float64(rs.TotalShards)/float64(rs.MinShards)) < minScore {
-		reasons = append(reasons, errLowScore)
-	}
 	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
 		reasons = append(reasons, errHostRedundantIP)
 	}
@@ -60,6 +57,8 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if gouging, reason := isGouging(gs, rs, settings); gouging {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
+	} else if hostScore(cfg, h, storedData, float64(rs.TotalShards)/float64(rs.MinShards)) < minScore {
+		reasons = append(reasons, errLowScore)
 	}
 
 	// sanity check - should never happen but this would cause a zero score
