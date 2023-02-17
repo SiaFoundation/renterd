@@ -117,8 +117,21 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 		return err
 	}
 
+	// compile map of stored data per host
+	storedData := make(map[types.PublicKey]uint64)
+	for _, c := range active {
+		storedData[c.HostKey()] += c.FileSize()
+	}
+
+	// min score to pass checks.
+	redundancy := rs.TotalShards / rs.MinShards
+	minScore, err := c.managedFindMinAllowedHostScores(ctx, cfg, storedData, float64(redundancy))
+	if err != nil {
+		return fmt.Errorf("failed to determine min score for contract check: %w", err)
+	}
+
 	// run checks
-	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs.BlockHeight, gs, rs, active)
+	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs.BlockHeight, gs, rs, active, minScore)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -156,7 +169,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if numContracts < addLeeway(cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, cfg, active, cfg.Contracts.Amount-numContracts, cs.BlockHeight, &remaining, address); err != nil {
+		if formed, err = c.runContractFormations(ctx, cfg, active, cfg.Contracts.Amount-numContracts, cs.BlockHeight, &remaining, address, minScore); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
@@ -247,7 +260,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.Autop
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -290,7 +303,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 		}
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, f, host)
+		usable, reasons := isUsableHost(cfg, gs, rs, f, host, minScore, contract.FileSize())
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -364,7 +377,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address, minScore float64) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -389,9 +402,9 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 	}()
 
 	// create a map of used hosts
-	used := make(map[types.PublicKey]bool)
+	used := make(map[types.PublicKey]struct{})
 	for _, contract := range active {
-		used[contract.HostKey()] = true
+		used[contract.HostKey()] = struct{}{}
 	}
 
 	// fetch recommended txn fee
@@ -402,7 +415,7 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, err := c.candidateHosts(ctx, cfg, used, wanted)
+	candidates, err := c.candidateHosts(ctx, cfg, used, make(map[types.PublicKey]uint64), wanted, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -633,7 +646,34 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, cfg api.Autopilot
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig, used map[types.PublicKey]bool, wanted int) ([]hostdb.Host, error) {
+func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg api.AutopilotConfig, storedData map[types.PublicKey]uint64, redundancy float64) (float64, error) {
+	// Pull a new set of hosts from the hostdb that could be used as a new set
+	// to match the allowance. The lowest scoring host of these new hosts will
+	// be used as a baseline for determining whether our existing contracts are
+	// worthwhile.
+	numContracts := cfg.Contracts.Amount
+	buffer := 50
+	hosts, err := c.candidateHosts(ctx, cfg, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 1) // 1 to avoid 0 score hosts
+	if err != nil {
+		return 0, err
+	}
+	if len(hosts) == 0 {
+		return 0, errors.New("no hosts returned in candidateHosts")
+	}
+
+	// Find the minimum score that a host is allowed to have to be considered
+	// good for upload.
+	lowestScore := hostScore(cfg, hosts[0], 0, redundancy)
+	for i := 1; i < len(hosts); i++ {
+		score := hostScore(cfg, hosts[i], 0, redundancy)
+		if score < lowestScore {
+			lowestScore = score
+		}
+	}
+	return lowestScore / 500, nil
+}
+
+func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig, exclude map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
 
 	// nothing to do
@@ -662,17 +702,17 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		return nil, err
 	}
 
-	c.logger.Debugf("found %d candidate hosts", len(hosts)-len(used))
+	c.logger.Debugf("found %d candidate hosts", len(hosts)-len(exclude))
 
 	// collect scores for all usable hosts
 	start := time.Now()
 	scores := make([]float64, 0, len(hosts))
 	scored := make([]hostdb.Host, 0, len(hosts))
 	for _, h := range hosts {
-		if used[h.PublicKey] {
+		if _, exclude := exclude[h.PublicKey]; exclude {
 			continue
 		}
-		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, h); !usable {
+		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
 			continue
 		}
 
@@ -685,7 +725,7 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		scores = append(scores, score)
 	}
 
-	c.logger.Debugf("scored %d candidate hosts, took %v", len(hosts)-len(used), time.Since(start))
+	c.logger.Debugf("scored %d candidate hosts, took %v", len(hosts)-len(exclude), time.Since(start))
 
 	// select hosts
 	var selected []hostdb.Host
