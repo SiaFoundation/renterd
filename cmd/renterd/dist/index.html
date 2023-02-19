@@ -53,7 +53,7 @@
 	<p id="updating-in"></p>
 	<script type="text/javascript">
 		async function getWalletBalance(password) {
-			const resp = await fetch('/api/wallet/balance', {
+			const resp = await fetch('/api/bus/wallet/balance', {
 				method: 'GET',
 				headers: {
 					'Content-Type': 'application/json',
