@@ -416,7 +416,7 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 			for _, h := range hosts {
 				wg.Add(1)
 				go func(ss *sharedSession) {
-					w.pool.forceClose(ctx, ss)
+					w.pool.forceClose(ss)
 					wg.Done()
 				}(h.(*sharedSession))
 			}
