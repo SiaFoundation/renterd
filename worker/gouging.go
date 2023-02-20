@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -137,6 +138,13 @@ func checkFormContractGouging(gs api.GougingSettings, hs rhpv2.HostSettings) err
 		return fmt.Errorf("contract price exceeds max: %v>%v", hs.ContractPrice, gs.MaxContractPrice)
 	}
 
+	// check MaxCollateral
+	if hs.MaxCollateral.IsZero() {
+		return errors.New("MaxCollateral of host is 0")
+	}
+	if hs.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
+		return fmt.Errorf("MaxCollateral is below minimum: %v<%v", hs.MaxCollateral, gs.MinMaxCollateral)
+	}
 	return nil
 }
 

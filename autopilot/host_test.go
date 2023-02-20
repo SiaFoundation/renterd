@@ -70,8 +70,10 @@ func newTestHost(hk types.PublicKey, settings *rhpv2.HostSettings) hostdb.Host {
 func newTestHostSettings() *rhpv2.HostSettings {
 	return &rhpv2.HostSettings{
 		AcceptingContracts: true,
+		MaxCollateral:      types.Siacoins(10000),
 		MaxDuration:        144 * 7 * 12, // 12w
 		Version:            "1.5.10",
+		RemainingStorage:   1 << 42, // 4 TiB
 	}
 }
 

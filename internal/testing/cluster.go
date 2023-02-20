@@ -62,6 +62,7 @@ var (
 	}
 
 	defaultGouging = api.GougingSettings{
+		MinMaxCollateral: types.ZeroCurrency,
 		MaxRPCPrice:      types.Siacoins(1),
 		MaxContractPrice: types.Siacoins(1),
 		MaxDownloadPrice: types.Siacoins(1).Mul64(2500),

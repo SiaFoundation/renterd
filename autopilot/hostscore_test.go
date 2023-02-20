@@ -21,13 +21,14 @@ func TestHostScore(t *testing.T) {
 	h2 := newHost(newTestHostSettings())
 
 	// assert both hosts score equal
-	if hostScore(cfg, h1) != hostScore(cfg, h2) {
+	redundancy := 3.0
+	if hostScore(cfg, h1, 0, redundancy) != hostScore(cfg, h2, 0, redundancy) {
 		t.Fatal("unexpected")
 	}
 
 	// assert age affects the score
 	h1.KnownSince = time.Now().Add(-1 * day)
-	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
 		t.Fatal("unexpected")
 	}
 
@@ -36,21 +37,21 @@ func TestHostScore(t *testing.T) {
 	settings.Collateral = types.NewCurrency64(1)
 	settings.MaxCollateral = types.NewCurrency64(10)
 	h1 = newHost(settings) // reset
-	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
 		t.Fatal("unexpected")
 	}
 
 	// assert interactions affect the score
 	h1 = newHost(newTestHostSettings()) // reset
 	h1.Interactions.SuccessfulInteractions++
-	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
 		t.Fatal("unexpected")
 	}
 
 	// assert uptime affects the score
 	h2 = newHost(newTestHostSettings()) // reset
 	h2.Interactions.SecondToLastScanSuccess = false
-	if hostScore(cfg, h1) <= hostScore(cfg, h2) || ageScore(h1) != ageScore(h2) {
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) || ageScore(h1) != ageScore(h2) {
 		t.Fatal("unexpected")
 	}
 
@@ -58,7 +59,21 @@ func TestHostScore(t *testing.T) {
 	h2Settings := newTestHostSettings()
 	h2Settings.Version = "1.5.6" // lower
 	h2 = newHost(h2Settings)     // reset
-	if hostScore(cfg, h1) <= hostScore(cfg, h2) {
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
+		t.Fatal("unexpected")
+	}
+
+	// asseret remaining storage affects the score.
+	h1 = newHost(newTestHostSettings()) // reset
+	h2.Settings.RemainingStorage = 100
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
+		t.Fatal("unexpected")
+	}
+
+	// assert MaxCollateral affects the score.
+	h2 = newHost(newTestHostSettings()) // reset
+	h2.Settings.MaxCollateral = types.ZeroCurrency
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
 		t.Fatal("unexpected")
 	}
 }

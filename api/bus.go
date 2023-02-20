@@ -183,6 +183,7 @@ type GougingParams struct {
 
 // GougingSettings contain some price settings used in price gouging.
 type GougingSettings struct {
+	MinMaxCollateral types.Currency
 	MaxRPCPrice      types.Currency
 	MaxContractPrice types.Currency
 	MaxDownloadPrice types.Currency // per TiB
@@ -194,6 +195,12 @@ type GougingSettings struct {
 type RedundancySettings struct {
 	MinShards   int
 	TotalShards int
+}
+
+// Redundancy returns the effective storage redundancy of the
+// RedundancySettings.
+func (rs RedundancySettings) Redundancy() float64 {
+	return float64(rs.TotalShards) / float64(rs.MinShards)
 }
 
 // Validate returns an error if the redundancy settings are not considered
