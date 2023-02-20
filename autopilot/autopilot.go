@@ -71,9 +71,11 @@ type Bus interface {
 }
 
 type Worker interface {
+	Accounts(ctx context.Context) (accounts []api.Account, err error)
 	ActiveContracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	MigrateSlab(ctx context.Context, s object.Slab) error
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error)
 	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
@@ -84,6 +86,7 @@ type Autopilot struct {
 	store  Store
 	worker Worker
 
+	a *accounts
 	c *contractor
 	m *migrator
 	s *scanner
