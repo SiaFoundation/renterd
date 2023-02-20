@@ -34,7 +34,7 @@ func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expect
 	return ageScore(h) *
 		collateralScore(cfg, *h.Settings, expectedRedundancy) *
 		interactionScore(h) *
-		storageRemainingScore(cfg, *h.Settings, 0, 3) *
+		storageRemainingScore(cfg, *h.Settings, storedData, expectedRedundancy) *
 		uptimeScore(h) *
 		versionScore(*h.Settings)
 }

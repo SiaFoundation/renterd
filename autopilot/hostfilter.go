@@ -57,7 +57,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if gouging, reason := isGouging(gs, rs, settings); gouging {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
-	} else if score := hostScore(cfg, h, storedData, float64(rs.TotalShards)/float64(rs.MinShards)); score < minScore {
+	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
 		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
 	}
 

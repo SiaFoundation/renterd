@@ -197,6 +197,12 @@ type RedundancySettings struct {
 	TotalShards int
 }
 
+// Redundancy returns the effective storage redundancy of the
+// RedundancySettings.
+func (rs RedundancySettings) Redundancy() float64 {
+	return float64(rs.TotalShards) / float64(rs.MinShards)
+}
+
 // Validate returns an error if the redundancy settings are not considered
 // valid.
 func (rs RedundancySettings) Validate() error {
