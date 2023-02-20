@@ -189,32 +189,44 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 	}
 
 	// reuse existing transport if possible
-	if t := s.transport; t != nil {
+	if s.withTransport != nil {
 		if time.Since(s.lastSeen) >= sp.sessionTTL {
 			// use RPCSettings as a generic "ping"
-			s.settings, err = RPCSettings(ctx, t)
-			if err != nil {
-				t.Close()
+			if err := s.withTransport(ctx, func(t *rhpv2.Transport) error {
+				if s.settings, err = RPCSettings(ctx, t); err != nil {
+					t.Close()
+				}
+				return err
+			}); err != nil {
 				goto reconnect
 			}
 		}
+
 		if s.Revision().ID() != ss.contractID {
-			// connected, but not locking the correct contract
-			if s.Revision().ID() != (types.FileContractID{}) {
-				if err := s.Unlock(ctx); err != nil {
-					t.Close()
-					goto reconnect
+			if err := s.withTransport(ctx, func(t *rhpv2.Transport) error {
+				// connected, but not locking the correct contract
+				if s.Revision().ID() != (types.FileContractID{}) {
+					if err = s.Unlock(ctx); err != nil {
+						t.Close()
+					}
 				}
-			}
-			s.revision, err = RPCLock(ctx, t, ss.contractID, ss.renterKey, 10*time.Second)
-			if err != nil {
-				t.Close()
+				s.revision, err = RPCLock(ctx, t, ss.contractID, ss.renterKey, 10*time.Second)
+				if err != nil {
+					t.Close()
+				}
+				return err
+			}); err != nil {
 				goto reconnect
 			}
-			s.key = ss.renterKey
-			s.settings, err = RPCSettings(ctx, t)
-			if err != nil {
-				t.Close()
+
+			if err := s.withTransport(ctx, func(t *rhpv2.Transport) error {
+				s.key = ss.renterKey
+				s.settings, err = RPCSettings(ctx, t)
+				if err != nil {
+					t.Close()
+				}
+				return err
+			}); err != nil {
 				return nil, err
 			}
 		}
@@ -223,6 +235,7 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 	}
 
 reconnect:
+	s.withTransport = nil
 	if sp.sessionReconnectTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, sp.sessionReconnectTimeout)
@@ -233,22 +246,23 @@ reconnect:
 	if err != nil {
 		return nil, err
 	}
-	s.transport, err = rhpv2.NewRenterTransport(conn, ss.hostKey)
+	transport, err := rhpv2.NewRenterTransport(conn, ss.hostKey)
 	if err != nil {
 		return nil, err
 	}
 	s.key = ss.renterKey
-	s.revision, err = RPCLock(ctx, s.transport, ss.contractID, ss.renterKey, 10*time.Second)
+	s.revision, err = RPCLock(ctx, transport, ss.contractID, ss.renterKey, 10*time.Second)
 	if err != nil {
-		s.transport.Close()
+		transport.Close()
 		return nil, err
 	}
-	s.settings, err = RPCSettings(ctx, s.transport)
+	s.settings, err = RPCSettings(ctx, transport)
 	if err != nil {
-		s.transport.Close()
+		transport.Close()
 		return nil, err
 	}
 	s.lastSeen = time.Now()
+	s.withTransport = withTransport(transport)
 	return s, nil
 }
 
@@ -292,7 +306,7 @@ func (sp *sessionPool) unlockContract(ctx context.Context, ss *sharedSession) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.transport != nil && s.Revision().ID() == ss.contractID {
+	if s.withTransport != nil && s.Revision().ID() == ss.contractID {
 		s.Unlock(ctx)
 	}
 }
@@ -306,9 +320,9 @@ func (sp *sessionPool) forceClose(ss *sharedSession) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.transport != nil {
+	if s.withTransport != nil {
 		s.Close()
-		s.transport = nil
+		s.withTransport = nil
 	}
 }
 
