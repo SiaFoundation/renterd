@@ -597,9 +597,9 @@ func (s *Session) Unlock(ctx context.Context) (err error) {
 }
 
 // Close gracefully terminates the session and closes the underlying connection.
-func (s *Session) Close() (err error) {
+func (s *Session) Close(ctx context.Context) (err error) {
 	defer wrapErr(&err, "Close")
-	return s.withTransport(context.Background(), func(transport *rhpv2.Transport) error {
+	return s.withTransport(ctx, func(transport *rhpv2.Transport) error {
 		return transport.Close()
 	})
 }

@@ -311,7 +311,7 @@ func (sp *sessionPool) unlockContract(ctx context.Context, ss *sharedSession) {
 	}
 }
 
-func (sp *sessionPool) forceClose(ss *sharedSession) {
+func (sp *sessionPool) forceClose(ctx context.Context, ss *sharedSession) {
 	sp.mu.Lock()
 	s, ok := ss.pool.hosts[ss.hostKey]
 	sp.mu.Unlock()
@@ -321,15 +321,15 @@ func (sp *sessionPool) forceClose(ss *sharedSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.withTransport != nil {
-		s.Close()
+		s.Close(ctx)
 		s.withTransport = nil
 	}
 }
 
 // Close gracefully closes all of the sessions in the pool.
-func (sp *sessionPool) Close() error {
+func (sp *sessionPool) Close(ctx context.Context) error {
 	for hostKey, sess := range sp.hosts {
-		sess.Close()
+		sess.Close(ctx)
 		delete(sp.hosts, hostKey)
 	}
 	return nil
