@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -433,13 +434,13 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 	return nil
 }
 
-// RPCLock calls the Lock RPC, returning the current contract revision. The
-// timeout specifies how long the host should wait while attempting to acquire
-// the lock. Note that timeouts are serialized in milliseconds, so a timeout of
-// less than 1ms will be rounded down to 0. (A timeout of 0 is valid: it means
-// that the lock will only be acquired if the contract is unlocked at the moment
-// the host receives the RPC.)
-func (s *Session) RPCLock(ctx context.Context, id types.FileContractID, key types.PrivateKey, timeout time.Duration) (_ rhpv2.ContractRevision, err error) {
+// Lock calls the Lock RPC, updating the current contract revision. The timeout
+// specifies how long the host should wait while attempting to acquire the lock.
+// Note that timeouts are serialized in milliseconds, so a timeout of less than
+// 1ms will be rounded down to 0. (A timeout of 0 is valid: it means that the
+// lock will only be acquired if the contract is unlocked at the moment the host
+// receives the RPC.)
+func (s *Session) Lock(ctx context.Context, id types.FileContractID, key types.PrivateKey, timeout time.Duration) (err error) {
 	defer wrapErr(&err, "Lock")
 	defer recordRPC(ctx, s.transport, rhpv2.ContractRevision{}, rhpv2.RPCLockID, &err)()
 	req := &rhpv2.RPCLockRequest{
@@ -457,29 +458,30 @@ func (s *Session) RPCLock(ctx context.Context, id types.FileContractID, key type
 		transport.SetChallenge(resp.NewChallenge)
 		return nil
 	}); err != nil {
-		return rhpv2.ContractRevision{}, err
+		return err
 	}
 
 	// verify claimed revision
 	if len(resp.Signatures) != 2 {
-		return rhpv2.ContractRevision{}, fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
+		return fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
 	} else if len(resp.Signatures[0].Signature) != 64 || len(resp.Signatures[1].Signature) != 64 {
-		return rhpv2.ContractRevision{}, errors.New("signatures on claimed revision have wrong length")
+		return errors.New("signatures on claimed revision have wrong length")
 	}
 	revHash := hashRevision(resp.Revision)
 	if !key.PublicKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[0].Signature)) {
-		return rhpv2.ContractRevision{}, errors.New("renter's signature on claimed revision is invalid")
+		return errors.New("renter's signature on claimed revision is invalid")
 	} else if !s.transport.HostKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[1].Signature)) {
-		return rhpv2.ContractRevision{}, errors.New("host's signature on claimed revision is invalid")
+		return errors.New("host's signature on claimed revision is invalid")
 	} else if !resp.Acquired {
-		return rhpv2.ContractRevision{}, ErrContractLocked
+		return ErrContractLocked
 	} else if resp.Revision.RevisionNumber == math.MaxUint64 {
-		return rhpv2.ContractRevision{}, ErrContractFinalized
+		return ErrContractFinalized
 	}
-	return rhpv2.ContractRevision{
+	s.revision = rhpv2.ContractRevision{
 		Revision:   resp.Revision,
 		Signatures: [2]types.TransactionSignature{resp.Signatures[0], resp.Signatures[1]},
-	}, nil
+	}
+	return nil
 }
 
 // Write implements the Write RPC, except for ActionUpdate. A Merkle proof is
@@ -595,6 +597,69 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 	return nil
 }
 
+func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID) (err error) {
+	defer wrapErr(&err, "Reconnect")
+
+	if s.transport != nil {
+		s.transport.Close()
+	}
+
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	if err != nil {
+		return err
+	}
+	s.transport, err = rhpv2.NewRenterTransport(conn, hostKey)
+	if err != nil {
+		return err
+	}
+
+	s.key = renterKey
+	if err = s.Lock(ctx, contractID, renterKey, 10*time.Second); err != nil {
+		s.transport.Close()
+		return err
+	}
+
+	if err := s.updateSettings(ctx); err != nil {
+		s.transport.Close()
+		return err
+	}
+
+	s.lastSeen = time.Now()
+	return nil
+}
+
+func (s *Session) Refresh(ctx context.Context, sessionTTL time.Duration, renterKey types.PrivateKey, contractID types.FileContractID) error {
+	if s.transport == nil {
+		return errors.New("no transport")
+	}
+
+	if time.Since(s.lastSeen) >= sessionTTL {
+		// use RPCSettings as a generic "ping"
+		if err := s.updateSettings(ctx); err != nil {
+			return err
+		}
+	}
+
+	if s.revision.ID() != contractID {
+		// connected, but not locking the correct contract
+		if s.revision.ID() != (types.FileContractID{}) {
+			if err := s.Unlock(ctx); err != nil {
+				return err
+			}
+		}
+		if err := s.Lock(ctx, contractID, renterKey, 10*time.Second); err != nil {
+			return err
+		}
+
+		s.key = renterKey
+		if err := s.updateSettings(ctx); err != nil {
+			return err
+		}
+	}
+	s.lastSeen = time.Now()
+	return nil
+}
+
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host. The old contract is "cleared," reverting its
 // filesize to zero.
@@ -704,23 +769,6 @@ func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction,
 	return rev, signedTxnSet, nil
 }
 
-// RPCSettings calls the Settings RPC, returning the host's reported settings.
-func (s *Session) RPCSettings(ctx context.Context) (settings rhpv2.HostSettings, err error) {
-	defer wrapErr(&err, "Settings")
-	defer recordRPC(ctx, s.transport, rhpv2.ContractRevision{}, rhpv2.RPCSettingsID, &err)()
-
-	err = s.withTransport(ctx, func(transport *rhpv2.Transport) error {
-		var resp rhpv2.RPCSettingsResponse
-		if err := transport.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {
-			return err
-		} else if err := json.Unmarshal(resp.Settings, &settings); err != nil {
-			return fmt.Errorf("couldn't unmarshal json: %w", err)
-		}
-		return nil
-	})
-	return
-}
-
 // Unlock calls the Unlock RPC, unlocking the currently-locked contract and
 // rendering the Session unusable.
 //
@@ -806,6 +854,23 @@ func (s *Session) sufficientFunds(price types.Currency) bool {
 
 func (s *Session) sufficientCollateral(collateral types.Currency) bool {
 	return s.revision.Revision.MissedProofOutputs[1].Value.Cmp(collateral) >= 0
+}
+
+func (s *Session) updateSettings(ctx context.Context) (err error) {
+	defer wrapErr(&err, "Settings")
+	defer recordRPC(ctx, s.transport, rhpv2.ContractRevision{}, rhpv2.RPCSettingsID, &err)()
+
+	var resp rhpv2.RPCSettingsResponse
+	if err := s.withTransport(ctx, func(transport *rhpv2.Transport) error {
+		return transport.Call(rhpv2.RPCSettingsID, nil, &resp)
+	}); err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(resp.Settings, &s.settings); err != nil {
+		return fmt.Errorf("couldn't unmarshal json: %w", err)
+	}
+	return
 }
 
 func (s *Session) withTransport(ctx context.Context, fn func(t *rhpv2.Transport) error) (err error) {

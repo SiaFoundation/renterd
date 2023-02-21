@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 	"time"
 
@@ -188,72 +187,19 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 		ss.contractID = s.renewedTo
 	}
 
-	// reuse existing transport if possible
-	if t := s.transport; t != nil {
-		if time.Since(s.lastSeen) >= sp.sessionTTL {
-			// use RPCSettings as a generic "ping"
-			s.settings, err = s.RPCSettings(ctx)
-			if err != nil {
-				t.Close()
-				goto reconnect
-			}
+	// try refreshing the session and reconnect if it failed
+	if err := s.Refresh(ctx, sp.sessionTTL, ss.renterKey, ss.contractID); err != nil {
+		if sp.sessionReconnectTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, sp.sessionReconnectTimeout)
+			defer cancel()
 		}
 
-		if s.Revision().ID() != ss.contractID {
-			// connected, but not locking the correct contract
-			if s.Revision().ID() != (types.FileContractID{}) {
-				if err = s.Unlock(ctx); err != nil {
-					t.Close()
-					goto reconnect
-				}
-			}
-			s.revision, err = s.RPCLock(ctx, ss.contractID, ss.renterKey, 10*time.Second)
-			if err != nil {
-				s.transport.Close()
-				goto reconnect
-			}
-
-			s.key = ss.renterKey
-			s.settings, err = s.RPCSettings(ctx)
-			if err != nil {
-				t.Close()
-				return nil, err
-			}
+		if err := s.Reconnect(ctx, ss.hostIP, ss.hostKey, ss.renterKey, ss.contractID); err != nil {
+			return nil, err
 		}
-		s.lastSeen = time.Now()
-		return s, nil
 	}
 
-reconnect:
-	if sp.sessionReconnectTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, sp.sessionReconnectTimeout)
-		defer cancel()
-	}
-
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", ss.hostIP)
-	if err != nil {
-		return nil, err
-	}
-	s.transport, err = rhpv2.NewRenterTransport(conn, ss.hostKey)
-	if err != nil {
-		return nil, err
-	}
-
-	s.key = ss.renterKey
-	s.revision, err = s.RPCLock(ctx, ss.contractID, ss.renterKey, 10*time.Second)
-	if err != nil {
-		s.transport.Close()
-		return nil, err
-	}
-
-	s.settings, err = s.RPCSettings(ctx)
-	if err != nil {
-		s.transport.Close()
-		return nil, err
-	}
-
-	s.lastSeen = time.Now()
 	return s, nil
 }
 

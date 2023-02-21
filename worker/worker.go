@@ -474,6 +474,10 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		return
 	}
 
+	// apply a pessimistic timeout on contract formations
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
