@@ -715,6 +715,7 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 	scored := make([]hostdb.Host, 0, len(hosts))
 	for _, h := range hosts {
 		if _, exclude := exclude[h.PublicKey]; exclude {
+			ipFilter.isRedundantIP(h) // add excluded hosts to ipFilter too
 			continue
 		}
 		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
