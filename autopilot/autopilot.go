@@ -194,6 +194,9 @@ func (ap *Autopilot) Run() error {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 
+			// update contracts for accounts.
+			ap.a.UpdateContracts(ctx, cfg)
+
 			// migration
 			ap.m.tryPerformMigrations(ctx, cfg)
 		}()

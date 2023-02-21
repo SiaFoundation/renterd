@@ -36,9 +36,11 @@ var (
 
 type accounts struct {
 	logger *zap.SugaredLogger
+	b      Bus
 	w      Worker
 
 	mu                sync.Mutex
+	fundingContracts  []api.ContractMetadata
 	inProgressRefills map[rhp.Account]struct{}
 }
 
@@ -70,20 +72,47 @@ func (a *accounts) releaseInProgressRefill(account rhp.Account) {
 	delete(a.inProgressRefills, account)
 }
 
+func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig) {
+	contracts, err := a.b.Contracts(ctx, cfg.Contracts.Set)
+	if err != nil {
+		a.logger.Errorw(fmt.Sprintf("failed to fetch contract set for refill: %v", err))
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.fundingContracts = append(a.fundingContracts[:0], contracts...)
+}
+
+func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
+	ticker := time.NewTicker(accountRefillInterval)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return // shutdown
+		case <-ticker.C:
+		}
+
+		a.refillWorkerAccounts(ctx)
+	}
+}
+
 // refillWorkerAccounts refills all accounts on a worker that require a refill.
 // To avoid slow hosts preventing refills for fast hosts, a separate goroutine
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
-func (a *accounts) refillWorkerAccounts(ctx context.Context, contracts []api.Contract) {
+func (a *accounts) refillWorkerAccounts(ctx context.Context) {
 	ctx, span := tracing.Tracer.Start(ctx, "refillWorkerAccounts")
 	defer span.End()
 
 	// Map hosts to contracts to use for funding.
-	contractForHost := make(map[types.PublicKey]types.FileContractID)
-	for _, c := range contracts {
-		contractForHost[c.HostKey()] = c.ID
+	a.mu.Lock()
+	contractForHost := make(map[types.PublicKey]types.FileContractID, len(a.fundingContracts))
+	for _, c := range a.fundingContracts {
+		contractForHost[c.HostKey] = c.ID
 	}
+	a.mu.Unlock()
 
 	accounts, err := a.w.Accounts(ctx)
 	if err != nil {
