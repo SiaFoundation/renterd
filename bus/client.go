@@ -242,6 +242,18 @@ func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures u
 	return
 }
 
+// HostAllowlist returns the allowlist.
+func (c *Client) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
+	err = c.c.WithContext(ctx).GET("/hosts/allowlist", &allowlist)
+	return
+}
+
+// UpdateHostAllowlist updates the host allowlist, adding and removing the given entries.
+func (c *Client) UpdateHostAllowlist(ctx context.Context, add, remove []types.PublicKey) (err error) {
+	err = c.c.WithContext(ctx).PUT("/hosts/allowlist", api.UpdateAllowlistRequest{Add: add, Remove: remove})
+	return
+}
+
 // HostBlocklist returns a host blocklist.
 func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
 	err = c.c.WithContext(ctx).GET("/hosts/blocklist", &blocklist)

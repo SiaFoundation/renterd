@@ -139,6 +139,12 @@ type UpdateSlabRequest struct {
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
+// UpdateAllowlistRequest is the request type for /hosts/allowlist endpoint.
+type UpdateAllowlistRequest struct {
+	Add    []types.PublicKey `json:"add"`
+	Remove []types.PublicKey `json:"remove"`
+}
+
 // UpdateBlocklistRequest is the request type for /hosts/blocklist endpoint.
 type UpdateBlocklistRequest struct {
 	Add    []string `json:"add"`

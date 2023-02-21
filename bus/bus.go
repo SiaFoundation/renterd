@@ -73,6 +73,10 @@ type (
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
+		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
+		AddHostAllowlistEntry(ctx context.Context, entry types.PublicKey) error
+		RemoveHostAllowlistEntry(ctx context.Context, entry types.PublicKey) error
+
 		HostBlocklist(ctx context.Context) ([]string, error)
 		AddHostBlocklistEntry(ctx context.Context, entry string) error
 		RemoveHostBlocklistEntry(ctx context.Context, entry string) error
@@ -463,6 +467,30 @@ func (b *bus) contractsSpendingHandlerPOST(jc jape.Context) {
 	}
 	if jc.Check("failed to record spending metrics for contract", b.ms.RecordContractSpending(jc.Request.Context(), records)) != nil {
 		return
+	}
+}
+
+func (b *bus) hostsAllowlistHandlerGET(jc jape.Context) {
+	allowlist, err := b.hdb.HostAllowlist(jc.Request.Context())
+	if jc.Check("couldn't load allowlist", err) == nil {
+		jc.Encode(allowlist)
+	}
+}
+
+func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
+	ctx := jc.Request.Context()
+	var req api.UpdateAllowlistRequest
+	if jc.Decode(&req) == nil {
+		for _, entry := range req.Add {
+			if jc.Check(fmt.Sprintf("couldn't add allowlist entry '%s'", entry), b.hdb.AddHostAllowlistEntry(ctx, entry)) != nil {
+				return
+			}
+		}
+		for _, entry := range req.Remove {
+			if jc.Check(fmt.Sprintf("couldn't remove allowlist entry '%s'", entry), b.hdb.RemoveHostAllowlistEntry(ctx, entry)) != nil {
+				return
+			}
+		}
 	}
 }
 
@@ -896,6 +924,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /host/:hostkey":      b.hostsPubkeyHandlerGET,
 		"POST   /hosts/interactions": b.hostsPubkeyHandlerPOST,
 		"POST   /hosts/remove":       b.hostsRemoveHandlerPOST,
+		"GET    /hosts/allowlist":    b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":    b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":    b.hostsBlocklistHandlerGET,
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
