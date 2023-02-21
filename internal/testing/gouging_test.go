@@ -106,7 +106,7 @@ func TestGouging(t *testing.T) {
 	}{
 		{"mindownloadbandwidthprice", stypes.SiacoinPrecision},
 		{"minuploadbandwidthprice", stypes.SiacoinPrecision},
-		{"mincontractprice", stypes.SiacoinPrecision.Mul64(10)},
+		{"mincontractprice", stypes.SiacoinPrecision.Mul64(11)},
 	}
 
 	for _, c := range cases {
