@@ -548,7 +548,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 			}
 			return renterTxnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
 		})
-		return nil
+		return err
 	})
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
