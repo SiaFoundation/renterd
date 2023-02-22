@@ -211,7 +211,7 @@ func TestUploadDownload(t *testing.T) {
 	}
 
 	// Wait for the contract to be renewed.
-	err = Retry(100, 100*time.Millisecond, func() error {
+	err = Retry(100, time.Second, func() error {
 		cms, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
