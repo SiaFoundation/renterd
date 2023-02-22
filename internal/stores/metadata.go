@@ -791,9 +791,9 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	fcid := c.ID()
 
 	// Find host.
-	var host dbHost
-	err := tx.Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
-		Take(&host).Error
+	var hostID uint
+	err := tx.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
+		Select("id").Scan(&hostID).Error
 	if err != nil {
 		return dbContract{}, err
 	}
@@ -801,7 +801,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	// Create contract.
 	contract := dbContract{
 		FCID:        fileContractID(fcid),
-		HostID:      host.ID,
+		HostID:      hostID,
 		RenewedFrom: fileContractID(renewedFrom),
 		StartHeight: startHeight,
 		TotalCost:   currency(totalCost),
@@ -813,8 +813,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Insert contract.
-	err = tx.Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
-		Create(&contract).Error
+	err = tx.Create(&contract).Error
 	if err != nil {
 		return dbContract{}, err
 	}
