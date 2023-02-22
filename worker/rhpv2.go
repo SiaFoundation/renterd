@@ -814,6 +814,10 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
+	s.revision.Revision = initRevision
+	s.revision.Signatures[0].Signature = renterRevisionSig.Signature
+	s.revision.Signatures[1].Signature = hostSigs.RevisionSignature.Signature
+
 	return rhpv2.ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
