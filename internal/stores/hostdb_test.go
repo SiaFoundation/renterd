@@ -12,6 +12,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
@@ -41,7 +42,7 @@ func TestSQLHostDB(t *testing.T) {
 	ctx := context.Background()
 	hk := types.GeneratePrivateKey().PublicKey()
 	_, err = hdb.Host(ctx, hk)
-	if !errors.Is(err, ErrHostNotFound) {
+	if !errors.Is(err, api.ErrHostNotFound) {
 		t.Fatal(err)
 	}
 
@@ -845,10 +846,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	isBlocked := func(hk types.PublicKey) bool {
 		t.Helper()
-		host, err := hdb.Host(ctx, hk)
-		if err != nil {
-			t.Fatal(err)
-		}
+		host, _ := hdb.Host(ctx, hk)
 		return host.Blocked
 	}
 
@@ -898,8 +896,10 @@ func TestSQLHostBlocklist(t *testing.T) {
 	if !isBlocked(hk1) || isBlocked(hk2) || isBlocked(hk3) {
 		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3))
 	}
-	if _, err = hdb.Host(ctx, hk1); err != ErrHostNotFound {
+	if host, err := hdb.Host(ctx, hk1); err != nil {
 		t.Fatal("unexpected err", err)
+	} else if !host.Blocked {
+		t.Fatal("expected host to be blocked")
 	}
 
 	// assert adding the same entry is a no-op
@@ -985,7 +985,9 @@ func TestSQLHostBlocklist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err = hdb.Host(ctx, hk4); err != ErrHostNotFound {
+	if host, err := hdb.Host(ctx, hk4); err != nil {
+		t.Fatal(err)
+	} else if !host.Blocked {
 		t.Fatal("expected host to be blocked")
 	}
 	if _, err = hdb.Host(ctx, hk5); err != nil {
@@ -1010,9 +1012,9 @@ func TestSQLHostBlocklist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert 3 out of 5 hosts are blocked
-	if !isBlocked(hk1) || !isBlocked(hk2) || !isBlocked(hk3) || isBlocked(hk4) || isBlocked(hk5) {
-		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
+	// assert 2 out of 5 hosts are blocked
+	if !isBlocked(hk1) || !isBlocked(hk3) || isBlocked(hk4) || isBlocked(hk5) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
 	}
 
 	// add host 5 to the allowlist
@@ -1022,8 +1024,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// assert all hosts except host 5 are blocked
-	if !isBlocked(hk1) || !isBlocked(hk2) || !isBlocked(hk3) || !isBlocked(hk4) || isBlocked(hk5) {
-		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
+	if !isBlocked(hk1) || !isBlocked(hk3) || !isBlocked(hk4) || isBlocked(hk5) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
 	}
 
 	// add a rule to block host 5
@@ -1033,8 +1035,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// assert all hosts are blocked
-	if !isBlocked(hk1) || !isBlocked(hk2) || !isBlocked(hk3) || !isBlocked(hk4) || !isBlocked(hk5) {
-		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
+	if !isBlocked(hk1) || !isBlocked(hk3) || !isBlocked(hk4) || !isBlocked(hk5) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
 	}
 }
 

@@ -9,6 +9,15 @@ import (
 	"go.sia.tech/renterd/object"
 )
 
+var (
+	// ErrHostNotFound is returned if the requested host is not found.
+	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
+
+	// ErrSettingNotFound is returned if a requested setting is not present in the
+	// database.
+	ErrSettingNotFound = errors.New("setting not found")
+)
+
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
 	BlockHeight uint64
@@ -223,7 +232,3 @@ func (rs RedundancySettings) Validate() error {
 	}
 	return nil
 }
-
-// ErrSettingNotFound is returned if a requested setting is not present in the
-// database.
-var ErrSettingNotFound = errors.New("setting not found")

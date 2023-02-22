@@ -11,6 +11,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
@@ -34,7 +35,6 @@ const (
 )
 
 var (
-	ErrHostNotFound   = errors.New("host doesn't exist in hostdb")
 	ErrNegativeOffset = errors.New("offset can not be negative")
 )
 
@@ -329,11 +329,8 @@ func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
 func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
-		fmt.Println("OH NO", err)
 		return false // do nothing
 	}
-
-	fmt.Println("blocks", types.PublicKey(h.PublicKey).String(), host, e.Entry)
 
 	return host == e.Entry || strings.HasSuffix(host, "."+e.Entry)
 }
@@ -348,7 +345,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.H
 		Preload("Blocklist").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.HostInfo{}, ErrHostNotFound
+		return hostdb.HostInfo{}, api.ErrHostNotFound
 	} else if tx.Error != nil {
 		return hostdb.HostInfo{}, tx.Error
 	}
