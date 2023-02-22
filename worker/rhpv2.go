@@ -148,6 +148,7 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 // Contract.
 type Session struct {
 	transport   *rhpv2.Transport
+	renewedFrom types.FileContractID
 	revision    rhpv2.ContractRevision
 	key         types.PrivateKey
 	appendRoots []types.Hash256
@@ -814,6 +815,8 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
+	// update revision
+	s.renewedFrom = s.revision.ID()
 	s.revision.Revision = initRevision
 	s.revision.Signatures[0].Signature = renterRevisionSig.Signature
 	s.revision.Signatures[1].Signature = hostSigs.RevisionSignature.Signature
