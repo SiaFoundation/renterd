@@ -335,8 +335,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		return
 	}
 
-	fc := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.HostSettings, wprr.EndHeight)
-	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice)
+	fc, basePrice := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.HostSettings, wprr.EndHeight)
 	finalPayment := wprr.HostSettings.BaseRPCPrice
 	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {
 		finalPayment = wprr.Contract.ValidRenterPayout()
@@ -345,7 +344,8 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
+	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice, txn.MinerFees[0], basePrice)
+	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, cost, b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
