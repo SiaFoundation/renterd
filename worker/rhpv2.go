@@ -148,6 +148,8 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 // Contract.
 type Session struct {
 	transport   *rhpv2.Transport
+	renewedFrom types.FileContractID
+	renewedTo   types.FileContractID
 	revision    rhpv2.ContractRevision
 	key         types.PrivateKey
 	appendRoots []types.Hash256
@@ -814,10 +816,24 @@ func (s *Session) RenewContract(txnSet []types.Transaction, finalPayment types.C
 	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 
-	return rhpv2.ContractRevision{
+	// create revision
+	rev := rhpv2.ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
-	}, signedTxnSet, nil
+	}
+
+	// update revision
+	s.renewedFrom = s.revision.ID()
+	s.revision = rev
+	s.renewedTo = s.revision.ID()
+
+	// unlock the session after a renew to make sure the next use of the Session
+	// locks the new contract. If it fails, we close the transport directly.
+	if err := s.Unlock(); err != nil {
+		s.transport.Close()
+		s.transport = nil
+	}
+	return rev, signedTxnSet, nil
 }
 
 // NewSession returns a Session locking the provided contract.

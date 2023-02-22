@@ -159,45 +159,76 @@ func TestUploadDownload(t *testing.T) {
 	small := make([]byte, rhpv2.SectorSize/12)
 	large := make([]byte, rhpv2.SectorSize*3)
 
-	for _, data := range [][]byte{small, large} {
-		// prepare some data - make sure it's more than one sector
-		if _, err := frand.Read(data); err != nil {
-			t.Fatal(err)
-		}
+	uploadDownload := func() {
+		t.Helper()
+		for _, data := range [][]byte{small, large} {
+			// prepare some data - make sure it's more than one sector
+			if _, err := frand.Read(data); err != nil {
+				t.Fatal(err)
+			}
 
-		// upload the data
-		name := fmt.Sprintf("data_%v", len(data))
-		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
-			t.Fatal(err)
-		}
+			// upload the data
+			name := fmt.Sprintf("data_%v", len(data))
+			if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+				t.Fatal(err)
+			}
 
-		// Should be registered in bus.
-		_, entries, err := cluster.Bus.Object(context.Background(), "")
+			// Should be registered in bus.
+			_, entries, err := cluster.Bus.Object(context.Background(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var found bool
+			for _, entry := range entries {
+				if entry == fmt.Sprintf("/%s", name) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatal("uploaded object not found in bus")
+			}
+
+			// download the data
+			var buffer bytes.Buffer
+			if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
+				t.Fatal(err)
+			}
+
+			// assert it matches
+			if !bytes.Equal(data, buffer.Bytes()) {
+				t.Fatal("unexpected")
+			}
+		}
+	}
+
+	// Run uploads once.
+	uploadDownload()
+
+	// Renew contracts.
+	if err := cluster.MineToRenewWindow(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the contract to be renewed.
+	err = Retry(100, time.Second, func() error {
+		cms, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		var found bool
-		for _, entry := range entries {
-			if entry == fmt.Sprintf("/%s", name) {
-				found = true
-				break
+		for _, cm := range cms {
+			if cm.RenewedFrom == (types.FileContractID{}) {
+				return errors.New("found contract that wasn't renewed")
 			}
 		}
-		if !found {
-			t.Fatal("uploaded object not found in bus")
-		}
-
-		// download the data
-		var buffer bytes.Buffer
-		if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
-			t.Fatal(err)
-		}
-
-		// assert it matches
-		if !bytes.Equal(data, buffer.Bytes()) {
-			t.Fatal("unexpected")
-		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+
+	// Run uploads again.
+	uploadDownload()
 
 	// Check that the spending was recorded.
 	err = Retry(100, testBusFlushInterval, func() error {
