@@ -135,10 +135,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	}
 
 	// min score to pass checks.
-	redundancy := rs.TotalShards / rs.MinShards
-	minScore, err := c.managedFindMinAllowedHostScores(ctx, cfg, hosts, storedData, float64(redundancy))
-	if err != nil {
-		return fmt.Errorf("failed to determine min score for contract check: %w", err)
+	var minScore float64
+	if len(hosts) > 0 {
+		redundancy := rs.TotalShards / rs.MinShards
+		minScore, err = c.managedFindMinAllowedHostScores(ctx, cfg, hosts, storedData, float64(redundancy))
+		if err != nil {
+			return fmt.Errorf("failed to determine min score for contract check: %w", err)
+		}
 	}
 
 	// run checks
@@ -313,8 +316,14 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 			continue
 		}
 
+		// if the host is blocked we ignore it, it might be unblocked later
+		if host.Blocked {
+			toIgnore = append(toIgnore, fcid)
+			continue
+		}
+
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, f, host, minScore, contract.FileSize())
+		usable, reasons := isUsableHost(cfg, gs, rs, f, host.Host, minScore, contract.FileSize())
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -669,7 +678,8 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg ap
 		return 0, err
 	}
 	if len(hosts) == 0 {
-		return 0, errors.New("no hosts returned in candidateHosts")
+		c.logger.Debug("min host score is 0 because there are no candidate hosts")
+		return 0, nil
 	}
 
 	// Find the minimum score that a host is allowed to have to be considered

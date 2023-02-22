@@ -702,8 +702,11 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	isAllowed := func(hk types.PublicKey) bool {
 		t.Helper()
-		_, err := hdb.Host(ctx, hk)
-		return err == nil
+		host, err := hdb.Host(ctx, hk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return !host.Blocked
 	}
 
 	// add three hosts
@@ -842,16 +845,11 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	isBlocked := func(hk types.PublicKey) bool {
 		t.Helper()
-		hosts, err := hdb.Hosts(ctx, 0, -1)
+		host, err := hdb.Host(ctx, hk)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, host := range hosts {
-			if host.PublicKey == hk {
-				return false
-			}
-		}
-		return true
+		return host.Blocked
 	}
 
 	// add three hosts

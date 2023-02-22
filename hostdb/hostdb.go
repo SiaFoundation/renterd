@@ -98,6 +98,12 @@ type Host struct {
 	Interactions Interactions        `json:"interactions"`
 }
 
+// HostInfo extends the host type with a field indicating whether it is blocked or not.
+type HostInfo struct {
+	Host
+	Blocked bool `json:"blocked"`
+}
+
 // IsOnline returns whether a host is considered online.
 func (h Host) IsOnline() bool {
 	if h.Interactions.TotalScans == 0 {

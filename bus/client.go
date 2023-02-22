@@ -212,7 +212,7 @@ func (c *Client) WalletPending(ctx context.Context) (resp []types.Transaction, e
 }
 
 // Host returns information about a particular host known to the server.
-func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.Host, err error) {
+func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.HostInfo, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/host/%s", hostKey), &h)
 	return
 }

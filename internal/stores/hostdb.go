@@ -314,7 +314,7 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) error {
 SELECT @entry_id, id FROM (
 	SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
 	FROM hosts
-	WHERE net_host == @exact_entry OR net_host LIKE @like_entry
+	WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
 )`, params).Error
 }
 
@@ -329,24 +329,34 @@ func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
 func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
+		fmt.Println("OH NO", err)
 		return false // do nothing
 	}
+
+	fmt.Println("blocks", types.PublicKey(h.PublicKey).String(), host, e.Entry)
 
 	return host == e.Entry || strings.HasSuffix(host, "."+e.Entry)
 }
 
 // Host returns information about a host.
-func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error) {
+func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error) {
 	var h dbHost
 
 	tx := ss.db.
-		Scopes(ss.blocklist).
 		Where(&dbHost{PublicKey: publicKey(hostKey)}).
+		Preload("Allowlist").
+		Preload("Blocklist").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.Host{}, ErrHostNotFound
+		return hostdb.HostInfo{}, ErrHostNotFound
+	} else if tx.Error != nil {
+		return hostdb.HostInfo{}, tx.Error
 	}
-	return h.convert(), tx.Error
+
+	return hostdb.HostInfo{
+		Host:    h.convert(),
+		Blocked: ss.isBlocked(h),
+	}, nil
 }
 
 // HostsForScanning returns the address of hosts for scanning.
@@ -631,6 +641,19 @@ func (ss *SQLStore) blocklist(db *gorm.DB) *gorm.DB {
 		db = db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
 	}
 	return db
+}
+
+func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.hasAllowlist && len(h.Allowlist) == 0 {
+		blocked = true
+	}
+	if ss.hasBlocklist && len(h.Blocklist) > 0 {
+		blocked = true
+	}
+	return
 }
 
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
