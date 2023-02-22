@@ -280,13 +280,28 @@ func (e *dbAllowlistEntry) AfterCreate(tx *gorm.DB) error {
 		return nil
 	}
 
+	params := map[string]interface{}{
+		"entry_id":    e.ID,
+		"exact_entry": publicKey(e.Entry),
+	}
+
 	// insert entries into the allowlist
-	return tx.Exec(`INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
-SELECT ?, id FROM (
+	switch tx.Config.Dialector.Name() {
+	case "sqlite":
+		return tx.Exec(`INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
 	SELECT id
 	FROM hosts
-	WHERE public_key = ?
-)`, e.ID, publicKey(e.Entry)).Error
+	WHERE public_key = @exact_entry
+)`, params).Error
+	default:
+		return tx.Exec(`INSERT IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+	SELECT id
+	FROM hosts
+	WHERE public_key=@exact_entry
+) AS _`, params).Error
+	}
 }
 
 func (e *dbAllowlistEntry) BeforeCreate(tx *gorm.DB) (err error) {
@@ -310,12 +325,22 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) error {
 	}
 
 	// insert entries into the blocklist
-	return tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+	switch tx.Config.Dialector.Name() {
+	case "sqlite":
+		return tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		SELECT @entry_id, id FROM (
+			SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
+			FROM hosts
+			WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
+		)`, params).Error
+	default:
+		return tx.Exec(`INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
 SELECT @entry_id, id FROM (
-	SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
+	SELECT id
 	FROM hosts
-	WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
-)`, params).Error
+	WHERE net_address=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address))=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address)) LIKE @like_entry
+) AS _`, params).Error
+	}
 }
 
 func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
