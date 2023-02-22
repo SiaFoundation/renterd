@@ -621,7 +621,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			if !ok {
 				return errors.New("insufficient funds")
 			}
-			w.contractSpendingRecorder.record(rfr.ContractID, api.ContractSpending{FundAccount: cost})
+			w.contractSpendingRecorder.Record(rfr.ContractID, api.ContractSpending{FundAccount: cost})
 			return RPCFundAccount(t, &payment, account.id, pt.UID)
 		})
 	})
