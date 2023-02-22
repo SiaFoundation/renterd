@@ -704,8 +704,14 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		return nil, err
 	}
 
-	// create IP filter
+	// create IP filter and add all excluded hosts to it.
 	ipFilter := newIPFilter(c.logger)
+	for _, h := range hosts {
+		if _, exclude := exclude[h.PublicKey]; exclude {
+			ipFilter.isRedundantIP(h)
+			continue
+		}
+	}
 
 	c.logger.Debugf("found %d candidate hosts", len(hosts)-len(exclude))
 
