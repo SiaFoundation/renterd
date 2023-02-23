@@ -1175,7 +1175,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there is only one
-	toMigrate, err := db.UnhealthySlabs(ctx, 1.0, "autopilot", -1)
+	toMigrate, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1233,7 +1233,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there are none left
-	toMigrate, err = db.UnhealthySlabs(ctx, 1.0, "autopilot", -1)
+	toMigrate, err = db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
