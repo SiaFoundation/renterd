@@ -957,6 +957,22 @@ func TestUnhealthySlabs(t *testing.T) {
 	if reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
+
+	slabs, err = db.UnhealthySlabs(ctx, 0.5, "autopilot", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) != 2 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=4", len(slabs))
+	}
+
+	expected = []object.SlabSlice{
+		obj.Slabs[4],
+		obj.Slabs[2],
+	}
+	if reflect.DeepEqual(slabs, expected) {
+		t.Fatal("slabs are not returned in the correct order")
+	}
 }
 
 // TestContractSectors is a test for the contract_sectors join table. It
