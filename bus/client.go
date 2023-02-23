@@ -481,8 +481,8 @@ func (c *Client) DeleteObject(ctx context.Context, name string) (err error) {
 // SlabsForMigration returns up to 'limit' slabs which require migration. A slab
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.
-func (c *Client) SlabsForMigration(ctx context.Context, set string, limit int) (slabs []object.Slab, err error) {
-	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, Limit: limit}, &slabs)
+func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) (slabs []object.Slab, err error) {
+	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, HealthCutoff: healthCutoff, Limit: limit}, &slabs)
 	return
 }
 

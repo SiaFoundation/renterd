@@ -95,7 +95,7 @@ type (
 		UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, key string) error
 
-		UnhealthySlabs(ctx context.Context, set string, limit int) ([]object.Slab, error)
+		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
 
@@ -635,7 +635,7 @@ func (b *bus) slabHandlerPUT(jc jape.Context) {
 func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
-		if slabs, err := b.ms.UnhealthySlabs(jc.Request.Context(), msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+		if slabs, err := b.ms.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
 			jc.Encode(slabs)
 		}
 	}

@@ -62,7 +62,7 @@ type Bus interface {
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// objects
-	SlabsForMigration(ctx context.Context, set string, limit int) ([]object.Slab, error)
+	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 
 	// settings
 	UpdateSetting(ctx context.Context, key string, value string) error
@@ -268,7 +268,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64) (*Autopilot, error) {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64) (*Autopilot, error) {
 	ap := &Autopilot{
 		bus:    bus,
 		logger: logger.Sugar().Named("autopilot"),
@@ -292,7 +292,7 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 
 	ap.s = scanner
 	ap.c = newContractor(ap)
-	ap.m = newMigrator(ap)
+	ap.m = newMigrator(ap, migrationHealthCutoff)
 
 	return ap, nil
 }
