@@ -399,7 +399,7 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 		// apply a pessimistic timeout, ensuring unlocking the contract or force
 		// closing the session does not deadlock and keep this goroutine around
 		// forever
-		ctx, cancel := context.WithTimeout(ctx, time.Hour)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 		defer cancel()
 
 		var wg sync.WaitGroup
