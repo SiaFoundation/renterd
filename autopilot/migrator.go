@@ -12,6 +12,8 @@ import (
 
 const (
 	migratorBatchSize = math.MaxInt // TODO: change once we have a fix for the infinite loop
+
+	slabsForMigrationHealthCutoff = 0.75
 )
 
 type migrator struct {
@@ -55,7 +57,7 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	defer span.End()
 
 	// fetch slabs for migration
-	toMigrate, err := b.SlabsForMigration(ctx, cfg.Contracts.Set, migratorBatchSize)
+	toMigrate, err := b.SlabsForMigration(ctx, slabsForMigrationHealthCutoff, cfg.Contracts.Set, migratorBatchSize)
 	if err != nil {
 		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 		return

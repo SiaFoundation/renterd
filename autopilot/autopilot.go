@@ -62,7 +62,7 @@ type Bus interface {
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// objects
-	SlabsForMigration(ctx context.Context, set string, limit int) ([]object.Slab, error)
+	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 
 	// settings
 	UpdateSetting(ctx context.Context, key string, value string) error
