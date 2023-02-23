@@ -453,24 +453,48 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	return
 }
 
-func (ss *SQLStore) AddHostAllowlistEntry(ctx context.Context, entry types.PublicKey) (err error) {
+func (ss *SQLStore) AddHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) (err error) {
+	if len(entries) == 0 {
+		return nil
+	}
 	defer ss.updateHasAllowlist(&err)
-	return ss.db.Create(&dbAllowlistEntry{Entry: publicKey(entry)}).Error
+	var dbEntries []dbAllowlistEntry
+	for _, entry := range entries {
+		dbEntries = append(dbEntries, dbAllowlistEntry{Entry: publicKey(entry)})
+	}
+	return ss.db.Create(&dbEntries).Error
 }
 
-func (ss *SQLStore) RemoveHostAllowlistEntry(ctx context.Context, entry types.PublicKey) (err error) {
+func (ss *SQLStore) RemoveHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) (err error) {
+	if len(entries) == 0 {
+		return nil
+	}
 	defer ss.updateHasAllowlist(&err)
-	return ss.db.Where(&dbAllowlistEntry{Entry: publicKey(entry)}).Delete(&dbAllowlistEntry{}).Error
+	pubkeys := make([]publicKey, len(entries))
+	for i, entry := range entries {
+		pubkeys[i] = publicKey(entry)
+	}
+	return ss.db.Delete(&dbAllowlistEntry{}, "entry IN ?", pubkeys).Error
 }
 
-func (ss *SQLStore) AddHostBlocklistEntry(ctx context.Context, entry string) (err error) {
+func (ss *SQLStore) AddHostBlocklistEntries(ctx context.Context, entries []string) (err error) {
+	if len(entries) == 0 {
+		return nil
+	}
 	defer ss.updateHasBlocklist(&err)
-	return ss.db.Create(&dbBlocklistEntry{Entry: entry}).Error
+	var dbEntries []dbBlocklistEntry
+	for _, entry := range entries {
+		dbEntries = append(dbEntries, dbBlocklistEntry{Entry: entry})
+	}
+	return ss.db.Create(&dbEntries).Error
 }
 
-func (ss *SQLStore) RemoveHostBlocklistEntry(ctx context.Context, entry string) (err error) {
+func (ss *SQLStore) RemoveHostBlocklistEntries(ctx context.Context, entries []string) (err error) {
+	if len(entries) == 0 {
+		return nil
+	}
 	defer ss.updateHasBlocklist(&err)
-	err = ss.db.Where(&dbBlocklistEntry{Entry: entry}).Delete(&dbBlocklistEntry{}).Error
+	err = ss.db.Delete(&dbBlocklistEntry{}, "entry IN ?", entries).Error
 	return
 }
 

@@ -74,12 +74,12 @@ type (
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
-		AddHostAllowlistEntry(ctx context.Context, entry types.PublicKey) error
-		RemoveHostAllowlistEntry(ctx context.Context, entry types.PublicKey) error
+		AddHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) error
+		RemoveHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) error
 
 		HostBlocklist(ctx context.Context) ([]string, error)
-		AddHostBlocklistEntry(ctx context.Context, entry string) error
-		RemoveHostBlocklistEntry(ctx context.Context, entry string) error
+		AddHostBlocklistEntries(ctx context.Context, entries []string) error
+		RemoveHostBlocklistEntries(ctx context.Context, entries []string) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -481,15 +481,11 @@ func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateAllowlistRequest
 	if jc.Decode(&req) == nil {
-		for _, entry := range req.Add {
-			if jc.Check(fmt.Sprintf("couldn't add allowlist entry '%s'", entry), b.hdb.AddHostAllowlistEntry(ctx, entry)) != nil {
-				return
-			}
+		if jc.Check("couldn't add allowlist entries", b.hdb.AddHostAllowlistEntries(ctx, req.Add)) != nil {
+			return
 		}
-		for _, entry := range req.Remove {
-			if jc.Check(fmt.Sprintf("couldn't remove allowlist entry '%s'", entry), b.hdb.RemoveHostAllowlistEntry(ctx, entry)) != nil {
-				return
-			}
+		if jc.Check("couldn't remove allowlist entries", b.hdb.RemoveHostAllowlistEntries(ctx, req.Remove)) != nil {
+			return
 		}
 	}
 }
@@ -505,15 +501,11 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateBlocklistRequest
 	if jc.Decode(&req) == nil {
-		for _, entry := range req.Add {
-			if jc.Check(fmt.Sprintf("couldn't add blocklist entry '%s'", entry), b.hdb.AddHostBlocklistEntry(ctx, entry)) != nil {
-				return
-			}
+		if jc.Check("couldn't add blocklist entries", b.hdb.AddHostBlocklistEntries(ctx, req.Add)) != nil {
+			return
 		}
-		for _, entry := range req.Remove {
-			if jc.Check(fmt.Sprintf("couldn't remove blocklist entry '%s'", entry), b.hdb.RemoveHostBlocklistEntry(ctx, entry)) != nil {
-				return
-			}
+		if jc.Check("couldn't remove blocklist entries", b.hdb.RemoveHostBlocklistEntries(ctx, req.Remove)) != nil {
+			return
 		}
 	}
 }

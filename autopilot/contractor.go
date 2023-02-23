@@ -137,8 +137,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	// min score to pass checks.
 	var minScore float64
 	if len(hosts) > 0 {
-		redundancy := rs.TotalShards / rs.MinShards
-		minScore, err = c.managedFindMinAllowedHostScores(ctx, cfg, hosts, storedData, float64(redundancy))
+		minScore, err = c.managedFindMinAllowedHostScores(ctx, cfg, hosts, storedData, rs.Redundancy())
 		if err != nil {
 			return fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
@@ -318,6 +317,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 
 		// if the host is blocked we ignore it, it might be unblocked later
 		if host.Blocked {
+			c.logger.Infow("blocked host", "hk", hk, "fcid", fcid, "reasons", errHostBlocked.Error())
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
@@ -678,7 +678,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg ap
 		return 0, err
 	}
 	if len(hosts) == 0 {
-		c.logger.Debug("min host score is 0 because there are no candidate hosts")
+		c.logger.Warn("min host score is 0 because there are no candidate hosts")
 		return 0, nil
 	}
 
