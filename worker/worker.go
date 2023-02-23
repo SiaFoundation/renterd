@@ -389,39 +389,41 @@ func (w *worker) withHost(ctx context.Context, contractID types.FileContractID, 
 	})
 }
 
+func (w *worker) unlockHosts(hosts []sectorStore) {
+	// apply a pessimistic timeout, ensuring unlocking the contract or force
+	// closing the session does not deadlock and keep this goroutine around
+	// forever. Use a background context as the parent to avoid timing out
+	// the unlock when 'withHosts' returns and the parent context gets
+	// closed.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, h := range hosts {
+		wg.Add(1)
+		go func(ss *sharedSession) {
+			w.pool.unlockContract(ctx, ss)
+			wg.Done()
+		}(h.(*sharedSession))
+	}
+	wg.Wait()
+}
+
 func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
-	go func() {
-		// apply a pessimistic timeout, ensuring unlocking the contract or force
-		// closing the session does not deadlock and keep this goroutine around
-		// forever
-		ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
-		defer cancel()
 
-		var wg sync.WaitGroup
+	// Unlock hosts either after the context is closed or the function is done
+	// executing.
+	go func() {
 		select {
 		case <-done:
-			for _, h := range hosts {
-				wg.Add(1)
-				go func(ss *sharedSession) {
-					w.pool.unlockContract(ctx, ss)
-					wg.Done()
-				}(h.(*sharedSession))
-			}
+			w.unlockHosts(hosts)
 		case <-ctx.Done():
-			for _, h := range hosts {
-				wg.Add(1)
-				go func(ss *sharedSession) {
-					w.pool.forceClose(ss)
-					wg.Done()
-				}(h.(*sharedSession))
-			}
+			w.unlockHosts(hosts)
 		}
-		wg.Wait()
 	}()
 	defer func() {
 		close(done)
