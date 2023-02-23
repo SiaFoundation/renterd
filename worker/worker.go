@@ -420,10 +420,9 @@ func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata
 	go func() {
 		select {
 		case <-done:
-			w.unlockHosts(hosts)
 		case <-ctx.Done():
-			w.unlockHosts(hosts)
 		}
+		w.unlockHosts(hosts)
 	}()
 	defer func() {
 		close(done)
