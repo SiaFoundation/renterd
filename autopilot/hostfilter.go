@@ -29,6 +29,7 @@ const (
 
 var (
 	errHostOffline      = errors.New("host is offline")
+	errLowScore         = errors.New("host's score is below minimum")
 	errHostRedundantIP  = errors.New("host has redundant IP")
 	errHostBadSettings  = errors.New("host has bad settings")
 	errHostPriceGouging = errors.New("host is price gouging")
@@ -43,7 +44,7 @@ var (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h hostdb.Host) (bool, []error) {
+func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64) (bool, []error) {
 	var reasons []error
 
 	if !h.IsOnline() {
@@ -56,6 +57,8 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if gouging, reason := isGouging(gs, rs, settings); gouging {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
+	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
+		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
 	}
 
 	// sanity check - should never happen but this would cause a zero score

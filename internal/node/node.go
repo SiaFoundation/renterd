@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
+	"gorm.io/gorm"
 )
 
 type WorkerConfig struct {
@@ -44,6 +45,8 @@ type BusConfig struct {
 	GatewayAddr     string
 	Miner           *Miner
 	PersistInterval time.Duration
+
+	DBDialector gorm.Dialector
 
 	api.GougingSettings
 	api.RedundancySettings
@@ -235,7 +238,12 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 	if err := os.MkdirAll(dbDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	dbConn := stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
+
+	// If no DB dialector was provided, use SQLite.
+	dbConn := cfg.DBDialector
+	if dbConn == nil {
+		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
+	}
 
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), nil)
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, sqlLogger)

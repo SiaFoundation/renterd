@@ -15,8 +15,9 @@ import (
 const keyContractSpendingRecorder contextKey = "ContractSpendingRecorder"
 
 type (
+	// A ContractSpendingRecorder records the spending of a contract.
 	ContractSpendingRecorder interface {
-		record(fcid types.FileContractID, cs api.ContractSpending)
+		Record(fcid types.FileContractID, cs api.ContractSpending)
 	}
 
 	contractSpendingRecorder struct {
@@ -30,17 +31,18 @@ type (
 	}
 )
 
-func RecordContractSpending(ctx context.Context, fcid types.FileContractID, cs api.ContractSpending, err *error) {
+func recordContractSpending(ctx context.Context, fcid types.FileContractID, cs api.ContractSpending, err *error) {
 	if err != nil && *err != nil {
 		return
 	}
 	if sr, ok := ctx.Value(keyContractSpendingRecorder).(ContractSpendingRecorder); ok {
-		sr.record(fcid, cs)
+		sr.Record(fcid, cs)
 		return
 	}
-	panic("no spending recorder attached to the context") // developer error
 }
 
+// WithContractSpendingRecorder returns a context with the
+// ContractSpendingRecorder attached.
 func WithContractSpendingRecorder(ctx context.Context, sr ContractSpendingRecorder) context.Context {
 	return context.WithValue(ctx, keyContractSpendingRecorder, sr)
 }
@@ -54,7 +56,8 @@ func (w *worker) newContractSpendingRecorder() *contractSpendingRecorder {
 	}
 }
 
-func (sr *contractSpendingRecorder) record(fcid types.FileContractID, cs api.ContractSpending) {
+// Record sends contract spending records to the bus.
+func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, cs api.ContractSpending) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
@@ -93,6 +96,7 @@ func (sr *contractSpendingRecorder) flush() {
 	sr.contractSpendingsFlushTimer = nil
 }
 
+// Stop stops the flush timer.
 func (sr *contractSpendingRecorder) Stop() {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
