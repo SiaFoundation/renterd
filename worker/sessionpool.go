@@ -183,6 +183,11 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 		}
 	}()
 
+	// if contract of session was renewed, update the sharedSession.
+	if s.renewedFrom != (types.FileContractID{}) && ss.contractID == s.renewedFrom {
+		ss.contractID = s.renewedTo
+	}
+
 	// reuse existing transport if possible
 	if t := s.transport; t != nil {
 		if time.Since(s.lastSeen) >= sp.sessionTTL {
