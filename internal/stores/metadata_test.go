@@ -940,7 +940,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slabs, err := db.UnhealthySlabs(ctx, 1.0, "autopilot", -1)
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,7 +958,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 
-	slabs, err = db.UnhealthySlabs(ctx, 0.5, "autopilot", -1)
+	slabs, err = db.UnhealthySlabs(ctx, 0.49, "autopilot", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
