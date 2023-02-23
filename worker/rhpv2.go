@@ -873,7 +873,8 @@ func (s *Session) withTransport(ctx context.Context, fn func(t *rhpv2.Transport)
 	case err = <-errChan:
 		return
 	case <-ctx.Done():
-		if ctx.Err() != nil {
+		_ = s.transport.Close() // ignore error
+		if err = <-errChan; err == nil {
 			err = ctx.Err()
 		}
 	}
