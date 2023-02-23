@@ -878,7 +878,6 @@ func (s *Session) withTransport(ctx context.Context, fn func(t *rhpv2.Transport)
 			err = ctx.Err()
 		}
 		s.transport = nil
-		fmt.Println("err", err, ctx.Err())
 	}
 	return
 }
