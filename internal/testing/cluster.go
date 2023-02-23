@@ -229,10 +229,11 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 
 	// Create autopilot.
 	ap, aStartFn, aStopFn, err := node.NewAutopilot(node.AutopilotConfig{
-		Heartbeat:         time.Second,
-		ScannerInterval:   time.Second,
-		ScannerBatchSize:  10,
-		ScannerNumThreads: 1,
+		Heartbeat:             time.Second,
+		MigrationHealthCutoff: 0.99,
+		ScannerInterval:       time.Second,
+		ScannerBatchSize:      10,
+		ScannerNumThreads:     1,
 	}, autopilotStore, busClient, workerClient, logger)
 	if err != nil {
 		return nil, err

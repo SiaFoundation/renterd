@@ -12,22 +12,22 @@ import (
 
 const (
 	migratorBatchSize = math.MaxInt // TODO: change once we have a fix for the infinite loop
-
-	slabsForMigrationHealthCutoff = 0.75
 )
 
 type migrator struct {
-	ap     *Autopilot
-	logger *zap.SugaredLogger
+	ap           *Autopilot
+	logger       *zap.SugaredLogger
+	healthCutoff float64
 
 	mu      sync.Mutex
 	running bool
 }
 
-func newMigrator(ap *Autopilot) *migrator {
+func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
 	return &migrator{
-		ap:     ap,
-		logger: ap.logger.Named("migrator"),
+		ap:           ap,
+		logger:       ap.logger.Named("migrator"),
+		healthCutoff: healthCutoff,
 	}
 }
 
@@ -57,7 +57,7 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	defer span.End()
 
 	// fetch slabs for migration
-	toMigrate, err := b.SlabsForMigration(ctx, slabsForMigrationHealthCutoff, cfg.Contracts.Set, migratorBatchSize)
+	toMigrate, err := b.SlabsForMigration(ctx, m.healthCutoff, cfg.Contracts.Set, migratorBatchSize)
 	if err != nil {
 		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 		return
