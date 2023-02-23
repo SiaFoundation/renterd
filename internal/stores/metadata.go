@@ -699,8 +699,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 // UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
 // in the given contract set. These slabs need to be migrated to good contracts
 // so they are restored to full health.
-//
-// TODO: consider that we don't want to migrate slabs above a given health.
 func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error) {
 	var dbBatch []dbSlab
 	var slabs []object.Slab
@@ -709,10 +707,17 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Select(`slabs.*,
 		        CASE
 				  WHEN (slabs.min_shards = slabs.total_shards)
-				  THEN 1
+				  THEN
+				    CASE
+					WHEN (COUNT(DISTINCT(c.host_id)) < slabs.min_shards)
+					THEN
+					  0
+					ELSE
+					  1
+					END
 				  ELSE
 				  CAST((COUNT(DISTINCT(c.host_id)) - slabs.min_shards) AS FLOAT) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-				END AS health`).
+				  END AS health`).
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
 		Joins("INNER JOIN sectors s ON sh.db_sector_id = s.id").

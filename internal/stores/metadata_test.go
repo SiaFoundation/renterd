@@ -963,12 +963,102 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(slabs) != 2 {
-		t.Fatalf("unexpected amount of slabs to migrate, %v!=4", len(slabs))
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=2", len(slabs))
 	}
 
 	expected = []object.SlabSlice{
 		obj.Slabs[4],
 		obj.Slabs[2],
+	}
+	if reflect.DeepEqual(slabs, expected) {
+		t.Fatal("slabs are not returned in the correct order")
+	}
+}
+
+// TestUnhealthySlabs tests the functionality of UnhealthySlabs on slabs that
+// don't have any redundancy.
+func TestUnhealthySlabsNoRedundancy(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 hosts
+	hks, err := db.addTestHosts(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
+
+	// add 4 contracts
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1, fcid2, fcid3 := fcids[0], fcids[1], fcids[2]
+
+	// select the first two contracts as good contracts
+	goodContracts := []types.FileContractID{fcid1, fcid2}
+	if err := db.SetContractSet(context.Background(), "autopilot", goodContracts); err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			// hk1 is good so this slab should have full health.
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hk1,
+							Root: types.Hash256{1},
+						},
+					},
+				},
+			},
+			// hk4 is bad so this slab should have no health.
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 2,
+					Shards: []object.Sector{
+						{
+							Host: hk2,
+							Root: types.Hash256{2},
+						},
+						{
+							Host: hk3,
+							Root: types.Hash256{4},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	if err := db.UpdateObject(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+		hk3: fcid3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) != 1 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
+	}
+
+	expected := []object.SlabSlice{
+		obj.Slabs[0],
 	}
 	if reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
