@@ -43,10 +43,12 @@ type accounts struct {
 	inProgressRefills map[types.PublicKey]struct{}
 }
 
-func newAccounts(l *zap.SugaredLogger, w Worker) *accounts {
+func newAccounts(l *zap.SugaredLogger, b Bus, w Worker) *accounts {
 	return &accounts{
-		logger: l.Named("accounts"),
-		w:      w,
+		b:                 b,
+		logger:            l.Named("accounts"),
+		w:                 w,
+		inProgressRefills: make(map[types.PublicKey]struct{}),
 	}
 }
 

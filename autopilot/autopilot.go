@@ -302,7 +302,7 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		return nil, err
 	}
 
-	ap.a = newAccounts(ap.logger, ap.worker)
+	ap.a = newAccounts(ap.logger, ap.bus, ap.worker)
 	ap.s = scanner
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap, migrationHealthCutoff)
