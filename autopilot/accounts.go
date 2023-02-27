@@ -135,8 +135,11 @@ func (a *accounts) refillWorkerAccounts() {
 			// Remove from in-progress refills once done.
 			defer a.markRefillDone(contract.HostKey)
 
-			// Fetch the account. This might be zero so use it accordingly.
+			// Fetch the account. This might be zero so use accordingly.
 			account := accountForHost[contract.HostKey]
+			if account.Balance == nil {
+				account.Balance = new(big.Int)
+			}
 
 			// Add tracing.
 			ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
