@@ -18,6 +18,7 @@ import (
 var (
 	minBalance = types.Siacoins(1).Div64(2).Big()
 	maxBalance = types.Siacoins(1).Big()
+	maxDrift   = types.Siacoins(10).Big()
 )
 
 type accounts struct {
@@ -130,6 +131,9 @@ func (a *accounts) refillWorkerAccounts() {
 			if account.Balance == nil {
 				account.Balance = new(big.Int)
 			}
+			if account.Drift == nil {
+				account.Drift = new(big.Int)
+			}
 
 			// Add tracing.
 			ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
@@ -148,7 +152,15 @@ func (a *accounts) refillWorkerAccounts() {
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
 			defer cancel()
 
-			// TODO: Check if a host is potentially cheating before refilling.
+			// Check if a host is potentially cheating before refilling.
+			if account.Drift.CmpAbs(maxDrift) > 0 {
+				a.logger.Error("not refilling account since host is potentially cheating",
+					"account", account.ID,
+					"host", contract.HostKey,
+					"balance", account.Balance,
+					"drift", account.Drift)
+				return fmt.Errorf("drift on account is too large - not funding")
+			}
 
 			// Check if refill is needed and perform it if necessary.
 			if account.Balance.Cmp(minBalance) >= 0 {

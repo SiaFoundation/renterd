@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,50 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
+
+var (
+	// errBalanceMaxExceeded occurs when a deposit would push the account's
+	// balance over the maximum allowed ephemeral account balance.
+	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
+)
+
+func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, hostIP string, hostKey types.PublicKey, amount types.Currency, revision *types.FileContractRevision) error {
+	return account.WithDeposit(ctx, func() (types.Currency, error) {
+		return amount, w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) (err error) {
+			rk := w.deriveRenterKey(hostKey)
+			cost := amount.Add(pt.FundAccountCost)
+			payment, ok := rhpv3.PayByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
+			if !ok {
+				return errors.New("insufficient funds")
+			}
+			w.contractSpendingRecorder.Record(revision.ParentID, api.ContractSpending{FundAccount: cost})
+			return RPCFundAccount(t, &payment, account.id, pt.UID)
+		})
+	})
+}
+
+func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, hostIP string, hostKey types.PublicKey) error {
+	account, err := w.accounts.ForHost(hostKey)
+	if err != nil {
+		return err
+	}
+	payment := w.preparePayment(hostKey, pt.AccountBalanceCost)
+	return account.WithSync(ctx, func() (types.Currency, error) {
+		var balance types.Currency
+		err := w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) error {
+			balance, err = RPCAccountBalance(t, &payment, account.id)
+			return err
+		})
+		return balance, err
+	})
+}
+
+func isMaxBalanceExceeded(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), errBalanceMaxExceeded.Error())
+}
 
 type (
 	// accounts stores the balance and other metrics of accounts that the
@@ -147,14 +192,17 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is
 // locked while the balance is fetched through balanceFn.
-func (a *account) WithSync(ctx context.Context, balanceFn func() types.Currency) error {
+func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency, error)) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	balance, err := balanceFn()
+	if err != nil {
+		return err
+	}
 	a.balanceMu.Lock()
-	a.balance = balanceFn().Big()
+	a.balance = balance.Big()
 	a.balanceMu.Unlock()
-	err := a.bus.SetBalance(ctx, a.id, a.owner, a.host, a.balance)
-	return err
+	return a.bus.SetBalance(ctx, a.id, a.owner, a.host, a.balance)
 }
 
 // tryInitAccounts is used for lazily initialising the accounts from the bus.
@@ -410,13 +458,20 @@ func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rh
 }
 
 // RPCAccountBalance calls the AccountBalance RPC.
-func RPCAccountBalance(t *rhpv3.Transport, account rhpv3.Account, price, collateral types.Currency) (bal types.Currency, err error) {
+func RPCAccountBalance(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhpv3.Account) (bal types.Currency, err error) {
 	defer wrapErr(&err, "AccountBalance")
 	s := t.DialStream()
 	defer s.Close()
 
+	req := rhpv3.RPCAccountBalanceRequest{
+		Account: account,
+	}
 	var resp rhpv3.RPCAccountBalanceResponse
 	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &account); err != nil {
+		return types.ZeroCurrency, err
+	} else if err := s.WriteResponse(&req); err != nil {
+		return types.ZeroCurrency, err
+	} else if err := processPayment(s, payment); err != nil {
 		return types.ZeroCurrency, err
 	} else if err := s.ReadResponse(&resp, 128); err != nil {
 		return types.ZeroCurrency, err

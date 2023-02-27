@@ -623,19 +623,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		}
 	}
 
+	// TODO: gouging check on price table
+
 	// Fund account.
-	err = account.WithDeposit(ctx, func() (types.Currency, error) {
-		return rfr.Amount, w.withTransportV3(ctx, hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
-			rk := w.deriveRenterKey(rfr.HostKey)
-			cost := rfr.Amount.Add(pt.FundAccountCost)
-			payment, ok := rhpv3.PayByContract(&revision, cost, rhpv3.Account{}, rk) // no account needed for funding
-			if !ok {
-				return errors.New("insufficient funds")
-			}
-			w.contractSpendingRecorder.Record(rfr.ContractID, api.ContractSpending{FundAccount: cost})
-			return RPCFundAccount(t, &payment, account.id, pt.UID)
-		})
-	})
+	err = w.fundAccount(ctx, account, pt, hostIP, rfr.HostKey, rfr.Amount, &revision)
+
+	// If funding failed due to an exceeded max balance, we sync the account.
+	if isMaxBalanceExceeded(err) {
+		if err := w.syncAccount(ctx, account, pt, hostIP, rfr.HostKey); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+		}
+	}
 	if jc.Check("couldn't fund account", err) != nil {
 		return
 	}

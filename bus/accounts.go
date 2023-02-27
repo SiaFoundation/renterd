@@ -16,8 +16,6 @@ type accounts struct {
 }
 
 type account struct {
-	Owner string
-
 	mu sync.Mutex
 	api.Account
 }
@@ -29,12 +27,7 @@ func newAccounts(accs []api.Account) *accounts {
 	}
 	for _, acc := range accs {
 		account := &account{
-			Account: api.Account{
-				ID:      acc.ID,
-				Host:    acc.Host,
-				Balance: acc.Balance,
-			},
-			Owner: acc.Owner,
+			Account: acc,
 		}
 		a.byID[account.ID] = account
 		a.byOwner[acc.Owner] = append(a.byOwner[acc.Owner], account)
@@ -60,8 +53,10 @@ func (a *accounts) AddAmount(id rhpv3.Account, owner string, hk types.PublicKey,
 func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, balance *big.Int) {
 	acc := a.account(id, owner, hk)
 
-	// Update balance.
+	// Update balance and drift.
 	acc.mu.Lock()
+	newDrift := balance.Sub(balance, acc.Balance)
+	acc.Drift = acc.Drift.Add(acc.Drift, newDrift)
 	acc.Balance = balance
 	acc.mu.Unlock()
 }
@@ -95,7 +90,8 @@ func (a *accounts) ToPersist() []api.Account {
 		acc.mu.Lock()
 		accounts = append(accounts, api.Account{
 			ID:      acc.ID,
-			Balance: acc.Balance,
+			Balance: new(big.Int).Set(acc.Balance),
+			Drift:   new(big.Int).Set(acc.Drift),
 			Host:    acc.Host,
 			Owner:   acc.Owner,
 		})
@@ -116,8 +112,9 @@ func (a *accounts) account(id rhpv3.Account, owner string, hk types.PublicKey) *
 				ID:      id,
 				Host:    hk,
 				Balance: big.NewInt(0),
+				Drift:   big.NewInt(0),
+				Owner:   owner,
 			},
-			Owner: owner,
 		}
 		a.byID[id] = acc
 		a.byOwner[owner] = append(a.byOwner[owner], acc)
