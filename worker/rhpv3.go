@@ -37,14 +37,15 @@ type (
 		host  types.PublicKey
 		owner string
 
-		// The balance is locked by a RWMutex since both withdrawals and
-		// deposits can happen in parallel during normal operations. If
-		// the account ever goes out of sync, the worker needs to be
-		// able to prevent any deposits or withdrawals from the host for
-		// the duration of the sync so only syncing acquires an
-		// exclusive lock on the mutex.
-		mu      sync.RWMutex
-		balance *big.Int
+		// The balance is locked by a RWMutex in addition to a regular Mutex
+		// since both withdrawals and deposits can happen in parallel during
+		// normal operations. If the account ever goes out of sync, the worker
+		// needs to be able to prevent any deposits or withdrawals from the host
+		// for the duration of the sync so only syncing acquires an exclusive
+		// lock on the mutex.
+		mu        sync.RWMutex
+		balanceMu sync.Mutex
+		balance   *big.Int
 	}
 )
 
@@ -67,12 +68,16 @@ func (a *accounts) All() ([]api.Account, error) {
 	defer a.mu.Unlock()
 	accounts := make([]api.Account, 0, len(a.accounts))
 	for _, acc := range a.accounts {
+		acc.mu.RLock()
+		acc.balanceMu.Lock()
 		accounts = append(accounts, api.Account{
 			ID:      acc.id,
 			Balance: new(big.Int).Set(acc.balance),
 			Host:    acc.host,
 			Owner:   acc.owner,
 		})
+		acc.balanceMu.Unlock()
+		acc.mu.RUnlock()
 	}
 	return accounts, nil
 }
@@ -119,7 +124,9 @@ func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency,
 	if err != nil {
 		return err
 	}
+	a.balanceMu.Lock()
 	a.balance = a.balance.Add(a.balance, amt.Big())
+	a.balanceMu.Unlock()
 	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, amt.Big())
 }
 
@@ -132,7 +139,9 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	if err != nil {
 		return err
 	}
+	a.balanceMu.Lock()
 	a.balance = a.balance.Sub(a.balance, amt.Big())
+	a.balanceMu.Unlock()
 	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
 }
 
@@ -141,7 +150,9 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 func (a *account) WithSync(ctx context.Context, balanceFn func() types.Currency) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.balanceMu.Lock()
 	a.balance = balanceFn().Big()
+	a.balanceMu.Unlock()
 	err := a.bus.SetBalance(ctx, a.id, a.owner, a.host, a.balance)
 	return err
 }
