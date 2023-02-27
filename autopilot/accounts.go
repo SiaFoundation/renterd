@@ -15,19 +15,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// accountRefillInterval is the amount of time between refills of ephemeral
-	// accounts. If we conservatively assume that a good hosts charges 500 SC /
-	// TiB, we can pay for about 2.2 GiB with 1 SC. Since we want to refill
-	// ahead of time at 0.5 SC, that makes 1.1 GiB. Considering a 1 Gbps uplink
-	// that is shared across 30 uploads, we upload at around 33 Mbps to each
-	// host. That means uploading 1.1 GiB to drain 0.5 SC takes around 5
-	// minutes.  That's why we assume 30 seconds to be more than frequent enough
-	// to refill an account when it's due for another refill.
-	// TODO: make configurable
-	accountRefillInterval = 30 * time.Second
-)
-
 var (
 	minBalance = types.Siacoins(1).Div64(2).Big()
 	maxBalance = types.Siacoins(1).Big()
@@ -38,17 +25,20 @@ type accounts struct {
 	b      Bus
 	w      Worker
 
+	refillInterval time.Duration
+
 	mu                sync.Mutex
 	fundingContracts  []api.ContractMetadata
 	inProgressRefills map[types.PublicKey]struct{}
 }
 
-func newAccounts(l *zap.SugaredLogger, b Bus, w Worker) *accounts {
+func newAccounts(l *zap.SugaredLogger, b Bus, w Worker, interval time.Duration) *accounts {
 	return &accounts{
 		b:                 b,
-		logger:            l.Named("accounts"),
-		w:                 w,
 		inProgressRefills: make(map[types.PublicKey]struct{}),
+		logger:            l.Named("accounts"),
+		refillInterval:    interval,
+		w:                 w,
 	}
 }
 
@@ -85,7 +75,7 @@ func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig)
 }
 
 func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
-	ticker := time.NewTicker(accountRefillInterval)
+	ticker := time.NewTicker(a.refillInterval)
 
 	for {
 		select {

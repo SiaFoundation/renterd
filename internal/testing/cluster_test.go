@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"reflect"
 	"testing"
@@ -291,29 +292,24 @@ func TestEphemeralAccounts(t *testing.T) {
 		contract = contracts[0]
 	}
 
-	// Account shouldnt' exist.
-	ctx := context.Background()
-	accounts, err := w.Accounts(ctx)
+	// Wait for account to appear.
+	var accounts []api.Account
+	var ctx context.Context
+	err = Retry(100, 100*time.Millisecond, func() error {
+		accounts, err = w.Accounts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(accounts) != 1 {
+			return fmt.Errorf("wrong number of accounts %v", len(accounts))
+		}
+		if accounts[0].Balance.Cmp(new(big.Int)) == 0 {
+			return errors.New("balance is zero")
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(accounts) != 0 {
-		t.Fatalf("wrong number of accounts %v", len(accounts))
-	}
-
-	// Fund account.
-	fundAmt := types.Siacoins(1)
-	if err := w.RHPFund(ctx, contract.ID, contract.HostKey(), fundAmt); err != nil {
-		t.Fatal(err)
-	}
-
-	// Expected account balance should have increased.
-	accounts, err = w.Accounts(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(accounts) != 1 {
-		t.Fatalf("wrong number of accounts %v", len(accounts))
 	}
 	acc := accounts[0]
 	if acc.Balance.Cmp(types.Siacoins(1).Big()) != 0 {
@@ -350,6 +346,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fundAmt := types.Siacoins(1)
 	if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
 		t.Fatalf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
 	}
