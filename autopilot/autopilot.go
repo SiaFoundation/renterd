@@ -192,17 +192,18 @@ func (ap *Autopilot) Run() error {
 			// perform maintenance
 			err = ap.c.performContractMaintenance(ctx, cfg, cs)
 			if err != nil {
-				ap.logger.Errorf("contract maintenance failed, err: %v", err)
+				//ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
+			maintenanceSuccess := err == nil
 
-			// update contracts for account refill.
-			ap.a.UpdateContracts(ctx, cfg)
-
-			// launch account refills after contract maintenance.
-			launchAccountRefillsOnce.Do(func() {
-				ap.logger.Debug("account refills loop launched")
-				go ap.a.refillWorkersAccountsLoop(ap.stopChan)
-			})
+			// launch account refills after successful contract maintenance.
+			if maintenanceSuccess {
+				ap.a.UpdateContracts(ctx, cfg)
+				launchAccountRefillsOnce.Do(func() {
+					ap.logger.Debug("account refills loop launched")
+					go ap.a.refillWorkersAccountsLoop(ap.stopChan)
+				})
+			}
 
 			// migration
 			ap.m.tryPerformMigrations(ctx, cfg)

@@ -91,7 +91,7 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 	}
 
 	// Create and or return account.
-	accountID := rhpv3.Account(a.key.PublicKey())
+	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
