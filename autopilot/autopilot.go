@@ -137,6 +137,7 @@ func (ap *Autopilot) Run() error {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
 
+	var launchAccountRefillsOnce sync.Once
 	for {
 		select {
 		case <-ap.stopChan:
@@ -194,8 +195,14 @@ func (ap *Autopilot) Run() error {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 
-			// update contracts for accounts.
+			// update contracts for account refill.
 			ap.a.UpdateContracts(ctx, cfg)
+
+			// launch account refills after contract maintenance.
+			launchAccountRefillsOnce.Do(func() {
+				ap.logger.Debug("account refills loop launched")
+				go ap.a.refillWorkersAccountsLoop(ap.stopChan)
+			})
 
 			// migration
 			ap.m.tryPerformMigrations(ctx, cfg)
@@ -283,7 +290,6 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 
 		tickerDuration: heartbeat,
 	}
-
 	scanner, err := newScanner(
 		ap,
 		scannerBatchSize,
@@ -296,6 +302,7 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		return nil, err
 	}
 
+	ap.a = newAccounts(ap.logger, ap.worker)
 	ap.s = scanner
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap, migrationHealthCutoff)

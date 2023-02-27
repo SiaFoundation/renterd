@@ -9,7 +9,6 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/tracing"
@@ -41,35 +40,35 @@ type accounts struct {
 
 	mu                sync.Mutex
 	fundingContracts  []api.ContractMetadata
-	inProgressRefills map[rhp.Account]struct{}
+	inProgressRefills map[types.PublicKey]struct{}
 }
 
-func (ap *Autopilot) newAccounts(w Worker) *accounts {
+func newAccounts(l *zap.SugaredLogger, w Worker) *accounts {
 	return &accounts{
-		logger: ap.logger.Named("accounts"),
+		logger: l.Named("accounts"),
 		w:      w,
 	}
 }
 
-func (a *accounts) markRefillInProgress(account rhp.Account) bool {
+func (a *accounts) markRefillInProgress(host types.PublicKey) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, inProgress := a.inProgressRefills[account]
+	_, inProgress := a.inProgressRefills[host]
 	if inProgress {
 		return false
 	}
-	a.inProgressRefills[account] = struct{}{}
+	a.inProgressRefills[host] = struct{}{}
 	return true
 }
 
-func (a *accounts) releaseInProgressRefill(account rhp.Account) {
+func (a *accounts) markRefillDone(host types.PublicKey) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, inProgress := a.inProgressRefills[account]
+	_, inProgress := a.inProgressRefills[host]
 	if !inProgress {
 		panic("releasing a refill that hasn't been in progress")
 	}
-	delete(a.inProgressRefills, account)
+	delete(a.inProgressRefills, host)
 }
 
 func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig) {
@@ -83,17 +82,17 @@ func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig)
 	a.fundingContracts = append(a.fundingContracts[:0], contracts...)
 }
 
-func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
+func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(accountRefillInterval)
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-stopChan:
 			return // shutdown
 		case <-ticker.C:
 		}
 
-		a.refillWorkerAccounts(ctx)
+		a.refillWorkerAccounts()
 	}
 }
 
@@ -102,15 +101,15 @@ func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
-func (a *accounts) refillWorkerAccounts(ctx context.Context) {
-	ctx, span := tracing.Tracer.Start(ctx, "refillWorkerAccounts")
+func (a *accounts) refillWorkerAccounts() {
+	ctx, span := tracing.Tracer.Start(context.Background(), "refillWorkerAccounts")
 	defer span.End()
 
 	// Map hosts to contracts to use for funding.
 	a.mu.Lock()
-	contractForHost := make(map[types.PublicKey]types.FileContractID, len(a.fundingContracts))
+	contractForHost := make(map[types.PublicKey]api.ContractMetadata, len(a.fundingContracts))
 	for _, c := range a.fundingContracts {
-		contractForHost[c.HostKey] = c.ID
+		contractForHost[c.HostKey] = c
 	}
 	a.mu.Unlock()
 
@@ -119,21 +118,29 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context) {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch accounts for refill: %s", err))
 		return
 	}
+	accountForHost := make(map[types.PublicKey]api.Account, len(accounts))
+	for _, acc := range accounts {
+		accountForHost[acc.Host] = acc
+	}
 
-	for _, account := range accounts {
+	// Fund an account for every contract we have.
+	for _, contract := range contractForHost {
 		// Only launch a refill goroutine if no refill is in progress.
-		if !a.markRefillInProgress(account.ID) {
+		if !a.markRefillInProgress(contract.HostKey) {
 			continue // refill already in progress
 		}
-		go func(account api.Account) (err error) {
+		go func(contract api.ContractMetadata) (err error) {
 			// Remove from in-progress refills once done.
-			defer a.releaseInProgressRefill(account.ID)
+			defer a.markRefillDone(contract.HostKey)
+
+			// Fetch the account. This might be zero so use it accordingly.
+			account := accountForHost[contract.HostKey]
 
 			// Add tracing.
 			ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 			defer span.End()
 			span.SetAttributes(attribute.Stringer("account", account.ID))
-			span.SetAttributes(attribute.Stringer("host", account.Host))
+			span.SetAttributes(attribute.Stringer("host", contract.HostKey))
 			span.SetAttributes(attribute.Stringer("balance", account.Balance))
 			defer func() {
 				if err != nil {
@@ -152,18 +159,10 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context) {
 			if account.Balance.Cmp(minBalance) >= 0 {
 				a.logger.Debugw("contract doesn't require funding",
 					"account", account.ID,
-					"host", account.Host,
+					"host", contract.HostKey,
 					"balance", account.Balance,
 					"minBalance", minBalance)
 				return nil // nothing to do
-			}
-			contractID, found := contractForHost[account.Host]
-			if !found {
-				a.logger.Debugw("contract to fund account is missing",
-					"account", account.ID,
-					"host", account.Host,
-					"balance", account.Balance)
-				return nil // no contract to fund account
 			}
 			fundAmt := new(big.Int).Sub(maxBalance, account.Balance)
 
@@ -171,25 +170,25 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context) {
 			if err != nil {
 				a.logger.Errorw(fmt.Sprintf("failed to parse fundAmt as currency: %s", err),
 					"account", account.ID,
-					"host", account.Host,
+					"host", contract.HostKey,
 					"balance", account.Balance)
 				return err
 			}
 
-			if err := a.w.RHPFund(ctx, contractID, account.Host, fundCurrency); err != nil {
+			if err := a.w.RHPFund(ctx, contract.ID, contract.HostKey, fundCurrency); err != nil {
 				// TODO: depending on the error, resync the account balance with
 				// the host through the worker.
 				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
 					"account", account.ID,
-					"host", account.Host,
+					"host", contract.HostKey,
 					"balance", account.Balance)
 				return err
 			}
 			a.logger.Info("Successfully funded account",
 				"account", account.ID,
-				"host", account.Host,
+				"host", contract.HostKey,
 				"fundAmt", fundCurrency.String())
 			return nil
-		}(account)
+		}(contract)
 	}
 }
