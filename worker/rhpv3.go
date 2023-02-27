@@ -69,7 +69,7 @@ func (a *accounts) All() ([]api.Account, error) {
 	for _, acc := range a.accounts {
 		accounts = append(accounts, api.Account{
 			ID:      acc.id,
-			Balance: acc.balance,
+			Balance: new(big.Int).Set(acc.balance),
 			Host:    acc.host,
 			Owner:   acc.owner,
 		})
