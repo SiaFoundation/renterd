@@ -430,10 +430,11 @@ func (db *SQLStore) RecordContractSpending(ctx context.Context, records []api.Co
 			} else if err != nil {
 				return err
 			}
-			c.UploadSpending = currency(types.Currency(c.UploadSpending).Add(r.Uploads))
-			c.DownloadSpending = currency(types.Currency(c.DownloadSpending).Add(r.Downloads))
-			c.FundAccountSpending = currency(types.Currency(c.FundAccountSpending).Add(r.FundAccount))
-			return tx.Save(&c).Error
+			return tx.Model(&dbContract{}).Where("id", c.ID).Updates(map[string]interface{}{
+				"upload_spending":       currency(types.Currency(c.UploadSpending).Add(r.Uploads)),
+				"download_spending":     currency(types.Currency(c.DownloadSpending).Add(r.Downloads)),
+				"fund_account_spending": currency(types.Currency(c.FundAccountSpending).Add(r.FundAccount)),
+			}).Error
 		})
 		if err != nil {
 			return err
@@ -698,14 +699,25 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 // UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
 // in the given contract set. These slabs need to be migrated to good contracts
 // so they are restored to full health.
-//
-// TODO: consider that we don't want to migrate slabs above a given health.
-func (s *SQLStore) UnhealthySlabs(ctx context.Context, set string, limit int) ([]object.Slab, error) {
+func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error) {
 	var dbBatch []dbSlab
 	var slabs []object.Slab
 
 	if err := s.db.
-		Select("slabs.*, COUNT(DISTINCT(c.host_id)) as num_good_sectors, slabs.total_shards as num_required_sectors, slabs.total_shards-COUNT(DISTINCT(c.host_id)) as num_bad_sectors").
+		Select(`slabs.*,
+		        CASE
+				  WHEN (slabs.min_shards = slabs.total_shards)
+				  THEN
+				    CASE
+					WHEN (COUNT(DISTINCT(c.host_id)) < slabs.min_shards)
+					THEN
+					  0
+					ELSE
+					  1
+					END
+				  ELSE
+				  CAST((COUNT(DISTINCT(c.host_id)) - slabs.min_shards) AS FLOAT) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+				  END AS health`).
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
 		Joins("INNER JOIN sectors s ON sh.db_sector_id = s.id").
@@ -715,8 +727,8 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, set string, limit int) ([
 		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
 		Where("cs.name = ?", set).
 		Group("slabs.id").
-		Having("num_good_sectors < num_required_sectors").
-		Order("num_bad_sectors DESC").
+		Having("health <= ?", healthCutoff).
+		Order("health ASC").
 		Limit(limit).
 		Preload("Shards.DBSector").
 		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
@@ -790,9 +802,9 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	fcid := c.ID()
 
 	// Find host.
-	var host dbHost
-	err := tx.Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
-		Take(&host).Error
+	var hostID uint
+	err := tx.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
+		Select("id").Scan(&hostID).Error
 	if err != nil {
 		return dbContract{}, err
 	}
@@ -800,7 +812,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	// Create contract.
 	contract := dbContract{
 		FCID:        fileContractID(fcid),
-		HostID:      host.ID,
+		HostID:      hostID,
 		RenewedFrom: fileContractID(renewedFrom),
 		StartHeight: startHeight,
 		TotalCost:   currency(totalCost),
@@ -812,8 +824,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Insert contract.
-	err = tx.Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
-		Create(&contract).Error
+	err = tx.Create(&contract).Error
 	if err != nil {
 		return dbContract{}, err
 	}

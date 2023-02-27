@@ -389,33 +389,40 @@ func (w *worker) withHost(ctx context.Context, contractID types.FileContractID, 
 	})
 }
 
+func (w *worker) unlockHosts(hosts []sectorStore) {
+	// apply a pessimistic timeout, ensuring unlocking the contract or force
+	// closing the session does not deadlock and keep this goroutine around
+	// forever. Use a background context as the parent to avoid timing out
+	// the unlock when 'withHosts' returns and the parent context gets
+	// closed.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, h := range hosts {
+		wg.Add(1)
+		go func(ss *sharedSession) {
+			w.pool.unlockContract(ctx, ss)
+			wg.Done()
+		}(h.(*sharedSession))
+	}
+	wg.Wait()
+}
+
 func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
+
+	// Unlock hosts either after the context is closed or the function is done
+	// executing.
 	go func() {
-		var wg sync.WaitGroup
 		select {
 		case <-done:
-			for _, h := range hosts {
-				wg.Add(1)
-				go func(ss *sharedSession) {
-					w.pool.unlockContract(ss)
-					wg.Done()
-				}(h.(*sharedSession))
-			}
 		case <-ctx.Done():
-			for _, h := range hosts {
-				wg.Add(1)
-				go func(ss *sharedSession) {
-					w.pool.forceClose(ss)
-					wg.Done()
-				}(h.(*sharedSession))
-			}
 		}
-		wg.Wait()
+		w.unlockHosts(hosts)
 	}()
 	defer func() {
 		close(done)
@@ -468,6 +475,10 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		return
 	}
 
+	// apply a pessimistic timeout on contract formations
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
@@ -495,7 +506,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return err
 		}
 
-		contract, txnSet, err = RPCFormContract(t, renterKey, renterTxnSet)
+		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
 		if err != nil {
 			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
 			return err
@@ -548,7 +559,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 			}
 			return renterTxnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
 		})
-		return nil
+		return err
 	})
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
@@ -621,7 +632,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			if !ok {
 				return errors.New("insufficient funds")
 			}
-			w.contractSpendingRecorder.record(rfr.ContractID, api.ContractSpending{FundAccount: cost})
+			w.contractSpendingRecorder.Record(rfr.ContractID, api.ContractSpending{FundAccount: cost})
 			return RPCFundAccount(t, &payment, account.id, pt.UID)
 		})
 	})

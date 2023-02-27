@@ -129,8 +129,9 @@ type AddObjectRequest struct {
 
 // MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
 type MigrationSlabsRequest struct {
-	ContractSet string `json:"contractset"`
-	Limit       int    `json:"limit"`
+	ContractSet  string  `json:"contractset"`
+	HealthCutoff float64 `json:"healthCutoff"`
+	Limit        int     `json:"limit"`
 }
 
 // UpdateSlabRequest is the request type for the /slab endpoint.
@@ -183,12 +184,12 @@ type GougingParams struct {
 
 // GougingSettings contain some price settings used in price gouging.
 type GougingSettings struct {
-	MinMaxCollateral types.Currency
-	MaxRPCPrice      types.Currency
-	MaxContractPrice types.Currency
-	MaxDownloadPrice types.Currency // per TiB
-	MaxUploadPrice   types.Currency // per TiB
-	MaxStoragePrice  types.Currency // per byte per block
+	MinMaxCollateral types.Currency `json:"minMaxCollateral"`
+	MaxRPCPrice      types.Currency `json:"maxRPCPrice"`
+	MaxContractPrice types.Currency `json:"maxContractPrice"`
+	MaxDownloadPrice types.Currency `json:"maxDownloadPrice"` // per TiB
+	MaxUploadPrice   types.Currency `json:"maxUploadPrice"`   // per TiB
+	MaxStoragePrice  types.Currency `json:"maxStoragePrice"`  // per byte per block
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.

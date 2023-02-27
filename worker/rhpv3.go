@@ -425,16 +425,12 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 	var resp rhpv3.RPCFundAccountResponse
 	s.SetDeadline(time.Now().Add(15 * time.Second))
 	if err := s.WriteRequest(rhpv3.RPCFundAccountID, &settingsID); err != nil {
-		println(1)
 		return err
 	} else if err := s.WriteResponse(&req); err != nil {
-		println(2)
 		return err
 	} else if err := processPayment(s, payment); err != nil {
-		println(3)
 		return err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
-		println(4)
 		return err
 	}
 	return nil

@@ -704,8 +704,14 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		return nil, err
 	}
 
-	// create IP filter
+	// create IP filter and add all excluded hosts to it.
 	ipFilter := newIPFilter(c.logger)
+	for _, h := range hosts {
+		if _, exclude := exclude[h.PublicKey]; exclude {
+			ipFilter.isRedundantIP(h)
+			continue
+		}
+	}
 
 	c.logger.Debugf("found %d candidate hosts", len(hosts)-len(exclude))
 
@@ -853,7 +859,7 @@ func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg a
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, blockHeight, contract.EndHeight())
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
-	_, hostMissedPayout, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
+	_, hostMissedPayout, _, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
 	if isBelowCollateralThreshold(newCollateral, hostMissedPayout) {
 		err := fmt.Errorf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout)
 		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "newCollateral", newCollateral.String(), "hostMissedPayout", hostMissedPayout.String(), "maxCollateral", settings.MaxCollateral)
