@@ -47,8 +47,11 @@ func WithContractSpendingRecorder(ctx context.Context, sr ContractSpendingRecord
 	return context.WithValue(ctx, keyContractSpendingRecorder, sr)
 }
 
-func (w *worker) newContractSpendingRecorder() *contractSpendingRecorder {
-	return &contractSpendingRecorder{
+func (w *worker) initContractSpendingRecorder() {
+	if w.contractSpendingRecorder != nil {
+		panic("contractSpendingRecorder already initialized") // developer error
+	}
+	w.contractSpendingRecorder = &contractSpendingRecorder{
 		bus:               w.bus,
 		contractSpendings: make(map[types.FileContractID]api.ContractSpending),
 		flushInterval:     w.busFlushInterval,

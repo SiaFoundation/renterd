@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"strings"
@@ -113,11 +114,14 @@ type (
 	}
 )
 
-func newAccounts(workerID string, accountsKey types.PrivateKey, as AccountStore) *accounts {
-	return &accounts{
+func (w *worker) initAccounts(as AccountStore) {
+	if w.accounts != nil {
+		panic("accounts already initialized") // developer error
+	}
+	w.accounts = &accounts{
 		store:    as,
-		workerID: workerID,
-		key:      accountsKey,
+		workerID: w.id,
+		key:      w.deriveSubKey("accountkey"),
 	}
 }
 
@@ -145,7 +149,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 		return
 	}
 
-	// otherwise update the price table using an account payment, but fall back
+	// update price table using account payment if possible, but fall back to ensure we have a valid price table
 	pt, err = w.priceTables.Update(ctx, w.preparePriceTableAccountPayment(hostKey, bh), siamuxAddr, hostKey)
 	if err != nil {
 		updatePTByContract()
@@ -175,7 +179,7 @@ func (w *worker) withHostsV3(ctx context.Context, contracts []api.ContractMetada
 
 		ss = append(ss, &hostV3{
 			acc:        acc,
-			bh:         cs.BlockHeight,
+			bh:         pt.HostBlockHeight,
 			fcid:       c.ID,
 			pt:         pt,
 			siamuxAddr: c.SiamuxAddr,
@@ -402,6 +406,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 			payment := rhpv3.PayByEphemeralAccount(r.acc.id, amount, r.bh+defaultWithdrawalExpiryBlocks, r.sk)
 			data, _, err := RPCReadSector(t, r.pt, &payment, offset, length, root, true)
 			if err != nil {
+				fmt.Println("RPCReadSector", err)
 				return err
 			}
 			_, err = w.Write(data)
@@ -417,9 +422,8 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 const priceTableValidityLeeway = 30 * time.Second
 
 type priceTables struct {
-	withTransport func(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) error
-	mu            sync.Mutex
-	priceTables   map[types.PublicKey]*priceTable
+	mu          sync.Mutex
+	priceTables map[types.PublicKey]*priceTable
 }
 
 type priceTable struct {
@@ -437,10 +441,9 @@ type priceTableUpdate struct {
 	pt   *rhpv3.HostPriceTable
 }
 
-func newPriceTables(transportFn func(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) error) *priceTables {
+func newPriceTables() *priceTables {
 	return &priceTables{
-		priceTables:   make(map[types.PublicKey]*priceTable),
-		withTransport: transportFn,
+		priceTables: make(map[types.PublicKey]*priceTable),
 	}
 }
 
@@ -490,7 +493,7 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 
 	// Update price table.
 	var hpt rhpv3.HostPriceTable
-	err := pts.withTransport(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) (err error) {
 		hpt, err = RPCPriceTable(t, payFn)
 		return err
 	})

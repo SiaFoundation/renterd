@@ -1008,15 +1008,15 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		id:                    id,
 		bus:                   b,
 		pool:                  newSessionPool(sessionReconectTimeout, sessionTTL),
+		priceTables:           newPriceTables(),
 		masterKey:             masterKey,
 		busFlushInterval:      busFlushInterval,
 		downloadSectorTimeout: downloadSectorTimeout,
 		uploadSectorTimeout:   uploadSectorTimeout,
 		logger:                l.Sugar().Named("worker").Named(id),
 	}
-	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
-	w.contractSpendingRecorder = w.newContractSpendingRecorder()
-	w.priceTables = newPriceTables(withTransportV3)
+	w.initAccounts(b)
+	w.initContractSpendingRecorder()
 	return w
 }
 
