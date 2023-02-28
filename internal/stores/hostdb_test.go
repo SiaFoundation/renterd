@@ -12,7 +12,6 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
@@ -42,7 +41,7 @@ func TestSQLHostDB(t *testing.T) {
 	ctx := context.Background()
 	hk := types.GeneratePrivateKey().PublicKey()
 	_, err = hdb.Host(ctx, hk)
-	if !errors.Is(err, api.ErrHostNotFound) {
+	if !errors.Is(err, ErrHostNotFound) {
 		t.Fatal(err)
 	}
 
@@ -653,7 +652,7 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Add an entry to the blocklist to block host 1
 	entry1 := "foo.bar"
-	err = hdb.AddHostBlocklistEntries(context.Background(), []string{entry1})
+	err = hdb.UpdateHostBlocklistEntries(context.Background(), []string{entry1}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +727,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 	}
 
 	// assert we can add entries to the allowlist
-	err = hdb.AddHostAllowlistEntries(ctx, []types.PublicKey{hk1, hk2})
+	err = hdb.UpdateHostAllowlistEntries(ctx, []types.PublicKey{hk1, hk2}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,17 +743,8 @@ func TestSQLHostAllowlist(t *testing.T) {
 		t.Fatal("unexpected hosts are allowed", isAllowed(hk1), isAllowed(hk2), isAllowed(hk3))
 	}
 
-	// assert adding the same entry is a no-op
-	err = hdb.AddHostAllowlistEntries(ctx, []types.PublicKey{hk1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if numEntries() != 2 {
-		t.Fatalf("unexpected number of entries in allowlist, %v != 2", numEntries())
-	}
-
-	// assert we can remove an entry
-	err = hdb.RemoveHostAllowlistEntries(ctx, []types.PublicKey{hk2})
+	// assert adding the same entry is a no-op and we can remove an entry at the same time
+	err = hdb.UpdateHostAllowlistEntries(ctx, []types.PublicKey{hk1}, []types.PublicKey{hk2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -771,7 +761,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 	}
 
 	// assert removing a non-existing entry is a no-op
-	err = hdb.RemoveHostAllowlistEntries(ctx, []types.PublicKey{hk2})
+	err = hdb.UpdateHostAllowlistEntries(ctx, nil, []types.PublicKey{hk2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +781,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 	}
 
 	// remove the allowlist entry for h1
-	err = hdb.RemoveHostAllowlistEntries(ctx, []types.PublicKey{hk1})
+	err = hdb.UpdateHostAllowlistEntries(ctx, nil, []types.PublicKey{hk1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -871,7 +861,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// assert we can add entries to the blocklist
-	err = hdb.AddHostBlocklistEntries(ctx, []string{"foo.bar.com", "bar.com"})
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"foo.bar.com", "bar.com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -892,17 +882,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 		t.Fatal("expected host to be blocked")
 	}
 
-	// assert adding the same entry is a no-op
-	err = hdb.AddHostBlocklistEntries(ctx, []string{"foo.bar.com", "bar.com"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if numEntries() != 2 {
-		t.Fatalf("unexpected number of entries in blocklist, %v != 2", numEntries())
-	}
-
-	// assert we can remove an entry
-	err = hdb.RemoveHostBlocklistEntries(ctx, []string{"foo.bar.com"})
+	// assert adding the same entry is a no-op, and we can remove entries at the same time
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"foo.bar.com", "bar.com"}, []string{"foo.bar.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,12 +900,12 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// assert removing a non-existing entry is a no-op
-	err = hdb.RemoveHostBlocklistEntries(ctx, []string{"foo.bar.com"})
+	err = hdb.UpdateHostBlocklistEntries(ctx, nil, []string{"foo.bar.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// remove the other entry and assert the delete cascaded properly
-	err = hdb.RemoveHostBlocklistEntries(ctx, []string{"bar.com"})
+	err = hdb.UpdateHostBlocklistEntries(ctx, nil, []string{"bar.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -939,7 +920,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// block the second host
-	err = hdb.AddHostBlocklistEntries(ctx, []string{"baz.com"})
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"baz.com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,7 +976,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// add another entry that blocks multiple hosts
-	err = hdb.AddHostBlocklistEntries(ctx, []string{"com"})
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1006,7 +987,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// add host 5 to the allowlist
-	err = hdb.AddHostAllowlistEntries(ctx, []types.PublicKey{hk5})
+	err = hdb.UpdateHostAllowlistEntries(ctx, []types.PublicKey{hk5}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,7 +998,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// add a rule to block host 5
-	err = hdb.AddHostBlocklistEntries(ctx, []string{"foo.baz.commmmm"})
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"foo.baz.commmmm"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

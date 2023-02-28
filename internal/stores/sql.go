@@ -177,14 +177,14 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	return ss, ccid, nil
 }
 
-func (s *SQLStore) isSQLite() bool {
-	switch s.db.Dialector.(type) {
+func isSQLite(db *gorm.DB) bool {
+	switch db.Dialector.(type) {
 	case *sqlite.Dialector:
 		return true
 	case *mysql.Dialector:
 		return false
 	default:
-		panic(fmt.Sprintf("unknown dialector: %t", s.db.Dialector))
+		panic(fmt.Sprintf("unknown dialector: %t", db.Dialector))
 	}
 }
 

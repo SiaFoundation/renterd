@@ -10,9 +10,6 @@ import (
 )
 
 var (
-	// ErrHostNotFound is returned if the requested host is not found.
-	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
-
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")

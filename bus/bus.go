@@ -74,12 +74,9 @@ type (
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
-		AddHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) error
-		RemoveHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) error
-
 		HostBlocklist(ctx context.Context) ([]string, error)
-		AddHostBlocklistEntries(ctx context.Context, entries []string) error
-		RemoveHostBlocklistEntries(ctx context.Context, entries []string) error
+		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey) error
+		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -481,10 +478,7 @@ func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateAllowlistRequest
 	if jc.Decode(&req) == nil {
-		if jc.Check("couldn't add allowlist entries", b.hdb.AddHostAllowlistEntries(ctx, req.Add)) != nil {
-			return
-		}
-		if jc.Check("couldn't remove allowlist entries", b.hdb.RemoveHostAllowlistEntries(ctx, req.Remove)) != nil {
+		if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove)) != nil {
 			return
 		}
 	}
@@ -501,10 +495,7 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateBlocklistRequest
 	if jc.Decode(&req) == nil {
-		if jc.Check("couldn't add blocklist entries", b.hdb.AddHostBlocklistEntries(ctx, req.Add)) != nil {
-			return
-		}
-		if jc.Check("couldn't remove blocklist entries", b.hdb.RemoveHostBlocklistEntries(ctx, req.Remove)) != nil {
+		if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove)) != nil {
 			return
 		}
 	}

@@ -11,7 +11,6 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
@@ -35,6 +34,7 @@ const (
 )
 
 var (
+	ErrHostNotFound   = errors.New("host doesn't exist in hostdb")
 	ErrNegativeOffset = errors.New("offset can not be negative")
 )
 
@@ -286,22 +286,21 @@ func (e *dbAllowlistEntry) AfterCreate(tx *gorm.DB) error {
 	}
 
 	// insert entries into the allowlist
-	switch tx.Config.Dialector.Name() {
-	case "sqlite":
+	if isSQLite(tx) {
 		return tx.Exec(`INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
 SELECT @entry_id, id FROM (
-	SELECT id
-	FROM hosts
-	WHERE public_key = @exact_entry
+SELECT id
+FROM hosts
+WHERE public_key = @exact_entry
 )`, params).Error
-	default:
-		return tx.Exec(`INSERT IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+	}
+
+	return tx.Exec(`INSERT IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
 SELECT @entry_id, id FROM (
 	SELECT id
 	FROM hosts
 	WHERE public_key=@exact_entry
 ) AS _`, params).Error
-	}
 }
 
 func (e *dbAllowlistEntry) BeforeCreate(tx *gorm.DB) (err error) {
@@ -325,22 +324,21 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) error {
 	}
 
 	// insert entries into the blocklist
-	switch tx.Config.Dialector.Name() {
-	case "sqlite":
+	if isSQLite(tx) {
 		return tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-		SELECT @entry_id, id FROM (
-			SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
-			FROM hosts
-			WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
-		)`, params).Error
-	default:
-		return tx.Exec(`INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+	SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
+	FROM hosts
+	WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
+)`, params).Error
+	}
+
+	return tx.Exec(`INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
 SELECT @entry_id, id FROM (
 	SELECT id
 	FROM hosts
 	WHERE net_address=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address))=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address)) LIKE @like_entry
 ) AS _`, params).Error
-	}
 }
 
 func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
@@ -370,7 +368,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.H
 		Preload("Blocklist").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.HostInfo{}, api.ErrHostNotFound
+		return hostdb.HostInfo{}, ErrHostNotFound
 	} else if tx.Error != nil {
 		return hostdb.HostInfo{}, tx.Error
 	}
@@ -453,49 +451,61 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	return
 }
 
-func (ss *SQLStore) AddHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) (err error) {
-	if len(entries) == 0 {
+func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey) (err error) {
+	if len(add)+len(remove) == 0 {
 		return nil
 	}
 	defer ss.updateHasAllowlist(&err)
-	var dbEntries []dbAllowlistEntry
-	for _, entry := range entries {
-		dbEntries = append(dbEntries, dbAllowlistEntry{Entry: publicKey(entry)})
-	}
-	return ss.db.Create(&dbEntries).Error
-}
 
-func (ss *SQLStore) RemoveHostAllowlistEntries(ctx context.Context, entries []types.PublicKey) (err error) {
-	if len(entries) == 0 {
+	var toInsert []dbAllowlistEntry
+	for _, entry := range add {
+		toInsert = append(toInsert, dbAllowlistEntry{Entry: publicKey(entry)})
+	}
+
+	toDelete := make([]publicKey, len(remove))
+	for i, entry := range remove {
+		toDelete[i] = publicKey(entry)
+	}
+
+	return ss.db.Transaction(func(tx *gorm.DB) error {
+		if len(toInsert) > 0 {
+			if err := tx.Create(&toInsert).Error; err != nil {
+				return err
+			}
+		}
+		if len(toDelete) > 0 {
+			if err := tx.Delete(&dbAllowlistEntry{}, "entry IN ?", toDelete).Error; err != nil {
+				return err
+			}
+		}
 		return nil
-	}
-	defer ss.updateHasAllowlist(&err)
-	pubkeys := make([]publicKey, len(entries))
-	for i, entry := range entries {
-		pubkeys[i] = publicKey(entry)
-	}
-	return ss.db.Delete(&dbAllowlistEntry{}, "entry IN ?", pubkeys).Error
+	})
 }
 
-func (ss *SQLStore) AddHostBlocklistEntries(ctx context.Context, entries []string) (err error) {
-	if len(entries) == 0 {
-		return nil
-	}
-	defer ss.updateHasBlocklist(&err)
-	var dbEntries []dbBlocklistEntry
-	for _, entry := range entries {
-		dbEntries = append(dbEntries, dbBlocklistEntry{Entry: entry})
-	}
-	return ss.db.Create(&dbEntries).Error
-}
-
-func (ss *SQLStore) RemoveHostBlocklistEntries(ctx context.Context, entries []string) (err error) {
-	if len(entries) == 0 {
+func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string) (err error) {
+	if len(add)+len(remove) == 0 {
 		return nil
 	}
 	defer ss.updateHasBlocklist(&err)
-	err = ss.db.Delete(&dbBlocklistEntry{}, "entry IN ?", entries).Error
-	return
+
+	var toInsert []dbBlocklistEntry
+	for _, entry := range add {
+		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
+	}
+
+	return ss.db.Transaction(func(tx *gorm.DB) error {
+		if len(toInsert) > 0 {
+			if err := tx.Create(&toInsert).Error; err != nil {
+				return err
+			}
+		}
+		if len(remove) > 0 {
+			if err := tx.Delete(&dbBlocklistEntry{}, "entry IN ?", remove).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {

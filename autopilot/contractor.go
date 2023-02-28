@@ -141,6 +141,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 		if err != nil {
 			return fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
+	} else {
+		c.logger.Warn("could not calculate min score, no hosts found")
 	}
 
 	// run checks
@@ -679,7 +681,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg ap
 	}
 	if len(hosts) == 0 {
 		c.logger.Warn("min host score is 0 because there are no candidate hosts")
-		return 0, nil
+		return math.SmallestNonzeroFloat64, nil
 	}
 
 	// Find the minimum score that a host is allowed to have to be considered
