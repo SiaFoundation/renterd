@@ -33,6 +33,7 @@ import (
 const (
 	testBusFlushInterval = 100 * time.Millisecond
 	testPersistInterval  = 2 * time.Second
+	latestHardforkHeight = 50 // foundation hardfork height in testing
 )
 
 var (
@@ -281,7 +282,20 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 
 	// Fund the bus.
 	if funding {
-		if err := cluster.MineBlocks(20); err != nil {
+		if err := cluster.MineBlocks(latestHardforkHeight); err != nil {
+			return nil, err
+		}
+		err = Retry(1000, 100*time.Millisecond, func() error {
+			resp, err := busClient.ConsensusState(context.Background())
+			if err != nil {
+				return err
+			}
+			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
+				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
+			}
+			return nil
+		})
+		if err != nil {
 			return nil, err
 		}
 	}
