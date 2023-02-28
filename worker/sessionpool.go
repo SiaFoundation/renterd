@@ -84,7 +84,7 @@ func (ss *sharedSession) Contract() types.FileContractID {
 	return ss.contractID
 }
 
-func (ss *sharedSession) PublicKey() types.PublicKey {
+func (ss *sharedSession) HostKey() types.PublicKey {
 	return ss.hostKey
 }
 

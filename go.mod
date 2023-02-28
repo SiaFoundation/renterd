@@ -11,7 +11,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.12.0
 	go.opentelemetry.io/otel/sdk v1.12.0
 	go.opentelemetry.io/otel/trace v1.13.0
-	go.sia.tech/core v0.1.9
+	go.sia.tech/core v0.1.10
 	go.sia.tech/jape v0.9.0
 	go.sia.tech/siad v1.5.10-0.20221206172719-7f3713a01004
 	go.uber.org/zap v1.24.0

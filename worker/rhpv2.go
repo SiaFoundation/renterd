@@ -369,12 +369,12 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 
 // Reconnect re-establishes a connection to the host by recreating the
 // transport, updating the settings and calling the lock RPC.
-func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID) (err error) {
+func (s *Session) Reconnect(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID) (err error) {
 	defer wrapErr(&err, "Reconnect")
 
 	s.closeTransport()
 
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", siamuxAddr)
 	if err != nil {
 		return err
 	}

@@ -30,7 +30,7 @@ func (h *mockHost) Contract() types.FileContractID {
 	return h.contractID
 }
 
-func (h *mockHost) PublicKey() types.PublicKey {
+func (h *mockHost) HostKey() types.PublicKey {
 	return h.publicKey
 }
 

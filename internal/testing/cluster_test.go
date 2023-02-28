@@ -158,6 +158,23 @@ func TestUploadDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// prepare some data
+	data := make([]byte, rhpv2.SectorSize*3)
+	if _, err := frand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload the data
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// check it's registered in the bus
+	_, _, err = cluster.Bus.Object(context.Background(), "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// fund accounts
 	contracts, err := b.ActiveContracts(context.Background())
 	if err != nil {
@@ -167,6 +184,49 @@ func TestUploadDownload(t *testing.T) {
 		if err := w.RHPFund(context.Background(), contract.ID, contract.HostKey, types.Siacoins(1)); err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	// download the data
+	var buffer bytes.Buffer
+	if err := w.DownloadObject(context.Background(), &buffer, "foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it matches
+	if !bytes.Equal(data, buffer.Bytes()) {
+		t.Fatal("unexpected")
+	}
+}
+
+// TestUploadDownloadSpending is an integration test that verifies the upload
+// and download spending metrics are tracked properly.
+func TestUploadDownloadSpending(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if defaultAutopilotConfig.Contracts.Amount < uint64(defaultRedundancy.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := defaultRedundancy
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
 	}
 
 	// prepare two files, a small one and a large one

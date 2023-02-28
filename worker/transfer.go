@@ -34,7 +34,7 @@ var (
 type sectorStore interface {
 	Account() rhpv3.Account
 	Contract() types.FileContractID
-	PublicKey() types.PublicKey
+	HostKey() types.PublicKey
 	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error)
 	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
 	DeleteSectors(ctx context.Context, roots []types.Hash256) error
@@ -60,7 +60,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 
 		// Trace the upload.
 		ctx, span := tracing.Tracer.Start(ctx, "upload-request")
-		span.SetAttributes(attribute.Stringer("host", r.host.PublicKey()))
+		span.SetAttributes(attribute.Stringer("host", r.host.HostKey()))
 		span.SetAttributes(attribute.Stringer("contract", r.host.Contract()))
 
 		go func(r req) {
@@ -122,7 +122,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 		}
 
 		if resp.err != nil {
-			errs = append(errs, &HostError{resp.req.host.PublicKey(), resp.err})
+			errs = append(errs, &HostError{resp.req.host.HostKey(), resp.err})
 			// try next host
 			if hostIndex < len(hosts) {
 				go worker(req{hosts[hostIndex], resp.req.shardIndex})
@@ -131,7 +131,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 			}
 		} else if sectors[resp.req.shardIndex].Root == (types.Hash256{}) {
 			sectors[resp.req.shardIndex] = object.Sector{
-				Host: resp.req.host.PublicKey(),
+				Host: resp.req.host.HostKey(),
 				Root: resp.root,
 			}
 			rem--
@@ -144,7 +144,7 @@ func parallelUploadSlab(ctx context.Context, shards [][]byte, hosts []sectorStor
 	// make hosts map
 	hostsMap := make(map[types.PublicKey]int)
 	for i, h := range hosts {
-		hostsMap[h.PublicKey()] = i
+		hostsMap[h.HostKey()] = i
 	}
 
 	// collect slow host indices
@@ -206,7 +206,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 
 		// Trace the download.
 		ctx, span := tracing.Tracer.Start(ctx, "download-request")
-		span.SetAttributes(attribute.Stringer("host", hosts[r.hostIndex].PublicKey()))
+		span.SetAttributes(attribute.Stringer("host", hosts[r.hostIndex].HostKey()))
 		span.SetAttributes(attribute.Stringer("account", hosts[r.hostIndex].Account()))
 
 		go func(r req) {
@@ -215,13 +215,13 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			host := hosts[r.hostIndex]
 			var shard *object.Sector
 			for i := range ss.Shards {
-				if ss.Shards[i].Host == host.PublicKey() {
+				if ss.Shards[i].Host == host.HostKey() {
 					shard = &ss.Shards[i]
 					break
 				}
 			}
 			if shard == nil {
-				respChan <- resp{r, nil, fmt.Errorf("host %v, err: %w", host.PublicKey(), errUnusedHost)}
+				respChan <- resp{r, nil, fmt.Errorf("host %v, err: %w", host.HostKey(), errUnusedHost)}
 				return
 			}
 
@@ -273,7 +273,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 		}
 
 		if resp.err != nil {
-			errs = append(errs, &HostError{hosts[resp.req.hostIndex].PublicKey(), resp.err})
+			errs = append(errs, &HostError{hosts[resp.req.hostIndex].HostKey(), resp.err})
 			// try next host
 			if hostIndex < len(hosts) {
 				go worker(req{hostIndex})
@@ -282,7 +282,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 			}
 		} else {
 			for i := range ss.Shards {
-				if ss.Shards[i].Host == hosts[resp.req.hostIndex].PublicKey() && len(shards[i]) == 0 {
+				if ss.Shards[i].Host == hosts[resp.req.hostIndex].HostKey() && len(shards[i]) == 0 {
 					shards[i] = resp.shard
 					rem--
 					break
@@ -297,7 +297,7 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 	// make hosts map
 	hostsMap := make(map[types.PublicKey]int)
 	for i, h := range hosts {
-		hostsMap[h.PublicKey()] = i
+		hostsMap[h.HostKey()] = i
 	}
 
 	// collect slow host indices
@@ -372,9 +372,9 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 		go func(h sectorStore) {
 			// NOTE: if host is not storing any sectors, the map lookup will return
 			// nil, making this a no-op
-			err := h.DeleteSectors(ctx, rootsBysectorStore[h.PublicKey()])
+			err := h.DeleteSectors(ctx, rootsBysectorStore[h.HostKey()])
 			if err != nil {
-				errChan <- &HostError{h.PublicKey(), err}
+				errChan <- &HostError{h.HostKey(), err}
 			} else {
 				errChan <- nil
 			}
@@ -402,7 +402,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, v2Hosts, v3Hosts []sectorS
 
 	// make a map of good hosts
 	for _, h := range v2Hosts {
-		hostsMap[h.PublicKey().String()] = struct{}{}
+		hostsMap[h.HostKey().String()] = struct{}{}
 	}
 
 	// collect indices of shards that need to be migrated
@@ -461,7 +461,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, v2Hosts, v3Hosts []sectorS
 	// filter out the hosts we used already
 	filtered := v2Hosts[:0]
 	for _, h := range v2Hosts {
-		if _, used := usedMap[h.PublicKey().String()]; !used {
+		if _, used := usedMap[h.HostKey().String()]; !used {
 			filtered = append(filtered, h)
 		}
 	}
@@ -472,10 +472,10 @@ func migrateSlab(ctx context.Context, s *object.Slab, v2Hosts, v3Hosts []sectorS
 	// move slow hosts to the back of the array
 	slow := make(map[types.PublicKey]int)
 	for _, h := range slowHosts {
-		slow[v2Hosts[h].PublicKey()]++
+		slow[v3Hosts[h].HostKey()]++
 	}
 	sort.SliceStable(v2Hosts, func(i, j int) bool {
-		return slow[v2Hosts[i].PublicKey()] < slow[v2Hosts[j].PublicKey()]
+		return slow[v2Hosts[i].HostKey()] < slow[v2Hosts[j].HostKey()]
 	})
 
 	// reupload those shards

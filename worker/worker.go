@@ -354,7 +354,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey typ
 	return fn(t)
 }
 
-func (w *worker) withTransportV3(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
+func withTransportV3(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
 	conn, err := dial(ctx, siamuxAddr, hostKey)
 	if err != nil {
 		return err
@@ -590,7 +590,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Check("failed to fetch host", err) != nil {
 		return
 	}
-	hostIP := h.Settings.SiamuxAddr()
+	siamuxAddr := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
 	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityFunding, lockingDurationFunding)
@@ -603,7 +603,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// Get contract revision.
 	var revision types.FileContractRevision
-	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, hostIP, func(ss sectorStore) error {
+	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, siamuxAddr, func(ss sectorStore) error {
 		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
 		if err != nil {
 			return err
@@ -611,7 +611,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		revision = rev.Revision
 		return nil
 	})
-	if jc.Check("failed to fetch revision", err) != nil {
+	if jc.Check(fmt.Sprintf("failed to fetch revision from host '%s'", siamuxAddr), err) != nil {
 		return
 	}
 
@@ -619,18 +619,18 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
 	if !ptValid {
 		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
-		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, hostIP, rfr.HostKey)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rfr.HostKey)
 		if jc.Check("failed to update outdated price table", err) != nil {
 			return
 		}
 	}
 
 	// Fund account.
-	err = w.fundAccount(ctx, account, pt, hostIP, rfr.HostKey, rfr.Amount, &revision)
+	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, rfr.Amount, &revision)
 
 	// If funding failed due to an exceeded max balance, we sync the account.
 	if isMaxBalanceExceeded(err) {
-		if err := w.syncAccount(ctx, account, pt, hostIP, rfr.HostKey); err != nil {
+		if err := w.syncAccount(ctx, account, pt, siamuxAddr, rfr.HostKey); err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 		}
 	}
@@ -645,7 +645,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 		return
 	}
 	var value rhpv3.RegistryValue
-	err := w.withTransportV3(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
 		value, err = RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
@@ -664,7 +664,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
-	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
@@ -811,7 +811,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		err = w.withHostsV3(ctx, contracts, func(accounts []sectorStore) error {
 			slowHosts, err := downloadSlab(ctx, cw, ss, accounts, w.downloadSectorTimeout)
 			for _, h := range slowHosts {
-				slow[accounts[h].PublicKey()]++
+				slow[accounts[h].HostKey()]++
 			}
 			return err
 		})
@@ -885,13 +885,13 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		if err := w.withHostsV2(ctx, contracts, func(hosts []sectorStore) (err error) {
 			// move slow hosts to the back of the array
 			sort.SliceStable(hosts, func(i, j int) bool {
-				return slow[hosts[i].PublicKey()] < slow[hosts[j].PublicKey()]
+				return slow[hosts[i].HostKey()] < slow[hosts[j].HostKey()]
 			})
 
 			// upload the slab
 			s, length, slowHosts, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout)
 			for _, h := range slowHosts {
-				slow[hosts[h].PublicKey()]++
+				slow[hosts[h].HostKey()]++
 			}
 			return err
 		}); err == io.EOF {
@@ -955,7 +955,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 
 				rev, err := store.(*sharedSession).Revision(ctx)
 				if err != nil {
-					errs = append(errs, &HostError{HostKey: store.PublicKey(), Err: err})
+					errs = append(errs, &HostError{HostKey: store.HostKey(), Err: err})
 					return
 				}
 				contracts = append(contracts, api.Contract{
@@ -1016,7 +1016,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	}
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
 	w.contractSpendingRecorder = w.newContractSpendingRecorder()
-	w.priceTables = newPriceTables(w.withTransportV3)
+	w.priceTables = newPriceTables(withTransportV3)
 	return w
 }
 
