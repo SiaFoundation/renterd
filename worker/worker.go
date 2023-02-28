@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -661,7 +660,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	var pt rhpv3.HostPriceTable   // TODO
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
-	payment := w.preparePayment(rrur.HostKey, cost)
+	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
@@ -976,9 +975,9 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
+func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency, blockHeight uint64) rhpv3.PayByEphemeralAccountRequest {
 	pk := w.accounts.deriveAccountKey(hk)
-	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
+	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, blockHeight+6, pk) // 1 hour valid
 }
 
 func (w *worker) accountsHandlerGET(jc jape.Context) {

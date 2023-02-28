@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,6 +337,12 @@ func TestEphemeralAccounts(t *testing.T) {
 	busAcc := busAccounts[0]
 	if !reflect.DeepEqual(busAcc, acc) {
 		t.Fatal("bus account doesn't match worker account")
+	}
+
+	// Try to fund the account manually.
+	err = cluster.Worker.RHPFund(context.Background(), contract.ID, acc.Host, types.Siacoins(2))
+	if err == nil || !strings.Contains(err.Error(), "ephemeral account maximum balance exceeded") {
+		t.Fatal(err)
 	}
 
 	// Check that the spending was recorded for the contract. The recorded

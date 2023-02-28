@@ -43,11 +43,11 @@ func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.Hos
 	if err != nil {
 		return err
 	}
-	payment := w.preparePayment(hostKey, pt.AccountBalanceCost)
+	payment := w.preparePayment(hostKey, pt.AccountBalanceCost, pt.HostBlockHeight)
 	return account.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) error {
-			balance, err = RPCAccountBalance(t, &payment, account.id)
+			balance, err = RPCAccountBalance(t, &payment, account.id, pt.UID)
 			return err
 		})
 		return balance, err
@@ -465,7 +465,7 @@ func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rh
 }
 
 // RPCAccountBalance calls the AccountBalance RPC.
-func RPCAccountBalance(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhpv3.Account) (bal types.Currency, err error) {
+func RPCAccountBalance(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
 	defer wrapErr(&err, "AccountBalance")
 	s := t.DialStream()
 	defer s.Close()
@@ -474,11 +474,11 @@ func RPCAccountBalance(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account 
 		Account: account,
 	}
 	var resp rhpv3.RPCAccountBalanceResponse
-	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &account); err != nil {
-		return types.ZeroCurrency, err
-	} else if err := s.WriteResponse(&req); err != nil {
+	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &settingsID); err != nil {
 		return types.ZeroCurrency, err
 	} else if err := processPayment(s, payment); err != nil {
+		return types.ZeroCurrency, err
+	} else if err := s.WriteResponse(&req); err != nil {
 		return types.ZeroCurrency, err
 	} else if err := s.ReadResponse(&resp, 128); err != nil {
 		return types.ZeroCurrency, err
