@@ -351,6 +351,21 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatalf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
 	}
 
+	// Update the balance to create some drift.
+	newBalance := fundAmt.Div64(2)
+	newDrift := new(big.Int).Sub(newBalance.Big(), fundAmt.Big())
+	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, "worker", acc.Host, newBalance.Big(), newDrift); err != nil {
+		t.Fatal(err)
+	}
+	busAccounts, err = cluster.Bus.Accounts(context.Background(), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busAcc = busAccounts[0]
+	if busAcc.Drift.Cmp(newDrift) != 0 {
+		t.Fatalf("drift was %v but should be %v", busAcc.Drift, newDrift)
+	}
+
 	// Shut down cluster.
 	if err := cluster.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
@@ -366,6 +381,11 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 	}()
 
+	// Check that accoutns were loaded from the bus correctly.
+	// NOTE: since we updated the balance directly on the bus, we need to
+	// manually fix the balance and drift before comparing.
+	accounts[0].Balance = newBalance.Big()
+	accounts[0].Drift = newDrift
 	accounts2, err := cluster2.Worker.Accounts(ctx)
 	if err != nil {
 		t.Fatal(err)

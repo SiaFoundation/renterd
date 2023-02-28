@@ -50,14 +50,13 @@ func (a *accounts) AddAmount(id rhpv3.Account, owner string, hk types.PublicKey,
 
 // SetBalance sets the balance of a given account to the provided amount. If
 // the account doesn't exist, it is created.
-func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, balance *big.Int) {
+func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey, balance, drift *big.Int) {
 	acc := a.account(id, owner, hk)
 
 	// Update balance and drift.
 	acc.mu.Lock()
-	newDrift := balance.Sub(balance, acc.Balance)
-	acc.Drift = acc.Drift.Add(acc.Drift, newDrift)
-	acc.Balance = balance
+	acc.Balance.Set(balance)
+	acc.Drift.Set(drift)
 	acc.mu.Unlock()
 }
 
@@ -71,7 +70,8 @@ func (a *accounts) Accounts(owner string) []api.Account {
 		acc.mu.Lock()
 		accounts[i] = api.Account{
 			ID:      acc.ID,
-			Balance: acc.Balance,
+			Balance: new(big.Int).Set(acc.Balance),
+			Drift:   new(big.Int).Set(acc.Drift),
 			Host:    acc.Host,
 			Owner:   acc.Owner,
 		}

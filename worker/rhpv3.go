@@ -91,6 +91,7 @@ type (
 		mu        sync.RWMutex
 		balanceMu sync.Mutex
 		balance   *big.Int
+		drift     *big.Int
 	}
 )
 
@@ -118,6 +119,7 @@ func (a *accounts) All() ([]api.Account, error) {
 		accounts = append(accounts, api.Account{
 			ID:      acc.id,
 			Balance: new(big.Int).Set(acc.balance),
+			Drift:   new(big.Int).Set(acc.drift),
 			Host:    acc.host,
 			Owner:   acc.owner,
 		})
@@ -154,6 +156,7 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 			host:    hk,
 			owner:   a.workerID,
 			balance: types.ZeroCurrency.Big(),
+			drift:   types.ZeroCurrency.Big(),
 		}
 		a.accounts[accountID] = acc
 	}
@@ -200,9 +203,12 @@ func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency
 		return err
 	}
 	a.balanceMu.Lock()
+	delta := new(big.Int).Sub(balance.Big(), a.balance)
+	a.drift = a.drift.Add(a.drift, delta)
 	a.balance = balance.Big()
+	newBalance, newDrift := new(big.Int).Set(a.balance), new(big.Int).Set(a.drift)
 	a.balanceMu.Unlock()
-	return a.bus.SetBalance(ctx, a.id, a.owner, a.host, a.balance)
+	return a.bus.SetBalance(ctx, a.id, a.owner, a.host, newBalance, newDrift)
 }
 
 // tryInitAccounts is used for lazily initialising the accounts from the bus.
@@ -225,6 +231,7 @@ func (a *accounts) tryInitAccounts() error {
 			host:    acc.Host,
 			owner:   acc.Owner,
 			balance: acc.Balance,
+			drift:   acc.Drift,
 		}
 	}
 	return nil

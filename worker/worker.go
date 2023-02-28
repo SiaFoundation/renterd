@@ -206,7 +206,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 type AccountStore interface {
 	Accounts(ctx context.Context, owner string) ([]api.Account, error)
 	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
-	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
 }
 
 type contractLocker interface {
