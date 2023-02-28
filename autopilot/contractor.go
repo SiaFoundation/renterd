@@ -680,7 +680,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg ap
 		return 0, err
 	}
 	if len(hosts) == 0 {
-		c.logger.Warn("min host score is 0 because there are no candidate hosts")
+		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
 		return math.SmallestNonzeroFloat64, nil
 	}
 
