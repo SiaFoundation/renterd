@@ -591,7 +591,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	hostIP := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
-	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityRenew, lockingPriorityFunding)
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityFunding, lockingDurationFunding)
 	if jc.Check("failed to acquire contract for funding EA", err) != nil {
 		return
 	}
@@ -622,8 +622,6 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			return
 		}
 	}
-
-	// TODO: gouging check on price table
 
 	// Fund account.
 	err = w.fundAccount(ctx, account, pt, hostIP, rfr.HostKey, rfr.Amount, &revision)
