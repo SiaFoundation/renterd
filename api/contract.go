@@ -18,6 +18,7 @@ type (
 		HostIP      string               `json:"hostIP"`
 		HostKey     types.PublicKey      `json:"hostKey"`
 		StartHeight uint64               `json:"startHeight"`
+		SiamuxAddr  string               `json:"siamuxAddr"`
 
 		RenewedFrom types.FileContractID `json:"renewedFrom"`
 		Spending    ContractSpending     `json:"spending"`

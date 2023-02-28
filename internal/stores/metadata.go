@@ -178,6 +178,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		HostIP:      c.Host.NetAddress,
 		HostKey:     types.PublicKey(c.Host.PublicKey),
 		StartHeight: c.StartHeight,
+		SiamuxAddr:  c.Host.Settings.convert().SiamuxAddr(),
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
 		Spending: api.ContractSpending{

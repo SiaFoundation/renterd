@@ -6,15 +6,18 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/siad/crypto"
 )
 
 var (
@@ -93,6 +96,18 @@ type (
 		balance   *big.Int
 		drift     *big.Int
 	}
+
+	rhpV3 struct {
+		a  *account
+		bh uint64
+		pt rhpv3.HostPriceTable
+
+		sk   types.PrivateKey
+		pk   rhpv3.Account
+		fcid types.FileContractID
+
+		withTransportV3 func(fn func(t *rhpv3.Transport) error) error
+	}
 )
 
 func newAccounts(workerID string, accountsKey types.PrivateKey, as AccountStore) *accounts {
@@ -101,6 +116,77 @@ func newAccounts(workerID string, accountsKey types.PrivateKey, as AccountStore)
 		workerID: workerID,
 		key:      accountsKey,
 	}
+}
+
+func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr string, hostKey types.PublicKey) (pt rhpv3.HostPriceTable, err error) {
+	pt, ptValid := w.priceTables.PriceTable(hostKey)
+	if ptValid {
+		return pt, nil
+	}
+
+	updatePTByContract := func() {
+		var rev rhpv2.ContractRevision
+		if err = w.withHostV2(ctx, contractID, hostKey, siamuxAddr, func(ss sectorStore) (err error) {
+			rev, err = ss.(*sharedSession).Revision(ctx)
+			return
+		}); err != nil {
+			return
+		}
+		pt, err = w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, &rev.Revision), siamuxAddr, hostKey)
+	}
+
+	// update price table using contract payment if we don't have a funded account
+	acc, err := w.accounts.ForHost(hostKey)
+	if err != nil || acc.Balance().IsZero() {
+		updatePTByContract()
+		return
+	}
+
+	// otherwise update the price table using an account payment, but fall back
+	pt, err = w.priceTables.Update(ctx, w.preparePriceTableAccountPayment(hostKey), siamuxAddr, hostKey)
+	if err != nil {
+		updatePTByContract()
+	}
+	return
+}
+
+func (w *worker) withHostsV3(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
+	cs, err := w.bus.ConsensusState(ctx)
+	if err != nil {
+		return err
+	}
+
+	var eas []sectorStore
+	for _, c := range contracts {
+		acc, err := w.accounts.ForHost(c.HostKey)
+		if err != nil {
+			continue
+		}
+
+		pt, err := w.fetchPriceTable(ctx, c.ID, c.SiamuxAddr, c.HostKey)
+		if err != nil {
+			continue
+		}
+
+		// TODO: gouging check
+
+		sk := w.accounts.deriveAccountKey(c.HostKey)
+		eas = append(eas, &rhpV3{
+			a:  acc,
+			bh: cs.BlockHeight,
+			pt: pt,
+
+			sk:   w.accounts.deriveAccountKey(c.HostKey),
+			pk:   rhpv3.Account(sk.PublicKey()),
+			fcid: c.ID,
+
+			withTransportV3: func(fn func(t *rhpv3.Transport) error) (err error) {
+				err = w.withTransportV3(ctx, c.SiamuxAddr, c.HostKey, fn)
+				return
+			},
+		})
+	}
+	return fn(eas)
 }
 
 // All returns information about all accounts to be returned in the API.
@@ -151,6 +237,13 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 		a.accounts[accountID] = acc
 	}
 	return acc, nil
+}
+
+// Balance returns the account balance as a currency.
+func (a *account) Balance() types.Currency {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return types.NewCurrency(a.balance.Uint64(), new(big.Int).Rsh(a.balance, 64).Uint64())
 }
 
 func (a *accounts) ResetDrift(ctx context.Context, id rhpv3.Account) error {
@@ -286,11 +379,48 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	return pk
 }
 
+func (r *rhpV3) Account() rhpv3.Account {
+	return r.a.id
+}
+
+func (r *rhpV3) Contract() types.FileContractID {
+	return r.fcid
+}
+
+func (r *rhpV3) PublicKey() types.PublicKey {
+	return r.a.host
+}
+
+func (*rhpV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
+	panic("not implemented")
+}
+
+func (*rhpV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
+	panic("not implemented")
+}
+
+func (r *rhpV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+	err = r.a.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+		amount = types.Siacoins(1).Div64(10)
+		err = r.withTransportV3(func(t *rhpv3.Transport) error {
+			payment := rhpv3.PayByEphemeralAccount(r.pk, amount, r.bh+3, r.sk)
+			data, _, err := RPCReadSector(t, &r.pt, &payment, offset, length, root, true)
+			if err != nil {
+				return err
+			}
+			_, err = w.Write(data)
+			return err
+		})
+		return
+	})
+	return
+}
+
 // priceTableValidityLeeway is the number of time before the actual expiry of a
 // price table when we start considering it invalid.
 const priceTableValidityLeeway = 30 * time.Second
 
-type withTransportV3 func(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error)
+type withTransportV3 func(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error)
 
 type priceTables struct {
 	withTransport withTransportV3
@@ -332,7 +462,7 @@ func (pts *priceTables) PriceTable(hk types.PublicKey) (rhpv3.HostPriceTable, bo
 
 // Update updates a price table with the given host using the provided payment
 // function to pay for it.
-func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc, hostIP string, hk types.PublicKey) (rhpv3.HostPriceTable, error) {
+func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc, siamuxAddr string, hk types.PublicKey) (rhpv3.HostPriceTable, error) {
 	// Fetch the price table to update.
 	pt := pts.priceTable(hk)
 
@@ -366,7 +496,7 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 
 	// Update price table.
 	var hpt rhpv3.HostPriceTable
-	err := pts.withTransport(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
+	err := pts.withTransport(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) (err error) {
 		hpt, err = RPCPriceTable(t, payFn)
 		return err
 	})
@@ -455,7 +585,7 @@ func processPayment(s *rhpv3.Stream, payment rhpv3.PaymentMethod) error {
 		if err := s.ReadResponse(&pr, 4096); err != nil {
 			return err
 		}
-		pbcr.HostSignature = pr.Signature
+		pbcr.Signature = pr.Signature
 	}
 	return nil
 }
@@ -534,6 +664,48 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 		return err
 	}
 	return nil
+}
+
+// RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
+func RPCReadSector(t *rhpv3.Transport, pt *rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (data []byte, proof []crypto.Hash, err error) {
+	defer wrapErr(&err, "ReadSector")
+	s := t.DialStream()
+	defer s.Close()
+
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	e.WriteUint64(length)
+	e.WriteUint64(offset)
+	merkleRoot.EncodeTo(e)
+	e.Flush()
+
+	req := rhpv3.RPCExecuteProgramRequest{
+		FileContractID: types.FileContractID{},
+		Program: []rhpv3.Instruction{&rhpv3.InstrReadSector{
+			LengthOffset:     0,
+			OffsetOffset:     8,
+			MerkleRootOffset: 16,
+			ProofRequired:    true,
+		}},
+		ProgramData: buf.Bytes(),
+	}
+
+	var cancellationToken types.Specifier
+	var resp rhpv3.RPCExecuteProgramResponse
+	if err := s.WriteRequest(rhpv3.RPCExecuteProgramID, &pt.UID); err != nil {
+		return nil, nil, err
+	} else if err := processPayment(s, payment); err != nil {
+		return nil, nil, err
+	} else if err := s.WriteResponse(&req); err != nil {
+		return nil, nil, err
+	} else if err := s.ReadResponse(&cancellationToken, 16); err != nil {
+		return nil, nil, err
+	} else if err := s.ReadResponse(&resp, 4096); err != nil {
+		return nil, nil, err
+	}
+
+	data = resp.Output
+	return data, proof, nil
 }
 
 // RPCReadRegistry calls the ExecuteProgram RPC with an MDM program that reads

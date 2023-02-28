@@ -219,6 +219,8 @@ type Bus interface {
 	AccountStore
 	contractLocker
 
+	ConsensusState(ctx context.Context) (api.ConsensusState, error)
+
 	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	ContractsForSlab(ctx context.Context, shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
@@ -352,8 +354,8 @@ func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey typ
 	return fn(t)
 }
 
-func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
-	conn, err := dial(ctx, hostIP, hostKey)
+func (w *worker) withTransportV3(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
+	conn, err := dial(ctx, siamuxAddr, hostKey)
 	if err != nil {
 		return err
 	}
@@ -379,11 +381,11 @@ func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey typ
 	return fn(t)
 }
 
-func (w *worker) withHost(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStore) error) (err error) {
-	return w.withHosts(ctx, []api.ContractMetadata{{
-		ID:      contractID,
-		HostKey: hostKey,
-		HostIP:  hostIP,
+func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(sectorStore) error) (err error) {
+	return w.withHostsV2(ctx, []api.ContractMetadata{{
+		ID:         contractID,
+		HostKey:    hostKey,
+		SiamuxAddr: siamuxAddr,
 	}}, func(ss []sectorStore) error {
 		return fn(ss[0])
 	})
@@ -408,7 +410,7 @@ func (w *worker) unlockHosts(hosts []sectorStore) {
 	wg.Wait()
 }
 
-func (w *worker) withHosts(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
+func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
@@ -550,7 +552,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	ctx = WithGougingChecker(jc.Request.Context(), gp)
-	err = w.withHost(ctx, toRenewID, hostKey, hostIP, func(ss sectorStore) error {
+	err = w.withHostV2(ctx, toRenewID, hostKey, hostIP, func(ss sectorStore) error {
 		session := ss.(*sharedSession)
 		contract, txnSet, err = session.RenewContract(ctx, func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error) {
 			renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev, renterAddress, renterKey, renterFunds, newCollateral, hostKey, host, endHeight)
@@ -601,7 +603,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// Get contract revision.
 	var revision types.FileContractRevision
-	err = w.withHost(jc.Request.Context(), rfr.ContractID, rfr.HostKey, hostIP, func(ss sectorStore) error {
+	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, hostIP, func(ss sectorStore) error {
 		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
 		if err != nil {
 			return err
@@ -702,8 +704,10 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
+	err = w.withHostsV2(ctx, contracts, func(v2Hosts []sectorStore) error {
+		return w.withHostsV3(ctx, contracts, func(v3Hosts []sectorStore) error {
+			return migrateSlab(ctx, &slab, v2Hosts, v3Hosts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
+		})
 	})
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -762,9 +766,6 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, dp.GougingParams)
 
-	// attach contract spending recorder to the context.
-	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
-
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
 	// straightforward fashion, we would need one (or more!) RHP RPCs for each
@@ -782,7 +783,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 
-	// keep track of slow hosts so we can avoid them in consecutive slab uploads
+	// keep track of slow hosts so we can avoid them in consecutive slab downloads
 	slow := make(map[types.PublicKey]int)
 
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
@@ -807,10 +808,10 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
 		})
 
-		err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-			slowHosts, err := downloadSlab(ctx, cw, ss, hosts, &tracedContractLocker{w.bus}, w.downloadSectorTimeout)
+		err = w.withHostsV3(ctx, contracts, func(accounts []sectorStore) error {
+			slowHosts, err := downloadSlab(ctx, cw, ss, accounts, w.downloadSectorTimeout)
 			for _, h := range slowHosts {
-				slow[hosts[h].PublicKey()]++
+				slow[accounts[h].PublicKey()]++
 			}
 			return err
 		})
@@ -881,7 +882,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		var slowHosts []int
 
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
-		if err := w.withHosts(ctx, contracts, func(hosts []sectorStore) (err error) {
+		if err := w.withHostsV2(ctx, contracts, func(hosts []sectorStore) (err error) {
 			// move slow hosts to the back of the array
 			sort.SliceStable(hosts, func(i, j int) bool {
 				return slow[hosts[i].PublicKey()] < slow[hosts[j].PublicKey()]
@@ -941,7 +942,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 
 	// fetch all contracts
 	var contracts []api.Contract
-	err = w.withHosts(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
+	err = w.withHostsV2(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
 		var errs HostErrorSet
 		for i, store := range ss {
 			func() {

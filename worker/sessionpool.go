@@ -8,6 +8,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
 
@@ -24,11 +25,11 @@ func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	return root, nil
 }
 
-func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
-		Offset:     uint64(offset),
-		Length:     uint64(length),
+		Offset:     offset,
+		Length:     length,
 	}}
 	price := rhpv2.RPCReadCost(s.settings, sections)
 	if err := s.Read(ctx, w, sections, price); err != nil {
@@ -135,7 +136,7 @@ func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.Sector
 	return s.appendSector(ctx, sector, currentHeight)
 }
 
-func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	s, err := ss.pool.acquire(ctx, ss)
 	if err != nil {
 		return err
@@ -154,6 +155,10 @@ func (ss *sharedSession) DeleteSectors(ctx context.Context, roots []types.Hash25
 	}
 	defer ss.pool.release(s)
 	return s.deleteSectors(ctx, roots)
+}
+
+func (ss *sharedSession) Account() rhpv3.Account {
+	panic("sessions do not have account ids") // developer error
 }
 
 // A sessionPool is a set of sessions that can be used for uploading and

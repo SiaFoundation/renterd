@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
@@ -19,6 +20,10 @@ type mockHost struct {
 	contractID types.FileContractID
 	publicKey  types.PublicKey
 	sectors    map[types.Hash256][]byte
+}
+
+func (h *mockHost) Account() rhpv3.Account {
+	panic("not implemented")
 }
 
 func (h *mockHost) Contract() types.FileContractID {
@@ -35,7 +40,7 @@ func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byt
 	return root, nil
 }
 
-func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")
@@ -140,7 +145,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), dst, s, hosts, mockLocker, 0); err != nil {
+			if _, err := downloadSlab(context.Background(), dst, s, hosts, 0); err != nil {
 				t.Error(err)
 				return
 			}

@@ -149,12 +149,24 @@ func TestUploadDownload(t *testing.T) {
 		}
 	}()
 
+	b := cluster.Bus
 	w := cluster.Worker
 	rs := defaultRedundancy
 
 	// add hosts
-	if _, err := cluster.AddHostsBlocking(int(rs.TotalShards)); err != nil {
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
 		t.Fatal(err)
+	}
+
+	// fund accounts
+	contracts, err := b.ActiveContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contract := range contracts {
+		if err := w.RHPFund(context.Background(), contract.ID, contract.HostKey, types.Siacoins(1)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// prepare two files, a small one and a large one
