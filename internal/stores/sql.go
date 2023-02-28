@@ -18,7 +18,6 @@ type (
 	Model struct {
 		ID        uint `gorm:"primarykey"`
 		CreatedAt time.Time
-		UpdatedAt time.Time
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
