@@ -372,9 +372,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID) (err error) {
 	defer wrapErr(&err, "Reconnect")
 
-	if s.transport != nil {
-		s.closeTransport()
-	}
+	s.closeTransport()
 
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	if err != nil {
