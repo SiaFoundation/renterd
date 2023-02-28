@@ -430,11 +430,17 @@ func (db *SQLStore) RecordContractSpending(ctx context.Context, records []api.Co
 			} else if err != nil {
 				return err
 			}
-			return tx.Model(&dbContract{}).Where("id", c.ID).Updates(map[string]interface{}{
-				"upload_spending":       currency(types.Currency(c.UploadSpending).Add(r.Uploads)),
-				"download_spending":     currency(types.Currency(c.DownloadSpending).Add(r.Downloads)),
-				"fund_account_spending": currency(types.Currency(c.FundAccountSpending).Add(r.FundAccount)),
-			}).Error
+			updates := make(map[string]interface{})
+			if !r.Uploads.IsZero() {
+				updates["upload_spending"] = currency(types.Currency(c.UploadSpending).Add(r.Uploads))
+			}
+			if !r.Downloads.IsZero() {
+				updates["download_spending"] = currency(types.Currency(c.DownloadSpending).Add(r.Downloads))
+			}
+			if !r.FundAccount.IsZero() {
+				updates["fund_account_spending"] = currency(types.Currency(c.FundAccountSpending).Add(r.FundAccount))
+			}
+			return tx.Model(&dbContract{}).Where("id", c.ID).Updates(updates).Error
 		})
 		if err != nil {
 			return err
