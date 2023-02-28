@@ -3,6 +3,7 @@ package stores
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"go.sia.tech/siad/modules"
@@ -29,6 +30,10 @@ type (
 		persistInterval        time.Duration
 		unappliedAnnouncements []announcement
 		unappliedCCID          modules.ConsensusChangeID
+
+		mu           sync.Mutex
+		hasAllowlist bool
+		hasBlocklist bool
 	}
 )
 
@@ -101,6 +106,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 			&dbConsensusInfo{},
 			&dbHost{},
 			&dbInteraction{},
+			&dbAllowlistEntry{},
 			&dbBlocklistEntry{},
 
 			// bus.SettingStore tables
@@ -137,37 +143,85 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 
 	// Get latest consensus change ID or init db.
 	var ci dbConsensusInfo
-	err = db.Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
+	if err := db.
+		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
 		Attrs(dbConsensusInfo{
-			Model: Model{
-				ID: consensusInfoID,
-			},
-			CCID: modules.ConsensusChangeBeginning[:],
+			Model: Model{ID: consensusInfoID},
+			CCID:  modules.ConsensusChangeBeginning[:],
 		}).
-		FirstOrCreate(&ci).Error
-	if err != nil {
+		FirstOrCreate(&ci).
+		Error; err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
 	var ccid modules.ConsensusChangeID
 	copy(ccid[:], ci.CCID)
 
+	// Check allowlist and blocklist counts
+	allowlistCnt, err := tableCount(db, &dbAllowlistEntry{})
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	blocklistCnt, err := tableCount(db, &dbBlocklistEntry{})
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+
 	ss := &SQLStore{
 		db:                   db,
 		lastAnnouncementSave: time.Now(),
 		persistInterval:      persistInterval,
+		hasAllowlist:         allowlistCnt > 0,
+		hasBlocklist:         blocklistCnt > 0,
 	}
 	return ss, ccid, nil
 }
 
-func (s *SQLStore) isSQLite() bool {
-	switch s.db.Dialector.(type) {
+func isSQLite(db *gorm.DB) bool {
+	switch db.Dialector.(type) {
 	case *sqlite.Dialector:
 		return true
 	case *mysql.Dialector:
 		return false
 	default:
-		panic(fmt.Sprintf("unknown dialector: %t", s.db.Dialector))
+		panic(fmt.Sprintf("unknown dialector: %t", db.Dialector))
 	}
+}
+
+func (ss *SQLStore) updateHasAllowlist(err *error) {
+	if *err != nil {
+		return
+	}
+
+	cnt, cErr := tableCount(ss.db, &dbAllowlistEntry{})
+	if cErr != nil {
+		*err = cErr
+		return
+	}
+
+	ss.mu.Lock()
+	ss.hasAllowlist = cnt > 0
+	ss.mu.Unlock()
+}
+
+func (ss *SQLStore) updateHasBlocklist(err *error) {
+	if *err != nil {
+		return
+	}
+
+	cnt, cErr := tableCount(ss.db, &dbBlocklistEntry{})
+	if cErr != nil {
+		*err = cErr
+		return
+	}
+
+	ss.mu.Lock()
+	ss.hasBlocklist = cnt > 0
+	ss.mu.Unlock()
+}
+
+func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
+	err = db.Model(model).Count(&cnt).Error
+	return
 }
 
 // Close closes the underlying database connection of the store.

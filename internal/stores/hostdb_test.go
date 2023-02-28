@@ -652,7 +652,7 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Add an entry to the blocklist to block host 1
 	entry1 := "foo.bar"
-	err = hdb.AddHostBlocklistEntry(context.Background(), entry1)
+	err = hdb.UpdateHostBlocklistEntries(context.Background(), []string{entry1}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,11 +665,142 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 }
 
+func TestSQLHostAllowlist(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	numEntries := func() int {
+		t.Helper()
+		bl, err := hdb.HostAllowlist(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(bl)
+	}
+
+	numHosts := func() int {
+		t.Helper()
+		hosts, err := hdb.Hosts(ctx, 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(hosts)
+	}
+
+	numRelations := func() (cnt int64) {
+		t.Helper()
+		err = hdb.db.Table("host_allowlist_entry_hosts").Count(&cnt).Error
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	isAllowed := func(hk types.PublicKey) bool {
+		t.Helper()
+		host, err := hdb.Host(ctx, hk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return !host.Blocked
+	}
+
+	// add three hosts
+	hks, err := hdb.addTestHosts(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
+
+	// assert we can find them
+	if numHosts() != 3 {
+		t.Fatalf("unexpected number of hosts, %v != 3", numHosts())
+	}
+
+	// assert allowlist is empty
+	if numEntries() != 0 {
+		t.Fatalf("unexpected number of entries in allowlist, %v != 0", numEntries())
+	}
+
+	// assert we can add entries to the allowlist
+	err = hdb.UpdateHostAllowlistEntries(ctx, []types.PublicKey{hk1, hk2}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if numEntries() != 2 {
+		t.Fatalf("unexpected number of entries in allowlist, %v != 2", numEntries())
+	}
+	if numRelations() != 2 {
+		t.Fatalf("unexpected number of entries in join table, %v != 2", numRelations())
+	}
+
+	// assert both h1 and h2 are allowed now
+	if !isAllowed(hk1) || !isAllowed(hk2) || isAllowed(hk3) {
+		t.Fatal("unexpected hosts are allowed", isAllowed(hk1), isAllowed(hk2), isAllowed(hk3))
+	}
+
+	// assert adding the same entry is a no-op and we can remove an entry at the same time
+	err = hdb.UpdateHostAllowlistEntries(ctx, []types.PublicKey{hk1}, []types.PublicKey{hk2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if numEntries() != 1 {
+		t.Fatalf("unexpected number of entries in allowlist, %v != 1", numEntries())
+	}
+	if numRelations() != 1 {
+		t.Fatalf("unexpected number of entries in join table, %v != 1", numRelations())
+	}
+
+	// assert only h1 is allowed now
+	if !isAllowed(hk1) || isAllowed(hk2) || isAllowed(hk3) {
+		t.Fatal("unexpected hosts are allowed", isAllowed(hk1), isAllowed(hk2), isAllowed(hk3))
+	}
+
+	// assert removing a non-existing entry is a no-op
+	err = hdb.UpdateHostAllowlistEntries(ctx, nil, []types.PublicKey{hk2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// remove host 1
+	if err = hdb.db.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk1)}).Delete(&dbHost{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if numHosts() != 0 {
+		t.Fatalf("unexpected number of hosts, %v != 0", numHosts())
+	}
+	if numRelations() != 0 {
+		t.Fatalf("unexpected number of entries in join table, %v != 0", numRelations())
+	}
+	if numEntries() != 1 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 1", numEntries())
+	}
+
+	// remove the allowlist entry for h1
+	err = hdb.UpdateHostAllowlistEntries(ctx, nil, []types.PublicKey{hk1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert hosts reappear
+	if numHosts() != 2 {
+		t.Fatalf("unexpected number of hosts, %v != 2", numHosts())
+	}
+	if numEntries() != 0 {
+		t.Fatalf("unexpected number of entries in blocklist, %v != 0", numEntries())
+	}
+}
+
 func TestSQLHostBlocklist(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	ctx := context.Background()
 
 	numEntries := func() int {
@@ -701,16 +832,8 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	isBlocked := func(hk types.PublicKey) bool {
 		t.Helper()
-		hosts, err := hdb.Hosts(ctx, 0, -1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, host := range hosts {
-			if host.PublicKey == hk {
-				return false
-			}
-		}
-		return true
+		host, _ := hdb.Host(ctx, hk)
+		return host.Blocked
 	}
 
 	// add three hosts
@@ -738,13 +861,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// assert we can add entries to the blocklist
-	entry1 := "foo.bar.com"
-	err = hdb.AddHostBlocklistEntry(ctx, entry1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry2 := "bar.com"
-	err = hdb.AddHostBlocklistEntry(ctx, entry2)
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"foo.bar.com", "bar.com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -759,21 +876,14 @@ func TestSQLHostBlocklist(t *testing.T) {
 	if !isBlocked(hk1) || isBlocked(hk2) || isBlocked(hk3) {
 		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3))
 	}
-	if _, err = hdb.Host(ctx, hk1); err != ErrHostNotFound {
+	if host, err := hdb.Host(ctx, hk1); err != nil {
 		t.Fatal("unexpected err", err)
+	} else if !host.Blocked {
+		t.Fatal("expected host to be blocked")
 	}
 
-	// assert adding the same entry is a no-op
-	err = hdb.AddHostBlocklistEntry(ctx, entry1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if numEntries() != 2 {
-		t.Fatalf("unexpected number of entries in blocklist, %v != 2", numEntries())
-	}
-
-	// assert we can remove an entry
-	err = hdb.RemoveHostBlocklistEntry(ctx, entry1)
+	// assert adding the same entry is a no-op, and we can remove entries at the same time
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"foo.bar.com", "bar.com"}, []string{"foo.bar.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,12 +900,12 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// assert removing a non-existing entry is a no-op
-	err = hdb.RemoveHostBlocklistEntry(ctx, entry1)
+	err = hdb.UpdateHostBlocklistEntries(ctx, nil, []string{"foo.bar.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// remove the other entry and assert the delete cascaded properly
-	err = hdb.RemoveHostBlocklistEntry(ctx, entry2)
+	err = hdb.UpdateHostBlocklistEntries(ctx, nil, []string{"bar.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,8 +920,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// block the second host
-	entry3 := "baz.com"
-	err = hdb.AddHostBlocklistEntry(ctx, entry3)
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"baz.com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +931,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 		t.Fatalf("unexpected number of entries in join table, %v != 1", numRelations())
 	}
 
-	// delete the host and assert the delete cascaded properly
+	// delete host 2 and assert the delete cascaded properly
 	if err = hdb.db.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk2)}).Delete(&dbHost{}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -846,7 +955,9 @@ func TestSQLHostBlocklist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err = hdb.Host(ctx, hk4); err != ErrHostNotFound {
+	if host, err := hdb.Host(ctx, hk4); err != nil {
+		t.Fatal(err)
+	} else if !host.Blocked {
 		t.Fatal("expected host to be blocked")
 	}
 	if _, err = hdb.Host(ctx, hk5); err != nil {
@@ -865,15 +976,36 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// add another entry that blocks multiple hosts
-	entry4 := "com"
-	err = hdb.AddHostBlocklistEntry(ctx, entry4)
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// assert 3 out of 5 hosts are blocked
-	if !isBlocked(hk1) || !isBlocked(hk2) || !isBlocked(hk3) || isBlocked(hk4) || isBlocked(hk5) {
-		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk2), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
+	// assert 2 out of 5 hosts are blocked
+	if !isBlocked(hk1) || !isBlocked(hk3) || isBlocked(hk4) || isBlocked(hk5) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
+	}
+
+	// add host 5 to the allowlist
+	err = hdb.UpdateHostAllowlistEntries(ctx, []types.PublicKey{hk5}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert all hosts except host 5 are blocked
+	if !isBlocked(hk1) || !isBlocked(hk3) || !isBlocked(hk4) || isBlocked(hk5) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
+	}
+
+	// add a rule to block host 5
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"foo.baz.commmmm"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert all hosts are blocked
+	if !isBlocked(hk1) || !isBlocked(hk3) || !isBlocked(hk4) || !isBlocked(hk5) {
+		t.Fatal("unexpected host is blocked", isBlocked(hk1), isBlocked(hk3), isBlocked(hk4), isBlocked(hk5))
 	}
 }
 

@@ -9,6 +9,12 @@ import (
 	"go.sia.tech/renterd/object"
 )
 
+var (
+	// ErrSettingNotFound is returned if a requested setting is not present in the
+	// database.
+	ErrSettingNotFound = errors.New("setting not found")
+)
+
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
 	BlockHeight uint64
@@ -140,6 +146,12 @@ type UpdateSlabRequest struct {
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
+// UpdateAllowlistRequest is the request type for /hosts/allowlist endpoint.
+type UpdateAllowlistRequest struct {
+	Add    []types.PublicKey `json:"add"`
+	Remove []types.PublicKey `json:"remove"`
+}
+
 // UpdateBlocklistRequest is the request type for /hosts/blocklist endpoint.
 type UpdateBlocklistRequest struct {
 	Add    []string `json:"add"`
@@ -218,7 +230,3 @@ func (rs RedundancySettings) Validate() error {
 	}
 	return nil
 }
-
-// ErrSettingNotFound is returned if a requested setting is not present in the
-// database.
-var ErrSettingNotFound = errors.New("setting not found")

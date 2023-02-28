@@ -385,7 +385,7 @@ func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
 	}
 
 	concat := func(a, b string) string {
-		if s.isSQLite() {
+		if isSQLite(s.db) {
 			return fmt.Sprintf("%s || %s", a, b)
 		}
 		return fmt.Sprintf("CONCAT(%s, %s)", a, b)

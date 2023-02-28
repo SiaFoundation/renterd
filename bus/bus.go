@@ -67,15 +67,16 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error)
+		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
+		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
-		AddHostBlocklistEntry(ctx context.Context, entry string) error
-		RemoveHostBlocklistEntry(ctx context.Context, entry string) error
+		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey) error
+		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -466,6 +467,23 @@ func (b *bus) contractsSpendingHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) hostsAllowlistHandlerGET(jc jape.Context) {
+	allowlist, err := b.hdb.HostAllowlist(jc.Request.Context())
+	if jc.Check("couldn't load allowlist", err) == nil {
+		jc.Encode(allowlist)
+	}
+}
+
+func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
+	ctx := jc.Request.Context()
+	var req api.UpdateAllowlistRequest
+	if jc.Decode(&req) == nil {
+		if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove)) != nil {
+			return
+		}
+	}
+}
+
 func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
 	blocklist, err := b.hdb.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
@@ -477,15 +495,8 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateBlocklistRequest
 	if jc.Decode(&req) == nil {
-		for _, entry := range req.Add {
-			if jc.Check(fmt.Sprintf("couldn't add blocklist entry '%s'", entry), b.hdb.AddHostBlocklistEntry(ctx, entry)) != nil {
-				return
-			}
-		}
-		for _, entry := range req.Remove {
-			if jc.Check(fmt.Sprintf("couldn't remove blocklist entry '%s'", entry), b.hdb.RemoveHostBlocklistEntry(ctx, entry)) != nil {
-				return
-			}
+		if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove)) != nil {
+			return
 		}
 	}
 }
@@ -896,6 +907,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /host/:hostkey":      b.hostsPubkeyHandlerGET,
 		"POST   /hosts/interactions": b.hostsPubkeyHandlerPOST,
 		"POST   /hosts/remove":       b.hostsRemoveHandlerPOST,
+		"GET    /hosts/allowlist":    b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":    b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":    b.hostsBlocklistHandlerGET,
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,

@@ -28,6 +28,7 @@ const (
 )
 
 var (
+	errHostBlocked      = errors.New("host is blocked")
 	errHostOffline      = errors.New("host is offline")
 	errLowScore         = errors.New("host's score is below minimum")
 	errHostRedundantIP  = errors.New("host has redundant IP")
