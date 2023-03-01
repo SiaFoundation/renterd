@@ -184,10 +184,11 @@ func (a *accounts) refillWorkerAccounts() {
 				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
 					"account", account.ID,
 					"host", contract.HostKey,
-					"balance", account.Balance)
+					"balance", account.Balance,
+					"fundAmt", fundCurrency.String())
 				return err
 			}
-			a.logger.Info("Successfully funded account",
+			a.logger.Infow("Successfully funded account",
 				"account", account.ID,
 				"host", contract.HostKey,
 				"fundAmt", fundCurrency.String())
