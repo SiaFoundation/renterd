@@ -423,28 +423,28 @@ func (db *SQLStore) RecordContractSpending(ctx context.Context, records []api.Co
 	for _, r := range records {
 		squashedRecords[r.ContractID] = squashedRecords[r.ContractID].Add(r.ContractSpending)
 	}
-	for fcid, cs := range squashedRecords {
+	for fcid, newSpending := range squashedRecords {
 		err := db.db.Transaction(func(tx *gorm.DB) error {
-			var c dbContract
+			var contract dbContract
 			err := tx.Model(&dbContract{}).
 				Where("fcid = ?", fileContractID(fcid)).
-				Take(&c).Error
+				Take(&contract).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil // contract not found, continue with next one
 			} else if err != nil {
 				return err
 			}
 			updates := make(map[string]interface{})
-			if !cs.Uploads.IsZero() {
-				updates["upload_spending"] = currency(types.Currency(c.UploadSpending).Add(cs.Uploads))
+			if !newSpending.Uploads.IsZero() {
+				updates["upload_spending"] = currency(types.Currency(contract.UploadSpending).Add(newSpending.Uploads))
 			}
-			if !cs.Downloads.IsZero() {
-				updates["download_spending"] = currency(types.Currency(c.DownloadSpending).Add(cs.Downloads))
+			if !newSpending.Downloads.IsZero() {
+				updates["download_spending"] = currency(types.Currency(contract.DownloadSpending).Add(newSpending.Downloads))
 			}
-			if !cs.FundAccount.IsZero() {
-				updates["fund_account_spending"] = currency(types.Currency(c.FundAccountSpending).Add(cs.FundAccount))
+			if !newSpending.FundAccount.IsZero() {
+				updates["fund_account_spending"] = currency(types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount))
 			}
-			return tx.Model(&dbContract{}).Where("id", c.ID).Updates(updates).Error
+			return tx.Model(&contract).Updates(updates).Error
 		})
 		if err != nil {
 			return err
