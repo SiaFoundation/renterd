@@ -22,6 +22,10 @@ import (
 )
 
 const (
+	// contractHostPriceTableTimeout is the amount of time we wait to receive a
+	// price table from the host
+	contractHostPriceTableTimeout = 10 * time.Second
+
 	// contractHostTimeout is the amount of time we wait to receive the latest
 	// revision from the host
 	contractHostTimeout = 30 * time.Second
@@ -325,7 +329,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 		}
 
 		// fetch price table
-		pt, err := c.ap.worker.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), 30*time.Second)
+		pt, err := c.ap.worker.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), contractHostPriceTableTimeout)
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			continue
@@ -745,7 +749,7 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		if h.Settings == nil {
 			continue // host has not been scanned yet
 		}
-		pt, err := c.ap.worker.RHPPriceTable(ctx, h.PublicKey, h.Settings.SiamuxAddr(), 30*time.Second)
+		pt, err := c.ap.worker.RHPPriceTable(ctx, h.PublicKey, h.Settings.SiamuxAddr(), contractHostPriceTableTimeout)
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", h.PublicKey, err)
 			continue
