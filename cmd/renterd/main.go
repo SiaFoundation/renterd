@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -303,7 +304,7 @@ func main() {
 	log.Println("bus: Listening on", syncerAddress)
 
 	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, os.Interrupt)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 	select {
 	case <-signalCh:
 		log.Println("Shutting down...")
