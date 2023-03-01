@@ -468,6 +468,30 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
+func (w *worker) rhpPriceTableHandler(jc jape.Context) {
+	var rptr api.RHPPriceTableRequest
+	if jc.Decode(&rptr) != nil {
+		return
+	}
+
+	ctx := jc.Request.Context()
+	if rptr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), rptr.Timeout)
+		defer cancel()
+	}
+
+	var pt rhpv3.HostPriceTable
+	if jc.Check("could not get price table", w.withTransportV3(ctx, rptr.SiamuxAddr, rptr.HostKey, func(t *rhpv3.Transport) (err error) {
+		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+		return
+	})) != nil {
+		return
+	}
+
+	jc.Encode(pt)
+}
+
 func (w *worker) rhpFormHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var rfr api.RHPFormRequest
@@ -1041,6 +1065,7 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/form":             w.rhpFormHandler,
 		"POST   /rhp/renew":            w.rhpRenewHandler,
 		"POST   /rhp/fund":             w.rhpFundHandler,
+		"POST   /rhp/pricetable":       w.rhpPriceTableHandler,
 		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
 
