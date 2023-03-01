@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -56,7 +57,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	}
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
-	} else if gouging, reason := isGouging(gs, rs, settings); gouging {
+	} else if gouging, reason := isGouging(gs, rs, settings, nil); gouging { // TODO pass pricetable
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
 	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
 		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
@@ -141,28 +142,28 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 	return blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 }
 
-func isGouging(gs api.GougingSettings, rs api.RedundancySettings, settings rhpv2.HostSettings) (bool, string) {
-	return worker.IsGouging(gs, settings, rs.MinShards, rs.TotalShards)
+func isGouging(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (bool, string) {
+	return worker.IsGouging(gs, hs, pt, rs.MinShards, rs.TotalShards)
 }
 
-func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (rhpv2.HostSettings, bool, string) {
+func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (*rhpv2.HostSettings, bool, string) {
 	settings := h.Settings
 	if settings == nil {
-		return rhpv2.HostSettings{}, true, "no settings"
+		return nil, true, "no settings"
 	}
 	if !settings.AcceptingContracts {
-		return *settings, true, "not accepting contracts"
+		return nil, true, "not accepting contracts"
 	}
 	if cfg.Contracts.Period+cfg.Contracts.RenewWindow > settings.MaxDuration {
-		return *settings, true, fmt.Sprintf("max duration too low, %v > %v", cfg.Contracts.Period+cfg.Contracts.RenewWindow, settings.MaxDuration)
+		return nil, true, fmt.Sprintf("max duration too low, %v > %v", cfg.Contracts.Period+cfg.Contracts.RenewWindow, settings.MaxDuration)
 	}
 	maxBaseRPCPrice := settings.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
 	if settings.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
-		return *settings, true, fmt.Sprintf("base RPC price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
+		return nil, true, fmt.Sprintf("base RPC price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
 	}
 	maxSectorAccessPrice := settings.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
 	if settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
-		return *settings, true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
+		return nil, true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
 	}
-	return *settings, false, ""
+	return settings, false, ""
 }
