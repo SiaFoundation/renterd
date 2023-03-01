@@ -400,6 +400,25 @@ func TestEphemeralAccounts(t *testing.T) {
 	if !reflect.DeepEqual(accounts, accounts2) {
 		t.Fatal("worker's accounts weren't persisted")
 	}
+
+	// Reset drift again.
+	if err := cluster2.Worker.ResetDrift(context.Background(), acc.ID); err != nil {
+		t.Fatal(err)
+	}
+	accounts2, err = cluster2.Worker.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
+		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
+	}
+	accounts2, err = cluster2.Bus.Accounts(context.Background(), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
+		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
+	}
 }
 
 // newTestLogger creates a console logger used for testing.

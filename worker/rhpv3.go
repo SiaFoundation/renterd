@@ -163,6 +163,29 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 	return acc, nil
 }
 
+func (a *accounts) ResetDrift(ctx context.Context, id rhpv3.Account) error {
+	a.mu.Lock()
+	account, exists := a.accounts[id]
+	if !exists {
+		a.mu.Unlock()
+		return errors.New("account doesn't exist")
+	}
+	a.mu.Unlock()
+	return account.resetDrift(ctx)
+}
+
+func (a *account) resetDrift(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.bus.ResetDrift(ctx, a.id); err != nil {
+		return err
+	}
+	a.balanceMu.Lock()
+	a.drift.SetInt64(0)
+	a.balanceMu.Unlock()
+	return nil
+}
+
 // WithDeposit increases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
 func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency, error)) error {

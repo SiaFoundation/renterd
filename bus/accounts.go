@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"errors"
 	"math/big"
 	"sync"
 
@@ -80,6 +81,19 @@ func (a *accounts) Accounts(owner string) []api.Account {
 	return accounts
 }
 
+// ResetDrift resets the drift on an account.
+func (a *accounts) ResetDrift(id rhpv3.Account) error {
+	a.mu.Lock()
+	account, exists := a.byID[id]
+	if !exists {
+		a.mu.Unlock()
+		return errors.New("account doesn't exist")
+	}
+	a.mu.Unlock()
+	account.resetDrift()
+	return nil
+}
+
 // ToPersist returns all known accounts to be persisted by the storage backend.
 // Called once on shutdown.
 func (a *accounts) ToPersist() []api.Account {
@@ -120,4 +134,10 @@ func (a *accounts) account(id rhpv3.Account, owner string, hk types.PublicKey) *
 		a.byOwner[owner] = append(a.byOwner[owner], acc)
 	}
 	return acc
+}
+
+func (a *account) resetDrift() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Drift.SetInt64(0)
 }

@@ -540,6 +540,12 @@ func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string,
 	return
 }
 
+// ResetDrift resets the drift of an account to zero.
+func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
+	return
+}
+
 // NewClient returns a client that communicates with a renterd store server
 // listening on the specified address.
 func NewClient(addr, password string) *Client {

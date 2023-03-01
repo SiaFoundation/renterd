@@ -205,6 +205,7 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 type AccountStore interface {
 	Accounts(ctx context.Context, owner string) ([]api.Account, error)
 	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	ResetDrift(ctx context.Context, id rhpv3.Account) error
 	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
 }
 
@@ -1006,10 +1007,21 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	return w
 }
 
+func (w *worker) accountsResetDriftHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	if jc.Check("failed to reset drift", w.accounts.ResetDrift(jc.Request.Context(), id)) != nil {
+		return
+	}
+}
+
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /accounts": w.accountsHandlerGET,
+		"GET    /accounts":                w.accountsHandlerGET,
+		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,
