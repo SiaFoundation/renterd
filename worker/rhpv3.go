@@ -114,17 +114,7 @@ func (a *accounts) All() ([]api.Account, error) {
 	defer a.mu.Unlock()
 	accounts := make([]api.Account, 0, len(a.accounts))
 	for _, acc := range a.accounts {
-		acc.mu.RLock()
-		acc.balanceMu.Lock()
-		accounts = append(accounts, api.Account{
-			ID:      acc.id,
-			Balance: new(big.Int).Set(acc.balance),
-			Drift:   new(big.Int).Set(acc.drift),
-			Host:    acc.host,
-			Owner:   acc.owner,
-		})
-		acc.balanceMu.Unlock()
-		acc.mu.RUnlock()
+		accounts = append(accounts, acc.Convert())
 	}
 	return accounts, nil
 }
@@ -172,6 +162,20 @@ func (a *accounts) ResetDrift(ctx context.Context, id rhpv3.Account) error {
 	}
 	a.mu.Unlock()
 	return account.resetDrift(ctx)
+}
+
+func (a *account) Convert() api.Account {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	a.balanceMu.Lock()
+	defer a.balanceMu.Unlock()
+	return api.Account{
+		ID:      a.id,
+		Balance: new(big.Int).Set(a.balance),
+		Drift:   new(big.Int).Set(a.drift),
+		Host:    a.host,
+		Owner:   a.owner,
+	}
 }
 
 func (a *account) resetDrift(ctx context.Context) error {

@@ -268,7 +268,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	cluster, err := newTestCluster(dir, zap.New(zapcore.NewNopCore()))
+	cluster, err := newTestCluster(dir, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

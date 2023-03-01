@@ -981,6 +981,18 @@ func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency, blockHei
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, blockHeight+6, pk) // 1 hour valid
 }
 
+func (w *worker) accountHandlerGET(jc jape.Context) {
+	var host types.PublicKey
+	if jc.DecodeParam("id", &host) != nil {
+		return
+	}
+	account, err := w.accounts.ForHost(host)
+	if jc.Check("failed to fetch accounts", err) != nil {
+		return
+	}
+	jc.Encode(account.Convert())
+}
+
 func (w *worker) accountsHandlerGET(jc jape.Context) {
 	accounts, err := w.accounts.All()
 	if jc.Check("failed to fetch accounts", err) != nil {
@@ -1021,6 +1033,7 @@ func (w *worker) accountsResetDriftHandlerPOST(jc jape.Context) {
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
 		"GET    /accounts":                w.accountsHandlerGET,
+		"GET    /accounts/host/:id":       w.accountHandlerGET,
 		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,

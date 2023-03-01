@@ -176,6 +176,12 @@ func (c *Client) ActiveContracts(ctx context.Context, hostTimeout time.Duration)
 	return
 }
 
+// Account requests the worker's /accounts/:host endpoint.
+func (c *Client) Account(ctx context.Context, host types.PublicKey) (account api.Account, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts/host/%s", host), &account)
+	return
+}
+
 // Accounts requests the worker's /accounts endpoint.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
 	err = c.c.WithContext(ctx).GET("/accounts", &accounts)

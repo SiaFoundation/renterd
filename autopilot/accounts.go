@@ -106,16 +106,6 @@ func (a *accounts) refillWorkerAccounts() {
 	}
 	a.mu.Unlock()
 
-	accounts, err := a.w.Accounts(ctx)
-	if err != nil {
-		a.logger.Errorw(fmt.Sprintf("failed to fetch accounts for refill: %s", err))
-		return
-	}
-	accountForHost := make(map[types.PublicKey]api.Account, len(accounts))
-	for _, acc := range accounts {
-		accountForHost[acc.Host] = acc
-	}
-
 	// Fund an account for every contract we have.
 	for _, contract := range contractForHost {
 		// Only launch a refill goroutine if no refill is in progress.
@@ -126,21 +116,14 @@ func (a *accounts) refillWorkerAccounts() {
 			// Remove from in-progress refills once done.
 			defer a.markRefillDone(contract.HostKey)
 
-			// Fetch the account. This might be zero so use accordingly.
-			account := accountForHost[contract.HostKey]
-			if account.Balance == nil {
-				account.Balance = new(big.Int)
-			}
-			if account.Drift == nil {
-				account.Drift = new(big.Int)
-			}
+			// Limit the time a refill can take.
+			ctx, cancel := context.WithTimeout(ctx, time.Minute)
+			defer cancel()
 
 			// Add tracing.
 			ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 			defer span.End()
-			span.SetAttributes(attribute.Stringer("account", account.ID))
 			span.SetAttributes(attribute.Stringer("host", contract.HostKey))
-			span.SetAttributes(attribute.Stringer("balance", account.Balance))
 			defer func() {
 				if err != nil {
 					span.RecordError(err)
@@ -148,9 +131,15 @@ func (a *accounts) refillWorkerAccounts() {
 				}
 			}()
 
-			// Limit the time a refill can take.
-			ctx, cancel := context.WithTimeout(ctx, time.Minute)
-			defer cancel()
+			// Fetch the account.
+			account, err := a.w.Account(ctx, contract.HostKey)
+			if err != nil {
+				return err
+			}
+
+			// Add more tracing info.
+			span.SetAttributes(attribute.Stringer("account", account.ID))
+			span.SetAttributes(attribute.Stringer("balance", account.Balance))
 
 			// Check if a host is potentially cheating before refilling.
 			// We only check against the max drift if the account's drift is
