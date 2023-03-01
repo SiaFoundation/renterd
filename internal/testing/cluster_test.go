@@ -388,7 +388,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 	}()
 
-	// Check that accoutns were loaded from the bus correctly.
+	// Check that accounts were loaded from the bus correctly.
 	// NOTE: since we updated the balance directly on the bus, we need to
 	// manually fix the balance and drift before comparing.
 	accounts[0].Balance = newBalance.Big()

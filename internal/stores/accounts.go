@@ -45,7 +45,7 @@ func (a dbAccount) convert() api.Account {
 	}
 }
 
-// Accounts returns all accoutns from the db.
+// Accounts returns all accounts from the db.
 func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
 	var dbAccounts []dbAccount
 	if err := s.db.Find(&dbAccounts).Error; err != nil {

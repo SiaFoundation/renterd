@@ -16,9 +16,9 @@ import (
 )
 
 var (
-	minBalance = types.Siacoins(1).Div64(2).Big()
-	maxBalance = types.Siacoins(1).Big()
-	maxDrift   = types.Siacoins(10).Big()
+	minBalance  = types.Siacoins(1).Div64(2).Big()
+	maxBalance  = types.Siacoins(1).Big()
+	maxNegDrift = new(big.Int).Neg(types.Siacoins(10).Big())
 )
 
 type accounts struct {
@@ -153,7 +153,10 @@ func (a *accounts) refillWorkerAccounts() {
 			defer cancel()
 
 			// Check if a host is potentially cheating before refilling.
-			if account.Drift.CmpAbs(maxDrift) > 0 {
+			// We only check against the max drift if the account's drift is
+			// negative because we don't care if we have more money than
+			// expected.
+			if account.Drift.Cmp(maxNegDrift) < 0 {
 				a.logger.Error("not refilling account since host is potentially cheating",
 					"account", account.ID,
 					"host", contract.HostKey,
@@ -183,8 +186,6 @@ func (a *accounts) refillWorkerAccounts() {
 			}
 
 			if err := a.w.RHPFund(ctx, contract.ID, contract.HostKey, fundCurrency); err != nil {
-				// TODO: depending on the error, resync the account balance with
-				// the host through the worker.
 				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
 					"account", account.ID,
 					"host", contract.HostKey,
