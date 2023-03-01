@@ -399,26 +399,20 @@ func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 	panic("not implemented")
 }
 
-func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
-	err = r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
+	return r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = withTransportV3(ctx, r.siamuxAddr, r.HostKey(), func(t *rhpv3.Transport) error {
 			cost, err := readSectorCost(r.pt)
 			if err != nil {
 				return err
 			}
 
-			var data []byte
 			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.sk)
-			data, amount, err = RPCReadSector(t, r.pt, &payment, offset, length, root, true)
-			if err != nil {
-				return err
-			}
-			_, err = w.Write(data)
+			amount, err = RPCReadSector(t, w, r.pt, &payment, offset, length, root, true)
 			return err
 		})
 		return
 	})
-	return
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
@@ -704,7 +698,7 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(t *rhpv3.Transport, pt *rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (data []byte, cost types.Currency, err error) {
+func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
 	s := t.DialStream()
 	defer s.Close()
@@ -730,20 +724,20 @@ func RPCReadSector(t *rhpv3.Transport, pt *rhpv3.HostPriceTable, payment rhpv3.P
 	var cancellationToken types.Specifier
 	var resp rhpv3.RPCExecuteProgramResponse
 	if err := s.WriteRequest(rhpv3.RPCExecuteProgramID, &pt.UID); err != nil {
-		return nil, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	} else if err := processPayment(s, payment); err != nil {
-		return nil, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	} else if err := s.WriteResponse(&req); err != nil {
-		return nil, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	} else if err := s.ReadResponse(&cancellationToken, 16); err != nil {
-		return nil, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
-		return nil, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	}
 
 	// check response error
 	if resp.Error != nil {
-		return nil, types.ZeroCurrency, resp.Error
+		return types.ZeroCurrency, resp.Error
 	}
 
 	// build proof
@@ -761,7 +755,10 @@ func RPCReadSector(t *rhpv3.Transport, pt *rhpv3.HostPriceTable, payment rhpv3.P
 
 	// TODO: handle resp.FailureRefund (?)
 
-	return resp.Output, resp.TotalCost, nil
+	if _, err = w.Write(resp.Output); err != nil {
+		return resp.TotalCost, err
+	}
+	return resp.TotalCost, nil
 }
 
 // RPCReadRegistry calls the ExecuteProgram RPC with an MDM program that reads
