@@ -167,11 +167,6 @@ func (a *accounts) refillWorkerAccounts() {
 
 			// Check if refill is needed and perform it if necessary.
 			if account.Balance.Cmp(minBalance) >= 0 {
-				a.logger.Debugw("contract doesn't require funding",
-					"account", account.ID,
-					"host", contract.HostKey,
-					"balance", account.Balance,
-					"minBalance", minBalance)
 				return nil // nothing to do
 			}
 			fundAmt := new(big.Int).Sub(maxBalance, account.Balance)
