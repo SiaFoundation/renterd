@@ -39,7 +39,7 @@ type Bus interface {
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 
 	// hostdb
-	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error)
+	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 	HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error

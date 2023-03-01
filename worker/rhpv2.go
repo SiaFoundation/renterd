@@ -231,7 +231,7 @@ func (s *Session) Append(ctx context.Context, sector *[rhpv2.SectorSize]byte, pr
 // Close gracefully terminates the session and closes the underlying connection.
 func (s *Session) Close() (err error) {
 	defer wrapErr(&err, "Close")
-	return s.transport.Close()
+	return s.closeTransport()
 }
 
 // Delete calls the Write RPC with a set of Swap and Trim actions that delete
@@ -372,9 +372,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID) (err error) {
 	defer wrapErr(&err, "Reconnect")
 
-	if s.transport != nil {
-		s.transport.Close()
-	}
+	s.closeTransport()
 
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	if err != nil {
@@ -387,12 +385,12 @@ func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.Pu
 
 	s.key = renterKey
 	if err = s.lock(ctx, contractID, renterKey, 10*time.Second); err != nil {
-		s.transport.Close()
+		s.closeTransport()
 		return err
 	}
 
 	if err := s.updateSettings(ctx); err != nil {
-		s.transport.Close()
+		s.closeTransport()
 		return err
 	}
 
@@ -726,6 +724,13 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 	s.revision.Revision = rev
 	s.revision.Signatures[0].Signature = renterSig.Signature[:]
 	s.revision.Signatures[1].Signature = hostSig.Signature[:]
+	return nil
+}
+
+func (s *Session) closeTransport() error {
+	if s.transport != nil {
+		return s.transport.Close()
+	}
 	return nil
 }
 

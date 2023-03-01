@@ -225,7 +225,7 @@ type Bus interface {
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
-	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error)
+	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 
 	DownloadParams(ctx context.Context) (api.DownloadParams, error)
 	GougingParams(ctx context.Context) (api.GougingParams, error)

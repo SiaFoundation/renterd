@@ -212,7 +212,7 @@ func (c *Client) WalletPending(ctx context.Context) (resp []types.Transaction, e
 }
 
 // Host returns information about a particular host known to the server.
-func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.Host, err error) {
+func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.HostInfo, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/host/%s", hostKey), &h)
 	return
 }
@@ -239,6 +239,18 @@ func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures u
 		MinRecentScanFailures: minRecentScanFailures,
 		MaxDowntimeHours:      api.ParamDurationHour(maxDowntime),
 	}, &removed)
+	return
+}
+
+// HostAllowlist returns the allowlist.
+func (c *Client) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
+	err = c.c.WithContext(ctx).GET("/hosts/allowlist", &allowlist)
+	return
+}
+
+// UpdateHostAllowlist updates the host allowlist, adding and removing the given entries.
+func (c *Client) UpdateHostAllowlist(ctx context.Context, add, remove []types.PublicKey) (err error) {
+	err = c.c.WithContext(ctx).PUT("/hosts/allowlist", api.UpdateAllowlistRequest{Add: add, Remove: remove})
 	return
 }
 

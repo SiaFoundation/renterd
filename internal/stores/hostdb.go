@@ -66,7 +66,15 @@ type (
 		LastAnnouncement time.Time
 		NetAddress       string `gorm:"index"`
 
+		Allowlist []dbAllowlistEntry `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
 		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
+	}
+
+	// dbAllowlistEntry defines a table that stores the host blocklist.
+	dbAllowlistEntry struct {
+		Model
+		Entry publicKey `gorm:"unique;index;NOT NULL;size:32"`
+		Hosts []dbHost  `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbBlocklistEntry defines a table that stores the host blocklist.
@@ -183,6 +191,9 @@ func (dbHost) TableName() string { return "hosts" }
 func (dbInteraction) TableName() string { return "host_interactions" }
 
 // TableName implements the gorm.Tabler interface.
+func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
+
+// TableName implements the gorm.Tabler interface.
 func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
 
 // convert converts a host into a hostdb.Host.
@@ -216,6 +227,27 @@ func (h dbHost) convert() hostdb.Host {
 }
 
 func (h *dbHost) AfterCreate(tx *gorm.DB) (err error) {
+	// fetch allowlist and filter the entries that apply to this host
+	var dbAllowlist []dbAllowlistEntry
+	if err := tx.
+		Model(&dbAllowlistEntry{}).
+		Find(&dbAllowlist).
+		Error; err != nil {
+		return err
+	}
+	allowlist := dbAllowlist[:0]
+	for _, entry := range dbAllowlist {
+		if entry.Entry == h.PublicKey {
+			allowlist = append(allowlist, entry)
+		}
+	}
+
+	// update the association on the host
+	if err := tx.Model(h).Association("Allowlist").Replace(&allowlist); err != nil {
+		return err
+	}
+
+	// fetch blocklist and filter the entries that apply to this host
 	var dbBlocklist []dbBlocklistEntry
 	if err := tx.
 		Model(&dbBlocklistEntry{}).
@@ -223,14 +255,15 @@ func (h *dbHost) AfterCreate(tx *gorm.DB) (err error) {
 		Error; err != nil {
 		return err
 	}
-
-	filtered := dbBlocklist[:0]
+	blocklist := dbBlocklist[:0]
 	for _, entry := range dbBlocklist {
 		if entry.blocks(h) {
-			filtered = append(filtered, entry)
+			blocklist = append(blocklist, entry)
 		}
 	}
-	return tx.Model(h).Association("Blocklist").Replace(&filtered)
+
+	// update the association on the host
+	return tx.Model(h).Association("Blocklist").Replace(&blocklist)
 }
 
 func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
@@ -241,7 +274,44 @@ func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
-func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) (err error) {
+func (e *dbAllowlistEntry) AfterCreate(tx *gorm.DB) error {
+	// NOTE: the ID is zero here if we ignore a conflict on create
+	if e.ID == 0 {
+		return nil
+	}
+
+	params := map[string]interface{}{
+		"entry_id":    e.ID,
+		"exact_entry": publicKey(e.Entry),
+	}
+
+	// insert entries into the allowlist
+	if isSQLite(tx) {
+		return tx.Exec(`INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+SELECT id
+FROM hosts
+WHERE public_key = @exact_entry
+)`, params).Error
+	}
+
+	return tx.Exec(`INSERT IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+	SELECT id
+	FROM hosts
+	WHERE public_key=@exact_entry
+) AS _`, params).Error
+}
+
+func (e *dbAllowlistEntry) BeforeCreate(tx *gorm.DB) (err error) {
+	tx.Statement.AddClause(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "entry"}},
+		DoNothing: true,
+	})
+	return nil
+}
+
+func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) error {
 	// NOTE: the ID is zero here if we ignore a conflict on create
 	if e.ID == 0 {
 		return nil
@@ -253,13 +323,22 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) (err error) {
 		"like_entry":  fmt.Sprintf("%%.%s", e.Entry),
 	}
 
-	err = tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+	// insert entries into the blocklist
+	if isSQLite(tx) {
+		return tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
 SELECT @entry_id, id FROM (
 	SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
 	FROM hosts
-	WHERE net_host == @exact_entry OR net_host LIKE @like_entry
+	WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
 )`, params).Error
-	return
+	}
+
+	return tx.Exec(`INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+	SELECT id
+	FROM hosts
+	WHERE net_address=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address))=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address)) LIKE @like_entry
+) AS _`, params).Error
 }
 
 func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
@@ -280,17 +359,24 @@ func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
 }
 
 // Host returns information about a host.
-func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.Host, error) {
+func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error) {
 	var h dbHost
 
 	tx := ss.db.
-		Scopes(ExcludeBlockedHosts).
 		Where(&dbHost{PublicKey: publicKey(hostKey)}).
+		Preload("Allowlist").
+		Preload("Blocklist").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.Host{}, ErrHostNotFound
+		return hostdb.HostInfo{}, ErrHostNotFound
+	} else if tx.Error != nil {
+		return hostdb.HostInfo{}, tx.Error
 	}
-	return h.convert(), tx.Error
+
+	return hostdb.HostInfo{
+		Host:    h.convert(),
+		Blocked: ss.isBlocked(h),
+	}, nil
 }
 
 // HostsForScanning returns the address of hosts for scanning.
@@ -306,7 +392,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	var hostAddresses []hostdb.HostAddress
 
 	err := ss.db.
-		Scopes(ExcludeBlockedHosts).
+		Scopes(ss.blocklist).
 		Model(&dbHost{}).
 		Where("last_scan < ?", maxLastScan.UnixNano()).
 		Offset(offset).
@@ -338,7 +424,7 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 	var fullHosts []dbHost
 
 	err := ss.db.
-		Scopes(ExcludeBlockedHosts).
+		Scopes(ss.blocklist).
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
@@ -365,17 +451,78 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	return
 }
 
-func (ss *SQLStore) AddHostBlocklistEntry(ctx context.Context, entry string) error {
-	return ss.db.Create(&dbBlocklistEntry{Entry: entry}).Error
+func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey) (err error) {
+	if len(add)+len(remove) == 0 {
+		return nil
+	}
+	defer ss.updateHasAllowlist(&err)
+
+	var toInsert []dbAllowlistEntry
+	for _, entry := range add {
+		toInsert = append(toInsert, dbAllowlistEntry{Entry: publicKey(entry)})
+	}
+
+	toDelete := make([]publicKey, len(remove))
+	for i, entry := range remove {
+		toDelete[i] = publicKey(entry)
+	}
+
+	return ss.db.Transaction(func(tx *gorm.DB) error {
+		if len(toInsert) > 0 {
+			if err := tx.Create(&toInsert).Error; err != nil {
+				return err
+			}
+		}
+		if len(toDelete) > 0 {
+			if err := tx.Delete(&dbAllowlistEntry{}, "entry IN ?", toDelete).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-func (db *SQLStore) RemoveHostBlocklistEntry(ctx context.Context, entry string) (err error) {
-	err = db.db.Where(&dbBlocklistEntry{Entry: entry}).Delete(&dbBlocklistEntry{}).Error
+func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string) (err error) {
+	if len(add)+len(remove) == 0 {
+		return nil
+	}
+	defer ss.updateHasBlocklist(&err)
+
+	var toInsert []dbBlocklistEntry
+	for _, entry := range add {
+		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
+	}
+
+	return ss.db.Transaction(func(tx *gorm.DB) error {
+		if len(toInsert) > 0 {
+			if err := tx.Create(&toInsert).Error; err != nil {
+				return err
+			}
+		}
+		if len(remove) > 0 {
+			if err := tx.Delete(&dbBlocklistEntry{}, "entry IN ?", remove).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
+	var pubkeys []publicKey
+	err = ss.db.
+		Model(&dbAllowlistEntry{}).
+		Pluck("entry", &pubkeys).
+		Error
+
+	for _, pubkey := range pubkeys {
+		allowlist = append(allowlist, types.PublicKey(pubkey))
+	}
 	return
 }
 
-func (db *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
-	err = db.db.
+func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
+	err = ss.db.
 		Model(&dbBlocklistEntry{}).
 		Pluck("entry", &blocklist).
 		Error
@@ -384,7 +531,7 @@ func (db *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err 
 
 // RecordHostInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
-func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
+func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
 	if len(interactions) == 0 {
 		return nil // nothing to do
 	}
@@ -404,7 +551,7 @@ func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 	// transaction since we don't need it to be perfectly
 	// consistent.
 	var hosts []dbHost
-	if err := db.db.Where("public_key IN ?", hks).
+	if err := ss.db.Where("public_key IN ?", hks).
 		Find(&hosts).Error; err != nil {
 		return err
 	}
@@ -415,7 +562,7 @@ func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 
 	// Write the interactions and update to the hosts atmomically within a
 	// single transaction.
-	return db.db.Transaction(func(tx *gorm.DB) error {
+	return ss.db.Transaction(func(tx *gorm.DB) error {
 		// Apply all the interactions to the hosts.
 		dbInteractions := make([]dbInteraction, 0, len(interactions))
 		for _, interaction := range interactions {
@@ -496,7 +643,7 @@ func (db *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.
-func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
+func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	height := uint64(cc.InitialHeight())
 	for range cc.RevertedBlocks {
 		height--
@@ -516,31 +663,53 @@ func (db *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height++
 	}
 
-	db.unappliedAnnouncements = append(db.unappliedAnnouncements, newAnnouncements...)
-	db.unappliedCCID = cc.ID
+	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
+	ss.unappliedCCID = cc.ID
 
 	// Apply new announcements
-	if time.Since(db.lastAnnouncementSave) > db.persistInterval || len(db.unappliedAnnouncements) >= announcementBatchSoftLimit {
-		err := db.db.Transaction(func(tx *gorm.DB) error {
-			if len(db.unappliedAnnouncements) > 0 {
-				if err := insertAnnouncements(tx, db.unappliedAnnouncements); err != nil {
+	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval || len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit {
+		err := ss.db.Transaction(func(tx *gorm.DB) error {
+			if len(ss.unappliedAnnouncements) > 0 {
+				if err := insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
 					return err
 				}
 			}
-			return updateCCID(tx, db.unappliedCCID)
+			return updateCCID(tx, ss.unappliedCCID)
 		})
 		if err != nil {
 			// NOTE: print error. If we failed due to a temporary error
-			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(db.unappliedAnnouncements)))
+			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(ss.unappliedAnnouncements)))
 		}
 
-		db.unappliedAnnouncements = db.unappliedAnnouncements[:0]
-		db.lastAnnouncementSave = time.Now()
+		ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
+		ss.lastAnnouncementSave = time.Now()
 	}
 }
 
-func ExcludeBlockedHosts(db *gorm.DB) *gorm.DB {
-	return db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+func (ss *SQLStore) blocklist(db *gorm.DB) *gorm.DB {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.hasAllowlist {
+		db = db.Where("EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	if ss.hasBlocklist {
+		db = db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	return db
+}
+
+func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.hasAllowlist && len(h.Allowlist) == 0 {
+		blocked = true
+	}
+	if ss.hasBlocklist && len(h.Blocklist) > 0 {
+		blocked = true
+	}
+	return
 }
 
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
