@@ -407,8 +407,10 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 				return err
 			}
 
+			var refund types.Currency
 			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.sk)
-			amount, err = RPCReadSector(t, w, r.pt, &payment, offset, length, root, true)
+			cost, refund, err = RPCReadSector(t, w, r.pt, &payment, offset, length, root, true)
+			amount = cost.Sub(refund)
 			return err
 		})
 		return
@@ -698,7 +700,7 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost types.Currency, err error) {
+func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
 	s := t.DialStream()
 	defer s.Close()
@@ -723,22 +725,24 @@ func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, pa
 
 	var cancellationToken types.Specifier
 	var resp rhpv3.RPCExecuteProgramResponse
-	if err := s.WriteRequest(rhpv3.RPCExecuteProgramID, &pt.UID); err != nil {
-		return types.ZeroCurrency, err
-	} else if err := processPayment(s, payment); err != nil {
-		return types.ZeroCurrency, err
-	} else if err := s.WriteResponse(&req); err != nil {
-		return types.ZeroCurrency, err
-	} else if err := s.ReadResponse(&cancellationToken, 16); err != nil {
-		return types.ZeroCurrency, err
-	} else if err := s.ReadResponse(&resp, 4096); err != nil {
-		return types.ZeroCurrency, err
+	if err = s.WriteRequest(rhpv3.RPCExecuteProgramID, &pt.UID); err != nil {
+		return
+	} else if err = processPayment(s, payment); err != nil {
+		return
+	} else if err = s.WriteResponse(&req); err != nil {
+		return
+	} else if err = s.ReadResponse(&cancellationToken, 16); err != nil {
+		return
+	} else if err = s.ReadResponse(&resp, 4096); err != nil {
+		return
 	}
 
 	// check response error
-	if resp.Error != nil {
-		return types.ZeroCurrency, resp.Error
+	if err = resp.Error; err != nil {
+		refund = resp.FailureRefund
+		return
 	}
+	cost = resp.TotalCost
 
 	// build proof
 	proof := make([]crypto.Hash, len(resp.Proof))
@@ -746,19 +750,16 @@ func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, pa
 		proof[i] = crypto.Hash(h)
 	}
 
-	// TODO: verify proof
-	// proofStart := int(offset) / crypto.SegmentSize
-	// proofEnd := int(offset+length) / crypto.SegmentSize
-	// if !crypto.VerifyRangeProof(data, proof, proofStart, proofEnd, crypto.Hash(merkleRoot)) {
-	// 	return nil, resp.TotalCost, errors.New("proof verification failed")
-	// }
-
-	// TODO: handle resp.FailureRefund (?)
-
-	if _, err = w.Write(resp.Output); err != nil {
-		return resp.TotalCost, err
+	// verify proof
+	proofStart := int(offset) / crypto.SegmentSize
+	proofEnd := int(offset+length) / crypto.SegmentSize
+	if !crypto.VerifyRangeProof(resp.Output, proof, proofStart, proofEnd, crypto.Hash(merkleRoot)) {
+		err = errors.New("proof verification failed")
+		return
 	}
-	return resp.TotalCost, nil
+
+	_, err = w.Write(resp.Output)
+	return
 }
 
 // RPCReadRegistry calls the ExecuteProgram RPC with an MDM program that reads
