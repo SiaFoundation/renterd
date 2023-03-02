@@ -57,7 +57,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	}
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
-	} else if gouging, reason := isGouging(gs, rs, settings, pt); gouging {
+	} else if gouging, reason := worker.IsGouging(gs, rs, settings, pt); gouging {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
 	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
 		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
@@ -140,10 +140,6 @@ func isBelowCollateralThreshold(expectedCollateral, actualCollateral types.Curre
 
 func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) bool {
 	return blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
-}
-
-func isGouging(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (bool, string) {
-	return worker.IsGouging(gs, hs, pt, rs.MinShards, rs.TotalShards)
 }
 
 func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (*rhpv2.HostSettings, bool, string) {
