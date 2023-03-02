@@ -527,7 +527,13 @@ func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction,
 }
 
 // Revision returns the current revision of the contract.
-func (s *Session) Revision() rhpv2.ContractRevision { return s.revision }
+func (s *Session) Revision() (rev rhpv2.ContractRevision) {
+	b, _ := json.Marshal(s.revision) // deep copy
+	if err := json.Unmarshal(b, &rev); err != nil {
+		panic(err) // should never happen
+	}
+	return rev
+}
 
 // SectorRoots calls the SectorRoots RPC, returning the requested range of
 // sector Merkle roots of the currently-locked contract.

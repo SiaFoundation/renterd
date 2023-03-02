@@ -71,9 +71,12 @@ type Bus interface {
 }
 
 type Worker interface {
+	Account(ctx context.Context, host types.PublicKey) (account api.Account, err error)
+	Accounts(ctx context.Context) (accounts []api.Account, err error)
 	ActiveContracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	MigrateSlab(ctx context.Context, s object.Slab) error
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
+	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error)
 	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
@@ -84,6 +87,7 @@ type Autopilot struct {
 	store  Store
 	worker Worker
 
+	a *accounts
 	c *contractor
 	m *migrator
 	s *scanner
@@ -134,6 +138,7 @@ func (ap *Autopilot) Run() error {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
 
+	var launchAccountRefillsOnce sync.Once
 	for {
 		select {
 		case <-ap.stopChan:
@@ -188,7 +193,17 @@ func (ap *Autopilot) Run() error {
 			// perform maintenance
 			err = ap.c.performContractMaintenance(ctx, cfg, cs)
 			if err != nil {
-				ap.logger.Errorf("contract maintenance failed, err: %v", err)
+				//ap.logger.Errorf("contract maintenance failed, err: %v", err)
+			}
+			maintenanceSuccess := err == nil
+
+			// launch account refills after successful contract maintenance.
+			if maintenanceSuccess {
+				ap.a.UpdateContracts(ctx, cfg)
+				launchAccountRefillsOnce.Do(func() {
+					ap.logger.Debug("account refills loop launched")
+					go ap.a.refillWorkersAccountsLoop(ap.stopChan)
+				})
 			}
 
 			// migration
@@ -268,7 +283,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64) (*Autopilot, error) {
+func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		bus:    bus,
 		logger: logger.Sugar().Named("autopilot"),
@@ -277,7 +292,6 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 
 		tickerDuration: heartbeat,
 	}
-
 	scanner, err := newScanner(
 		ap,
 		scannerBatchSize,
@@ -290,6 +304,7 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		return nil, err
 	}
 
+	ap.a = newAccounts(ap.logger, ap.bus, ap.worker, accountsRefillInterval)
 	ap.s = scanner
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap, migrationHealthCutoff)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -206,7 +205,8 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 type AccountStore interface {
 	Accounts(ctx context.Context, owner string) ([]api.Account, error)
 	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
-	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	ResetDrift(ctx context.Context, id rhpv3.Account) error
+	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
 }
 
 type contractLocker interface {
@@ -591,7 +591,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	hostIP := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
-	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityRenew, lockingPriorityFunding)
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityFunding, lockingDurationFunding)
 	if jc.Check("failed to acquire contract for funding EA", err) != nil {
 		return
 	}
@@ -624,18 +624,14 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Fund account.
-	err = account.WithDeposit(ctx, func() (types.Currency, error) {
-		return rfr.Amount, w.withTransportV3(ctx, hostIP, rfr.HostKey, func(t *rhpv3.Transport) (err error) {
-			rk := w.deriveRenterKey(rfr.HostKey)
-			cost := rfr.Amount.Add(pt.FundAccountCost)
-			payment, ok := rhpv3.PayByContract(&revision, cost, rhpv3.Account{}, rk) // no account needed for funding
-			if !ok {
-				return errors.New("insufficient funds")
-			}
-			w.contractSpendingRecorder.Record(rfr.ContractID, api.ContractSpending{FundAccount: cost})
-			return RPCFundAccount(t, &payment, account.id, pt.UID)
-		})
-	})
+	err = w.fundAccount(ctx, account, pt, hostIP, rfr.HostKey, rfr.Amount, &revision)
+
+	// If funding failed due to an exceeded max balance, we sync the account.
+	if isMaxBalanceExceeded(err) {
+		if err := w.syncAccount(ctx, account, pt, hostIP, rfr.HostKey); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+		}
+	}
 	if jc.Check("couldn't fund account", err) != nil {
 		return
 	}
@@ -665,7 +661,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	var pt rhpv3.HostPriceTable   // TODO
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
-	payment := w.preparePayment(rrur.HostKey, cost)
+	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
 	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
@@ -980,9 +976,21 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency) rhpv3.PayByEphemeralAccountRequest {
+func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency, blockHeight uint64) rhpv3.PayByEphemeralAccountRequest {
 	pk := w.accounts.deriveAccountKey(hk)
-	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, math.MaxUint64, pk)
+	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, blockHeight+6, pk) // 1 hour valid
+}
+
+func (w *worker) accountHandlerGET(jc jape.Context) {
+	var host types.PublicKey
+	if jc.DecodeParam("id", &host) != nil {
+		return
+	}
+	account, err := w.accounts.ForHost(host)
+	if jc.Check("failed to fetch accounts", err) != nil {
+		return
+	}
+	jc.Encode(account.Convert())
 }
 
 func (w *worker) accountsHandlerGET(jc jape.Context) {
@@ -1011,10 +1019,22 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	return w
 }
 
+func (w *worker) accountsResetDriftHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	if jc.Check("failed to reset drift", w.accounts.ResetDrift(jc.Request.Context(), id)) != nil {
+		return
+	}
+}
+
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /accounts": w.accountsHandlerGET,
+		"GET    /accounts":                w.accountsHandlerGET,
+		"GET    /accounts/host/:id":       w.accountHandlerGET,
+		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,

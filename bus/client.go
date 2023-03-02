@@ -542,12 +542,19 @@ func (c *Client) AddBalance(ctx context.Context, id rhpv3.Account, owner string,
 }
 
 // SetBalance sets the given account's balance to a certain amount.
-func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amount *big.Int) (err error) {
+func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amount, drift *big.Int) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
 		Host:   hk,
 		Owner:  api.ParamString(owner),
 		Amount: amount,
+		Drift:  drift,
 	}, nil)
+	return
+}
+
+// ResetDrift resets the drift of an account to zero.
+func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
 	return
 }
 

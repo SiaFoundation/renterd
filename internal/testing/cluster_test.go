@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,7 +268,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	cluster, err := newTestCluster(dir, zap.New(zapcore.NewNopCore()))
+	cluster, err := newTestCluster(dir, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,29 +293,24 @@ func TestEphemeralAccounts(t *testing.T) {
 		contract = contracts[0]
 	}
 
-	// Account shouldnt' exist.
-	ctx := context.Background()
-	accounts, err := w.Accounts(ctx)
+	// Wait for account to appear.
+	var accounts []api.Account
+	var ctx context.Context
+	err = Retry(100, 100*time.Millisecond, func() error {
+		accounts, err = w.Accounts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(accounts) != 1 {
+			return fmt.Errorf("wrong number of accounts %v", len(accounts))
+		}
+		if accounts[0].Balance.Cmp(new(big.Int)) == 0 {
+			return errors.New("balance is zero")
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(accounts) != 0 {
-		t.Fatalf("wrong number of accounts %v", len(accounts))
-	}
-
-	// Fund account.
-	fundAmt := types.Siacoins(1)
-	if err := w.RHPFund(ctx, contract.ID, contract.HostKey(), fundAmt); err != nil {
-		t.Fatal(err)
-	}
-
-	// Expected account balance should have increased.
-	accounts, err = w.Accounts(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(accounts) != 1 {
-		t.Fatalf("wrong number of accounts %v", len(accounts))
 	}
 	acc := accounts[0]
 	if acc.Balance.Cmp(types.Siacoins(1).Big()) != 0 {
@@ -342,6 +339,12 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal("bus account doesn't match worker account")
 	}
 
+	// Try to fund the account manually.
+	err = cluster.Worker.RHPFund(context.Background(), contract.ID, acc.Host, types.Siacoins(2))
+	if err == nil || !strings.Contains(err.Error(), "ephemeral account maximum balance exceeded") {
+		t.Fatal(err)
+	}
+
 	// Check that the spending was recorded for the contract. The recorded
 	// spending should be > the fundAmt since it consists of the fundAmt plus
 	// fee.
@@ -350,8 +353,24 @@ func TestEphemeralAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fundAmt := types.Siacoins(1)
 	if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
 		t.Fatalf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
+	}
+
+	// Update the balance to create some drift.
+	newBalance := fundAmt.Div64(2)
+	newDrift := new(big.Int).Sub(newBalance.Big(), fundAmt.Big())
+	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, "worker", acc.Host, newBalance.Big(), newDrift); err != nil {
+		t.Fatal(err)
+	}
+	busAccounts, err = cluster.Bus.Accounts(context.Background(), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busAcc = busAccounts[0]
+	if busAcc.Drift.Cmp(newDrift) != 0 {
+		t.Fatalf("drift was %v but should be %v", busAcc.Drift, newDrift)
 	}
 
 	// Shut down cluster.
@@ -369,12 +388,36 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 	}()
 
+	// Check that accounts were loaded from the bus correctly.
+	// NOTE: since we updated the balance directly on the bus, we need to
+	// manually fix the balance and drift before comparing.
+	accounts[0].Balance = newBalance.Big()
+	accounts[0].Drift = newDrift
 	accounts2, err := cluster2.Worker.Accounts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(accounts, accounts2) {
 		t.Fatal("worker's accounts weren't persisted")
+	}
+
+	// Reset drift again.
+	if err := cluster2.Worker.ResetDrift(context.Background(), acc.ID); err != nil {
+		t.Fatal(err)
+	}
+	accounts2, err = cluster2.Worker.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
+		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
+	}
+	accounts2, err = cluster2.Bus.Accounts(context.Background(), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
+		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
 	}
 }
 

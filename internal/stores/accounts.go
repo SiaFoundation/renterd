@@ -24,6 +24,10 @@ type (
 
 		// Balance is the balance of the account.
 		Balance *balance
+
+		// Drift is the accumulated delta between the bus' tracked balance for
+		// an account and the balance reported by a host.
+		Drift *balance
 	}
 )
 
@@ -36,11 +40,12 @@ func (a dbAccount) convert() api.Account {
 		ID:      rhpv3.Account(a.AccountID),
 		Host:    types.PublicKey(a.Host),
 		Balance: (*big.Int)(a.Balance),
+		Drift:   (*big.Int)(a.Drift),
 		Owner:   a.Owner,
 	}
 }
 
-// Accounts returns all accoutns from the db.
+// Accounts returns all accounts from the db.
 func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
 	var dbAccounts []dbAccount
 	if err := s.db.Find(&dbAccounts).Error; err != nil {
@@ -66,6 +71,7 @@ func (s *SQLStore) SaveAccounts(ctx context.Context, accounts []api.Account) err
 			AccountID: publicKey(acc.ID),
 			Host:      publicKey(acc.Host),
 			Balance:   (*balance)(acc.Balance),
+			Drift:     (*balance)(acc.Drift),
 		}
 	}
 	return s.db.Clauses(clause.OnConflict{

@@ -816,6 +816,16 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 	b.accounts.AddAmount(id, string(req.Owner), req.Host, req.Amount)
 }
 
+func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	if jc.Check("failed to reset drift", b.accounts.ResetDrift(id)) != nil {
+		return
+	}
+}
+
 func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
@@ -837,7 +847,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.SetBalance(id, string(req.Owner), req.Host, req.Amount)
+	b.accounts.SetBalance(id, string(req.Owner), req.Host, req.Amount, req.Drift)
 }
 
 // New returns a new Bus.
@@ -876,9 +886,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /accounts/:owner":     b.accountsOwnerHandlerGET,
-		"POST   /accounts/:id/add":    b.accountsAddHandlerPOST,
-		"POST   /accounts/:id/update": b.accountsUpdateHandlerPOST,
+		"GET    /accounts/:owner":         b.accountsOwnerHandlerGET,
+		"POST   /accounts/:id/add":        b.accountsAddHandlerPOST,
+		"POST   /accounts/:id/update":     b.accountsUpdateHandlerPOST,
+		"POST   /accounts/:id/resetdrift": b.accountsResetDriftHandlerPOST,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,

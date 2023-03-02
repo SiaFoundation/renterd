@@ -26,6 +26,18 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	// accountRefillInterval is the amount of time between refills of ephemeral
+	// accounts. If we conservatively assume that a good hosts charges 500 SC /
+	// TiB, we can pay for about 2.2 GiB with 1 SC. Since we want to refill
+	// ahead of time at 0.5 SC, that makes 1.1 GiB. Considering a 1 Gbps uplink
+	// that is shared across 30 uploads, we upload at around 33 Mbps to each
+	// host. That means uploading 1.1 GiB to drain 0.5 SC takes around 5
+	// minutes.  That's why we assume 30 seconds to be more than frequent enough
+	// to refill an account when it's due for another refill.
+	defaultAccountRefillInterval = 30 * time.Second
+)
+
 var (
 	// to be supplied at build time
 	githash   = "?"
@@ -158,6 +170,7 @@ func main() {
 	flag.DurationVar(&workerCfg.SessionTTL, "worker.sessionTTL", 2*time.Minute, "the time a host session is valid for before reconnecting")
 	flag.DurationVar(&workerCfg.DownloadSectorTimeout, "worker.downloadSectorTimeout", 3*time.Second, "timeout applied to sector downloads when downloading a slab")
 	flag.DurationVar(&workerCfg.UploadSectorTimeout, "worker.uploadSectorTimeout", 5*time.Second, "timeout applied to sector uploads when uploading a slab")
+	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 10*time.Minute, "interval at which autopilot loop runs")
 	flag.Float64Var(&autopilotCfg.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", 0.75, "health threshold below which slabs are migrated to new hosts")

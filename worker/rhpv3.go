@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,50 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
+
+var (
+	// errBalanceMaxExceeded occurs when a deposit would push the account's
+	// balance over the maximum allowed ephemeral account balance.
+	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
+)
+
+func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, hostIP string, hostKey types.PublicKey, amount types.Currency, revision *types.FileContractRevision) error {
+	return account.WithDeposit(ctx, func() (types.Currency, error) {
+		return amount, w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) (err error) {
+			rk := w.deriveRenterKey(hostKey)
+			cost := amount.Add(pt.FundAccountCost)
+			payment, ok := rhpv3.PayByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
+			if !ok {
+				return errors.New("insufficient funds")
+			}
+			w.contractSpendingRecorder.Record(revision.ParentID, api.ContractSpending{FundAccount: cost})
+			return RPCFundAccount(t, &payment, account.id, pt.UID)
+		})
+	})
+}
+
+func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, hostIP string, hostKey types.PublicKey) error {
+	account, err := w.accounts.ForHost(hostKey)
+	if err != nil {
+		return err
+	}
+	payment := w.preparePayment(hostKey, pt.AccountBalanceCost, pt.HostBlockHeight)
+	return account.WithSync(ctx, func() (types.Currency, error) {
+		var balance types.Currency
+		err := w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) error {
+			balance, err = RPCAccountBalance(t, &payment, account.id, pt.UID)
+			return err
+		})
+		return balance, err
+	})
+}
+
+func isMaxBalanceExceeded(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), errBalanceMaxExceeded.Error())
+}
 
 type (
 	// accounts stores the balance and other metrics of accounts that the
@@ -37,14 +82,16 @@ type (
 		host  types.PublicKey
 		owner string
 
-		// The balance is locked by a RWMutex since both withdrawals and
-		// deposits can happen in parallel during normal operations. If
-		// the account ever goes out of sync, the worker needs to be
-		// able to prevent any deposits or withdrawals from the host for
-		// the duration of the sync so only syncing acquires an
-		// exclusive lock on the mutex.
-		mu      sync.RWMutex
-		balance *big.Int
+		// The balance is locked by a RWMutex in addition to a regular Mutex
+		// since both withdrawals and deposits can happen in parallel during
+		// normal operations. If the account ever goes out of sync, the worker
+		// needs to be able to prevent any deposits or withdrawals from the host
+		// for the duration of the sync so only syncing acquires an exclusive
+		// lock on the mutex.
+		mu        sync.RWMutex
+		balanceMu sync.Mutex
+		balance   *big.Int
+		drift     *big.Int
 	}
 )
 
@@ -67,12 +114,7 @@ func (a *accounts) All() ([]api.Account, error) {
 	defer a.mu.Unlock()
 	accounts := make([]api.Account, 0, len(a.accounts))
 	for _, acc := range a.accounts {
-		accounts = append(accounts, api.Account{
-			ID:      acc.id,
-			Balance: acc.balance,
-			Host:    acc.host,
-			Owner:   acc.owner,
-		})
+		accounts = append(accounts, acc.Convert())
 	}
 	return accounts, nil
 }
@@ -91,7 +133,7 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 	}
 
 	// Create and or return account.
-	accountID := rhpv3.Account(a.key.PublicKey())
+	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -104,10 +146,48 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 			host:    hk,
 			owner:   a.workerID,
 			balance: types.ZeroCurrency.Big(),
+			drift:   types.ZeroCurrency.Big(),
 		}
 		a.accounts[accountID] = acc
 	}
 	return acc, nil
+}
+
+func (a *accounts) ResetDrift(ctx context.Context, id rhpv3.Account) error {
+	a.mu.Lock()
+	account, exists := a.accounts[id]
+	if !exists {
+		a.mu.Unlock()
+		return errors.New("account doesn't exist")
+	}
+	a.mu.Unlock()
+	return account.resetDrift(ctx)
+}
+
+func (a *account) Convert() api.Account {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	a.balanceMu.Lock()
+	defer a.balanceMu.Unlock()
+	return api.Account{
+		ID:      a.id,
+		Balance: new(big.Int).Set(a.balance),
+		Drift:   new(big.Int).Set(a.drift),
+		Host:    a.host,
+		Owner:   a.owner,
+	}
+}
+
+func (a *account) resetDrift(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.bus.ResetDrift(ctx, a.id); err != nil {
+		return err
+	}
+	a.balanceMu.Lock()
+	a.drift.SetInt64(0)
+	a.balanceMu.Unlock()
+	return nil
 }
 
 // WithDeposit increases the balance of an account by the amount returned by
@@ -119,7 +199,9 @@ func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency,
 	if err != nil {
 		return err
 	}
+	a.balanceMu.Lock()
 	a.balance = a.balance.Add(a.balance, amt.Big())
+	a.balanceMu.Unlock()
 	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, amt.Big())
 }
 
@@ -132,18 +214,28 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	if err != nil {
 		return err
 	}
+	a.balanceMu.Lock()
 	a.balance = a.balance.Sub(a.balance, amt.Big())
+	a.balanceMu.Unlock()
 	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is
 // locked while the balance is fetched through balanceFn.
-func (a *account) WithSync(ctx context.Context, balanceFn func() types.Currency) error {
+func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency, error)) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.balance = balanceFn().Big()
-	err := a.bus.SetBalance(ctx, a.id, a.owner, a.host, a.balance)
-	return err
+	balance, err := balanceFn()
+	if err != nil {
+		return err
+	}
+	a.balanceMu.Lock()
+	delta := new(big.Int).Sub(balance.Big(), a.balance)
+	a.drift = a.drift.Add(a.drift, delta)
+	a.balance = balance.Big()
+	newBalance, newDrift := new(big.Int).Set(a.balance), new(big.Int).Set(a.drift)
+	a.balanceMu.Unlock()
+	return a.bus.SetBalance(ctx, a.id, a.owner, a.host, newBalance, newDrift)
 }
 
 // tryInitAccounts is used for lazily initialising the accounts from the bus.
@@ -166,6 +258,7 @@ func (a *accounts) tryInitAccounts() error {
 			host:    acc.Host,
 			owner:   acc.Owner,
 			balance: acc.Balance,
+			drift:   acc.Drift,
 		}
 	}
 	return nil
@@ -399,13 +492,20 @@ func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rh
 }
 
 // RPCAccountBalance calls the AccountBalance RPC.
-func RPCAccountBalance(t *rhpv3.Transport, account rhpv3.Account, price, collateral types.Currency) (bal types.Currency, err error) {
+func RPCAccountBalance(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
 	defer wrapErr(&err, "AccountBalance")
 	s := t.DialStream()
 	defer s.Close()
 
+	req := rhpv3.RPCAccountBalanceRequest{
+		Account: account,
+	}
 	var resp rhpv3.RPCAccountBalanceResponse
-	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &account); err != nil {
+	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &settingsID); err != nil {
+		return types.ZeroCurrency, err
+	} else if err := processPayment(s, payment); err != nil {
+		return types.ZeroCurrency, err
+	} else if err := s.WriteResponse(&req); err != nil {
 		return types.ZeroCurrency, err
 	} else if err := s.ReadResponse(&resp, 128); err != nil {
 		return types.ZeroCurrency, err

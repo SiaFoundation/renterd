@@ -164,6 +164,7 @@ type AccountsUpdateBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
 	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
+	Drift  *big.Int        `json:"drift"`
 }
 
 // AccountsAddBalanceRequest is the request type for /accounts/:id/add

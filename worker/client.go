@@ -176,9 +176,21 @@ func (c *Client) ActiveContracts(ctx context.Context, hostTimeout time.Duration)
 	return
 }
 
+// Account requests the worker's /accounts/:host endpoint.
+func (c *Client) Account(ctx context.Context, host types.PublicKey) (account api.Account, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts/host/%s", host), &account)
+	return
+}
+
 // Accounts requests the worker's /accounts endpoint.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
 	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
+	return
+}
+
+// ResetDrift resets the drift of an account to zero.
+func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
 	return
 }
 
