@@ -17,13 +17,14 @@ import (
 )
 
 type mockHost struct {
+	account    rhpv3.Account
 	contractID types.FileContractID
 	publicKey  types.PublicKey
 	sectors    map[types.Hash256][]byte
 }
 
 func (h *mockHost) Account() rhpv3.Account {
-	panic("not implemented")
+	return h.account
 }
 
 func (h *mockHost) Contract() types.FileContractID {
