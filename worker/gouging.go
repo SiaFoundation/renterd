@@ -53,7 +53,7 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 	})
 }
 
-func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (bool, string) {
+func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable, txnFee types.Currency, period, renewWindow uint64) (bool, string) {
 	if hs == nil && pt == nil {
 		panic("IsGouging needs to be provided with at least host settings or a price table") // developer error
 	}
@@ -65,7 +65,7 @@ func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.Host
 
 	var results GougingResults
 	results.merge(gc.CheckHS(hs))
-	results.merge(gc.CheckPT(pt))
+	results.merge(gc.CheckPT(pt, txnFee, period, renewWindow))
 
 	if errs := filterErrors(
 		results.downloadErr,
@@ -89,11 +89,11 @@ func (gc gougingChecker) CheckHS(hs *rhpv2.HostSettings) (results GougingResults
 	return
 }
 
-func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable) (results GougingResults) {
+func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable, txnFee types.Currency, period, renewWindow uint64) (results GougingResults) {
 	if pt != nil {
 		results = GougingResults{
 			downloadErr: checkDownloadGouging(gc.settings, gc.redundancy, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
-			gougingErr:  checkPriceGougingPT(gc.settings, pt),
+			gougingErr:  checkPriceGougingPT(gc.settings, pt, txnFee, period, renewWindow),
 			uploadErr:   checkUploadGouging(gc.settings, gc.redundancy, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
 		}
 	}
@@ -151,25 +151,10 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 	return nil
 }
 
-func checkPriceGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error {
+func checkPriceGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable, txnFee types.Currency, period, renewWindow uint64) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
 		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
-	}
-
-	// check ReadLengthCost - should be 1H as it's unused by hosts
-	if types.NewCurrency64(1).Cmp(pt.ReadLengthCost) < 0 {
-		return fmt.Errorf("ReadLengthCost of host is %v but should be %v", pt.ReadLengthCost, types.NewCurrency64(1))
-	}
-
-	// check WriteLengthCost - should be 1H as it's unused by hosts
-	if types.NewCurrency64(1).Cmp(pt.WriteLengthCost) < 0 {
-		return fmt.Errorf("WriteLengthCost of %v exceeds 1H", pt.WriteLengthCost)
-	}
-
-	// check MemoryTimeCost - should be 1H as it's unused by hosts
-	if types.NewCurrency64(1).Cmp(pt.MemoryTimeCost) < 0 {
-		return fmt.Errorf("MemoryTimeCost of %v exceeds 1H", pt.WriteLengthCost)
 	}
 
 	// check contract price
@@ -188,6 +173,104 @@ func checkPriceGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error
 	}
 	if pt.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
 		return fmt.Errorf("MaxCollateral is below minimum: %v<%v", pt.MaxCollateral, gs.MinMaxCollateral)
+	}
+
+	// check ReadLengthCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.ReadLengthCost) < 0 {
+		return fmt.Errorf("ReadLengthCost of host is %v but should be %v", pt.ReadLengthCost, types.NewCurrency64(1))
+	}
+
+	// check WriteLengthCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.WriteLengthCost) < 0 {
+		return fmt.Errorf("WriteLengthCost of %v exceeds 1H", pt.WriteLengthCost)
+	}
+
+	// check AccountBalanceCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.AccountBalanceCost) < 0 {
+		return fmt.Errorf("AccountBalanceCost of %v exceeds 1H", pt.AccountBalanceCost)
+	}
+
+	// check FundAccountCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
+		return fmt.Errorf("FundAccountCost of %v exceeds 1H", pt.FundAccountCost)
+	}
+
+	// check UpdatePriceTableCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.UpdatePriceTableCost) < 0 {
+		return fmt.Errorf("UpdatePriceTableCost of %v exceeds 1H", pt.UpdatePriceTableCost)
+	}
+
+	// check HasSectorBaseCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.HasSectorBaseCost) < 0 {
+		return fmt.Errorf("HasSectorBaseCost of %v exceeds 1H", pt.HasSectorBaseCost)
+	}
+
+	// check MemoryTimeCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.MemoryTimeCost) < 0 {
+		return fmt.Errorf("MemoryTimeCost of %v exceeds 1H", pt.WriteLengthCost)
+	}
+
+	// check DropSectorsBaseCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.DropSectorsBaseCost) < 0 {
+		return fmt.Errorf("DropSectorsBaseCost of %v exceeds 1H", pt.DropSectorsBaseCost)
+	}
+
+	// check DropSectorsUnitCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.DropSectorsUnitCost) < 0 {
+		return fmt.Errorf("DropSectorsUnitCost of %v exceeds 1H", pt.DropSectorsUnitCost)
+	}
+
+	// check SwapSectorBaseCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.SwapSectorBaseCost) < 0 {
+		return fmt.Errorf("SwapSectorBaseCost of %v exceeds 1H", pt.SwapSectorBaseCost)
+	}
+
+	// check SubscriptionMemoryCost - expect 1H default
+	if types.NewCurrency64(1).Cmp(pt.SubscriptionMemoryCost) < 0 {
+		return fmt.Errorf("SubscriptionMemoryCost of %v exceeds 1H", pt.SubscriptionMemoryCost)
+	}
+
+	// check SubscriptionNotificationCost - expect 1H default
+	if types.NewCurrency64(1).Cmp(pt.SubscriptionNotificationCost) < 0 {
+		return fmt.Errorf("SubscriptionNotificationCost of %v exceeds 1H", pt.SubscriptionNotificationCost)
+	}
+
+	// check LatestRevisionCost - expect sane value
+	bw, overflow := pt.DownloadBandwidthCost.Mul64WithOverflow(modules.SectorSize)
+	if overflow {
+		return errors.New("DownloadBandwidthCost overflows LatestRevisionCost calculation")
+	}
+	cost, overflow := bw.AddWithOverflow(pt.InitBaseCost)
+	if overflow {
+		return errors.New("InitBaseCost overflows LatestRevisionCost calculation")
+	}
+	if pt.LatestRevisionCost.Cmp(cost) > 0 {
+		return fmt.Errorf("LatestRevisionCost of %v exceeds maximum cost of %v", pt.SubscriptionNotificationCost, cost)
+	}
+
+	// check RenewContractCost - expect 100nS default
+	if types.Siacoins(1).Mul64(100).Div64(1e9).Cmp(pt.RenewContractCost) < 0 {
+		return fmt.Errorf("RenewContractCost of %v exceeds 100nS", pt.RenewContractCost)
+	}
+
+	// check RevisionBaseCost - expect 0H default
+	if types.ZeroCurrency.Cmp(pt.RevisionBaseCost) < 0 {
+		return fmt.Errorf("RevisionBaseCost of %v exceeds 0H", pt.RevisionBaseCost)
+	}
+
+	// check TxnFeeMaxRecommended - expect at most a multiple of our fee
+	if pt.TxnFeeMaxRecommended.Cmp(txnFee.Mul64(5)) > 0 {
+		return fmt.Errorf("TxnFeeMaxRecommended %v exceeds %v", pt.TxnFeeMaxRecommended, txnFee.Mul64(5))
+	}
+
+	// check MaxDuration
+	if period > pt.MaxDuration {
+		return fmt.Errorf("MaxDuration %v is lower than the period %v", pt.MaxDuration, period)
+	}
+
+	// check WindowSize
+	if renewWindow < pt.WindowSize {
+		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", pt.WindowSize, renewWindow)
 	}
 
 	return nil

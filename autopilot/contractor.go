@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -298,6 +299,12 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 		)
 	}()
 
+	// fetch recommended txn fee
+	fee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
 	// create a new ip filter
 	f := newIPFilter(c.logger)
 
@@ -329,14 +336,14 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 		}
 
 		// fetch price table
-		pt, err := c.ap.worker.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), contractHostPriceTableTimeout)
+		pt, err := c.priceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			continue
 		}
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, &pt, f, host.Host, minScore, contract.FileSize())
+		usable, reasons := isUsableHost(cfg, gs, rs, &pt, f, host.Host, minScore, contract.FileSize(), fee)
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -715,6 +722,12 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		return nil, nil
 	}
 
+	// fetch recommended fee
+	txnFee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings(ctx)
 	if err != nil {
@@ -749,12 +762,14 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		if h.Settings == nil {
 			continue // host has not been scanned yet
 		}
-		pt, err := c.ap.worker.RHPPriceTable(ctx, h.PublicKey, h.Settings.SiamuxAddr(), contractHostPriceTableTimeout)
+
+		pt, err := c.priceTable(ctx, h.PublicKey, h.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", h.PublicKey, err)
 			continue
 		}
-		if usable, _ := isUsableHost(cfg, gs, rs, &pt, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
+
+		if usable, _ := isUsableHost(cfg, gs, rs, &pt, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
 			continue
 		}
 
@@ -987,6 +1002,12 @@ func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, mi
 		"collateral", hostCollateral.String(),
 	)
 	return formedContract, true, nil
+}
+
+func (c *contractor) priceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error) {
+	ctx, cancel := context.WithTimeout(ctx, contractHostPriceTableTimeout)
+	defer cancel()
+	return c.ap.worker.RHPPriceTable(ctx, hk, siamuxAddr)
 }
 
 func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
