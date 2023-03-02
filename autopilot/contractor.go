@@ -22,6 +22,10 @@ import (
 )
 
 const (
+	// contractHostPriceTableTimeout is the amount of time we wait to receive a
+	// price table from the host
+	contractHostPriceTableTimeout = 10 * time.Second
+
 	// contractHostTimeout is the amount of time we wait to receive the latest
 	// revision from the host
 	contractHostTimeout = 30 * time.Second
@@ -324,8 +328,15 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 			continue
 		}
 
+		// fetch price table
+		pt, err := c.ap.worker.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), contractHostPriceTableTimeout)
+		if err != nil {
+			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
+			continue
+		}
+
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, f, host.Host, minScore, contract.FileSize())
+		usable, reasons := isUsableHost(cfg, gs, rs, &pt, f, host.Host, minScore, contract.FileSize())
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -735,7 +746,15 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		if _, exclude := exclude[h.PublicKey]; exclude {
 			continue
 		}
-		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
+		if h.Settings == nil {
+			continue // host has not been scanned yet
+		}
+		pt, err := c.ap.worker.RHPPriceTable(ctx, h.PublicKey, h.Settings.SiamuxAddr(), contractHostPriceTableTimeout)
+		if err != nil {
+			c.logger.Errorf("could not fetch price table for host %v: %v", h.PublicKey, err)
+			continue
+		}
+		if usable, _ := isUsableHost(cfg, gs, rs, &pt, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
 			continue
 		}
 

@@ -646,6 +646,8 @@ func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rh
 		return rhpv3.HostPriceTable{}, err
 	} else if payment, err := paymentFunc(pt); err != nil {
 		return rhpv3.HostPriceTable{}, err
+	} else if payment == nil {
+		return pt, nil // intended not to pay
 	} else if err := processPayment(s, payment); err != nil {
 		return rhpv3.HostPriceTable{}, err
 	} else if err := s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
