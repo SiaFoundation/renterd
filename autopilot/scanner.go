@@ -40,9 +40,6 @@ type (
 			HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
-		worker interface {
-			RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
-		}
 
 		tracker *tracker
 		logger  *zap.SugaredLogger
@@ -60,6 +57,9 @@ type (
 		scanningLastStart time.Time
 		timeout           time.Duration
 		timeoutLastUpdate time.Time
+	}
+	scanWorker interface {
+		RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 	}
 
 	scanReq struct {
@@ -131,8 +131,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}
 
 	return &scanner{
-		bus:    ap.bus,
-		worker: ap.worker,
+		bus: ap.bus,
 		tracker: newTracker(
 			trackerMinDataPoints,
 			trackerNumDataPoints,
@@ -150,7 +149,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context, cfg api.AutopilotConfig) {
+func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, cfg api.AutopilotConfig) {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() || s.ap.isStopped() {
 		s.mu.Unlock()
@@ -163,7 +162,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, cfg api.AutopilotConfi
 	s.mu.Unlock()
 
 	go func() {
-		for resp := range s.launchScanWorkers(ctx, s.launchHostScans()) {
+		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
 			if s.ap.isStopped() {
 				break
 			}
@@ -250,7 +249,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 	return reqChan
 }
 
-func (s *scanner) launchScanWorkers(ctx context.Context, reqs chan scanReq) chan scanResp {
+func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan scanReq) chan scanResp {
 	respChan := make(chan scanResp, s.scanThreads)
 	liveThreads := s.scanThreads
 
@@ -261,7 +260,7 @@ func (s *scanner) launchScanWorkers(ctx context.Context, reqs chan scanReq) chan
 					break
 				}
 
-				scan, err := s.worker.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
+				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				respChan <- scanResp{req.hostKey, scan.Settings, err}
 				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}

@@ -22,9 +22,9 @@ var (
 )
 
 type accounts struct {
-	logger *zap.SugaredLogger
-	b      Bus
-	w      Worker
+	logger  *zap.SugaredLogger
+	b       Bus
+	workers *workerPool
 
 	refillInterval time.Duration
 
@@ -33,13 +33,13 @@ type accounts struct {
 	inProgressRefills map[types.PublicKey]struct{}
 }
 
-func newAccounts(l *zap.SugaredLogger, b Bus, w Worker, interval time.Duration) *accounts {
+func newAccounts(l *zap.SugaredLogger, b Bus, workers *workerPool, interval time.Duration) *accounts {
 	return &accounts{
 		b:                 b,
 		inProgressRefills: make(map[types.PublicKey]struct{}),
 		logger:            l.Named("accounts"),
 		refillInterval:    interval,
-		w:                 w,
+		workers:           workers,
 	}
 }
 
@@ -85,7 +85,9 @@ func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
 		case <-ticker.C:
 		}
 
-		a.refillWorkerAccounts()
+		a.workers.withWorkers(func(w Worker) {
+			a.refillWorkerAccounts(w)
+		})
 	}
 }
 
@@ -94,7 +96,7 @@ func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
-func (a *accounts) refillWorkerAccounts() {
+func (a *accounts) refillWorkerAccounts(w Worker) {
 	ctx, span := tracing.Tracer.Start(context.Background(), "refillWorkerAccounts")
 	defer span.End()
 
@@ -132,7 +134,7 @@ func (a *accounts) refillWorkerAccounts() {
 			}()
 
 			// Fetch the account.
-			account, err := a.w.Account(ctx, contract.HostKey)
+			account, err := w.Account(ctx, contract.HostKey)
 			if err != nil {
 				return err
 			}
@@ -169,7 +171,7 @@ func (a *accounts) refillWorkerAccounts() {
 				return err
 			}
 
-			if err := a.w.RHPFund(ctx, contract.ID, contract.HostKey, fundCurrency); err != nil {
+			if err := w.RHPFund(ctx, contract.ID, contract.HostKey, fundCurrency); err != nil {
 				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
 					"account", account.ID,
 					"host", contract.HostKey,

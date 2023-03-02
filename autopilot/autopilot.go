@@ -82,10 +82,10 @@ type Worker interface {
 }
 
 type Autopilot struct {
-	bus    Bus
-	logger *zap.SugaredLogger
-	store  Store
-	worker Worker
+	bus     Bus
+	logger  *zap.SugaredLogger
+	store   Store
+	workers *workerPool
 
 	a *accounts
 	c *contractor
@@ -100,6 +100,40 @@ type Autopilot struct {
 	ticker      *time.Ticker
 	triggerChan chan struct{}
 	stopChan    chan struct{}
+}
+
+// workerPool contains all workers known to the autopilot.  Users can call
+// withWorker to execute a function with a worker of the pool or withWorkers to
+// sequentially run a function on all workers.  Due to the RWMutex this will
+// never block during normal operations. However, during an update of the
+// workerpool, this allows us to guarantee that all workers have finished their
+// tasks by calling  acquiring an exclusive lock on the pool before updating it.
+// That way the caller who updated the pool can rely on the autopilot not using
+// a worker that was removed during the update after the update operation
+// returns.
+type workerPool struct {
+	mu      sync.RWMutex
+	workers []Worker
+}
+
+func newWorkerPool(workers []Worker) *workerPool {
+	return &workerPool{
+		workers: workers,
+	}
+}
+
+func (wp *workerPool) withWorker(workerFunc func(Worker)) {
+	wp.mu.RLock()
+	defer wp.mu.RUnlock()
+	workerFunc(wp.workers[0])
+}
+
+func (wp *workerPool) withWorkers(workerFunc func(Worker)) {
+	wp.mu.RLock()
+	defer wp.mu.RUnlock()
+	for _, w := range wp.workers {
+		workerFunc(w)
+	}
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -150,7 +184,7 @@ func (ap *Autopilot) Run() error {
 			ap.logger.Info("autopilot iteration starting")
 		}
 
-		func() {
+		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
 			defer span.End()
@@ -166,7 +200,7 @@ func (ap *Autopilot) Run() error {
 
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ctx, cfg)
+			ap.s.tryPerformHostScan(ctx, w, cfg)
 
 			// fetch consensus state
 			cs, err := ap.bus.ConsensusState(ctx)
@@ -191,9 +225,9 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// perform maintenance
-			err = ap.c.performContractMaintenance(ctx, cfg, cs)
+			err = ap.c.performContractMaintenance(ctx, w, cfg, cs)
 			if err != nil {
-				//ap.logger.Errorf("contract maintenance failed, err: %v", err)
+				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 			maintenanceSuccess := err == nil
 
@@ -207,8 +241,8 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.tryPerformMigrations(ctx, cfg)
-		}()
+			ap.m.tryPerformMigrations(ctx, w, cfg)
+		})
 	}
 }
 
@@ -283,12 +317,12 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
+func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
-		bus:    bus,
-		logger: logger.Sugar().Named("autopilot"),
-		store:  store,
-		worker: worker,
+		bus:     bus,
+		logger:  logger.Sugar().Named("autopilot"),
+		store:   store,
+		workers: newWorkerPool(workers),
 
 		tickerDuration: heartbeat,
 	}
@@ -304,7 +338,7 @@ func New(store Store, bus Bus, worker Worker, logger *zap.Logger, heartbeat time
 		return nil, err
 	}
 
-	ap.a = newAccounts(ap.logger, ap.bus, ap.worker, accountsRefillInterval)
+	ap.a = newAccounts(ap.logger, ap.bus, ap.workers, accountsRefillInterval)
 	ap.s = scanner
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap, migrationHealthCutoff)

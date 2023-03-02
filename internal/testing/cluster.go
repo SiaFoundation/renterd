@@ -236,7 +236,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 		ScannerInterval:        time.Second,
 		ScannerBatchSize:       10,
 		ScannerNumThreads:      1,
-	}, autopilotStore, busClient, workerClient, logger)
+	}, autopilotStore, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err
 	}

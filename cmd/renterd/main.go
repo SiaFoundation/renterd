@@ -16,6 +16,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
@@ -139,7 +140,7 @@ func main() {
 	busCfg.DBDialector = getDBDialectorFromEnv()
 
 	var workerCfg struct {
-		remoteAddr  string
+		remoteAddrs string
 		apiPassword string
 		node.WorkerConfig
 	}
@@ -164,7 +165,7 @@ func main() {
 	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.Siacoins(1), "max allowed price to store one byte per block")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker")
-	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
+	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddr", "", "URL of remote worker service")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.DurationVar(&workerCfg.SessionReconnectTimeout, "worker.sessionReconnectTimeout", 10*time.Second, "the maximum of time reconnecting a session is allowed to take")
 	flag.DurationVar(&workerCfg.SessionTTL, "worker.sessionTTL", 2*time.Minute, "the time a host session is valid for before reconnecting")
@@ -211,7 +212,7 @@ func main() {
 		shutdownFns = append(shutdownFns, shutdownFn)
 	}
 
-	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
+	if busCfg.remoteAddr != "" && workerCfg.remoteAddrs != "" && !autopilotCfg.enabled {
 		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
 	if err := busCfg.RedundancySettings.Validate(); err != nil {
@@ -255,8 +256,9 @@ func main() {
 	}
 	bc := bus.NewClient(busAddr, busPassword)
 
-	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
-	if workerAddr == "" {
+	var workers []autopilot.Worker
+	workerAddrs, workerPassword := workerCfg.remoteAddrs, workerCfg.apiPassword
+	if workerAddrs == "" {
 		w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
 		if err != nil {
 			log.Fatal(err)
@@ -264,10 +266,17 @@ func main() {
 		shutdownFns = append(shutdownFns, shutdownFn)
 
 		mux.sub["/api/worker"] = treeMux{h: auth(w)}
-		workerAddr = *apiAddr + "/api/worker"
+		workerAddr := *apiAddr + "/api/worker"
 		workerPassword = getAPIPassword()
+		workers = append(workers, worker.NewClient(workerAddr, workerPassword))
+	} else {
+		// TODO: all workers use the same password. Figure out a nice way to
+		// have individual passwords.
+		workerAddrsSplit := strings.Split(workerAddrs, ";")
+		for _, workerAddr := range workerAddrsSplit {
+			workers = append(workers, worker.NewClient(workerAddr, workerPassword))
+		}
 	}
-	wc := worker.NewClient(workerAddr, workerPassword)
 
 	autopilotErr := make(chan error, 1)
 	if autopilotCfg.enabled {
@@ -281,7 +290,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
+		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, workers, logger)
 		if err != nil {
 			log.Fatal(err)
 		}
