@@ -490,6 +490,8 @@ func newPriceTables() *priceTables {
 // whether it is valid or not.
 func (pts *priceTables) PriceTable(hk types.PublicKey) (rhpv3.HostPriceTable, bool) {
 	pt := pts.priceTable(hk)
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
 	if pt.pt == nil {
 		return rhpv3.HostPriceTable{}, false
 	}
