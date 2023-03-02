@@ -149,12 +149,16 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}()
 
-	b := cluster.Bus
 	w := cluster.Worker
 	rs := defaultRedundancy
 
 	// add hosts
 	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,17 +174,6 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 		name := fmt.Sprintf("data_%v", len(data))
 		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// fund accounts
-	contracts, err := b.ActiveContracts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, contract := range contracts {
-		if err := w.RHPFund(context.Background(), contract.ID, contract.HostKey, types.Siacoins(1)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -224,7 +217,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 	}()
 
-	b := cluster.Bus
 	w := cluster.Worker
 	rs := defaultRedundancy
 
@@ -233,20 +225,14 @@ func TestUploadDownloadSpending(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
 	// TODO: strange behaviour here, if there's no sleep I keep running into the following error when trying to connect to the host
 	// failed to fetch revision from host 'localhost:65346': Reconnect: dial tcp: missing address
 	time.Sleep(time.Second)
-
-	// fund accounts
-	contracts, err := b.ActiveContracts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, contract := range contracts {
-		if err := w.RHPFund(context.Background(), contract.ID, contract.HostKey, types.Siacoins(1)); err != nil {
-			t.Fatal(err)
-		}
-	}
 
 	// check that the funding was recorded
 	err = Retry(100, testBusFlushInterval, func() error {

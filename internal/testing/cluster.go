@@ -403,11 +403,27 @@ func (c *TestCluster) MineBlocks(n int) error {
 	return c.miner.Mine(addr, n)
 }
 
+func (c *TestCluster) WaitForAccounts() ([]api.Account, error) {
+	// build hosts map
+	hostsMap := make(map[types.PublicKey]struct{})
+	for _, host := range c.hosts {
+		hostsMap[host.HostKey()] = struct{}{}
+	}
+
+	//  wait for accounts to be filled
+	if err := c.waitForHostAccounts(hostsMap); err != nil {
+		return nil, err
+	}
+
+	// fetch all accounts
+	return c.Worker.Accounts(context.Background())
+}
+
 func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	// build hosts map
-	hostsMap := make(map[string]struct{})
+	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {
-		hostsMap[host.HostKey().String()] = struct{}{}
+		hostsMap[host.HostKey()] = struct{}{}
 	}
 
 	//  wait for the contracts to form
@@ -530,9 +546,9 @@ func (c *TestCluster) AddHostsBlocking(n int) ([]*TestNode, error) {
 	}
 
 	// build hosts map
-	hostsmap := make(map[string]struct{})
+	hostsmap := make(map[types.PublicKey]struct{})
 	for _, host := range hosts {
-		hostsmap[host.HostKey().String()] = struct{}{}
+		hostsmap[host.HostKey()] = struct{}{}
 	}
 
 	// wait for contracts to form
@@ -564,18 +580,43 @@ func (c *TestCluster) Sync() error {
 	return c.sync(c.hosts)
 }
 
+// waitForHostAccounts will fetch the accounts from the worker and wait until
+// they have money in them
+func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) error {
+	return Retry(30, time.Second, func() error {
+		accounts, err := c.Worker.Accounts(context.Background())
+		if err != nil {
+			return err
+		}
+
+		funded := make(map[types.PublicKey]struct{})
+		for _, a := range accounts {
+			if a.Balance.Uint64() > 0 {
+				funded[a.Host] = struct{}{}
+			}
+		}
+
+		for hpk := range hosts {
+			if _, exists := funded[hpk]; !exists {
+				return fmt.Errorf("missing funded account for host %v", hpk)
+			}
+		}
+		return nil
+	})
+}
+
 // waitForHostContracts will fetch the active contracts from the bus and wait
 // until we have a contract with every host in the given hosts map
-func (c *TestCluster) waitForHostContracts(hosts map[string]struct{}) error {
+func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) error {
 	return Retry(30, time.Second, func() error {
 		contracts, err := c.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			return err
 		}
 
-		existing := make(map[string]struct{})
+		existing := make(map[types.PublicKey]struct{})
 		for _, c := range contracts {
-			existing[c.HostKey.String()] = struct{}{}
+			existing[c.HostKey] = struct{}{}
 		}
 
 		for hpk := range hosts {
