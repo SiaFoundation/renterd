@@ -22,9 +22,9 @@ type (
 	}
 
 	GougingResults struct {
-		downloadErr     error
-		formContractErr error
-		uploadErr       error
+		downloadErr error
+		gougingErr  error
+		uploadErr   error
 	}
 
 	gougingChecker struct {
@@ -54,36 +54,39 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 }
 
 func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (bool, string) {
-	var hsErrs []error
+	var errs []error
 	if hs != nil {
-		hsErrs = filterErrors(
-			checkDownloadGougingHS(gs, rs, hs),
-			checkFormContractGougingHS(gs, hs),
-			checkUploadGougingHS(gs, rs, hs),
+		errs = append(errs,
+			filterErrors(
+				checkDownloadGouging(gs, rs, hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice),
+				checkPriceGougingHS(gs, hs),
+				checkUploadGouging(gs, rs, hs.BaseRPCPrice, hs.StoragePrice, hs.UploadBandwidthPrice),
+			)...,
 		)
 	}
 
-	var ptErrs []error
 	if pt != nil {
-		ptErrs = filterErrors(
-			checkDownloadGougingPT(gs, rs, pt),
-			checkFormContractGougingPT(gs, pt),
-			checkUploadGougingPT(gs, rs, pt),
+		errs = append(errs,
+			filterErrors(
+				checkDownloadGouging(gs, rs, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
+				checkPriceGougingPT(gs, pt),
+				checkUploadGouging(gs, rs, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
+			)...,
 		)
 	}
 
-	if len(hsErrs)+len(ptErrs) == 0 {
+	if len(errs) == 0 {
 		return false, ""
 	}
-	return true, joinErrors(append(hsErrs, ptErrs...)...).Error()
+	return true, joinErrors(errs...).Error()
 }
 
 func (gc gougingChecker) CheckHS(hs *rhpv2.HostSettings) (results GougingResults) {
 	if hs != nil {
 		results = GougingResults{
-			downloadErr:     checkDownloadGougingHS(gc.settings, gc.redundancy, hs),
-			formContractErr: checkFormContractGougingHS(gc.settings, hs),
-			uploadErr:       checkUploadGougingHS(gc.settings, gc.redundancy, hs),
+			downloadErr: checkDownloadGouging(gc.settings, gc.redundancy, hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice),
+			gougingErr:  checkPriceGougingHS(gc.settings, hs),
+			uploadErr:   checkUploadGouging(gc.settings, gc.redundancy, hs.BaseRPCPrice, hs.StoragePrice, hs.UploadBandwidthPrice),
 		}
 	}
 	return
@@ -92,9 +95,9 @@ func (gc gougingChecker) CheckHS(hs *rhpv2.HostSettings) (results GougingResults
 func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable) (results GougingResults) {
 	if pt != nil {
 		results = GougingResults{
-			downloadErr:     checkDownloadGougingPT(gc.settings, gc.redundancy, pt),
-			formContractErr: checkFormContractGougingPT(gc.settings, pt),
-			uploadErr:       checkUploadGougingPT(gc.settings, gc.redundancy, pt),
+			downloadErr: checkDownloadGouging(gc.settings, gc.redundancy, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
+			gougingErr:  checkPriceGougingPT(gc.settings, pt),
+			uploadErr:   checkUploadGouging(gc.settings, gc.redundancy, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
 		}
 	}
 	return
@@ -113,69 +116,18 @@ func (gr GougingResults) CanForm() []error {
 func (gr GougingResults) CanUpload() []error {
 	return filterErrors(
 		gr.downloadErr,
+		gr.gougingErr,
 		gr.uploadErr,
-		gr.formContractErr,
 	)
 }
 
 func (gr *GougingResults) merge(other GougingResults) {
 	gr.downloadErr = joinErrors(gr.downloadErr, other.downloadErr)
+	gr.gougingErr = joinErrors(gr.gougingErr, other.gougingErr)
 	gr.uploadErr = joinErrors(gr.uploadErr, other.uploadErr)
-	gr.formContractErr = joinErrors(gr.formContractErr, other.formContractErr)
 }
 
-func checkDownloadGougingHS(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings) error {
-	// check base rpc price
-	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
-		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
-	}
-
-	// check download cost
-	dpptb, overflow := downloadPricePerTB(hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice)
-	if overflow {
-		return fmt.Errorf("overflow detected when computing download price per TiB")
-	}
-	downloadPriceTotalShards, overflow := dpptb.Mul64WithOverflow(uint64(rs.TotalShards))
-	if overflow {
-		return fmt.Errorf("overflow detected when multiplying %v * %v in download gouging", dpptb, rs.TotalShards)
-	}
-	downloadPrice := downloadPriceTotalShards.Div64(uint64(rs.MinShards))
-	if !gs.MaxDownloadPrice.IsZero() && downloadPrice.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max dl price: %v>%v", downloadPrice, gs.MaxDownloadPrice)
-	}
-
-	return nil
-}
-
-func checkDownloadGougingPT(gs api.GougingSettings, rs api.RedundancySettings, pt *rhpv3.HostPriceTable) error {
-	// check base rpc price
-	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
-		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
-	}
-
-	// check ReadLengthCost - should be 1H as it's unused by hosts
-	if types.NewCurrency64(1).Cmp(pt.ReadLengthCost) < 0 {
-		return fmt.Errorf("ReadLengthCost of host is %v but should be %v", pt.ReadLengthCost, types.NewCurrency64(1))
-	}
-
-	// check download cost
-	dpptb, overflow := downloadPricePerTB(pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost)
-	if overflow {
-		return fmt.Errorf("overflow detected when computing download price per TiB")
-	}
-	downloadPriceTotalShards, overflow := dpptb.Mul64WithOverflow(uint64(rs.TotalShards))
-	if overflow {
-		return fmt.Errorf("overflow detected when multiplying %v * %v in download gouging", dpptb, rs.TotalShards)
-	}
-	downloadPrice := downloadPriceTotalShards.Div64(uint64(rs.MinShards))
-	if !gs.MaxDownloadPrice.IsZero() && downloadPrice.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max dl price: %v>%v", downloadPrice, gs.MaxDownloadPrice)
-	}
-
-	return nil
-}
-
-func checkUploadGougingHS(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings) error {
+func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -186,27 +138,31 @@ func checkUploadGougingHS(gs api.GougingSettings, rs api.RedundancySettings, hs 
 		return fmt.Errorf("storage price exceeds max: %v>%v", hs.StoragePrice, gs.MaxUploadPrice)
 	}
 
-	// check upload cost
-	upptb, overflow := uploadPricePerTB(hs.BaseRPCPrice, hs.SectorAccessPrice, hs.UploadBandwidthPrice)
-	if overflow {
-		return fmt.Errorf("overflow detected when computing upload price per TiB")
+	// check contract price
+	if !gs.MaxContractPrice.IsZero() && hs.ContractPrice.Cmp(gs.MaxContractPrice) > 0 {
+		return fmt.Errorf("contract price exceeds max: %v>%v", hs.ContractPrice, gs.MaxContractPrice)
 	}
-	uploadPriceTotalShards, overflow := upptb.Mul64WithOverflow(uint64(rs.TotalShards))
-	if overflow {
-		return fmt.Errorf("overflow detected when multiplying %v * %v in upload gouging", upptb, rs.TotalShards)
+
+	// check max collateral
+	if hs.MaxCollateral.IsZero() {
+		return errors.New("MaxCollateral of host is 0")
 	}
-	uploadPrice := uploadPriceTotalShards.Div64(uint64(rs.MinShards))
-	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
+	if hs.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
+		return fmt.Errorf("MaxCollateral is below minimum: %v<%v", hs.MaxCollateral, gs.MinMaxCollateral)
 	}
 
 	return nil
 }
 
-func checkUploadGougingPT(gs api.GougingSettings, rs api.RedundancySettings, pt *rhpv3.HostPriceTable) error {
+func checkPriceGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
 		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
+	}
+
+	// check ReadLengthCost - should be 1H as it's unused by hosts
+	if types.NewCurrency64(1).Cmp(pt.ReadLengthCost) < 0 {
+		return fmt.Errorf("ReadLengthCost of host is %v but should be %v", pt.ReadLengthCost, types.NewCurrency64(1))
 	}
 
 	// check WriteLengthCost - should be 1H as it's unused by hosts
@@ -219,56 +175,17 @@ func checkUploadGougingPT(gs api.GougingSettings, rs api.RedundancySettings, pt 
 		return fmt.Errorf("MemoryTimeCost of %v exceeds 1H", pt.WriteLengthCost)
 	}
 
-	// check upload cost
-	upptb, overflow := uploadPricePerTB(pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost)
-	if overflow {
-		return fmt.Errorf("overflow detected when computing upload price per TiB")
-	}
-	uploadPriceTotalShards, overflow := upptb.Mul64WithOverflow(uint64(rs.TotalShards))
-	if overflow {
-		return fmt.Errorf("overflow detected when multiplying %v * %v in upload gouging", upptb, rs.TotalShards)
-	}
-	uploadPrice := uploadPriceTotalShards.Div64(uint64(rs.MinShards))
-	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
-	}
-
-	return nil
-}
-
-func checkFormContractGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
-	// check base rpc price
-	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
-		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
-	}
-
-	// check contract price
-	if !gs.MaxContractPrice.IsZero() && hs.ContractPrice.Cmp(gs.MaxContractPrice) > 0 {
-		return fmt.Errorf("contract price exceeds max: %v>%v", hs.ContractPrice, gs.MaxContractPrice)
-	}
-
-	// check MaxCollateral
-	if hs.MaxCollateral.IsZero() {
-		return errors.New("MaxCollateral of host is 0")
-	}
-	if hs.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
-		return fmt.Errorf("MaxCollateral is below minimum: %v<%v", hs.MaxCollateral, gs.MinMaxCollateral)
-	}
-	return nil
-}
-
-func checkFormContractGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error {
-	// check base rpc price
-	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
-		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
-	}
-
 	// check contract price
 	if !gs.MaxContractPrice.IsZero() && pt.ContractPrice.Cmp(gs.MaxContractPrice) > 0 {
 		return fmt.Errorf("contract price exceeds max: %v>%v", pt.ContractPrice, gs.MaxContractPrice)
 	}
 
-	// check MaxCollateral
+	// check max storage
+	if !gs.MaxStoragePrice.IsZero() && pt.WriteStoreCost.Cmp(gs.MaxStoragePrice) > 0 {
+		return fmt.Errorf("storage price exceeds max: %v>%v", pt.WriteStoreCost, gs.MaxStoragePrice)
+	}
+
+	// check max collateral
 	if pt.MaxCollateral.IsZero() {
 		return errors.New("MaxCollateral of host is 0")
 	}
@@ -279,36 +196,60 @@ func checkFormContractGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable
 	return nil
 }
 
-func uploadPricePerTB(baseRPCPrice, sectorAccessPrice, UploadBandwidthPrice types.Currency) (types.Currency, bool) {
-	uploadPrice, overflow := UploadBandwidthPrice.Mul64WithOverflow(modules.SectorSize)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	sectorPrice, overflow := sectorAccessPrice.AddWithOverflow(baseRPCPrice)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	sectorPrice, overflow = sectorPrice.AddWithOverflow(uploadPrice)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	return sectorPrice.Mul64WithOverflow(1 << 40 / modules.SectorSize) // sectors per TiB
-}
-
-func downloadPricePerTB(baseRPCPrice, sectorAccessPrice, downloadBandwidthPrice types.Currency) (types.Currency, bool) {
+func checkDownloadGouging(gs api.GougingSettings, rs api.RedundancySettings, baseRPCPrice, sectorAccessPrice, downloadBandwidthPrice types.Currency) error {
 	downloadPrice, overflow := downloadBandwidthPrice.Mul64WithOverflow(modules.SectorSize)
 	if overflow {
-		return types.ZeroCurrency, true
+		return fmt.Errorf("overflow detected when computing download bandwidth price")
 	}
 	sectorPrice, overflow := sectorAccessPrice.AddWithOverflow(baseRPCPrice)
 	if overflow {
-		return types.ZeroCurrency, true
+		return fmt.Errorf("overflow detected when computing sector price")
 	}
 	sectorPrice, overflow = sectorPrice.AddWithOverflow(downloadPrice)
 	if overflow {
-		return types.ZeroCurrency, true
+		return fmt.Errorf("overflow detected when computing download price per sector")
 	}
-	return sectorPrice.Mul64WithOverflow(1 << 40 / modules.SectorSize) // sectors per TiB
+	dpptb, overflow := sectorPrice.Mul64WithOverflow(1 << 40 / modules.SectorSize) // sectors per TiB
+	if overflow {
+		return fmt.Errorf("overflow detected when computing download price per TiB")
+	}
+	downloadPriceTotalShards, overflow := dpptb.Mul64WithOverflow(uint64(rs.TotalShards))
+	if overflow {
+		return fmt.Errorf("overflow detected when multiplying %v * %v in download gouging", dpptb, rs.TotalShards)
+	}
+	downloadPrice = downloadPriceTotalShards.Div64(uint64(rs.MinShards))
+	if !gs.MaxDownloadPrice.IsZero() && downloadPrice.Cmp(gs.MaxDownloadPrice) > 0 {
+		return fmt.Errorf("cost per TiB exceeds max dl price: %v>%v", downloadPrice, gs.MaxDownloadPrice)
+	}
+	return nil
+}
+
+func checkUploadGouging(gs api.GougingSettings, rs api.RedundancySettings, baseRPCPrice, storagePrice, uploadBandwidthPrice types.Currency) error {
+	uploadPrice, overflow := uploadBandwidthPrice.Mul64WithOverflow(modules.SectorSize)
+	if overflow {
+		return fmt.Errorf("overflow detected when computing upload bandwidth price")
+	}
+	sectorPrice, overflow := storagePrice.AddWithOverflow(baseRPCPrice)
+	if overflow {
+		return fmt.Errorf("overflow detected when computing sector price")
+	}
+	sectorPrice, overflow = sectorPrice.AddWithOverflow(uploadPrice)
+	if overflow {
+		return fmt.Errorf("overflow detected when computing upload price per sector")
+	}
+	upptb, overflow := sectorPrice.Mul64WithOverflow(1 << 40 / modules.SectorSize) // sectors per TiB
+	if overflow {
+		return fmt.Errorf("overflow detected when computing upload price per TiB")
+	}
+	uploadPriceTotalShards, overflow := upptb.Mul64WithOverflow(uint64(rs.TotalShards))
+	if overflow {
+		return fmt.Errorf("overflow detected when multiplying %v * %v in upload gouging", upptb, rs.TotalShards)
+	}
+	uploadPrice = uploadPriceTotalShards.Div64(uint64(rs.MinShards))
+	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
+		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
+	}
+	return nil
 }
 
 func filterErrors(errs ...error) []error {
