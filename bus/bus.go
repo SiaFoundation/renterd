@@ -778,9 +778,16 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		panic(err)
 	}
 
+	cs := api.ConsensusState{
+		BlockHeight: b.cm.TipState(ctx).Index.Height,
+		Synced:      b.cm.Synced(ctx),
+	}
+
 	return api.GougingParams{
+		ConsensusState:     cs,
 		GougingSettings:    gs,
 		RedundancySettings: rs,
+		TransactionFee:     b.tp.RecommendedFee(),
 	}, nil
 }
 

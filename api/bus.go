@@ -191,8 +191,10 @@ type UploadParams struct {
 // GougingParams contains the metadata needed by a worker to perform gouging
 // checks.
 type GougingParams struct {
+	ConsensusState     ConsensusState
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
+	TransactionFee     types.Currency
 }
 
 // GougingSettings contain some price settings used in price gouging.
