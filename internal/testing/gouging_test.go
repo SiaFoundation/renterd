@@ -99,6 +99,9 @@ func TestGouging(t *testing.T) {
 	if err := w.DownloadObject(ctx, &buffer, name); err != nil {
 		t.Fatal(err)
 	}
+	if !bytes.Equal(data, buffer.Bytes()) {
+		t.Fatal("unexpected data")
+	}
 
 	cases := []struct {
 		param client.HostParam
@@ -138,10 +141,18 @@ func TestGouging(t *testing.T) {
 		if err := h.HostModifySettingPost("mindownloadbandwidthprice", stypes.SiacoinPrecision); err != nil {
 			t.Fatal(err)
 		}
+		// assert it was removed from the contract set
+		if err := waitForHostRemoval(h.HostKey()); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// download the data - should fail
+	buffer.Reset()
 	if err := w.DownloadObject(ctx, &buffer, name); err == nil {
+		t.Fatal(err)
+	}
+	if len(buffer.Bytes()) > 0 {
 		t.Fatal("expected download to fail")
 	}
 }

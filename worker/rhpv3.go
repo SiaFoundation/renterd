@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"strings"
@@ -400,6 +401,10 @@ func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 }
 
 func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
+	if errs := PerformGougingChecks(ctx, nil, r.pt).CanDownload(); len(errs) > 0 {
+		return fmt.Errorf("failed to download sector, gouging check failed: %v", errs)
+	}
+
 	return r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = withTransportV3(ctx, r.siamuxAddr, r.HostKey(), func(t *rhpv3.Transport) error {
 			cost, err := readSectorCost(r.pt)
