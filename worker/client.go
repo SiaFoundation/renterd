@@ -76,10 +76,15 @@ func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, h
 
 // RHPPriceTable fetches a price table for a host.
 func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (pt rhpv3.HostPriceTable, err error) {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	req := api.RHPPriceTableRequest{
 		HostKey:    hostKey,
 		SiamuxAddr: siamuxAddr,
-		Timeout:    timeout,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/pricetable", req, &pt)
 	return

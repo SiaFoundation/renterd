@@ -54,31 +54,28 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 }
 
 func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (bool, string) {
-	var errs []error
-	if hs != nil {
-		errs = append(errs,
-			filterErrors(
-				checkDownloadGouging(gs, rs, hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice),
-				checkPriceGougingHS(gs, hs),
-				checkUploadGouging(gs, rs, hs.BaseRPCPrice, hs.StoragePrice, hs.UploadBandwidthPrice),
-			)...,
-		)
+	if hs == nil && pt == nil {
+		panic("IsGouging needs to be provided with at least host settings or a price table") // developer error
 	}
 
-	if pt != nil {
-		errs = append(errs,
-			filterErrors(
-				checkDownloadGouging(gs, rs, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
-				checkPriceGougingPT(gs, pt),
-				checkUploadGouging(gs, rs, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
-			)...,
-		)
+	gc := gougingChecker{
+		settings:   gs,
+		redundancy: rs,
 	}
 
-	if len(errs) == 0 {
+	var results GougingResults
+	results.merge(gc.CheckHS(hs))
+	results.merge(gc.CheckPT(pt))
+
+	if errs := filterErrors(
+		results.downloadErr,
+		results.gougingErr,
+		results.uploadErr,
+	); len(errs) == 0 {
 		return false, ""
+	} else {
+		return true, joinErrors(errs...).Error()
 	}
-	return true, joinErrors(errs...).Error()
 }
 
 func (gc gougingChecker) CheckHS(hs *rhpv2.HostSettings) (results GougingResults) {
