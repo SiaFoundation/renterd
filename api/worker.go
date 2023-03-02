@@ -24,7 +24,7 @@ type RHPScanRequest struct {
 // RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
 type RHPPriceTableRequest struct {
 	HostKey    types.PublicKey `json:"hostKey"`
-	SiamuxAddr string          `json:"hostIP"`
+	SiamuxAddr string          `json:"siamuxAddr"`
 	Timeout    time.Duration   `json:"timeout"`
 }
 
