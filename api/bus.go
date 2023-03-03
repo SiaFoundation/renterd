@@ -191,8 +191,10 @@ type UploadParams struct {
 // GougingParams contains the metadata needed by a worker to perform gouging
 // checks.
 type GougingParams struct {
+	ConsensusState     ConsensusState
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
+	TransactionFee     types.Currency
 }
 
 // GougingSettings contain some price settings used in price gouging.
@@ -203,6 +205,8 @@ type GougingSettings struct {
 	MaxDownloadPrice types.Currency `json:"maxDownloadPrice"` // per TiB
 	MaxUploadPrice   types.Currency `json:"maxUploadPrice"`   // per TiB
 	MaxStoragePrice  types.Currency `json:"maxStoragePrice"`  // per byte per block
+
+	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.

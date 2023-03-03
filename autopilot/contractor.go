@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -22,6 +23,10 @@ import (
 )
 
 const (
+	// contractHostPriceTableTimeout is the amount of time we wait to receive a
+	// price table from the host
+	contractHostPriceTableTimeout = 10 * time.Second
+
 	// contractHostTimeout is the amount of time we wait to receive the latest
 	// revision from the host
 	contractHostTimeout = 30 * time.Second
@@ -110,6 +115,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker, c
 	c.logger.Debugf("fetched %d active contracts, took %v", len(resp.Contracts), time.Since(start))
 	active := resp.Contracts
 
+	// fetch recommended txn fee
+	fee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return err
+	}
+
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings(ctx)
 	if err != nil {
@@ -137,7 +148,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker, c
 	// min score to pass checks.
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore, err = c.managedFindMinAllowedHostScores(ctx, cfg, hosts, storedData, rs.Redundancy())
+		minScore, err = c.managedFindMinAllowedHostScores(ctx, w, cfg, hosts, storedData, rs.Redundancy())
 		if err != nil {
 			return fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
@@ -146,7 +157,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker, c
 	}
 
 	// run checks
-	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs.BlockHeight, gs, rs, active, minScore)
+	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, cfg, cs, gs, rs, active, minScore, fee)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -184,7 +195,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker, c
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if numContracts < addLeeway(cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, w, cfg, hosts, active, cfg.Contracts.Amount-numContracts, cs.BlockHeight, &remaining, address, minScore); err != nil {
+		if formed, err = c.runContractFormations(ctx, w, cfg, hosts, active, cfg.Contracts.Amount-numContracts, cs.BlockHeight, &remaining, address, minScore, fee); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
@@ -275,7 +286,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.Autop
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64, txnFee types.Currency) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -324,8 +335,15 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 			continue
 		}
 
+		// fetch price table
+		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		if err != nil {
+			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
+			continue
+		}
+
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, f, host.Host, minScore, contract.FileSize())
+		usable, reasons := isUsableHost(cfg, gs, rs, cs, &pt, f, host.Host, minScore, contract.FileSize(), txnFee)
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -337,12 +355,12 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, settings: settings}
-		renterFunds, err := c.renewFundingEstimate(ctx, cfg, blockHeight, ci)
+		renterFunds, err := c.renewFundingEstimate(ctx, cfg, cs.BlockHeight, ci)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(cfg, ci, blockHeight, renterFunds)
+		usable, refresh, renew, reasons := isUsableContract(cfg, ci, cs.BlockHeight, renterFunds)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
@@ -399,7 +417,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, w Worker, cfg api.AutopilotConfig, hosts []hostdb.Host, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address, minScore float64) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, cfg api.AutopilotConfig, hosts []hostdb.Host, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address, minScore float64, txnFee types.Currency) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -429,15 +447,9 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, cfg ap
 		used[contract.HostKey()] = struct{}{}
 	}
 
-	// fetch recommended txn fee
-	fee, err := c.ap.bus.RecommendedFee(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, err := c.candidateHosts(ctx, cfg, hosts, used, make(map[types.PublicKey]uint64), wanted, minScore)
+	candidates, err := c.candidateHosts(ctx, w, cfg, hosts, used, make(map[types.PublicKey]uint64), wanted, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +469,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, cfg ap
 			break
 		}
 
-		formedContract, proceed, err := c.formContract(ctx, w, host, fee, minInitialContractFunds, maxInitialContractFunds, blockHeight, budget, renterAddress, cfg)
+		formedContract, proceed, err := c.formContract(ctx, w, host, txnFee, minInitialContractFunds, maxInitialContractFunds, blockHeight, budget, renterAddress, cfg)
 		if err == nil {
 			// add contract to contract set
 			formed = append(formed, formedContract.ID)
@@ -668,14 +680,14 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, cfg api.Autopilot
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg api.AutopilotConfig, hosts []hostdb.Host, storedData map[types.PublicKey]uint64, redundancy float64) (float64, error) {
+func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Worker, cfg api.AutopilotConfig, hosts []hostdb.Host, storedData map[types.PublicKey]uint64, redundancy float64) (float64, error) {
 	// Pull a new set of hosts from the hostdb that could be used as a new set
 	// to match the allowance. The lowest scoring host of these new hosts will
 	// be used as a baseline for determining whether our existing contracts are
 	// worthwhile.
 	numContracts := cfg.Contracts.Amount
 	buffer := 50
-	hosts, err := c.candidateHosts(ctx, cfg, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 1) // 1 to avoid 0 score hosts
+	hosts, err := c.candidateHosts(ctx, w, cfg, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 1) // 1 to avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
@@ -696,12 +708,24 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg ap
 	return lowestScore / minAllowedScoreLeeway, nil
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig, hosts []hostdb.Host, exclude map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
+func (c *contractor) candidateHosts(ctx context.Context, w Worker, cfg api.AutopilotConfig, hosts []hostdb.Host, exclude map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
 
 	// nothing to do
 	if wanted == 0 {
 		return nil, nil
+	}
+
+	// fetch consensus state
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// fetch recommended fee
+	txnFee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// fetch gouging settings
@@ -735,7 +759,17 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		if _, exclude := exclude[h.PublicKey]; exclude {
 			continue
 		}
-		if usable, _ := isUsableHost(cfg, gs, rs, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
+		if h.Settings == nil {
+			continue // host has not been scanned yet
+		}
+
+		pt, err := c.priceTable(ctx, w, h.PublicKey, h.Settings.SiamuxAddr())
+		if err != nil {
+			c.logger.Errorf("could not fetch price table for host %v: %v", h.PublicKey, err)
+			continue
+		}
+
+		if usable, _ := isUsableHost(cfg, gs, rs, cs, &pt, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
 			continue
 		}
 
@@ -968,6 +1002,12 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 		"collateral", hostCollateral.String(),
 	)
 	return formedContract, true, nil
+}
+
+func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error) {
+	ctx, cancel := context.WithTimeout(ctx, contractHostPriceTableTimeout)
+	defer cancel()
+	return w.RHPPriceTable(ctx, hk, siamuxAddr)
 }
 
 func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
