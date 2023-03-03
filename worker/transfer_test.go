@@ -11,6 +11,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
 )
@@ -109,8 +110,9 @@ func TestMultipleObjects(t *testing.T) {
 		hosts = append(hosts, newMockHost())
 	}
 	var slabs []object.Slab
+	var w *worker
 	for {
-		s, _, _, err := uploadSlab(context.Background(), r, 3, 10, hosts, mockLocker, 0)
+		s, _, _, err := w.uploadSlab(context.Background(), r, 3, 10, []api.ContractMetadata{}, mockLocker, 0)
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -140,7 +142,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), dst, s, hosts, mockLocker, 0); err != nil {
+			if _, err := w.downloadSlab(context.Background(), dst, s, []api.ContractMetadata{}, mockLocker, 0); err != nil {
 				t.Error(err)
 				return
 			}
