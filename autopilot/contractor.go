@@ -115,6 +115,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	c.logger.Debugf("fetched %d active contracts, took %v", len(resp.Contracts), time.Since(start))
 	active := resp.Contracts
 
+	// fetch recommended txn fee
+	fee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return err
+	}
+
 	// fetch gouging settings
 	gs, err := c.ap.bus.GougingSettings(ctx)
 	if err != nil {
@@ -151,7 +157,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	}
 
 	// run checks
-	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs.BlockHeight, gs, rs, active, minScore)
+	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs, gs, rs, active, minScore, fee)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -189,7 +195,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if numContracts < addLeeway(cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, cfg, hosts, active, cfg.Contracts.Amount-numContracts, cs.BlockHeight, &remaining, address, minScore); err != nil {
+		if formed, err = c.runContractFormations(ctx, cfg, hosts, active, cfg.Contracts.Amount-numContracts, cs.BlockHeight, &remaining, address, minScore, fee); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
@@ -280,7 +286,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.Autop
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64, txnFee types.Currency) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -298,12 +304,6 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 			"toRenew", len(toRenew),
 		)
 	}()
-
-	// fetch recommended txn fee
-	fee, err := c.ap.bus.RecommendedFee(ctx)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
 
 	// create a new ip filter
 	f := newIPFilter(c.logger)
@@ -343,7 +343,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 		}
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, &pt, f, host.Host, minScore, contract.FileSize(), fee)
+		usable, reasons := isUsableHost(cfg, gs, rs, cs, &pt, f, host.Host, minScore, contract.FileSize(), txnFee)
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -355,12 +355,12 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, settings: settings}
-		renterFunds, err := c.renewFundingEstimate(ctx, cfg, blockHeight, ci)
+		renterFunds, err := c.renewFundingEstimate(ctx, cfg, cs.BlockHeight, ci)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(cfg, ci, blockHeight, renterFunds)
+		usable, refresh, renew, reasons := isUsableContract(cfg, ci, cs.BlockHeight, renterFunds)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
@@ -417,7 +417,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, hosts []hostdb.Host, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address, minScore float64) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, hosts []hostdb.Host, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address, minScore float64, txnFee types.Currency) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -447,12 +447,6 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 		used[contract.HostKey()] = struct{}{}
 	}
 
-	// fetch recommended txn fee
-	fee, err := c.ap.bus.RecommendedFee(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
 	candidates, err := c.candidateHosts(ctx, cfg, hosts, used, make(map[types.PublicKey]uint64), wanted, minScore)
@@ -475,7 +469,7 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 			break
 		}
 
-		formedContract, proceed, err := c.formContract(ctx, host, fee, minInitialContractFunds, maxInitialContractFunds, blockHeight, budget, renterAddress, cfg)
+		formedContract, proceed, err := c.formContract(ctx, host, txnFee, minInitialContractFunds, maxInitialContractFunds, blockHeight, budget, renterAddress, cfg)
 		if err == nil {
 			// add contract to contract set
 			formed = append(formed, formedContract.ID)
@@ -722,6 +716,12 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		return nil, nil
 	}
 
+	// fetch consensus state
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// fetch recommended fee
 	txnFee, err := c.ap.bus.RecommendedFee(ctx)
 	if err != nil {
@@ -769,7 +769,7 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 			continue
 		}
 
-		if usable, _ := isUsableHost(cfg, gs, rs, &pt, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
+		if usable, _ := isUsableHost(cfg, gs, rs, cs, &pt, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
 			continue
 		}
 
