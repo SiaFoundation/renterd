@@ -34,8 +34,10 @@ type (
 	}
 
 	gougingChecker struct {
-		settings   api.GougingSettings
-		redundancy api.RedundancySettings
+		consensusState api.ConsensusState
+		settings       api.GougingSettings
+		redundancy     api.RedundancySettings
+		txFee          types.Currency
 	}
 
 	contextKey string
@@ -56,8 +58,10 @@ func PerformGougingChecks(ctx context.Context, hs *rhpv2.HostSettings, pt *rhpv3
 
 func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Context {
 	return context.WithValue(ctx, keyGougingChecker, gougingChecker{
-		settings:   gp.GougingSettings,
-		redundancy: gp.RedundancySettings,
+		consensusState: gp.ConsensusState,
+		settings:       gp.GougingSettings,
+		redundancy:     gp.RedundancySettings,
+		txFee:          gp.TransactionFee,
 	})
 }
 
@@ -79,9 +83,9 @@ func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.Consens
 
 		// price table checks
 		checkDownloadGouging(gs, rs, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
-		checkPriceGougingPT(gs, pt),
+		checkPriceGougingPT(gs, cs, txnFee, pt),
 		checkUploadGouging(gs, rs, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
-		checkContractGougingPT(cs, txnFee, period, renewWindow, pt),
+		checkContractGougingPT(period, renewWindow, pt),
 	); err != nil {
 		return true, err.Error()
 	}
@@ -104,7 +108,7 @@ func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable) (results GougingResul
 	if pt != nil {
 		results = GougingResults{
 			downloadErr: checkDownloadGouging(gc.settings, gc.redundancy, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
-			gougingErr:  checkPriceGougingPT(gc.settings, pt),
+			gougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, pt),
 			uploadErr:   checkUploadGouging(gc.settings, gc.redundancy, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
 		}
 	}
@@ -162,12 +166,7 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 	return nil
 }
 
-func checkContractGougingPT(cs api.ConsensusState, txnFee types.Currency, period, renewWindow uint64, pt *rhpv3.HostPriceTable) error {
-	// check TxnFeeMaxRecommended - expect at most a multiple of our fee
-	if !txnFee.IsZero() && pt.TxnFeeMaxRecommended.Cmp(txnFee.Mul64(5)) > 0 {
-		return fmt.Errorf("TxnFeeMaxRecommended %v exceeds %v", pt.TxnFeeMaxRecommended, txnFee.Mul64(5))
-	}
-
+func checkContractGougingPT(period, renewWindow uint64, pt *rhpv3.HostPriceTable) error {
 	// check MaxDuration
 	if period != 0 && period > pt.MaxDuration {
 		return fmt.Errorf("MaxDuration %v is lower than the period %v", pt.MaxDuration, period)
@@ -178,20 +177,10 @@ func checkContractGougingPT(cs api.ConsensusState, txnFee types.Currency, period
 		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", pt.WindowSize, renewWindow)
 	}
 
-	// check block height
-	if !cs.Synced {
-		if pt.HostBlockHeight < cs.BlockHeight {
-			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
-		}
-	} else {
-		if !(cs.BlockHeight-blockHeightLeeway <= pt.HostBlockHeight && pt.HostBlockHeight <= cs.BlockHeight+blockHeightLeeway) {
-			return fmt.Errorf("consensus is synced and host block height is not within range, %v %v %v", cs.BlockHeight, pt.HostBlockHeight, blockHeightLeeway)
-		}
-	}
 	return nil
 }
 
-func checkPriceGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error {
+func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
 		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
@@ -296,6 +285,22 @@ func checkPriceGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error
 	// check RevisionBaseCost - expect 0H default
 	if types.ZeroCurrency.Cmp(pt.RevisionBaseCost) < 0 {
 		return fmt.Errorf("RevisionBaseCost of %v exceeds 0H", pt.RevisionBaseCost)
+	}
+
+	// check block height
+	if !cs.Synced {
+		if pt.HostBlockHeight < cs.BlockHeight {
+			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
+		}
+	} else {
+		if !(cs.BlockHeight-blockHeightLeeway <= pt.HostBlockHeight && pt.HostBlockHeight <= cs.BlockHeight+blockHeightLeeway) {
+			return fmt.Errorf("consensus is synced and host block height is not within range, %v %v %v", cs.BlockHeight, pt.HostBlockHeight, blockHeightLeeway)
+		}
+	}
+
+	// check TxnFeeMaxRecommended - expect at most a multiple of our fee
+	if !txnFee.IsZero() && pt.TxnFeeMaxRecommended.Cmp(txnFee.Mul64(5)) > 0 {
+		return fmt.Errorf("TxnFeeMaxRecommended %v exceeds %v", pt.TxnFeeMaxRecommended, txnFee.Mul64(5))
 	}
 
 	return nil
