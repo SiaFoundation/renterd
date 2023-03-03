@@ -14,10 +14,6 @@ import (
 )
 
 const (
-	// blockHeightLeeway is the amount of leeway we will allow in the host's
-	// blockheight field on the price table
-	blockHeightLeeway = 3
-
 	keyGougingChecker contextKey = "GougingChecker"
 )
 
@@ -288,8 +284,13 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
 		}
 	} else {
-		if !(cs.BlockHeight-blockHeightLeeway <= pt.HostBlockHeight && pt.HostBlockHeight <= cs.BlockHeight+blockHeightLeeway) {
-			return fmt.Errorf("consensus is synced and host block height is not within range, %v %v %v", cs.BlockHeight, pt.HostBlockHeight, blockHeightLeeway)
+		var min uint64
+		if cs.BlockHeight >= uint64(gs.HostBlockHeightLeeway) {
+			min = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
+		}
+		max := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
+		if !(min <= pt.HostBlockHeight && pt.HostBlockHeight <= max) {
+			return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", min, max, pt.HostBlockHeight)
 		}
 	}
 
