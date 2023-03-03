@@ -18,7 +18,7 @@ const keyGougingChecker contextKey = "GougingChecker"
 type (
 	GougingChecker interface {
 		CheckHS(*rhpv2.HostSettings) GougingResults
-		CheckPT(*rhpv3.HostPriceTable) GougingResults
+		CheckPT(*rhpv3.HostPriceTable, types.Currency, uint64, uint64) GougingResults
 	}
 
 	GougingResults struct {
@@ -35,6 +35,8 @@ type (
 	contextKey string
 )
 
+var _ GougingChecker = gougingChecker{}
+
 func PerformGougingChecks(ctx context.Context, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (results GougingResults) {
 	gc, ok := ctx.Value(keyGougingChecker).(GougingChecker)
 	if !ok {
@@ -42,7 +44,7 @@ func PerformGougingChecks(ctx context.Context, hs *rhpv2.HostSettings, pt *rhpv3
 	}
 
 	results.merge(gc.CheckHS(hs))
-	results.merge(gc.CheckPT(pt))
+	results.merge(gc.CheckPT(pt, types.ZeroCurrency, 0, 0))
 	return
 }
 
@@ -259,17 +261,17 @@ func checkPriceGougingPT(gs api.GougingSettings, pt *rhpv3.HostPriceTable, txnFe
 	}
 
 	// check TxnFeeMaxRecommended - expect at most a multiple of our fee
-	if pt.TxnFeeMaxRecommended.Cmp(txnFee.Mul64(5)) > 0 {
+	if !txnFee.IsZero() && pt.TxnFeeMaxRecommended.Cmp(txnFee.Mul64(5)) > 0 {
 		return fmt.Errorf("TxnFeeMaxRecommended %v exceeds %v", pt.TxnFeeMaxRecommended, txnFee.Mul64(5))
 	}
 
 	// check MaxDuration
-	if period > pt.MaxDuration {
+	if period != 0 && period > pt.MaxDuration {
 		return fmt.Errorf("MaxDuration %v is lower than the period %v", pt.MaxDuration, period)
 	}
 
 	// check WindowSize
-	if renewWindow < pt.WindowSize {
+	if renewWindow != 0 && renewWindow < pt.WindowSize {
 		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", pt.WindowSize, renewWindow)
 	}
 
