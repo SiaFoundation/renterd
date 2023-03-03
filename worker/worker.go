@@ -413,7 +413,7 @@ func (w *worker) unlockHosts(hosts []sectorStore) {
 func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
+		hosts = append(hosts, w.pool.session(c.HostKey, c.SiamuxAddr, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
 
