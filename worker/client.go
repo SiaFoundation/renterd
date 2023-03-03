@@ -74,6 +74,16 @@ func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, h
 	return
 }
 
+// RHPPriceTable fetches a price table for a host.
+func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (pt rhpv3.HostPriceTable, err error) {
+	req := api.RHPPriceTableRequest{
+		HostKey:    hostKey,
+		SiamuxAddr: siamuxAddr,
+	}
+	err = c.c.WithContext(ctx).POST("/rhp/pricetable", req, &pt)
+	return
+}
+
 // RHPReadRegistry reads a registry value.
 func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
 	req := api.RHPRegistryReadRequest{

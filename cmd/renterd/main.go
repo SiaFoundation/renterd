@@ -162,6 +162,7 @@ func main() {
 	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.Siacoins(2500), "max allowed price to download one TiB")
 	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.Siacoins(2500), "max allowed price to upload one TiB")
 	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.Siacoins(1), "max allowed price to store one byte per block")
+	flag.IntVar(&busCfg.HostBlockHeightLeeway, "bus.hostBlockHeightLeeway", 3, "amount of leeway given to host block height before it is considered gouging")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker")
 	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
