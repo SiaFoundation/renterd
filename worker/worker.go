@@ -1001,6 +1001,10 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(accounts)
 }
 
+func (w *worker) idHandlerGET(jc jape.Context) {
+	jc.Encode(w.id)
+}
+
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) *worker {
 	w := &worker{
@@ -1035,6 +1039,8 @@ func (w *worker) Handler() http.Handler {
 		"GET    /accounts":                w.accountsHandlerGET,
 		"GET    /accounts/host/:id":       w.accountHandlerGET,
 		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
+
+		"GET    /id": w.idHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,

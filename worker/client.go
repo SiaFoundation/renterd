@@ -22,6 +22,11 @@ type Client struct {
 	c jape.Client
 }
 
+func (c *Client) ID(ctx context.Context) (id string, err error) {
+	err = c.c.WithContext(ctx).GET("/id", &id)
+	return
+}
+
 // RHPScan scans a host, returning its current settings.
 func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/rhp/scan", api.RHPScanRequest{
