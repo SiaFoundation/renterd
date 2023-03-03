@@ -157,7 +157,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	}
 
 	// run checks
-	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs.BlockHeight, gs, rs, active, minScore, fee)
+	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs, gs, rs, active, minScore, fee)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -286,7 +286,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.Autop
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64, txnFee types.Currency) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64, txnFee types.Currency) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -343,7 +343,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 		}
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(cfg, gs, rs, &pt, f, host.Host, minScore, contract.FileSize(), txnFee)
+		usable, reasons := isUsableHost(cfg, gs, rs, cs, &pt, f, host.Host, minScore, contract.FileSize(), txnFee)
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -355,12 +355,12 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, settings: settings}
-		renterFunds, err := c.renewFundingEstimate(ctx, cfg, blockHeight, ci)
+		renterFunds, err := c.renewFundingEstimate(ctx, cfg, cs.BlockHeight, ci)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(cfg, ci, blockHeight, renterFunds)
+		usable, refresh, renew, reasons := isUsableContract(cfg, ci, cs.BlockHeight, renterFunds)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
@@ -716,6 +716,12 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		return nil, nil
 	}
 
+	// fetch consensus state
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// fetch recommended fee
 	txnFee, err := c.ap.bus.RecommendedFee(ctx)
 	if err != nil {
@@ -763,7 +769,7 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 			continue
 		}
 
-		if usable, _ := isUsableHost(cfg, gs, rs, &pt, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
+		if usable, _ := isUsableHost(cfg, gs, rs, cs, &pt, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
 			continue
 		}
 
