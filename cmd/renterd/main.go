@@ -174,6 +174,7 @@ func main() {
 	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.Siacoins(2500), "max allowed price to upload one TiB")
 	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.Siacoins(1), "max allowed price to store one byte per block")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
+	flag.IntVar(&busCfg.HostBlockHeightLeeway, "bus.hostBlockHeightLeeway", 3, "amount of leeway given to host block height before it is considered gouging")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker used internally - can be overwritten using the RENTERD_WORKER_ID environment variable")
 	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using RENTERD_WORKER_REMOTE_ADDRS environment variable")

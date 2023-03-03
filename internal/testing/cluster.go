@@ -57,18 +57,20 @@ var (
 		},
 	}
 
-	defaultRedundancy = api.RedundancySettings{
+	testRedundancySettings = api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 3,
 	}
 
-	defaultGouging = api.GougingSettings{
+	testGougingSettings = api.GougingSettings{
 		MinMaxCollateral: types.Siacoins(10),                   // at least up to 10 SC per contract
 		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
 		MaxContractPrice: types.Siacoins(10),                   // 10 SC per contract
 		MaxDownloadPrice: types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
 		MaxUploadPrice:   types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
 		MaxStoragePrice:  types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
+
+		HostBlockHeightLeeway: 120, // amount of leeway given to host block height
 	}
 )
 
@@ -192,8 +194,8 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              miner,
 		PersistInterval:    testPersistInterval,
-		GougingSettings:    defaultGouging,
-		RedundancySettings: defaultRedundancy,
+		GougingSettings:    testGougingSettings,
+		RedundancySettings: testRedundancySettings,
 	}, busDir, wk, logger)
 	if err != nil {
 		return nil, err
