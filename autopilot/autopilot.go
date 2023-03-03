@@ -74,6 +74,7 @@ type Worker interface {
 	Account(ctx context.Context, host types.PublicKey) (account api.Account, err error)
 	Accounts(ctx context.Context) (accounts []api.Account, err error)
 	ActiveContracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
+	ID(ctx context.Context) (string, error)
 	MigrateSlab(ctx context.Context, s object.Slab) error
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error)

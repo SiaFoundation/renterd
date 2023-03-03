@@ -30,38 +30,40 @@ type accounts struct {
 
 	mu                sync.Mutex
 	fundingContracts  []api.ContractMetadata
-	inProgressRefills map[types.PublicKey]struct{}
+	inProgressRefills map[types.Hash256]struct{}
 }
 
 func newAccounts(l *zap.SugaredLogger, b Bus, workers *workerPool, interval time.Duration) *accounts {
 	return &accounts{
 		b:                 b,
-		inProgressRefills: make(map[types.PublicKey]struct{}),
+		inProgressRefills: make(map[types.Hash256]struct{}),
 		logger:            l.Named("accounts"),
 		refillInterval:    interval,
 		workers:           workers,
 	}
 }
 
-func (a *accounts) markRefillInProgress(host types.PublicKey) bool {
+func (a *accounts) markRefillInProgress(workerID string, host types.PublicKey) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, inProgress := a.inProgressRefills[host]
+	k := types.HashBytes(append([]byte(workerID), host[:]...))
+	_, inProgress := a.inProgressRefills[k]
 	if inProgress {
 		return false
 	}
-	a.inProgressRefills[host] = struct{}{}
+	a.inProgressRefills[k] = struct{}{}
 	return true
 }
 
-func (a *accounts) markRefillDone(host types.PublicKey) {
+func (a *accounts) markRefillDone(workerID string, host types.PublicKey) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, inProgress := a.inProgressRefills[host]
+	k := types.HashBytes(append([]byte(workerID), host[:]...))
+	_, inProgress := a.inProgressRefills[k]
 	if !inProgress {
 		panic("releasing a refill that hasn't been in progress")
 	}
-	delete(a.inProgressRefills, host)
+	delete(a.inProgressRefills, k)
 }
 
 func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig) {
@@ -100,6 +102,14 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	ctx, span := tracing.Tracer.Start(context.Background(), "refillWorkerAccounts")
 	defer span.End()
 
+	workerID, err := w.ID(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to fetch worker id")
+		a.logger.Errorw(fmt.Sprintf("failed to fetch worker id for refill: %v", err))
+		return
+	}
+
 	// Map hosts to contracts to use for funding.
 	a.mu.Lock()
 	contractForHost := make(map[types.PublicKey]api.ContractMetadata, len(a.fundingContracts))
@@ -111,12 +121,12 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	// Fund an account for every contract we have.
 	for _, contract := range contractForHost {
 		// Only launch a refill goroutine if no refill is in progress.
-		if !a.markRefillInProgress(contract.HostKey) {
+		if !a.markRefillInProgress(workerID, contract.HostKey) {
 			continue // refill already in progress
 		}
 		go func(contract api.ContractMetadata) (err error) {
 			// Remove from in-progress refills once done.
-			defer a.markRefillDone(contract.HostKey)
+			defer a.markRefillDone(workerID, contract.HostKey)
 
 			// Limit the time a refill can take.
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
