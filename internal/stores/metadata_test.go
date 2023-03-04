@@ -215,29 +215,37 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a host for the contract.
-	hk := types.GeneratePrivateKey().PublicKey()
-	err = cs.addTestHost(hk)
+	// Create a host for the contract and another one for redundancy.
+	hks, err := cs.addTestHosts(2)
 	if err != nil {
 		t.Fatal(err)
 	}
+	hk, hk2 := hks[0], hks[1]
 
-	// Add an announcement.
+	// Add announcements.
 	err = cs.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	err = cs.insertTestAnnouncement(hk2, hostdb.Announcement{NetAddress: "address2"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Create random unlock conditions for the host.
+	// Create random unlock conditions for the hosts.
 	uc := generateMultisigUC(1, 2, "salt")
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
-	// Insert a contract.
-	fcid := types.FileContractID{1, 1, 1, 1, 1}
+	uc2 := generateMultisigUC(1, 2, "salt")
+	uc2.PublicKeys[1].Key = hk2[:]
+	uc2.Timelock = 192837
+
+	// Insert the contracts.
+	fcid1 := types.FileContractID{1, 1, 1, 1, 1}
 	c := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
-			ParentID:         fcid,
+			ParentID:         fcid1,
 			UnlockConditions: uc,
 			FileContract: types.FileContract{
 				Filesize:       1,
@@ -260,11 +268,66 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 
+	fcid2 := types.FileContractID{9, 9, 9, 9, 9}
+	c2 := c
+	c2.Revision.ParentID = fcid2
+	c2.Revision.UnlockConditions = uc2
+	_, err = cs.AddContract(ctx, c2, oldContractTotal, oldContractStartHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object for that contract.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			// good slab
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hk,
+							Root: types.Hash256{1},
+						},
+						{
+							Host: hk2,
+							Root: types.Hash256{2},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// create a contract set with both contracts.
+	if err := cs.SetContractSet(context.Background(), "test", []types.FileContractID{fcid1, fcid2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add the object.
+	if err := cs.UpdateObject(context.Background(), "foo", obj, map[types.PublicKey]types.FileContractID{
+		hk:  fcid1,
+		hk2: fcid2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// no slabs should be unhealthy.
+	slabs, err := cs.UnhealthySlabs(context.Background(), 0.99, "test", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) > 0 {
+		t.Fatal("shouldn't return any slabs", len(slabs))
+	}
+
 	// Renew it.
-	fcid2 := types.FileContractID{2, 2, 2, 2, 2}
+	fcid1Renewed := types.FileContractID{2, 2, 2, 2, 2}
 	renewed := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
-			ParentID:         fcid2,
+			ParentID:         fcid1Renewed,
 			UnlockConditions: uc,
 			FileContract: types.FileContract{
 				MissedProofOutputs: []types.SiacoinOutput{},
@@ -274,27 +337,45 @@ func TestRenewedContract(t *testing.T) {
 	}
 	newContractTotal := types.NewCurrency64(222)
 	newContractStartHeight := uint64(200)
-	if _, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid); err != nil {
+	if _, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid1); err != nil {
 		t.Fatal(err)
 	}
 
+	// make sure the contract set was updated.
+	setContracts, err := cs.Contracts(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(setContracts) != 2 || (setContracts[0].ID != fcid1Renewed && setContracts[1].ID != fcid1Renewed) {
+		t.Fatal("contract set wasn't updated", setContracts)
+	}
+
+	// slab should still be in good shape.
+	slabs, err = cs.UnhealthySlabs(context.Background(), 0.99, "test", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) > 0 {
+		t.Fatal("shouldn't return any slabs", len(slabs))
+	}
+
 	// Contract should be gone from active contracts.
-	_, err = cs.Contract(ctx, fcid)
+	_, err = cs.Contract(ctx, fcid1)
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
 
 	// New contract should exist.
-	newContract, err := cs.Contract(ctx, fcid2)
+	newContract, err := cs.Contract(ctx, fcid1Renewed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expected := api.ContractMetadata{
-		ID:          fcid2,
+		ID:          fcid1Renewed,
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
-		RenewedFrom: fcid,
+		RenewedFrom: fcid1,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
 			Downloads:   types.ZeroCurrency,
@@ -309,7 +390,7 @@ func TestRenewedContract(t *testing.T) {
 	// Archived contract should exist.
 	var ac dbArchivedContract
 	err = cs.db.Model(&dbArchivedContract{}).
-		Where("fcid", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid1)).
 		Take(&ac).
 		Error
 	if err != nil {
@@ -318,9 +399,9 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:                fileContractID(fcid),
+		FCID:                fileContractID(fcid1),
 		Host:                publicKey(c.HostKey()),
-		RenewedTo:           fileContractID(fcid2),
+		RenewedTo:           fileContractID(fcid1Renewed),
 		Reason:              archivalReasonRenewed,
 		StartHeight:         100,
 		UploadSpending:      zeroCurrency,
@@ -349,11 +430,11 @@ func TestRenewedContract(t *testing.T) {
 	newContractStartHeight = uint64(300)
 
 	// Assert the renewed contract is returned
-	renewedContract, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid2)
+	renewedContract, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid1Renewed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if renewedContract.RenewedFrom != fcid2 {
+	if renewedContract.RenewedFrom != fcid1Renewed {
 		t.Fatal("unexpected")
 	}
 }

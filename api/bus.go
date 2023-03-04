@@ -205,6 +205,8 @@ type GougingSettings struct {
 	MaxDownloadPrice types.Currency `json:"maxDownloadPrice"` // per TiB
 	MaxUploadPrice   types.Currency `json:"maxUploadPrice"`   // per TiB
 	MaxStoragePrice  types.Currency `json:"maxStoragePrice"`  // per byte per block
+
+	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
