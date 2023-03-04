@@ -293,15 +293,31 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
-		// Delete the contract from the regular table.
-		err = removeContract(tx, fileContractID(renewedFrom))
+		// Add the new contract.
+		renewed, err = addContract(tx, c, totalCost, startHeight, renewedFrom)
 		if err != nil {
 			return err
 		}
 
-		// Add the new contract.
-		renewed, err = addContract(tx, c, totalCost, startHeight, renewedFrom)
-		return err
+		// Update the old contract in the contract set to the new one.
+		err = tx.Table("contract_set_contracts").
+			Where("db_contract_id = ?", oldContract.ID).
+			Update("db_contract_id", renewed.ID).Error
+		if err != nil {
+			return err
+		}
+
+		// Update the contract_sectors table from the old contract to the new
+		// one.
+		err = tx.Table("contract_sectors").
+			Where("db_contract_id = ?", oldContract.ID).
+			Update("db_contract_id", renewed.ID).Error
+		if err != nil {
+			return err
+		}
+
+		// Finally delete the old contract.
+		return removeContract(tx, fileContractID(renewedFrom))
 	}); err != nil {
 		return api.ContractMetadata{}, err
 	}
