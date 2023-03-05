@@ -176,8 +176,6 @@ func (w *worker) withHostsV3(ctx context.Context, contracts []api.ContractMetada
 			continue
 		}
 
-		// TODO: gouging check
-
 		ss = append(ss, &hostV3{
 			acc:        acc,
 			bh:         pt.HostBlockHeight,

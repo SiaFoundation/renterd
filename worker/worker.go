@@ -381,11 +381,11 @@ func withTransportV3(ctx context.Context, siamuxAddr string, hostKey types.Publi
 	return fn(t)
 }
 
-func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(sectorStore) error) (err error) {
+func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStore) error) (err error) {
 	return w.withHostsV2(ctx, []api.ContractMetadata{{
-		ID:         contractID,
-		HostKey:    hostKey,
-		SiamuxAddr: siamuxAddr,
+		ID:      contractID,
+		HostKey: hostKey,
+		HostIP:  hostIP,
 	}}, func(ss []sectorStore) error {
 		return fn(ss[0])
 	})
@@ -413,7 +413,7 @@ func (w *worker) unlockHosts(hosts []sectorStore) {
 func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
 	var hosts []sectorStore
 	for _, c := range contracts {
-		hosts = append(hosts, w.pool.session(c.HostKey, c.SiamuxAddr, c.ID, w.deriveRenterKey(c.HostKey)))
+		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
 	done := make(chan struct{})
 
@@ -620,7 +620,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// Get contract revision.
 	var revision types.FileContractRevision
-	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, siamuxAddr, func(ss sectorStore) error {
+	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, h.NetAddress, func(ss sectorStore) error {
 		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
 		if err != nil {
 			return err

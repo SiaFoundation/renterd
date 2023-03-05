@@ -230,10 +230,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// TODO: strange behaviour here, if there's no sleep I keep running into the following error when trying to connect to the host
-	// failed to fetch revision from host 'localhost:65346': Reconnect: dial tcp: missing address
-	time.Sleep(time.Second)
-
 	// check that the funding was recorded
 	err = Retry(100, testBusFlushInterval, func() error {
 		cms, err := cluster.Bus.ActiveContracts(context.Background())

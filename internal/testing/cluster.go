@@ -438,6 +438,9 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	if err != nil {
 		return nil, err
 	}
+	if resp.Error != "" {
+		return nil, errors.New(resp.Error)
+	}
 	return resp.Contracts, nil
 }
 

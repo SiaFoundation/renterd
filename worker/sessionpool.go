@@ -74,7 +74,7 @@ func (s *Session) deleteSectors(ctx context.Context, roots []types.Hash256) erro
 // sharedSession implements Host via the renter-host protocol.
 type sharedSession struct {
 	hostKey    types.PublicKey
-	siamuxAddr string
+	hostIP     string
 	contractID types.FileContractID
 	renterKey  types.PrivateKey
 	pool       *sessionPool
@@ -200,7 +200,7 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 			defer cancel()
 		}
 
-		if err := s.Reconnect(ctx, ss.siamuxAddr, ss.hostKey, ss.renterKey, ss.contractID); err != nil {
+		if err := s.Reconnect(ctx, ss.hostIP, ss.hostKey, ss.renterKey, ss.contractID); err != nil {
 			return nil, err
 		}
 	}
@@ -229,10 +229,10 @@ func (sp *sessionPool) currentHeight() uint64 {
 
 // session adds a RHPv2 session to the pool. The session is initiated lazily; no
 // I/O is performed until the first RPC call is made.
-func (sp *sessionPool) session(hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID, renterKey types.PrivateKey) *sharedSession {
+func (sp *sessionPool) session(hostKey types.PublicKey, hostIP string, contractID types.FileContractID, renterKey types.PrivateKey) *sharedSession {
 	return &sharedSession{
 		hostKey:    hostKey,
-		siamuxAddr: siamuxAddr,
+		hostIP:     hostIP,
 		contractID: contractID,
 		renterKey:  renterKey,
 		pool:       sp,
