@@ -301,7 +301,7 @@ type worker struct {
 	logger *zap.SugaredLogger
 }
 
-func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) {
+func (w *worker) recordScan(hostKey types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings, err error) {
 	hi := hostdb.Interaction{
 		Host:      hostKey,
 		Timestamp: time.Now(),
@@ -310,7 +310,8 @@ func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings
 	}
 	if err == nil {
 		hi.Result, _ = json.Marshal(hostdb.ScanResult{
-			Settings: settings,
+			PriceTable: pt,
+			Settings:   settings,
 		})
 	} else {
 		hi.Result, _ = json.Marshal(hostdb.ScanResult{
@@ -352,7 +353,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey typ
 	return fn(t)
 }
 
-func (w *worker) withTransportV3(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
+func withTransportV3(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
 	conn, err := dial(ctx, hostIP, hostKey)
 	if err != nil {
 		return err
@@ -449,17 +450,29 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	var settings rhpv2.HostSettings
 	start := time.Now()
-	scanErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
+	pingErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
 		settings, err = RPCSettings(ctx, t)
 		return err
 	})
 	elapsed := time.Since(start)
 
-	w.recordScan(rsr.HostKey, settings, scanErr)
+	var pt rhpv3.HostPriceTable
+	ptErr := withTransportV3(ctx, settings.SiamuxAddr(), rsr.HostKey, func(t *rhpv3.Transport) (err error) {
+		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+		return err
+	})
+
+	w.recordScan(rsr.HostKey, pt, settings, pingErr)
 
 	var scanErrStr string
-	if scanErr != nil {
-		scanErrStr = scanErr.Error()
+	if pingErr != nil {
+		scanErrStr = pingErr.Error()
+	}
+	if ptErr != nil {
+		if scanErrStr != "" {
+			scanErrStr += "; "
+		}
+		scanErrStr += ptErr.Error()
 	}
 	jc.Encode(api.RHPScanResponse{
 		Ping:      api.ParamDuration(elapsed),
@@ -475,7 +488,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	}
 
 	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", w.withTransportV3(jc.Request.Context(), rptr.SiamuxAddr, rptr.HostKey, func(t *rhpv3.Transport) (err error) {
+	if jc.Check("could not get price table", withTransportV3(jc.Request.Context(), rptr.SiamuxAddr, rptr.HostKey, func(t *rhpv3.Transport) (err error) {
 		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
@@ -661,7 +674,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 		return
 	}
 	var value rhpv3.RegistryValue
-	err := w.withTransportV3(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
 		value, err = RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
@@ -680,7 +693,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
-	err := w.withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
@@ -1037,7 +1050,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	}
 	w.accounts = newAccounts(w.id, w.deriveSubKey("accountkey"), b)
 	w.contractSpendingRecorder = w.newContractSpendingRecorder()
-	w.priceTables = newPriceTables(w.withTransportV3)
+	w.priceTables = newPriceTables()
 	return w
 }
 
