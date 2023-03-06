@@ -82,7 +82,7 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState) error {
+func (c *contractor) performContractMaintenance(ctx context.Context, w Worker, cfg api.AutopilotConfig, cs api.ConsensusState) error {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
 
@@ -106,7 +106,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 
 	// fetch all active contracts from the worker
 	start := time.Now()
-	resp, err := c.ap.worker.ActiveContracts(ctx, contractHostTimeout)
+	resp, err := w.ActiveContracts(ctx, contractHostTimeout)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	// min score to pass checks.
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore, err = c.managedFindMinAllowedHostScores(ctx, cfg, hosts, storedData, rs.Redundancy())
+		minScore, err = c.managedFindMinAllowedHostScores(ctx, w, cfg, hosts, storedData, rs.Redundancy())
 		if err != nil {
 			return fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
@@ -158,7 +158,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	}
 
 	// run checks
-	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, cfg, cs, gs, rs, active, minScore, fee)
+	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, cfg, cs, gs, rs, active, minScore, fee)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -178,13 +178,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	}
 
 	// run renewals
-	renewed, err := c.runContractRenewals(ctx, cfg, cs.BlockHeight, &remaining, address, toRenew)
+	renewed, err := c.runContractRenewals(ctx, w, cfg, cs.BlockHeight, &remaining, address, toRenew)
 	if err != nil {
 		c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
 	}
 
 	// run contract refreshes
-	refreshed, err := c.runContractRefreshes(ctx, cfg, cs.BlockHeight, &remaining, address, toRefresh)
+	refreshed, err := c.runContractRefreshes(ctx, w, cfg, cs.BlockHeight, &remaining, address, toRefresh)
 	if err != nil {
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	}
@@ -196,7 +196,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if numContracts < addLeeway(cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, cfg, cs, gs, rs, hosts, active, cfg.Contracts.Amount-numContracts, &remaining, address, minScore, fee); err != nil {
+		if formed, err = c.runContractFormations(ctx, w, cfg, cs, gs, rs, hosts, active, cfg.Contracts.Amount-numContracts, &remaining, address, minScore, fee); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
@@ -287,7 +287,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context, cfg api.Autop
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64, txnFee types.Currency) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, contracts []api.Contract, minScore float64, txnFee types.Currency) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -337,7 +337,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 		}
 
 		// fetch price table
-		pt, err := c.priceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
+		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			continue
@@ -418,7 +418,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, hosts []hostdb.Host, active []api.Contract, missing uint64, budget *types.Currency, renterAddress types.Address, minScore float64, txnFee types.Currency) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, hosts []hostdb.Host, active []api.Contract, missing uint64, budget *types.Currency, renterAddress types.Address, minScore float64, txnFee types.Currency) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -450,7 +450,7 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, err := c.candidateHosts(ctx, cfg, hosts, used, make(map[types.PublicKey]uint64), wanted, minScore)
+	candidates, err := c.candidateHosts(ctx, w, cfg, hosts, used, make(map[types.PublicKey]uint64), wanted, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -471,7 +471,7 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 		}
 
 		// fetch price table on the fly
-		pt, err := c.priceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
+		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host, err)
 			continue
@@ -483,7 +483,7 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 			continue
 		}
 
-		formedContract, proceed, err := c.formContract(ctx, host, txnFee, minInitialContractFunds, maxInitialContractFunds, cs.BlockHeight, budget, renterAddress, cfg)
+		formedContract, proceed, err := c.formContract(ctx, w, host, txnFee, minInitialContractFunds, maxInitialContractFunds, cs.BlockHeight, budget, renterAddress, cfg)
 		if err == nil {
 			// add contract to contract set
 			formed = append(formed, formedContract.ID)
@@ -497,7 +497,7 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 	return formed, nil
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo) ([]api.ContractMetadata, error) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo) ([]api.ContractMetadata, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
 	defer span.End()
 
@@ -524,7 +524,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, cfg api.AutopilotC
 			break
 		}
 
-		contract, proceed, err := c.renewContract(ctx, ci, cfg, blockHeight, budget, renterAddress)
+		contract, proceed, err := c.renewContract(ctx, w, ci, cfg, blockHeight, budget, renterAddress)
 		if err == nil {
 			renewed = append(renewed, contract)
 		}
@@ -536,7 +536,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, cfg api.AutopilotC
 	return renewed, nil
 }
 
-func (c *contractor) runContractRefreshes(ctx context.Context, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) ([]api.ContractMetadata, error) {
+func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) ([]api.ContractMetadata, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRefreshes")
 	defer span.End()
 
@@ -563,7 +563,7 @@ func (c *contractor) runContractRefreshes(ctx context.Context, cfg api.Autopilot
 			break
 		}
 
-		contract, proceed, err := c.refreshContract(ctx, ci, cfg, blockHeight, budget, renterAddress)
+		contract, proceed, err := c.refreshContract(ctx, w, ci, cfg, blockHeight, budget, renterAddress)
 		if err == nil {
 			refreshed = append(refreshed, contract)
 		}
@@ -694,14 +694,14 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, cfg api.Autopilot
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg api.AutopilotConfig, hosts []hostdb.Host, storedData map[types.PublicKey]uint64, redundancy float64) (float64, error) {
+func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Worker, cfg api.AutopilotConfig, hosts []hostdb.Host, storedData map[types.PublicKey]uint64, redundancy float64) (float64, error) {
 	// Pull a new set of hosts from the hostdb that could be used as a new set
 	// to match the allowance. The lowest scoring host of these new hosts will
 	// be used as a baseline for determining whether our existing contracts are
 	// worthwhile.
 	numContracts := cfg.Contracts.Amount
 	buffer := 50
-	hosts, err := c.candidateHosts(ctx, cfg, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 1) // 1 to avoid 0 score hosts
+	hosts, err := c.candidateHosts(ctx, w, cfg, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 1) // 1 to avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
@@ -722,7 +722,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, cfg ap
 	return lowestScore / minAllowedScoreLeeway, nil
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig, hosts []hostdb.Host, exclude map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
+func (c *contractor) candidateHosts(ctx context.Context, w Worker, cfg api.AutopilotConfig, hosts []hostdb.Host, exclude map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
 
 	// nothing to do
@@ -814,7 +814,7 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 	return selected, nil
 }
 
-func (c *contractor) renewContract(ctx context.Context, ci contractInfo, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInfo, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "renewContract")
 	defer span.End()
 	defer func() {
@@ -852,7 +852,7 @@ func (c *contractor) renewContract(ctx context.Context, ci contractInfo, cfg api
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, blockHeight, endHeight)
 
 	// renew the contract
-	newRevision, _, err := c.ap.worker.RHPRenew(ctx, fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
+	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
 		if containsError(err, wallet.ErrInsufficientBalance) {
@@ -881,7 +881,7 @@ func (c *contractor) renewContract(ctx context.Context, ci contractInfo, cfg api
 	return renewedContract, true, nil
 }
 
-func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractInfo, cfg api.AutopilotConfig, blockHeight uint64, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "refreshContract")
 	defer span.End()
 	defer func() {
@@ -926,7 +926,7 @@ func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg a
 	}
 
 	// renew the contract
-	newRevision, _, err := c.ap.worker.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
+	newRevision, _, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		if containsError(err, wallet.ErrInsufficientBalance) {
@@ -955,7 +955,7 @@ func (c *contractor) refreshContract(ctx context.Context, ci contractInfo, cfg a
 	return refreshedContract, true, nil
 }
 
-func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, minInitialContractFunds, maxInitialContractFunds types.Currency, blockHeight uint64, budget *types.Currency, renterAddress types.Address, cfg api.AutopilotConfig) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Host, fee, minInitialContractFunds, maxInitialContractFunds types.Currency, blockHeight uint64, budget *types.Currency, renterAddress types.Address, cfg api.AutopilotConfig) (cm api.ContractMetadata, proceed bool, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "formContract")
 	defer span.End()
 	defer func() {
@@ -968,7 +968,7 @@ func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, mi
 	span.SetAttributes(attribute.Stringer("host", hk))
 
 	// fetch host settings
-	scan, err := c.ap.worker.RHPScan(ctx, hk, host.NetAddress, 0)
+	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
 	if err != nil {
 		c.logger.Debugw(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
@@ -988,7 +988,7 @@ func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, mi
 	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, expectedStorage, scan.Settings)
 
 	// form contract
-	contract, _, err := c.ap.worker.RHPForm(ctx, endHeight, hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
+	contract, _, err := w.RHPForm(ctx, endHeight, hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
@@ -1017,10 +1017,10 @@ func (c *contractor) formContract(ctx context.Context, host hostdb.Host, fee, mi
 	return formedContract, true, nil
 }
 
-func (c *contractor) priceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error) {
+func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error) {
 	ctx, cancel := context.WithTimeout(ctx, contractHostPriceTableTimeout)
 	defer cancel()
-	return c.ap.worker.RHPPriceTable(ctx, hk, siamuxAddr)
+	return w.RHPPriceTable(ctx, hk, siamuxAddr)
 }
 
 func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
