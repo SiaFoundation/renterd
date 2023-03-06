@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -30,10 +31,19 @@ type (
 		persistInterval        time.Duration
 		unappliedAnnouncements []announcement
 		unappliedCCID          modules.ConsensusChangeID
+		unappliedRevisions     map[types.FileContractID]revisionUpdate
+		unappliedProofs        map[types.FileContractID]uint64
 
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
+
+		knownContracts map[types.FileContractID]struct{}
+	}
+
+	revisionUpdate struct {
+		height uint64
+		number uint64
 	}
 )
 
@@ -68,10 +78,10 @@ func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
 }
 
 func DBConfigFromEnv() (uri, user, password, dbName string) {
-	uri = os.Getenv("RENTER_DB_URI")
-	user = os.Getenv("RENTER_DB_USER")
-	password = os.Getenv("RENTER_DB_PASSWORD")
-	dbName = os.Getenv("RENTER_DB_NAME")
+	uri = os.Getenv("RENTERD_DB_URI")
+	user = os.Getenv("RENTERD_DB_USER")
+	password = os.Getenv("RENTERD_DB_PASSWORD")
+	dbName = os.Getenv("RENTERD_DB_NAME")
 	return
 }
 
@@ -166,12 +176,32 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
+	// Fetch contract ids.
+	var activeFCIDs, archivedFCIDs []fileContractID
+	if err := db.Model(&dbContract{}).
+		Select("fcid").
+		Find(&activeFCIDs).Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	if err := db.Model(&dbArchivedContract{}).
+		Select("fcid").
+		Find(&archivedFCIDs).Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	isOurContract := make(map[types.FileContractID]struct{})
+	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
+		isOurContract[types.FileContractID(fcid)] = struct{}{}
+	}
+
 	ss := &SQLStore{
 		db:                   db,
+		knownContracts:       isOurContract,
 		lastAnnouncementSave: time.Now(),
 		persistInterval:      persistInterval,
 		hasAllowlist:         allowlistCnt > 0,
 		hasBlocklist:         blocklistCnt > 0,
+		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:      make(map[types.FileContractID]uint64),
 	}
 	return ss, ccid, nil
 }

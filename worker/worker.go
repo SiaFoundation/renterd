@@ -618,7 +618,8 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Check("failed to fetch host", err) != nil {
 		return
 	}
-	hostIP := h.Settings.SiamuxAddr()
+	hostIP := h.Settings.NetAddress
+	siamuxAddr := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
 	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityFunding, lockingDurationFunding)
@@ -647,14 +648,14 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
 	if !ptValid {
 		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
-		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, hostIP, rfr.HostKey)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rfr.HostKey)
 		if jc.Check("failed to update outdated price table", err) != nil {
 			return
 		}
 	}
 
 	// Fund account.
-	err = w.fundAccount(ctx, account, pt, hostIP, rfr.HostKey, rfr.Amount, &revision)
+	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, rfr.Amount, &revision)
 
 	// If funding failed due to an exceeded max balance, we sync the account.
 	if isMaxBalanceExceeded(err) {
@@ -1031,6 +1032,10 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(accounts)
 }
 
+func (w *worker) idHandlerGET(jc jape.Context) {
+	jc.Encode(w.id)
+}
+
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) *worker {
 	w := &worker{
@@ -1065,6 +1070,8 @@ func (w *worker) Handler() http.Handler {
 		"GET    /accounts":                w.accountsHandlerGET,
 		"GET    /accounts/host/:id":       w.accountHandlerGET,
 		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
+
+		"GET    /id": w.idHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,

@@ -22,46 +22,48 @@ var (
 )
 
 type accounts struct {
-	logger *zap.SugaredLogger
-	b      Bus
-	w      Worker
+	logger  *zap.SugaredLogger
+	b       Bus
+	workers *workerPool
 
 	refillInterval time.Duration
 
 	mu                sync.Mutex
 	fundingContracts  []api.ContractMetadata
-	inProgressRefills map[types.PublicKey]struct{}
+	inProgressRefills map[types.Hash256]struct{}
 }
 
-func newAccounts(l *zap.SugaredLogger, b Bus, w Worker, interval time.Duration) *accounts {
+func newAccounts(l *zap.SugaredLogger, b Bus, workers *workerPool, interval time.Duration) *accounts {
 	return &accounts{
 		b:                 b,
-		inProgressRefills: make(map[types.PublicKey]struct{}),
+		inProgressRefills: make(map[types.Hash256]struct{}),
 		logger:            l.Named("accounts"),
 		refillInterval:    interval,
-		w:                 w,
+		workers:           workers,
 	}
 }
 
-func (a *accounts) markRefillInProgress(host types.PublicKey) bool {
+func (a *accounts) markRefillInProgress(workerID string, host types.PublicKey) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, inProgress := a.inProgressRefills[host]
+	k := types.HashBytes(append([]byte(workerID), host[:]...))
+	_, inProgress := a.inProgressRefills[k]
 	if inProgress {
 		return false
 	}
-	a.inProgressRefills[host] = struct{}{}
+	a.inProgressRefills[k] = struct{}{}
 	return true
 }
 
-func (a *accounts) markRefillDone(host types.PublicKey) {
+func (a *accounts) markRefillDone(workerID string, host types.PublicKey) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, inProgress := a.inProgressRefills[host]
+	k := types.HashBytes(append([]byte(workerID), host[:]...))
+	_, inProgress := a.inProgressRefills[k]
 	if !inProgress {
 		panic("releasing a refill that hasn't been in progress")
 	}
-	delete(a.inProgressRefills, host)
+	delete(a.inProgressRefills, k)
 }
 
 func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig) {
@@ -85,7 +87,11 @@ func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
 		case <-ticker.C:
 		}
 
-		a.refillWorkerAccounts()
+		a.workers.withWorkers(func(workers []Worker) {
+			for _, w := range workers {
+				a.refillWorkerAccounts(w)
+			}
+		})
 	}
 }
 
@@ -94,9 +100,17 @@ func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
-func (a *accounts) refillWorkerAccounts() {
+func (a *accounts) refillWorkerAccounts(w Worker) {
 	ctx, span := tracing.Tracer.Start(context.Background(), "refillWorkerAccounts")
 	defer span.End()
+
+	workerID, err := w.ID(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to fetch worker id")
+		a.logger.Errorw(fmt.Sprintf("failed to fetch worker id for refill: %v", err))
+		return
+	}
 
 	// Map hosts to contracts to use for funding.
 	a.mu.Lock()
@@ -109,12 +123,12 @@ func (a *accounts) refillWorkerAccounts() {
 	// Fund an account for every contract we have.
 	for _, contract := range contractForHost {
 		// Only launch a refill goroutine if no refill is in progress.
-		if !a.markRefillInProgress(contract.HostKey) {
+		if !a.markRefillInProgress(workerID, contract.HostKey) {
 			continue // refill already in progress
 		}
 		go func(contract api.ContractMetadata) (err error) {
 			// Remove from in-progress refills once done.
-			defer a.markRefillDone(contract.HostKey)
+			defer a.markRefillDone(workerID, contract.HostKey)
 
 			// Limit the time a refill can take.
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
@@ -132,7 +146,7 @@ func (a *accounts) refillWorkerAccounts() {
 			}()
 
 			// Fetch the account.
-			account, err := a.w.Account(ctx, contract.HostKey)
+			account, err := w.Account(ctx, contract.HostKey)
 			if err != nil {
 				return err
 			}
@@ -169,7 +183,7 @@ func (a *accounts) refillWorkerAccounts() {
 				return err
 			}
 
-			if err := a.w.RHPFund(ctx, contract.ID, contract.HostKey, fundCurrency); err != nil {
+			if err := w.RHPFund(ctx, contract.ID, contract.HostKey, fundCurrency); err != nil {
 				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
 					"account", account.ID,
 					"host", contract.HostKey,

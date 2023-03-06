@@ -740,9 +740,9 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height--
 	}
 
-	// Fetch announcements and add them to the queue.
 	var newAnnouncements []announcement
 	for _, sb := range cc.AppliedBlocks {
+		// Fetch announcements and add them to the queue.
 		var b types.Block
 		convertToCore(sb, &b)
 		hostdb.ForEachAnnouncement(b, height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
@@ -751,17 +751,47 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 				announcement: ha,
 			})
 		})
+		// Update RevisionHeight and RevisionNumber for our contracts.
+		for _, txn := range sb.Transactions {
+			for _, rev := range txn.FileContractRevisions {
+				if _, isOurs := ss.knownContracts[types.FileContractID(rev.ParentID)]; isOurs {
+					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
+						height: height,
+						number: rev.NewRevisionNumber,
+					}
+				}
+			}
+			// Get ProofHeight for our contracts.
+			for _, sp := range txn.StorageProofs {
+				if _, isOurs := ss.knownContracts[types.FileContractID(sp.ParentID)]; isOurs {
+					ss.unappliedProofs[types.FileContractID(sp.ParentID)] = height
+				}
+			}
+		}
 		height++
 	}
 
 	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
 	ss.unappliedCCID = cc.ID
 
-	// Apply new announcements
-	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval || len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit {
+	// Apply updates.
+	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval ||
+		len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit ||
+		len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0 {
 		err := ss.db.Transaction(func(tx *gorm.DB) error {
+			// Apply announcements.
 			if len(ss.unappliedAnnouncements) > 0 {
 				if err := insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
+					return err
+				}
+			}
+			for fcid, rev := range ss.unappliedRevisions {
+				if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
+					return err
+				}
+			}
+			for fcid, proofHeight := range ss.unappliedProofs {
+				if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
 					return err
 				}
 			}
@@ -831,4 +861,30 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 		return err
 	}
 	return tx.Create(&hosts).Error
+}
+
+func updateRevisionNumberAndHeight(db *gorm.DB, fcid types.FileContractID, revisionHeight, revisionNumber uint64) error {
+	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
+		"revision_height": revisionHeight,
+		"revision_number": fmt.Sprint(revisionNumber),
+	})
+}
+
+func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {
+	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
+		"proof_height": blockHeight,
+	})
+}
+
+func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
+	err1 := tx.Model(&dbContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Updates(updates).Error
+	err2 := tx.Model(&dbArchivedContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Updates(updates).Error
+	if err1 != nil || err2 != nil {
+		return fmt.Errorf("%s; %s", err1, err2)
+	}
+	return nil
 }
