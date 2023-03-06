@@ -405,7 +405,12 @@ func TestRenewedContract(t *testing.T) {
 		Host:                publicKey(c.HostKey()),
 		RenewedTo:           fileContractID(fcid1Renewed),
 		Reason:              archivalReasonRenewed,
+		ProofHeight:         0,
+		RevisionHeight:      0,
+		RevisionNumber:      "0",
 		StartHeight:         100,
+		WindowStart:         2,
+		WindowEnd:           3,
 		UploadSpending:      zeroCurrency,
 		DownloadSpending:    zeroCurrency,
 		FundAccountSpending: zeroCurrency,
@@ -478,9 +483,12 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 	for i := 0; i < len(contracts)-1; i++ {
 		if !reflect.DeepEqual(contracts[i], api.ArchivedContract{
-			ID:        fcids[len(fcids)-2-i],
-			HostKey:   hk,
-			RenewedTo: fcids[len(fcids)-1-i],
+			ID:          fcids[len(fcids)-2-i],
+			HostKey:     hk,
+			RenewedTo:   fcids[len(fcids)-1-i],
+			StartHeight: 2,
+			WindowStart: 400,
+			WindowEnd:   500,
 		}) {
 			t.Fatal("wrong contract", i)
 		}
@@ -704,6 +712,7 @@ func TestSQLMetadataStore(t *testing.T) {
 											PublicKey: publicKey(hk1),
 										},
 										FCID:                fileContractID(fcid1),
+										RevisionNumber:      "0",
 										StartHeight:         startHeight1,
 										WindowStart:         400,
 										WindowEnd:           500,
@@ -741,6 +750,7 @@ func TestSQLMetadataStore(t *testing.T) {
 											PublicKey: publicKey(hk2),
 										},
 										FCID:                fileContractID(fcid2),
+										RevisionNumber:      "0",
 										StartHeight:         startHeight2,
 										WindowStart:         400,
 										WindowEnd:           500,

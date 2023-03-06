@@ -136,7 +136,9 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Apply a consensus change.
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}
-	hdb.ProcessConsensusChange(modules.ConsensusChange{ID: ccid2})
+	hdb.ProcessConsensusChange(modules.ConsensusChange{
+		ID: ccid2,
+	})
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
