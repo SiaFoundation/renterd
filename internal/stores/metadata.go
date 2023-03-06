@@ -271,7 +271,7 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, to
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
-	s.isOurContract[c.ID()] = struct{}{}
+	s.knownContracts[c.ID()] = struct{}{}
 	return added.convert(), nil
 }
 
@@ -334,7 +334,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		if err != nil {
 			return err
 		}
-		s.isOurContract[c.ID()] = struct{}{}
+		s.knownContracts[c.ID()] = struct{}{}
 
 		// Update the old contract in the contract set to the new one.
 		err = tx.Table("contract_set_contracts").
@@ -433,7 +433,7 @@ func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) 
 	if err != nil {
 		return err
 	}
-	delete(s.isOurContract, id)
+	delete(s.knownContracts, id)
 	return nil
 }
 

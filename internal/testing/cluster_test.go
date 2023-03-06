@@ -132,7 +132,6 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println("contract", contract.ID)
 	if err := cluster.MineBlocks(int(contract.WindowStart - cs.BlockHeight - 4)); err != nil {
 		t.Fatal(err)
 	}

@@ -663,7 +663,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		// Update RevisionHeight and RevisionNumber for our contracts.
 		for _, txn := range sb.Transactions {
 			for _, rev := range txn.FileContractRevisions {
-				if _, isOurs := ss.isOurContract[types.FileContractID(rev.ParentID)]; isOurs {
+				if _, isOurs := ss.knownContracts[types.FileContractID(rev.ParentID)]; isOurs {
 					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
 						height: height,
 						number: rev.NewRevisionNumber,
@@ -672,7 +672,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 			}
 			// Get ProofHeight for our contracts.
 			for _, sp := range txn.StorageProofs {
-				if _, isOurs := ss.isOurContract[types.FileContractID(sp.ParentID)]; isOurs {
+				if _, isOurs := ss.knownContracts[types.FileContractID(sp.ParentID)]; isOurs {
 					ss.unappliedProofs[types.FileContractID(sp.ParentID)] = height
 				}
 			}
@@ -785,11 +785,11 @@ func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint6
 	})
 }
 
-func updateActiveAndArchivedContract(db *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
-	err1 := db.Model(&dbContract{}).
+func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
+	err1 := tx.Model(&dbContract{}).
 		Where("fcid = ?", fileContractID(fcid)).
 		Updates(updates).Error
-	err2 := db.Model(&dbArchivedContract{}).
+	err2 := tx.Model(&dbArchivedContract{}).
 		Where("fcid = ?", fileContractID(fcid)).
 		Updates(updates).Error
 	if err1 != nil || err2 != nil {

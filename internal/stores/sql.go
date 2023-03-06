@@ -38,7 +38,7 @@ type (
 		hasAllowlist bool
 		hasBlocklist bool
 
-		isOurContract map[types.FileContractID]struct{}
+		knownContracts map[types.FileContractID]struct{}
 	}
 
 	revisionUpdate struct {
@@ -195,7 +195,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 
 	ss := &SQLStore{
 		db:                   db,
-		isOurContract:        isOurContract,
+		knownContracts:       isOurContract,
 		lastAnnouncementSave: time.Now(),
 		persistInterval:      persistInterval,
 		hasAllowlist:         allowlistCnt > 0,
