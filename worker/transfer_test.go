@@ -204,10 +204,12 @@ func TestMultipleObjects(t *testing.T) {
 		}
 	}
 
+	mockLocker.mu.Lock()
 	if mockLocker.acquired == 0 {
 		t.Errorf("should have acquired")
 	}
 	if mockLocker.released == 0 {
 		t.Errorf("should have released")
 	}
+	mockLocker.mu.Unlock()
 }
