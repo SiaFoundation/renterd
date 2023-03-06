@@ -194,8 +194,8 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 		GatewayAddr:        "127.0.0.1:0",
 		Miner:              miner,
 		PersistInterval:    testPersistInterval,
-		GougingSettings:    testGougingSettings,
-		RedundancySettings: testRedundancySettings,
+		GougingSettings:    &testGougingSettings,
+		RedundancySettings: &testRedundancySettings,
 	}, busDir, wk, logger)
 	if err != nil {
 		return nil, err
