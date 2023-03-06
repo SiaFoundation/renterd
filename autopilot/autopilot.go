@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -19,6 +20,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 type Store interface {
@@ -128,15 +130,13 @@ func newWorkerPool(workers []Worker) *workerPool {
 func (wp *workerPool) withWorker(workerFunc func(Worker)) {
 	wp.mu.RLock()
 	defer wp.mu.RUnlock()
-	workerFunc(wp.workers[0])
+	workerFunc(wp.workers[frand.Intn(len(wp.workers))])
 }
 
-func (wp *workerPool) withWorkers(workerFunc func(Worker)) {
+func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 	wp.mu.RLock()
 	defer wp.mu.RUnlock()
-	for _, w := range wp.workers {
-		workerFunc(w)
-	}
+	workerFunc(wp.workers)
 }
 
 // Actions returns the autopilot actions that have occurred since the given time.
@@ -192,11 +192,20 @@ func (ap *Autopilot) Run() error {
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
 			defer span.End()
 
+			// Trace/Log worker id chosen for this maintenance iteration.
+			workerID, err := w.ID(ctx)
+			if err != nil {
+				ap.logger.Errorf("failed to fetch worker id - abort maintenance", err)
+				return
+			}
+			span.SetAttributes(attribute.String("worker", workerID))
+			ap.logger.Infof("using worker %s for iteration", workerID)
+
 			// use the same config for the entire iteration
 			cfg := ap.store.Config()
 
 			// update the contract set setting
-			err := ap.bus.UpdateSetting(ctx, bus.SettingContractSet, cfg.Contracts.Set)
+			err = ap.bus.UpdateSetting(ctx, bus.SettingContractSet, cfg.Contracts.Set)
 			if err != nil {
 				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 			}

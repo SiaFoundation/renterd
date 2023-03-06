@@ -606,7 +606,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 	hostIP := h.Settings.NetAddress
-	siamuxIP := h.Settings.SiamuxAddr()
+	siamuxAddr := h.Settings.SiamuxAddr()
 
 	// Get contract revision.
 	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityFunding, lockingDurationFunding)
@@ -635,14 +635,14 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
 	if !ptValid {
 		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
-		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxIP, rfr.HostKey)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rfr.HostKey)
 		if jc.Check("failed to update outdated price table", err) != nil {
 			return
 		}
 	}
 
 	// Fund account.
-	err = w.fundAccount(ctx, account, pt, siamuxIP, rfr.HostKey, rfr.Amount, &revision)
+	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, rfr.Amount, &revision)
 
 	// If funding failed due to an exceeded max balance, we sync the account.
 	if isMaxBalanceExceeded(err) {
