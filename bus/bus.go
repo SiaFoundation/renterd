@@ -879,20 +879,12 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 		SettingGouging:    api.DefaultGougingSettings,
 		SettingRedundancy: api.DefaultRedundancySettings,
 	} {
-		setting, err := b.ss.Setting(ctx, key)
-		if err != nil {
-			return nil, err
-		}
-		if setting != "" {
-			continue
-		}
-
-		bytes, err := json.Marshal(value)
-		if err != nil {
-			panic("failed to marshal default settings") // should never happen
-		}
-		if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
-			return nil, err
+		if _, err := b.ss.Setting(ctx, key); err == api.ErrSettingNotFound {
+			if bytes, err := json.Marshal(value); err != nil {
+				panic("failed to marshal default settings") // should never happen
+			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
+				return nil, err
+			}
 		}
 	}
 
