@@ -618,12 +618,12 @@ func processPayment(s *rhpv3.Stream, payment rhpv3.PaymentMethod) error {
 	} else if err := s.WriteResponse(payment); err != nil {
 		return err
 	}
-	if pbcr, ok := payment.(*rhpv3.PayByContractRequest); ok {
+	if _, ok := payment.(*rhpv3.PayByContractRequest); ok {
 		var pr rhpv3.PaymentResponse
 		if err := s.ReadResponse(&pr, 4096); err != nil {
 			return err
 		}
-		pbcr.Signature = pr.Signature
+		// TODO: return host signature
 	}
 	return nil
 }
