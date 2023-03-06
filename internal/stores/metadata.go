@@ -55,7 +55,7 @@ type (
 
 		ProofHeight    uint64 `gorm:"index"`
 		RevisionHeight uint64 `gorm:"index"`
-		RevisionNumber uint64 `gorm:"index"`
+		RevisionNumber string `gorm:"NOT NULL"`
 		StartHeight    uint64 `gorm:"index;NOT NULL"`
 		WindowStart    uint64 `gorm:"index;NOT NULL"`
 		WindowEnd      uint64 `gorm:"index;NOT NULL"`
@@ -71,7 +71,7 @@ type (
 
 		ProofHeight    uint64 `gorm:"index"`
 		RevisionHeight uint64 `gorm:"index"`
-		RevisionNumber uint64 `gorm:"index"`
+		RevisionNumber string // string since db can't store math.MaxUint64
 		StartHeight    uint64 `gorm:"index;NOT NULL"`
 		WindowStart    uint64 `gorm:"index;NOT NULL"`
 		WindowEnd      uint64 `gorm:"index;NOT NULL"`
@@ -171,10 +171,19 @@ func (dbSlice) TableName() string { return "slices" }
 
 // convert converts a dbContract to an ArchivedContract.
 func (c dbArchivedContract) convert() api.ArchivedContract {
+	var revisionNumber uint64
+	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
 	return api.ArchivedContract{
 		ID:        types.FileContractID(c.FCID),
 		HostKey:   types.PublicKey(c.Host),
 		RenewedTo: types.FileContractID(c.RenewedTo),
+
+		ProofHeight:    c.ProofHeight,
+		RevisionHeight: c.RevisionHeight,
+		RevisionNumber: revisionNumber,
+		StartHeight:    c.StartHeight,
+		WindowStart:    c.WindowStart,
+		WindowEnd:      c.WindowEnd,
 
 		Spending: api.ContractSpending{
 			Uploads:     types.Currency(c.UploadSpending),
@@ -186,6 +195,8 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 
 // convert converts a dbContract to a ContractMetadata.
 func (c dbContract) convert() api.ContractMetadata {
+	var revisionNumber uint64
+	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
 	return api.ContractMetadata{
 		ID:          types.FileContractID(c.FCID),
 		HostIP:      c.Host.NetAddress,
@@ -199,7 +210,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		},
 		ProofHeight:    c.ProofHeight,
 		RevisionHeight: c.RevisionHeight,
-		RevisionNumber: c.RevisionNumber,
+		RevisionNumber: revisionNumber,
 		StartHeight:    c.StartHeight,
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
@@ -873,9 +884,10 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		RenewedFrom: fileContractID(renewedFrom),
 		TotalCost:   currency(totalCost),
 
-		StartHeight: startHeight,
-		WindowStart: c.Revision.WindowStart,
-		WindowEnd:   c.Revision.WindowEnd,
+		RevisionNumber: "0",
+		StartHeight:    startHeight,
+		WindowStart:    c.Revision.WindowStart,
+		WindowEnd:      c.Revision.WindowEnd,
 
 		// Spending starts at 0.
 		UploadSpending:      zeroCurrency,

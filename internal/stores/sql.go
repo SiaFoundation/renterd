@@ -200,6 +200,8 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		persistInterval:      persistInterval,
 		hasAllowlist:         allowlistCnt > 0,
 		hasBlocklist:         blocklistCnt > 0,
+		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:      make(map[types.FileContractID]uint64),
 	}
 	return ss, ccid, nil
 }

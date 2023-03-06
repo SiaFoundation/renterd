@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"reflect"
@@ -118,6 +119,57 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		if contracts[0].EndHeight() != contract.EndHeight()+cfg.Contracts.Period {
 			t.Fatal("wrong endHeight")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mine until before the window start to give the host time to submit the
+	// revision first.
+	cs, err := cluster.Bus.ConsensusState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("contract", contract.ID)
+	if err := cluster.MineBlocks(int(contract.WindowStart - cs.BlockHeight - 4)); err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	// Mine a few more blocks to make the host submits the proof.
+	if err := cluster.MineBlocks(5); err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now wait for the revision and proof to be caught by the hostdb.
+	err = Retry(10, time.Second, func() error {
+		if err := cluster.MineBlocks(1); err != nil {
+			t.Fatal(err)
+		}
+		// Fetch renewed contract and make sure we caught the proof and revision.
+		contracts, err := cluster.Bus.ActiveContracts(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(archivedContracts) != 1 {
+			return fmt.Errorf("should have 1 archived contract but got %v", len(archivedContracts))
+		}
+		ac := archivedContracts[0]
+		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
+			return fmt.Errorf("revision information is wrong: %v %v", ac.RevisionHeight, ac.RevisionNumber)
+		}
+		if ac.ProofHeight != 0 {
+			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
 		}
 		return nil
 	})

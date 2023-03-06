@@ -49,6 +49,13 @@ type (
 		HostKey   types.PublicKey      `json:"hostKey"`
 		RenewedTo types.FileContractID `json:"renewedTo"`
 		Spending  ContractSpending     `json:"spending"`
+
+		ProofHeight    uint64 `json:"proofHeight"`
+		RevisionHeight uint64 `json:"revisionHeight"`
+		RevisionNumber uint64 `json:"revisionNumber"`
+		StartHeight    uint64 `json:"startHeight"`
+		WindowStart    uint64 `json:"windowStart"`
+		WindowEnd      uint64 `json:"windowEnd"`
 	}
 )
 

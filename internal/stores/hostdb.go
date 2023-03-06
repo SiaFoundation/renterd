@@ -775,7 +775,7 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 func updateRevisionNumberAndHeight(db *gorm.DB, fcid types.FileContractID, revisionHeight, revisionNumber uint64) error {
 	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
 		"revision_height": revisionHeight,
-		"revision_number": revisionNumber,
+		"revision_number": fmt.Sprint(revisionNumber),
 	})
 }
 
