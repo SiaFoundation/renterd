@@ -16,10 +16,9 @@ type ContractsResponse struct {
 
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
-	HostKey    types.PublicKey `json:"hostKey"`
-	HostIP     string          `json:"hostIP"`
-	SiamuxAddr string          `json:"siamuxAddr"`
-	Timeout    time.Duration   `json:"timeout"`
+	HostKey types.PublicKey `json:"hostKey"`
+	HostIP  string          `json:"hostIP"`
+	Timeout time.Duration   `json:"timeout"`
 }
 
 // RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.

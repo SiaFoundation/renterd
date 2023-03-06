@@ -457,7 +457,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	elapsed := time.Since(start)
 
 	var pt rhpv3.HostPriceTable
-	ptErr := withTransportV3(ctx, rsr.SiamuxAddr, rsr.HostKey, func(t *rhpv3.Transport) (err error) {
+	ptErr := withTransportV3(ctx, settings.SiamuxAddr(), rsr.HostKey, func(t *rhpv3.Transport) (err error) {
 		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return err
 	})

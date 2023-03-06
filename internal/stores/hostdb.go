@@ -40,9 +40,12 @@ var (
 )
 
 type (
-	// dbHost defines a hostdb.Interaction as persisted in the DB.
-	// Deleting a host from the db will cascade the deletion and also delete
-	// the corresponding announcements and interactions with that host.
+	// dbHost defines a hostdb.Interaction as persisted in the DB. Deleting a
+	// host from the db will cascade the deletion and also delete the
+	// corresponding announcements and interactions with that host.
+	//
+	// NOTE: updating the host entity requires an update to the field map passed
+	// to 'Update' when recording host interactions
 	dbHost struct {
 		Model
 
@@ -718,6 +721,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					"uptime":                      h.Uptime,
 					"last_scan":                   h.LastScan,
 					"settings":                    h.Settings,
+					"price_table":                 h.PriceTable,
 					"successful_interactions":     h.SuccessfulInteractions,
 					"failed_interactions":         h.FailedInteractions,
 				}).Error
