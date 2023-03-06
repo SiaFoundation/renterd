@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
 
@@ -18,6 +19,7 @@ type (
 	fileContractID types.FileContractID
 	publicKey      types.PublicKey
 	hostSettings   rhpv2.HostSettings
+	hostPriceTable rhpv3.HostPriceTable
 	balance        big.Int
 )
 
@@ -109,6 +111,24 @@ func (hs *hostSettings) Scan(value interface{}) error {
 
 // Value returns a hostSettings value, implements driver.Valuer interface.
 func (hs hostSettings) Value() (driver.Value, error) {
+	return json.Marshal(hs)
+}
+
+func (hs hostPriceTable) GormDataType() string {
+	return "string"
+}
+
+// Scan scan value into hostPriceTable, implements sql.Scanner interface.
+func (hpt *hostPriceTable) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal hostPriceTable value:", value))
+	}
+	return json.Unmarshal(bytes, hpt)
+}
+
+// Value returns a hostPriceTable value, implements driver.Valuer interface.
+func (hs hostPriceTable) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }
 

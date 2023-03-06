@@ -9,6 +9,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -41,6 +42,7 @@ type (
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
 		worker interface {
+			RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error)
 			RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 		}
 
