@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -30,10 +31,19 @@ type (
 		persistInterval        time.Duration
 		unappliedAnnouncements []announcement
 		unappliedCCID          modules.ConsensusChangeID
+		unappliedRevisions     map[types.FileContractID]revisionUpdate
+		unappliedProofs        map[types.FileContractID]uint64
 
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
+
+		isOurContract map[types.FileContractID]struct{}
+	}
+
+	revisionUpdate struct {
+		height uint64
+		number uint64
 	}
 )
 
@@ -166,8 +176,22 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
+	// Fetch contract ids.
+	var activeFCIDs, archivedFCIDs []fileContractID
+	if err := db.Select("fcid FROM contracts").Find(&activeFCIDs).Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	if err := db.Select("fcid FROM archived_contracts").Find(&archivedFCIDs).Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	isOurContract := make(map[types.FileContractID]struct{})
+	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
+		isOurContract[types.FileContractID(fcid)] = struct{}{}
+	}
+
 	ss := &SQLStore{
 		db:                   db,
+		isOurContract:        isOurContract,
 		lastAnnouncementSave: time.Now(),
 		persistInterval:      persistInterval,
 		hasAllowlist:         allowlistCnt > 0,
