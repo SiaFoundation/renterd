@@ -178,10 +178,14 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 
 	// Fetch contract ids.
 	var activeFCIDs, archivedFCIDs []fileContractID
-	if err := db.Select("fcid FROM contracts").Find(&activeFCIDs).Error; err != nil {
+	if err := db.Model(&dbContract{}).
+		Select("fcid").
+		Find(&activeFCIDs).Error; err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
-	if err := db.Select("fcid FROM archived_contracts").Find(&archivedFCIDs).Error; err != nil {
+	if err := db.Model(&dbArchivedContract{}).
+		Select("fcid").
+		Find(&archivedFCIDs).Error; err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
 	isOurContract := make(map[types.FileContractID]struct{})
