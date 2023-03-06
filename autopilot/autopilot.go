@@ -193,7 +193,7 @@ func (ap *Autopilot) Run() error {
 			ap.s.tryPerformHostScan(ctx)
 
 			// do not continue if we are not synced
-			if !ap.state.cs.Synced {
+			if !ap.isSynced() {
 				ap.logger.Debug("iteration interrupted, consensus not synced")
 				return
 			}
