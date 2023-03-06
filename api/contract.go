@@ -14,10 +14,13 @@ type (
 
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
-		ID          types.FileContractID `json:"id"`
-		HostIP      string               `json:"hostIP"`
-		HostKey     types.PublicKey      `json:"hostKey"`
-		StartHeight uint64               `json:"startHeight"`
+		ID      types.FileContractID `json:"id"`
+		HostIP  string               `json:"hostIP"`
+		HostKey types.PublicKey      `json:"hostKey"`
+
+		StartHeight uint64 `json:"startHeight"`
+		WindowStart uint64 `json:"windowStart"`
+		WindowEnd   uint64 `json:"windowEnd"`
 
 		RenewedFrom types.FileContractID `json:"renewedFrom"`
 		Spending    ContractSpending     `json:"spending"`
