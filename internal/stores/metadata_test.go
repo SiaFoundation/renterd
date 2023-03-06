@@ -483,9 +483,12 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 	for i := 0; i < len(contracts)-1; i++ {
 		if !reflect.DeepEqual(contracts[i], api.ArchivedContract{
-			ID:        fcids[len(fcids)-2-i],
-			HostKey:   hk,
-			RenewedTo: fcids[len(fcids)-1-i],
+			ID:          fcids[len(fcids)-2-i],
+			HostKey:     hk,
+			RenewedTo:   fcids[len(fcids)-1-i],
+			StartHeight: 2,
+			WindowStart: 400,
+			WindowEnd:   500,
 		}) {
 			t.Fatal("wrong contract", i)
 		}
@@ -709,6 +712,7 @@ func TestSQLMetadataStore(t *testing.T) {
 											PublicKey: publicKey(hk1),
 										},
 										FCID:                fileContractID(fcid1),
+										RevisionNumber:      "0",
 										StartHeight:         startHeight1,
 										WindowStart:         400,
 										WindowEnd:           500,
@@ -746,6 +750,7 @@ func TestSQLMetadataStore(t *testing.T) {
 											PublicKey: publicKey(hk2),
 										},
 										FCID:                fileContractID(fcid2),
+										RevisionNumber:      "0",
 										StartHeight:         startHeight2,
 										WindowStart:         400,
 										WindowEnd:           500,

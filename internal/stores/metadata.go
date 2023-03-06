@@ -71,7 +71,7 @@ type (
 
 		ProofHeight    uint64 `gorm:"index"`
 		RevisionHeight uint64 `gorm:"index"`
-		RevisionNumber string // string since db can't store math.MaxUint64
+		RevisionNumber string `gorm:"NOT NULL"` // string since db can't store math.MaxUint64
 		StartHeight    uint64 `gorm:"index;NOT NULL"`
 		WindowStart    uint64 `gorm:"index;NOT NULL"`
 		WindowEnd      uint64 `gorm:"index;NOT NULL"`
