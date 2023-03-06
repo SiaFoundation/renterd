@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
 
@@ -195,7 +196,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, cfg api.Aut
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if numContracts < addLeeway(cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, cfg, hosts, active, cfg.Contracts.Amount-numContracts, cs.BlockHeight, &remaining, address, minScore, fee); err != nil {
+		if formed, err = c.runContractFormations(ctx, cfg, cs, gs, rs, hosts, active, cfg.Contracts.Amount-numContracts, &remaining, address, minScore, fee); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
@@ -417,7 +418,7 @@ func (c *contractor) runContractChecks(ctx context.Context, cfg api.AutopilotCon
 	return toDelete, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, hosts []hostdb.Host, active []api.Contract, missing, blockHeight uint64, budget *types.Currency, renterAddress types.Address, minScore float64, txnFee types.Currency) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, cfg api.AutopilotConfig, cs api.ConsensusState, gs api.GougingSettings, rs api.RedundancySettings, hosts []hostdb.Host, active []api.Contract, missing uint64, budget *types.Currency, renterAddress types.Address, minScore float64, txnFee types.Currency) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -469,7 +470,20 @@ func (c *contractor) runContractFormations(ctx context.Context, cfg api.Autopilo
 			break
 		}
 
-		formedContract, proceed, err := c.formContract(ctx, host, txnFee, minInitialContractFunds, maxInitialContractFunds, blockHeight, budget, renterAddress, cfg)
+		// fetch price table on the fly
+		pt, err := c.priceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
+		if err != nil {
+			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host, err)
+			continue
+		}
+
+		// perform gouging checks on the fly to ensure the host is not gouging its prices
+		if gouging, reasons := worker.IsGouging(gs, rs, cs, nil, &pt, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow); gouging {
+			c.logger.Error("candidate host became unusable", "host", host, "reasons", reasons)
+			continue
+		}
+
+		formedContract, proceed, err := c.formContract(ctx, host, txnFee, minInitialContractFunds, maxInitialContractFunds, cs.BlockHeight, budget, renterAddress, cfg)
 		if err == nil {
 			// add contract to contract set
 			formed = append(formed, formedContract.ID)
@@ -759,17 +773,16 @@ func (c *contractor) candidateHosts(ctx context.Context, cfg api.AutopilotConfig
 		if _, exclude := exclude[h.PublicKey]; exclude {
 			continue
 		}
-		if h.Settings == nil {
+		if h.Settings == nil || h.PriceTable == nil {
 			continue // host has not been scanned yet
 		}
 
-		pt, err := c.priceTable(ctx, h.PublicKey, h.Settings.SiamuxAddr())
-		if err != nil {
-			c.logger.Errorf("could not fetch price table for host %v: %v", h.PublicKey, err)
-			continue
-		}
-
-		if usable, _ := isUsableHost(cfg, gs, rs, cs, &pt, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
+		// NOTE: use the price table stored on the host for gouging checks when
+		// looking for candidate hosts, fetching the price table on the fly here
+		// slows contract maintenance down way too much, we re-evaluate the host
+		// right before forming the contract to ensure we do not form a contract
+		// with a host that's gouging its prices.
+		if usable, _ := isUsableHost(cfg, gs, rs, cs, h.PriceTable, ipFilter, h, minScore, storedData[h.PublicKey], txnFee); !usable {
 			continue
 		}
 

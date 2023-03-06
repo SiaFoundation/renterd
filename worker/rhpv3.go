@@ -25,7 +25,7 @@ var (
 
 func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, hostIP string, hostKey types.PublicKey, amount types.Currency, revision *types.FileContractRevision) error {
 	return account.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) (err error) {
+		return amount, withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(hostKey)
 			cost := amount.Add(pt.FundAccountCost)
 			payment, ok := rhpv3.PayByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
@@ -46,7 +46,7 @@ func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.Hos
 	payment := w.preparePayment(hostKey, pt.AccountBalanceCost, pt.HostBlockHeight)
 	return account.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
-		err := w.withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) error {
+		err := withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) error {
 			balance, err = RPCAccountBalance(t, &payment, account.id, pt.UID)
 			return err
 		})
@@ -151,6 +151,12 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 		a.accounts[accountID] = acc
 	}
 	return acc, nil
+}
+
+func (a *account) Balance() types.Currency {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return types.NewCurrency(a.balance.Uint64(), new(big.Int).Rsh(a.balance, 64).Uint64())
 }
 
 func (a *accounts) ResetDrift(ctx context.Context, id rhpv3.Account) error {
@@ -290,12 +296,9 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 // price table when we start considering it invalid.
 const priceTableValidityLeeway = 30 * time.Second
 
-type withTransportV3 func(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error)
-
 type priceTables struct {
-	withTransport withTransportV3
-	mu            sync.Mutex
-	priceTables   map[types.PublicKey]*priceTable
+	mu          sync.Mutex
+	priceTables map[types.PublicKey]*priceTable
 }
 
 type priceTable struct {
@@ -313,10 +316,9 @@ type priceTableUpdate struct {
 	pt   *rhpv3.HostPriceTable
 }
 
-func newPriceTables(transportFn withTransportV3) *priceTables {
+func newPriceTables() *priceTables {
 	return &priceTables{
-		priceTables:   make(map[types.PublicKey]*priceTable),
-		withTransport: transportFn,
+		priceTables: make(map[types.PublicKey]*priceTable),
 	}
 }
 
@@ -366,7 +368,7 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 
 	// Update price table.
 	var hpt rhpv3.HostPriceTable
-	err := pts.withTransport(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(ctx, hostIP, hk, func(t *rhpv3.Transport) (err error) {
 		hpt, err = RPCPriceTable(t, payFn)
 		return err
 	})

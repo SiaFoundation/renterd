@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
@@ -45,8 +46,9 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey publicKey `gorm:"unique;index;NOT NULL;size:32"`
-		Settings  hostSettings
+		PublicKey  publicKey `gorm:"unique;index;NOT NULL;size:32"`
+		Settings   hostSettings
+		PriceTable hostPriceTable
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -178,6 +180,83 @@ func convertHostSettings(settings rhpv2.HostSettings) hostSettings {
 	}
 }
 
+// convert converts hostSettings to rhp.HostSettings
+func (pt hostPriceTable) convert() rhpv3.HostPriceTable {
+	return rhpv3.HostPriceTable{
+		UID:                          pt.UID,
+		Validity:                     pt.Validity,
+		HostBlockHeight:              pt.HostBlockHeight,
+		UpdatePriceTableCost:         pt.UpdatePriceTableCost,
+		AccountBalanceCost:           pt.AccountBalanceCost,
+		FundAccountCost:              pt.FundAccountCost,
+		LatestRevisionCost:           pt.LatestRevisionCost,
+		SubscriptionMemoryCost:       pt.SubscriptionMemoryCost,
+		SubscriptionNotificationCost: pt.SubscriptionNotificationCost,
+		InitBaseCost:                 pt.InitBaseCost,
+		MemoryTimeCost:               pt.MemoryTimeCost,
+		DownloadBandwidthCost:        pt.DownloadBandwidthCost,
+		UploadBandwidthCost:          pt.UploadBandwidthCost,
+		DropSectorsBaseCost:          pt.DropSectorsBaseCost,
+		DropSectorsUnitCost:          pt.DropSectorsUnitCost,
+		HasSectorBaseCost:            pt.HasSectorBaseCost,
+		ReadBaseCost:                 pt.ReadBaseCost,
+		ReadLengthCost:               pt.ReadLengthCost,
+		RenewContractCost:            pt.RenewContractCost,
+		RevisionBaseCost:             pt.RevisionBaseCost,
+		SwapSectorBaseCost:           pt.SwapSectorBaseCost,
+		WriteBaseCost:                pt.WriteBaseCost,
+		WriteLengthCost:              pt.WriteLengthCost,
+		WriteStoreCost:               pt.WriteStoreCost,
+		TxnFeeMinRecommended:         pt.TxnFeeMinRecommended,
+		TxnFeeMaxRecommended:         pt.TxnFeeMaxRecommended,
+		ContractPrice:                pt.ContractPrice,
+		CollateralCost:               pt.CollateralCost,
+		MaxCollateral:                pt.MaxCollateral,
+		MaxDuration:                  pt.MaxDuration,
+		WindowSize:                   pt.WindowSize,
+		RegistryEntriesLeft:          pt.RegistryEntriesLeft,
+		RegistryEntriesTotal:         pt.RegistryEntriesTotal,
+	}
+}
+
+func convertHostPriceTable(pt rhpv3.HostPriceTable) hostPriceTable {
+	return hostPriceTable{
+		UID:                          pt.UID,
+		Validity:                     pt.Validity,
+		HostBlockHeight:              pt.HostBlockHeight,
+		UpdatePriceTableCost:         pt.UpdatePriceTableCost,
+		AccountBalanceCost:           pt.AccountBalanceCost,
+		FundAccountCost:              pt.FundAccountCost,
+		LatestRevisionCost:           pt.LatestRevisionCost,
+		SubscriptionMemoryCost:       pt.SubscriptionMemoryCost,
+		SubscriptionNotificationCost: pt.SubscriptionNotificationCost,
+		InitBaseCost:                 pt.InitBaseCost,
+		MemoryTimeCost:               pt.MemoryTimeCost,
+		DownloadBandwidthCost:        pt.DownloadBandwidthCost,
+		UploadBandwidthCost:          pt.UploadBandwidthCost,
+		DropSectorsBaseCost:          pt.DropSectorsBaseCost,
+		DropSectorsUnitCost:          pt.DropSectorsUnitCost,
+		HasSectorBaseCost:            pt.HasSectorBaseCost,
+		ReadBaseCost:                 pt.ReadBaseCost,
+		ReadLengthCost:               pt.ReadLengthCost,
+		RenewContractCost:            pt.RenewContractCost,
+		RevisionBaseCost:             pt.RevisionBaseCost,
+		SwapSectorBaseCost:           pt.SwapSectorBaseCost,
+		WriteBaseCost:                pt.WriteBaseCost,
+		WriteLengthCost:              pt.WriteLengthCost,
+		WriteStoreCost:               pt.WriteStoreCost,
+		TxnFeeMinRecommended:         pt.TxnFeeMinRecommended,
+		TxnFeeMaxRecommended:         pt.TxnFeeMaxRecommended,
+		ContractPrice:                pt.ContractPrice,
+		CollateralCost:               pt.CollateralCost,
+		MaxCollateral:                pt.MaxCollateral,
+		MaxDuration:                  pt.MaxDuration,
+		WindowSize:                   pt.WindowSize,
+		RegistryEntriesLeft:          pt.RegistryEntriesLeft,
+		RegistryEntriesTotal:         pt.RegistryEntriesTotal,
+	}
+}
+
 // TableName implements the gorm.Tabler interface.
 func (dbAnnouncement) TableName() string { return "host_announcements" }
 
@@ -222,6 +301,13 @@ func (h dbHost) convert() hostdb.Host {
 	} else {
 		s := h.Settings.convert()
 		hdbHost.Settings = &s
+	}
+
+	if h.PriceTable == (hostPriceTable{}) {
+		hdbHost.PriceTable = nil
+	} else {
+		pt := h.PriceTable.convert()
+		hdbHost.PriceTable = &pt
 	}
 	return hdbHost
 }
@@ -607,6 +693,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 						return err
 					}
 					host.Settings = convertHostSettings(sr.Settings)
+					host.PriceTable = convertHostPriceTable(sr.PriceTable)
 				}
 			}
 
