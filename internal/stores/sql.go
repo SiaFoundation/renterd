@@ -78,10 +78,10 @@ func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
 }
 
 func DBConfigFromEnv() (uri, user, password, dbName string) {
-	uri = os.Getenv("RENTER_DB_URI")
-	user = os.Getenv("RENTER_DB_USER")
-	password = os.Getenv("RENTER_DB_PASSWORD")
-	dbName = os.Getenv("RENTER_DB_NAME")
+	uri = os.Getenv("RENTERD_DB_URI")
+	user = os.Getenv("RENTERD_DB_USER")
+	password = os.Getenv("RENTERD_DB_PASSWORD")
+	dbName = os.Getenv("RENTERD_DB_NAME")
 	return
 }
 

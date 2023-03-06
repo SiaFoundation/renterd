@@ -139,7 +139,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Mine a few more blocks to make the host submits the proof.
-	if err := cluster.MineBlocks(5); err != nil {
+	if err := cluster.MineBlocks(4); err != nil {
 		t.Fatal(err)
 	}
 	if err := cluster.Sync(); err != nil {

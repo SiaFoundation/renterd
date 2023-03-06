@@ -285,8 +285,8 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *za
 	return w.Handler(), w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
-	ap, err := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
+func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
+	ap, err := autopilot.New(s, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
 	if err != nil {
 		return nil, nil, nil, err
 	}

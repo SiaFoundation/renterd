@@ -66,18 +66,31 @@ func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.Consens
 		panic("IsGouging needs to be provided with at least host settings or a price table") // developer error
 	}
 
-	if err := joinErrors(
-		// host setting checks
-		checkDownloadGouging(gs, rs, hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice),
-		checkPriceGougingHS(gs, hs),
-		checkUploadGouging(gs, rs, hs.BaseRPCPrice, hs.StoragePrice, hs.UploadBandwidthPrice),
+	var errs []error
+	if hs != nil {
+		errs = append(
+			errs,
 
-		// price table checks
-		checkDownloadGouging(gs, rs, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
-		checkPriceGougingPT(gs, cs, txnFee, pt),
-		checkUploadGouging(gs, rs, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
-		checkContractGougingPT(period, renewWindow, pt),
-	); err != nil {
+			// host setting checks
+			checkDownloadGouging(gs, rs, hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice),
+			checkPriceGougingHS(gs, hs),
+			checkUploadGouging(gs, rs, hs.BaseRPCPrice, hs.StoragePrice, hs.UploadBandwidthPrice),
+		)
+	}
+
+	if pt != nil {
+		errs = append(
+			errs,
+
+			// price table checks
+			checkDownloadGouging(gs, rs, pt.InitBaseCost, pt.ReadBaseCost.Add(pt.ReadLengthCost.Mul64(modules.SectorSize)), pt.DownloadBandwidthCost),
+			checkPriceGougingPT(gs, cs, txnFee, pt),
+			checkUploadGouging(gs, rs, pt.InitBaseCost, pt.WriteBaseCost.Add(pt.WriteLengthCost.Mul64(modules.SectorSize)), pt.UploadBandwidthCost),
+			checkContractGougingPT(period, renewWindow, pt),
+		)
+	}
+
+	if err := joinErrors(errs...); err != nil {
 		return true, err.Error()
 	}
 
