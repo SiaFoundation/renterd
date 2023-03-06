@@ -58,11 +58,15 @@ type (
 	dbContract struct {
 		Model
 
-		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
-		HostID              uint           `gorm:"index"`
-		Host                dbHost
-		RenewedFrom         fileContractID `gorm:"index;size:32"`
-		StartHeight         uint64         `gorm:"index;NOT NULL"`
+		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
+		HostID      uint           `gorm:"index"`
+		Host        dbHost
+		RenewedFrom fileContractID `gorm:"index;size:32"`
+
+		StartHeight uint64 `gorm:"index;NOT NULL"`
+		WindowStart uint64 `gorm:"index;NOT NULL"`
+		WindowEnd   uint64 `gorm:"index;NOT NULL"`
+
 		TotalCost           currency
 		UploadSpending      currency
 		DownloadSpending    currency
@@ -178,6 +182,8 @@ func (c dbContract) convert() api.ContractMetadata {
 		HostIP:      c.Host.NetAddress,
 		HostKey:     types.PublicKey(c.Host.PublicKey),
 		StartHeight: c.StartHeight,
+		WindowStart: c.WindowStart,
+		WindowEnd:   c.WindowEnd,
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
 		Spending: api.ContractSpending{
@@ -840,8 +846,11 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		FCID:        fileContractID(fcid),
 		HostID:      hostID,
 		RenewedFrom: fileContractID(renewedFrom),
-		StartHeight: startHeight,
 		TotalCost:   currency(totalCost),
+
+		StartHeight: startHeight,
+		WindowStart: c.Revision.WindowStart,
+		WindowEnd:   c.Revision.WindowEnd,
 
 		// Spending starts at 0.
 		UploadSpending:      zeroCurrency,
