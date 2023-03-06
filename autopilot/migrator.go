@@ -31,7 +31,7 @@ func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
 	}
 }
 
-func (m *migrator) tryPerformMigrations(ctx context.Context, cfg api.AutopilotConfig) {
+func (m *migrator) tryPerformMigrations(ctx context.Context) {
 	m.mu.Lock()
 	if m.running || m.ap.isStopped() {
 		m.mu.Unlock()
@@ -41,13 +41,13 @@ func (m *migrator) tryPerformMigrations(ctx context.Context, cfg api.AutopilotCo
 	m.mu.Unlock()
 
 	m.ap.wg.Add(1)
-	go func() {
+	go func(cfg api.AutopilotConfig) {
 		defer m.ap.wg.Done()
 		m.performMigrations(cfg)
 		m.mu.Lock()
 		m.running = false
 		m.mu.Unlock()
-	}()
+	}(m.ap.state.cfg)
 }
 
 func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
