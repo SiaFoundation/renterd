@@ -874,7 +874,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
 
-	// Load default settings
+	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
 		SettingGouging:    api.DefaultGougingSettings,
 		SettingRedundancy: api.DefaultRedundancySettings,
@@ -896,7 +896,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 		}
 	}
 
-	// Override the default settings with the provided settings.
+	// Override the gouging or redundancy settings if they were provided.
 	if gs != nil {
 		if err := b.setGougingSettings(ctx, *gs); err != nil {
 			return nil, err

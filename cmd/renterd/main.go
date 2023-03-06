@@ -224,9 +224,6 @@ func main() {
 	if workerCfg.remoteAddrs == "" && !workerCfg.enabled && autopilotCfg.enabled {
 		log.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
-	if err := busCfg.RedundancySettings.Validate(); err != nil {
-		log.Fatal("failed to validate redundancy settings", err)
-	}
 
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
