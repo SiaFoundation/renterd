@@ -39,7 +39,11 @@ type sectorStore interface {
 	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }
 
-func (w *worker) parallelUploadSlab(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration) ([]object.Sector, []int, error) {
+type storeProvider interface {
+	withHost(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStore) error) (err error)
+}
+
+func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration) ([]object.Sector, []int, error) {
 	if len(contracts) < len(shards) {
 		return nil, nil, fmt.Errorf("not enough hosts to upload slab, %v<%v", len(contracts), len(shards))
 	}
@@ -74,7 +78,7 @@ func (w *worker) parallelUploadSlab(ctx context.Context, shards [][]byte, contra
 			}
 			defer locker.ReleaseContract(ctx, r.contract.ID, lockID)
 
-			_ = w.withHost(ctx, r.contract.ID, r.contract.HostKey, r.contract.HostIP, func(ss sectorStore) error {
+			_ = sp.withHost(ctx, r.contract.ID, r.contract.HostKey, r.contract.HostIP, func(ss sectorStore) error {
 				root, err := ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]))
 				if err != nil {
 					span.SetStatus(codes.Error, "uploading the sector failed")
@@ -162,7 +166,7 @@ func (w *worker) parallelUploadSlab(ctx context.Context, shards [][]byte, contra
 	return sectors, slowHosts, nil
 }
 
-func (w *worker) uploadSlab(ctx context.Context, r io.Reader, m, n uint8, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration) (object.Slab, int, []int, error) {
+func uploadSlab(ctx context.Context, sp storeProvider, r io.Reader, m, n uint8, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration) (object.Slab, int, []int, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
 	defer span.End()
 
@@ -179,7 +183,7 @@ func (w *worker) uploadSlab(ctx context.Context, r io.Reader, m, n uint8, contra
 	s.Encode(buf, shards)
 	s.Encrypt(shards)
 
-	sectors, slowHosts, err := w.parallelUploadSlab(ctx, shards, contracts, locker, uploadSectorTimeout)
+	sectors, slowHosts, err := parallelUploadSlab(ctx, sp, shards, contracts, locker, uploadSectorTimeout)
 	if err != nil {
 		return object.Slab{}, 0, nil, err
 	}
@@ -188,7 +192,7 @@ func (w *worker) uploadSlab(ctx context.Context, r io.Reader, m, n uint8, contra
 	return s, length, slowHosts, nil
 }
 
-func (w *worker) parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, contracts []api.ContractMetadata, locker contractLocker, downloadSectorTimeout time.Duration) ([][]byte, []int, error) {
+func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabSlice, contracts []api.ContractMetadata, locker contractLocker, downloadSectorTimeout time.Duration) ([][]byte, []int, error) {
 	// check whether we can recover the slab
 	if len(contracts) < int(ss.MinShards) {
 		return nil, nil, errors.New("not enough hosts to recover slab")
@@ -238,7 +242,7 @@ func (w *worker) parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, 
 
 			offset, length := ss.SectorRegion()
 			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
-			_ = w.withHost(ctx, c.ID, c.HostKey, c.HostIP, func(ss sectorStore) error {
+			_ = sp.withHost(ctx, c.ID, c.HostKey, c.HostIP, func(ss sectorStore) error {
 				err = ss.DownloadSector(ctx, buf, shard.Root, offset, length)
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")
@@ -328,11 +332,11 @@ func (w *worker) parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, 
 	return shards, slowHosts, nil
 }
 
-func (w *worker) downloadSlab(ctx context.Context, out io.Writer, ss object.SlabSlice, contracts []api.ContractMetadata, locker contractLocker, downloadSectorTimeout time.Duration) ([]int, error) {
+func downloadSlab(ctx context.Context, sp storeProvider, out io.Writer, ss object.SlabSlice, contracts []api.ContractMetadata, locker contractLocker, downloadSectorTimeout time.Duration) ([]int, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "parallelDownloadSlab")
 	defer span.End()
 
-	shards, slowHosts, err := w.parallelDownloadSlab(ctx, ss, contracts, locker, downloadSectorTimeout)
+	shards, slowHosts, err := parallelDownloadSlab(ctx, sp, ss, contracts, locker, downloadSectorTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +411,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 	return nil
 }
 
-func (w *worker) migrateSlab(ctx context.Context, s *object.Slab, contracts []api.ContractMetadata, locker contractLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration) error {
+func migrateSlab(ctx context.Context, sp storeProvider, s *object.Slab, contracts []api.ContractMetadata, locker contractLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
@@ -456,7 +460,7 @@ func (w *worker) migrateSlab(ctx context.Context, s *object.Slab, contracts []ap
 		Offset: 0,
 		Length: uint32(s.MinShards) * rhpv2.SectorSize,
 	}
-	shards, slowHosts, err := w.parallelDownloadSlab(ctx, ss, contracts, locker, downloadSectorTimeout)
+	shards, slowHosts, err := parallelDownloadSlab(ctx, sp, ss, contracts, locker, downloadSectorTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to download slab for migration: %w", err)
 	}
@@ -493,7 +497,7 @@ func (w *worker) migrateSlab(ctx context.Context, s *object.Slab, contracts []ap
 	})
 
 	// reupload those shards
-	uploaded, _, err := w.parallelUploadSlab(ctx, shards, filtered, locker, uploadSectorTimeout)
+	uploaded, _, err := parallelUploadSlab(ctx, sp, shards, filtered, locker, uploadSectorTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}

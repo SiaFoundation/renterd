@@ -733,7 +733,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = w.migrateSlab(ctx, &slab, contracts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
+	err = migrateSlab(ctx, w, &slab, contracts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -836,7 +836,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
 		})
 
-		slowHosts, err := w.downloadSlab(ctx, cw, ss, contracts, &tracedContractLocker{w.bus}, w.downloadSectorTimeout)
+		slowHosts, err := downloadSlab(ctx, w, cw, ss, contracts, &tracedContractLocker{w.bus}, w.downloadSectorTimeout)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
 		}
@@ -913,7 +913,7 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		})
 
 		// upload the slab
-		s, length, slowHosts, err = w.uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout)
+		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
 		}
