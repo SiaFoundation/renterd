@@ -138,16 +138,9 @@ func TestNewTestCluster(t *testing.T) {
 	if err := cluster.Sync(); err != nil {
 		t.Fatal(err)
 	}
-	// Mine a few more blocks to make the host submits the proof.
-	if err := cluster.MineBlocks(4); err != nil {
-		t.Fatal(err)
-	}
-	if err := cluster.Sync(); err != nil {
-		t.Fatal(err)
-	}
 
 	// Now wait for the revision and proof to be caught by the hostdb.
-	err = Retry(10, time.Second, func() error {
+	err = Retry(20, time.Second, func() error {
 		if err := cluster.MineBlocks(1); err != nil {
 			t.Fatal(err)
 		}
