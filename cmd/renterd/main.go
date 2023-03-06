@@ -252,7 +252,7 @@ func main() {
 	if busAddr == "" {
 		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
 		if err != nil {
-			log.Fatal("failed to create bus", err)
+			log.Fatal("failed to create bus, err: ", err)
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 
