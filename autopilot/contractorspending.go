@@ -13,7 +13,7 @@ func (c *contractor) currentPeriod() uint64 {
 	return c.currPeriod
 }
 
-func (c *contractor) updateCurrentPeriod(cfg api.AutopilotConfig, cs api.ConsensusState) {
+func (c *contractor) updateCurrentPeriod() {
 	c.mu.Lock()
 	defer func(prevPeriod uint64) {
 		if c.currPeriod != prevPeriod {
@@ -21,6 +21,9 @@ func (c *contractor) updateCurrentPeriod(cfg api.AutopilotConfig, cs api.Consens
 		}
 		c.mu.Unlock()
 	}(c.currPeriod)
+
+	cfg := c.ap.state.cfg
+	cs := c.ap.state.cs
 
 	if c.currPeriod == 0 {
 		c.currPeriod = cs.BlockHeight
@@ -73,7 +76,9 @@ func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Curr
 	return spent, nil
 }
 
-func (c *contractor) remainingFunds(cfg api.AutopilotConfig, contracts []api.Contract) (types.Currency, error) {
+func (c *contractor) remainingFunds(contracts []api.Contract) (types.Currency, error) {
+	cfg := c.ap.state.cfg
+
 	// find out how much we spent in the current period
 	spent, err := c.currentPeriodSpending(contracts)
 	if err != nil {

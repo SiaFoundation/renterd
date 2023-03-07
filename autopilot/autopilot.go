@@ -89,6 +89,7 @@ type Worker interface {
 type Autopilot struct {
 	bus     Bus
 	logger  *zap.SugaredLogger
+	state   loopState
 	store   Store
 	workers *workerPool
 
@@ -105,6 +106,18 @@ type Autopilot struct {
 	ticker      *time.Ticker
 	triggerChan chan struct{}
 	stopChan    chan struct{}
+}
+
+// loopState holds a bunch of state variables that are used by the autopilot and
+// updated in every iteration. The state is not protected by a mutex because the
+// autopilot's loop is single threaded and the state should never be accessed
+// from multiple goroutines.
+type loopState struct {
+	cfg api.AutopilotConfig
+	cs  api.ConsensusState
+	rs  api.RedundancySettings
+	gs  api.GougingSettings
+	fee types.Currency
 }
 
 // workerPool contains all workers known to the autopilot.  Users can call
@@ -201,43 +214,45 @@ func (ap *Autopilot) Run() error {
 			span.SetAttributes(attribute.String("worker", workerID))
 			ap.logger.Infof("using worker %s for iteration", workerID)
 
-			// use the same config for the entire iteration
-			cfg := ap.store.Config()
+			// update the loop state
+			//
+			// NOTE: it is important this is the first action we perform in this
+			// iteration of the loop, keeping a state object ensures we use the
+			// same state throughout the entire iteration and we don't needless
+			// fetch the same information twice
+			err = ap.updateLoopState(ctx)
+			if err != nil {
+				ap.logger.Errorf("failed to update loop state, err: %v", err)
+				return
+			}
 
 			// update the contract set setting
-			err = ap.bus.UpdateSetting(ctx, bus.SettingContractSet, cfg.Contracts.Set)
+			err = ap.bus.UpdateSetting(ctx, bus.SettingContractSet, ap.state.cfg.Contracts.Set)
 			if err != nil {
 				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 			}
 
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ctx, w, cfg)
-
-			// fetch consensus state
-			cs, err := ap.bus.ConsensusState(ctx)
-			if err != nil {
-				ap.logger.Errorf("iteration interrupted, could not fetch consensus state, err: %v", err)
-				return
-			}
+			ap.s.tryPerformHostScan(ctx, w)
 
 			// do not continue if we are not synced
-			if !cs.Synced {
+			if !ap.isSynced() {
 				ap.logger.Debug("iteration interrupted, consensus not synced")
 				return
 			}
 
 			// update current period
-			ap.c.updateCurrentPeriod(cfg, cs)
+			ap.c.updateCurrentPeriod()
 
 			// perform wallet maintenance
-			err = ap.c.performWalletMaintenance(ctx, cfg, cs)
+			err = ap.c.performWalletMaintenance(ctx)
 			if err != nil {
 				ap.logger.Errorf("wallet maintenance failed, err: %v", err)
 			}
 
 			// perform maintenance
-			err = ap.c.performContractMaintenance(ctx, w, cfg, cs)
+			err = ap.c.performContractMaintenance(ctx, w)
 			if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
@@ -245,15 +260,17 @@ func (ap *Autopilot) Run() error {
 
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {
-				ap.a.UpdateContracts(ctx, cfg)
+				ap.a.UpdateContracts(ctx, ap.state.cfg)
 				launchAccountRefillsOnce.Do(func() {
 					ap.logger.Debug("account refills loop launched")
 					go ap.a.refillWorkersAccountsLoop(ap.stopChan)
 				})
+			} else {
+				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 
 			// migration
-			ap.m.tryPerformMigrations(ctx, w, cfg)
+			ap.m.tryPerformMigrations(ctx, w)
 		})
 	}
 }
@@ -283,6 +300,49 @@ func (ap *Autopilot) Trigger() bool {
 	default:
 		return false
 	}
+}
+
+func (ap *Autopilot) updateLoopState(ctx context.Context) error {
+	// fetch the current config
+	cfg := ap.store.Config()
+
+	// fetch consensus state
+	cs, err := ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return fmt.Errorf("could not fetch consensus state, err: %v", err)
+	}
+
+	// fetch redundancy settings
+	rs, err := ap.bus.RedundancySettings(ctx)
+	if err != nil {
+		return fmt.Errorf("could not fetch redundancy settings, err: %v", err)
+	}
+
+	// fetch gouging settings
+	gs, err := ap.bus.GougingSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("could not fetch gouging settings, err: %v", err)
+	}
+
+	// fetch recommended transaction fee
+	fee, err := ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return fmt.Errorf("could not fetch fee, err: %v", err)
+	}
+
+	// update the loop state
+	ap.state = loopState{
+		cfg: cfg,
+		cs:  cs,
+		rs:  rs,
+		gs:  gs,
+		fee: fee,
+	}
+	return nil
+}
+
+func (ap *Autopilot) isSynced() bool {
+	return ap.state.cs.Synced
 }
 
 func (ap *Autopilot) isStopped() bool {

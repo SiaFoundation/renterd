@@ -86,8 +86,6 @@ func (s *scanner) isScanning() bool {
 }
 
 func TestScanner(t *testing.T) {
-	cfg := api.DefaultAutopilotConfig()
-
 	// prepare 100 hosts
 	hosts := newTestHosts(100)
 
@@ -97,7 +95,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background(), w, cfg)
+	s.tryPerformHostScan(context.Background(), w)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -125,7 +123,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.tryPerformHostScan(context.Background(), w, cfg)
+	s.tryPerformHostScan(context.Background(), w)
 	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -134,14 +132,17 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background(), w, cfg)
+	s.tryPerformHostScan(context.Background(), w)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
 }
 
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
-	ap := &Autopilot{stopChan: make(chan struct{})}
+	ap := &Autopilot{
+		state:    loopState{cfg: api.DefaultAutopilotConfig()},
+		stopChan: make(chan struct{}),
+	}
 	return &scanner{
 		ap:     ap,
 		bus:    b,
