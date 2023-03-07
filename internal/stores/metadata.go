@@ -51,8 +51,8 @@ type (
 		RenewedTo fileContractID `gorm:"unique;index;size:32"`
 		Reason    string
 
-		contractMetadata
-		contractSpending
+		ContractMetadata
+		ContractSpending
 	}
 
 	dbContract struct {
@@ -63,11 +63,11 @@ type (
 		Host        dbHost
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
-		contractMetadata
-		contractSpending
+		ContractMetadata
+		ContractSpending
 	}
 
-	contractMetadata struct {
+	ContractMetadata struct {
 		ProofHeight    uint64 `gorm:"index;default:0"`
 		RevisionHeight uint64 `gorm:"index;default:0"`
 		RevisionNumber string `gorm:"NOT NULL;default:'0'"` // string since db can't store math.MaxUint64
@@ -76,7 +76,7 @@ type (
 		WindowEnd      uint64 `gorm:"index;NOT NULL;default:0"`
 	}
 
-	contractSpending struct {
+	ContractSpending struct {
 		TotalCost           currency
 		UploadSpending      currency
 		DownloadSpending    currency
@@ -315,7 +315,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			Reason:    archivalReasonRenewed,
 			RenewedTo: fileContractID(c.ID()),
 
-			contractMetadata: contractMetadata{
+			ContractMetadata: ContractMetadata{
 				ProofHeight:    oldContract.ProofHeight,
 				RevisionHeight: oldContract.RevisionHeight,
 				RevisionNumber: oldContract.RevisionNumber,
@@ -323,7 +323,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 				WindowStart:    oldContract.WindowStart,
 				WindowEnd:      oldContract.WindowEnd,
 			},
-			contractSpending: contractSpending{
+			ContractSpending: ContractSpending{
 				UploadSpending:      oldContract.UploadSpending,
 				DownloadSpending:    oldContract.DownloadSpending,
 				FundAccountSpending: oldContract.FundAccountSpending,
@@ -888,14 +888,14 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		HostID:      hostID,
 		RenewedFrom: fileContractID(renewedFrom),
 
-		contractMetadata: contractMetadata{
+		ContractMetadata: ContractMetadata{
 			RevisionNumber: "0",
 			StartHeight:    startHeight,
 			WindowStart:    c.Revision.WindowStart,
 			WindowEnd:      c.Revision.WindowEnd,
 		},
 
-		contractSpending: contractSpending{
+		ContractSpending: ContractSpending{
 			UploadSpending:      zeroCurrency,
 			DownloadSpending:    zeroCurrency,
 			FundAccountSpending: zeroCurrency,

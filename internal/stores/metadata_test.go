@@ -406,7 +406,7 @@ func TestRenewedContract(t *testing.T) {
 		RenewedTo: fileContractID(fcid1Renewed),
 		Reason:    archivalReasonRenewed,
 
-		contractMetadata: contractMetadata{
+		ContractMetadata: ContractMetadata{
 			ProofHeight:    0,
 			RevisionHeight: 0,
 			RevisionNumber: "0",
@@ -415,7 +415,7 @@ func TestRenewedContract(t *testing.T) {
 			WindowEnd:      3,
 		},
 
-		contractSpending: contractSpending{
+		ContractSpending: ContractSpending{
 			UploadSpending:      zeroCurrency,
 			DownloadSpending:    zeroCurrency,
 			FundAccountSpending: zeroCurrency,
@@ -719,13 +719,13 @@ func TestSQLMetadataStore(t *testing.T) {
 										},
 										FCID: fileContractID(fcid1),
 
-										contractMetadata: contractMetadata{
+										ContractMetadata: ContractMetadata{
 											RevisionNumber: "0",
 											StartHeight:    startHeight1,
 											WindowStart:    400,
 											WindowEnd:      500,
 										},
-										contractSpending: contractSpending{
+										ContractSpending: ContractSpending{
 											TotalCost:           currency(totalCost1),
 											UploadSpending:      zeroCurrency,
 											DownloadSpending:    zeroCurrency,
@@ -761,13 +761,13 @@ func TestSQLMetadataStore(t *testing.T) {
 											PublicKey: publicKey(hk2),
 										},
 										FCID: fileContractID(fcid2),
-										contractMetadata: contractMetadata{
+										ContractMetadata: ContractMetadata{
 											RevisionNumber: "0",
 											StartHeight:    startHeight2,
 											WindowStart:    400,
 											WindowEnd:      500,
 										},
-										contractSpending: contractSpending{
+										ContractSpending: ContractSpending{
 											TotalCost:           currency(totalCost2),
 											UploadSpending:      zeroCurrency,
 											DownloadSpending:    zeroCurrency,
