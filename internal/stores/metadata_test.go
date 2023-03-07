@@ -401,25 +401,24 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:      fileContractID(fcid1),
 		Host:      publicKey(c.HostKey()),
 		RenewedTo: fileContractID(fcid1Renewed),
 		Reason:    archivalReasonRenewed,
 
-		ContractMetadata: ContractMetadata{
+		ContractCommon: ContractCommon{
+			FCID: fileContractID(fcid1),
+
+			TotalCost:      currency(oldContractTotal),
 			ProofHeight:    0,
 			RevisionHeight: 0,
 			RevisionNumber: "0",
 			StartHeight:    100,
 			WindowStart:    2,
 			WindowEnd:      3,
-		},
 
-		ContractSpending: ContractSpending{
 			UploadSpending:      zeroCurrency,
 			DownloadSpending:    zeroCurrency,
 			FundAccountSpending: zeroCurrency,
-			TotalCost:           currency(oldContractTotal),
 		},
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
@@ -716,16 +715,16 @@ func TestSQLMetadataStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: publicKey(hk1),
 										},
-										FCID: fileContractID(fcid1),
 
-										ContractMetadata: ContractMetadata{
+										ContractCommon: ContractCommon{
+											FCID: fileContractID(fcid1),
+
+											TotalCost:      currency(totalCost1),
 											RevisionNumber: "0",
 											StartHeight:    startHeight1,
 											WindowStart:    400,
 											WindowEnd:      500,
-										},
-										ContractSpending: ContractSpending{
-											TotalCost:           currency(totalCost1),
+
 											UploadSpending:      zeroCurrency,
 											DownloadSpending:    zeroCurrency,
 											FundAccountSpending: zeroCurrency,
@@ -759,15 +758,15 @@ func TestSQLMetadataStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: publicKey(hk2),
 										},
-										FCID: fileContractID(fcid2),
-										ContractMetadata: ContractMetadata{
+										ContractCommon: ContractCommon{
+											FCID: fileContractID(fcid2),
+
+											TotalCost:      currency(totalCost2),
 											RevisionNumber: "0",
 											StartHeight:    startHeight2,
 											WindowStart:    400,
 											WindowEnd:      500,
-										},
-										ContractSpending: ContractSpending{
-											TotalCost:           currency(totalCost2),
+
 											UploadSpending:      zeroCurrency,
 											DownloadSpending:    zeroCurrency,
 											FundAccountSpending: zeroCurrency,
