@@ -189,13 +189,11 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 	// Create bus.
 	var shutdownFns []func(context.Context) error
 	b, bStopFn, err := node.NewBus(node.BusConfig{
-		DBDialector:        dialector,
-		Bootstrap:          false,
-		GatewayAddr:        "127.0.0.1:0",
-		Miner:              miner,
-		PersistInterval:    testPersistInterval,
-		GougingSettings:    &testGougingSettings,
-		RedundancySettings: &testRedundancySettings,
+		DBDialector:     dialector,
+		Bootstrap:       false,
+		GatewayAddr:     "127.0.0.1:0",
+		Miner:           miner,
+		PersistInterval: testPersistInterval,
 	}, busDir, wk, logger)
 	if err != nil {
 		return nil, err
@@ -301,6 +299,16 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Update the bus settings.
+	err = busClient.UpdateGougingSettings(context.Background(), testGougingSettings)
+	if err != nil {
+		return nil, err
+	}
+	err = busClient.UpdateRedundancySettings(context.Background(), testRedundancySettings)
+	if err != nil {
+		return nil, err
 	}
 
 	// Set autopilot config.

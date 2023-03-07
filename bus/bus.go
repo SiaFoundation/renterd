@@ -858,7 +858,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, gs *api.GougingSettings, rs *api.RedundancySettings, l *zap.Logger) (*bus, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
@@ -885,18 +885,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
 				return nil, err
 			}
-		}
-	}
-
-	// Override the gouging or redundancy settings if they were provided.
-	if gs != nil {
-		if err := b.setGougingSettings(ctx, *gs); err != nil {
-			return nil, err
-		}
-	}
-	if rs != nil {
-		if err := b.setRedundancySettings(ctx, *rs); err != nil {
-			return nil, err
 		}
 	}
 
