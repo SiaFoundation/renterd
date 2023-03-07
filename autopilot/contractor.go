@@ -329,6 +329,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
+			toIgnore = append(toIgnore, fcid)
 			continue
 		}
 
