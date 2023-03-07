@@ -768,14 +768,14 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	if gss, err := b.ss.Setting(ctx, SettingGouging); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		panic(err)
+		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
 	}
 
 	var rs api.RedundancySettings
 	if rss, err := b.ss.Setting(ctx, SettingRedundancy); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		panic(err)
+		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
 	cs := api.ConsensusState{
