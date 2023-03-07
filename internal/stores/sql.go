@@ -1,11 +1,13 @@
 package stores
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -30,10 +32,19 @@ type (
 		persistInterval        time.Duration
 		unappliedAnnouncements []announcement
 		unappliedCCID          modules.ConsensusChangeID
+		unappliedRevisions     map[types.FileContractID]revisionUpdate
+		unappliedProofs        map[types.FileContractID]uint64
 
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
+
+		knownContracts map[types.FileContractID]struct{}
+	}
+
+	revisionUpdate struct {
+		height uint64
+		number uint64
 	}
 )
 
@@ -166,12 +177,32 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
+	// Fetch contract ids.
+	var activeFCIDs, archivedFCIDs []fileContractID
+	if err := db.Model(&dbContract{}).
+		Select("fcid").
+		Find(&activeFCIDs).Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	if err := db.Model(&dbArchivedContract{}).
+		Select("fcid").
+		Find(&archivedFCIDs).Error; err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
+	isOurContract := make(map[types.FileContractID]struct{})
+	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
+		isOurContract[types.FileContractID(fcid)] = struct{}{}
+	}
+
 	ss := &SQLStore{
 		db:                   db,
+		knownContracts:       isOurContract,
 		lastAnnouncementSave: time.Now(),
 		persistInterval:      persistInterval,
 		hasAllowlist:         allowlistCnt > 0,
 		hasBlocklist:         blocklistCnt > 0,
+		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:      make(map[types.FileContractID]uint64),
 	}
 	return ss, ccid, nil
 }
@@ -231,4 +262,16 @@ func (s *SQLStore) Close() error {
 		return err
 	}
 	return db.Close()
+}
+
+func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+	var err error
+	for i := 0; i < 5; i++ {
+		err = s.db.Transaction(fc, opts...)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("retryTransaction failed: %w", err)
 }

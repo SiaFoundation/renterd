@@ -52,7 +52,13 @@ type (
 		UploadSpending      currency
 		DownloadSpending    currency
 		FundAccountSpending currency
-		StartHeight         uint64 `gorm:"index;NOT NULL"`
+
+		ProofHeight    uint64 `gorm:"index"`
+		RevisionHeight uint64 `gorm:"index"`
+		RevisionNumber string `gorm:"NOT NULL"`
+		StartHeight    uint64 `gorm:"index;NOT NULL"`
+		WindowStart    uint64 `gorm:"index;NOT NULL"`
+		WindowEnd      uint64 `gorm:"index;NOT NULL"`
 	}
 
 	dbContract struct {
@@ -63,9 +69,12 @@ type (
 		Host        dbHost
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
-		StartHeight uint64 `gorm:"index;NOT NULL"`
-		WindowStart uint64 `gorm:"index;NOT NULL"`
-		WindowEnd   uint64 `gorm:"index;NOT NULL"`
+		ProofHeight    uint64 `gorm:"index"`
+		RevisionHeight uint64 `gorm:"index"`
+		RevisionNumber string `gorm:"NOT NULL"` // string since db can't store math.MaxUint64
+		StartHeight    uint64 `gorm:"index;NOT NULL"`
+		WindowStart    uint64 `gorm:"index;NOT NULL"`
+		WindowEnd      uint64 `gorm:"index;NOT NULL"`
 
 		TotalCost           currency
 		UploadSpending      currency
@@ -162,10 +171,19 @@ func (dbSlice) TableName() string { return "slices" }
 
 // convert converts a dbContract to an ArchivedContract.
 func (c dbArchivedContract) convert() api.ArchivedContract {
+	var revisionNumber uint64
+	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
 	return api.ArchivedContract{
 		ID:        types.FileContractID(c.FCID),
 		HostKey:   types.PublicKey(c.Host),
 		RenewedTo: types.FileContractID(c.RenewedTo),
+
+		ProofHeight:    c.ProofHeight,
+		RevisionHeight: c.RevisionHeight,
+		RevisionNumber: revisionNumber,
+		StartHeight:    c.StartHeight,
+		WindowStart:    c.WindowStart,
+		WindowEnd:      c.WindowEnd,
 
 		Spending: api.ContractSpending{
 			Uploads:     types.Currency(c.UploadSpending),
@@ -177,13 +195,12 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 
 // convert converts a dbContract to a ContractMetadata.
 func (c dbContract) convert() api.ContractMetadata {
+	var revisionNumber uint64
+	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
 	return api.ContractMetadata{
 		ID:          types.FileContractID(c.FCID),
 		HostIP:      c.Host.NetAddress,
 		HostKey:     types.PublicKey(c.Host.PublicKey),
-		StartHeight: c.StartHeight,
-		WindowStart: c.WindowStart,
-		WindowEnd:   c.WindowEnd,
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
 		Spending: api.ContractSpending{
@@ -191,6 +208,12 @@ func (c dbContract) convert() api.ContractMetadata {
 			Downloads:   types.Currency(c.DownloadSpending),
 			FundAccount: types.Currency(c.FundAccountSpending),
 		},
+		ProofHeight:    c.ProofHeight,
+		RevisionHeight: c.RevisionHeight,
+		RevisionNumber: revisionNumber,
+		StartHeight:    c.StartHeight,
+		WindowStart:    c.WindowStart,
+		WindowEnd:      c.WindowEnd,
 	}
 }
 
@@ -248,6 +271,7 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, to
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
+	s.knownContracts[c.ID()] = struct{}{}
 	return added.convert(), nil
 }
 
@@ -276,7 +300,7 @@ func (s *SQLStore) ActiveContracts(ctx context.Context) ([]api.ContractMetadata,
 func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
 	var renewed dbContract
 
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, fileContractID(renewedFrom))
 		if err != nil {
@@ -285,11 +309,17 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 
 		// Create copy in archive.
 		err = tx.Create(&dbArchivedContract{
-			FCID:        oldContract.FCID,
-			Host:        publicKey(oldContract.Host.PublicKey),
-			Reason:      archivalReasonRenewed,
-			RenewedTo:   fileContractID(c.ID()),
-			StartHeight: oldContract.StartHeight,
+			FCID:      oldContract.FCID,
+			Host:      publicKey(oldContract.Host.PublicKey),
+			Reason:    archivalReasonRenewed,
+			RenewedTo: fileContractID(c.ID()),
+
+			ProofHeight:    oldContract.ProofHeight,
+			RevisionHeight: oldContract.RevisionHeight,
+			RevisionNumber: oldContract.RevisionNumber,
+			StartHeight:    oldContract.StartHeight,
+			WindowStart:    oldContract.WindowStart,
+			WindowEnd:      oldContract.WindowEnd,
 
 			UploadSpending:      oldContract.UploadSpending,
 			DownloadSpending:    oldContract.DownloadSpending,
@@ -304,6 +334,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		if err != nil {
 			return err
 		}
+		s.knownContracts[c.ID()] = struct{}{}
 
 		// Update the old contract in the contract set to the new one.
 		err = tx.Table("contract_set_contracts").
@@ -398,7 +429,12 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 }
 
 func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) error {
-	return removeContract(s.db, fileContractID(id))
+	err := removeContract(s.db, fileContractID(id))
+	if err != nil {
+		return err
+	}
+	delete(s.knownContracts, id)
+	return nil
 }
 
 func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
@@ -488,7 +524,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 	}
 
 	// UpdateObject is ACID.
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
 		// slabs if it exists.
 		err := removeObject(tx, key)
@@ -675,7 +711,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 	}
 
 	// Update slab.
-	return ss.db.Transaction(func(tx *gorm.DB) (err error) {
+	return ss.retryTransaction(func(tx *gorm.DB) (err error) {
 		// build map out of current shards
 		shards := make(map[uint]struct{})
 		for _, shard := range slab.Shards {
@@ -848,9 +884,10 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		RenewedFrom: fileContractID(renewedFrom),
 		TotalCost:   currency(totalCost),
 
-		StartHeight: startHeight,
-		WindowStart: c.Revision.WindowStart,
-		WindowEnd:   c.Revision.WindowEnd,
+		RevisionNumber: "0",
+		StartHeight:    startHeight,
+		WindowStart:    c.Revision.WindowStart,
+		WindowEnd:      c.Revision.WindowEnd,
 
 		// Spending starts at 0.
 		UploadSpending:      zeroCurrency,
