@@ -300,7 +300,7 @@ func (s *SQLStore) ActiveContracts(ctx context.Context) ([]api.ContractMetadata,
 func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
 	var renewed dbContract
 
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, fileContractID(renewedFrom))
 		if err != nil {
@@ -524,7 +524,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 	}
 
 	// UpdateObject is ACID.
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
 		// slabs if it exists.
 		err := removeObject(tx, key)
@@ -711,7 +711,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 	}
 
 	// Update slab.
-	return ss.db.Transaction(func(tx *gorm.DB) (err error) {
+	return ss.retryTransaction(func(tx *gorm.DB) (err error) {
 		// build map out of current shards
 		shards := make(map[uint]struct{})
 		for _, shard := range slab.Shards {
