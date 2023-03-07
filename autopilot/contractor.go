@@ -325,15 +325,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// fetch price table
-		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
-		if err != nil {
-			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
-			continue
-		}
-
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(state.cfg, state.gs, state.rs, state.cs, &pt, f, host.Host, minScore, contract.FileSize(), state.fee)
+		usable, reasons := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee)
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -751,7 +744,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// slows contract maintenance down way too much, we re-evaluate the host
 		// right before forming the contract to ensure we do not form a contract
 		// with a host that's gouging its prices.
-		if usable, _ := isUsableHost(state.cfg, state.gs, state.rs, state.cs, h.PriceTable, ipFilter, h, minScore, storedData[h.PublicKey], state.fee); !usable {
+		if usable, _ := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee); !usable {
 			continue
 		}
 

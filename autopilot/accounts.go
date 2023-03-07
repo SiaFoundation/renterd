@@ -131,7 +131,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 			defer a.markRefillDone(workerID, contract.HostKey)
 
 			// Limit the time a refill can take.
-			ctx, cancel := context.WithTimeout(ctx, time.Minute)
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
 
 			// Add tracing.
