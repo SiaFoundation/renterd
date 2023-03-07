@@ -2,12 +2,12 @@ package stores
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -419,12 +419,11 @@ func TestRenewedContract(t *testing.T) {
 			UploadSpending:      zeroCurrency,
 			DownloadSpending:    zeroCurrency,
 			FundAccountSpending: zeroCurrency,
+			TotalCost:           currency(oldContractTotal),
 		},
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
-		fmt.Println(ac)
-		fmt.Println(expectedContract)
-		t.Fatal("mismatch")
+		t.Fatal("mismatch", cmp.Diff(ac, expectedContract))
 	}
 
 	// Renew it once more.
@@ -785,9 +784,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(obj, expectedObj) {
-		js1, _ := json.MarshalIndent(obj, "", "  ")
-		js2, _ := json.MarshalIndent(expectedObj, "", "  ")
-		t.Fatal("object mismatch", string(js1), string(js2))
+		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
 
 	// Fetch it and verify again.
