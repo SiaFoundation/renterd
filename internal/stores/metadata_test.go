@@ -401,19 +401,25 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:                fileContractID(fcid1),
-		Host:                publicKey(c.HostKey()),
-		RenewedTo:           fileContractID(fcid1Renewed),
-		Reason:              archivalReasonRenewed,
-		ProofHeight:         0,
-		RevisionHeight:      0,
-		RevisionNumber:      "0",
-		StartHeight:         100,
-		WindowStart:         2,
-		WindowEnd:           3,
-		UploadSpending:      zeroCurrency,
-		DownloadSpending:    zeroCurrency,
-		FundAccountSpending: zeroCurrency,
+		FCID:      fileContractID(fcid1),
+		Host:      publicKey(c.HostKey()),
+		RenewedTo: fileContractID(fcid1Renewed),
+		Reason:    archivalReasonRenewed,
+
+		contractMetadata: contractMetadata{
+			ProofHeight:    0,
+			RevisionHeight: 0,
+			RevisionNumber: "0",
+			StartHeight:    100,
+			WindowStart:    2,
+			WindowEnd:      3,
+		},
+
+		contractSpending: contractSpending{
+			UploadSpending:      zeroCurrency,
+			DownloadSpending:    zeroCurrency,
+			FundAccountSpending: zeroCurrency,
+		},
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
 		fmt.Println(ac)

@@ -45,20 +45,14 @@ var (
 type (
 	dbArchivedContract struct {
 		Model
-		FCID                fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
-		Host                publicKey      `gorm:"index;NOT NULL;size:32"`
-		RenewedTo           fileContractID `gorm:"unique;index;size:32"`
-		Reason              string
-		UploadSpending      currency
-		DownloadSpending    currency
-		FundAccountSpending currency
 
-		ProofHeight    uint64 `gorm:"index"`
-		RevisionHeight uint64 `gorm:"index"`
-		RevisionNumber string `gorm:"NOT NULL"`
-		StartHeight    uint64 `gorm:"index;NOT NULL"`
-		WindowStart    uint64 `gorm:"index;NOT NULL"`
-		WindowEnd      uint64 `gorm:"index;NOT NULL"`
+		FCID      fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
+		Host      publicKey      `gorm:"index;NOT NULL;size:32"`
+		RenewedTo fileContractID `gorm:"unique;index;size:32"`
+		Reason    string
+
+		contractMetadata
+		contractSpending
 	}
 
 	dbContract struct {
@@ -69,13 +63,20 @@ type (
 		Host        dbHost
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
-		ProofHeight    uint64 `gorm:"index"`
-		RevisionHeight uint64 `gorm:"index"`
-		RevisionNumber string `gorm:"NOT NULL"` // string since db can't store math.MaxUint64
-		StartHeight    uint64 `gorm:"index;NOT NULL"`
-		WindowStart    uint64 `gorm:"index;NOT NULL"`
-		WindowEnd      uint64 `gorm:"index;NOT NULL"`
+		contractMetadata
+		contractSpending
+	}
 
+	contractMetadata struct {
+		ProofHeight    uint64 `gorm:"index;default:0"`
+		RevisionHeight uint64 `gorm:"index;default:0"`
+		RevisionNumber string `gorm:"NOT NULL;default:'0'"` // string since db can't store math.MaxUint64
+		StartHeight    uint64 `gorm:"index;NOT NULL"`
+		WindowStart    uint64 `gorm:"index;NOT NULL;default:0"`
+		WindowEnd      uint64 `gorm:"index;NOT NULL;default:0"`
+	}
+
+	contractSpending struct {
 		TotalCost           currency
 		UploadSpending      currency
 		DownloadSpending    currency
@@ -314,16 +315,20 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			Reason:    archivalReasonRenewed,
 			RenewedTo: fileContractID(c.ID()),
 
-			ProofHeight:    oldContract.ProofHeight,
-			RevisionHeight: oldContract.RevisionHeight,
-			RevisionNumber: oldContract.RevisionNumber,
-			StartHeight:    oldContract.StartHeight,
-			WindowStart:    oldContract.WindowStart,
-			WindowEnd:      oldContract.WindowEnd,
-
-			UploadSpending:      oldContract.UploadSpending,
-			DownloadSpending:    oldContract.DownloadSpending,
-			FundAccountSpending: oldContract.FundAccountSpending,
+			contractMetadata: contractMetadata{
+				ProofHeight:    oldContract.ProofHeight,
+				RevisionHeight: oldContract.RevisionHeight,
+				RevisionNumber: oldContract.RevisionNumber,
+				StartHeight:    oldContract.StartHeight,
+				WindowStart:    oldContract.WindowStart,
+				WindowEnd:      oldContract.WindowEnd,
+			},
+			contractSpending: contractSpending{
+				UploadSpending:      oldContract.UploadSpending,
+				DownloadSpending:    oldContract.DownloadSpending,
+				FundAccountSpending: oldContract.FundAccountSpending,
+				TotalCost:           oldContract.TotalCost,
+			},
 		}).Error
 		if err != nil {
 			return err
