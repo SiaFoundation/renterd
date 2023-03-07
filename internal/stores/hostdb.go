@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
@@ -39,14 +40,18 @@ var (
 )
 
 type (
-	// dbHost defines a hostdb.Interaction as persisted in the DB.
-	// Deleting a host from the db will cascade the deletion and also delete
-	// the corresponding announcements and interactions with that host.
+	// dbHost defines a hostdb.Interaction as persisted in the DB. Deleting a
+	// host from the db will cascade the deletion and also delete the
+	// corresponding announcements and interactions with that host.
+	//
+	// NOTE: updating the host entity requires an update to the field map passed
+	// to 'Update' when recording host interactions
 	dbHost struct {
 		Model
 
-		PublicKey publicKey `gorm:"unique;index;NOT NULL;size:32"`
-		Settings  hostSettings
+		PublicKey  publicKey `gorm:"unique;index;NOT NULL;size:32"`
+		Settings   hostSettings
+		PriceTable hostPriceTable
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -178,6 +183,83 @@ func convertHostSettings(settings rhpv2.HostSettings) hostSettings {
 	}
 }
 
+// convert converts hostSettings to rhp.HostSettings
+func (pt hostPriceTable) convert() rhpv3.HostPriceTable {
+	return rhpv3.HostPriceTable{
+		UID:                          pt.UID,
+		Validity:                     pt.Validity,
+		HostBlockHeight:              pt.HostBlockHeight,
+		UpdatePriceTableCost:         pt.UpdatePriceTableCost,
+		AccountBalanceCost:           pt.AccountBalanceCost,
+		FundAccountCost:              pt.FundAccountCost,
+		LatestRevisionCost:           pt.LatestRevisionCost,
+		SubscriptionMemoryCost:       pt.SubscriptionMemoryCost,
+		SubscriptionNotificationCost: pt.SubscriptionNotificationCost,
+		InitBaseCost:                 pt.InitBaseCost,
+		MemoryTimeCost:               pt.MemoryTimeCost,
+		DownloadBandwidthCost:        pt.DownloadBandwidthCost,
+		UploadBandwidthCost:          pt.UploadBandwidthCost,
+		DropSectorsBaseCost:          pt.DropSectorsBaseCost,
+		DropSectorsUnitCost:          pt.DropSectorsUnitCost,
+		HasSectorBaseCost:            pt.HasSectorBaseCost,
+		ReadBaseCost:                 pt.ReadBaseCost,
+		ReadLengthCost:               pt.ReadLengthCost,
+		RenewContractCost:            pt.RenewContractCost,
+		RevisionBaseCost:             pt.RevisionBaseCost,
+		SwapSectorBaseCost:           pt.SwapSectorBaseCost,
+		WriteBaseCost:                pt.WriteBaseCost,
+		WriteLengthCost:              pt.WriteLengthCost,
+		WriteStoreCost:               pt.WriteStoreCost,
+		TxnFeeMinRecommended:         pt.TxnFeeMinRecommended,
+		TxnFeeMaxRecommended:         pt.TxnFeeMaxRecommended,
+		ContractPrice:                pt.ContractPrice,
+		CollateralCost:               pt.CollateralCost,
+		MaxCollateral:                pt.MaxCollateral,
+		MaxDuration:                  pt.MaxDuration,
+		WindowSize:                   pt.WindowSize,
+		RegistryEntriesLeft:          pt.RegistryEntriesLeft,
+		RegistryEntriesTotal:         pt.RegistryEntriesTotal,
+	}
+}
+
+func convertHostPriceTable(pt rhpv3.HostPriceTable) hostPriceTable {
+	return hostPriceTable{
+		UID:                          pt.UID,
+		Validity:                     pt.Validity,
+		HostBlockHeight:              pt.HostBlockHeight,
+		UpdatePriceTableCost:         pt.UpdatePriceTableCost,
+		AccountBalanceCost:           pt.AccountBalanceCost,
+		FundAccountCost:              pt.FundAccountCost,
+		LatestRevisionCost:           pt.LatestRevisionCost,
+		SubscriptionMemoryCost:       pt.SubscriptionMemoryCost,
+		SubscriptionNotificationCost: pt.SubscriptionNotificationCost,
+		InitBaseCost:                 pt.InitBaseCost,
+		MemoryTimeCost:               pt.MemoryTimeCost,
+		DownloadBandwidthCost:        pt.DownloadBandwidthCost,
+		UploadBandwidthCost:          pt.UploadBandwidthCost,
+		DropSectorsBaseCost:          pt.DropSectorsBaseCost,
+		DropSectorsUnitCost:          pt.DropSectorsUnitCost,
+		HasSectorBaseCost:            pt.HasSectorBaseCost,
+		ReadBaseCost:                 pt.ReadBaseCost,
+		ReadLengthCost:               pt.ReadLengthCost,
+		RenewContractCost:            pt.RenewContractCost,
+		RevisionBaseCost:             pt.RevisionBaseCost,
+		SwapSectorBaseCost:           pt.SwapSectorBaseCost,
+		WriteBaseCost:                pt.WriteBaseCost,
+		WriteLengthCost:              pt.WriteLengthCost,
+		WriteStoreCost:               pt.WriteStoreCost,
+		TxnFeeMinRecommended:         pt.TxnFeeMinRecommended,
+		TxnFeeMaxRecommended:         pt.TxnFeeMaxRecommended,
+		ContractPrice:                pt.ContractPrice,
+		CollateralCost:               pt.CollateralCost,
+		MaxCollateral:                pt.MaxCollateral,
+		MaxDuration:                  pt.MaxDuration,
+		WindowSize:                   pt.WindowSize,
+		RegistryEntriesLeft:          pt.RegistryEntriesLeft,
+		RegistryEntriesTotal:         pt.RegistryEntriesTotal,
+	}
+}
+
 // TableName implements the gorm.Tabler interface.
 func (dbAnnouncement) TableName() string { return "host_announcements" }
 
@@ -222,6 +304,13 @@ func (h dbHost) convert() hostdb.Host {
 	} else {
 		s := h.Settings.convert()
 		hdbHost.Settings = &s
+	}
+
+	if h.PriceTable == (hostPriceTable{}) {
+		hdbHost.PriceTable = nil
+	} else {
+		pt := h.PriceTable.convert()
+		hdbHost.PriceTable = &pt
 	}
 	return hdbHost
 }
@@ -467,7 +556,7 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 		toDelete[i] = publicKey(entry)
 	}
 
-	return ss.db.Transaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(func(tx *gorm.DB) error {
 		if len(toInsert) > 0 {
 			if err := tx.Create(&toInsert).Error; err != nil {
 				return err
@@ -493,7 +582,7 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
 	}
 
-	return ss.db.Transaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(func(tx *gorm.DB) error {
 		if len(toInsert) > 0 {
 			if err := tx.Create(&toInsert).Error; err != nil {
 				return err
@@ -562,7 +651,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 
 	// Write the interactions and update to the hosts atmomically within a
 	// single transaction.
-	return ss.db.Transaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(func(tx *gorm.DB) error {
 		// Apply all the interactions to the hosts.
 		dbInteractions := make([]dbInteraction, 0, len(interactions))
 		for _, interaction := range interactions {
@@ -607,6 +696,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 						return err
 					}
 					host.Settings = convertHostSettings(sr.Settings)
+					host.PriceTable = convertHostPriceTable(sr.PriceTable)
 				}
 			}
 
@@ -631,6 +721,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					"uptime":                      h.Uptime,
 					"last_scan":                   h.LastScan,
 					"settings":                    h.Settings,
+					"price_table":                 h.PriceTable,
 					"successful_interactions":     h.SuccessfulInteractions,
 					"failed_interactions":         h.FailedInteractions,
 				}).Error
@@ -649,9 +740,9 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		height--
 	}
 
-	// Fetch announcements and add them to the queue.
 	var newAnnouncements []announcement
 	for _, sb := range cc.AppliedBlocks {
+		// Fetch announcements and add them to the queue.
 		var b types.Block
 		convertToCore(sb, &b)
 		hostdb.ForEachAnnouncement(b, height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
@@ -660,17 +751,47 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 				announcement: ha,
 			})
 		})
+		// Update RevisionHeight and RevisionNumber for our contracts.
+		for _, txn := range sb.Transactions {
+			for _, rev := range txn.FileContractRevisions {
+				if _, isOurs := ss.knownContracts[types.FileContractID(rev.ParentID)]; isOurs {
+					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
+						height: height,
+						number: rev.NewRevisionNumber,
+					}
+				}
+			}
+			// Get ProofHeight for our contracts.
+			for _, sp := range txn.StorageProofs {
+				if _, isOurs := ss.knownContracts[types.FileContractID(sp.ParentID)]; isOurs {
+					ss.unappliedProofs[types.FileContractID(sp.ParentID)] = height
+				}
+			}
+		}
 		height++
 	}
 
 	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
 	ss.unappliedCCID = cc.ID
 
-	// Apply new announcements
-	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval || len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit {
-		err := ss.db.Transaction(func(tx *gorm.DB) error {
+	// Apply updates.
+	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval ||
+		len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit ||
+		len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0 {
+		err := ss.retryTransaction(func(tx *gorm.DB) error {
+			// Apply announcements.
 			if len(ss.unappliedAnnouncements) > 0 {
 				if err := insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
+					return err
+				}
+			}
+			for fcid, rev := range ss.unappliedRevisions {
+				if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
+					return err
+				}
+			}
+			for fcid, proofHeight := range ss.unappliedProofs {
+				if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
 					return err
 				}
 			}
@@ -681,6 +802,8 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(ss.unappliedAnnouncements)))
 		}
 
+		ss.unappliedProofs = make(map[types.FileContractID]uint64)
+		ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
 		ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
 		ss.lastAnnouncementSave = time.Now()
 	}
@@ -740,4 +863,30 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 		return err
 	}
 	return tx.Create(&hosts).Error
+}
+
+func updateRevisionNumberAndHeight(db *gorm.DB, fcid types.FileContractID, revisionHeight, revisionNumber uint64) error {
+	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
+		"revision_height": revisionHeight,
+		"revision_number": fmt.Sprint(revisionNumber),
+	})
+}
+
+func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {
+	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
+		"proof_height": blockHeight,
+	})
+}
+
+func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
+	err1 := tx.Model(&dbContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Updates(updates).Error
+	err2 := tx.Model(&dbArchivedContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Updates(updates).Error
+	if err1 != nil || err2 != nil {
+		return fmt.Errorf("%s; %s", err1, err2)
+	}
+	return nil
 }

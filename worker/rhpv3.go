@@ -238,10 +238,11 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 	return acc, nil
 }
 
-// Balance returns the account balance as a currency.
 func (a *account) Balance() types.Currency {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	a.balanceMu.Lock()
+	defer a.balanceMu.Unlock()
 	return types.NewCurrency(a.balance.Uint64(), new(big.Int).Rsh(a.balance, 64).Uint64())
 }
 

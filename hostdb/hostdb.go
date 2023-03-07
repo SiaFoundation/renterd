@@ -6,6 +6,7 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
@@ -24,8 +25,9 @@ type hostAnnouncement struct {
 }
 
 type ScanResult struct {
-	Error    string
-	Settings rhpv2.HostSettings `json:"settings,omitempty"`
+	Error      string
+	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
+	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
 }
 
 const InteractionTypeScan = "scan"
@@ -91,11 +93,12 @@ type HostAddress struct {
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	KnownSince   time.Time           `json:"knownSince"`
-	PublicKey    types.PublicKey     `json:"public_key"`
-	NetAddress   string              `json:"netAddress"`
-	Settings     *rhpv2.HostSettings `json:"settings"`
-	Interactions Interactions        `json:"interactions"`
+	KnownSince   time.Time             `json:"knownSince"`
+	PublicKey    types.PublicKey       `json:"public_key"`
+	NetAddress   string                `json:"netAddress"`
+	PriceTable   *rhpv3.HostPriceTable `json:"priceTable"`
+	Settings     *rhpv2.HostSettings   `json:"settings"`
+	Interactions Interactions          `json:"interactions"`
 }
 
 // HostInfo extends the host type with a field indicating whether it is blocked or not.

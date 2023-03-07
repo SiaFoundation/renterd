@@ -303,7 +303,7 @@ type worker struct {
 	logger *zap.SugaredLogger
 }
 
-func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings, err error) {
+func (w *worker) recordScan(hostKey types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings, err error) {
 	hi := hostdb.Interaction{
 		Host:      hostKey,
 		Timestamp: time.Now(),
@@ -312,7 +312,8 @@ func (w *worker) recordScan(hostKey types.PublicKey, settings rhpv2.HostSettings
 	}
 	if err == nil {
 		hi.Result, _ = json.Marshal(hostdb.ScanResult{
-			Settings: settings,
+			PriceTable: pt,
+			Settings:   settings,
 		})
 	} else {
 		hi.Result, _ = json.Marshal(hostdb.ScanResult{
@@ -451,17 +452,29 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	var settings rhpv2.HostSettings
 	start := time.Now()
-	scanErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
+	pingErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
 		settings, err = RPCSettings(ctx, t)
 		return err
 	})
 	elapsed := time.Since(start)
 
-	w.recordScan(rsr.HostKey, settings, scanErr)
+	var pt rhpv3.HostPriceTable
+	ptErr := withTransportV3(ctx, settings.SiamuxAddr(), rsr.HostKey, func(t *rhpv3.Transport) (err error) {
+		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+		return err
+	})
+
+	w.recordScan(rsr.HostKey, pt, settings, pingErr)
 
 	var scanErrStr string
-	if scanErr != nil {
-		scanErrStr = scanErr.Error()
+	if pingErr != nil {
+		scanErrStr = pingErr.Error()
+	}
+	if ptErr != nil {
+		if scanErrStr != "" {
+			scanErrStr += "; "
+		}
+		scanErrStr += ptErr.Error()
 	}
 	jc.Encode(api.RHPScanResponse{
 		Ping:      api.ParamDuration(elapsed),
@@ -1019,6 +1032,10 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(accounts)
 }
 
+func (w *worker) idHandlerGET(jc jape.Context) {
+	jc.Encode(w.id)
+}
+
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) *worker {
 	w := &worker{
@@ -1053,6 +1070,8 @@ func (w *worker) Handler() http.Handler {
 		"GET    /accounts":                w.accountsHandlerGET,
 		"GET    /accounts/host/:id":       w.accountHandlerGET,
 		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
+
+		"GET    /id": w.idHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,
