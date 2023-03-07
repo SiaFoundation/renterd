@@ -556,7 +556,7 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 		toDelete[i] = publicKey(entry)
 	}
 
-	return ss.db.Transaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(func(tx *gorm.DB) error {
 		if len(toInsert) > 0 {
 			if err := tx.Create(&toInsert).Error; err != nil {
 				return err
@@ -582,7 +582,7 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
 	}
 
-	return ss.db.Transaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(func(tx *gorm.DB) error {
 		if len(toInsert) > 0 {
 			if err := tx.Create(&toInsert).Error; err != nil {
 				return err
@@ -651,7 +651,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 
 	// Write the interactions and update to the hosts atmomically within a
 	// single transaction.
-	return ss.db.Transaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(func(tx *gorm.DB) error {
 		// Apply all the interactions to the hosts.
 		dbInteractions := make([]dbInteraction, 0, len(interactions))
 		for _, interaction := range interactions {
@@ -778,7 +778,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval ||
 		len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit ||
 		len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0 {
-		err := ss.db.Transaction(func(tx *gorm.DB) error {
+		err := ss.retryTransaction(func(tx *gorm.DB) error {
 			// Apply announcements.
 			if len(ss.unappliedAnnouncements) > 0 {
 				if err := insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
@@ -802,6 +802,8 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(ss.unappliedAnnouncements)))
 		}
 
+		ss.unappliedProofs = make(map[types.FileContractID]uint64)
+		ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
 		ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
 		ss.lastAnnouncementSave = time.Now()
 	}

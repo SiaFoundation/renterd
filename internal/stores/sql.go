@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"sync"
@@ -261,4 +262,16 @@ func (s *SQLStore) Close() error {
 		return err
 	}
 	return db.Close()
+}
+
+func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+	var err error
+	for i := 0; i < 5; i++ {
+		err = s.db.Transaction(fc, opts...)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("retryTransaction failed: %w", err)
 }
