@@ -7,7 +7,6 @@ import (
 	"math/big"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -33,6 +32,7 @@ var (
 	errHostOffline      = errors.New("host is offline")
 	errLowScore         = errors.New("host's score is below minimum")
 	errHostRedundantIP  = errors.New("host has redundant IP")
+	errHostNoPriceTable = errors.New("host has no price table")
 	errHostBadSettings  = errors.New("host has bad settings")
 	errHostPriceGouging = errors.New("host is price gouging")
 	errHostNotAnnounced = errors.New("host is not announced")
@@ -46,7 +46,7 @@ var (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, pt *rhpv3.HostPriceTable, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency) (bool, []error) {
+func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency) (bool, []error) {
 	var reasons []error
 
 	if !h.IsOnline() {
@@ -55,9 +55,11 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
 		reasons = append(reasons, errHostRedundantIP)
 	}
-	if settings, bad, reason := hasBadSettings(cfg, h); bad {
+	if h.PriceTable == nil {
+		reasons = append(reasons, errHostNoPriceTable)
+	} else if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
-	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, pt, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow); gouging {
+	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, h.PriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow); gouging {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
 	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
 		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
