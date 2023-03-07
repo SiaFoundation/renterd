@@ -13,6 +13,27 @@ var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
+
+	// DefaultRedundancySettings define the default redundancy settings the bus
+	// is configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultRedundancySettings = RedundancySettings{
+		MinShards:   10,
+		TotalShards: 30,
+	}
+
+	// DefaultGougingSettings define the default gouging settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultGougingSettings = GougingSettings{
+		MinMaxCollateral:      types.Siacoins(10),                   // at least up to 10 SC per contract
+		MaxRPCPrice:           types.Siacoins(1).Div64(1000),        // 1mS per RPC
+		MaxContractPrice:      types.Siacoins(10),                   // 10 SC per contract
+		MaxDownloadPrice:      types.Siacoins(1000),                 // 1000 SC per 1 TiB
+		MaxUploadPrice:        types.Siacoins(1000),                 // 1000 SC per 1 TiB
+		MaxStoragePrice:       types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
+		HostBlockHeightLeeway: 3,                                    // 3 blocks
+	}
 )
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
@@ -199,20 +220,34 @@ type GougingParams struct {
 
 // GougingSettings contain some price settings used in price gouging.
 type GougingSettings struct {
+	// MinMaxCollateral is the minimum value for 'MaxCollateral' in the host's
+	// price settings
 	MinMaxCollateral types.Currency `json:"minMaxCollateral"`
-	MaxRPCPrice      types.Currency `json:"maxRPCPrice"`
-	MaxContractPrice types.Currency `json:"maxContractPrice"`
-	MaxDownloadPrice types.Currency `json:"maxDownloadPrice"` // per TiB
-	MaxUploadPrice   types.Currency `json:"maxUploadPrice"`   // per TiB
-	MaxStoragePrice  types.Currency `json:"maxStoragePrice"`  // per byte per block
 
+	// MaxRPCPrice is the maximum allowed base price for RPCs
+	MaxRPCPrice types.Currency `json:"maxRPCPrice"`
+
+	// MaxContractPrice is the maximum allowed price to form a contract
+	MaxContractPrice types.Currency `json:"maxContractPrice"`
+
+	// MaxDownloadPrice is the maximum allowed price to download 1TiB of data
+	MaxDownloadPrice types.Currency `json:"maxDownloadPrice"`
+
+	// MaxUploadPrice is the maximum allowed price to upload 1TiB of data
+	MaxUploadPrice types.Currency `json:"maxUploadPrice"`
+
+	// MaxStoragePrice is the maximum allowed price to store 1 byte per block
+	MaxStoragePrice types.Currency `json:"maxStoragePrice"`
+
+	// HostBlockHeightLeeway is the amount of blocks of leeway given to the host
+	// block height in the host's price table
 	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
 type RedundancySettings struct {
-	MinShards   int
-	TotalShards int
+	MinShards   int `json:"minShards"`
+	TotalShards int `json:"totalShards"`
 }
 
 // Redundancy returns the effective storage redundancy of the

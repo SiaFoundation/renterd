@@ -166,15 +166,7 @@ func main() {
 	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
 	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
 	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
-	flag.IntVar(&busCfg.MinShards, "bus.minShards", 10, "min amount of shards needed to reconstruct the slab")
-	flag.IntVar(&busCfg.TotalShards, "bus.totalShards", 30, "total amount of shards for each slab")
-	flagCurrencyVar(&busCfg.MaxRPCPrice, "bus.maxRPCPrice", types.Siacoins(1), "max allowed base price for RPCs")
-	flagCurrencyVar(&busCfg.MaxContractPrice, "bus.maxContractPrice", types.Siacoins(1), "max allowed price to form a contract")
-	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.Siacoins(2500), "max allowed price to download one TiB")
-	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.Siacoins(2500), "max allowed price to upload one TiB")
-	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.Siacoins(1), "max allowed price to store one byte per block")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
-	flag.IntVar(&busCfg.HostBlockHeightLeeway, "bus.hostBlockHeightLeeway", 3, "amount of leeway given to host block height before it is considered gouging")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker used internally - can be overwritten using the RENTERD_WORKER_ID environment variable")
 	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using RENTERD_WORKER_REMOTE_ADDRS environment variable")
@@ -232,9 +224,6 @@ func main() {
 	if workerCfg.remoteAddrs == "" && !workerCfg.enabled && autopilotCfg.enabled {
 		log.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
-	if err := busCfg.RedundancySettings.Validate(); err != nil {
-		log.Fatal("failed to validate redundancy settings", err)
-	}
 
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
@@ -263,7 +252,7 @@ func main() {
 	if busAddr == "" {
 		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
 		if err != nil {
-			log.Fatal("failed to create bus", err)
+			log.Fatal("failed to create bus, err: ", err)
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 
