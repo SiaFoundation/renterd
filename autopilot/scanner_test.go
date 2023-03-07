@@ -95,7 +95,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), w)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -123,7 +123,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), w)
 	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -132,7 +132,7 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background())
+	s.tryPerformHostScan(context.Background(), w)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -146,7 +146,6 @@ func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	return &scanner{
 		ap:     ap,
 		bus:    b,
-		worker: w,
 		logger: zap.New(zapcore.NewNopCore()).Sugar(),
 		tracker: newTracker(
 			trackerMinDataPoints,

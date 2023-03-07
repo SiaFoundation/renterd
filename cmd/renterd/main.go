@@ -16,6 +16,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
@@ -123,6 +124,15 @@ func getDBDialectorFromEnv() gorm.Dialector {
 	return stores.NewMySQLConnection(user, password, uri, dbName)
 }
 
+func parseEnvVar(s string, v interface{}) {
+	if env, ok := os.LookupEnv(s); ok {
+		if _, err := fmt.Sscan(env, v); err != nil {
+			log.Fatalf("failed to parse %s: %v", s, err)
+		}
+		fmt.Printf("Using %s environment variable\n", s)
+	}
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -139,7 +149,8 @@ func main() {
 	busCfg.DBDialector = getDBDialectorFromEnv()
 
 	var workerCfg struct {
-		remoteAddr  string
+		enabled     bool
+		remoteAddrs string
 		apiPassword string
 		node.WorkerConfig
 	}
@@ -151,28 +162,21 @@ func main() {
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	tracingEnabled := flag.Bool("tracing-enabled", false, "Enables tracing through OpenTelemetry. If RENTERD_TRACING_ENABLED is set, it overwrites the CLI flag's value. Tracing can be configured using the standard OpenTelemetry environment variables. https://github.com/open-telemetry/opentelemetry-specification/blob/v1.8.0/specification/protocol/exporter.md")
 	dir := flag.String("dir", ".", "directory to store node state in")
-	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service")
-	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service")
+	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
+	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
 	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
 	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
-	flag.IntVar(&busCfg.MinShards, "bus.minShards", 10, "min amount of shards needed to reconstruct the slab")
-	flag.IntVar(&busCfg.TotalShards, "bus.totalShards", 30, "total amount of shards for each slab")
-	flagCurrencyVar(&busCfg.MaxRPCPrice, "bus.maxRPCPrice", types.Siacoins(1), "max allowed base price for RPCs")
-	flagCurrencyVar(&busCfg.MaxContractPrice, "bus.maxContractPrice", types.Siacoins(1), "max allowed price to form a contract")
-	flagCurrencyVar(&busCfg.MaxDownloadPrice, "bus.maxDownloadPrice", types.Siacoins(2500), "max allowed price to download one TiB")
-	flagCurrencyVar(&busCfg.MaxUploadPrice, "bus.maxUploadPrice", types.Siacoins(2500), "max allowed price to upload one TiB")
-	flagCurrencyVar(&busCfg.MaxStoragePrice, "bus.maxStoragePrice", types.Siacoins(1), "max allowed price to store one byte per block")
-	flag.IntVar(&busCfg.HostBlockHeightLeeway, "bus.hostBlockHeightLeeway", 3, "amount of leeway given to host block height before it is considered gouging")
+	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
-	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker")
-	flag.StringVar(&workerCfg.remoteAddr, "worker.remoteAddr", "", "URL of remote worker service")
+	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker used internally - can be overwritten using the RENTERD_WORKER_ID environment variable")
+	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using RENTERD_WORKER_REMOTE_ADDRS environment variable")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.DurationVar(&workerCfg.SessionReconnectTimeout, "worker.sessionReconnectTimeout", 10*time.Second, "the maximum of time reconnecting a session is allowed to take")
 	flag.DurationVar(&workerCfg.SessionTTL, "worker.sessionTTL", 2*time.Minute, "the time a host session is valid for before reconnecting")
 	flag.DurationVar(&workerCfg.DownloadSectorTimeout, "worker.downloadSectorTimeout", 3*time.Second, "timeout applied to sector downloads when downloading a slab")
 	flag.DurationVar(&workerCfg.UploadSectorTimeout, "worker.uploadSectorTimeout", 5*time.Second, "timeout applied to sector uploads when uploading a slab")
 	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
-	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable the autopilot")
+	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable/disable the autopilot - can be overwritten using the RENTERD_AUTOPILOT_ENABLED environment variable")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 10*time.Minute, "interval at which autopilot loop runs")
 	flag.Float64Var(&autopilotCfg.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", 0.75, "health threshold below which slabs are migrated to new hosts")
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
@@ -192,16 +196,18 @@ func main() {
 		return
 	}
 
+	// Overwrite flags from environment if set.
+	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &busCfg.remoteAddr)
+	parseEnvVar("RENTERD_BUS_API_PASSWORD", &busCfg.apiPassword)
+	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerCfg.remoteAddrs)
+	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerCfg.apiPassword)
+	parseEnvVar("RENTERD_WORKER_ENABLED", &workerCfg.enabled)
+	parseEnvVar("RENTERD_WORKER_ID", &workerCfg.ID)
+	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
+	parseEnvVar("RENTERD_TRACING_ENABLED", &tracingEnabled)
+
 	var autopilotShutdownFn func(context.Context) error
 	var shutdownFns []func(context.Context) error
-
-	// Alternative way to enable tracing.
-	if tracingStr := os.Getenv("RENTERD_TRACING_ENABLED"); tracingStr != "" {
-		_, err := fmt.Sscan(tracingStr, tracingEnabled)
-		if err != nil {
-			log.Fatal("failed to parse RENTERD_TRACING_ENABLED")
-		}
-	}
 
 	// Init tracing.
 	if *tracingEnabled {
@@ -212,18 +218,18 @@ func main() {
 		shutdownFns = append(shutdownFns, shutdownFn)
 	}
 
-	if busCfg.remoteAddr != "" && workerCfg.remoteAddr != "" && !autopilotCfg.enabled {
+	if busCfg.remoteAddr != "" && workerCfg.remoteAddrs != "" && !autopilotCfg.enabled {
 		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
-	if err := busCfg.RedundancySettings.Validate(); err != nil {
-		log.Fatal(err)
+	if workerCfg.remoteAddrs == "" && !workerCfg.enabled && autopilotCfg.enabled {
+		log.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
 
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
 	l, err := net.Listen("tcp", *apiAddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to create listener", err)
 	}
 	shutdownFns = append(shutdownFns, func(_ context.Context) error { return l.Close() })
 	*apiAddr = "http://" + l.Addr().String()
@@ -238,7 +244,7 @@ func main() {
 	renterdLog := filepath.Join(*dir, "renterd.log")
 	logger, closeFn, err := node.NewLogger(renterdLog)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to create logger", err)
 	}
 	shutdownFns = append(shutdownFns, closeFn)
 
@@ -246,45 +252,58 @@ func main() {
 	if busAddr == "" {
 		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("failed to create bus, err: ", err)
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
 		busPassword = getAPIPassword()
+	} else {
+		fmt.Println("connecting to remote bus at", busAddr)
 	}
 	bc := bus.NewClient(busAddr, busPassword)
 
-	workerAddr, workerPassword := workerCfg.remoteAddr, workerCfg.apiPassword
-	if workerAddr == "" {
-		w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
-		if err != nil {
-			log.Fatal(err)
-		}
-		shutdownFns = append(shutdownFns, shutdownFn)
+	var workers []autopilot.Worker
+	workerAddrs, workerPassword := workerCfg.remoteAddrs, workerCfg.apiPassword
+	if workerAddrs == "" {
+		if workerCfg.enabled {
+			w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
+			if err != nil {
+				log.Fatal("failed to create worker", err)
+			}
+			shutdownFns = append(shutdownFns, shutdownFn)
 
-		mux.sub["/api/worker"] = treeMux{h: auth(w)}
-		workerAddr = *apiAddr + "/api/worker"
-		workerPassword = getAPIPassword()
+			mux.sub["/api/worker"] = treeMux{h: auth(w)}
+			workerAddr := *apiAddr + "/api/worker"
+			workerPassword = getAPIPassword()
+			workers = append(workers, worker.NewClient(workerAddr, workerPassword))
+		}
+	} else {
+		// TODO: all workers use the same password. Figure out a nice way to
+		// have individual passwords.
+		workerAddrsSplit := strings.Split(workerAddrs, ";")
+		for _, workerAddr := range workerAddrsSplit {
+			workers = append(workers, worker.NewClient(workerAddr, workerPassword))
+			fmt.Println("connecting to remote worker at", workerAddr)
+		}
 	}
-	wc := worker.NewClient(workerAddr, workerPassword)
 
 	autopilotErr := make(chan error, 1)
 	if autopilotCfg.enabled {
 		autopilotDir := filepath.Join(*dir, "autopilot")
 		if err := os.MkdirAll(autopilotDir, 0700); err != nil {
-			log.Fatal(err)
+			log.Fatal("failed to create autopilot dir", err)
 		}
 
 		s, err := stores.NewJSONAutopilotStore(autopilotDir)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("failed to create JSON autopilot store", err)
 		}
 
-		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, wc, logger)
+		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, workers, logger)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("failed to create autopilot", err)
 		}
 		// NOTE: the autopilot shutdown function is not added to the shutdown
 		// functions array because it needs to be called first
@@ -300,7 +319,7 @@ func main() {
 
 	syncerAddress, err := bc.SyncerAddress(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to fetch syncer address", err)
 	}
 	log.Println("bus: Listening on", syncerAddress)
 

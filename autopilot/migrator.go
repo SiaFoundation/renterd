@@ -31,7 +31,7 @@ func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
 	}
 }
 
-func (m *migrator) tryPerformMigrations(ctx context.Context) {
+func (m *migrator) tryPerformMigrations(ctx context.Context, w Worker) {
 	m.mu.Lock()
 	if m.running || m.ap.isStopped() {
 		m.mu.Unlock()
@@ -43,14 +43,14 @@ func (m *migrator) tryPerformMigrations(ctx context.Context) {
 	m.ap.wg.Add(1)
 	go func(cfg api.AutopilotConfig) {
 		defer m.ap.wg.Done()
-		m.performMigrations(cfg)
+		m.performMigrations(w, cfg)
 		m.mu.Lock()
 		m.running = false
 		m.mu.Unlock()
 	}(m.ap.state.cfg)
 }
 
-func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
+func (m *migrator) performMigrations(w Worker, cfg api.AutopilotConfig) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
@@ -77,7 +77,7 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 			break
 		}
 
-		err := m.ap.worker.MigrateSlab(ctx, slab)
+		err := w.MigrateSlab(ctx, slab)
 		if err != nil {
 			m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
 			continue
