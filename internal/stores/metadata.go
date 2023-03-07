@@ -887,17 +887,20 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 		FCID:        fileContractID(fcid),
 		HostID:      hostID,
 		RenewedFrom: fileContractID(renewedFrom),
-		TotalCost:   currency(totalCost),
 
-		RevisionNumber: "0",
-		StartHeight:    startHeight,
-		WindowStart:    c.Revision.WindowStart,
-		WindowEnd:      c.Revision.WindowEnd,
+		contractMetadata: contractMetadata{
+			RevisionNumber: "0",
+			StartHeight:    startHeight,
+			WindowStart:    c.Revision.WindowStart,
+			WindowEnd:      c.Revision.WindowEnd,
+		},
 
-		// Spending starts at 0.
-		UploadSpending:      zeroCurrency,
-		DownloadSpending:    zeroCurrency,
-		FundAccountSpending: zeroCurrency,
+		contractSpending: contractSpending{
+			UploadSpending:      zeroCurrency,
+			DownloadSpending:    zeroCurrency,
+			FundAccountSpending: zeroCurrency,
+			TotalCost:           currency(totalCost),
+		},
 	}
 
 	// Insert contract.
