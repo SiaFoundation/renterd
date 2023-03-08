@@ -51,8 +51,11 @@ func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.Hos
 			if !ok {
 				return errors.New("insufficient funds")
 			}
+			if err := RPCFundAccount(t, &payment, account.id, pt.UID); err != nil {
+				return err
+			}
 			w.contractSpendingRecorder.Record(revision.ParentID, api.ContractSpending{FundAccount: cost})
-			return RPCFundAccount(t, &payment, account.id, pt.UID)
+			return nil
 		})
 	})
 }

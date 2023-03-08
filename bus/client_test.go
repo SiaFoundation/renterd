@@ -18,11 +18,6 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-var defaultSettings = api.RedundancySettings{
-	MinShards:   10,
-	TotalShards: 30,
-}
-
 func TestClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -58,7 +53,7 @@ func TestClient(t *testing.T) {
 	// fetch redundancy settings and assert they're configured to the default values
 	if rs, err := c.RedundancySettings(ctx); err != nil {
 		t.Fatal(err)
-	} else if rs.MinShards != defaultSettings.MinShards || rs.TotalShards != defaultSettings.TotalShards {
+	} else if rs.MinShards != api.DefaultRedundancySettings.MinShards || rs.TotalShards != api.DefaultRedundancySettings.TotalShards {
 		t.Fatal("unexpected redundancy settings", rs)
 	}
 }
@@ -74,10 +69,9 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 	client := bus.NewClient("http://"+l.Addr().String(), "test")
 
 	b, cleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:          false,
-		GatewayAddr:        "127.0.0.1:0",
-		Miner:              node.NewMiner(client),
-		RedundancySettings: defaultSettings,
+		Bootstrap:   false,
+		GatewayAddr: "127.0.0.1:0",
+		Miner:       node.NewMiner(client),
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err

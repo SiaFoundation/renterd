@@ -114,22 +114,22 @@ Especially the `contracts` section is important, make sure the `amount` is set t
 
 ## Redundancy
 
-The redundancy is configurable in a couple of ways, the first one is through two CLI options:
-
-- **`bus.minShards`**: min amount of shards needed to reconstruct the slab
-- **`bus.totalShards`**: total amount of shards for each slab
-
 The default redundancy is 30-10. The redunancy can be updated using the settings API:
 
 - `GET /api/bus/setting/redundancy`
 - `PUT /api/bus/setting/redundancy`
 
-Lastly, the redundancy can be passed through query string parameters on the
-upload endpoint in the worker API:
+The redundancy can also be passed through query string parameters on the upload
+endpoint in the worker API:
 
 - `PUT /api/worker/objects/foo?minshards=2&totalshards=5`
 
-It is important to note that on every restart of `renterd` the setting is overwritten with the default values, if you want to run `renterd` using a redundancy which is not the default we advise to use the CLI options.
+## Gouging
+
+The default gouging settings are listed below. The gouging settings can be updated using the settings API:
+
+- `GET /api/bus/setting/gouging`
+- `PUT /api/bus/setting/gouging`
 
 ## Blocklist
 

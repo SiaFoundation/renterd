@@ -817,16 +817,22 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	slow := make(map[types.PublicKey]int)
 
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
-	for _, ss := range slabsForDownload(o.Slabs, offset, length) {
+	for i, ss := range slabsForDownload(o.Slabs, offset, length) {
 		contracts, err := w.bus.ContractsForSlab(ctx, ss.Shards, dp.ContractSet)
 		if err != nil {
-			_ = err // NOTE: can't write error because we may have already written to the response
+			w.logger.Errorf("couldn't fetch contracts for object %v slab %d, err: %v", key, i, err)
+			if i == 0 {
+				jc.Error(err, http.StatusInternalServerError)
+			}
 			return
 		}
 
 		if len(contracts) < int(ss.MinShards) {
 			err = fmt.Errorf("not enough contracts to download the slab, %d<%d", len(contracts), ss.MinShards)
-			_ = err // TODO: can we do better UX wise (?) could ask the DB before initiating the first download
+			w.logger.Errorf("couldn't download object %v slab %d, err: %v", key, i, err)
+			if i == 0 {
+				jc.Error(err, http.StatusInternalServerError)
+			}
 			return
 		}
 
@@ -846,7 +852,10 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return err
 		})
 		if err != nil {
-			_ = err // NOTE: can't write error because we may have already written to the response
+			w.logger.Errorf("couldn't download object %v slab %d, err: %v", key, i, err)
+			if i == 0 {
+				jc.Error(err, http.StatusInternalServerError)
+			}
 			return
 		}
 	}

@@ -2,12 +2,12 @@ package stores
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -401,24 +401,28 @@ func TestRenewedContract(t *testing.T) {
 
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
-		FCID:                fileContractID(fcid1),
-		Host:                publicKey(c.HostKey()),
-		RenewedTo:           fileContractID(fcid1Renewed),
-		Reason:              archivalReasonRenewed,
-		ProofHeight:         0,
-		RevisionHeight:      0,
-		RevisionNumber:      "0",
-		StartHeight:         100,
-		WindowStart:         2,
-		WindowEnd:           3,
-		UploadSpending:      zeroCurrency,
-		DownloadSpending:    zeroCurrency,
-		FundAccountSpending: zeroCurrency,
+		Host:      publicKey(c.HostKey()),
+		RenewedTo: fileContractID(fcid1Renewed),
+		Reason:    archivalReasonRenewed,
+
+		ContractCommon: ContractCommon{
+			FCID: fileContractID(fcid1),
+
+			TotalCost:      currency(oldContractTotal),
+			ProofHeight:    0,
+			RevisionHeight: 0,
+			RevisionNumber: "0",
+			StartHeight:    100,
+			WindowStart:    2,
+			WindowEnd:      3,
+
+			UploadSpending:      zeroCurrency,
+			DownloadSpending:    zeroCurrency,
+			FundAccountSpending: zeroCurrency,
+		},
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
-		fmt.Println(ac)
-		fmt.Println(expectedContract)
-		t.Fatal("mismatch")
+		t.Fatal("mismatch", cmp.Diff(ac, expectedContract))
 	}
 
 	// Renew it once more.
@@ -711,15 +715,20 @@ func TestSQLMetadataStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: publicKey(hk1),
 										},
-										FCID:                fileContractID(fcid1),
-										RevisionNumber:      "0",
-										StartHeight:         startHeight1,
-										WindowStart:         400,
-										WindowEnd:           500,
-										TotalCost:           currency(totalCost1),
-										UploadSpending:      zeroCurrency,
-										DownloadSpending:    zeroCurrency,
-										FundAccountSpending: zeroCurrency,
+
+										ContractCommon: ContractCommon{
+											FCID: fileContractID(fcid1),
+
+											TotalCost:      currency(totalCost1),
+											RevisionNumber: "0",
+											StartHeight:    startHeight1,
+											WindowStart:    400,
+											WindowEnd:      500,
+
+											UploadSpending:      zeroCurrency,
+											DownloadSpending:    zeroCurrency,
+											FundAccountSpending: zeroCurrency,
+										},
 									},
 								},
 							},
@@ -749,15 +758,19 @@ func TestSQLMetadataStore(t *testing.T) {
 										Host: dbHost{
 											PublicKey: publicKey(hk2),
 										},
-										FCID:                fileContractID(fcid2),
-										RevisionNumber:      "0",
-										StartHeight:         startHeight2,
-										WindowStart:         400,
-										WindowEnd:           500,
-										TotalCost:           currency(totalCost2),
-										UploadSpending:      zeroCurrency,
-										DownloadSpending:    zeroCurrency,
-										FundAccountSpending: zeroCurrency,
+										ContractCommon: ContractCommon{
+											FCID: fileContractID(fcid2),
+
+											TotalCost:      currency(totalCost2),
+											RevisionNumber: "0",
+											StartHeight:    startHeight2,
+											WindowStart:    400,
+											WindowEnd:      500,
+
+											UploadSpending:      zeroCurrency,
+											DownloadSpending:    zeroCurrency,
+											FundAccountSpending: zeroCurrency,
+										},
 									},
 								},
 							},
@@ -770,9 +783,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(obj, expectedObj) {
-		js1, _ := json.MarshalIndent(obj, "", "  ")
-		js2, _ := json.MarshalIndent(expectedObj, "", "  ")
-		t.Fatal("object mismatch", string(js1), string(js2))
+		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
 
 	// Fetch it and verify again.
