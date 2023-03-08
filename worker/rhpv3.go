@@ -144,7 +144,7 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr string, hostKey types.PublicKey, bh uint64) (pt rhpv3.HostPriceTable, err error) {
+func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr, hostIP string, hostKey types.PublicKey, bh uint64) (pt rhpv3.HostPriceTable, err error) {
 	pt, ptValid := w.priceTables.PriceTable(hostKey)
 	if ptValid {
 		return pt, nil
@@ -152,7 +152,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 
 	updatePTByContract := func() {
 		var rev rhpv2.ContractRevision
-		if err = w.withHostV2(ctx, contractID, hostKey, siamuxAddr, func(ss sectorStore) (err error) {
+		if err = w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) (err error) {
 			rev, err = ss.(*sharedSession).Revision(ctx)
 			return
 		}); err != nil {
@@ -189,7 +189,7 @@ func (w *worker) withHostsV3(ctx context.Context, contracts []api.ContractMetada
 			continue
 		}
 
-		pt, err := w.fetchPriceTable(ctx, c.ID, c.SiamuxAddr, c.HostKey, cs.BlockHeight)
+		pt, err := w.fetchPriceTable(ctx, c.ID, c.SiamuxAddr, c.HostIP, c.HostKey, cs.BlockHeight)
 		if err != nil {
 			continue
 		}
