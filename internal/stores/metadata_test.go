@@ -879,21 +879,65 @@ func TestObjects(t *testing.T) {
 		os.UpdateObject(ctx, path, obj, ucs)
 	}
 	tests := []struct {
+		path   string
 		prefix string
 		want   []string
 	}{
-		{"/", []string{"/foo/", "/gab/"}},
-		{"/foo/", []string{"/foo/bar", "/foo/bat", "/foo/baz/"}},
-		{"/foo/baz/", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
-		{"/gab/", []string{"/gab/guub"}},
+		{"/", "", []string{"/foo/", "/gab/"}},
+		{"/foo/", "", []string{"/foo/bar", "/foo/bat", "/foo/baz/"}},
+		{"/foo/baz/", "", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
+		{"/gab/", "", []string{"/gab/guub"}},
+
+		{"/", "f", []string{"/foo/"}},
+		{"/foo/", "fo", []string{}},
+		{"/foo/baz/", "quux", []string{"/foo/baz/quux"}},
+		{"/gab/", "/guub", []string{}},
 	}
 	for _, test := range tests {
-		got, err := os.Objects(ctx, test.prefix)
+		got, err := os.Objects(ctx, 0, -1, test.path, test.prefix)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(got, test.want) {
-			t.Errorf("\nlist: %v\ngot:  %v\nwant: %v", test.prefix, got, test.want)
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+		}
+	}
+}
+
+// TestObjectsFuzzy is a test for the ObjectsFuzzy method.
+func TestObjectsFuzzy(t *testing.T) {
+	os, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		"/foo/bar",
+		"/foo/bat",
+		"/foo/baz/quux",
+		"/foo/baz/quuz",
+		"/gab/guub",
+	}
+	ctx := context.Background()
+	for _, path := range paths {
+		obj, ucs := newTestObject(frand.Intn(10))
+		os.UpdateObject(ctx, path, obj, ucs)
+	}
+	tests := []struct {
+		key  string
+		want []string
+	}{
+		{"/", []string{"/foo/bar", "/foo/bat", "/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
+		{"/foo/b", []string{"/foo/bar", "/foo/bat", "/foo/baz/quux", "/foo/baz/quuz"}},
+		{"o/baz/quu", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
+		{"uu", []string{"/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
+	}
+	for _, test := range tests {
+		got, err := os.ObjectsFuzzy(ctx, 0, -1, test.key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.key, got, test.want)
 		}
 	}
 }

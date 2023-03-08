@@ -251,6 +251,15 @@ func TestUploadDownload(t *testing.T) {
 	// Run uploads once.
 	uploadDownload()
 
+	// Fuzzy search for the objects.
+	objects, err := cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "ata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(objects))
+	}
+
 	// Renew contracts.
 	if err := cluster.MineToRenewWindow(); err != nil {
 		t.Fatal(err)
