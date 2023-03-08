@@ -23,10 +23,6 @@ type mockHost struct {
 	sectors    map[types.Hash256][]byte
 }
 
-func (h *mockHost) Account() rhpv3.Account {
-	return h.account
-}
-
 func (h *mockHost) Contract() types.FileContractID {
 	return h.contractID
 }

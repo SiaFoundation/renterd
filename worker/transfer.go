@@ -12,7 +12,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
@@ -26,13 +25,14 @@ const (
 
 var (
 	errUnusedHost            = errors.New("host not used")
+	errGougingHost           = errors.New("host is gouging")
+	errNonFundedHost         = errors.New("host is not funded")
 	errDownloadSectorTimeout = errors.New("download sector timed out")
 	errUploadSectorTimeout   = errors.New("upload sector timed out")
 )
 
 // A sectorStore stores contract data.
 type sectorStore interface {
-	Account() rhpv3.Account
 	Contract() types.FileContractID
 	HostKey() types.PublicKey
 	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error)
@@ -207,7 +207,6 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 		// Trace the download.
 		ctx, span := tracing.Tracer.Start(ctx, "download-request")
 		span.SetAttributes(attribute.Stringer("host", hosts[r.hostIndex].HostKey()))
-		span.SetAttributes(attribute.Stringer("account", hosts[r.hostIndex].Account()))
 
 		go func(r req) {
 			defer close(doneChan)
@@ -300,25 +299,27 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 		hostsMap[h.HostKey()] = i
 	}
 
-	// collect slow host indices
-	var slowHosts []int
+	// collect bad host indices
+	var badHosts []int
 	for _, he := range errs {
-		if errors.Is(he, errDownloadSectorTimeout) {
+		if errors.Is(he, errBalanceInsufficient) ||
+			errors.Is(he, errDownloadSectorTimeout) ||
+			errors.Is(he, errGougingHost) {
 			if _, exists := hostsMap[he.HostKey]; !exists {
 				panic("host not found in hostsmap")
 			}
-			slowHosts = append(slowHosts, hostsMap[he.HostKey])
+			badHosts = append(badHosts, hostsMap[he.HostKey])
 		}
 	}
 
-	return shards, slowHosts, nil
+	return shards, badHosts, nil
 }
 
 func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts []sectorStore, downloadSectorTimeout time.Duration) ([]int, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "parallelDownloadSlab")
 	defer span.End()
 
-	shards, slowHosts, err := parallelDownloadSlab(ctx, ss, hosts, downloadSectorTimeout)
+	shards, badHosts, err := parallelDownloadSlab(ctx, ss, hosts, downloadSectorTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +328,7 @@ func downloadSlab(ctx context.Context, w io.Writer, ss object.SlabSlice, hosts [
 	if err != nil {
 		return nil, err
 	}
-	return slowHosts, nil
+	return badHosts, nil
 }
 
 // slabsForDownload returns the slices that comprise the specified offset-length
@@ -442,7 +443,7 @@ func migrateSlab(ctx context.Context, s *object.Slab, v2Hosts, v3Hosts []sectorS
 		Offset: 0,
 		Length: uint32(s.MinShards) * rhpv2.SectorSize,
 	}
-	shards, slowHosts, err := parallelDownloadSlab(ctx, ss, v3Hosts, downloadSectorTimeout)
+	shards, badHosts, err := parallelDownloadSlab(ctx, ss, v3Hosts, downloadSectorTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to download slab for migration: %w", err)
 	}
@@ -469,13 +470,14 @@ func migrateSlab(ctx context.Context, s *object.Slab, v2Hosts, v3Hosts []sectorS
 	// randomize order of hosts to make sure we don't migrate to the same hosts all the time
 	frand.Shuffle(len(filtered), func(i, j int) { filtered[i], filtered[j] = filtered[j], filtered[i] })
 
-	// move slow hosts to the back of the array
-	slow := make(map[types.PublicKey]int)
-	for _, h := range slowHosts {
-		slow[v3Hosts[h].HostKey()]++
+	// move bad hosts to the back of the array, a bad host is a host that timed
+	// out, is out of funds or is gouging its prices
+	bad := make(map[types.PublicKey]int)
+	for _, h := range badHosts {
+		bad[v3Hosts[h].HostKey()]++
 	}
 	sort.SliceStable(v2Hosts, func(i, j int) bool {
-		return slow[v2Hosts[i].HostKey()] < slow[v2Hosts[j].HostKey()]
+		return bad[v2Hosts[i].HostKey()] < bad[v2Hosts[j].HostKey()]
 	})
 
 	// reupload those shards

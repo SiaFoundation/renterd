@@ -29,6 +29,10 @@ const (
 )
 
 var (
+	// errBalanceInsufficient occurs when a withdrawal failed because the
+	// account balance was insufficient.
+	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
+
 	// errBalanceMaxExceeded occurs when a deposit would push the account's
 	// balance over the maximum allowed ephemeral account balance.
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
@@ -70,6 +74,13 @@ func isMaxBalanceExceeded(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), errBalanceMaxExceeded.Error())
+}
+
+func isBalanceInsufficient(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), errBalanceInsufficient.Error())
 }
 
 type (
@@ -303,6 +314,14 @@ func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency,
 func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Currency, error)) error {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+
+	// return early if our account is not funded
+	a.balanceMu.Lock()
+	if a.balance.Cmp(big.NewInt(0)) <= 0 {
+		return errBalanceInsufficient
+	}
+	a.balanceMu.Unlock()
+
 	amt, err := amtFn()
 	if err != nil {
 		return err
@@ -379,10 +398,6 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	return pk
 }
 
-func (r *hostV3) Account() rhpv3.Account {
-	return r.acc.id
-}
-
 func (r *hostV3) Contract() types.FileContractID {
 	return r.fcid
 }
@@ -399,10 +414,17 @@ func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 	panic("not implemented")
 }
 
-func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
+func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+	// return errGougingHost if gouging checks fail
 	if errs := PerformGougingChecks(ctx, nil, r.pt).CanDownload(); len(errs) > 0 {
-		return fmt.Errorf("failed to download sector, gouging check failed: %v", errs)
+		return fmt.Errorf("failed to download sector, %w: %v", errGougingHost, errs)
 	}
+	// return errBalanceInsufficient if balance insufficient
+	defer func() {
+		if isBalanceInsufficient(err) {
+			err = fmt.Errorf("%w, err: %v", errBalanceInsufficient, err)
+		}
+	}()
 
 	return r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = withTransportV3(ctx, r.siamuxAddr, r.HostKey(), func(t *rhpv3.Transport) error {

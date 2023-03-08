@@ -8,7 +8,6 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
 
@@ -155,10 +154,6 @@ func (ss *sharedSession) DeleteSectors(ctx context.Context, roots []types.Hash25
 	}
 	defer ss.pool.release(s)
 	return s.deleteSectors(ctx, roots)
-}
-
-func (ss *sharedSession) Account() rhpv3.Account {
-	panic("sessions do not have account ids") // developer error
 }
 
 // A sessionPool is a set of sessions that can be used for uploading and
