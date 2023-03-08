@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -25,7 +26,8 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		db *gorm.DB
+		db     *gorm.DB
+		logger glogger.Interface
 
 		// HostDB related fields.
 		lastAnnouncementSave   time.Time
@@ -196,6 +198,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 
 	ss := &SQLStore{
 		db:                   db,
+		logger:               logger,
 		knownContracts:       isOurContract,
 		lastAnnouncementSave: time.Now(),
 		persistInterval:      persistInterval,
@@ -271,6 +274,7 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		if err == nil {
 			return nil
 		}
+		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, 5, err))
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
