@@ -813,8 +813,8 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 
-	// keep track of slow hosts so we can avoid them in consecutive slab downloads
-	slow := make(map[types.PublicKey]int)
+	// keep track of bad hosts so we can avoid them in consecutive slab downloads
+	badHosts := make(map[types.PublicKey]int)
 
 	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
 	for i, ss := range slabsForDownload(o.Slabs, offset, length) {
@@ -839,15 +839,16 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 		// randomize order of contracts so we don't always download from the same hosts
 		frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
 
-		// move slow hosts to the back of the array
+		// move bad hosts to the back of the array, a bad host is a host that
+		// timed out, is out of funds or is gouging its prices
 		sort.SliceStable(contracts, func(i, j int) bool {
-			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
+			return badHosts[contracts[i].HostKey] < badHosts[contracts[j].HostKey]
 		})
 
 		err = w.withHostsV3(ctx, contracts, func(accounts []sectorStore) error {
-			slowHosts, err := downloadSlab(ctx, cw, ss, accounts, w.downloadSectorTimeout)
-			for _, h := range slowHosts {
-				slow[accounts[h].HostKey()]++
+			badHostIndices, err := downloadSlab(ctx, cw, ss, accounts, w.downloadSectorTimeout)
+			for _, h := range badHostIndices {
+				badHosts[accounts[h].HostKey()]++
 			}
 			return err
 		})
