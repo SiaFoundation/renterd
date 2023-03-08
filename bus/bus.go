@@ -68,7 +68,7 @@ type (
 	// A HostDB stores information about hosts.
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
+		Hosts(ctx context.Context, offset, limit int, includeBlocked bool, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
@@ -399,7 +399,23 @@ func (b *bus) hostsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	hosts, err := b.hdb.Hosts(jc.Request.Context(), offset, limit)
+	includeBlocked := false
+	addressContains := ""
+	keyInStr := ""
+	if jc.DecodeForm("includeBlocked", &includeBlocked) != nil || jc.DecodeForm("addressContains", &addressContains) != nil || jc.DecodeForm("keyIn", &keyInStr) != nil {
+		return
+	}
+	var keyIn []types.PublicKey
+	if keyInStr != "" {
+		for _, pk := range strings.Split(keyInStr, ",") {
+			var hostKey types.PublicKey
+			if jc.Check("failed to decode keyIn", hostKey.UnmarshalText([]byte(pk))) != nil {
+				return
+			}
+			keyIn = append(keyIn, hostKey)
+		}
+	}
+	hosts, err := b.hdb.Hosts(jc.Request.Context(), offset, limit, includeBlocked, addressContains, keyIn)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}

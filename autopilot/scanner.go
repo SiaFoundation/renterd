@@ -36,7 +36,7 @@ type (
 		// a bit, we currently use inline interfaces to avoid having to update the
 		// scanner tests with every interface change
 		bus interface {
-			Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
+			Hosts(ctx context.Context, offset, limit int, includeBlocked bool, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
 			HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}

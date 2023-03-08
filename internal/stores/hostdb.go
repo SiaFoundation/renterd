@@ -504,7 +504,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 }
 
 // Hosts returns hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
+func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int, includeBlocked bool, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -512,8 +512,31 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 	var hosts []hostdb.Host
 	var fullHosts []dbHost
 
-	err := ss.db.
-		Scopes(ss.blocklist).
+	// Exclude blocked hosts.
+	query := ss.db
+	if !includeBlocked {
+		query = query.Scopes(ss.blocklist)
+	}
+
+	// Add address filter.
+	if addressContains != "" {
+		query = query.Scopes(func(d *gorm.DB) *gorm.DB {
+			return d.Where("net_address LIKE ?", "%"+addressContains+"%")
+		})
+	}
+
+	// Only search for specific hosts.
+	if len(keyIn) > 0 {
+		pubKeys := make([]publicKey, len(keyIn))
+		for i, pk := range keyIn {
+			pubKeys[i] = publicKey(pk)
+		}
+		query = query.Scopes(func(d *gorm.DB) *gorm.DB {
+			return d.Where("public_key IN ?", pubKeys)
+		})
+	}
+
+	err := query.
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
