@@ -26,6 +26,10 @@ const (
 	// current blockheight when we define an expiry block height for withdrawal
 	// messages.
 	defaultWithdrawalExpiryBlocks = 6
+
+	// bandwidthLeeway is the amount of excess bandwidth used when
+	// overestimating the bandwidth cost
+	bandwidthLeeway = 1 << 12 // 4 KiB
 )
 
 var (
@@ -450,12 +454,12 @@ func readSectorCost(pt *rhpv3.HostPriceTable) (types.Currency, error) {
 		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, base cost overflow")
 	}
 
-	ulbw, overflow := pt.UploadBandwidthCost.Mul64WithOverflow(modules.SectorSize)
+	ulbw, overflow := pt.UploadBandwidthCost.Mul64WithOverflow(1<<12 + bandwidthLeeway) // 4KiB + leeway
 	if overflow {
 		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, upload bandwidth overflow")
 	}
 
-	dlbw, overflow := pt.DownloadBandwidthCost.Mul64WithOverflow(modules.SectorSize)
+	dlbw, overflow := pt.DownloadBandwidthCost.Mul64WithOverflow(modules.SectorSize + bandwidthLeeway) // 4MiB + leeway
 	if overflow {
 		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, download bandwidth overflow")
 	}
@@ -468,11 +472,6 @@ func readSectorCost(pt *rhpv3.HostPriceTable) (types.Currency, error) {
 	cost, overflow = cost.AddWithOverflow(bw)
 	if overflow {
 		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost")
-	}
-
-	cost, overflow = cost.Mul64WithOverflow(2) // overestimate the cost
-	if overflow {
-		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, estimate overflow")
 	}
 	return cost, nil
 }
