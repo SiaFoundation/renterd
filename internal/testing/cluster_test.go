@@ -86,6 +86,18 @@ func TestNewTestCluster(t *testing.T) {
 		contract = contracts[0]
 	}
 
+	// Make sure the contract set exists.
+	sets, err := cluster.Bus.ContractSets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sets) != 1 {
+		t.Fatal("invalid number of setse", len(sets))
+	}
+	if sets[0] != "autopilot" {
+		t.Fatal("set name should be 'autopilot' but was", sets[0])
+	}
+
 	// Verify startHeight and endHeight of the contract.
 	currentPeriod, err := cluster.Autopilot.Status()
 	if err != nil {

@@ -400,6 +400,14 @@ func (s *SQLStore) Contracts(ctx context.Context, set string) ([]api.ContractMet
 	return contracts, nil
 }
 
+func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
+	var sets []string
+	err := s.db.Raw("SELECT name FROM contract_sets WHERE (SELECT DISTINCT(db_contract_set_id) FROM contract_set_contracts)").
+		Scan(&sets).
+		Error
+	return sets, err
+}
+
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
 	fcids := make([]fileContractID, len(contractIds))
 	for i, fcid := range contractIds {
