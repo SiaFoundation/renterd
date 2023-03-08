@@ -302,9 +302,9 @@ func parallelDownloadSlab(ctx context.Context, ss object.SlabSlice, hosts []sect
 	// collect bad host indices
 	var badHosts []int
 	for _, he := range errs {
-		if errors.Is(he, errBalanceInsufficient) ||
-			errors.Is(he, errDownloadSectorTimeout) ||
-			errors.Is(he, errGougingHost) {
+		if errors.Is(he, errNonFundedHost) ||
+			errors.Is(he, errGougingHost) ||
+			errors.Is(he, errDownloadSectorTimeout) {
 			if _, exists := hostsMap[he.HostKey]; !exists {
 				panic("host not found in hostsmap")
 			}

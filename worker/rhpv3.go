@@ -429,7 +429,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
 		if isBalanceInsufficient(err) {
-			err = fmt.Errorf("%w, err: %v", errBalanceInsufficient, err)
+			err = fmt.Errorf("%w %v, err: %v", errNonFundedHost, r.HostKey(), err)
 		}
 	}()
 
