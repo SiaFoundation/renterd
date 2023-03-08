@@ -325,6 +325,7 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	// return early if our account is not funded
 	a.balanceMu.Lock()
 	if a.balance.Cmp(big.NewInt(0)) <= 0 {
+		a.balanceMu.Unlock()
 		return errBalanceInsufficient
 	}
 	a.balanceMu.Unlock()
