@@ -149,7 +149,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, cfg api.AutopilotConfig) {
+func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker) {
 	s.mu.Lock()
 	if s.scanning || !s.isScanRequired() || s.ap.isStopped() {
 		s.mu.Unlock()
@@ -161,7 +161,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, cfg api.
 	s.scanning = true
 	s.mu.Unlock()
 
-	go func() {
+	go func(cfg api.AutopilotConfig) {
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
 			if s.ap.isStopped() {
 				break
@@ -185,7 +185,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, cfg api.
 		s.scanning = false
 		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
 		s.mu.Unlock()
-	}()
+	}(s.ap.state.cfg)
 }
 
 func (s *scanner) tryUpdateTimeout() {

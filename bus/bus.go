@@ -768,14 +768,14 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	if gss, err := b.ss.Setting(ctx, SettingGouging); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		panic(err)
+		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
 	}
 
 	var rs api.RedundancySettings
 	if rss, err := b.ss.Setting(ctx, SettingRedundancy); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		panic(err)
+		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
 	cs := api.ConsensusState{
@@ -858,7 +858,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, gs api.GougingSettings, rs api.RedundancySettings, l *zap.Logger) (*bus, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
@@ -873,12 +873,19 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
-	if err := b.setGougingSettings(ctx, gs); err != nil {
-		return nil, err
-	}
 
-	if err := b.setRedundancySettings(ctx, rs); err != nil {
-		return nil, err
+	// Load default settings if the setting is not already set.
+	for key, value := range map[string]interface{}{
+		SettingGouging:    api.DefaultGougingSettings,
+		SettingRedundancy: api.DefaultRedundancySettings,
+	} {
+		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
+			if bytes, err := json.Marshal(value); err != nil {
+				panic("failed to marshal default settings") // should never happen
+			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Load the accounts into memory. They're saved when the bus is stopped.
