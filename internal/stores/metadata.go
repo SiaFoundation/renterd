@@ -479,13 +479,13 @@ func (s *SQLStore) Object(ctx context.Context, key string) (object.Object, error
 	return obj.convert()
 }
 
-func (db *SQLStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
+func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
 	squashedRecords := make(map[types.FileContractID]api.ContractSpending)
 	for _, r := range records {
 		squashedRecords[r.ContractID] = squashedRecords[r.ContractID].Add(r.ContractSpending)
 	}
 	for fcid, newSpending := range squashedRecords {
-		err := db.db.Transaction(func(tx *gorm.DB) error {
+		err := s.retryTransaction(func(tx *gorm.DB) error {
 			var contract dbContract
 			err := tx.Model(&dbContract{}).
 				Where("fcid = ?", fileContractID(fcid)).
