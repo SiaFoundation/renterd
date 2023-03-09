@@ -92,8 +92,8 @@ type (
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		Object(ctx context.Context, key string) (object.Object, error)
-		Objects(ctx context.Context, offset, limit int, key, prefix string) ([]string, error)
-		ObjectsFuzzy(ctx context.Context, offset, limit int, key string) ([]string, error)
+		Objects(ctx context.Context, key, prefix string, offset, limit int) ([]string, error)
+		ObjectsFuzzy(ctx context.Context, key string, offset, limit int) ([]string, error)
 		UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, key string) error
 
@@ -618,7 +618,7 @@ func (b *bus) fuzzyObjectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
 		return
 	}
-	keys, err := b.ms.ObjectsFuzzy(jc.Request.Context(), offset, limit, key)
+	keys, err := b.ms.ObjectsFuzzy(jc.Request.Context(), key, offset, limit)
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
@@ -634,7 +634,7 @@ func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 		if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("prefix", &prefix) != nil {
 			return
 		}
-		keys, err := b.ms.Objects(ctx, offset, limit, jc.PathParam("key"), prefix)
+		keys, err := b.ms.Objects(ctx, jc.PathParam("key"), prefix, offset, limit)
 		if jc.Check("couldn't list objects", err) == nil {
 			jc.Encode(api.ObjectsResponse{Entries: keys})
 		}

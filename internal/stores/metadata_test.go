@@ -894,12 +894,21 @@ func TestObjects(t *testing.T) {
 		{"/gab/", "/guub", []string{}},
 	}
 	for _, test := range tests {
-		got, err := os.Objects(ctx, 0, -1, test.path, test.prefix)
+		got, err := os.Objects(ctx, test.path, test.prefix, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+		}
+		for offset := 0; offset < len(test.want); offset++ {
+			got, err := os.Objects(ctx, test.path, test.prefix, offset, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0] != test.want[offset] {
+				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
+			}
 		}
 	}
 }
@@ -932,12 +941,21 @@ func TestObjectsFuzzy(t *testing.T) {
 		{"uu", []string{"/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
 	}
 	for _, test := range tests {
-		got, err := os.ObjectsFuzzy(ctx, 0, -1, test.key)
+		got, err := os.ObjectsFuzzy(ctx, test.key, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.key, got, test.want)
+		}
+		for offset := 0; offset < len(test.want); offset++ {
+			got, err := os.ObjectsFuzzy(ctx, test.key, offset, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0] != test.want[offset] {
+				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.key, got, test.want[offset])
+			}
 		}
 	}
 }
