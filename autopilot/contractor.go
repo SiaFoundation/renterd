@@ -120,7 +120,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	active := resp.Contracts
 
 	// fetch all hosts
-	hosts, err := c.ap.bus.Hosts(ctx, 0, -1, false, "", nil)
+	hosts, err := c.ap.bus.Hosts(ctx, 0, -1)
 	if err != nil {
 		return err
 	}

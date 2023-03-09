@@ -244,6 +244,14 @@ type GougingSettings struct {
 	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
 }
 
+type SearchHostsRequest struct {
+	Offset          int               `json:"offset"`
+	Limit           int               `json:"limit"`
+	FilterMode      string            `json:"filterMode"`
+	AddressContains string            `json:"addressContains"`
+	KeyIn           []types.PublicKey `json:"keyIn"`
+}
+
 // RedundancySettings contain settings that dictate an object's redundancy.
 type RedundancySettings struct {
 	MinShards   int `json:"minShards"`

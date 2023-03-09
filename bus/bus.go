@@ -408,16 +408,8 @@ func (b *bus) hostsHandlerGET(jc jape.Context) {
 	jc.Encode(hosts)
 }
 
-type searchHostsRequest struct {
-	Offset          int
-	Limit           int
-	FilterMode      string
-	AddressContains string
-	KeyIn           []types.PublicKey
-}
-
 func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
-	var req searchHostsRequest
+	var req api.SearchHostsRequest
 	if jc.Decode(&req) != nil {
 		return
 	}

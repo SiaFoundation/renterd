@@ -21,7 +21,7 @@ type mockBus struct {
 	reqs  []string
 }
 
-func (b *mockBus) Hosts(ctx context.Context, offset, limit int, includeBlocked bool, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
+func (b *mockBus) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
 	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", offset, offset+limit))
 
 	start := offset
@@ -38,7 +38,7 @@ func (b *mockBus) Hosts(ctx context.Context, offset, limit int, includeBlocked b
 }
 
 func (b *mockBus) HostsForScanning(ctx context.Context, _ time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
-	hosts, err := b.Hosts(ctx, offset, limit, false, "", nil)
+	hosts, err := b.Hosts(ctx, offset, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
-	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -219,19 +218,10 @@ func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.Ho
 }
 
 // Hosts returns 'limit' hosts at given 'offset'.
-func (c *Client) Hosts(ctx context.Context, offset, limit int, includeBlocked bool, addressContains string, keyIn []types.PublicKey) (hosts []hostdb.Host, err error) {
+func (c *Client) Hosts(ctx context.Context, offset, limit int) (hosts []hostdb.Host, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
-	values.Set("includeBlocked", fmt.Sprint(includeBlocked))
-	values.Set("addressContains", addressContains)
-	if len(keyIn) > 0 {
-		var inKeyStr []string
-		for _, pk := range keyIn {
-			inKeyStr = append(inKeyStr, pk.String())
-		}
-		values.Set("keyIn", strings.Join(inKeyStr, ","))
-	}
 	err = c.c.WithContext(ctx).GET("/hosts?"+values.Encode(), &hosts)
 	return
 }
@@ -470,6 +460,18 @@ func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.Redundancy
 		return err
 	}
 	return c.UpdateSetting(ctx, SettingRedundancy, string(b))
+}
+
+// SearchHosts returns all hosts that match certain search criteria.
+func (c *Client) SearchHosts(ctx context.Context, offset, limit int, filterMode string, addressContains string, keyIn []types.PublicKey) (hosts []hostdb.Host, err error) {
+	err = c.c.WithContext(ctx).POST("/search/objects", &api.SearchHostsRequest{
+		Offset:          offset,
+		Limit:           limit,
+		FilterMode:      filterMode,
+		AddressContains: addressContains,
+		KeyIn:           keyIn,
+	}, &hosts)
+	return
 }
 
 // SearchObjects returns all objects that contains a sub-string in their key.
