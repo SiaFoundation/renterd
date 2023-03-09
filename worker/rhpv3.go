@@ -144,7 +144,7 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr, hostIP string, hostKey types.PublicKey, bh uint64) (pt rhpv3.HostPriceTable, err error) {
+func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr, hostIP string, hostKey types.PublicKey) (pt rhpv3.HostPriceTable, err error) {
 	pt, ptValid := w.priceTables.PriceTable(hostKey)
 	if ptValid {
 		return pt, nil
@@ -168,42 +168,39 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 		return
 	}
 
+	// fetch block height
+	cs, err := w.bus.ConsensusState(ctx)
+	if err != nil {
+		return rhpv3.HostPriceTable{}, err
+	}
+
 	// update price table using account payment if possible, but fall back to ensure we have a valid price table
-	pt, err = w.priceTables.Update(ctx, w.preparePriceTableAccountPayment(hostKey, bh), siamuxAddr, hostKey)
+	pt, err = w.priceTables.Update(ctx, w.preparePriceTableAccountPayment(hostKey, cs.BlockHeight), siamuxAddr, hostKey)
 	if err != nil {
 		updatePTByContract()
 	}
 	return
 }
 
-func (w *worker) withHostsV3(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
-	cs, err := w.bus.ConsensusState(ctx)
+func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, fn func(sectorStore) error) (err error) {
+	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
 	}
 
-	var ss []sectorStore
-	for _, c := range contracts {
-		acc, err := w.accounts.ForHost(c.HostKey)
-		if err != nil {
-			continue
-		}
-
-		pt, err := w.fetchPriceTable(ctx, c.ID, c.SiamuxAddr, c.HostIP, c.HostKey, cs.BlockHeight)
-		if err != nil {
-			continue
-		}
-
-		ss = append(ss, &hostV3{
-			acc:        acc,
-			bh:         pt.HostBlockHeight,
-			fcid:       c.ID,
-			pt:         &pt,
-			siamuxAddr: c.SiamuxAddr,
-			sk:         w.accounts.deriveAccountKey(c.HostKey),
-		})
+	pt, err := w.fetchPriceTable(ctx, contractID, siamuxAddr, hostIP, hostKey)
+	if err != nil {
+		return err
 	}
-	return fn(ss)
+
+	return fn(&hostV3{
+		acc:        acc,
+		bh:         pt.HostBlockHeight,
+		fcid:       contractID,
+		pt:         &pt,
+		siamuxAddr: siamuxAddr,
+		sk:         w.accounts.deriveAccountKey(hostKey),
+	})
 }
 
 // All returns information about all accounts to be returned in the API.

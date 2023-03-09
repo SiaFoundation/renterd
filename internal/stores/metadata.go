@@ -442,7 +442,18 @@ func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) 
 	return nil
 }
 
-func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
+func (s *SQLStore) ObjectsFuzzy(ctx context.Context, substring string, offset, limit int) ([]string, error) {
+	var ids []string
+	err := s.db.Model(&dbObject{}).
+		Select("object_id").
+		Where("object_id LIKE ?", "%"+substring+"%").
+		Offset(offset).
+		Limit(limit).
+		Scan(&ids).Error
+	return ids, err
+}
+
+func (s *SQLStore) Objects(ctx context.Context, path, prefix string, offset, limit int) ([]string, error) {
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
 	}
@@ -454,6 +465,7 @@ func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
 		return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 	}
 
+	// base query
 	query := s.db.Raw(fmt.Sprintf(`SELECT CASE slashindex WHEN 0 THEN %s ELSE %s END AS result
 	FROM (
 		SELECT trimmed, INSTR(trimmed, ?) AS slashindex
@@ -463,7 +475,13 @@ func (s *SQLStore) Objects(ctx context.Context, path string) ([]string, error) {
 			WHERE object_id LIKE ?
 		) AS i
 	) AS m
-	GROUP BY result`, concat("?", "trimmed"), concat("?", "substr(trimmed, 0, slashindex+1)")), path, path, "/", len(path)+1, path+"%")
+	GROUP BY result
+	LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, "/", len(path)+1, path+"%", limit, offset)
+
+	// apply prefix
+	if prefix != "" {
+		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
+	}
 
 	var ids []string
 	err := query.Scan(&ids).Error
