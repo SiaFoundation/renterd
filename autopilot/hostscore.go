@@ -6,6 +6,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/build"
@@ -36,7 +37,68 @@ func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expect
 		interactionScore(h) *
 		storageRemainingScore(cfg, *h.Settings, storedData, expectedRedundancy) *
 		uptimeScore(h) *
-		versionScore(*h.Settings)
+		versionScore(*h.Settings) *
+		priceAdjustmentScore(hostPeriodCost(h, cfg, expectedRedundancy), cfg)
+}
+
+func contractFormationCost(h hostdb.Host) types.Currency {
+	panic("not done")
+}
+
+func uploadCost(h hostdb.Host, bytes uint64) types.Currency {
+	panic("not done")
+}
+
+func downloadCost(h hostdb.Host, bytes uint64) types.Currency {
+	panic("not done")
+}
+
+func storageCost(h hostdb.Host, bytes, period uint64) types.Currency {
+	panic("not done")
+}
+
+func hostPeriodCost(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
+	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
+	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))
+	storagePerHost := uint64(float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount))
+
+	hostCostPerPeriod := contractFormationCost(h).Mul64(3)
+	hostCostPerPeriod = hostCostPerPeriod.Add(uploadCost(h, uploadPerHost))
+	hostCostPerPeriod = hostCostPerPeriod.Add(downloadCost(h, downloadPerHost))
+	hostCostPerPeriod = hostCostPerPeriod.Add(storageCost(h, storagePerHost, cfg.Contracts.Period))
+	return hostCostPerPeriod
+}
+
+// priceAdjustmentScore computes a score between 0 and 1 for a host giving its
+// price settings and the autopilot's configuration.
+//   - 0.5 is returned if the host's costs exactly match the settings.
+//   - If the host is cheaper than expected, a linear bonus is applied. The best
+//     score of 1 is reached when the ratio between host cost and expectations is
+//     10x.
+//   - If the host is more expensive than expected, an exponential malus is applied.
+//     A 2x ratio will already cause the score to drop to 0.16 and a 3x ratio causes
+//     it to drop to 0.05.
+func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.AutopilotConfig) float64 {
+	hostPeriodBudget := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
+
+	ratio := new(big.Rat).SetFrac(hostCostPerPeriod.Big(), hostPeriodBudget.Big())
+	fRatio, _ := ratio.Float64()
+	switch ratio.Cmp(new(big.Rat).SetUint64(1)) {
+	case 0:
+		return 0.5 // ratio is exactly 1 -> score is 0.5
+	case 1:
+		// cost is greater than budget -> score is in range (0; 0.5)
+		//
+		return 1.5 / math.Pow(3, fRatio)
+	case -1:
+		// cost < budget -> score is (0.5; 1]
+		s := 0.4 + 0.06*(1/fRatio)
+		if s > 1.0 {
+			s = 1.0
+		}
+		return s
+	}
+	panic("unreachable")
 }
 
 func storageRemainingScore(cfg api.AutopilotConfig, h rhpv2.HostSettings, storedData uint64, expectedRedundancy float64) float64 {
