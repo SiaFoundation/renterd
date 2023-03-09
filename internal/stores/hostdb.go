@@ -503,7 +503,12 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-// Hosts returns hosts at given offset and limit.
+const (
+	hostFilterModeAll     = "all"
+	hostFilterModeAllowed = "allowed"
+	hostFilterModeBlocked = "blocked"
+)
+
 func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -515,11 +520,11 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMo
 	// Apply filter mode.
 	query := ss.db
 	switch filterMode {
-	case "allowed":
+	case hostFilterModeAllowed:
 		query = query.Scopes(ss.excludeBlocked)
-	case "blocked":
+	case hostFilterModeBlocked:
 		query = query.Scopes(ss.excludeAllowed)
-	case "all":
+	case hostFilterModeAll:
 		// nothing to do
 	default:
 		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
@@ -559,8 +564,9 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMo
 	return hosts, err
 }
 
+// Hosts returns non-blocked hosts at given offset and limit.
 func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
-	return ss.SearchHosts(ctx, offset, limit, "allowed", "", nil)
+	return ss.SearchHosts(ctx, offset, limit, hostFilterModeAllowed, "", nil)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
@@ -869,6 +875,11 @@ func (ss *SQLStore) excludeAllowed(db *gorm.DB) *gorm.DB {
 	}
 	if ss.hasBlocklist {
 		db = db.Where("EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	if !ss.hasAllowlist && !ss.hasBlocklist {
+		// if neither an allowlist nor a blocklist exist, all hosts are allowed
+		// which means we return none
+		db = db.Where("1 = 0")
 	}
 	return db
 }
