@@ -41,7 +41,7 @@ func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.Hos
 	})
 }
 
-func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, hostIP string, hostKey types.PublicKey) error {
+func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey) error {
 	account, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.Hos
 	payment := w.preparePayment(hostKey, pt.AccountBalanceCost, pt.HostBlockHeight)
 	return account.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
-		err := withTransportV3(ctx, hostIP, hostKey, func(t *rhpv3.Transport) error {
+		err := withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) error {
 			balance, err = RPCAccountBalance(t, &payment, account.id, pt.UID)
 			return err
 		})

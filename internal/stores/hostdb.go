@@ -481,7 +481,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	var hostAddresses []hostdb.HostAddress
 
 	err := ss.db.
-		Scopes(ss.blocklist).
+		Scopes(ss.excludeBlocked).
 		Model(&dbHost{}).
 		Where("last_scan < ?", maxLastScan.UnixNano()).
 		Offset(offset).
@@ -504,7 +504,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 }
 
 // Hosts returns hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int, includeBlocked bool, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
+func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -512,10 +512,17 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int, includeBlocked
 	var hosts []hostdb.Host
 	var fullHosts []dbHost
 
-	// Exclude blocked hosts.
+	// Apply filter mode.
 	query := ss.db
-	if !includeBlocked {
-		query = query.Scopes(ss.blocklist)
+	switch filterMode {
+	case "allowed":
+		query = query.Scopes(ss.excludeBlocked)
+	case "blocked":
+		query = query.Scopes(ss.excludeAllowed)
+	case "all":
+		// nothing to do
+	default:
+		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
 	}
 
 	// Add address filter.
@@ -550,6 +557,10 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int, includeBlocked
 		return nil, err
 	}
 	return hosts, err
+}
+
+func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
+	return ss.SearchHosts(ctx, offset, limit, "allowed", "", nil)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
@@ -832,7 +843,9 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 }
 
-func (ss *SQLStore) blocklist(db *gorm.DB) *gorm.DB {
+// excludeBlocked can be used as a scope for a db transaction to exclude blocked
+// hosts.
+func (ss *SQLStore) excludeBlocked(db *gorm.DB) *gorm.DB {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
@@ -841,6 +854,21 @@ func (ss *SQLStore) blocklist(db *gorm.DB) *gorm.DB {
 	}
 	if ss.hasBlocklist {
 		db = db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	return db
+}
+
+// excludeAllowed can be used as a scope for a db transaction to exclude allowed
+// hosts.
+func (ss *SQLStore) excludeAllowed(db *gorm.DB) *gorm.DB {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.hasAllowlist {
+		db = db.Where("NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	if ss.hasBlocklist {
+		db = db.Where("EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
 	}
 	return db
 }

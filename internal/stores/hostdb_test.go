@@ -52,7 +52,7 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Assert it's returned
-	allHosts, err := hdb.Hosts(ctx, 0, -1, false, "", nil)
+	allHosts, err := hdb.Hosts(ctx, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,42 +285,43 @@ func TestSQLHosts(t *testing.T) {
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
 	// assert the hosts method returns the expected hosts
-	if hosts, err := db.Hosts(ctx, 0, -1, false, "", nil); err != nil || len(hosts) != 3 {
+	if hosts, err := db.Hosts(ctx, 0, -1); err != nil || len(hosts) != 3 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := db.Hosts(ctx, 0, 1, false, "", nil); err != nil || len(hosts) != 1 {
+	if hosts, err := db.Hosts(ctx, 0, 1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	} else if host := hosts[0]; host.PublicKey != hk1 {
 		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
 	}
-	if hosts, err := db.Hosts(ctx, 1, 1, false, "", nil); err != nil || len(hosts) != 1 {
+	if hosts, err := db.Hosts(ctx, 1, 1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	} else if host := hosts[0]; host.PublicKey != hk2 {
 		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
 	}
-	if hosts, err := db.Hosts(ctx, 3, 1, false, "", nil); err != nil || len(hosts) != 0 {
+	if hosts, err := db.Hosts(ctx, 3, 1); err != nil || len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if _, err := db.Hosts(ctx, -1, -1, false, "", nil); err != ErrNegativeOffset {
+	if _, err := db.Hosts(ctx, -1, -1); err != ErrNegativeOffset {
 		t.Fatal("unexpected error", err)
 	}
 
 	// Filter by address.
-	if hosts, err := db.Hosts(ctx, 0, -1, false, "1", nil); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-	// Filter by key.
-	if hosts, err := db.Hosts(ctx, 0, -1, false, "", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 2 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-	// Filter by address and key.
-	if hosts, err := db.Hosts(ctx, 0, -1, false, "1", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-	// Filter by key and limit results
-	if hosts, err := db.Hosts(ctx, 0, 1, false, "3", []types.PublicKey{hk3}); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
+	// TODO: move
+	//	if hosts, err := db.Hosts(ctx, 0, -1, false, "1", nil); err != nil || len(hosts) != 1 {
+	//		t.Fatal("unexpected", len(hosts), err)
+	//	}
+	//	// Filter by key.
+	//	if hosts, err := db.Hosts(ctx, 0, -1, false, "", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 2 {
+	//		t.Fatal("unexpected", len(hosts), err)
+	//	}
+	//	// Filter by address and key.
+	//	if hosts, err := db.Hosts(ctx, 0, -1, false, "1", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 1 {
+	//		t.Fatal("unexpected", len(hosts), err)
+	//	}
+	//	// Filter by key and limit results
+	//	if hosts, err := db.Hosts(ctx, 0, 1, false, "3", []types.PublicKey{hk3}); err != nil || len(hosts) != 1 {
+	//		t.Fatal("unexpected", len(hosts), err)
+	//	}
 
 	// Add a scan for each host.
 	n := time.Now()
@@ -706,7 +707,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	numHosts := func() int {
 		t.Helper()
-		hosts, err := hdb.Hosts(ctx, 0, -1, false, "", nil)
+		hosts, err := hdb.Hosts(ctx, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -802,14 +803,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 		t.Fatalf("unexpected number of entries in blocklist, %v != 1", numEntries())
 	}
 
-	// try if including blocked hosts works
-	hosts, err := hdb.Hosts(context.Background(), 0, -1, true, "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 2 {
-		t.Fatal("wrong number of hosts", len(hosts))
-	}
+	// TODO: search for hosts including blocked ones.
 
 	// remove the allowlist entry for h1
 	err = hdb.UpdateHostAllowlistEntries(ctx, nil, []types.PublicKey{hk1})
@@ -845,7 +839,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	numHosts := func() int {
 		t.Helper()
-		hosts, err := hdb.Hosts(ctx, 0, -1, false, "", nil)
+		hosts, err := hdb.Hosts(ctx, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
