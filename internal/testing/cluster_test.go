@@ -252,21 +252,21 @@ func TestUploadDownload(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "")
+	objects, err := cluster.Bus.SearchObjects(context.Background(), 0, -1, "")
 	if err != nil {
 		t.Fatal("should fail")
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "ata")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "ata")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "12288")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "12288")
 	if err != nil {
 		t.Fatal(err)
 	}

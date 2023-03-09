@@ -94,7 +94,7 @@ type (
 
 		Object(ctx context.Context, key string) (object.Object, error)
 		Objects(ctx context.Context, key, prefix string, offset, limit int) ([]string, error)
-		ObjectsFuzzy(ctx context.Context, key string, offset, limit int) ([]string, error)
+		SearchObjects(ctx context.Context, key string, offset, limit int) ([]string, error)
 		UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, key string) error
 
@@ -632,14 +632,14 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contract", b.ms.RemoveContract(jc.Request.Context(), id))
 }
 
-func (b *bus) fuzzyObjectsHandlerGET(jc jape.Context) {
+func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 	offset := 0
 	limit := -1
 	var key string
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
 		return
 	}
-	keys, err := b.ms.ObjectsFuzzy(jc.Request.Context(), key, offset, limit)
+	keys, err := b.ms.SearchObjects(jc.Request.Context(), key, offset, limit)
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
@@ -992,7 +992,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
-		"GET /fuzzy/objects": b.fuzzyObjectsHandlerGET,
+		"POST /search/hosts":  b.searchHostsHandlerPOST,
+		"GET /search/objects": b.searchObjectsHandlerGET,
 
 		"GET    /objects/*key": b.objectsKeyHandlerGET,
 		"PUT    /objects/*key": b.objectsKeyHandlerPUT,

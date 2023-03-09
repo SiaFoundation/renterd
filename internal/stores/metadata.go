@@ -440,7 +440,7 @@ func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) 
 	return nil
 }
 
-func (s *SQLStore) ObjectsFuzzy(ctx context.Context, substring string, offset, limit int) ([]string, error) {
+func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]string, error) {
 	var ids []string
 	err := s.db.Model(&dbObject{}).
 		Select("object_id").
