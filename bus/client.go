@@ -464,7 +464,7 @@ func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.Redundancy
 
 // SearchHosts returns all hosts that match certain search criteria.
 func (c *Client) SearchHosts(ctx context.Context, offset, limit int, filterMode string, addressContains string, keyIn []types.PublicKey) (hosts []hostdb.Host, err error) {
-	err = c.c.WithContext(ctx).POST("/search/objects", &api.SearchHostsRequest{
+	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
 		Offset:          offset,
 		Limit:           limit,
 		FilterMode:      filterMode,
