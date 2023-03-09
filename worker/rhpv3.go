@@ -30,6 +30,10 @@ const (
 	// bandwidthLeeway is the amount of excess bandwidth used when
 	// overestimating the bandwidth cost
 	bandwidthLeeway = 1 << 12 // 4 KiB
+
+	// responseLeeway is the amount of leeway given to the maxLen when we read
+	// the response in the ReadSector RPC
+	responseLeeway = 1 << 12 // 4 KiB
 )
 
 var (
@@ -763,7 +767,7 @@ func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, pa
 		return
 	} else if err = s.ReadResponse(&cancellationToken, 16); err != nil {
 		return
-	} else if err = s.ReadResponse(&resp, 4096); err != nil {
+	} else if err = s.ReadResponse(&resp, modules.SectorSize+responseLeeway); err != nil {
 		return
 	}
 
