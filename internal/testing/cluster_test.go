@@ -251,6 +251,29 @@ func TestUploadDownload(t *testing.T) {
 	// Run uploads once.
 	uploadDownload()
 
+	// Fuzzy search for uploaded data in various ways.
+	objects, err := cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "")
+	if err != nil {
+		t.Fatal("should fail")
+	}
+	if len(objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(objects))
+	}
+	objects, err = cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "ata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(objects))
+	}
+	objects, err = cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "12288")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("should have 1 objects but got %v", len(objects))
+	}
+
 	// Renew contracts.
 	if err := cluster.MineToRenewWindow(); err != nil {
 		t.Fatal(err)
