@@ -74,7 +74,7 @@ func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.Consens
 			// host setting checks
 			checkDownloadGouging(gs, rs, hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice),
 			checkPriceGougingHS(gs, hs),
-			checkUploadGouging(gs, rs, hs.BaseRPCPrice, hs.StoragePrice, hs.UploadBandwidthPrice),
+			checkUploadGouging(gs, rs, hs.BaseRPCPrice, hs.StoragePrice.Mul64(modules.SectorSize), hs.UploadBandwidthPrice),
 		)
 	}
 
@@ -102,7 +102,7 @@ func (gc gougingChecker) CheckHS(hs *rhpv2.HostSettings) (results GougingResults
 		results = GougingResults{
 			downloadErr: checkDownloadGouging(gc.settings, gc.redundancy, hs.BaseRPCPrice, hs.SectorAccessPrice, hs.DownloadBandwidthPrice),
 			gougingErr:  checkPriceGougingHS(gc.settings, hs),
-			uploadErr:   checkUploadGouging(gc.settings, gc.redundancy, hs.BaseRPCPrice, hs.StoragePrice, hs.UploadBandwidthPrice),
+			uploadErr:   checkUploadGouging(gc.settings, gc.redundancy, hs.BaseRPCPrice, hs.StoragePrice.Mul64(modules.SectorSize), hs.UploadBandwidthPrice),
 		}
 	}
 	return
@@ -348,12 +348,16 @@ func checkDownloadGouging(gs api.GougingSettings, rs api.RedundancySettings, bas
 	return nil
 }
 
-func checkUploadGouging(gs api.GougingSettings, rs api.RedundancySettings, baseRPCPrice, storagePrice, uploadBandwidthPrice types.Currency) error {
+func checkUploadGouging(gs api.GougingSettings, rs api.RedundancySettings, baseRPCPrice, storagePricePerSectorPerBlock, uploadBandwidthPrice types.Currency) error {
 	uploadPrice, overflow := uploadBandwidthPrice.Mul64WithOverflow(modules.SectorSize)
 	if overflow {
 		return fmt.Errorf("overflow detected when computing upload bandwidth price")
 	}
-	sectorPrice, overflow := storagePrice.AddWithOverflow(baseRPCPrice)
+	storagePricePerSectorPerMonth, overflow := storagePricePerSectorPerBlock.Mul64WithOverflow(4320)
+	if overflow {
+		return fmt.Errorf("overflow detected when computing sector storage price")
+	}
+	sectorPrice, overflow := storagePricePerSectorPerMonth.AddWithOverflow(baseRPCPrice)
 	if overflow {
 		return fmt.Errorf("overflow detected when computing sector price")
 	}
