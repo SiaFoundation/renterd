@@ -660,7 +660,8 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// If funding failed due to an exceeded max balance, we sync the account.
 	if isMaxBalanceExceeded(err) {
-		if err := w.syncAccount(ctx, account, pt, siamuxAddr, rfr.HostKey); err != nil {
+		err = w.syncAccount(ctx, account, pt, siamuxAddr, rfr.HostKey)
+		if err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 		}
 	}

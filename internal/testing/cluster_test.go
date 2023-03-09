@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -351,21 +350,21 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "")
+	objects, err := cluster.Bus.SearchObjects(context.Background(), 0, -1, "")
 	if err != nil {
 		t.Fatal("should fail")
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "ata")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "ata")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.ObjectsFuzzy(context.Background(), 0, -1, "12288")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "12288")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,12 +506,6 @@ func TestEphemeralAccounts(t *testing.T) {
 	busAcc := busAccounts[0]
 	if !reflect.DeepEqual(busAcc, acc) {
 		t.Fatal("bus account doesn't match worker account")
-	}
-
-	// Try to fund the account manually.
-	err = cluster.Worker.RHPFund(context.Background(), contract.ID, acc.Host, types.Siacoins(2))
-	if err == nil || !strings.Contains(err.Error(), "ephemeral account maximum balance exceeded") {
-		t.Fatal(err)
 	}
 
 	// Check that the spending was recorded for the contract. The recorded

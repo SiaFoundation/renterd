@@ -414,19 +414,25 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) error {
 
 	// insert entries into the blocklist
 	if isSQLite(tx) {
-		return tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-SELECT @entry_id, id FROM (
-	SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
-	FROM hosts
-	WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
-)`, params).Error
-	}
-
-	return tx.Exec(`INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		return tx.Exec(`
+INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
 SELECT @entry_id, id FROM (
 	SELECT id
 	FROM hosts
-	WHERE net_address=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address))=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address)) LIKE @like_entry
+	WHERE net_address == @exact_entry OR
+		rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == @exact_entry OR
+		rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE @like_entry
+)`, params).Error
+	}
+
+	return tx.Exec(`
+INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+	SELECT id
+	FROM hosts
+	WHERE net_address=@exact_entry OR
+		SUBSTRING_INDEX(net_address,':',1)=@exact_entry OR
+		SUBSTRING_INDEX(net_address,':',1) LIKE @like_entry
 ) AS _`, params).Error
 }
 
@@ -481,7 +487,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	var hostAddresses []hostdb.HostAddress
 
 	err := ss.db.
-		Scopes(ss.blocklist).
+		Scopes(ss.excludeBlocked).
 		Model(&dbHost{}).
 		Where("last_scan < ?", maxLastScan.UnixNano()).
 		Offset(offset).
@@ -503,8 +509,13 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-// Hosts returns hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
+const (
+	hostFilterModeAll     = "all"
+	hostFilterModeAllowed = "allowed"
+	hostFilterModeBlocked = "blocked"
+)
+
+func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -512,8 +523,38 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 	var hosts []hostdb.Host
 	var fullHosts []dbHost
 
-	err := ss.db.
-		Scopes(ss.blocklist).
+	// Apply filter mode.
+	query := ss.db
+	switch filterMode {
+	case hostFilterModeAllowed:
+		query = query.Scopes(ss.excludeBlocked)
+	case hostFilterModeBlocked:
+		query = query.Scopes(ss.excludeAllowed)
+	case hostFilterModeAll:
+		// nothing to do
+	default:
+		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
+	}
+
+	// Add address filter.
+	if addressContains != "" {
+		query = query.Scopes(func(d *gorm.DB) *gorm.DB {
+			return d.Where("net_address LIKE ?", "%"+addressContains+"%")
+		})
+	}
+
+	// Only search for specific hosts.
+	if len(keyIn) > 0 {
+		pubKeys := make([]publicKey, len(keyIn))
+		for i, pk := range keyIn {
+			pubKeys[i] = publicKey(pk)
+		}
+		query = query.Scopes(func(d *gorm.DB) *gorm.DB {
+			return d.Where("public_key IN ?", pubKeys)
+		})
+	}
+
+	err := query.
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
@@ -527,6 +568,11 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 		return nil, err
 	}
 	return hosts, err
+}
+
+// Hosts returns non-blocked hosts at given offset and limit.
+func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
+	return ss.SearchHosts(ctx, offset, limit, hostFilterModeAllowed, "", nil)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
@@ -809,7 +855,9 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 }
 
-func (ss *SQLStore) blocklist(db *gorm.DB) *gorm.DB {
+// excludeBlocked can be used as a scope for a db transaction to exclude blocked
+// hosts.
+func (ss *SQLStore) excludeBlocked(db *gorm.DB) *gorm.DB {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
@@ -818,6 +866,26 @@ func (ss *SQLStore) blocklist(db *gorm.DB) *gorm.DB {
 	}
 	if ss.hasBlocklist {
 		db = db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	return db
+}
+
+// excludeAllowed can be used as a scope for a db transaction to exclude allowed
+// hosts.
+func (ss *SQLStore) excludeAllowed(db *gorm.DB) *gorm.DB {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.hasAllowlist {
+		db = db.Where("NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	if ss.hasBlocklist {
+		db = db.Where("EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+	}
+	if !ss.hasAllowlist && !ss.hasBlocklist {
+		// if neither an allowlist nor a blocklist exist, all hosts are allowed
+		// which means we return none
+		db = db.Where("1 = 0")
 	}
 	return db
 }

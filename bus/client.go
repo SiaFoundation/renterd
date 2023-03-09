@@ -462,13 +462,25 @@ func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.Redundancy
 	return c.UpdateSetting(ctx, SettingRedundancy, string(b))
 }
 
-// ObjectFuzzy returns all objects that contains a sub-string in their key.
-func (c *Client) ObjectsFuzzy(ctx context.Context, offset, limit int, key string) (entries []string, err error) {
+// SearchHosts returns all hosts that match certain search criteria.
+func (c *Client) SearchHosts(ctx context.Context, offset, limit int, filterMode string, addressContains string, keyIn []types.PublicKey) (hosts []hostdb.Host, err error) {
+	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
+		Offset:          offset,
+		Limit:           limit,
+		FilterMode:      filterMode,
+		AddressContains: addressContains,
+		KeyIn:           keyIn,
+	}, &hosts)
+	return
+}
+
+// SearchObjects returns all objects that contains a sub-string in their key.
+func (c *Client) SearchObjects(ctx context.Context, offset, limit int, key string) (entries []string, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
 	values.Set("key", key)
-	err = c.c.WithContext(ctx).GET("/fuzzy/objects?"+values.Encode(), &entries)
+	err = c.c.WithContext(ctx).GET("/search/objects?"+values.Encode(), &entries)
 	return
 }
 

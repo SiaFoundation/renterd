@@ -913,8 +913,8 @@ func TestObjects(t *testing.T) {
 	}
 }
 
-// TestObjectsFuzzy is a test for the ObjectsFuzzy method.
-func TestObjectsFuzzy(t *testing.T) {
+// TestSearchObjects is a test for the SearchObjects method.
+func TestSearchObjects(t *testing.T) {
 	os, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
@@ -941,7 +941,7 @@ func TestObjectsFuzzy(t *testing.T) {
 		{"uu", []string{"/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
 	}
 	for _, test := range tests {
-		got, err := os.ObjectsFuzzy(ctx, test.key, 0, -1)
+		got, err := os.SearchObjects(ctx, test.key, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -949,7 +949,7 @@ func TestObjectsFuzzy(t *testing.T) {
 			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.key, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			got, err := os.ObjectsFuzzy(ctx, test.key, offset, 1)
+			got, err := os.SearchObjects(ctx, test.key, offset, 1)
 			if err != nil {
 				t.Fatal(err)
 			}

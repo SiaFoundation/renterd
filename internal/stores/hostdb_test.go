@@ -274,7 +274,6 @@ func TestSQLHosts(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// add 3 hosts
 	hks, err := db.addTestHosts(3)
 	if err != nil {
 		t.Fatal(err)
@@ -348,6 +347,42 @@ func TestSQLHosts(t *testing.T) {
 	}
 	if len(hostAddresses) != 0 {
 		t.Fatal("wrong number of addresses")
+	}
+}
+
+// TestSearchHosts is a unit test for SearchHosts.
+func TestSearchHosts(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// add 3 hosts
+	var hks []types.PublicKey
+	for i := 0; i < 3; i++ {
+		if err := db.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i+1)); err != nil {
+			t.Fatal(err)
+		}
+		hks = append(hks, types.PublicKey{byte(i)})
+	}
+	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
+
+	// Search by address.
+	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "1", nil); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by key.
+	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 2 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by address and key.
+	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "1", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by key and limit results
+	if hosts, err := db.SearchHosts(ctx, 0, 1, hostFilterModeAll, "3", []types.PublicKey{hk3}); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
 	}
 }
 
@@ -768,6 +803,38 @@ func TestSQLHostAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	assertSearch := func(total, allowed, blocked int) error {
+		t.Helper()
+		hosts, err := hdb.SearchHosts(context.Background(), 0, -1, hostFilterModeAll, "", nil)
+		if err != nil {
+			return err
+		}
+		if len(hosts) != total {
+			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
+		}
+		hosts, err = hdb.SearchHosts(context.Background(), 0, -1, hostFilterModeAllowed, "", nil)
+		if err != nil {
+			return err
+		}
+		if len(hosts) != allowed {
+			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
+		}
+		hosts, err = hdb.SearchHosts(context.Background(), 0, -1, hostFilterModeBlocked, "", nil)
+		if err != nil {
+			return err
+		}
+		if len(hosts) != blocked {
+			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
+		}
+		return nil
+	}
+
+	// Search for hosts using different modes. Should have 3 hosts in total, 2
+	// allowed ones and 2 blocked ones.
+	if err := assertSearch(3, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+
 	// remove host 1
 	if err = hdb.db.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk1)}).Delete(&dbHost{}).Error; err != nil {
 		t.Fatal(err)
@@ -782,9 +849,21 @@ func TestSQLHostAllowlist(t *testing.T) {
 		t.Fatalf("unexpected number of entries in blocklist, %v != 1", numEntries())
 	}
 
+	// Search for hosts using different modes. Should have 2 hosts in total, 0
+	// allowed ones and 2 blocked ones.
+	if err := assertSearch(2, 0, 2); err != nil {
+		t.Fatal(err)
+	}
+
 	// remove the allowlist entry for h1
 	err = hdb.UpdateHostAllowlistEntries(ctx, nil, []types.PublicKey{hk1})
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Search for hosts using different modes. Should have 2 hosts in total, 2
+	// allowed ones and 0 blocked ones.
+	if err := assertSearch(2, 2, 0); err != nil {
 		t.Fatal(err)
 	}
 

@@ -28,9 +28,9 @@ var (
 	DefaultGougingSettings = GougingSettings{
 		MinMaxCollateral:      types.Siacoins(10),                   // at least up to 10 SC per contract
 		MaxRPCPrice:           types.Siacoins(1).Div64(1000),        // 1mS per RPC
-		MaxContractPrice:      types.Siacoins(10),                   // 10 SC per contract
-		MaxDownloadPrice:      types.Siacoins(1000),                 // 1000 SC per 1 TiB
-		MaxUploadPrice:        types.Siacoins(1000),                 // 1000 SC per 1 TiB
+		MaxContractPrice:      types.Siacoins(15),                   // 15 SC per contract
+		MaxDownloadPrice:      types.Siacoins(3000),                 // 3000 SC per 1 TiB
+		MaxUploadPrice:        types.Siacoins(3000),                 // 3000 SC per 1 TiB
 		MaxStoragePrice:       types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
 		HostBlockHeightLeeway: 3,                                    // 3 blocks
 	}
@@ -242,6 +242,14 @@ type GougingSettings struct {
 	// HostBlockHeightLeeway is the amount of blocks of leeway given to the host
 	// block height in the host's price table
 	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
+}
+
+type SearchHostsRequest struct {
+	Offset          int               `json:"offset"`
+	Limit           int               `json:"limit"`
+	FilterMode      string            `json:"filterMode"`
+	AddressContains string            `json:"addressContains"`
+	KeyIn           []types.PublicKey `json:"keyIn"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
