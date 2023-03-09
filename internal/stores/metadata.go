@@ -402,7 +402,7 @@ func (s *SQLStore) Contracts(ctx context.Context, set string) ([]api.ContractMet
 
 func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 	var sets []string
-	err := s.db.Raw("SELECT name FROM contract_sets WHERE (SELECT DISTINCT(db_contract_set_id) FROM contract_set_contracts)").
+	err := s.db.Raw("SELECT name FROM contract_sets").
 		Scan(&sets).
 		Error
 	return sets, err
