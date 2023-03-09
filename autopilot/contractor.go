@@ -346,7 +346,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, settings: settings}
-		renterFunds, err := c.renewFundingEstimate(ctx, ci)
+		renterFunds, err := c.renewFundingEstimate(ctx, ci, false)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
@@ -605,7 +605,7 @@ func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.Autopil
 	return refreshAmountCapped, nil
 }
 
-func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo) (types.Currency, error) {
+func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, renewing bool) (types.Currency, error) {
 	cfg := c.ap.state.cfg
 	cs := c.ap.state.cs
 
@@ -669,20 +669,23 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo) 
 	if cappedEstimatedCost.Cmp(minimum) < 0 {
 		cappedEstimatedCost = minimum
 	}
-	c.logger.Debugw("renew estimate",
-		"fcid", ci.contract.ID,
-		"dataStored", dataStored,
-		"storageCost", storageCost.String(),
-		"newUploadsCost", newUploadsCost.String(),
-		"newDownloadsCost", newDownloadsCost.String(),
-		"newFundAccountCost", newFundAccountCost.String(),
-		"contractPrice", ci.settings.ContractPrice.String(),
-		"prevUploadDataEstimate", prevUploadDataEstimate.String(),
-		"estimatedCost", estimatedCost.String(),
-		"minInitialContractFunds", minInitialContractFunds.String(),
-		"minimum", minimum.String(),
-		"cappedEstimatedCost", cappedEstimatedCost.String(),
-	)
+
+	if renewing {
+		c.logger.Debugw("renew estimate",
+			"fcid", ci.contract.ID,
+			"dataStored", dataStored,
+			"storageCost", storageCost.String(),
+			"newUploadsCost", newUploadsCost.String(),
+			"newDownloadsCost", newDownloadsCost.String(),
+			"newFundAccountCost", newFundAccountCost.String(),
+			"contractPrice", ci.settings.ContractPrice.String(),
+			"prevUploadDataEstimate", prevUploadDataEstimate.String(),
+			"estimatedCost", estimatedCost.String(),
+			"minInitialContractFunds", minInitialContractFunds.String(),
+			"minimum", minimum.String(),
+			"cappedEstimatedCost", cappedEstimatedCost.String(),
+		)
+	}
 	return cappedEstimatedCost, nil
 }
 
@@ -806,7 +809,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	hk := contract.HostKey()
 
 	// calculate the renter funds
-	renterFunds, err := c.renewFundingEstimate(ctx, ci)
+	renterFunds, err := c.renewFundingEstimate(ctx, ci, true)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("could not get renew funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, true, err
