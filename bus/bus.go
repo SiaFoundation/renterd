@@ -93,7 +93,8 @@ type (
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		Object(ctx context.Context, key string) (object.Object, error)
-		Objects(ctx context.Context, key string) ([]string, error)
+		Objects(ctx context.Context, key, prefix string, offset, limit int) ([]string, error)
+		ObjectsFuzzy(ctx context.Context, key string, offset, limit int) ([]string, error)
 		UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, key string) error
 
@@ -631,10 +632,30 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contract", b.ms.RemoveContract(jc.Request.Context(), id))
 }
 
+func (b *bus) fuzzyObjectsHandlerGET(jc jape.Context) {
+	offset := 0
+	limit := -1
+	var key string
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
+		return
+	}
+	keys, err := b.ms.ObjectsFuzzy(jc.Request.Context(), key, offset, limit)
+	if jc.Check("couldn't list objects", err) != nil {
+		return
+	}
+	jc.Encode(keys)
+}
+
 func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 	if strings.HasSuffix(jc.PathParam("key"), "/") {
-		keys, err := b.ms.Objects(ctx, jc.PathParam("key"))
+		offset := 0
+		limit := -1
+		prefix := ""
+		if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("prefix", &prefix) != nil {
+			return
+		}
+		keys, err := b.ms.Objects(ctx, jc.PathParam("key"), prefix, offset, limit)
 		if jc.Check("couldn't list objects", err) == nil {
 			jc.Encode(api.ObjectsResponse{Entries: keys})
 		}
@@ -970,6 +991,8 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
+
+		"GET /fuzzy/objects": b.fuzzyObjectsHandlerGET,
 
 		"GET    /objects/*key": b.objectsKeyHandlerGET,
 		"PUT    /objects/*key": b.objectsKeyHandlerPUT,

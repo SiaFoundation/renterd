@@ -472,6 +472,16 @@ func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.Redundancy
 	return c.UpdateSetting(ctx, SettingRedundancy, string(b))
 }
 
+// ObjectFuzzy returns all objects that contains a sub-string in their key.
+func (c *Client) ObjectsFuzzy(ctx context.Context, offset, limit int, key string) (entries []string, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+	values.Set("key", key)
+	err = c.c.WithContext(ctx).GET("/fuzzy/objects?"+values.Encode(), &entries)
+	return
+}
+
 // Object returns the object at the given path, or, if path ends in '/', the
 // entries under that path.
 func (c *Client) Object(ctx context.Context, path string) (o object.Object, entries []string, err error) {
