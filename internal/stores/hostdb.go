@@ -414,19 +414,25 @@ func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) error {
 
 	// insert entries into the blocklist
 	if isSQLite(tx) {
-		return tx.Exec(`INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-SELECT @entry_id, id FROM (
-	SELECT id, rtrim(rtrim(net_address, replace(net_address, ':', '')),':') as net_host
-	FROM hosts
-	WHERE net_address == @exact_entry OR net_host == @exact_entry OR net_host LIKE @like_entry
-)`, params).Error
-	}
-
-	return tx.Exec(`INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		return tx.Exec(`
+INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
 SELECT @entry_id, id FROM (
 	SELECT id
 	FROM hosts
-	WHERE net_address=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address))=@exact_entry OR trim(TRAILING ':' FROM trim(TRAILING replace(net_address, ':', '') from net_address)) LIKE @like_entry
+	WHERE net_address == @exact_entry OR
+		rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == @exact_entry OR
+		rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE @like_entry
+)`, params).Error
+	}
+
+	return tx.Exec(`
+INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+SELECT @entry_id, id FROM (
+	SELECT id
+	FROM hosts
+	WHERE net_address=@exact_entry OR
+		SUBSTRING_INDEX(net_address,':',1)=@exact_entry OR
+		SUBSTRING_INDEX(net_address,':',1) LIKE @like_entry
 ) AS _`, params).Error
 }
 
