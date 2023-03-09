@@ -468,7 +468,7 @@ func (c *Client) ObjectsFuzzy(ctx context.Context, offset, limit int, key string
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
 	values.Set("key", key)
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/fuzzy/objects?%s", values.Encode()), &entries)
+	err = c.c.WithContext(ctx).GET("/fuzzy/objects?"+values.Encode(), &entries)
 	return
 }
 
