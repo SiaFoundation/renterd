@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/build"
+	"go.sia.tech/siad/modules"
 	"lukechampine.com/frand"
 )
 
@@ -39,58 +40,6 @@ func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expect
 		uptimeScore(h) *
 		versionScore(*h.Settings) *
 		priceAdjustmentScore(hostPeriodCostForScore(h, cfg, expectedRedundancy), cfg)
-}
-
-// contractPriceForScore returns the contract price of the host used for
-// scoring. Since we don't know whether rhpv2 or rhpv3 are used, we return the
-// bigger one for a pesimistic score.
-func contractPriceForScore(h hostdb.Host) types.Currency {
-	cp := h.Settings.ContractPrice
-	if cp.Cmp(h.PriceTable.ContractPrice) > 0 {
-		cp = h.PriceTable.ContractPrice
-	}
-	return cp
-}
-
-func uploadCostForScore(h hostdb.Host, bytes uint64) types.Currency {
-	panic("not done")
-}
-
-func downloadCostForScore(h hostdb.Host, bytes uint64) types.Currency {
-	panic("not done")
-}
-
-func storageCostForScore(h hostdb.Host, bytes, period uint64) types.Currency {
-	panic("not done")
-}
-
-func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
-	// compute how much data we upload, download and store.
-	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
-	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))
-	storagePerHost := uint64(float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount))
-
-	// compute the individual costs.
-	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, *h.Settings)
-	hostContractPrice := contractPriceForScore(h)
-	hostUploadCost := uploadCostForScore(h, uploadPerHost)
-	hostDownloadCost := uploadCostForScore(h, downloadPerHost)
-	hostStorageCost := uploadCostForScore(h, storagePerHost)
-	siafundFee := hostCollateral.
-		Add(hostContractPrice).
-		Add(hostUploadCost).
-		Add(hostDownloadCost).
-		Add(hostStorageCost).
-		Mul64(39).
-		Div64(1000)
-
-	// add it all up. We multiple the contract price here since we might refresh
-	// a contract multiple times.
-	return hostContractPrice.Mul64(3).
-		Add(hostUploadCost).
-		Add(hostDownloadCost).
-		Add(hostStorageCost).
-		Add(siafundFee)
 }
 
 // priceAdjustmentScore computes a score between 0 and 1 for a host giving its
@@ -328,4 +277,76 @@ func randSelectByWeight(weights []float64) int {
 		}
 	}
 	return len(weights) - 1
+}
+
+// contractPriceForScore returns the contract price of the host used for
+// scoring. Since we don't know whether rhpv2 or rhpv3 are used, we return the
+// bigger one for a pesimistic score.
+func contractPriceForScore(h hostdb.Host) types.Currency {
+	cp := h.Settings.ContractPrice
+	if cp.Cmp(h.PriceTable.ContractPrice) > 0 {
+		cp = h.PriceTable.ContractPrice
+	}
+	return cp
+}
+
+func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) (types.Currency, bool) {
+	cost := func(baseRPCPrice, sectorStoragePrice, uploadBandwidthPrice types.Currency) (types.Currency, bool) {
+		uploadCost, overflow := uploadBandwidthPrice.Mul64WithOverflow(bytes)
+		if overflow {
+			return types.ZeroCurrency, true
+		}
+		baseCost, overflow := baseRPCPrice.Mul64WithOverflow(bytes / modules.SectorSize)
+		if overflow {
+			return types.ZeroCurrency, true
+		}
+		storageCost, overflow := sectorStoragePrice.Mul64WithOverflow(bytes / modules.SectorSize)
+		if overflow {
+			return types.ZeroCurrency, true
+		}
+		total, overflow := uploadCost.AddWithOverflow(baseCost)
+		if overflow {
+			return types.ZeroCurrency, true
+		}
+		return total.AddWithOverflow(storageCost)
+	}
+
+	panic("not done")
+}
+
+func downloadCostForScore(h hostdb.Host, bytes uint64) types.Currency {
+	panic("not done")
+}
+
+func storageCostForScore(h hostdb.Host, bytes, period uint64) types.Currency {
+	panic("not done")
+}
+
+func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
+	// compute how much data we upload, download and store.
+	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
+	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))
+	storagePerHost := uint64(float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount))
+
+	// compute the individual costs.
+	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, *h.Settings)
+	hostContractPrice := contractPriceForScore(h)
+	hostUploadCost := uploadCostForScore(h, uploadPerHost)
+	hostDownloadCost := uploadCostForScore(h, downloadPerHost)
+	hostStorageCost := uploadCostForScore(h, storagePerHost)
+	siafundFee := hostCollateral.
+		Add(hostContractPrice).
+		Add(hostUploadCost).
+		Add(hostDownloadCost).
+		Add(hostStorageCost).
+		Mul64(39).
+		Div64(1000)
+
+	// add it all up. We multiple the contract price here since we might refresh
+	// a contract multiple times.
+	return hostContractPrice.Mul64(3).
+		Add(hostUploadCost).
+		Add(hostDownloadCost).
+		Add(hostStorageCost).
+		Add(siafundFee)
 }
