@@ -733,9 +733,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-		return migrateSlab(ctx, &slab, hosts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
-	})
+	err = migrateSlab(ctx, w, &slab, contracts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -844,13 +842,10 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
 		})
 
-		err = w.withHosts(ctx, contracts, func(hosts []sectorStore) error {
-			slowHosts, err := downloadSlab(ctx, cw, ss, hosts, &tracedContractLocker{w.bus}, w.downloadSectorTimeout)
-			for _, h := range slowHosts {
-				slow[hosts[h].PublicKey()]++
-			}
-			return err
-		})
+		slowHosts, err := downloadSlab(ctx, w, cw, ss, contracts, &tracedContractLocker{w.bus}, w.downloadSectorTimeout)
+		for _, h := range slowHosts {
+			slow[contracts[h].HostKey]++
+		}
 		if err != nil {
 			w.logger.Errorf("couldn't download object %v slab %d, err: %v", key, i, err)
 			if i == 0 {
@@ -921,19 +916,17 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		var slowHosts []int
 
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
-		if err := w.withHosts(ctx, contracts, func(hosts []sectorStore) (err error) {
-			// move slow hosts to the back of the array
-			sort.SliceStable(hosts, func(i, j int) bool {
-				return slow[hosts[i].PublicKey()] < slow[hosts[j].PublicKey()]
-			})
+		// move slow hosts to the back of the array
+		sort.SliceStable(contracts, func(i, j int) bool {
+			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
+		})
 
-			// upload the slab
-			s, length, slowHosts, err = uploadSlab(ctx, lr, uint8(rs.MinShards), uint8(rs.TotalShards), hosts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout)
-			for _, h := range slowHosts {
-				slow[hosts[h].PublicKey()]++
-			}
-			return err
-		}); err == io.EOF {
+		// upload the slab
+		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout)
+		for _, h := range slowHosts {
+			slow[contracts[h].HostKey]++
+		}
+		if err == io.EOF {
 			break
 		} else if jc.Check("couldn't upload slab", err); err != nil {
 			return
