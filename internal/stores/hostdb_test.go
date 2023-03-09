@@ -274,13 +274,9 @@ func TestSQLHosts(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// add 3 hosts
-	var hks []types.PublicKey
-	for i := 0; i < 3; i++ {
-		if err := db.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i+1)); err != nil {
-			t.Fatal(err)
-		}
-		hks = append(hks, types.PublicKey{byte(i)})
+	hks, err := db.addTestHosts(3)
+	if err != nil {
+		t.Fatal(err)
 	}
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
@@ -304,24 +300,6 @@ func TestSQLHosts(t *testing.T) {
 	if _, err := db.Hosts(ctx, -1, -1); err != ErrNegativeOffset {
 		t.Fatal("unexpected error", err)
 	}
-
-	// Filter by address.
-	// TODO: move
-	//	if hosts, err := db.Hosts(ctx, 0, -1, false, "1", nil); err != nil || len(hosts) != 1 {
-	//		t.Fatal("unexpected", len(hosts), err)
-	//	}
-	//	// Filter by key.
-	//	if hosts, err := db.Hosts(ctx, 0, -1, false, "", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 2 {
-	//		t.Fatal("unexpected", len(hosts), err)
-	//	}
-	//	// Filter by address and key.
-	//	if hosts, err := db.Hosts(ctx, 0, -1, false, "1", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 1 {
-	//		t.Fatal("unexpected", len(hosts), err)
-	//	}
-	//	// Filter by key and limit results
-	//	if hosts, err := db.Hosts(ctx, 0, 1, false, "3", []types.PublicKey{hk3}); err != nil || len(hosts) != 1 {
-	//		t.Fatal("unexpected", len(hosts), err)
-	//	}
 
 	// Add a scan for each host.
 	n := time.Now()
@@ -369,6 +347,42 @@ func TestSQLHosts(t *testing.T) {
 	}
 	if len(hostAddresses) != 0 {
 		t.Fatal("wrong number of addresses")
+	}
+}
+
+// TestSearchHosts is a unit test for SearchHosts.
+func TestSearchHosts(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// add 3 hosts
+	var hks []types.PublicKey
+	for i := 0; i < 3; i++ {
+		if err := db.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i+1)); err != nil {
+			t.Fatal(err)
+		}
+		hks = append(hks, types.PublicKey{byte(i)})
+	}
+	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
+
+	// Search by address.
+	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "1", nil); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by key.
+	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 2 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by address and key.
+	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "1", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by key and limit results
+	if hosts, err := db.SearchHosts(ctx, 0, 1, hostFilterModeAll, "3", []types.PublicKey{hk3}); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
 	}
 }
 
