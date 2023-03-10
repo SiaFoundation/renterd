@@ -512,7 +512,7 @@ func (c *Client) AddObject(ctx context.Context, path string, o object.Object, us
 	return
 }
 
-// DeleteObject deletes the object with the given name.
+// DeleteObject deletes the object at the given path.
 func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
 	return
