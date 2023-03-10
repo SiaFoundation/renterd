@@ -31,7 +31,6 @@ const (
 )
 
 func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) float64 {
-	// TODO: priceAdjustmentScore
 	return ageScore(h) *
 		collateralScore(cfg, *h.Settings, expectedRedundancy) *
 		interactionScore(h) *
@@ -337,6 +336,9 @@ func storageCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) t
 }
 
 func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
+	// TODO: if we ever stop assuming that certain prices in the pricetable are
+	// always set to 1H we should account for those fields here as well.
+
 	// compute how much data we upload, download and store.
 	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
 	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))

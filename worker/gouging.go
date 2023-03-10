@@ -241,7 +241,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 
 	// check MemoryTimeCost - should be 1H as it's unused by hosts
 	if types.NewCurrency64(1).Cmp(pt.MemoryTimeCost) < 0 {
-		return fmt.Errorf("MemoryTimeCost of %v exceeds 1H", pt.WriteLengthCost)
+		return fmt.Errorf("MemoryTimeCost of %v exceeds 1H", pt.MemoryTimeCost)
 	}
 
 	// check DropSectorsBaseCost - should be 1H as it's unused by hosts

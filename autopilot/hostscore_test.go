@@ -78,6 +78,13 @@ func TestHostScore(t *testing.T) {
 	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
 		t.Fatal("unexpected")
 	}
+
+	// assert price affects the score.
+	h2 = newHost(newTestHostSettings()) // reset
+	h2.PriceTable.WriteBaseCost = types.Siacoins(1)
+	if hostScore(cfg, h1, 0, redundancy) <= hostScore(cfg, h2, 0, redundancy) {
+		t.Fatal("unexpected")
+	}
 }
 
 func TestRandSelectByWeight(t *testing.T) {
