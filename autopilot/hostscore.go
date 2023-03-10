@@ -10,7 +10,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/build"
-	"go.sia.tech/siad/modules"
 	"lukechampine.com/frand"
 )
 
@@ -290,36 +289,51 @@ func contractPriceForScore(h hostdb.Host) types.Currency {
 	return cp
 }
 
-func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) (types.Currency, bool) {
-	cost := func(baseRPCPrice, sectorStoragePrice, uploadBandwidthPrice types.Currency) (types.Currency, bool) {
-		uploadCost, overflow := uploadBandwidthPrice.Mul64WithOverflow(bytes)
-		if overflow {
-			return types.ZeroCurrency, true
-		}
-		baseCost, overflow := baseRPCPrice.Mul64WithOverflow(bytes / modules.SectorSize)
-		if overflow {
-			return types.ZeroCurrency, true
-		}
-		storageCost, overflow := sectorStoragePrice.Mul64WithOverflow(bytes / modules.SectorSize)
-		if overflow {
-			return types.ZeroCurrency, true
-		}
-		total, overflow := uploadCost.AddWithOverflow(baseCost)
-		if overflow {
-			return types.ZeroCurrency, true
-		}
-		return total.AddWithOverflow(storageCost)
+func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+	uploadSectorCostRHPv2, _ := rhpv2.RPCAppendCost(*h.Settings, cfg.Contracts.Period)
+
+	asc := h.PriceTable.AppendSectorCost(cfg.Contracts.Period)
+	uploadSectorCostRHPv3, _ := asc.Total()
+
+	numSectors := bytes / rhpv2.SectorSize
+	if bytes%rhpv2.SectorSize != 0 {
+		numSectors++
 	}
-
-	panic("not done")
+	if uploadSectorCostRHPv2.Cmp(uploadSectorCostRHPv3) > 0 {
+		return uploadSectorCostRHPv2.Mul64(numSectors)
+	}
+	return uploadSectorCostRHPv3.Mul64(numSectors)
 }
 
-func downloadCostForScore(h hostdb.Host, bytes uint64) types.Currency {
-	panic("not done")
+func downloadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+	downloadSectorCostRHPv2 := rhpv2.RPCReadCost(*h.Settings, []rhpv2.RPCReadRequestSection{{Offset: 0, Length: rhpv2.SectorSize}})
+	asc := h.PriceTable.ReadSectorCost(rhpv2.SectorSize)
+	downloadSectorCostRHPv3, _ := asc.Total()
+
+	numSectors := bytes / rhpv2.SectorSize
+	if bytes%rhpv2.SectorSize != 0 {
+		numSectors++
+	}
+	if downloadSectorCostRHPv2.Cmp(downloadSectorCostRHPv3) > 0 {
+		return downloadSectorCostRHPv2.Mul64(numSectors)
+	}
+	return downloadSectorCostRHPv3.Mul64(numSectors)
 }
 
-func storageCostForScore(h hostdb.Host, bytes, period uint64) types.Currency {
-	panic("not done")
+func storageCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+	storeSectorCostRHPv2 := h.Settings.StoragePrice.Mul64(bytes)
+
+	asc := h.PriceTable.AppendSectorCost(cfg.Contracts.Period)
+	storeSectorCostRHPv3 := asc.Storage
+
+	numSectors := bytes / rhpv2.SectorSize
+	if bytes%rhpv2.SectorSize != 0 {
+		numSectors++
+	}
+	if storeSectorCostRHPv2.Cmp(storeSectorCostRHPv3) > 0 {
+		return storeSectorCostRHPv2.Mul64(numSectors)
+	}
+	return storeSectorCostRHPv3.Mul64(numSectors)
 }
 
 func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
@@ -331,9 +345,9 @@ func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedu
 	// compute the individual costs.
 	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, *h.Settings)
 	hostContractPrice := contractPriceForScore(h)
-	hostUploadCost := uploadCostForScore(h, uploadPerHost)
-	hostDownloadCost := uploadCostForScore(h, downloadPerHost)
-	hostStorageCost := uploadCostForScore(h, storagePerHost)
+	hostUploadCost := uploadCostForScore(cfg, h, uploadPerHost)
+	hostDownloadCost := downloadCostForScore(cfg, h, downloadPerHost)
+	hostStorageCost := storageCostForScore(cfg, h, storagePerHost)
 	siafundFee := hostCollateral.
 		Add(hostContractPrice).
 		Add(hostUploadCost).
