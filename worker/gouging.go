@@ -62,7 +62,7 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 	})
 }
 
-func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable, txnFee types.Currency, period, renewWindow uint64) (gouging bool, reasons string) {
+func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable, txnFee types.Currency, period, renewWindow uint64, ignoreBlockHeight bool) (gouging bool, reasons string) {
 	if hs == nil && pt == nil {
 		panic("IsGouging needs to be provided with at least host settings or a price table") // developer error
 	}
@@ -279,7 +279,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 		return errors.New("InitBaseCost overflows LatestRevisionCost calculation")
 	}
 	if pt.LatestRevisionCost.Cmp(cost) > 0 {
-		return fmt.Errorf("LatestRevisionCost of %v exceeds maximum cost of %v", pt.SubscriptionNotificationCost, cost)
+		return fmt.Errorf("LatestRevisionCost of %v exceeds maximum cost of %v", pt.LatestRevisionCost, cost)
 	}
 
 	// check RenewContractCost - expect 100nS default
