@@ -128,19 +128,19 @@ func TestPriceAdjustmentScore(t *testing.T) {
 	// Test decreasing values for host cost. Score should go from 0.5 to 1 and
 	// be capped at 1.
 	if s := score(50); s != 0.52 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.52, s)
 	}
 	if s := score(25); s != 0.64 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.64, s)
 	}
 	if s := score(15); s != 0.8 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.8, s)
 	}
 	if s := score(10); s != 1 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 1, s)
 	}
 	if s := score(1); s != 1 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 1, s)
 	}
 
 	// Test increasing values for host cost. Score should go from 1 towards 0.
@@ -149,25 +149,25 @@ func TestPriceAdjustmentScore(t *testing.T) {
 		return float64(i) / 100.0
 	}
 	if s := round(score(101)); s != 0.49 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.49, s)
 	}
 	if s := round(score(110)); s != 0.44 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.44, s)
 	}
 	if s := round(score(125)); s != 0.37 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.37, s)
 	}
 	if s := round(score(150)); s != 0.28 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.28, s)
 	}
 	if s := round(score(200)); s != 0.16 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.16, s)
 	}
 	if s := round(score(250)); s != 0.09 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.09, s)
 	}
 	if s := round(score(300)); s != 0.05 {
-		t.Errorf("expected %v but got %v", 0.5, s)
+		t.Errorf("expected %v but got %v", 0.05, s)
 	}
 }
 
