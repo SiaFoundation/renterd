@@ -167,6 +167,23 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Add another contract set.
+	if err := cs.SetContractSet(ctx, "foo2", []types.FileContractID{contracts[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch contract sets.
+	sets, err := cs.ContractSets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sets) != 2 {
+		t.Fatal("wrong number of sets")
+	}
+	if sets[0] != "foo" || sets[1] != "foo2" {
+		t.Fatal("wrong sets returned", sets)
+	}
+
 	// Delete the contract.
 	if err := cs.RemoveContract(ctx, c.ID()); err != nil {
 		t.Fatal(err)

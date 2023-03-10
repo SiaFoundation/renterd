@@ -88,6 +88,7 @@ type (
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContract(ctx context.Context, id types.FileContractID) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
@@ -526,6 +527,13 @@ func (b *bus) contractsSetHandlerGET(jc jape.Context) {
 	cs, err := b.ms.Contracts(jc.Request.Context(), jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
+	}
+}
+
+func (b *bus) contractsSetsHandlerGET(jc jape.Context) {
+	sets, err := b.ms.ContractSets(jc.Request.Context())
+	if jc.Check("couldn't fetch contract sets", err) == nil {
+		jc.Encode(sets)
 	}
 }
 
@@ -973,6 +981,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
+		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,

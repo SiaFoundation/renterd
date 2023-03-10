@@ -299,6 +299,12 @@ func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contrac
 	return
 }
 
+// ContractSets returns the contract sets of the bus.
+func (c *Client) ContractSets(ctx context.Context) (sets []string, err error) {
+	err = c.c.WithContext(ctx).GET("/contracts/sets", &sets)
+	return
+}
+
 // AddContract adds the provided contract to the metadata store.
 func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
