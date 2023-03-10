@@ -419,10 +419,6 @@ func joinErrors(errs ...error) error {
 
 func sectorReadCostRHPv2(settings rhpv2.HostSettings) (types.Currency, bool) {
 	bandwidth := rhpv2.SectorSize + 2*uint64(bits.Len64(rhpv2.SectorSize/rhpv2.LeavesPerSector))*32
-	minMessageSize := uint64(4096) // 4kib
-	if bandwidth < minMessageSize {
-		bandwidth = minMessageSize
-	}
 	bandwidthPrice, overflow := settings.DownloadBandwidthPrice.Mul64WithOverflow(bandwidth)
 	if overflow {
 		return types.ZeroCurrency, true
@@ -508,12 +504,7 @@ func sectorReadCostRHPv3(pt rhpv3.HostPriceTable) (types.Currency, bool) {
 
 func sectorUploadCostPerMonthRHPv3(pt rhpv3.HostPriceTable) (types.Currency, bool) {
 	// write
-	const atomicWriteSize = 1 << 12
-	writeLength := uint64(rhpv2.SectorSize)
-	if mod := writeLength % atomicWriteSize; mod != 0 {
-		writeLength += (atomicWriteSize - mod)
-	}
-	writeCost, overflow := pt.WriteLengthCost.Mul64WithOverflow(writeLength)
+	writeCost, overflow := pt.WriteLengthCost.Mul64WithOverflow(rhpv2.SectorSize)
 	if overflow {
 		return types.ZeroCurrency, true
 	}
