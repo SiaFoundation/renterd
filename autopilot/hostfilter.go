@@ -7,7 +7,6 @@ import (
 	"math/big"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -36,6 +35,7 @@ var (
 	errHostBadSettings  = errors.New("host has bad settings")
 	errHostPriceGouging = errors.New("host is price gouging")
 	errHostNotAnnounced = errors.New("host is not announced")
+	errHostNoPriceTable = errors.New("no pricetable")
 
 	errContractOutOfCollateral   = errors.New("contract is out of collateral")
 	errContractOutOfFunds        = errors.New("contract is out of funds")
@@ -46,7 +46,7 @@ var (
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, pt *rhpv3.HostPriceTable, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency) (bool, []error) {
+func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency, ignoreBlockHeight bool) (bool, []error) {
 	var reasons []error
 
 	if !h.IsOnline() {
@@ -57,7 +57,9 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	}
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
-	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, pt, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow); gouging {
+	} else if h.PriceTable == nil {
+		reasons = append(reasons, errHostNoPriceTable)
+	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, h.PriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
 	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
 		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
