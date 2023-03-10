@@ -503,9 +503,9 @@ func (c *Client) Object(ctx context.Context, path string) (o object.Object, entr
 	return
 }
 
-// AddObject stores the provided object under the given name.
-func (c *Client) AddObject(ctx context.Context, name string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", name), api.AddObjectRequest{
+// AddObject stores the provided object under the given path.
+func (c *Client) AddObject(ctx context.Context, path string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
 		Object:        o,
 		UsedContracts: usedContract,
 	})
@@ -513,8 +513,8 @@ func (c *Client) AddObject(ctx context.Context, name string, o object.Object, us
 }
 
 // DeleteObject deletes the object with the given name.
-func (c *Client) DeleteObject(ctx context.Context, name string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", name))
+func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
 	return
 }
 
