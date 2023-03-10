@@ -85,7 +85,7 @@ func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.Consens
 
 			// price table checks
 			checkDownloadGougingRHPv3(gs, rs, *pt),
-			checkPriceGougingPT(gs, cs, txnFee, pt),
+			checkPriceGougingPT(gs, cs, txnFee, pt, ignoreBlockHeight),
 			checkUploadGougingRHPv3(gs, rs, *pt),
 			checkContractGougingPT(period, renewWindow, pt),
 		)
@@ -113,7 +113,7 @@ func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable) (results GougingResul
 	if pt != nil {
 		results = GougingResults{
 			downloadErr: checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt),
-			gougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, pt),
+			gougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, pt, false),
 			uploadErr:   checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt),
 		}
 	}
@@ -185,7 +185,7 @@ func checkContractGougingPT(period, renewWindow uint64, pt *rhpv3.HostPriceTable
 	return nil
 }
 
-func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable) error {
+func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable, ignoreBlockHeight bool) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
 		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
@@ -270,16 +270,9 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	}
 
 	// check LatestRevisionCost - expect sane value
-	bw, overflow := pt.DownloadBandwidthCost.Mul64WithOverflow(modules.SectorSize)
-	if overflow {
-		return errors.New("DownloadBandwidthCost overflows LatestRevisionCost calculation")
-	}
-	cost, overflow := bw.AddWithOverflow(pt.InitBaseCost)
-	if overflow {
-		return errors.New("InitBaseCost overflows LatestRevisionCost calculation")
-	}
-	if pt.LatestRevisionCost.Cmp(cost) > 0 {
-		return fmt.Errorf("LatestRevisionCost of %v exceeds maximum cost of %v", pt.LatestRevisionCost, cost)
+	maxRevisionCost := gs.MaxDownloadPrice.Div64(1 << 40).Mul64(4096)
+	if pt.LatestRevisionCost.Cmp(maxRevisionCost) > 0 {
+		return fmt.Errorf("LatestRevisionCost of %v exceeds maximum cost of %v", pt.LatestRevisionCost, maxRevisionCost)
 	}
 
 	// check RenewContractCost - expect 100nS default
@@ -293,18 +286,20 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	}
 
 	// check block height
-	if !cs.Synced {
-		if pt.HostBlockHeight < cs.BlockHeight {
-			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
-		}
-	} else {
-		var min uint64
-		if cs.BlockHeight >= uint64(gs.HostBlockHeightLeeway) {
-			min = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
-		}
-		max := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
-		if !(min <= pt.HostBlockHeight && pt.HostBlockHeight <= max) {
-			return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", min, max, pt.HostBlockHeight)
+	if !ignoreBlockHeight {
+		if !cs.Synced {
+			if pt.HostBlockHeight < cs.BlockHeight {
+				return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
+			}
+		} else {
+			var min uint64
+			if cs.BlockHeight >= uint64(gs.HostBlockHeightLeeway) {
+				min = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
+			}
+			max := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
+			if !(min <= pt.HostBlockHeight && pt.HostBlockHeight <= max) {
+				return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", min, max, pt.HostBlockHeight)
+			}
 		}
 	}
 
