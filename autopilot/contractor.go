@@ -758,9 +758,8 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// with a host that's gouging its prices.
 		// NOTE: we ignore the host's blockheight here because we don't
 		// necessarily have a recent price table.
-		if usable, reasons := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+		if usable, _ := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
 			unusable++
-			c.logger.Warn(reasons)
 			continue
 		}
 
