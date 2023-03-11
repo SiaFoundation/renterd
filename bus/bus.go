@@ -654,7 +654,7 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 	}
 
 	o, err := b.ms.Object(jc.Request.Context(), path)
-	if err == api.ErrObjectNotFound {
+	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -693,7 +693,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	// return a meaningful status code depending on whether the parent exists or not
 	key := strings.TrimPrefix(path, "/")
 	_, err = b.ms.Object(jc.Request.Context(), key)
-	if err == api.ErrObjectNotFound {
+	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {

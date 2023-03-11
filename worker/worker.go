@@ -764,7 +764,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	path := strings.TrimPrefix(jc.PathParam("path"), "/")
 	obj, entries, err := w.bus.Object(ctx, path)
-	if err == api.ErrObjectNotFound {
+	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("couldn't get object or entries", err) != nil {
