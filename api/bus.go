@@ -10,6 +10,10 @@ import (
 )
 
 var (
+	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
+	// the database.
+	ErrObjectNotFound = errors.New("object not found")
+
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
