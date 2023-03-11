@@ -325,16 +325,17 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// fetch price table
+		// fetch recent price table and attach it to host.
 		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
+		host.PriceTable = &pt
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(state.cfg, state.gs, state.rs, state.cs, &pt, f, host.Host, minScore, contract.FileSize(), state.fee)
+		usable, reasons := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
 			toIgnore = append(toIgnore, fcid)
@@ -471,7 +472,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &pt, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow); gouging {
+		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &pt, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
 			c.logger.Error("candidate host became unusable", "host", host, "reasons", reasons)
 			continue
 		}
@@ -696,7 +697,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// worthwhile.
 	numContracts := c.ap.state.cfg.Contracts.Amount
 	buffer := 50
-	hosts, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 1) // 1 to avoid 0 score hosts
+	hosts, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
@@ -742,11 +743,14 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	start := time.Now()
 	scores := make([]float64, 0, len(hosts))
 	scored := make([]hostdb.Host, 0, len(hosts))
+	var excluded, unscanned, unusable, zeros int
 	for _, h := range hosts {
 		if _, exclude := exclude[h.PublicKey]; exclude {
+			excluded++
 			continue
 		}
 		if h.Settings == nil || h.PriceTable == nil {
+			unscanned++
 			continue // host has not been scanned yet
 		}
 
@@ -755,12 +759,16 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// slows contract maintenance down way too much, we re-evaluate the host
 		// right before forming the contract to ensure we do not form a contract
 		// with a host that's gouging its prices.
-		if usable, _ := isUsableHost(state.cfg, state.gs, state.rs, state.cs, h.PriceTable, ipFilter, h, minScore, storedData[h.PublicKey], state.fee); !usable {
+		// NOTE: we ignore the host's blockheight here because we don't
+		// necessarily have a recent price table.
+		if usable, _ := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+			unusable++
 			continue
 		}
 
 		score := hostScore(state.cfg, h, 0, state.rs.Redundancy())
 		if score == 0 {
+			zeros++
 			continue
 		}
 
@@ -768,7 +776,10 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		scores = append(scores, score)
 	}
 
-	c.logger.Debugf("scored %d candidate hosts, took %v", len(hosts)-len(exclude), time.Since(start))
+	c.logger.Debugw(fmt.Sprintf("scored %d candidate hosts out of %v, took %v", len(scored), len(hosts), time.Since(start)),
+		"excluded", excluded,
+		"unscanned", unscanned,
+		"unusable", unusable)
 
 	// select hosts
 	var selected []hostdb.Host
