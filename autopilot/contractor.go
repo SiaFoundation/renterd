@@ -737,7 +737,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	for _, h := range hosts {
 		// filter out used hosts
 		if _, exclude := used[h.PublicKey]; exclude {
-			ipFilter.isRedundantIP(h)
+			_ = ipFilter.isRedundantIP(h) // ensure the host's IP is registered as used
 			excluded++
 			continue
 		}
@@ -749,7 +749,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		candidates = append(candidates, h)
 	}
 
-	c.logger.Debugw(fmt.Sprintf("filtered %d candidate hosts out of %d", len(candidates), len(hosts)),
+	c.logger.Debugw(fmt.Sprintf("selected %d candidate hosts out of %d", len(candidates), len(hosts)),
 		"excluded", excluded,
 		"unscanned", unscanned)
 
@@ -797,9 +797,13 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
 	}
 
-	if len(selected) < wanted {
-		c.logger.Debugf("found %d candidate hosts out of the %d we wanted", len(selected), wanted)
+	// print warning if no candidate hosts were found
+	if len(selected) == 0 {
+		c.logger.Warnf("no candidate hosts found")
+	} else if len(selected) < wanted {
+		c.logger.Debugf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted)
 	}
+
 	return selected, nil
 }
 
