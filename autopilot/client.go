@@ -1,6 +1,9 @@
 package autopilot
 
 import (
+	"fmt"
+
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 )
@@ -41,5 +44,10 @@ func (c *Client) Status() (uint64, error) {
 
 func (c *Client) Trigger() (res string, err error) {
 	err = c.c.POST("/debug/trigger", nil, &res)
+	return
+}
+
+func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerGET, err error) {
+	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &resp)
 	return
 }

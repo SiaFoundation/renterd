@@ -65,8 +65,10 @@ type (
 
 		maintenanceTxnID types.TransactionID
 
-		mu         sync.Mutex
-		currPeriod uint64
+		mu               sync.Mutex
+		cachedDataStored map[types.PublicKey]uint64
+		cachedMinScore   float64
+		currPeriod       uint64
 	}
 
 	contractInfo struct {
@@ -80,6 +82,40 @@ func newContractor(ap *Autopilot) *contractor {
 		ap:     ap,
 		logger: ap.logger.Named("contractor"),
 	}
+}
+
+func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, api.HostScoreBreakdown, []error, error) {
+	host, err := c.ap.bus.Host(ctx, hostKey)
+	if err != nil {
+		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+	}
+	gs, err := c.ap.bus.GougingSettings(ctx)
+	if err != nil {
+		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+	}
+	rs, err := c.ap.bus.RedundancySettings(ctx)
+	if err != nil {
+		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+	}
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+	}
+	fee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+	}
+	c.mu.Lock()
+	storedData := c.cachedDataStored[hostKey]
+	minScore := c.cachedMinScore
+	c.mu.Unlock()
+
+	cfg := c.ap.Config()
+	f := newIPFilter(c.logger)
+
+	sb := hostScore(cfg, host.Host, 0, 0)
+	_, reasons := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
+	return host, sb, reasons, nil
 }
 
 func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) error {
@@ -141,6 +177,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
+
+	// update cache.
+	c.mu.Lock()
+	c.cachedDataStored = storedData
+	c.cachedMinScore = minScore
+	c.mu.Unlock()
 
 	// run checks
 	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, active, minScore)
@@ -710,7 +752,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// good for upload.
 	lowestScore := math.MaxFloat64
 	for i := 0; i < len(hosts); i++ {
-		score := hostScore(c.ap.state.cfg, hosts[i], 0, c.ap.state.rs.Redundancy())
+		score := hostScore(c.ap.state.cfg, hosts[i], 0, c.ap.state.rs.Redundancy()).Score()
 		if score < lowestScore {
 			lowestScore = score
 		}
@@ -766,7 +808,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 			continue
 		}
 
-		score := hostScore(state.cfg, h, 0, state.rs.Redundancy())
+		score := hostScore(state.cfg, h, 0, state.rs.Redundancy()).Score()
 		if score == 0 {
 			zeros++
 			continue

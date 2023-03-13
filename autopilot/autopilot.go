@@ -418,6 +418,32 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 	return ap, nil
 }
 
+func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
+	var hostKey types.PublicKey
+	if jc.DecodeForm("hostKey", &hostKey) != nil {
+		return
+	}
+
+	host, sb, reasons, err := ap.c.HostInfo(jc.Request.Context(), hostKey)
+	if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+
+	var unusableReasons []string
+	if len(reasons) > 0 {
+		for _, reason := range reasons {
+			unusableReasons = append(unusableReasons, reason.Error())
+		}
+	}
+	jc.Encode(api.HostHandlerGET{
+		Host:            host,
+		Score:           sb.Score(),
+		ScoreBreakdown:  sb,
+		Usable:          len(unusableReasons) == 0,
+		UnusableReasons: unusableReasons,
+	})
+}
+
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
@@ -425,6 +451,8 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
 		"GET    /status":  ap.statusHandlerGET,
+
+		"GET    /host/:hostKey": ap.hostHandlerGET,
 
 		"POST    /debug/trigger": ap.triggerHandlerPOST,
 	}))
