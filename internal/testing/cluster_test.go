@@ -207,7 +207,7 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("host wasn't set")
 		}
 	}
-	hostInfos, err := cluster.Autopilot.HostInfos(0, -1)
+	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), 0, -1, api.HostFilterModeAll, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

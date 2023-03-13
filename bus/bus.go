@@ -69,7 +69,7 @@ type (
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
-		SearchHosts(ctx context.Context, offset, limit int, filterMode string, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
+		SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)

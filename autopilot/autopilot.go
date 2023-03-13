@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -45,6 +44,7 @@ type Bus interface {
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
+	SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
 	HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
@@ -432,15 +432,12 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	jc.Encode(host)
 }
 
-func (ap *Autopilot) hostsHandlerGET(jc jape.Context) {
-	var offset, limit int
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
+func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
+	var req api.SearchHostsRequest
+	if jc.Decode(&req) != nil {
 		return
 	}
-	if limit == -1 {
-		limit = math.MaxInt
-	}
-	hosts, err := ap.c.HostInfos(jc.Request.Context(), offset, limit)
+	hosts, err := ap.c.HostInfos(jc.Request.Context(), req.Offset, req.Limit, req.FilterMode, req.AddressContains, req.KeyIn)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
@@ -456,7 +453,7 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /status":  ap.statusHandlerGET,
 
 		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"GET    /hosts":         ap.hostsHandlerGET,
+		"POST    /hosts":        ap.hostsHandlerPOST,
 
 		"POST    /debug/trigger": ap.triggerHandlerPOST,
 	}))

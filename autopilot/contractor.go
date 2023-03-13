@@ -123,7 +123,6 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}
 	return api.HostHandlerGET{
 		Host:            host.Host,
-		Blocked:         host.Blocked,
 		Score:           sb.Score(),
 		ScoreBreakdown:  sb,
 		Usable:          isUsable,
@@ -131,8 +130,8 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
-func (c *contractor) HostInfos(ctx context.Context, offset, limit int) ([]api.HostHandlerGET, error) {
-	hosts, err := c.ap.bus.Hosts(ctx, offset, limit)
+func (c *contractor) HostInfos(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]api.HostHandlerGET, error) {
+	hosts, err := c.ap.bus.SearchHosts(ctx, offset, limit, filterMode, addressContains, keyIn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
 	}
@@ -175,7 +174,6 @@ func (c *contractor) HostInfos(ctx context.Context, offset, limit int) ([]api.Ho
 			}
 		}
 		hostInfos = append(hostInfos, api.HostHandlerGET{
-			Blocked:         false, // hosts returned by Hosts are never blocked
 			Host:            host,
 			Score:           sb.Score(),
 			ScoreBreakdown:  sb,

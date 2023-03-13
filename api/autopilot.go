@@ -34,7 +34,6 @@ type (
 	}
 
 	HostHandlerGET struct {
-		Blocked         bool `json:"blocked"`
 		ScoreBreakdown  HostScoreBreakdown
 		Score           float64     `json:"score"`
 		Usable          bool        `json:"usable"`
