@@ -84,26 +84,26 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, api.HostScoreBreakdown, []error, error) {
+func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerGET, error) {
 	host, err := c.ap.bus.Host(ctx, hostKey)
 	if err != nil {
-		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch requested host from bus: %w", err)
 	}
 	gs, err := c.ap.bus.GougingSettings(ctx)
 	if err != nil {
-		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
 	}
 	rs, err := c.ap.bus.RedundancySettings(ctx)
 	if err != nil {
-		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
 	}
 	cs, err := c.ap.bus.ConsensusState(ctx)
 	if err != nil {
-		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
 	}
 	fee, err := c.ap.bus.RecommendedFee(ctx)
 	if err != nil {
-		return hostdb.HostInfo{}, api.HostScoreBreakdown{}, nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
 	}
 	c.mu.Lock()
 	storedData := c.cachedDataStored[hostKey]
@@ -114,8 +114,76 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (hos
 	f := newIPFilter(c.logger)
 
 	sb := hostScore(cfg, host.Host, 0, 0)
-	_, reasons := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
-	return host, sb, reasons, nil
+	isUsable, reasons := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
+	var unusableReasons []string
+	if len(reasons) > 0 {
+		for _, reason := range reasons {
+			unusableReasons = append(unusableReasons, reason.Error())
+		}
+	}
+	return api.HostHandlerGET{
+		Host:            host.Host,
+		Blocked:         host.Blocked,
+		Score:           sb.Score(),
+		ScoreBreakdown:  sb,
+		Usable:          isUsable,
+		UnusableReasons: unusableReasons,
+	}, nil
+}
+
+func (c *contractor) HostInfos(ctx context.Context, offset, limit int) ([]api.HostHandlerGET, error) {
+	hosts, err := c.ap.bus.Hosts(ctx, offset, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+	}
+	gs, err := c.ap.bus.GougingSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+	}
+	rs, err := c.ap.bus.RedundancySettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+	}
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+	}
+	fee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+	}
+	cfg := c.ap.Config()
+	f := newIPFilter(c.logger)
+
+	c.mu.Lock()
+	storedData := make(map[types.PublicKey]uint64)
+	for _, host := range hosts {
+		storedData[host.PublicKey] = c.cachedDataStored[host.PublicKey]
+	}
+	minScore := c.cachedMinScore
+	c.mu.Unlock()
+
+	var hostInfos []api.HostHandlerGET
+	for _, host := range hosts {
+		storedData := storedData[host.PublicKey]
+		sb := hostScore(cfg, host, 0, 0)
+		isUsable, reasons := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData, fee, true)
+		var unusableReasons []string
+		if len(reasons) > 0 {
+			for _, reason := range reasons {
+				unusableReasons = append(unusableReasons, reason.Error())
+			}
+		}
+		hostInfos = append(hostInfos, api.HostHandlerGET{
+			Blocked:         false, // hosts returned by Hosts are never blocked
+			Host:            host,
+			Score:           sb.Score(),
+			ScoreBreakdown:  sb,
+			Usable:          isUsable,
+			UnusableReasons: unusableReasons,
+		})
+	}
+	return hostInfos, nil
 }
 
 func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) error {

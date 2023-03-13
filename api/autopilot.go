@@ -34,12 +34,12 @@ type (
 	}
 
 	HostHandlerGET struct {
+		Blocked         bool `json:"blocked"`
 		ScoreBreakdown  HostScoreBreakdown
-		Score           float64  `json:"score"`
-		Usable          bool     `json:"usable"`
-		UnusableReasons []string `json:"usableReasons"`
-
-		Host hostdb.HostInfo `json:"host"`
+		Score           float64     `json:"score"`
+		Usable          bool        `json:"usable"`
+		UnusableReasons []string    `json:"usableReasons"`
+		Host            hostdb.Host `json:"host"`
 	}
 
 	HostScoreBreakdown struct {

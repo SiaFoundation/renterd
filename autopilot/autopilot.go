@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -424,24 +425,26 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 
-	host, sb, reasons, err := ap.c.HostInfo(jc.Request.Context(), hostKey)
+	host, err := ap.c.HostInfo(jc.Request.Context(), hostKey)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
+	jc.Encode(host)
+}
 
-	var unusableReasons []string
-	if len(reasons) > 0 {
-		for _, reason := range reasons {
-			unusableReasons = append(unusableReasons, reason.Error())
-		}
+func (ap *Autopilot) hostsHandlerGET(jc jape.Context) {
+	var offset, limit int
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
+		return
 	}
-	jc.Encode(api.HostHandlerGET{
-		Host:            host,
-		Score:           sb.Score(),
-		ScoreBreakdown:  sb,
-		Usable:          len(unusableReasons) == 0,
-		UnusableReasons: unusableReasons,
-	})
+	if limit == -1 {
+		limit = math.MaxInt
+	}
+	hosts, err := ap.c.HostInfos(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+	jc.Encode(hosts)
 }
 
 // Handler returns an HTTP handler that serves the autopilot api.
@@ -453,6 +456,7 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /status":  ap.statusHandlerGET,
 
 		"GET    /host/:hostKey": ap.hostHandlerGET,
+		"GET    /hosts":         ap.hostsHandlerGET,
 
 		"POST    /debug/trigger": ap.triggerHandlerPOST,
 	}))

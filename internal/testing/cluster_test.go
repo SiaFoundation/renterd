@@ -207,6 +207,27 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("host wasn't set")
 		}
 	}
+	hostInfos, err := cluster.Autopilot.HostInfos(0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hi := range hostInfos {
+		if hi.ScoreBreakdown.Score() == 0 {
+			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+		}
+		if hi.Score == 0 {
+			t.Fatal("score shouldn't be 0")
+		}
+		if !hi.Usable {
+			t.Fatal("host should be usable")
+		}
+		if len(hi.UnusableReasons) != 0 {
+			t.Fatal("usable hosts don't have any reasons set")
+		}
+		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+			t.Fatal("host wasn't set")
+		}
+	}
 }
 
 // TestUploadDownload is an integration test that verifies objects can be

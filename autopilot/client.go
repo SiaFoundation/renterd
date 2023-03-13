@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"fmt"
+	"net/url"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
@@ -49,5 +50,13 @@ func (c *Client) Trigger() (res string, err error) {
 
 func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerGET, err error) {
 	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &resp)
+	return
+}
+
+func (c *Client) HostInfos(offset, limit int) (resp []api.HostHandlerGET, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+	err = c.c.GET(fmt.Sprintf("/hosts?"+values.Encode()), &resp)
 	return
 }
