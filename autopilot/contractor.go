@@ -26,7 +26,7 @@ import (
 const (
 	// contractHostPriceTableTimeout is the amount of time we wait to receive a
 	// price table from the host
-	contractHostPriceTableTimeout = 10 * time.Second
+	contractHostPriceTableTimeout = 30 * time.Second
 
 	// contractHostTimeout is the amount of time we wait to receive the latest
 	// revision from the host
@@ -467,7 +467,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
 		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &pt, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
-			c.logger.Error("candidate host became unusable", "host", host, "reasons", reasons)
+			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
 			continue
 		}
 
