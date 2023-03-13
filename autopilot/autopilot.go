@@ -420,7 +420,7 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 
 func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	var hostKey types.PublicKey
-	if jc.DecodeForm("hostKey", &hostKey) != nil {
+	if jc.DecodeParam("hostKey", &hostKey) != nil {
 		return
 	}
 
