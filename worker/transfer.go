@@ -44,6 +44,10 @@ type storeProvider interface {
 }
 
 func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration) ([]object.Sector, []int, error) {
+	// ensure the context is cancelled when the slab is uploaded
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	if len(contracts) < len(shards) {
 		return nil, nil, fmt.Errorf("not enough hosts to upload slab, %v<%v", len(contracts), len(shards))
 	}
@@ -193,6 +197,10 @@ func uploadSlab(ctx context.Context, sp storeProvider, r io.Reader, m, n uint8, 
 }
 
 func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabSlice, contracts []api.ContractMetadata, locker contractLocker, downloadSectorTimeout time.Duration) ([][]byte, []int, error) {
+	// ensure the context is cancelled when the slab is downloaded
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// check whether we can recover the slab
 	if len(contracts) < int(ss.MinShards) {
 		return nil, nil, errors.New("not enough hosts to recover slab")
