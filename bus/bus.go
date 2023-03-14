@@ -684,25 +684,13 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 		return
 	}
 
-	// return early if we have found entries or if a prefix was specified
-	if len(entries) > 0 || prefix != "" {
-		jc.Encode(api.ObjectsResponse{Entries: entries})
+	// return a 404 if no entries were found and no prefix was specified
+	if len(entries) == 0 && prefix == "" {
+		jc.Error(fmt.Errorf("no entries found for object at '%v'", path), http.StatusNotFound)
 		return
 	}
 
-	// return a meaningful status code depending on whether the parent exists or not
-	key := strings.TrimPrefix(path, "/")
-	_, err = b.ms.Object(jc.Request.Context(), key)
-	if errors.Is(err, api.ErrObjectNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else {
-		jc.Error(fmt.Errorf("object at '%v' is not a directory", key), http.StatusBadRequest)
-		return
-	}
+	jc.Encode(api.ObjectsResponse{Entries: entries})
 }
 
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
