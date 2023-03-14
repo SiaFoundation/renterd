@@ -86,23 +86,30 @@ func newTestHostPriceTable() *rhpv3.HostPriceTable {
 	ulbwPrice := oneSC.Div64(1 << 40)           // 1 SC / TiB
 
 	return &rhpv3.HostPriceTable{
-		Validity:             time.Minute,
-		FundAccountCost:      oneSC,
-		UpdatePriceTableCost: oneSC,
+		Validity: time.Minute,
 
-		HasSectorBaseCost:  oneSC,
-		InitBaseCost:       oneSC,
-		MemoryTimeCost:     oneSC,
-		ReadBaseCost:       oneSC,
-		ReadLengthCost:     oneSC,
-		SwapSectorBaseCost: oneSC,
+		// fields that are currently always set to 1H.
+		ReadLengthCost:       types.NewCurrency64(1),
+		WriteLengthCost:      types.NewCurrency64(1),
+		AccountBalanceCost:   types.NewCurrency64(1),
+		FundAccountCost:      types.NewCurrency64(1),
+		UpdatePriceTableCost: types.NewCurrency64(1),
+		HasSectorBaseCost:    types.NewCurrency64(1),
+		MemoryTimeCost:       types.NewCurrency64(1),
+		DropSectorsBaseCost:  types.NewCurrency64(1),
+		DropSectorsUnitCost:  types.NewCurrency64(1),
+		SwapSectorBaseCost:   types.NewCurrency64(1),
 
+		SubscriptionMemoryCost:       types.NewCurrency64(1),
+		SubscriptionNotificationCost: types.NewCurrency64(1),
+
+		InitBaseCost:          types.NewCurrency64(1),
 		DownloadBandwidthCost: dlbwPrice,
 		UploadBandwidthCost:   ulbwPrice,
 
-		WriteBaseCost:   oneSC,
-		WriteLengthCost: oneSC,
-		WriteStoreCost:  oneSC,
+		ReadBaseCost:   types.NewCurrency64(1),
+		WriteBaseCost:  oneSC.Div64(1 << 40),
+		WriteStoreCost: oneSC.Div64(4032).Div64(1 << 40), // 1 SC / TiB / month
 	}
 }
 
