@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -25,10 +26,6 @@ const (
 )
 
 var (
-	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
-	// the database.
-	ErrObjectNotFound = errors.New("object not found in database")
-
 	// ErrSlabNotFound is returned if get is unable to retrieve a slab from the
 	// database.
 	ErrSlabNotFound = errors.New("slab not found in database")
@@ -449,6 +446,10 @@ func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) 
 }
 
 func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]string, error) {
+	if limit <= -1 {
+		limit = math.MaxInt
+	}
+
 	var ids []string
 	err := s.db.Model(&dbObject{}).
 		Select("object_id").
@@ -459,7 +460,10 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 	return ids, err
 }
 
-func (s *SQLStore) Objects(ctx context.Context, path, prefix string, offset, limit int) ([]string, error) {
+func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]string, error) {
+	if limit <= -1 {
+		limit = math.MaxInt
+	}
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
 	}
@@ -489,12 +493,12 @@ func (s *SQLStore) Objects(ctx context.Context, path, prefix string, offset, lim
 		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
 	}
 
-	var ids []string
-	err := query.Scan(&ids).Error
+	var entries []string
+	err := query.Scan(&entries).Error
 	if err != nil {
 		return nil, err
 	}
-	return ids, nil
+	return entries, nil
 }
 
 func (s *SQLStore) Object(ctx context.Context, key string) (object.Object, error) {
@@ -797,6 +801,10 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 // in the given contract set. These slabs need to be migrated to good contracts
 // so they are restored to full health.
 func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error) {
+	if limit <= -1 {
+		limit = math.MaxInt
+	}
+
 	var dbBatch []dbSlab
 	var slabs []object.Slab
 
@@ -852,7 +860,7 @@ func (s *SQLStore) object(ctx context.Context, key string) (dbObject, error) {
 		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return dbObject{}, ErrObjectNotFound
+		return dbObject{}, api.ErrObjectNotFound
 	}
 	return obj, nil
 }

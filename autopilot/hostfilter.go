@@ -86,36 +86,33 @@ func newUnusableHostResult(errs []error) (u unusableHostResult) {
 func (u unusableHostResult) String() string {
 	var reasons []string
 	if u.blocked > 0 {
-		reasons = append(reasons, "blocked")
+		reasons = append(reasons, errHostBlocked.Error())
 	}
 	if u.offline > 0 {
-		reasons = append(reasons, "offline")
+		reasons = append(reasons, errHostOffline.Error())
 	}
 	if u.lowscore > 0 {
-		reasons = append(reasons, "has a low score")
+		reasons = append(reasons, errLowScore.Error())
 	}
 	if u.redundantip > 0 {
-		reasons = append(reasons, "has a redundant IP")
+		reasons = append(reasons, errHostRedundantIP.Error())
 	}
 	if u.badsettings > 0 {
-		reasons = append(reasons, "bad settings")
+		reasons = append(reasons, errHostBadSettings.Error())
 	}
 	if u.gouging > 0 {
-		reasons = append(reasons, "is price gouging")
+		reasons = append(reasons, errHostPriceGouging.Error())
 	}
 	if u.notannounced > 0 {
-		reasons = append(reasons, "is not announced")
+		reasons = append(reasons, errHostNotAnnounced.Error())
 	}
 	if u.nopricetable > 0 {
-		reasons = append(reasons, "has no pricetable")
+		reasons = append(reasons, errHostNoPriceTable.Error())
 	}
 	if u.unknown > 0 {
 		reasons = append(reasons, "for unknown reasons")
 	}
-	if len(reasons) == 0 {
-		return "host is usable"
-	}
-	return fmt.Sprintf("host is unusable because it is: %v", strings.Join(reasons, ", "))
+	return strings.Join(reasons, ", ")
 }
 
 func (u *unusableHostResult) merge(other unusableHostResult) {
@@ -168,7 +165,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		errs = append(errs, errHostNoPriceTable)
 	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, h.PriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
 		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
-	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
+	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()).Score(); score < minScore {
 		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
 	}
 

@@ -12,6 +12,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
@@ -509,12 +510,6 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-const (
-	hostFilterModeAll     = "all"
-	hostFilterModeAllowed = "allowed"
-	hostFilterModeBlocked = "blocked"
-)
-
 func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -526,11 +521,11 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMo
 	// Apply filter mode.
 	query := ss.db
 	switch filterMode {
-	case hostFilterModeAllowed:
+	case api.HostFilterModeAllowed:
 		query = query.Scopes(ss.excludeBlocked)
-	case hostFilterModeBlocked:
+	case api.HostFilterModeBlocked:
 		query = query.Scopes(ss.excludeAllowed)
-	case hostFilterModeAll:
+	case api.HostFilterModeAll:
 		// nothing to do
 	default:
 		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
@@ -572,7 +567,7 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMo
 
 // Hosts returns non-blocked hosts at given offset and limit.
 func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
-	return ss.SearchHosts(ctx, offset, limit, hostFilterModeAllowed, "", nil)
+	return ss.SearchHosts(ctx, offset, limit, api.HostFilterModeAllowed, "", nil)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
