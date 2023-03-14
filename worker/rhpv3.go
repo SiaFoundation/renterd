@@ -311,10 +311,10 @@ type priceTable struct {
 	hk     types.PublicKey
 	expiry time.Time
 
-	mu            sync.Mutex
-	updateOngoing bool
-	updateChan    chan struct{}
-	updateErr     error
+	mu              sync.Mutex
+	updateAvailable chan struct{}
+	updateErr       error
+	updateOngoing   bool
 }
 
 func newPriceTables() *priceTables {
@@ -345,7 +345,7 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 	if !pt.updateOngoing {
 		performUpdate = true
 		pt.updateOngoing = true
-		pt.updateChan = make(chan struct{})
+		pt.updateAvailable = make(chan struct{})
 		pt.updateErr = nil
 	}
 	pt.mu.Unlock()
@@ -356,7 +356,7 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 		select {
 		case <-ctx.Done():
 			return rhpv3.HostPriceTable{}, errors.New("timeout while blocking for pricetable update")
-		case <-pt.updateChan:
+		case <-pt.updateAvailable:
 		}
 		if pt.updateErr != nil {
 			return rhpv3.HostPriceTable{}, pt.updateErr
@@ -384,7 +384,7 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 	// Signal that the update is over.
 	pt.updateErr = err
 	pt.updateOngoing = false
-	close(pt.updateChan)
+	close(pt.updateAvailable)
 	return hpt, err
 }
 
