@@ -755,6 +755,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 	// score all candidate hosts
 	start := time.Now()
+	reasons := make(map[string]int)
 	scores := make([]float64, 0, len(hosts))
 	scored := make([]hostdb.Host, 0, len(hosts))
 	var unusable, zeros int
@@ -767,7 +768,8 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		//
 		// NOTE: we ignore the host's blockheight here because we don't
 		// necessarily have a recent price table.
-		if usable, _ := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+		if usable, errs := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+			hostErrCounts(errs, reasons)
 			unusable++
 			continue
 		}
@@ -801,7 +803,15 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	if len(selected) == 0 {
 		c.logger.Warnf("no candidate hosts found")
 	} else if len(selected) < wanted {
-		c.logger.Debugf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted)
+		if len(candidates) >= wanted {
+			var keysAndValues []interface{}
+			for k, v := range reasons {
+				keysAndValues = append(keysAndValues, k, v)
+			}
+			c.logger.Warnw(fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted), keysAndValues...)
+		} else {
+			c.logger.Debugf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted)
+		}
 	}
 
 	return selected, nil

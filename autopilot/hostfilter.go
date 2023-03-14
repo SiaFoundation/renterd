@@ -44,6 +44,26 @@ var (
 	errContractExpired           = errors.New("contract has expired")
 )
 
+func hostErrCounts(errs []error, counts map[string]int) {
+	list := map[string]error{
+		"blocked":      errHostBlocked,
+		"offline":      errHostOffline,
+		"lowscore":     errLowScore,
+		"redundantip":  errHostRedundantIP,
+		"badsettings":  errHostBadSettings,
+		"gouging":      errHostPriceGouging,
+		"notannounced": errHostNotAnnounced,
+		"nopricetable": errHostNoPriceTable,
+	}
+	for _, err := range errs {
+		for k, v := range list {
+			if errors.Is(err, v) {
+				counts[k]++
+			}
+		}
+	}
+}
+
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
 func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency, ignoreBlockHeight bool) (bool, []error) {
