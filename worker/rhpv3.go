@@ -498,13 +498,9 @@ type priceTable struct {
 	expiry time.Time
 
 	mu            sync.Mutex
-	ongoingUpdate *priceTableUpdate
-}
-
-type priceTableUpdate struct {
-	err  error
-	done chan struct{}
-	pt   *rhpv3.HostPriceTable
+	updateOngoing bool
+	updateChan    chan struct{}
+	updateErr     error
 }
 
 func newPriceTables() *priceTables {
@@ -533,14 +529,12 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 
 	// Check if there is some update going on already. If not, create one.
 	pt.mu.Lock()
-	ongoing := pt.ongoingUpdate
 	var performUpdate bool
-	if ongoing == nil {
-		ongoing = &priceTableUpdate{
-			done: make(chan struct{}),
-		}
-		pt.ongoingUpdate = ongoing
+	if !pt.updateOngoing {
 		performUpdate = true
+		pt.updateOngoing = true
+		pt.updateChan = make(chan struct{})
+		pt.updateErr = nil
 	}
 	pt.mu.Unlock()
 
@@ -550,12 +544,12 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 		select {
 		case <-ctx.Done():
 			return rhpv3.HostPriceTable{}, errors.New("timeout while blocking for pricetable update")
-		case <-ongoing.done:
+		case <-pt.updateChan:
 		}
-		if ongoing.err != nil {
-			return rhpv3.HostPriceTable{}, ongoing.err
+		if pt.updateErr != nil {
+			return rhpv3.HostPriceTable{}, pt.updateErr
 		} else {
-			return *ongoing.pt, nil
+			return *pt.pt, nil
 		}
 	}
 
@@ -574,10 +568,11 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 		pt.pt = &hpt
 		pt.expiry = time.Now().Add(hpt.Validity)
 	}
+
 	// Signal that the update is over.
-	ongoing.err = err
-	close(ongoing.done)
-	pt.ongoingUpdate = nil
+	pt.updateErr = err
+	pt.updateOngoing = false
+	close(pt.updateChan)
 	return hpt, err
 }
 
@@ -586,14 +581,11 @@ func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc,
 func (pts *priceTables) priceTable(hk types.PublicKey) *priceTable {
 	pts.mu.Lock()
 	defer pts.mu.Unlock()
-	pt, exists := pts.priceTables[hk]
-	if !exists {
-		pt = &priceTable{
-			hk: hk,
-		}
-		pts.priceTables[hk] = pt
+
+	if _, exists := pts.priceTables[hk]; !exists {
+		pts.priceTables[hk] = &priceTable{hk: hk}
 	}
-	return pt
+	return pts.priceTables[hk]
 }
 
 // preparePriceTableContractPayment prepare a payment function to pay for a
