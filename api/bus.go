@@ -9,6 +9,12 @@ import (
 	"go.sia.tech/renterd/object"
 )
 
+const (
+	HostFilterModeAll     = "all"
+	HostFilterModeAllowed = "allowed"
+	HostFilterModeBlocked = "blocked"
+)
+
 var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.

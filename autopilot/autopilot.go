@@ -44,6 +44,7 @@ type Bus interface {
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
+	SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
 	HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
@@ -418,6 +419,31 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 	return ap, nil
 }
 
+func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
+	var hostKey types.PublicKey
+	if jc.DecodeParam("hostKey", &hostKey) != nil {
+		return
+	}
+
+	host, err := ap.c.HostInfo(jc.Request.Context(), hostKey)
+	if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+	jc.Encode(host)
+}
+
+func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
+	var req api.SearchHostsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	hosts, err := ap.c.HostInfos(jc.Request.Context(), req.Offset, req.Limit, req.FilterMode, req.AddressContains, req.KeyIn)
+	if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+	jc.Encode(hosts)
+}
+
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
@@ -425,6 +451,9 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /config":  ap.configHandlerGET,
 		"PUT    /config":  ap.configHandlerPUT,
 		"GET    /status":  ap.statusHandlerGET,
+
+		"GET    /host/:hostKey": ap.hostHandlerGET,
+		"POST    /hosts":        ap.hostsHandlerPOST,
 
 		"POST    /debug/trigger": ap.triggerHandlerPOST,
 	}))
