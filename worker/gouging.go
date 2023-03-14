@@ -185,6 +185,9 @@ func checkContractGougingPT(period, renewWindow uint64, pt *rhpv3.HostPriceTable
 	return nil
 }
 
+// TODO: if we ever stop assuming that certain prices in the pricetable are
+// always set to 1H we should account for those fields in
+// `hostPeriodCostForScore` as well.
 func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable, ignoreBlockHeight bool) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
