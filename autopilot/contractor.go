@@ -335,9 +335,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable = &pt
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
+		usable, result := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
 		if !usable {
-			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
+			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", result.String())
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
@@ -755,7 +755,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 	// score all candidate hosts
 	start := time.Now()
-	reasons := make(map[string]int)
+	var results unusableHostResult
 	scores := make([]float64, 0, len(hosts))
 	scored := make([]hostdb.Host, 0, len(hosts))
 	var unusable, zeros int
@@ -768,8 +768,8 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		//
 		// NOTE: we ignore the host's blockheight here because we don't
 		// necessarily have a recent price table.
-		if usable, errs := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
-			hostErrCounts(errs, reasons)
+		if usable, result := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+			results.merge(result)
 			unusable++
 			continue
 		}
@@ -804,11 +804,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		c.logger.Warnf("no candidate hosts found")
 	} else if len(selected) < wanted {
 		if len(candidates) >= wanted {
-			var keysAndValues []interface{}
-			for k, v := range reasons {
-				keysAndValues = append(keysAndValues, k, v)
-			}
-			c.logger.Warnw(fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted), keysAndValues...)
+			c.logger.Warnw(fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted), results.keysAndValues()...)
 		} else {
 			c.logger.Debugf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted)
 		}

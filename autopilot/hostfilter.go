@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -44,52 +45,138 @@ var (
 	errContractExpired           = errors.New("contract has expired")
 )
 
-func hostErrCounts(errs []error, counts map[string]int) {
-	list := map[string]error{
-		"blocked":      errHostBlocked,
-		"offline":      errHostOffline,
-		"lowscore":     errLowScore,
-		"redundantip":  errHostRedundantIP,
-		"badsettings":  errHostBadSettings,
-		"gouging":      errHostPriceGouging,
-		"notannounced": errHostNotAnnounced,
-		"nopricetable": errHostNoPriceTable,
-	}
+type unusableHostResult struct {
+	blocked      uint64
+	offline      uint64
+	lowscore     uint64
+	redundantip  uint64
+	badsettings  uint64
+	gouging      uint64
+	notannounced uint64
+	nopricetable uint64
+	unknown      uint64
+}
+
+func newUnusableHostResult(errs []error) (u unusableHostResult) {
 	for _, err := range errs {
-		for k, v := range list {
-			if errors.Is(err, v) {
-				counts[k]++
-			}
+		switch err {
+		case errHostBlocked:
+			u.blocked++
+		case errHostOffline:
+			u.offline++
+		case errLowScore:
+			u.lowscore++
+		case errHostRedundantIP:
+			u.redundantip++
+		case errHostBadSettings:
+			u.badsettings++
+		case errHostPriceGouging:
+			u.gouging++
+		case errHostNotAnnounced:
+			u.notannounced++
+		case errHostNoPriceTable:
+			u.nopricetable++
+		default:
+			u.unknown++
 		}
 	}
+	return
+}
+
+func (u unusableHostResult) String() string {
+	var reasons []string
+	if u.blocked > 0 {
+		reasons = append(reasons, "blocked")
+	}
+	if u.offline > 0 {
+		reasons = append(reasons, "offline")
+	}
+	if u.lowscore > 0 {
+		reasons = append(reasons, "has a low score")
+	}
+	if u.redundantip > 0 {
+		reasons = append(reasons, "has a redundant IP")
+	}
+	if u.badsettings > 0 {
+		reasons = append(reasons, "bad settings")
+	}
+	if u.gouging > 0 {
+		reasons = append(reasons, "is price gouging")
+	}
+	if u.notannounced > 0 {
+		reasons = append(reasons, "is not announced")
+	}
+	if u.nopricetable > 0 {
+		reasons = append(reasons, "has no pricetable")
+	}
+	if u.unknown > 0 {
+		reasons = append(reasons, "for unknown reasons")
+	}
+	if len(reasons) == 0 {
+		return "host is usable"
+	}
+	return fmt.Sprintf("host is unusable because it is: %v", strings.Join(reasons, ", "))
+}
+
+func (u *unusableHostResult) merge(other unusableHostResult) {
+	u.blocked += other.blocked
+	u.offline += other.offline
+	u.lowscore += other.lowscore
+	u.redundantip += other.redundantip
+	u.badsettings += other.badsettings
+	u.gouging += other.gouging
+	u.notannounced += other.notannounced
+	u.nopricetable += other.nopricetable
+	u.unknown += other.unknown
+}
+
+func (u *unusableHostResult) keysAndValues() []interface{} {
+	values := []interface{}{
+		"blocked", u.blocked,
+		"offline", u.offline,
+		"lowscore", u.lowscore,
+		"redundantip", u.redundantip,
+		"badsettings", u.badsettings,
+		"gouging", u.gouging,
+		"notannounced", u.notannounced,
+		"nopricetable", u.nopricetable,
+		"unknown", u.unknown,
+	}
+	for i := 0; i < len(values); i += 2 {
+		if values[i+1].(uint64) == 0 {
+			values = append(values[:i], values[i+2:]...)
+			i -= 2
+		}
+	}
+	return values
 }
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency, ignoreBlockHeight bool) (bool, []error) {
-	var reasons []error
+func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency, ignoreBlockHeight bool) (bool, unusableHostResult) {
+	var errs []error
 
 	if !h.IsOnline() {
-		reasons = append(reasons, errHostOffline)
+		errs = append(errs, errHostOffline)
 	}
 	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
-		reasons = append(reasons, errHostRedundantIP)
+		errs = append(errs, errHostRedundantIP)
 	}
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
-		reasons = append(reasons, fmt.Errorf("%w: %v", errHostBadSettings, reason))
+		errs = append(errs, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if h.PriceTable == nil {
-		reasons = append(reasons, errHostNoPriceTable)
+		errs = append(errs, errHostNoPriceTable)
 	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, h.PriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
-		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
+		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
 	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
-		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
+		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
 	}
 
 	// sanity check - should never happen but this would cause a zero score
 	if h.NetAddress == "" {
-		reasons = append(reasons, errHostNotAnnounced)
+		errs = append(errs, errHostNotAnnounced)
 	}
-	return len(reasons) == 0, reasons
+	return len(errs) == 0, newUnusableHostResult(errs)
 }
 
 // isUsableContract returns whether the given contract is usable and whether it
