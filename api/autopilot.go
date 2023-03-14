@@ -34,11 +34,11 @@ type (
 	}
 
 	HostHandlerGET struct {
-		ScoreBreakdown  HostScoreBreakdown
-		Score           float64     `json:"score"`
-		Usable          bool        `json:"usable"`
-		UnusableReasons []string    `json:"unusableReasons"`
-		Host            hostdb.Host `json:"host"`
+		ScoreBreakdown  HostScoreBreakdown `json:"scoreBreakdown"`
+		Score           float64            `json:"score"`
+		Usable          bool               `json:"usable"`
+		UnusableReasons []string           `json:"unusableReasons"`
+		Host            hostdb.Host        `json:"host"`
 	}
 
 	HostScoreBreakdown struct {
