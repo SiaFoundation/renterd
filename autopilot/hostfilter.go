@@ -112,7 +112,7 @@ func (u unusableHostResult) String() string {
 	if u.unknown > 0 {
 		reasons = append(reasons, "for unknown reasons")
 	}
-	return strings.Join(reasons, ", ")
+	return strings.Join(reasons, ",")
 }
 
 func (u *unusableHostResult) merge(other unusableHostResult) {
