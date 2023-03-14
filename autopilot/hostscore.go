@@ -288,16 +288,21 @@ func contractPriceForScore(h hostdb.Host) types.Currency {
 	return cp
 }
 
+func bytesToSectors(bytes uint64) uint64 {
+	numSectors := bytes / rhpv2.SectorSize
+	if bytes%rhpv2.SectorSize != 0 {
+		numSectors++
+	}
+	return numSectors
+}
+
 func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
 	uploadSectorCostRHPv2, _ := rhpv2.RPCAppendCost(*h.Settings, cfg.Contracts.Period)
 
 	asc := h.PriceTable.AppendSectorCost(cfg.Contracts.Period)
 	uploadSectorCostRHPv3, _ := asc.Total()
 
-	numSectors := bytes / rhpv2.SectorSize
-	if bytes%rhpv2.SectorSize != 0 {
-		numSectors++
-	}
+	numSectors := bytesToSectors(bytes)
 	if uploadSectorCostRHPv2.Cmp(uploadSectorCostRHPv3) > 0 {
 		return uploadSectorCostRHPv2.Mul64(numSectors)
 	}
@@ -306,13 +311,10 @@ func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) ty
 
 func downloadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
 	downloadSectorCostRHPv2 := rhpv2.RPCReadCost(*h.Settings, []rhpv2.RPCReadRequestSection{{Offset: 0, Length: rhpv2.SectorSize}})
-	asc := h.PriceTable.ReadSectorCost(rhpv2.SectorSize)
-	downloadSectorCostRHPv3, _ := asc.Total()
+	rsc := h.PriceTable.ReadSectorCost(rhpv2.SectorSize)
+	downloadSectorCostRHPv3, _ := rsc.Total()
 
-	numSectors := bytes / rhpv2.SectorSize
-	if bytes%rhpv2.SectorSize != 0 {
-		numSectors++
-	}
+	numSectors := bytesToSectors(bytes)
 	if downloadSectorCostRHPv2.Cmp(downloadSectorCostRHPv3) > 0 {
 		return downloadSectorCostRHPv2.Mul64(numSectors)
 	}
@@ -325,10 +327,7 @@ func storageCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) t
 	asc := h.PriceTable.AppendSectorCost(cfg.Contracts.Period)
 	storeSectorCostRHPv3 := asc.Storage
 
-	numSectors := bytes / rhpv2.SectorSize
-	if bytes%rhpv2.SectorSize != 0 {
-		numSectors++
-	}
+	numSectors := bytesToSectors(bytes)
 	if storeSectorCostRHPv2.Cmp(storeSectorCostRHPv3) > 0 {
 		return storeSectorCostRHPv2.Mul64(numSectors)
 	}
@@ -336,9 +335,6 @@ func storageCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) t
 }
 
 func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
-	// TODO: if we ever stop assuming that certain prices in the pricetable are
-	// always set to 1H we should account for those fields here as well.
-
 	// compute how much data we upload, download and store.
 	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
 	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))
@@ -358,7 +354,7 @@ func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedu
 		Mul64(39).
 		Div64(1000)
 
-	// add it all up. We multiple the contract price here since we might refresh
+	// add it all up. We multiply the contract price here since we might refresh
 	// a contract multiple times.
 	return hostContractPrice.Mul64(3).
 		Add(hostUploadCost).
