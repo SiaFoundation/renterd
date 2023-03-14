@@ -231,9 +231,9 @@ type Bus interface {
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(ctx context.Context, key string) (object.Object, []string, error)
-	AddObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-	DeleteObject(ctx context.Context, key string) error
+	Object(ctx context.Context, path string) (object.Object, []string, error)
+	AddObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	DeleteObject(ctx context.Context, path string) error
 
 	Accounts(ctx context.Context, owner string) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
@@ -758,20 +758,23 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 }
 
-func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
+func (w *worker) objectsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 	jc.Custom(nil, []string{})
 
-	key := strings.TrimPrefix(jc.PathParam("key"), "/")
-	o, es, err := w.bus.Object(ctx, key)
-	if jc.Check("couldn't get object or entries", err) != nil {
+	path := strings.TrimPrefix(jc.PathParam("path"), "/")
+	obj, entries, err := w.bus.Object(ctx, path)
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't get object or entries", err) != nil {
 		return
 	}
-	if len(es) > 0 {
-		jc.Encode(es)
+	if len(entries) > 0 {
+		jc.Encode(entries)
 		return
 	}
-	if len(o.Slabs) == 0 {
+	if len(obj.Slabs) == 0 {
 		jc.Error(errors.New("object has no data"), http.StatusInternalServerError)
 		return
 	}
@@ -801,25 +804,25 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	// Read call. We can improve on this to some degree by buffering, but
 	// without knowing the exact ranges being requested, this will always be
 	// suboptimal. Thus, sadly, we have to roll our own range support.
-	offset, length, err := parseRange(jc.Request.Header.Get("Range"), o.Size())
+	offset, length, err := parseRange(jc.Request.Header.Get("Range"), obj.Size())
 	if err != nil {
 		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
-	if length < o.Size() {
+	if length < obj.Size() {
 		jc.ResponseWriter.WriteHeader(http.StatusPartialContent)
-		jc.ResponseWriter.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, o.Size()))
+		jc.ResponseWriter.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, obj.Size()))
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 
 	// keep track of slow hosts so we can avoid them in consecutive slab uploads
 	slow := make(map[types.PublicKey]int)
 
-	cw := o.Key.Decrypt(jc.ResponseWriter, offset)
-	for i, ss := range slabsForDownload(o.Slabs, offset, length) {
+	cw := obj.Key.Decrypt(jc.ResponseWriter, offset)
+	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
 		contracts, err := w.bus.ContractsForSlab(ctx, ss.Shards, dp.ContractSet)
 		if err != nil {
-			w.logger.Errorf("couldn't fetch contracts for object %v slab %d, err: %v", key, i, err)
+			w.logger.Errorf("couldn't fetch contracts for object '%v' slab %d, err: %v", path, i, err)
 			if i == 0 {
 				jc.Error(err, http.StatusInternalServerError)
 			}
@@ -828,7 +831,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 
 		if len(contracts) < int(ss.MinShards) {
 			err = fmt.Errorf("not enough contracts to download the slab, %d<%d", len(contracts), ss.MinShards)
-			w.logger.Errorf("couldn't download object %v slab %d, err: %v", key, i, err)
+			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
 			if i == 0 {
 				jc.Error(err, http.StatusInternalServerError)
 			}
@@ -848,7 +851,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 			slow[contracts[h].HostKey]++
 		}
 		if err != nil {
-			w.logger.Errorf("couldn't download object %v slab %d, err: %v", key, i, err)
+			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
 			if i == 0 {
 				jc.Error(err, http.StatusInternalServerError)
 			}
@@ -857,7 +860,7 @@ func (w *worker) objectsKeyHandlerGET(jc jape.Context) {
 	}
 }
 
-func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
+func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
 
@@ -951,14 +954,14 @@ func (w *worker) objectsKeyHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	key := strings.TrimPrefix(jc.PathParam("key"), "/")
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, key, o, usedContracts)) != nil {
+	path := strings.TrimPrefix(jc.PathParam("path"), "/")
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, o, usedContracts)) != nil {
 		return
 	}
 }
 
-func (w *worker) objectsKeyHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("key")))
+func (w *worker) objectsHandlerDELETE(jc jape.Context) {
+	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path")))
 }
 
 func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
@@ -1087,9 +1090,9 @@ func (w *worker) Handler() http.Handler {
 
 		"POST   /slab/migrate": w.slabMigrateHandler,
 
-		"GET    /objects/*key": w.objectsKeyHandlerGET,
-		"PUT    /objects/*key": w.objectsKeyHandlerPUT,
-		"DELETE /objects/*key": w.objectsKeyHandlerDELETE,
+		"GET    /objects/*path": w.objectsHandlerGET,
+		"PUT    /objects/*path": w.objectsHandlerPUT,
+		"DELETE /objects/*path": w.objectsHandlerDELETE,
 	}))
 }
 

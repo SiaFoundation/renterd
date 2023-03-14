@@ -93,11 +93,11 @@ type (
 		RemoveContract(ctx context.Context, id types.FileContractID) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
-		Object(ctx context.Context, key string) (object.Object, error)
-		Objects(ctx context.Context, key, prefix string, offset, limit int) ([]string, error)
-		SearchObjects(ctx context.Context, key string, offset, limit int) ([]string, error)
-		UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-		RemoveObject(ctx context.Context, key string) error
+		Object(ctx context.Context, path string) (object.Object, error)
+		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]string, error)
+		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]string, error)
+		UpdateObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		RemoveObject(ctx context.Context, path string) error
 
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
@@ -646,36 +646,62 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 	jc.Encode(keys)
 }
 
-func (b *bus) objectsKeyHandlerGET(jc jape.Context) {
-	ctx := jc.Request.Context()
-	if strings.HasSuffix(jc.PathParam("key"), "/") {
-		offset := 0
-		limit := -1
-		prefix := ""
-		if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("prefix", &prefix) != nil {
-			return
-		}
-		keys, err := b.ms.Objects(ctx, jc.PathParam("key"), prefix, offset, limit)
-		if jc.Check("couldn't list objects", err) == nil {
-			jc.Encode(api.ObjectsResponse{Entries: keys})
-		}
+func (b *bus) objectsHandlerGET(jc jape.Context) {
+	path := jc.PathParam("path")
+	if strings.HasSuffix(path, "/") {
+		b.objectEntriesHandlerGET(jc, path)
 		return
 	}
-	o, err := b.ms.Object(ctx, jc.PathParam("key"))
-	if jc.Check("couldn't load object", err) == nil {
-		jc.Encode(api.ObjectsResponse{Object: &o})
+
+	o, err := b.ms.Object(jc.Request.Context(), path)
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
 	}
+	if jc.Check("couldn't load object", err) != nil {
+		return
+	}
+	jc.Encode(api.ObjectsResponse{Object: &o})
 }
 
-func (b *bus) objectsKeyHandlerPUT(jc jape.Context) {
+func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	}
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+	var prefix string
+	if jc.DecodeForm("prefix", &prefix) != nil {
+		return
+	}
+
+	// look for object entries
+	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit)
+	if jc.Check("couldn't list object entries", err) != nil {
+		return
+	}
+
+	// return a 404 if no entries were found
+	if len(entries) == 0 {
+		jc.Error(fmt.Errorf("no entries found for object at '%v'", path), http.StatusNotFound)
+		return
+	}
+
+	jc.Encode(api.ObjectsResponse{Entries: entries})
+}
+
+func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("key"), aor.Object, aor.UsedContracts))
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.Object, aor.UsedContracts))
 	}
 }
 
-func (b *bus) objectsKeyHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("key")))
+func (b *bus) objectsHandlerDELETE(jc jape.Context) {
+	jc.Check("couldn't delete object", b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path")))
 }
 
 func (b *bus) slabHandlerPUT(jc jape.Context) {
@@ -725,24 +751,6 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
 	} else if jc.Decode(&value) == nil {
 		jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, value))
-	}
-}
-
-func (b *bus) setGougingSettings(ctx context.Context, gs api.GougingSettings) error {
-	if js, err := json.Marshal(gs); err != nil {
-		panic(err)
-	} else {
-		return b.ss.UpdateSetting(ctx, SettingGouging, string(js))
-	}
-}
-
-func (b *bus) setRedundancySettings(ctx context.Context, rs api.RedundancySettings) error {
-	if err := rs.Validate(); err != nil {
-		return err
-	} else if js, err := json.Marshal(rs); err != nil {
-		panic(err)
-	} else {
-		return b.ss.UpdateSetting(ctx, SettingRedundancy, string(js))
 	}
 }
 
@@ -996,9 +1004,9 @@ func (b *bus) Handler() http.Handler {
 		"POST /search/hosts":  b.searchHostsHandlerPOST,
 		"GET /search/objects": b.searchObjectsHandlerGET,
 
-		"GET    /objects/*key": b.objectsKeyHandlerGET,
-		"PUT    /objects/*key": b.objectsKeyHandlerPUT,
-		"DELETE /objects/*key": b.objectsKeyHandlerDELETE,
+		"GET    /objects/*path": b.objectsHandlerGET,
+		"PUT    /objects/*path": b.objectsHandlerPUT,
+		"DELETE /objects/*path": b.objectsHandlerDELETE,
 
 		"POST   /slabs/migration": b.slabsMigrationHandlerPOST,
 		"PUT    /slab":            b.slabHandlerPUT,

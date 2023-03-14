@@ -117,11 +117,11 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
 	return c.c.WithContext(ctx).POST("/slab/migrate", slab, nil)
 }
 
-// UploadObject uploads the data in r, creating an object with the given name.
-func (c *Client) UploadObject(ctx context.Context, r io.Reader, name string) (err error) {
-	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", name), []byte{}, nil)
+// UploadObject uploads the data in r, creating an object at the given path.
+func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string) (err error) {
+	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, name), r)
+	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), r)
 	if err != nil {
 		panic(err)
 	}
@@ -178,9 +178,9 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (
 	return
 }
 
-// DeleteObject deletes the object with the given name.
-func (c *Client) DeleteObject(ctx context.Context, name string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", name))
+// DeleteObject deletes the object at the given path.
+func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
 	return
 }
 
