@@ -3,12 +3,14 @@ package testing
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -506,4 +508,61 @@ func newTestLogger() *zap.Logger {
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	)
+}
+
+func TestParallelUpload(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(int(rs.TotalShards)); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare two files, a small one and a large one
+
+	upload := func() error {
+		t.Helper()
+		// prepare some data - make sure it's more than one sector
+		data := make([]byte, rhpv2.SectorSize)
+		if _, err := frand.Read(data); err != nil {
+			return err
+		}
+
+		// upload the data
+		name := fmt.Sprintf("data_%v", hex.EncodeToString(data[:16]))
+		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Upload in parallel
+	var wg sync.WaitGroup
+	for i := 0; i < 1; i++ {
+		wg.Add(1)
+		go func() {
+			if err := upload(); err != nil {
+				t.Error(err)
+				return
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }
