@@ -684,8 +684,8 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 		return
 	}
 
-	// return a 404 if no entries were found and no prefix was specified
-	if len(entries) == 0 && prefix == "" {
+	// return a 404 if no entries were found
+	if len(entries) == 0 {
 		jc.Error(fmt.Errorf("no entries found for object at '%v'", path), http.StatusNotFound)
 		return
 	}
