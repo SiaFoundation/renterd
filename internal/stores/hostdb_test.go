@@ -12,6 +12,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
@@ -369,19 +370,19 @@ func TestSearchHosts(t *testing.T) {
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
 	// Search by address.
-	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "1", nil); err != nil || len(hosts) != 1 {
+	if hosts, err := db.SearchHosts(ctx, 0, -1, api.HostFilterModeAll, "1", nil); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
 	// Filter by key.
-	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 2 {
+	if hosts, err := db.SearchHosts(ctx, 0, -1, api.HostFilterModeAll, "", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
 	// Filter by address and key.
-	if hosts, err := db.SearchHosts(ctx, 0, -1, hostFilterModeAll, "1", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 1 {
+	if hosts, err := db.SearchHosts(ctx, 0, -1, api.HostFilterModeAll, "1", []types.PublicKey{hk1, hk2}); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
 	// Filter by key and limit results
-	if hosts, err := db.SearchHosts(ctx, 0, 1, hostFilterModeAll, "3", []types.PublicKey{hk3}); err != nil || len(hosts) != 1 {
+	if hosts, err := db.SearchHosts(ctx, 0, 1, api.HostFilterModeAll, "3", []types.PublicKey{hk3}); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
 }
@@ -805,21 +806,21 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	assertSearch := func(total, allowed, blocked int) error {
 		t.Helper()
-		hosts, err := hdb.SearchHosts(context.Background(), 0, -1, hostFilterModeAll, "", nil)
+		hosts, err := hdb.SearchHosts(context.Background(), 0, -1, api.HostFilterModeAll, "", nil)
 		if err != nil {
 			return err
 		}
 		if len(hosts) != total {
 			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
 		}
-		hosts, err = hdb.SearchHosts(context.Background(), 0, -1, hostFilterModeAllowed, "", nil)
+		hosts, err = hdb.SearchHosts(context.Background(), 0, -1, api.HostFilterModeAllowed, "", nil)
 		if err != nil {
 			return err
 		}
 		if len(hosts) != allowed {
 			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
 		}
-		hosts, err = hdb.SearchHosts(context.Background(), 0, -1, hostFilterModeBlocked, "", nil)
+		hosts, err = hdb.SearchHosts(context.Background(), 0, -1, api.HostFilterModeBlocked, "", nil)
 		if err != nil {
 			return err
 		}

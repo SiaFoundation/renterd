@@ -94,7 +94,6 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
 		DisableNestedTransaction: true,   // disable nesting transactions
-		PrepareStmt:              true,   // caches queries as prepared statements
 		Logger:                   logger, // custom logger
 	})
 	if err != nil {

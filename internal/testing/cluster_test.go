@@ -18,6 +18,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -180,6 +181,54 @@ func TestNewTestCluster(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Get host info for every host.
+	hosts, err := cluster.Bus.Hosts(context.Background(), 0, math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range hosts {
+		hi, err := cluster.Autopilot.HostInfo(host.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hi.ScoreBreakdown.Score() == 0 {
+			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+		}
+		if hi.Score == 0 {
+			t.Fatal("score shouldn't be 0")
+		}
+		if !hi.Usable {
+			t.Fatal("host should be usable")
+		}
+		if len(hi.UnusableReasons) != 0 {
+			t.Fatal("usable hosts don't have any reasons set")
+		}
+		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+			t.Fatal("host wasn't set")
+		}
+	}
+	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), 0, -1, api.HostFilterModeAll, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hi := range hostInfos {
+		if hi.ScoreBreakdown.Score() == 0 {
+			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+		}
+		if hi.Score == 0 {
+			t.Fatal("score shouldn't be 0")
+		}
+		if !hi.Usable {
+			t.Fatal("host should be usable")
+		}
+		if len(hi.UnusableReasons) != 0 {
+			t.Fatal("usable hosts don't have any reasons set")
+		}
+		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+			t.Fatal("host wasn't set")
+		}
 	}
 }
 

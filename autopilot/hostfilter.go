@@ -61,7 +61,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		reasons = append(reasons, errHostNoPriceTable)
 	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, h.PriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
 		reasons = append(reasons, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
-	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()); score < minScore {
+	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()).Score(); score < minScore {
 		reasons = append(reasons, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
 	}
 
