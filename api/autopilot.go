@@ -37,7 +37,7 @@ type (
 		ScoreBreakdown  HostScoreBreakdown `json:"scoreBreakdown"`
 		Score           float64            `json:"score"`
 		Usable          bool               `json:"usable"`
-		UnusableReasons []string           `json:"unusableReasons"`
+		UnusableReasons string             `json:"unusableReasons"`
 		Host            hostdb.Host        `json:"host"`
 	}
 
