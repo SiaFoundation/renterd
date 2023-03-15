@@ -605,11 +605,11 @@ func TestParallelUpload(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			if err := upload(); err != nil {
 				t.Error(err)
 				return
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()
