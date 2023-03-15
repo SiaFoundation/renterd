@@ -559,6 +559,7 @@ func newTestLogger() *zap.Logger {
 	)
 }
 
+// TestParallelUpload tests uploading multiple files in parallel.
 func TestParallelUpload(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
@@ -583,8 +584,6 @@ func TestParallelUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// prepare two files, a small one and a large one
-
 	upload := func() error {
 		t.Helper()
 		// prepare some data - make sure it's more than one sector
@@ -603,7 +602,7 @@ func TestParallelUpload(t *testing.T) {
 
 	// Upload in parallel
 	var wg sync.WaitGroup
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go func() {
 			if err := upload(); err != nil {
