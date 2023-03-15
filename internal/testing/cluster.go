@@ -101,6 +101,7 @@ type TestCluster struct {
 	miner  *node.Miner
 	dbName string
 	dir    string
+	wk     types.PrivateKey
 	wg     sync.WaitGroup
 }
 
@@ -126,12 +127,13 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
-	return newTestClusterWithFunding(dir, "", true, logger)
+	wk := types.GeneratePrivateKey()
+	return newTestClusterWithFunding(dir, "", true, wk, logger)
 }
 
 // newTestClusterWithFunding creates a new cluster without hosts that is funded
 // by mining multiple blocks if 'funding' is set.
-func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Logger) (*TestCluster, error) {
+func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.PrivateKey, logger *zap.Logger) (*TestCluster, error) {
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
 	var dialector gorm.Dialector
@@ -149,9 +151,6 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 		}
 		dialector = stores.NewMySQLConnection(user, password, uri, dbName)
 	}
-
-	// Use shared wallet key.
-	wk := types.GeneratePrivateKey()
 
 	// Prepare individual dirs.
 	busDir := filepath.Join(dir, "bus")
@@ -251,6 +250,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, logger *zap.Log
 		dir:    dir,
 		dbName: dbName,
 		miner:  miner,
+		wk:     wk,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,

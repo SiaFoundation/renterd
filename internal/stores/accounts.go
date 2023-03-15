@@ -72,11 +72,12 @@ func (s *SQLStore) SaveAccounts(ctx context.Context, accounts []api.Account) err
 	dbAccounts := make([]dbAccount, len(accounts))
 	for i, acc := range accounts {
 		dbAccounts[i] = dbAccount{
-			Owner:     acc.Owner,
-			AccountID: publicKey(acc.ID),
-			Host:      publicKey(acc.Host),
-			Balance:   (*balance)(acc.Balance),
-			Drift:     (*balance)(acc.Drift),
+			Owner:        acc.Owner,
+			AccountID:    publicKey(acc.ID),
+			Host:         publicKey(acc.Host),
+			Balance:      (*balance)(acc.Balance),
+			Drift:        (*balance)(acc.Drift),
+			RequiresSync: acc.RequiresSync,
 		}
 	}
 	return s.db.Clauses(clause.OnConflict{

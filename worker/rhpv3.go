@@ -277,13 +277,14 @@ func (a *accounts) tryInitAccounts() error {
 	}
 	for _, acc := range accounts {
 		a.accounts[rhpv3.Account(acc.ID)] = &account{
-			bus:     a.store,
-			id:      rhpv3.Account(acc.ID),
-			key:     a.deriveAccountKey(acc.Host),
-			host:    acc.Host,
-			owner:   acc.Owner,
-			balance: acc.Balance,
-			drift:   acc.Drift,
+			bus:          a.store,
+			id:           rhpv3.Account(acc.ID),
+			key:          a.deriveAccountKey(acc.Host),
+			host:         acc.Host,
+			owner:        acc.Owner,
+			balance:      acc.Balance,
+			drift:        acc.Drift,
+			requiresSync: acc.RequiresSync,
 		}
 	}
 	return nil
