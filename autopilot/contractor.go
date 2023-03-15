@@ -114,13 +114,13 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	f := newIPFilter(c.logger)
 
 	sb := hostScore(cfg, host.Host, 0, 0)
-	isUsable, result := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
+	isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
 	return api.HostHandlerGET{
 		Host:            host.Host,
 		Score:           sb.Score(),
 		ScoreBreakdown:  sb,
 		Usable:          isUsable,
-		UnusableReasons: result.String(),
+		UnusableReasons: unusableResult.reasons(),
 	}, nil
 }
 
@@ -160,13 +160,13 @@ func (c *contractor) HostInfos(ctx context.Context, offset, limit int, filterMod
 	for _, host := range hosts {
 		storedData := storedData[host.PublicKey]
 		sb := hostScore(cfg, host, 0, 0)
-		isUsable, result := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData, fee, true)
+		isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData, fee, true)
 		hostInfos = append(hostInfos, api.HostHandlerGET{
 			Host:            host,
 			Score:           sb.Score(),
 			ScoreBreakdown:  sb,
 			Usable:          isUsable,
-			UnusableReasons: result.String(),
+			UnusableReasons: unusableResult.reasons(),
 		})
 	}
 	return hostInfos, nil
@@ -431,9 +431,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable = &pt
 
 		// decide whether the host is still good
-		usable, result := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
+		usable, unusableResult := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
 		if !usable {
-			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", result.String())
+			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", unusableResult.reasons())
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}

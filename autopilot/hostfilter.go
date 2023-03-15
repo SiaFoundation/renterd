@@ -84,6 +84,10 @@ func newUnusableHostResult(errs []error) (u unusableHostResult) {
 }
 
 func (u unusableHostResult) String() string {
+	return fmt.Sprintf("host is unusable because of the following reasons: %v", strings.Join(u.reasons(), ", "))
+}
+
+func (u unusableHostResult) reasons() []string {
 	var reasons []string
 	if u.blocked > 0 {
 		reasons = append(reasons, errHostBlocked.Error())
@@ -110,9 +114,9 @@ func (u unusableHostResult) String() string {
 		reasons = append(reasons, errHostNoPriceTable.Error())
 	}
 	if u.unknown > 0 {
-		reasons = append(reasons, "for unknown reasons")
+		reasons = append(reasons, "unknown")
 	}
-	return strings.Join(reasons, ",")
+	return reasons
 }
 
 func (u *unusableHostResult) merge(other unusableHostResult) {
