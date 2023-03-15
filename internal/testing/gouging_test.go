@@ -82,6 +82,11 @@ func TestGouging(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// wait until accounts are ready and funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
 	// upload and download some data, asserting we have a working contract set
 	data := make([]byte, rhpv2.SectorSize/12)
 	if _, err := frand.Read(data); err != nil {
