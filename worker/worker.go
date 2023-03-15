@@ -657,12 +657,28 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	// Fund account.
 	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, rfr.Amount, &revision)
 
-	// If funding failed due to an exceeded max balance, we sync the account.
+	// If funding failed due to an exceeded max balance, we sync the account and
+	// try funding the account again.
 	if isMaxBalanceExceeded(err) {
+		balanceBeforeSync := account.Balance()
 		err = w.syncAccount(ctx, account, pt, siamuxAddr, rfr.HostKey)
 		if err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 		}
+		balanceAfterSync := account.Balance()
+
+		// Try funding the account again.
+		if balanceAfterSync.Cmp(balanceBeforeSync.Add(rfr.Amount)) < 0 {
+			fundAmount := balanceBeforeSync.Add(rfr.Amount).Sub(balanceAfterSync)
+			if fundAmount.Cmp(rfr.Amount) < 0 {
+				fundAmount = rfr.Amount
+			}
+			err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
+			if err != nil {
+				w.logger.Errorw(fmt.Sprintf("failed to fund account right after a sync: %v", err), "host", rfr.HostKey, "before", balanceBeforeSync, "after", balanceAfterSync, "fund", fundAmount)
+			}
+		}
+
 	}
 	if jc.Check("couldn't fund account", err) != nil {
 		return
