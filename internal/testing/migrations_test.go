@@ -53,7 +53,7 @@ func TestMigrations(t *testing.T) {
 
 	usedHosts := func() []types.PublicKey {
 		t.Helper()
-		obj, _, err := b.Object(context.Background(), "foo")
+		obj, _, err := b.Object(context.Background(), "foo", "", 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -492,7 +492,7 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 
 	// apply prefix
 	if prefix != "" {
-		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
+		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) AS i WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
 	}
 
 	var entries []string
@@ -909,16 +909,16 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	fcid := c.ID()
 
 	// Find host.
-	var hostID uint
+	var host dbHost
 	err := tx.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(c.HostKey())}).
-		Select("id").Scan(&hostID).Error
+		Find(&host).Error
 	if err != nil {
 		return dbContract{}, err
 	}
 
 	// Create contract.
 	contract := dbContract{
-		HostID: hostID,
+		HostID: host.ID,
 
 		ContractCommon: ContractCommon{
 			FCID:        fileContractID(fcid),
@@ -941,6 +941,8 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	if err != nil {
 		return dbContract{}, err
 	}
+	// Populate host.
+	contract.Host = host
 	return contract, nil
 }
 

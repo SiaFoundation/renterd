@@ -233,7 +233,7 @@ type Bus interface {
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(ctx context.Context, path string) (object.Object, []string, error)
+	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []string, error)
 	AddObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string) error
 
@@ -763,15 +763,29 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 	jc.Custom(nil, []string{})
 
+	var off int
+	if jc.DecodeForm("offset", &off) != nil {
+		return
+	}
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+	var prefix string
+	if jc.DecodeForm("prefix", &prefix) != nil {
+		return
+	}
+
 	path := strings.TrimPrefix(jc.PathParam("path"), "/")
-	obj, entries, err := w.bus.Object(ctx, path)
-	if errors.Is(err, api.ErrObjectNotFound) {
+	obj, entries, err := w.bus.Object(ctx, path, prefix, off, limit)
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("couldn't get object or entries", err) != nil {
 		return
 	}
-	if len(entries) > 0 {
+
+	if strings.HasSuffix(path, "/") {
 		jc.Encode(entries)
 		return
 	}

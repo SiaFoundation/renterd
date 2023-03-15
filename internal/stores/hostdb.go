@@ -510,7 +510,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error) {
+func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -567,7 +567,7 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, offset, limit int, filterMo
 
 // Hosts returns non-blocked hosts at given offset and limit.
 func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
-	return ss.SearchHosts(ctx, offset, limit, api.HostFilterModeAllowed, "", nil)
+	return ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, offset, limit)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {

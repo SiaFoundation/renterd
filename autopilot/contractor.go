@@ -124,8 +124,8 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
-func (c *contractor) HostInfos(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]api.HostHandlerGET, error) {
-	hosts, err := c.ap.bus.SearchHosts(ctx, offset, limit, filterMode, addressContains, keyIn)
+func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerGET, error) {
+	hosts, err := c.ap.bus.SearchHosts(ctx, filterMode, addressContains, keyIn, offset, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
 	}

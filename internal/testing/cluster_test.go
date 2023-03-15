@@ -209,7 +209,7 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("host wasn't set")
 		}
 	}
-	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), 0, -1, api.HostFilterModeAll, "", nil)
+	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,6 +266,45 @@ func TestUploadDownloadBasic(t *testing.T) {
 	// wait for accounts to be funded
 	if _, err := cluster.WaitForAccounts(); err != nil {
 		t.Fatal(err)
+	}
+
+	// upload two files under /foo
+	file1 := make([]byte, rhpv2.SectorSize/12)
+	file2 := make([]byte, rhpv2.SectorSize/12)
+	frand.Read(file1)
+	frand.Read(file2)
+	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "foo/file1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.UploadObject(context.Background(), bytes.NewReader(file2), "foo/file2"); err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch entries with "file" prefix
+	_, entries, err := cluster.Bus.Object(context.Background(), "foo/", "file", 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatal("expected two entry to be returned", len(entries))
+	}
+
+	// fetch entries with "foo" prefix
+	_, entries, err = cluster.Bus.Object(context.Background(), "foo/", "foo", 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatal("expected no entries to be returned", len(entries))
+	}
+
+	// fetch entries from the worker for unexisting path
+	entries, err = cluster.Worker.ObjectEntries(context.Background(), "bar/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatal("expected no entries to be returned", len(entries))
 	}
 
 	// prepare two files, a small one and a large one
@@ -381,7 +420,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 
 			// Should be registered in bus.
-			_, entries, err := cluster.Bus.Object(context.Background(), "")
+			_, entries, err := cluster.Bus.Object(context.Background(), "", "", 0, -1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -413,21 +452,21 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), 0, -1, "")
+	objects, err := cluster.Bus.SearchObjects(context.Background(), "", 0, -1)
 	if err != nil {
 		t.Fatal("should fail")
 	}
-	if len(objects) != 2 {
-		t.Fatalf("should have 2 objects but got %v", len(objects))
+	if len(objects) != 4 {
+		t.Fatalf("should have 4 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "ata")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "ata", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "12288")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "12288", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
