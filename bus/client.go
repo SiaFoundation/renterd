@@ -499,7 +499,7 @@ func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit 
 	values.Set("limit", fmt.Sprint(limit))
 
 	var or api.ObjectsResponse
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s?", path)+values.Encode(), &or)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s?"+values.Encode(), path), &or)
 	if or.Object != nil {
 		o = *or.Object
 	} else {
