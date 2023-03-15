@@ -41,6 +41,7 @@ func (h *lockCandidatePriorityHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = &lockCandidate{}
 	*h = old[0 : n-1]
 	return x
 }
@@ -100,6 +101,7 @@ func (l *contractLock) stopTimer() {
 		default:
 		}
 	}
+	l.wakeupTimer = nil
 }
 
 // Acquire acquires a contract lock for the given id and provided duration. If
