@@ -490,7 +490,7 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 
 	// apply prefix
 	if prefix != "" {
-		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
+		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) AS i WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
 	}
 
 	var entries []string

@@ -44,7 +44,7 @@ type Bus interface {
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
-	SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
+	SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
 	HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
@@ -437,7 +437,7 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	hosts, err := ap.c.HostInfos(jc.Request.Context(), req.Offset, req.Limit, req.FilterMode, req.AddressContains, req.KeyIn)
+	hosts, err := ap.c.HostInfos(jc.Request.Context(), req.FilterMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}

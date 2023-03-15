@@ -469,7 +469,7 @@ func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.Redundancy
 }
 
 // SearchHosts returns all hosts that match certain search criteria.
-func (c *Client) SearchHosts(ctx context.Context, offset, limit int, filterMode string, addressContains string, keyIn []types.PublicKey) (hosts []hostdb.Host, err error) {
+func (c *Client) SearchHosts(ctx context.Context, filterMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (hosts []hostdb.Host, err error) {
 	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
 		Offset:          offset,
 		Limit:           limit,
@@ -481,7 +481,7 @@ func (c *Client) SearchHosts(ctx context.Context, offset, limit int, filterMode 
 }
 
 // SearchObjects returns all objects that contains a sub-string in their key.
-func (c *Client) SearchObjects(ctx context.Context, offset, limit int, key string) (entries []string, err error) {
+func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit int) (entries []string, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
@@ -490,11 +490,16 @@ func (c *Client) SearchObjects(ctx context.Context, offset, limit int, key strin
 	return
 }
 
-// Object returns the object at the given path, or, if path ends in '/', the
-// entries under that path.
-func (c *Client) Object(ctx context.Context, path string) (o object.Object, entries []string, err error) {
+// Object returns the object at the given path with the given prefix, or, if
+// path ends in '/', the entries under that path.
+func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit int) (o object.Object, entries []string, err error) {
+	values := url.Values{}
+	values.Set("prefix", prefix)
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+
 	var or api.ObjectsResponse
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &or)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s?"+values.Encode(), path), &or)
 	if or.Object != nil {
 		o = *or.Object
 	} else {
