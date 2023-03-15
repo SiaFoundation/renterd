@@ -607,6 +607,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
+
 	// Get account for the host.
 	account, err := w.accounts.ForHost(rfr.HostKey)
 	if jc.Check("failed to get account for provided host", err) != nil {
@@ -654,35 +655,31 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		}
 	}
 
+	// Calculate the fund amount
+	balance := account.Balance()
+	if balance.Cmp(rfr.Balance) >= 0 {
+		jc.Error(fmt.Errorf("account balance %v is already greater than or equal to requested balance %v", balance, rfr.Balance), http.StatusBadRequest)
+		return
+	}
+	fundAmount := rfr.Balance.Sub(balance)
+
 	// Fund account.
-	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, rfr.Amount, &revision)
+	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
 
 	// If funding failed due to an exceeded max balance, we sync the account and
 	// try funding the account again.
 	if isMaxBalanceExceeded(err) {
-		balanceBeforeSync := account.Balance()
 		err = w.syncAccount(ctx, account, pt, siamuxAddr, rfr.HostKey)
 		if err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 		}
-		balanceAfterSync := account.Balance()
 
-		// Try funding the account again.
-		expectedBalance := balanceBeforeSync.Add(rfr.Amount)
-		if balanceAfterSync.Cmp(expectedBalance) < 0 {
-			fundAmount := expectedBalance.Sub(balanceAfterSync)
-			if fundAmount.Cmp(rfr.Amount) > 0 {
-				w.logger.Debugw("fund amount exceeded the original fund amount which should never happen",
-					"expectedBalance", expectedBalance,
-					"balanceAfterSync", balanceAfterSync,
-					"fundAmount", rfr.Amount,
-					"newFundAmount", fundAmount,
-				)
-				fundAmount = rfr.Amount // ensure we never fund more than the original fund amount
-			}
+		balance = account.Balance()
+		if balance.Cmp(rfr.Balance) < 0 {
+			fundAmount = rfr.Balance.Sub(balance)
 			err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
 			if err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to fund account right after a sync: %v", err), "host", rfr.HostKey, "before", balanceBeforeSync, "after", balanceAfterSync, "fund", fundAmount)
+				w.logger.Errorw(fmt.Sprintf("failed to fund account right after a sync: %v", err), "host", rfr.HostKey, "balance", balance, "requested", rfr.Balance, "fund", fundAmount)
 			}
 		}
 	}

@@ -17,7 +17,7 @@ import (
 
 var (
 	minBalance  = types.Siacoins(1).Div64(2).Big()
-	maxBalance  = types.Siacoins(1).Big()
+	maxBalance  = types.Siacoins(1)
 	maxNegDrift = new(big.Int).Neg(types.Siacoins(10).Big())
 )
 
@@ -172,29 +172,19 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 			if account.Balance.Cmp(minBalance) >= 0 {
 				return nil // nothing to do
 			}
-			fundAmt := new(big.Int).Sub(maxBalance, account.Balance)
 
-			fundCurrency, err := types.ParseCurrency(fundAmt.String())
-			if err != nil {
-				a.logger.Errorw(fmt.Sprintf("failed to parse fundAmt as currency: %s", err),
-					"account", account.ID,
-					"host", contract.HostKey,
-					"balance", account.Balance)
-				return err
-			}
-
-			if err := w.RHPFund(ctx, contract.ID, contract.HostKey, fundCurrency); err != nil {
+			if err := w.RHPFund(ctx, contract.ID, contract.HostKey, maxBalance); err != nil {
 				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
 					"account", account.ID,
 					"host", contract.HostKey,
 					"balance", account.Balance,
-					"fundAmt", fundCurrency.String())
+					"expected", maxBalance)
 				return err
 			}
 			a.logger.Infow("Successfully funded account",
 				"account", account.ID,
 				"host", contract.HostKey,
-				"fundAmt", fundCurrency.String())
+				"balance", maxBalance)
 			return nil
 		}(contract)
 	}

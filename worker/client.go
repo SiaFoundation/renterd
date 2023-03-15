@@ -69,11 +69,11 @@ func (c *Client) RHPRenew(ctx context.Context, fcid types.FileContractID, endHei
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error) {
+func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, balance types.Currency) (err error) {
 	req := api.RHPFundRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
-		Amount:     amount,
+		Balance:    balance,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/fund", req, nil)
 	return
