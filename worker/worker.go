@@ -668,8 +668,9 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		balanceAfterSync := account.Balance()
 
 		// Try funding the account again.
-		if balanceAfterSync.Cmp(balanceBeforeSync.Add(rfr.Amount)) < 0 {
-			fundAmount := balanceBeforeSync.Add(rfr.Amount).Sub(balanceAfterSync)
+		expectedBalance := balanceBeforeSync.Add(rfr.Amount)
+		if balanceAfterSync.Cmp(expectedBalance) < 0 {
+			fundAmount := expectedBalance.Sub(balanceAfterSync)
 			if fundAmount.Cmp(rfr.Amount) < 0 {
 				fundAmount = rfr.Amount
 			}
