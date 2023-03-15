@@ -26,7 +26,7 @@ import (
 const (
 	// contractHostPriceTableTimeout is the amount of time we wait to receive a
 	// price table from the host
-	contractHostPriceTableTimeout = 10 * time.Second
+	contractHostPriceTableTimeout = 30 * time.Second
 
 	// contractHostTimeout is the amount of time we wait to receive the latest
 	// revision from the host
@@ -65,8 +65,10 @@ type (
 
 		maintenanceTxnID types.TransactionID
 
-		mu         sync.Mutex
-		currPeriod uint64
+		mu               sync.Mutex
+		cachedDataStored map[types.PublicKey]uint64
+		cachedMinScore   float64
+		currPeriod       uint64
 	}
 
 	contractInfo struct {
@@ -80,6 +82,94 @@ func newContractor(ap *Autopilot) *contractor {
 		ap:     ap,
 		logger: ap.logger.Named("contractor"),
 	}
+}
+
+func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerGET, error) {
+	host, err := c.ap.bus.Host(ctx, hostKey)
+	if err != nil {
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+	}
+	gs, err := c.ap.bus.GougingSettings(ctx)
+	if err != nil {
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+	}
+	rs, err := c.ap.bus.RedundancySettings(ctx)
+	if err != nil {
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+	}
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+	}
+	fee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+	}
+	c.mu.Lock()
+	storedData := c.cachedDataStored[hostKey]
+	minScore := c.cachedMinScore
+	c.mu.Unlock()
+
+	cfg := c.ap.Config()
+	f := newIPFilter(c.logger)
+
+	sb := hostScore(cfg, host.Host, 0, 0)
+	isUsable, result := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
+	return api.HostHandlerGET{
+		Host:            host.Host,
+		Score:           sb.Score(),
+		ScoreBreakdown:  sb,
+		Usable:          isUsable,
+		UnusableReasons: result.String(),
+	}, nil
+}
+
+func (c *contractor) HostInfos(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]api.HostHandlerGET, error) {
+	hosts, err := c.ap.bus.SearchHosts(ctx, offset, limit, filterMode, addressContains, keyIn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+	}
+	gs, err := c.ap.bus.GougingSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+	}
+	rs, err := c.ap.bus.RedundancySettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+	}
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+	}
+	fee, err := c.ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+	}
+	cfg := c.ap.Config()
+	f := newIPFilter(c.logger)
+
+	c.mu.Lock()
+	storedData := make(map[types.PublicKey]uint64)
+	for _, host := range hosts {
+		storedData[host.PublicKey] = c.cachedDataStored[host.PublicKey]
+	}
+	minScore := c.cachedMinScore
+	c.mu.Unlock()
+
+	var hostInfos []api.HostHandlerGET
+	for _, host := range hosts {
+		storedData := storedData[host.PublicKey]
+		sb := hostScore(cfg, host, 0, 0)
+		isUsable, result := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData, fee, true)
+		hostInfos = append(hostInfos, api.HostHandlerGET{
+			Host:            host,
+			Score:           sb.Score(),
+			ScoreBreakdown:  sb,
+			Usable:          isUsable,
+			UnusableReasons: result.String(),
+		})
+	}
+	return hostInfos, nil
 }
 
 func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) error {
@@ -141,6 +231,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
+
+	// update cache.
+	c.mu.Lock()
+	c.cachedDataStored = storedData
+	c.cachedMinScore = minScore
+	c.mu.Unlock()
 
 	// run checks
 	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, active, minScore)
@@ -335,9 +431,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable = &pt
 
 		// decide whether the host is still good
-		usable, reasons := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
+		usable, result := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
 		if !usable {
-			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errStr(joinErrors(reasons)))
+			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", result.String())
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
@@ -436,15 +532,9 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	// convenience variables
 	state := c.ap.state
 
-	// create a map of used hosts
-	used := make(map[types.PublicKey]struct{})
-	for _, contract := range active {
-		used[contract.HostKey()] = struct{}{}
-	}
-
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, err := c.candidateHosts(ctx, w, hosts, used, make(map[types.PublicKey]uint64), wanted, minScore)
+	candidates, err := c.candidateHosts(ctx, w, hosts, active, make(map[types.PublicKey]uint64), wanted, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -473,7 +563,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
 		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &pt, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
-			c.logger.Error("candidate host became unusable", "host", host, "reasons", reasons)
+			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
 			continue
 		}
 
@@ -697,7 +787,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// worthwhile.
 	numContracts := c.ap.state.cfg.Contracts.Amount
 	buffer := 50
-	hosts, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	hosts, err := c.candidateHosts(ctx, w, hosts, nil, storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
@@ -710,7 +800,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// good for upload.
 	lowestScore := math.MaxFloat64
 	for i := 0; i < len(hosts); i++ {
-		score := hostScore(c.ap.state.cfg, hosts[i], 0, c.ap.state.rs.Redundancy())
+		score := hostScore(c.ap.state.cfg, hosts[i], 0, c.ap.state.rs.Redundancy()).Score()
 		if score < lowestScore {
 			lowestScore = score
 		}
@@ -718,7 +808,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	return lowestScore / minAllowedScoreLeeway, nil
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, exclude map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
+func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, active []api.Contract, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
 
 	// nothing to do
@@ -728,45 +818,59 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 	state := c.ap.state
 
-	// create IP filter and add all excluded hosts to it.
-	ipFilter := newIPFilter(c.logger)
-	for _, h := range hosts {
-		if _, exclude := exclude[h.PublicKey]; exclude {
-			ipFilter.isRedundantIP(h)
-			continue
-		}
+	// create a map of used hosts
+	used := make(map[types.PublicKey]struct{})
+	for _, contract := range active {
+		used[contract.HostKey()] = struct{}{}
 	}
 
-	c.logger.Debugf("found %d candidate hosts", len(hosts)-len(exclude))
+	// create an IP filter
+	ipFilter := newIPFilter(c.logger)
 
-	// collect scores for all usable hosts
-	start := time.Now()
-	scores := make([]float64, 0, len(hosts))
-	scored := make([]hostdb.Host, 0, len(hosts))
-	var excluded, unscanned, unusable, zeros int
+	// create list of candidate hosts
+	candidates := hosts[:0]
+	var excluded, unscanned int
 	for _, h := range hosts {
-		if _, exclude := exclude[h.PublicKey]; exclude {
+		// filter out used hosts
+		if _, exclude := used[h.PublicKey]; exclude {
+			_ = ipFilter.isRedundantIP(h) // ensure the host's IP is registered as used
 			excluded++
 			continue
 		}
+		// filter out unscanned hosts
 		if h.Settings == nil || h.PriceTable == nil {
 			unscanned++
-			continue // host has not been scanned yet
+			continue
 		}
+		candidates = append(candidates, h)
+	}
 
+	c.logger.Debugw(fmt.Sprintf("selected %d candidate hosts out of %d", len(candidates), len(hosts)),
+		"excluded", excluded,
+		"unscanned", unscanned)
+
+	// score all candidate hosts
+	start := time.Now()
+	var results unusableHostResult
+	scores := make([]float64, 0, len(hosts))
+	scored := make([]hostdb.Host, 0, len(hosts))
+	var unusable, zeros int
+	for _, h := range candidates {
 		// NOTE: use the price table stored on the host for gouging checks when
 		// looking for candidate hosts, fetching the price table on the fly here
 		// slows contract maintenance down way too much, we re-evaluate the host
 		// right before forming the contract to ensure we do not form a contract
 		// with a host that's gouging its prices.
+		//
 		// NOTE: we ignore the host's blockheight here because we don't
 		// necessarily have a recent price table.
-		if usable, _ := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+		if usable, result := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+			results.merge(result)
 			unusable++
 			continue
 		}
 
-		score := hostScore(state.cfg, h, 0, state.rs.Redundancy())
+		score := hostScore(state.cfg, h, 0, state.rs.Redundancy()).Score()
 		if score == 0 {
 			zeros++
 			continue
@@ -776,9 +880,8 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		scores = append(scores, score)
 	}
 
-	c.logger.Debugw(fmt.Sprintf("scored %d candidate hosts out of %v, took %v", len(scored), len(hosts), time.Since(start)),
-		"excluded", excluded,
-		"unscanned", unscanned,
+	c.logger.Debugw(fmt.Sprintf("scored %d candidate hosts out of %v, took %v", len(scored), len(candidates), time.Since(start)),
+		"zeroscore", zeros,
 		"unusable", unusable)
 
 	// select hosts
@@ -792,9 +895,17 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
 	}
 
-	if len(selected) < wanted {
-		c.logger.Debugf("could not fetch 'wanted' candidate hosts, %d<%d", len(selected), wanted)
+	// print warning if no candidate hosts were found
+	if len(selected) == 0 {
+		c.logger.Warnf("no candidate hosts found")
+	} else if len(selected) < wanted {
+		if len(candidates) >= wanted {
+			c.logger.Warnw(fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted), results.keysAndValues()...)
+		} else {
+			c.logger.Debugf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted)
+		}
 	}
+
 	return selected, nil
 }
 

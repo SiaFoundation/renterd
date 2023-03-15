@@ -69,7 +69,7 @@ type (
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
-		SearchHosts(ctx context.Context, offset, limit int, filterMode string, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
+		SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
@@ -684,25 +684,13 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 		return
 	}
 
-	// return early if we have found entries or if a prefix was specified
-	if len(entries) > 0 || prefix != "" {
-		jc.Encode(api.ObjectsResponse{Entries: entries})
+	// return a 404 if no entries were found
+	if len(entries) == 0 {
+		jc.Error(fmt.Errorf("no entries found for object at '%v'", path), http.StatusNotFound)
 		return
 	}
 
-	// return a meaningful status code depending on whether the parent exists or not
-	key := strings.TrimPrefix(path, "/")
-	_, err = b.ms.Object(jc.Request.Context(), key)
-	if errors.Is(err, api.ErrObjectNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else {
-		jc.Error(fmt.Errorf("object at '%v' is not a directory", key), http.StatusBadRequest)
-		return
-	}
+	jc.Encode(api.ObjectsResponse{Entries: entries})
 }
 
 func (b *bus) objectsHandlerPUT(jc jape.Context) {

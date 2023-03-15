@@ -9,6 +9,12 @@ import (
 	"go.sia.tech/renterd/object"
 )
 
+const (
+	HostFilterModeAll     = "all"
+	HostFilterModeAllowed = "allowed"
+	HostFilterModeBlocked = "blocked"
+)
+
 var (
 	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
 	// the database.

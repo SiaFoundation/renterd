@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/hostdb"
 )
 
 const (
@@ -32,6 +33,24 @@ type (
 		DefragThreshold uint64 `json:"defragThreshold"`
 	}
 
+	HostHandlerGET struct {
+		ScoreBreakdown  HostScoreBreakdown `json:"scoreBreakdown"`
+		Score           float64            `json:"score"`
+		Usable          bool               `json:"usable"`
+		UnusableReasons string             `json:"unusableReasons"`
+		Host            hostdb.Host        `json:"host"`
+	}
+
+	HostScoreBreakdown struct {
+		Age              float64 `json:"age"`
+		Collateral       float64 `json:"collateral"`
+		Interactions     float64 `json:"interactions"`
+		StorageRemaining float64 `json:"storageRemaining"`
+		Uptime           float64 `json:"uptime"`
+		Version          float64 `json:"version"`
+		Prices           float64 `json:"prices"`
+	}
+
 	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
 		IgnoreRedundantIPs bool                        `json:"ignoreRedundantIPs"`
@@ -57,6 +76,10 @@ type (
 		CurrentPeriod uint64 `json:"currentPeriod"`
 	}
 )
+
+func (sb HostScoreBreakdown) Score() float64 {
+	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
+}
 
 // DefaultAutopilotConfig returns a configuration with sane default values.
 func DefaultAutopilotConfig() (c AutopilotConfig) {

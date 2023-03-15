@@ -30,14 +30,16 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
-func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) float64 {
-	return ageScore(h) *
-		collateralScore(cfg, *h.Settings, expectedRedundancy) *
-		interactionScore(h) *
-		storageRemainingScore(cfg, *h.Settings, storedData, expectedRedundancy) *
-		uptimeScore(h) *
-		versionScore(*h.Settings) *
-		priceAdjustmentScore(hostPeriodCostForScore(h, cfg, expectedRedundancy), cfg)
+func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+	return api.HostScoreBreakdown{
+		Age:              ageScore(h),
+		Collateral:       collateralScore(cfg, *h.Settings, expectedRedundancy),
+		Interactions:     interactionScore(h),
+		StorageRemaining: storageRemainingScore(cfg, *h.Settings, storedData, expectedRedundancy),
+		Uptime:           uptimeScore(h),
+		Version:          versionScore(*h.Settings),
+		Prices:           priceAdjustmentScore(hostPeriodCostForScore(h, cfg, expectedRedundancy), cfg),
+	}
 }
 
 // priceAdjustmentScore computes a score between 0 and 1 for a host giving its
