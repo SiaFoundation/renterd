@@ -207,6 +207,7 @@ type AccountStore interface {
 	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 	ResetDrift(ctx context.Context, id rhpv3.Account) error
 	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
+	SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) error
 }
 
 type contractLocker interface {

@@ -58,6 +58,15 @@ func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey
 	acc.mu.Lock()
 	acc.Balance.Set(balance)
 	acc.Drift.Set(drift)
+	acc.RequiresSync = false
+	acc.mu.Unlock()
+}
+
+// SetRequiresSync sets the requiresSync flag of an account.
+func (a *accounts) SetRequiresSync(id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) {
+	acc := a.account(id, owner, hk)
+	acc.mu.Lock()
+	acc.RequiresSync = requiresSync
 	acc.mu.Unlock()
 }
 
