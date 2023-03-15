@@ -671,15 +671,20 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		expectedBalance := balanceBeforeSync.Add(rfr.Amount)
 		if balanceAfterSync.Cmp(expectedBalance) < 0 {
 			fundAmount := expectedBalance.Sub(balanceAfterSync)
-			if fundAmount.Cmp(rfr.Amount) < 0 {
-				fundAmount = rfr.Amount
+			if fundAmount.Cmp(rfr.Amount) > 0 {
+				w.logger.Debugw("fund amount exceeded the original fund amount which should never happen",
+					"expectedBalance", expectedBalance,
+					"balanceAfterSync", balanceAfterSync,
+					"fundAmount", rfr.Amount,
+					"newFundAmount", fundAmount,
+				)
+				fundAmount = rfr.Amount // ensure we never fund more than the original fund amount
 			}
 			err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
 			if err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to fund account right after a sync: %v", err), "host", rfr.HostKey, "before", balanceBeforeSync, "after", balanceAfterSync, "fund", fundAmount)
 			}
 		}
-
 	}
 	if jc.Check("couldn't fund account", err) != nil {
 		return
