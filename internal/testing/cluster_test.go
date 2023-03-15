@@ -209,7 +209,7 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("host wasn't set")
 		}
 	}
-	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), 0, -1, api.HostFilterModeAll, "", nil)
+	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,9 +285,12 @@ func TestUploadDownload(t *testing.T) {
 	}
 
 	// fetch entries with "foo" prefix
-	_, _, err = cluster.Bus.Object(context.Background(), "foo/", "foo", 0, -1)
-	if errors.Is(err, api.ErrObjectNotFound) {
+	_, entries, err = cluster.Bus.Object(context.Background(), "foo/", "foo", 0, -1)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatal("expected no entries to be returned", len(entries))
 	}
 
 	// prepare two files, a small one and a large one
@@ -341,21 +344,21 @@ func TestUploadDownload(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), 0, -1, "")
+	objects, err := cluster.Bus.SearchObjects(context.Background(), "", 0, -1)
 	if err != nil {
 		t.Fatal("should fail")
 	}
 	if len(objects) != 4 {
 		t.Fatalf("should have 4 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "ata")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "ata", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "12288")
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "12288", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}

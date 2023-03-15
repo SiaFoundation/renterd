@@ -69,7 +69,7 @@ type (
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
-		SearchHosts(ctx context.Context, offset, limit int, filterMode, addressContains string, keyIn []types.PublicKey) ([]hostdb.Host, error)
+		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
@@ -414,7 +414,7 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.Offset, req.Limit, req.FilterMode, req.AddressContains, req.KeyIn)
+	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.FilterMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
@@ -681,12 +681,6 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	// look for object entries
 	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit)
 	if jc.Check("couldn't list object entries", err) != nil {
-		return
-	}
-
-	// return a 404 if no entries were found
-	if len(entries) == 0 {
-		jc.Error(fmt.Errorf("no entries found for object at '%v'", path), http.StatusNotFound)
 		return
 	}
 

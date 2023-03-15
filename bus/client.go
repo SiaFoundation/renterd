@@ -469,7 +469,7 @@ func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.Redundancy
 }
 
 // SearchHosts returns all hosts that match certain search criteria.
-func (c *Client) SearchHosts(ctx context.Context, offset, limit int, filterMode string, addressContains string, keyIn []types.PublicKey) (hosts []hostdb.Host, err error) {
+func (c *Client) SearchHosts(ctx context.Context, filterMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (hosts []hostdb.Host, err error) {
 	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
 		Offset:          offset,
 		Limit:           limit,
@@ -481,7 +481,7 @@ func (c *Client) SearchHosts(ctx context.Context, offset, limit int, filterMode 
 }
 
 // SearchObjects returns all objects that contains a sub-string in their key.
-func (c *Client) SearchObjects(ctx context.Context, offset, limit int, key string) (entries []string, err error) {
+func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit int) (entries []string, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
