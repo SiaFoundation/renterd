@@ -263,6 +263,33 @@ func TestUploadDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// upload two files under /foo
+	file1 := make([]byte, rhpv2.SectorSize/12)
+	file2 := make([]byte, rhpv2.SectorSize/12)
+	frand.Read(file1)
+	frand.Read(file2)
+	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "foo/file1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.UploadObject(context.Background(), bytes.NewReader(file2), "foo/file2"); err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch entries with "file" prefix
+	_, entries, err := cluster.Bus.Object(context.Background(), "foo/", "file", 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatal("expected two entry to be returned", len(entries))
+	}
+
+	// fetch entries with "foo" prefix
+	_, _, err = cluster.Bus.Object(context.Background(), "foo/", "foo", 0, -1)
+	if errors.Is(err, api.ErrObjectNotFound) {
+		t.Fatal(err)
+	}
+
 	// prepare two files, a small one and a large one
 	small := make([]byte, rhpv2.SectorSize/12)
 	large := make([]byte, rhpv2.SectorSize*3)
@@ -282,7 +309,7 @@ func TestUploadDownload(t *testing.T) {
 			}
 
 			// Should be registered in bus.
-			_, entries, err := cluster.Bus.Object(context.Background(), "")
+			_, entries, err := cluster.Bus.Object(context.Background(), "", "", 0, -1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -318,8 +345,8 @@ func TestUploadDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal("should fail")
 	}
-	if len(objects) != 2 {
-		t.Fatalf("should have 2 objects but got %v", len(objects))
+	if len(objects) != 4 {
+		t.Fatalf("should have 4 objects but got %v", len(objects))
 	}
 	objects, err = cluster.Bus.SearchObjects(context.Background(), 0, -1, "ata")
 	if err != nil {
