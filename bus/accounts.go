@@ -70,11 +70,12 @@ func (a *accounts) Accounts(owner string) []api.Account {
 	for i, acc := range a.byOwner[owner] {
 		acc.mu.Lock()
 		accounts[i] = api.Account{
-			ID:      acc.ID,
-			Balance: new(big.Int).Set(acc.Balance),
-			Drift:   new(big.Int).Set(acc.Drift),
-			Host:    acc.Host,
-			Owner:   acc.Owner,
+			ID:           acc.ID,
+			Balance:      new(big.Int).Set(acc.Balance),
+			Drift:        new(big.Int).Set(acc.Drift),
+			Host:         acc.Host,
+			Owner:        acc.Owner,
+			RequiresSync: acc.RequiresSync,
 		}
 		acc.mu.Unlock()
 	}
@@ -103,11 +104,12 @@ func (a *accounts) ToPersist() []api.Account {
 	for _, acc := range a.byID {
 		acc.mu.Lock()
 		accounts = append(accounts, api.Account{
-			ID:      acc.ID,
-			Balance: new(big.Int).Set(acc.Balance),
-			Drift:   new(big.Int).Set(acc.Drift),
-			Host:    acc.Host,
-			Owner:   acc.Owner,
+			ID:           acc.ID,
+			Balance:      new(big.Int).Set(acc.Balance),
+			Drift:        new(big.Int).Set(acc.Drift),
+			Host:         acc.Host,
+			Owner:        acc.Owner,
+			RequiresSync: acc.RequiresSync,
 		})
 		acc.mu.Unlock()
 	}
@@ -123,11 +125,12 @@ func (a *accounts) account(id rhpv3.Account, owner string, hk types.PublicKey) *
 	if !exists {
 		acc = &account{
 			Account: api.Account{
-				ID:      id,
-				Host:    hk,
-				Balance: big.NewInt(0),
-				Drift:   big.NewInt(0),
-				Owner:   owner,
+				ID:           id,
+				Host:         hk,
+				Balance:      big.NewInt(0),
+				Drift:        big.NewInt(0),
+				Owner:        owner,
+				RequiresSync: false,
 			},
 		}
 		a.byID[id] = acc

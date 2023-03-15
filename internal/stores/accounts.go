@@ -28,6 +28,10 @@ type (
 		// Drift is the accumulated delta between the bus' tracked balance for
 		// an account and the balance reported by a host.
 		Drift *balance
+
+		// RequiresSync indicates whether an account needs to be synced with the
+		// host before it can be used again.
+		RequiresSync bool `gorm:"index"`
 	}
 )
 
@@ -37,11 +41,12 @@ func (dbAccount) TableName() string {
 
 func (a dbAccount) convert() api.Account {
 	return api.Account{
-		ID:      rhpv3.Account(a.AccountID),
-		Host:    types.PublicKey(a.Host),
-		Balance: (*big.Int)(a.Balance),
-		Drift:   (*big.Int)(a.Drift),
-		Owner:   a.Owner,
+		ID:           rhpv3.Account(a.AccountID),
+		Host:         types.PublicKey(a.Host),
+		Balance:      (*big.Int)(a.Balance),
+		Drift:        (*big.Int)(a.Drift),
+		Owner:        a.Owner,
+		RequiresSync: a.RequiresSync,
 	}
 }
 

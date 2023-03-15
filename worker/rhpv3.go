@@ -41,7 +41,7 @@ func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.Hos
 	})
 }
 
-func (w *worker) syncAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey) error {
+func (w *worker) syncAccount(ctx context.Context, pt rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey) error {
 	account, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
@@ -91,10 +91,11 @@ type (
 		// needs to be able to prevent any deposits or withdrawals from the host
 		// for the duration of the sync so only syncing acquires an exclusive
 		// lock on the mutex.
-		mu        sync.RWMutex
-		balanceMu sync.Mutex
-		balance   *big.Int
-		drift     *big.Int
+		rwmu         sync.RWMutex
+		mu           sync.Mutex
+		balance      *big.Int
+		drift        *big.Int
+		requiresSync bool
 	}
 )
 
@@ -157,10 +158,10 @@ func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
 }
 
 func (a *account) Balance() types.Currency {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	a.balanceMu.Lock()
-	defer a.balanceMu.Unlock()
+	a.rwmu.RLock()
+	defer a.rwmu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return types.NewCurrency(a.balance.Uint64(), new(big.Int).Rsh(a.balance, 64).Uint64())
 }
 
@@ -176,76 +177,84 @@ func (a *accounts) ResetDrift(ctx context.Context, id rhpv3.Account) error {
 }
 
 func (a *account) Convert() api.Account {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	a.balanceMu.Lock()
-	defer a.balanceMu.Unlock()
+	a.rwmu.RLock()
+	defer a.rwmu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return api.Account{
-		ID:      a.id,
-		Balance: new(big.Int).Set(a.balance),
-		Drift:   new(big.Int).Set(a.drift),
-		Host:    a.host,
-		Owner:   a.owner,
+		ID:           a.id,
+		Balance:      new(big.Int).Set(a.balance),
+		Drift:        new(big.Int).Set(a.drift),
+		Host:         a.host,
+		Owner:        a.owner,
+		RequiresSync: a.requiresSync,
 	}
 }
 
 func (a *account) resetDrift(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.rwmu.Lock()
+	defer a.rwmu.Unlock()
 	if err := a.bus.ResetDrift(ctx, a.id); err != nil {
 		return err
 	}
-	a.balanceMu.Lock()
+	a.mu.Lock()
 	a.drift.SetInt64(0)
-	a.balanceMu.Unlock()
+	a.mu.Unlock()
 	return nil
 }
 
 // WithDeposit increases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
 func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency, error)) error {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.rwmu.RLock()
+	defer a.rwmu.RUnlock()
 	amt, err := amtFn()
+	if err != nil && strings.Contains(err.Error(), "ephemeral account balance was insufficient") {
+		a.mu.Lock()
+		a.requiresSync = true
+		a.mu.Unlock()
+		return err
+	}
 	if err != nil {
 		return err
 	}
-	a.balanceMu.Lock()
+	a.mu.Lock()
 	a.balance = a.balance.Add(a.balance, amt.Big())
-	a.balanceMu.Unlock()
+	a.mu.Unlock()
 	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, amt.Big())
 }
 
 // WithWithdrawal decreases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
 func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Currency, error)) error {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.rwmu.RLock()
+	defer a.rwmu.RUnlock()
 	amt, err := amtFn()
 	if err != nil {
 		return err
 	}
-	a.balanceMu.Lock()
+	a.mu.Lock()
 	a.balance = a.balance.Sub(a.balance, amt.Big())
-	a.balanceMu.Unlock()
+	a.mu.Unlock()
 	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is
 // locked while the balance is fetched through balanceFn.
 func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency, error)) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.rwmu.Lock()
+	defer a.rwmu.Unlock()
 	balance, err := balanceFn()
 	if err != nil {
 		return err
 	}
-	a.balanceMu.Lock()
+	a.mu.Lock()
 	delta := new(big.Int).Sub(balance.Big(), a.balance)
 	a.drift = a.drift.Add(a.drift, delta)
 	a.balance = balance.Big()
 	newBalance, newDrift := new(big.Int).Set(a.balance), new(big.Int).Set(a.drift)
-	a.balanceMu.Unlock()
+	a.requiresSync = false
+	a.mu.Unlock()
 	return a.bus.SetBalance(ctx, a.id, a.owner, a.host, newBalance, newDrift)
 }
 
