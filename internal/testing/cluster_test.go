@@ -293,6 +293,15 @@ func TestUploadDownload(t *testing.T) {
 		t.Fatal("expected no entries to be returned", len(entries))
 	}
 
+	// fetch entries from the worker for unexisting path
+	entries, err = cluster.Worker.ObjectEntries(context.Background(), "bar/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatal("expected no entries to be returned", len(entries))
+	}
+
 	// prepare two files, a small one and a large one
 	small := make([]byte, rhpv2.SectorSize/12)
 	large := make([]byte, rhpv2.SectorSize*3)
