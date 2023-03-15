@@ -85,7 +85,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			}
 
 			var res resp
-			_ = sp.withHost(ctx, r.contract.ID, r.contract.HostKey, r.contract.HostIP, func(ss sectorStore) error {
+			_ = sp.withHostV2(ctx, r.contract.ID, r.contract.HostKey, r.contract.HostIP, func(ss sectorStore) error {
 				root, err := ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]))
 				if err != nil {
 					span.SetStatus(codes.Error, "uploading the sector failed")
