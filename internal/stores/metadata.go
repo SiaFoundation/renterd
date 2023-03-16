@@ -193,9 +193,11 @@ func (c dbContract) convert() api.ContractMetadata {
 	var revisionNumber uint64
 	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
 	return api.ContractMetadata{
-		ID:          types.FileContractID(c.FCID),
-		HostIP:      c.Host.NetAddress,
-		HostKey:     types.PublicKey(c.Host.PublicKey),
+		ID:         types.FileContractID(c.FCID),
+		HostIP:     c.Host.NetAddress,
+		HostKey:    types.PublicKey(c.Host.PublicKey),
+		SiamuxAddr: c.Host.Settings.convert().SiamuxAddr(),
+
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
 		Spending: api.ContractSpending{

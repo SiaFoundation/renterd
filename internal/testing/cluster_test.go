@@ -232,9 +232,9 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
-// TestUploadDownload is an integration test that verifies objects can be
+// TestUploadDownloadBasic is an integration test that verifies objects can be
 // uploaded and download correctly.
-func TestUploadDownload(t *testing.T) {
+func TestUploadDownloadBasic(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -259,7 +259,12 @@ func TestUploadDownload(t *testing.T) {
 	rs := testRedundancySettings
 
 	// add hosts
-	if _, err := cluster.AddHostsBlocking(int(rs.TotalShards)); err != nil {
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -306,9 +311,103 @@ func TestUploadDownload(t *testing.T) {
 	small := make([]byte, rhpv2.SectorSize/12)
 	large := make([]byte, rhpv2.SectorSize*3)
 
+	// upload the data
+	for _, data := range [][]byte{small, large} {
+		if _, err := frand.Read(data); err != nil {
+			t.Fatal(err)
+		}
+
+		name := fmt.Sprintf("data_%v", len(data))
+		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// download the data
+	for _, data := range [][]byte{small, large} {
+		name := fmt.Sprintf("data_%v", len(data))
+
+		var buffer bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
+			t.Fatal(err)
+		}
+
+		// assert it matches
+		if !bytes.Equal(data, buffer.Bytes()) {
+			t.Fatal("unexpected")
+		}
+	}
+}
+
+// TestUploadDownloadSpending is an integration test that verifies the upload
+// and download spending metrics are tracked properly.
+func TestUploadDownloadSpending(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if defaultAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// check that the funding was recorded
+	err = Retry(100, testBusFlushInterval, func() error {
+		cms, err := cluster.Bus.ActiveContracts(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cms) == 0 {
+			t.Fatal("no active contracts found")
+		}
+
+		nFunded := 0
+		for _, c := range cms {
+			if !c.Spending.FundAccount.IsZero() {
+				nFunded++
+			}
+		}
+		if nFunded < rs.TotalShards {
+			return fmt.Errorf("not enough contracts have fund account spending, %v<%v", nFunded, rs.TotalShards)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare two files, a small one and a large one
+	small := make([]byte, rhpv2.SectorSize/12)
+	large := make([]byte, rhpv2.SectorSize*3)
+	files := [][]byte{small, large}
+
 	uploadDownload := func() {
 		t.Helper()
-		for _, data := range [][]byte{small, large} {
+		for _, data := range files {
 			// prepare some data - make sure it's more than one sector
 			if _, err := frand.Read(data); err != nil {
 				t.Fatal(err)
@@ -349,7 +448,7 @@ func TestUploadDownload(t *testing.T) {
 		}
 	}
 
-	// Run uploads once.
+	// run uploads once
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
@@ -357,8 +456,8 @@ func TestUploadDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal("should fail")
 	}
-	if len(objects) != 4 {
-		t.Fatalf("should have 4 objects but got %v", len(objects))
+	if len(objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
 	objects, err = cluster.Bus.SearchObjects(context.Background(), "ata", 0, -1)
 	if err != nil {
@@ -375,17 +474,21 @@ func TestUploadDownload(t *testing.T) {
 		t.Fatalf("should have 1 objects but got %v", len(objects))
 	}
 
-	// Renew contracts.
+	// renew contracts.
 	if err := cluster.MineToRenewWindow(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Wait for the contract to be renewed.
+	// wait for the contract to be renewed
 	err = Retry(100, time.Second, func() error {
 		cms, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
+		if len(cms) == 0 {
+			t.Fatal("no active contracts found")
+		}
+
 		for _, cm := range cms {
 			if cm.RenewedFrom == (types.FileContractID{}) {
 				return errors.New("found contract that wasn't renewed")
@@ -397,30 +500,30 @@ func TestUploadDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Run uploads again.
+	// run uploads again
 	uploadDownload()
 
-	// Check that the spending was recorded.
+	// check that the spending was recorded
 	err = Retry(100, testBusFlushInterval, func() error {
-		contracts, err := cluster.Bus.ActiveContracts(context.Background())
+		cms, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
+		if len(cms) == 0 {
+			t.Fatal("no active contracts found")
+		}
+
 		nUploaded := 0
-		nDownloaded := 0
-		for _, c := range contracts {
+		for _, c := range cms {
 			if !c.Spending.Uploads.IsZero() {
 				nUploaded++
 			}
 			if !c.Spending.Downloads.IsZero() {
-				nDownloaded++
+				t.Fatal("download spending should be zero")
 			}
 		}
 		if nUploaded < rs.TotalShards {
-			return fmt.Errorf("expected at least %v contracts to contain upload spending", rs.TotalShards)
-		}
-		if nDownloaded < rs.MinShards {
-			return fmt.Errorf("expected at least %v contracts to contain download spending", rs.MinShards)
+			return fmt.Errorf("not enough contracts have upload spending, %v<%v", nUploaded, rs.TotalShards)
 		}
 		return nil
 	})

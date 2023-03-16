@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -17,6 +18,7 @@ import (
 )
 
 type mockHost struct {
+	account    rhpv3.Account
 	contractID types.FileContractID
 	publicKey  types.PublicKey
 	sectors    map[types.Hash256][]byte
@@ -26,7 +28,7 @@ func (h *mockHost) Contract() types.FileContractID {
 	return h.contractID
 }
 
-func (h *mockHost) PublicKey() types.PublicKey {
+func (h *mockHost) HostKey() types.PublicKey {
 	return h.publicKey
 }
 
@@ -36,7 +38,7 @@ func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byt
 	return root, nil
 }
 
-func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")
@@ -93,12 +95,20 @@ func newMockStoreProvider(hosts []sectorStore) *mockStoreProvider {
 		hosts: make(map[types.PublicKey]sectorStore),
 	}
 	for _, h := range hosts {
-		sp.hosts[h.PublicKey()] = h
+		sp.hosts[h.HostKey()] = h
 	}
 	return sp
 }
 
-func (sp *mockStoreProvider) withHost(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(sectorStore) error) (err error) {
+func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(sectorStore) error) (err error) {
+	h, exists := sp.hosts[hostKey]
+	if !exists {
+		panic("doesn't exist")
+	}
+	return f(h)
+}
+
+func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, f func(sectorStore) error) (err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
@@ -134,7 +144,7 @@ func TestMultipleObjects(t *testing.T) {
 	sp := newMockStoreProvider(hosts)
 	var contracts []api.ContractMetadata
 	for _, h := range hosts {
-		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.PublicKey()})
+		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.HostKey()})
 	}
 
 	// upload
@@ -170,7 +180,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, mockLocker, 0); err != nil {
+			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0); err != nil {
 				t.Error(err)
 				return
 			}
