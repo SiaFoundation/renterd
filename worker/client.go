@@ -204,7 +204,7 @@ func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err erro
 }
 
 // PriceTables
-func (c *Client) PriceTables(ctx context.Context) (pricetables []PriceTableGET, err error) {
+func (c *Client) PriceTables(ctx context.Context) (pricetables []api.PriceTablesResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/pricetables", &pricetables)
 	return
 }

@@ -14,6 +14,13 @@ type ContractsResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// PriceTablesResponse is the response type for the /pricetables endpoint.
+type PriceTablesResponse struct {
+	rhpv3.HostPriceTable `json:"priceTable"`
+	Expiry               time.Time `json:"expiry"`
+	Host                 types.PublicKey
+}
+
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`

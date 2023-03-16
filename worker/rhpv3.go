@@ -327,22 +327,16 @@ func newPriceTables() *priceTables {
 	}
 }
 
-type PriceTableGET struct {
-	rhpv3.HostPriceTable `json:"priceTable"`
-	Expiry               time.Time `json:"expiry"`
-	Host                 types.PublicKey
-}
-
 // All return all pricetables known to the worker.
-func (pts *priceTables) All() []PriceTableGET {
-	var priceTables []PriceTableGET
+func (pts *priceTables) All() []api.PriceTablesResponse {
+	var priceTables []api.PriceTablesResponse
 	pts.mu.Lock()
 	defer pts.mu.Unlock()
 	for pk, pt := range pts.priceTables {
 		if pt.pt == nil {
 			continue
 		}
-		priceTables = append(priceTables, PriceTableGET{
+		priceTables = append(priceTables, api.PriceTablesResponse{
 			HostPriceTable: *pt.pt,
 			Expiry:         pt.expiry,
 			Host:           pk,
