@@ -223,7 +223,6 @@ type Bus interface {
 
 	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
-	ContractsForSlab(ctx context.Context, shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
@@ -849,17 +848,33 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// keep track of bad hosts so we can avoid them in consecutive slab downloads
 	badHosts := make(map[types.PublicKey]int)
 
+	// fetch contracts
+	set, err := w.bus.Contracts(ctx, dp.ContractSet)
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	// build contract map
+	contracts := make(map[types.PublicKey]api.ContractMetadata)
+	for _, contract := range set {
+		contracts[contract.HostKey] = contract
+	}
+
+	// create a function that returns the contracts for a given slab
+	contractsForSlab := func(s object.Slab) (c []api.ContractMetadata) {
+		for _, shard := range s.Shards {
+			if contract, exists := contracts[shard.Host]; exists {
+				c = append(c, contract)
+			}
+		}
+		return
+	}
+
 	cw := obj.Key.Decrypt(jc.ResponseWriter, offset)
 	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
-		contracts, err := w.bus.ContractsForSlab(ctx, ss.Shards, dp.ContractSet)
-		if err != nil {
-			w.logger.Errorf("couldn't fetch contracts for object '%v' slab %d, err: %v", path, i, err)
-			if i == 0 {
-				jc.Error(err, http.StatusInternalServerError)
-			}
-			return
-		}
-
+		// fetch contracts for the slab
+		contracts := contractsForSlab(ss.Slab)
 		if len(contracts) < int(ss.MinShards) {
 			err = fmt.Errorf("not enough contracts to download the slab, %d<%d", len(contracts), ss.MinShards)
 			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
