@@ -827,8 +827,8 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 
-	// keep track of bad hosts so we can avoid them in consecutive slab downloads
-	badHosts := make(map[types.PublicKey]int)
+	// keep track of recent timings per host so we can favour faster hosts
+	performance := make(map[types.PublicKey]int64)
 
 	cw := obj.Key.Decrypt(jc.ResponseWriter, offset)
 	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
@@ -850,18 +850,24 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 			return
 		}
 
-		// randomize order of contracts so we don't always download from the same hosts
-		frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
-
-		// move bad hosts to the back of the array, a bad host is a host that
-		// timed out, is out of funds or is gouging its prices
+		// make sure consecutive slabs are downloaded from hosts that performed
+		// well on previous slab downloads
 		sort.SliceStable(contracts, func(i, j int) bool {
-			return badHosts[contracts[i].HostKey] < badHosts[contracts[j].HostKey]
+			return performance[contracts[i].HostKey] < performance[contracts[j].HostKey]
 		})
 
-		badHostIndices, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout)
-		for _, h := range badHostIndices {
-			badHosts[contracts[h].HostKey]++
+		timings, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout)
+
+		// update historic host performance
+		//
+		// NOTE: we only update if we don't have a datapoint yet or if the
+		// returned timing differs from the default. This ensures we don't
+		// necessarily want to try downloading from all hosts and we don't reset
+		// a host's performance to the default timing.
+		for i, timing := range timings {
+			if _, exists := performance[contracts[i].HostKey]; !exists || timing != int64(defaultSectorDownloadTiming) {
+				performance[contracts[i].HostKey] = timing
+			}
 		}
 		if err != nil {
 			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
