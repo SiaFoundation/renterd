@@ -101,6 +101,7 @@ type TestCluster struct {
 	miner  *node.Miner
 	dbName string
 	dir    string
+	logger *zap.Logger
 	wk     types.PrivateKey
 	wg     sync.WaitGroup
 }
@@ -123,6 +124,25 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 		time.Sleep(durationBetweenAttempts)
 	}
 	return fn()
+}
+
+// Reboot simulates a reboot of the cluster by calling Shutdown and creating a
+// new cluster using the same settings as the previous one.
+// NOTE: Simulating a reboot means that the hosts stay active and are not
+// restarted.
+func (c *TestCluster) Reboot(ctx context.Context) (*TestCluster, error) {
+	hosts := c.hosts
+	c.hosts = nil
+	if err := c.Shutdown(ctx); err != nil {
+		return nil, err
+	}
+
+	newCluster, err := newTestClusterWithFunding(c.dir, c.dbName, false, c.wk, c.logger)
+	if err != nil {
+		return nil, err
+	}
+	newCluster.hosts = hosts
+	return newCluster, nil
 }
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
@@ -249,6 +269,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 	cluster := &TestCluster{
 		dir:    dir,
 		dbName: dbName,
+		logger: logger,
 		miner:  miner,
 		wk:     wk,
 

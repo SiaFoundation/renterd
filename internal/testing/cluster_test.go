@@ -535,12 +535,8 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatalf("drift was %v but should be %v", busAcc.Drift, newDrift)
 	}
 
-	// Shut down cluster.
-	if err := cluster.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	cluster2, err := newTestClusterWithFunding(dir, cluster.dbName, false, cluster.wk, zap.New(zapcore.NewNopCore()))
+	// Reboot cluster.
+	cluster2, err := cluster.Reboot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,8 +693,12 @@ func TestEphemeralAccountSync(t *testing.T) {
 	if acc.RequiresSync {
 		t.Fatal("account shouldn't require a sync")
 	}
+	balanceBefore := acc.Balance
 
-	// Set requiresSync flag on bus.
+	// Set requiresSync flag on bus and balance to 0.
+	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.Owner, acc.Host, new(big.Int), new(big.Int)); err != nil {
+		t.Fatal(err)
+	}
 	if err := cluster.Bus.SetRequiresSync(context.Background(), acc.ID, acc.Owner, acc.Host, true); err != nil {
 		t.Fatal(err)
 	}
@@ -711,10 +711,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// Restart cluster to have worker fetch the account from the bus again.
-	if err := cluster.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	cluster2, err := newTestClusterWithFunding(dir, cluster.dbName, false, cluster.wk, zap.New(zapcore.NewNopCore()))
+	cluster2, err := cluster.Reboot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -733,21 +730,31 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatal("flag wasn't persisted")
 	}
 
-	// Set requiresSync flag on bus again to verify that calling SetBalance on
-	// the bus will reset the requiresSync flag.
-	if err := cluster2.Bus.SetRequiresSync(context.Background(), acc.ID, acc.Owner, acc.Host, true); err != nil {
+	// Wait for autopilot to sync and reset flag.
+	err = Retry(100, 100*time.Millisecond, func() error {
+		account, err := cluster2.Worker.Account(context.Background(), acc.Host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if account.RequiresSync {
+			return errors.New("account wasn't synced")
+		}
+		// account for 1H sync cost
+		if new(big.Int).Add(account.Balance, big.NewInt(1)).Cmp(balanceBefore) != 0 {
+			t.Fatal("balance mismatch", account.Balance, balanceBefore)
+		}
+		return nil
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Set a balance. This should also reset the sync flag
-	balance := types.Siacoins(1).Div64(10).Mul64(9).Big()
-	if err := cluster2.Bus.SetBalance(context.Background(), acc.ID, acc.Owner, acc.Host, balance, new(big.Int)); err != nil {
-		t.Fatal(err)
-	}
+
+	// Flag should also be reset on bus now.
 	accounts, err = cluster2.Bus.Accounts(context.Background(), acc.Owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(accounts) != 1 || accounts[0].Balance.Cmp(balance) != 0 || accounts[0].RequiresSync {
+	if len(accounts) != 1 || accounts[0].RequiresSync {
 		t.Fatal("account wasn't updated")
 	}
 }
