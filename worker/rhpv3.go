@@ -227,11 +227,14 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	amt, err := amtFn()
 	if err != nil && strings.Contains(err.Error(), "ephemeral account balance was insufficient") {
 		a.mu.Lock()
+		requiresSyncBefore := a.requiresSync
 		a.requiresSync = true
 		a.mu.Unlock()
-		err2 := a.bus.SetRequiresSync(ctx, a.id, a.owner, a.host, true)
-		if err2 != nil {
-			err = fmt.Errorf("failed to set requiresSync flag on bus: %w", err)
+		if requiresSyncBefore {
+			err2 := a.bus.SetRequiresSync(ctx, a.id, a.owner, a.host, true)
+			if err2 != nil {
+				err = fmt.Errorf("failed to set requiresSync flag on bus: %w", err)
+			}
 		}
 		return err
 	}

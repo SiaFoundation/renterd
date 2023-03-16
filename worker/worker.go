@@ -838,13 +838,14 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	path := strings.TrimPrefix(jc.PathParam("path"), "/")
 	obj, entries, err := w.bus.Object(ctx, path, prefix, off, limit)
-	if errors.Is(err, api.ErrObjectNotFound) {
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("couldn't get object or entries", err) != nil {
 		return
 	}
-	if len(entries) > 0 {
+
+	if strings.HasSuffix(path, "/") {
 		jc.Encode(entries)
 		return
 	}
