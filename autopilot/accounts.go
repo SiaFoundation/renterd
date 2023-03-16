@@ -175,8 +175,13 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 					a.logger.Errorw(fmt.Sprintf("failed to sync account's balance: %s", err),
 						"account", account.ID,
 						"host", contract.HostKey)
+					return err
 				}
-				return err
+				// Re-fetch account after sync.
+				account, err = w.Account(ctx, contract.HostKey)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Check if refill is needed and perform it if necessary.

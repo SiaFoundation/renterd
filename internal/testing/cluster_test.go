@@ -724,7 +724,8 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatal("flag wasn't persisted")
 	}
 
-	// Set requiresSync flag on bus again.
+	// Set requiresSync flag on bus again to verify that calling SetBalance on
+	// the bus will reset the requiresSync flag.
 	if err := cluster2.Bus.SetRequiresSync(context.Background(), acc.ID, acc.Owner, acc.Host, true); err != nil {
 		t.Fatal(err)
 	}

@@ -872,7 +872,11 @@ func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	if jc.Check("failed to reset drift", b.accounts.ResetDrift(id)) != nil {
+	err := b.accounts.ResetDrift(id)
+	if errors.Is(err, errAccountsNotFound) {
+		jc.Error(err, http.StatusNotFound)
+	}
+	if jc.Check("failed to reset drift", err) != nil {
 		return
 	}
 }
@@ -922,7 +926,13 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.SetRequiresSync(id, string(req.Owner), req.Host, req.RequiresSync)
+	err := b.accounts.SetRequiresSync(id, string(req.Owner), req.Host, req.RequiresSync)
+	if errors.Is(err, errAccountsNotFound) {
+		jc.Error(err, http.StatusNotFound)
+	}
+	if jc.Check("failed tot set requiresSync flag on account", err) != nil {
+		return
+	}
 }
 
 // New returns a new Bus.

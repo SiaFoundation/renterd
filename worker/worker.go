@@ -724,7 +724,9 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 		return
 	}
 	defer func() {
-		_ = w.bus.ReleaseContract(ctx, rsr.ContractID, lockID) // TODO: log error
+		if err := w.bus.ReleaseContract(ctx, rsr.ContractID, lockID); err != nil {
+			w.logger.Warnf("failed to release lock for contract %v: %v", rsr.ContractID, err)
+		}
 	}()
 
 	// Get contract revision.

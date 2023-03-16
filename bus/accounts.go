@@ -10,6 +10,8 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
+var errAccountsNotFound = errors.New("account doesn't exist")
+
 type accounts struct {
 	mu      sync.Mutex
 	byID    map[rhpv3.Account]*account
@@ -63,11 +65,20 @@ func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey
 }
 
 // SetRequiresSync sets the requiresSync flag of an account.
-func (a *accounts) SetRequiresSync(id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) {
+func (a *accounts) SetRequiresSync(id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) error {
 	acc := a.account(id, owner, hk)
 	acc.mu.Lock()
 	acc.RequiresSync = requiresSync
 	acc.mu.Unlock()
+
+	a.mu.Lock()
+	account, exists := a.byID[id]
+	defer a.mu.Unlock()
+	if !exists {
+		return errAccountsNotFound
+	}
+	account.resetDrift()
+	return nil
 }
 
 // Accounts returns all accounts for a given owner. Usually called when workers
@@ -97,7 +108,7 @@ func (a *accounts) ResetDrift(id rhpv3.Account) error {
 	account, exists := a.byID[id]
 	if !exists {
 		a.mu.Unlock()
-		return errors.New("account doesn't exist")
+		return errAccountsNotFound
 	}
 	a.mu.Unlock()
 	account.resetDrift()
