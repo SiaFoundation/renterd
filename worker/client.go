@@ -203,6 +203,12 @@ func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err erro
 	return
 }
 
+// PriceTables
+func (c *Client) PriceTables(ctx context.Context) (pricetables []PriceTableGET, err error) {
+	err = c.c.WithContext(ctx).GET("/pricetables", &pricetables)
+	return
+}
+
 // ResetDrift resets the drift of an account to zero.
 func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)

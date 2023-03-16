@@ -327,6 +327,30 @@ func newPriceTables() *priceTables {
 	}
 }
 
+type PriceTableGET struct {
+	rhpv3.HostPriceTable `json:"priceTable"`
+	Expiry               time.Time `json:"expiry"`
+	Host                 types.PublicKey
+}
+
+// All return all pricetables known to the worker.
+func (pts *priceTables) All() []PriceTableGET {
+	var priceTables []PriceTableGET
+	pts.mu.Lock()
+	defer pts.mu.Unlock()
+	for pk, pt := range pts.priceTables {
+		if pt.pt == nil {
+			continue
+		}
+		priceTables = append(priceTables, PriceTableGET{
+			HostPriceTable: *pt.pt,
+			Expiry:         pt.expiry,
+			Host:           pk,
+		})
+	}
+	return priceTables
+}
+
 // PriceTable returns a price table for the given host and an bool to indicate
 // whether it is valid or not.
 func (pts *priceTables) PriceTable(hk types.PublicKey) (rhpv3.HostPriceTable, bool) {

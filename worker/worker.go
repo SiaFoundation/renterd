@@ -1052,6 +1052,11 @@ func (w *worker) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(accounts)
 }
 
+func (w *worker) priceTablesHandlerGET(jc jape.Context) {
+	priceTables := w.priceTables.All()
+	jc.Encode(priceTables)
+}
+
 func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
@@ -1092,6 +1097,8 @@ func (w *worker) Handler() http.Handler {
 		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
 
 		"GET    /id": w.idHandlerGET,
+
+		"GET    /pricetables": w.priceTablesHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,

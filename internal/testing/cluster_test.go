@@ -352,6 +352,26 @@ func TestUploadDownload(t *testing.T) {
 	// Run uploads once.
 	uploadDownload()
 
+	// We should have active pricetables now.
+	priceTables, err := cluster.Worker.PriceTables(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(priceTables) != 3 {
+		t.Fatal("wrong number of priceTables", len(priceTables), 3)
+	}
+	for _, pt := range priceTables {
+		if pt.HostPriceTable == (rhpv3.HostPriceTable{}) {
+			t.Fatal("pricetable wasn't set")
+		}
+		if pt.Expiry.IsZero() {
+			t.Fatal("expiry not set")
+		}
+		if pt.Host == (types.PublicKey{}) {
+			t.Fatal("host not set")
+		}
+	}
+
 	// Fuzzy search for uploaded data in various ways.
 	objects, err := cluster.Bus.SearchObjects(context.Background(), "", 0, -1)
 	if err != nil {
