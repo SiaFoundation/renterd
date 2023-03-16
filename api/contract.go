@@ -14,9 +14,10 @@ type (
 
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
-		ID      types.FileContractID `json:"id"`
-		HostIP  string               `json:"hostIP"`
-		HostKey types.PublicKey      `json:"hostKey"`
+		ID         types.FileContractID `json:"id"`
+		HostIP     string               `json:"hostIP"`
+		HostKey    types.PublicKey      `json:"hostKey"`
+		SiamuxAddr string               `json:"siamuxAddr"`
 
 		ProofHeight    uint64 `json:"proofHeight"`
 		RevisionHeight uint64 `json:"revisionHeight"`

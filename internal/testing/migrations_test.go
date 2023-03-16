@@ -39,6 +39,11 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// wait until we have accounts
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
 	// add an object
 	data := make([]byte, rhpv2.SectorSize*4)
 	frand.Read(data)

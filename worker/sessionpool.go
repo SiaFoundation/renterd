@@ -24,11 +24,11 @@ func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	return root, nil
 }
 
-func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
-		Offset:     uint64(offset),
-		Length:     uint64(length),
+		Offset:     offset,
+		Length:     length,
 	}}
 	price := rhpv2.RPCReadCost(s.settings, sections)
 	if err := s.Read(ctx, w, sections, price); err != nil {
@@ -83,7 +83,7 @@ func (ss *sharedSession) Contract() types.FileContractID {
 	return ss.contractID
 }
 
-func (ss *sharedSession) PublicKey() types.PublicKey {
+func (ss *sharedSession) HostKey() types.PublicKey {
 	return ss.hostKey
 }
 
@@ -135,7 +135,7 @@ func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.Sector
 	return s.appendSector(ctx, sector, currentHeight)
 }
 
-func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	s, err := ss.pool.acquire(ctx, ss)
 	if err != nil {
 		return err
