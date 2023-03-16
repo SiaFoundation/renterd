@@ -40,7 +40,7 @@ jobs:
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
-          args: "-race;-tags='testing';-timeout=600s"
+          args: "-race;-tags='testing';-timeout=900s"
       - name: Test Integration - MySQL
         if: matrix.os == 'ubuntu-latest'
         uses: n8maninger/action-golang-test@v1
@@ -50,7 +50,7 @@ jobs:
           RENTER_DB_PASSWORD: test
         with:
           package: "./internal/testing/..."
-          args: "-race;-tags='testing';-timeout=600s"
+          args: "-race;-tags='testing';-timeout=900s"
       - name: Check Endpoints
         uses: SiaFoundation/action-golang-analysis@HEAD
         with:

@@ -116,12 +116,7 @@ func TestSQLContractStore(t *testing.T) {
 	// Insert it.
 	totalCost := types.NewCurrency64(456)
 	startHeight := uint64(100)
-	if _, err := cs.AddContract(ctx, c, totalCost, startHeight); err != nil {
-		t.Fatal(err)
-	}
-
-	// Look it up again.
-	fetched, err := cs.Contract(ctx, c.ID())
+	returned, err := cs.AddContract(ctx, c, totalCost, startHeight)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +134,15 @@ func TestSQLContractStore(t *testing.T) {
 			FundAccount: types.ZeroCurrency,
 		},
 		TotalCost: totalCost,
+	}
+	if !reflect.DeepEqual(returned, expected) {
+		t.Fatal("contract mismatch")
+	}
+
+	// Look it up again.
+	fetched, err := cs.Contract(ctx, c.ID())
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
