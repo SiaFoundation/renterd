@@ -543,7 +543,6 @@ func TestEphemeralAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := cluster.Worker
 
 	// add host
 	nodes, err := cluster.AddHosts(1)
@@ -565,21 +564,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Wait for account to appear.
-	var accounts []api.Account
-	var ctx context.Context
-	err = Retry(100, 100*time.Millisecond, func() error {
-		accounts, err = w.Accounts(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(accounts) != 1 {
-			return fmt.Errorf("wrong number of accounts %v", len(accounts))
-		}
-		if accounts[0].Balance.Cmp(new(big.Int)) == 0 {
-			return errors.New("balance is zero")
-		}
-		return nil
-	})
+	accounts, err := cluster.WaitForAccounts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -654,7 +639,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// manually fix the balance and drift before comparing.
 	accounts[0].Balance = newBalance.Big()
 	accounts[0].Drift = newDrift
-	accounts2, err := cluster2.Worker.Accounts(ctx)
+	accounts2, err := cluster2.Worker.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,7 +750,6 @@ func TestEphemeralAccountSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := cluster.Worker
 
 	// add host
 	_, err = cluster.AddHosts(1)
@@ -774,21 +758,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// Wait for account to appear.
-	var accounts []api.Account
-	var ctx context.Context
-	err = Retry(100, 100*time.Millisecond, func() error {
-		accounts, err = w.Accounts(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(accounts) != 1 {
-			return fmt.Errorf("wrong number of accounts %v", len(accounts))
-		}
-		if accounts[0].Balance.Cmp(new(big.Int)) == 0 {
-			return errors.New("balance is zero")
-		}
-		return nil
-	})
+	accounts, err := cluster.WaitForAccounts()
 	if err != nil {
 		t.Fatal(err)
 	}
