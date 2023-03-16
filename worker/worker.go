@@ -207,6 +207,7 @@ type AccountStore interface {
 	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 	ResetDrift(ctx context.Context, id rhpv3.Account) error
 	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
+	SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) error
 }
 
 type contractLocker interface {
@@ -669,7 +670,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	// If funding failed due to an exceeded max balance, we sync the account and
 	// try funding the account again.
 	if isMaxBalanceExceeded(err) {
-		err = w.syncAccount(ctx, account, pt, siamuxAddr, rfr.HostKey)
+		err = w.syncAccount(ctx, pt, siamuxAddr, rfr.HostKey)
 		if err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 		}
@@ -717,6 +718,66 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
+		return
+	}
+}
+
+func (w *worker) rhpSyncHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
+	var rsr api.RHPSyncRequest
+	if jc.Decode(&rsr) != nil {
+		return
+	}
+
+	// Get IP of host.
+	h, err := w.bus.Host(ctx, rsr.HostKey)
+	if jc.Check("failed to fetch host", err) != nil {
+		return
+	}
+	hostIP := h.Settings.NetAddress
+	siamuxAddr := h.Settings.SiamuxAddr()
+
+	// Get contract revision.
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rsr.ContractID, lockingPriorityFunding, lockingDurationFunding)
+	if jc.Check("failed to acquire contract for funding EA", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(ctx, rsr.ContractID, lockID); err != nil {
+			w.logger.Warnf("failed to release lock for contract %v: %v", rsr.ContractID, err)
+		}
+	}()
+
+	// Get contract revision.
+	var revision types.FileContractRevision
+	err = w.withHostV2(jc.Request.Context(), rsr.ContractID, rsr.HostKey, hostIP, func(ss sectorStore) error {
+		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
+		if err != nil {
+			return err
+		}
+		revision = rev.Revision
+		return nil
+	})
+	if jc.Check("failed to fetch revision", err) != nil {
+		return
+	}
+
+	// Get price table.
+	pt, ptValid := w.priceTables.PriceTable(rsr.HostKey)
+	if !ptValid {
+		paymentFunc := w.preparePriceTableContractPayment(rsr.HostKey, &revision)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rsr.HostKey)
+		if jc.Check("failed to update outdated price table", err) != nil {
+			return
+		}
+	}
+
+	// Sync account.
+	err = w.syncAccount(ctx, pt, siamuxAddr, rsr.HostKey)
+	if err != nil {
+		w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rsr.HostKey)
+	}
+	if jc.Check("couldn't fund account", err) != nil {
 		return
 	}
 }
@@ -1131,6 +1192,7 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/form":             w.rhpFormHandler,
 		"POST   /rhp/renew":            w.rhpRenewHandler,
 		"POST   /rhp/fund":             w.rhpFundHandler,
+		"POST   /rhp/sync":             w.rhpSyncHandler,
 		"POST   /rhp/pricetable":       w.rhpPriceTableHandler,
 		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,

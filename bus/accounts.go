@@ -10,6 +10,8 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
+var errAccountsNotFound = errors.New("account doesn't exist")
+
 type accounts struct {
 	mu      sync.Mutex
 	byID    map[rhpv3.Account]*account
@@ -58,7 +60,25 @@ func (a *accounts) SetBalance(id rhpv3.Account, owner string, hk types.PublicKey
 	acc.mu.Lock()
 	acc.Balance.Set(balance)
 	acc.Drift.Set(drift)
+	acc.RequiresSync = false
 	acc.mu.Unlock()
+}
+
+// SetRequiresSync sets the requiresSync flag of an account.
+func (a *accounts) SetRequiresSync(id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) error {
+	acc := a.account(id, owner, hk)
+	acc.mu.Lock()
+	acc.RequiresSync = requiresSync
+	acc.mu.Unlock()
+
+	a.mu.Lock()
+	account, exists := a.byID[id]
+	defer a.mu.Unlock()
+	if !exists {
+		return errAccountsNotFound
+	}
+	account.resetDrift()
+	return nil
 }
 
 // Accounts returns all accounts for a given owner. Usually called when workers
@@ -70,11 +90,12 @@ func (a *accounts) Accounts(owner string) []api.Account {
 	for i, acc := range a.byOwner[owner] {
 		acc.mu.Lock()
 		accounts[i] = api.Account{
-			ID:      acc.ID,
-			Balance: new(big.Int).Set(acc.Balance),
-			Drift:   new(big.Int).Set(acc.Drift),
-			Host:    acc.Host,
-			Owner:   acc.Owner,
+			ID:           acc.ID,
+			Balance:      new(big.Int).Set(acc.Balance),
+			Drift:        new(big.Int).Set(acc.Drift),
+			Host:         acc.Host,
+			Owner:        acc.Owner,
+			RequiresSync: acc.RequiresSync,
 		}
 		acc.mu.Unlock()
 	}
@@ -87,7 +108,7 @@ func (a *accounts) ResetDrift(id rhpv3.Account) error {
 	account, exists := a.byID[id]
 	if !exists {
 		a.mu.Unlock()
-		return errors.New("account doesn't exist")
+		return errAccountsNotFound
 	}
 	a.mu.Unlock()
 	account.resetDrift()
@@ -103,11 +124,12 @@ func (a *accounts) ToPersist() []api.Account {
 	for _, acc := range a.byID {
 		acc.mu.Lock()
 		accounts = append(accounts, api.Account{
-			ID:      acc.ID,
-			Balance: new(big.Int).Set(acc.Balance),
-			Drift:   new(big.Int).Set(acc.Drift),
-			Host:    acc.Host,
-			Owner:   acc.Owner,
+			ID:           acc.ID,
+			Balance:      new(big.Int).Set(acc.Balance),
+			Drift:        new(big.Int).Set(acc.Drift),
+			Host:         acc.Host,
+			Owner:        acc.Owner,
+			RequiresSync: acc.RequiresSync,
 		})
 		acc.mu.Unlock()
 	}
@@ -123,11 +145,12 @@ func (a *accounts) account(id rhpv3.Account, owner string, hk types.PublicKey) *
 	if !exists {
 		acc = &account{
 			Account: api.Account{
-				ID:      id,
-				Host:    hk,
-				Balance: big.NewInt(0),
-				Drift:   big.NewInt(0),
-				Owner:   owner,
+				ID:           id,
+				Host:         hk,
+				Balance:      big.NewInt(0),
+				Drift:        big.NewInt(0),
+				Owner:        owner,
+				RequiresSync: false,
 			},
 		}
 		a.byID[id] = acc

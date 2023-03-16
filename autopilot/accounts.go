@@ -168,6 +168,22 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 				return fmt.Errorf("drift on account is too large - not funding")
 			}
 
+			// Check if a resync is needed.
+			if account.RequiresSync {
+				err := w.RHPSync(ctx, contract.ID, contract.HostKey)
+				if err != nil {
+					a.logger.Errorw(fmt.Sprintf("failed to sync account's balance: %s", err),
+						"account", account.ID,
+						"host", contract.HostKey)
+					return err
+				}
+				// Re-fetch account after sync.
+				account, err = w.Account(ctx, contract.HostKey)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Check if refill is needed and perform it if necessary.
 			if account.Balance.Cmp(minBalance) >= 0 {
 				return nil // nothing to do

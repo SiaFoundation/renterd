@@ -77,6 +77,12 @@ type RHPFundRequest struct {
 	Balance    types.Currency       `json:"balance"`
 }
 
+// RHPSyncRequest is the request type for the /rhp/sync endpoint.
+type RHPSyncRequest struct {
+	ContractID types.FileContractID `json:"contractID"`
+	HostKey    types.PublicKey      `json:"hostKey"`
+}
+
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
 // endpoint.
 type RHPPreparePaymentRequest struct {

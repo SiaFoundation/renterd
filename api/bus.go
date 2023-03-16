@@ -198,6 +198,14 @@ type AccountsUpdateBalanceRequest struct {
 	Drift  *big.Int        `json:"drift"`
 }
 
+// AccountsRequiresSyncRequest is the request type for
+// /accounts/:id/requiressync endpoint.
+type AccountsRequiresSyncRequest struct {
+	Host         types.PublicKey `json:"host"`
+	Owner        ParamString     `json:"owner"`
+	RequiresSync bool            `json:"requiresSync"`
+}
+
 // AccountsAddBalanceRequest is the request type for /accounts/:id/add
 // endpoint.
 type AccountsAddBalanceRequest struct {

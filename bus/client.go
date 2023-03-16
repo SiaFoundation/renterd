@@ -560,6 +560,16 @@ func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string,
 	return
 }
 
+// SetRequiresSync sets the requiresSync flag of an account.
+func (c *Client) SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/requiressync", id), api.AccountsRequiresSyncRequest{
+		Host:         hk,
+		Owner:        api.ParamString(owner),
+		RequiresSync: requiresSync,
+	}, nil)
+	return
+}
+
 // ResetDrift resets the drift of an account to zero.
 func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
