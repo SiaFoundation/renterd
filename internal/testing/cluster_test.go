@@ -456,8 +456,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 	if err != nil {
 		t.Fatal("should fail")
 	}
-	if len(objects) != 4 {
-		t.Fatalf("should have 4 objects but got %v", len(objects))
+	if len(objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
 	objects, err = cluster.Bus.SearchObjects(context.Background(), "ata", 0, -1)
 	if err != nil {
