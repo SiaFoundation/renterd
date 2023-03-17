@@ -22,6 +22,10 @@ import (
 )
 
 const (
+	// accountLockingDuration is the time for which an account lock remains
+	// reserved on the bus after locking it.
+	accountLockingDuration = 30 * time.Second
+
 	// defaultWithdrawalExpiryBlocks is the number of blocks we add to the
 	// current blockheight when we define an expiry block height for withdrawal
 	// messages.
@@ -97,31 +101,15 @@ type (
 		store    AccountStore
 		workerID string
 		key      types.PrivateKey
-
-		mu       sync.Mutex
-		accounts map[rhpv3.Account]*account
 	}
 
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
-		bus   AccountStore
-		id    rhpv3.Account
-		key   types.PrivateKey
-		host  types.PublicKey
-		owner string
-
-		// The balance is locked by a RWMutex in addition to a regular Mutex
-		// since both withdrawals and deposits can happen in parallel during
-		// normal operations. If the account ever goes out of sync, the worker
-		// needs to be able to prevent any deposits or withdrawals from the host
-		// for the duration of the sync so only syncing acquires an exclusive
-		// lock on the mutex.
-		rwmu         sync.RWMutex
-		mu           sync.Mutex
-		balance      *big.Int
-		drift        *big.Int
-		requiresSync bool
+		bus  AccountStore
+		id   rhpv3.Account
+		key  types.PrivateKey
+		host types.PublicKey
 	}
 
 	hostV3 struct {
@@ -151,22 +139,23 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 		return pt, nil
 	}
 
-	updatePTByContract := func() {
+	updatePTByContract := func() (rhpv3.HostPriceTable, error) {
 		var rev rhpv2.ContractRevision
 		if err = w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) (err error) {
 			rev, err = ss.(*sharedSession).Revision(ctx)
-			return
+			return err
 		}); err != nil {
-			return
+			return rhpv3.HostPriceTable{}, err
 		}
-		pt, err = w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, &rev.Revision), siamuxAddr, hostKey)
+		return w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, &rev.Revision), siamuxAddr, hostKey)
 	}
 
 	// update price table using contract payment if we don't have a funded account
 	acc, err := w.accounts.ForHost(hostKey)
-	if err != nil || acc.Balance().IsZero() {
-		updatePTByContract()
-		return
+	if err != nil {
+		return updatePTByContract()
+	} else if balance, err := acc.Balance(ctx); err != nil || balance.IsZero() {
+		return updatePTByContract()
 	}
 
 	// fetch block height
@@ -178,9 +167,9 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 	// update price table using account payment if possible, but fall back to ensure we have a valid price table
 	pt, err = w.priceTables.Update(ctx, w.preparePriceTableAccountPayment(hostKey, cs.BlockHeight), siamuxAddr, hostKey)
 	if err != nil {
-		updatePTByContract()
+		return updatePTByContract()
 	}
-	return
+	return pt, nil
 }
 
 func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, fn func(sectorStore) error) (err error) {
@@ -204,198 +193,90 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-// All returns information about all accounts to be returned in the API.
-func (a *accounts) All() ([]api.Account, error) {
-	// Make sure accounts are initialised.
-	if err := a.tryInitAccounts(); err != nil {
-		return nil, err
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	accounts := make([]api.Account, 0, len(a.accounts))
-	for _, acc := range a.accounts {
-		accounts = append(accounts, acc.Convert())
-	}
-	return accounts, nil
-}
-
 // ForHost returns an account to use for a given host. If the account
 // doesn't exist, a new one is created.
 func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
-	// Make sure accounts are initialised.
-	if err := a.tryInitAccounts(); err != nil {
-		return nil, err
-	}
-
 	// Key should be set.
 	if hk == (types.PublicKey{}) {
 		return nil, errors.New("empty host key provided")
 	}
 
-	// Create and or return account.
+	// Return account.
 	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	acc, exists := a.accounts[accountID]
-	if !exists {
-		acc = &account{
-			bus:     a.store,
-			id:      accountID,
-			key:     a.key,
-			host:    hk,
-			owner:   a.workerID,
-			balance: types.ZeroCurrency.Big(),
-			drift:   types.ZeroCurrency.Big(),
-		}
-		a.accounts[accountID] = acc
-	}
-	return acc, nil
-}
-
-func (a *account) Balance() types.Currency {
-	a.rwmu.RLock()
-	defer a.rwmu.RUnlock()
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return types.NewCurrency(a.balance.Uint64(), new(big.Int).Rsh(a.balance, 64).Uint64())
-}
-
-func (a *accounts) ResetDrift(ctx context.Context, id rhpv3.Account) error {
-	a.mu.Lock()
-	account, exists := a.accounts[id]
-	if !exists {
-		a.mu.Unlock()
-		return errors.New("account doesn't exist")
-	}
-	a.mu.Unlock()
-	return account.resetDrift(ctx)
-}
-
-func (a *account) Convert() api.Account {
-	a.rwmu.RLock()
-	defer a.rwmu.RUnlock()
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return api.Account{
-		ID:           a.id,
-		Balance:      new(big.Int).Set(a.balance),
-		Drift:        new(big.Int).Set(a.drift),
-		Host:         a.host,
-		Owner:        a.owner,
-		RequiresSync: a.requiresSync,
-	}
-}
-
-func (a *account) resetDrift(ctx context.Context) error {
-	a.rwmu.Lock()
-	defer a.rwmu.Unlock()
-	if err := a.bus.ResetDrift(ctx, a.id); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	a.drift.SetInt64(0)
-	a.mu.Unlock()
-	return nil
+	return &account{
+		bus:  a.store,
+		id:   accountID,
+		key:  a.key,
+		host: hk,
+	}, nil
 }
 
 // WithDeposit increases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
 func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency, error)) error {
-	a.rwmu.RLock()
-	defer a.rwmu.RUnlock()
+	_, lockID, err := a.bus.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
+	if err != nil {
+		return err
+	}
+	defer a.bus.UnlockAccount(ctx, a.id, lockID)
+
 	amt, err := amtFn()
 	if err != nil {
 		return err
 	}
-	a.mu.Lock()
-	a.balance = a.balance.Add(a.balance, amt.Big())
-	a.mu.Unlock()
-	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, amt.Big())
+	return a.bus.AddBalance(ctx, a.id, a.host, amt.Big())
+}
+
+func (a *account) Balance(ctx context.Context) (types.Currency, error) {
+	account, lockID, err := a.bus.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
+	if err != nil {
+		return types.Currency{}, err
+	}
+	defer a.bus.UnlockAccount(ctx, a.id, lockID)
+	return types.NewCurrency(account.Balance.Uint64(), new(big.Int).Rsh(account.Balance, 64).Uint64()), nil
 }
 
 // WithWithdrawal decreases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
 func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Currency, error)) error {
-	a.rwmu.RLock()
-	defer a.rwmu.RUnlock()
+	account, lockID, err := a.bus.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
+	if err != nil {
+		return err
+	}
+	defer a.bus.UnlockAccount(ctx, a.id, lockID)
 
 	// return early if our account is not funded
-	a.mu.Lock()
-	if a.balance.Cmp(big.NewInt(0)) <= 0 {
-		a.rwmu.Unlock()
+	if account.Balance.Cmp(big.NewInt(0)) <= 0 {
 		return errBalanceInsufficient
 	}
-	a.mu.Unlock()
 
 	amt, err := amtFn()
-	if err != nil && strings.Contains(err.Error(), "ephemeral account balance was insufficient") {
-		a.mu.Lock()
-		requiresSyncBefore := a.requiresSync
-		a.requiresSync = true
-		a.mu.Unlock()
-		if requiresSyncBefore {
-			err2 := a.bus.SetRequiresSync(ctx, a.id, a.owner, a.host, true)
-			if err2 != nil {
-				err = fmt.Errorf("failed to set requiresSync flag on bus: %w", err)
-			}
+	if err != nil && isBalanceInsufficient(err) {
+		err2 := a.bus.SetRequiresSync(ctx, a.id, a.host, true)
+		if err2 != nil {
+			err = fmt.Errorf("failed to set requiresSync flag on bus: %w", err)
 		}
 		return err
 	}
 	if err != nil {
 		return err
 	}
-	a.mu.Lock()
-	a.balance = a.balance.Sub(a.balance, amt.Big())
-	a.mu.Unlock()
-	return a.bus.AddBalance(ctx, a.id, a.owner, a.host, new(big.Int).Neg(amt.Big()))
+	return a.bus.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is
 // locked while the balance is fetched through balanceFn.
 func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency, error)) error {
-	a.rwmu.Lock()
-	defer a.rwmu.Unlock()
+	_, lockID, err := a.bus.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
+	if err != nil {
+		return err
+	}
+	defer a.bus.UnlockAccount(ctx, a.id, lockID)
 	balance, err := balanceFn()
 	if err != nil {
 		return err
 	}
-	a.mu.Lock()
-	delta := new(big.Int).Sub(balance.Big(), a.balance)
-	a.drift = a.drift.Add(a.drift, delta)
-	a.balance = balance.Big()
-	newBalance, newDrift := new(big.Int).Set(a.balance), new(big.Int).Set(a.drift)
-	a.requiresSync = false
-	a.mu.Unlock()
-	return a.bus.SetBalance(ctx, a.id, a.owner, a.host, newBalance, newDrift)
-}
-
-// tryInitAccounts is used for lazily initialising the accounts from the bus.
-func (a *accounts) tryInitAccounts() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.accounts != nil {
-		return nil // already initialised
-	}
-	a.accounts = make(map[rhpv3.Account]*account)
-	accounts, err := a.store.Accounts(context.Background(), a.workerID)
-	if err != nil {
-		return err
-	}
-	for _, acc := range accounts {
-		a.accounts[rhpv3.Account(acc.ID)] = &account{
-			bus:          a.store,
-			id:           rhpv3.Account(acc.ID),
-			key:          a.deriveAccountKey(acc.Host),
-			host:         acc.Host,
-			owner:        acc.Owner,
-			balance:      acc.Balance,
-			drift:        acc.Drift,
-			requiresSync: acc.RequiresSync,
-		}
-	}
-	return nil
+	return a.bus.SetBalance(ctx, a.id, a.host, balance.Big())
 }
 
 // deriveAccountKey derives an account plus key for a given host and worker.
@@ -408,8 +289,7 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	// Append the owner of the account (worker's id), the host for which to
 	// create it and the index to the corresponding sub-key.
 	subKey := a.key
-	data := append(subKey, []byte(a.workerID)...)
-	data = append(data, hostKey[:]...)
+	data := append(subKey, hostKey[:]...)
 	data = append(data, index)
 
 	seed := types.HashBytes(data)

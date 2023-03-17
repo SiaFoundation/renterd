@@ -578,12 +578,9 @@ func TestEphemeralAccounts(t *testing.T) {
 	if acc.Host != types.PublicKey(hg.PublicKey.ToPublicKey()) {
 		t.Fatal("wrong host")
 	}
-	if acc.Owner == "" {
-		t.Fatal("owner not set")
-	}
 
 	// Fetch account from bus directly.
-	busAccounts, err := cluster.Bus.Accounts(context.Background(), "worker")
+	busAccounts, err := cluster.Bus.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,10 +608,10 @@ func TestEphemeralAccounts(t *testing.T) {
 	// Update the balance to create some drift.
 	newBalance := fundAmt.Div64(2)
 	newDrift := new(big.Int).Sub(newBalance.Big(), fundAmt.Big())
-	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, "worker", acc.Host, newBalance.Big(), newDrift); err != nil {
+	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, acc.Host, newBalance.Big()); err != nil {
 		t.Fatal(err)
 	}
-	busAccounts, err = cluster.Bus.Accounts(context.Background(), "worker")
+	busAccounts, err = cluster.Bus.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +655,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
 		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
 	}
-	accounts2, err = cluster2.Bus.Accounts(context.Background(), "worker")
+	accounts2, err = cluster2.Bus.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,13 +766,13 @@ func TestEphemeralAccountSync(t *testing.T) {
 	balanceBefore := acc.Balance
 
 	// Set requiresSync flag on bus and balance to 0.
-	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.Owner, acc.Host, new(big.Int), new(big.Int)); err != nil {
+	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.Host, new(big.Int)); err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.Bus.SetRequiresSync(context.Background(), acc.ID, acc.Owner, acc.Host, true); err != nil {
+	if err := cluster.Bus.SetRequiresSync(context.Background(), acc.ID, acc.Host, true); err != nil {
 		t.Fatal(err)
 	}
-	accounts, err = cluster.Bus.Accounts(context.Background(), acc.Owner)
+	accounts, err = cluster.Bus.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,7 +820,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// Flag should also be reset on bus now.
-	accounts, err = cluster2.Bus.Accounts(context.Background(), acc.Owner)
+	accounts, err = cluster2.Bus.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

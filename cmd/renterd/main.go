@@ -29,7 +29,7 @@ import (
 
 const (
 	// accountRefillInterval is the amount of time between refills of ephemeral
-	// accounts. If we conservatively assume that a good hosts charges 500 SC /
+	// accounts. If we conservatively assume that a good host charges 500 SC /
 	// TiB, we can pay for about 2.2 GiB with 1 SC. Since we want to refill
 	// ahead of time at 0.5 SC, that makes 1.1 GiB. Considering a 1 Gbps uplink
 	// that is shared across 30 uploads, we upload at around 33 Mbps to each

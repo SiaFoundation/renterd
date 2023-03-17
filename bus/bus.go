@@ -836,11 +836,7 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
-	var owner api.ParamString
-	if jc.DecodeParam("owner", &owner) != nil {
-		return
-	}
-	jc.Encode(b.accounts.Accounts(owner.String()))
+	jc.Encode(b.accounts.Accounts())
 }
 
 func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
@@ -856,15 +852,11 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Owner == "" {
-		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
-		return
-	}
 	if req.Host == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.AddAmount(id, string(req.Owner), req.Host, req.Amount)
+	b.accounts.AddAmount(id, req.Host, req.Amount)
 }
 
 func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
@@ -894,15 +886,11 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Owner == "" {
-		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
-		return
-	}
 	if req.Host == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.SetBalance(id, string(req.Owner), req.Host, req.Amount, req.Drift)
+	b.accounts.SetBalance(id, req.Host, req.Amount)
 }
 
 func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
@@ -918,19 +906,48 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Owner == "" {
-		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
-		return
-	}
 	if req.Host == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	err := b.accounts.SetRequiresSync(id, string(req.Owner), req.Host, req.RequiresSync)
+	err := b.accounts.SetRequiresSync(id, req.Host, req.RequiresSync)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	}
 	if jc.Check("failed tot set requiresSync flag on account", err) != nil {
+		return
+	}
+}
+
+func (b *bus) accountsLockHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsLockHandlerRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	acc, lockID := b.accounts.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
+	jc.Encode(api.AccountsLockHandlerResponse{
+		Account: acc,
+		LockID:  lockID,
+	})
+}
+
+func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsUnlockHandlerRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	err := b.accounts.UnlockAccount(id, req.LockID)
+	if jc.Check("failed to unlock account", err) != nil {
 		return
 	}
 }
@@ -975,10 +992,42 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 	return b, nil
 }
 
+//func (w *worker) accountHandlerGET(jc jape.Context) {
+//	var host types.PublicKey
+//	if jc.DecodeParam("id", &host) != nil {
+//		return
+//	}
+//	account, err := w.accounts.ForHost(host)
+//	if jc.Check("failed to fetch accounts", err) != nil {
+//		return
+//	}
+//	jc.Encode(account.Convert())
+//}
+//
+//func (w *worker) accountsHandlerGET(jc jape.Context) {
+//	accounts, err := w.accounts.All()
+//	if jc.Check("failed to fetch accounts", err) != nil {
+//		return
+//	}
+//	jc.Encode(accounts)
+//}
+//
+//func (w *worker) accountsResetDriftHandlerPOST(jc jape.Context) {
+//	var id rhpv3.Account
+//	if jc.DecodeParam("id", &id) != nil {
+//		return
+//	}
+//	if jc.Check("failed to reset drift", w.accounts.ResetDrift(jc.Request.Context(), id)) != nil {
+//		return
+//	}
+//}
+
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /accounts/:owner":           b.accountsOwnerHandlerGET,
+		"GET    /accounts":                  b.accountsOwnerHandlerGET,
+		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
+		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
 		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
 		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
 		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,

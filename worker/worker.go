@@ -203,11 +203,15 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 }
 
 type AccountStore interface {
-	Accounts(ctx context.Context, owner string) ([]api.Account, error)
-	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	Accounts(ctx context.Context) ([]api.Account, error)
+	AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
+
+	LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
+	UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
+
 	ResetDrift(ctx context.Context, id rhpv3.Account) error
-	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
-	SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) error
+	SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
+	SetRequiresSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey, requiresSync bool) error
 }
 
 type contractLocker interface {
@@ -237,7 +241,7 @@ type Bus interface {
 	AddObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string) error
 
-	Accounts(ctx context.Context, owner string) ([]api.Account, error)
+	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
@@ -657,7 +661,10 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// Calculate the fund amount
-	balance := account.Balance()
+	balance, err := account.Balance(ctx)
+	if jc.Check("failed to fetch account balance", err) != nil {
+		return
+	}
 	if balance.Cmp(rfr.Balance) >= 0 {
 		jc.Error(fmt.Errorf("account balance %v is already greater than or equal to requested balance %v", balance, rfr.Balance), http.StatusBadRequest)
 		return
@@ -675,7 +682,10 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 		}
 
-		balance = account.Balance()
+		balance, err = account.Balance(ctx)
+		if jc.Check("failed to fetch account balance for syncing after failed funding", err) != nil {
+			return
+		}
 		if balance.Cmp(rfr.Balance) < 0 {
 			fundAmount = rfr.Balance.Sub(balance)
 			err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
@@ -1126,26 +1136,6 @@ func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency, blockHei
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, blockHeight+6, pk) // 1 hour valid
 }
 
-func (w *worker) accountHandlerGET(jc jape.Context) {
-	var host types.PublicKey
-	if jc.DecodeParam("id", &host) != nil {
-		return
-	}
-	account, err := w.accounts.ForHost(host)
-	if jc.Check("failed to fetch accounts", err) != nil {
-		return
-	}
-	jc.Encode(account.Convert())
-}
-
-func (w *worker) accountsHandlerGET(jc jape.Context) {
-	accounts, err := w.accounts.All()
-	if jc.Check("failed to fetch accounts", err) != nil {
-		return
-	}
-	jc.Encode(accounts)
-}
-
 func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
@@ -1168,23 +1158,9 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	return w
 }
 
-func (w *worker) accountsResetDriftHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	if jc.Check("failed to reset drift", w.accounts.ResetDrift(jc.Request.Context(), id)) != nil {
-		return
-	}
-}
-
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /accounts":                w.accountsHandlerGET,
-		"GET    /accounts/host/:id":       w.accountHandlerGET,
-		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
-
 		"GET    /id": w.idHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,

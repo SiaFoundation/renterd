@@ -534,37 +534,50 @@ func (c *Client) GougingParams(ctx context.Context) (gp api.GougingParams, err e
 }
 
 // Accounts returns the ephemeral accounts for a given owner.
-func (c *Client) Accounts(ctx context.Context, owner string) (accounts []api.Account, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts/%s", api.ParamString(owner)), &accounts)
+func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
+	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
 	return
 }
 
 // AddBalance adds the given amount to an account's balance.
-func (c *Client) AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amount *big.Int) (err error) {
+func (c *Client) AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amount *big.Int) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/add", id), api.AccountsAddBalanceRequest{
 		Host:   hk,
-		Owner:  api.ParamString(owner),
 		Amount: amount,
+	}, nil)
+	return
+}
+
+func (c *Client) LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (account api.Account, lockID uint64, err error) {
+	var resp api.AccountsLockHandlerResponse
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/lock", id), api.AccountsLockHandlerRequest{
+		HostKey:   hostKey,
+		Exclusive: exclusive,
+		Duration:  api.ParamDuration(duration),
+	}, &resp)
+	return resp.Account, resp.LockID, err
+}
+
+func (c *Client) UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/unlock", id), api.AccountsUnlockHandlerRequest{
+		LockID: lockID,
 	}, nil)
 	return
 }
 
 // SetBalance sets the given account's balance to a certain amount.
-func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amount, drift *big.Int) (err error) {
+func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amount *big.Int) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
 		Host:   hk,
-		Owner:  api.ParamString(owner),
 		Amount: amount,
-		Drift:  drift,
 	}, nil)
 	return
 }
 
 // SetRequiresSync sets the requiresSync flag of an account.
-func (c *Client) SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) (err error) {
+func (c *Client) SetRequiresSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey, requiresSync bool) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/requiressync", id), api.AccountsRequiresSyncRequest{
 		Host:         hk,
-		Owner:        api.ParamString(owner),
 		RequiresSync: requiresSync,
 	}, nil)
 	return

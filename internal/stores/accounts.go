@@ -14,8 +14,6 @@ type (
 	dbAccount struct {
 		Model
 
-		Owner string `gorm:"NOT NULL"`
-
 		// AccountID identifies an account.
 		AccountID publicKey `gorm:"unique;NOT NULL;size:32"`
 
@@ -45,7 +43,6 @@ func (a dbAccount) convert() api.Account {
 		Host:         types.PublicKey(a.Host),
 		Balance:      (*big.Int)(a.Balance),
 		Drift:        (*big.Int)(a.Drift),
-		Owner:        a.Owner,
 		RequiresSync: a.RequiresSync,
 	}
 }
@@ -72,7 +69,6 @@ func (s *SQLStore) SaveAccounts(ctx context.Context, accounts []api.Account) err
 	dbAccounts := make([]dbAccount, len(accounts))
 	for i, acc := range accounts {
 		dbAccounts[i] = dbAccount{
-			Owner:        acc.Owner,
 			AccountID:    publicKey(acc.ID),
 			Host:         publicKey(acc.Host),
 			Balance:      (*balance)(acc.Balance),

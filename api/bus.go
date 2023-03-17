@@ -193,16 +193,13 @@ type UpdateBlocklistRequest struct {
 // endpoint.
 type AccountsUpdateBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
-	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
-	Drift  *big.Int        `json:"drift"`
 }
 
 // AccountsRequiresSyncRequest is the request type for
 // /accounts/:id/requiressync endpoint.
 type AccountsRequiresSyncRequest struct {
 	Host         types.PublicKey `json:"host"`
-	Owner        ParamString     `json:"owner"`
 	RequiresSync bool            `json:"requiresSync"`
 }
 
@@ -210,7 +207,6 @@ type AccountsRequiresSyncRequest struct {
 // endpoint.
 type AccountsAddBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
-	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
 }
 
