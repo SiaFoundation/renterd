@@ -735,6 +735,65 @@ func TestParallelUpload(t *testing.T) {
 	wg.Wait()
 }
 
+// TestParallelDownload tests downloading a file in parallel.
+func TestParallelDownload(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(int(rs.TotalShards)); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload the data
+	data := frand.Bytes(rhpv2.SectorSize)
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	download := func() error {
+		t.Helper()
+		buf := bytes.NewBuffer(nil)
+		err := w.DownloadObject(context.Background(), buf, "foo")
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(buf.Bytes(), data) {
+			return errors.New("data mismatch")
+		}
+		return nil
+	}
+
+	// Upload in parallel
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := download(); err != nil {
+				t.Error(err)
+				return
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 // TestEphemeralAccountSync verifies that setting the requiresSync flag makes
 // the autopilot resync the balance between renter and host.
 func TestEphemeralAccountSync(t *testing.T) {
