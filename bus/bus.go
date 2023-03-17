@@ -929,6 +929,7 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 	err := b.accounts.SetRequiresSync(id, req.Host, req.RequiresSync)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
+		return
 	}
 	if jc.Check("failed tot set requiresSync flag on account", err) != nil {
 		return

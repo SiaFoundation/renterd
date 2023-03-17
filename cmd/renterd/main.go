@@ -34,9 +34,9 @@ const (
 	// ahead of time at 0.5 SC, that makes 1.1 GiB. Considering a 1 Gbps uplink
 	// that is shared across 30 uploads, we upload at around 33 Mbps to each
 	// host. That means uploading 1.1 GiB to drain 0.5 SC takes around 5
-	// minutes.  That's why we assume 30 seconds to be more than frequent enough
+	// minutes. That's why we assume 10 seconds to be more than frequent enough
 	// to refill an account when it's due for another refill.
-	defaultAccountRefillInterval = 30 * time.Second
+	defaultAccountRefillInterval = 10 * time.Second
 )
 
 var (
