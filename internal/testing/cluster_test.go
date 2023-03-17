@@ -766,6 +766,12 @@ func TestParallelDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Wait for accounts to be funded.
+	_, err = cluster.WaitForAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	download := func() error {
 		t.Helper()
 		buf := bytes.NewBuffer(nil)
