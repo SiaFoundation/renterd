@@ -87,10 +87,8 @@ func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
 		case <-ticker.C:
 		}
 
-		a.workers.withWorkers(func(workers []Worker) {
-			for _, w := range workers {
-				a.refillWorkerAccounts(w)
-			}
+		a.workers.withWorker(func(w Worker) {
+			a.refillWorkerAccounts(w)
 		})
 	}
 }
