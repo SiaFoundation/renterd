@@ -872,7 +872,11 @@ func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	if jc.Check("failed to reset drift", b.accounts.ResetDrift(id)) != nil {
+	err := b.accounts.ResetDrift(id)
+	if errors.Is(err, errAccountsNotFound) {
+		jc.Error(err, http.StatusNotFound)
+	}
+	if jc.Check("failed to reset drift", err) != nil {
 		return
 	}
 }
@@ -899,6 +903,36 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		return
 	}
 	b.accounts.SetBalance(id, string(req.Owner), req.Host, req.Amount, req.Drift)
+}
+
+func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsRequiresSyncRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if id == (rhpv3.Account{}) {
+		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Owner == "" {
+		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
+		return
+	}
+	if req.Host == (types.PublicKey{}) {
+		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
+		return
+	}
+	err := b.accounts.SetRequiresSync(id, string(req.Owner), req.Host, req.RequiresSync)
+	if errors.Is(err, errAccountsNotFound) {
+		jc.Error(err, http.StatusNotFound)
+	}
+	if jc.Check("failed tot set requiresSync flag on account", err) != nil {
+		return
+	}
 }
 
 // New returns a new Bus.
@@ -944,10 +978,11 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /accounts/:owner":         b.accountsOwnerHandlerGET,
-		"POST   /accounts/:id/add":        b.accountsAddHandlerPOST,
-		"POST   /accounts/:id/update":     b.accountsUpdateHandlerPOST,
-		"POST   /accounts/:id/resetdrift": b.accountsResetDriftHandlerPOST,
+		"GET    /accounts/:owner":           b.accountsOwnerHandlerGET,
+		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
+		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
+		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
+		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,

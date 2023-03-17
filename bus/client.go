@@ -383,31 +383,6 @@ func (c *Client) RecommendedFee(ctx context.Context) (fee types.Currency, err er
 	return
 }
 
-// ContractsForSlab returns contracts that can be used to download the provided
-// slab.
-func (c *Client) ContractsForSlab(ctx context.Context, shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error) {
-	// build hosts map
-	hosts := make(map[string]struct{})
-	for _, shard := range shards {
-		hosts[shard.Host.String()] = struct{}{}
-	}
-
-	// fetch all contracts from the set
-	contracts, err := c.Contracts(ctx, contractSetName)
-	if err != nil {
-		return nil, err
-	}
-
-	// filter contracts
-	filtered := contracts[:0]
-	for _, contract := range contracts {
-		if _, ok := hosts[contract.HostKey.String()]; ok {
-			filtered = append(filtered, contract)
-		}
-	}
-	return filtered, nil
-}
-
 // Setting returns the value for the setting with given key.
 func (c *Client) Setting(ctx context.Context, key string) (value string, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/setting/%s", key), &value)
@@ -581,6 +556,16 @@ func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string,
 		Owner:  api.ParamString(owner),
 		Amount: amount,
 		Drift:  drift,
+	}, nil)
+	return
+}
+
+// SetRequiresSync sets the requiresSync flag of an account.
+func (c *Client) SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/requiressync", id), api.AccountsRequiresSyncRequest{
+		Host:         hk,
+		Owner:        api.ParamString(owner),
+		RequiresSync: requiresSync,
 	}, nil)
 	return
 }

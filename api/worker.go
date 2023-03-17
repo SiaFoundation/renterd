@@ -74,7 +74,13 @@ type RHPRenewResponse struct {
 type RHPFundRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
-	Amount     types.Currency       `json:"amount"`
+	Balance    types.Currency       `json:"balance"`
+}
+
+// RHPSyncRequest is the request type for the /rhp/sync endpoint.
+type RHPSyncRequest struct {
+	ContractID types.FileContractID `json:"contractID"`
+	HostKey    types.PublicKey      `json:"hostKey"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment

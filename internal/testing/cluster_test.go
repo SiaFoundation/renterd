@@ -543,7 +543,6 @@ func TestEphemeralAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := cluster.Worker
 
 	// add host
 	nodes, err := cluster.AddHosts(1)
@@ -565,21 +564,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Wait for account to appear.
-	var accounts []api.Account
-	var ctx context.Context
-	err = Retry(100, 100*time.Millisecond, func() error {
-		accounts, err = w.Accounts(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(accounts) != 1 {
-			return fmt.Errorf("wrong number of accounts %v", len(accounts))
-		}
-		if accounts[0].Balance.Cmp(new(big.Int)) == 0 {
-			return errors.New("balance is zero")
-		}
-		return nil
-	})
+	accounts, err := cluster.WaitForAccounts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,12 +623,8 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatalf("drift was %v but should be %v", busAcc.Drift, newDrift)
 	}
 
-	// Shut down cluster.
-	if err := cluster.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	cluster2, err := newTestClusterWithFunding(dir, cluster.dbName, false, zap.New(zapcore.NewNopCore()))
+	// Reboot cluster.
+	cluster2, err := cluster.Reboot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +639,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// manually fix the balance and drift before comparing.
 	accounts[0].Balance = newBalance.Big()
 	accounts[0].Drift = newDrift
-	accounts2, err := cluster2.Worker.Accounts(ctx)
+	accounts2, err := cluster2.Worker.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,4 +736,98 @@ func TestParallelUpload(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestEphemeralAccountSync verifies that setting the requiresSync flag makes
+// the autopilot resync the balance between renter and host.
+func TestEphemeralAccountSync(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	dir := t.TempDir()
+	cluster, err := newTestCluster(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add host
+	_, err = cluster.AddHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for account to appear.
+	accounts, err := cluster.WaitForAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	acc := accounts[0]
+	if acc.RequiresSync {
+		t.Fatal("account shouldn't require a sync")
+	}
+	balanceBefore := acc.Balance
+
+	// Set requiresSync flag on bus and balance to 0.
+	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.Owner, acc.Host, new(big.Int), new(big.Int)); err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.Bus.SetRequiresSync(context.Background(), acc.ID, acc.Owner, acc.Host, true); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err = cluster.Bus.Accounts(context.Background(), acc.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 || !accounts[0].RequiresSync {
+		t.Fatal("account wasn't updated")
+	}
+
+	// Restart cluster to have worker fetch the account from the bus again.
+	cluster2, err := cluster.Reboot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster2.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Account should need a sync.
+	account, err := cluster2.Worker.Account(context.Background(), acc.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !account.RequiresSync {
+		t.Fatal("flag wasn't persisted")
+	}
+
+	// Wait for autopilot to sync and reset flag.
+	err = Retry(100, 100*time.Millisecond, func() error {
+		account, err := cluster2.Worker.Account(context.Background(), acc.Host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if account.RequiresSync {
+			return errors.New("account wasn't synced")
+		}
+		// account for 1H sync cost
+		if new(big.Int).Add(account.Balance, big.NewInt(1)).Cmp(balanceBefore) != 0 {
+			t.Fatal("balance mismatch", account.Balance, balanceBefore)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Flag should also be reset on bus now.
+	accounts, err = cluster2.Bus.Accounts(context.Background(), acc.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 || accounts[0].RequiresSync {
+		t.Fatal("account wasn't updated")
+	}
 }

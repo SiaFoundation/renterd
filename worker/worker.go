@@ -207,6 +207,7 @@ type AccountStore interface {
 	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
 	ResetDrift(ctx context.Context, id rhpv3.Account) error
 	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
+	SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) error
 }
 
 type contractLocker interface {
@@ -223,7 +224,6 @@ type Bus interface {
 
 	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
-	ContractsForSlab(ctx context.Context, shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
@@ -609,6 +609,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
+
 	// Get account for the host.
 	account, err := w.accounts.ForHost(rfr.HostKey)
 	if jc.Check("failed to get account for provided host", err) != nil {
@@ -655,14 +656,32 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		}
 	}
 
-	// Fund account.
-	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, rfr.Amount, &revision)
+	// Calculate the fund amount
+	balance := account.Balance()
+	if balance.Cmp(rfr.Balance) >= 0 {
+		jc.Error(fmt.Errorf("account balance %v is already greater than or equal to requested balance %v", balance, rfr.Balance), http.StatusBadRequest)
+		return
+	}
+	fundAmount := rfr.Balance.Sub(balance)
 
-	// If funding failed due to an exceeded max balance, we sync the account.
+	// Fund account.
+	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
+
+	// If funding failed due to an exceeded max balance, we sync the account and
+	// try funding the account again.
 	if isMaxBalanceExceeded(err) {
-		err = w.syncAccount(ctx, account, pt, siamuxAddr, rfr.HostKey)
+		err = w.syncAccount(ctx, pt, siamuxAddr, rfr.HostKey)
 		if err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+		}
+
+		balance = account.Balance()
+		if balance.Cmp(rfr.Balance) < 0 {
+			fundAmount = rfr.Balance.Sub(balance)
+			err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
+			if err != nil {
+				w.logger.Errorw(fmt.Sprintf("failed to fund account right after a sync: %v", err), "host", rfr.HostKey, "balance", balance, "requested", rfr.Balance, "fund", fundAmount)
+			}
 		}
 	}
 	if jc.Check("couldn't fund account", err) != nil {
@@ -699,6 +718,66 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
+		return
+	}
+}
+
+func (w *worker) rhpSyncHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
+	var rsr api.RHPSyncRequest
+	if jc.Decode(&rsr) != nil {
+		return
+	}
+
+	// Get IP of host.
+	h, err := w.bus.Host(ctx, rsr.HostKey)
+	if jc.Check("failed to fetch host", err) != nil {
+		return
+	}
+	hostIP := h.Settings.NetAddress
+	siamuxAddr := h.Settings.SiamuxAddr()
+
+	// Get contract revision.
+	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rsr.ContractID, lockingPriorityFunding, lockingDurationFunding)
+	if jc.Check("failed to acquire contract for funding EA", err) != nil {
+		return
+	}
+	defer func() {
+		if err := w.bus.ReleaseContract(ctx, rsr.ContractID, lockID); err != nil {
+			w.logger.Warnf("failed to release lock for contract %v: %v", rsr.ContractID, err)
+		}
+	}()
+
+	// Get contract revision.
+	var revision types.FileContractRevision
+	err = w.withHostV2(jc.Request.Context(), rsr.ContractID, rsr.HostKey, hostIP, func(ss sectorStore) error {
+		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
+		if err != nil {
+			return err
+		}
+		revision = rev.Revision
+		return nil
+	})
+	if jc.Check("failed to fetch revision", err) != nil {
+		return
+	}
+
+	// Get price table.
+	pt, ptValid := w.priceTables.PriceTable(rsr.HostKey)
+	if !ptValid {
+		paymentFunc := w.preparePriceTableContractPayment(rsr.HostKey, &revision)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rsr.HostKey)
+		if jc.Check("failed to update outdated price table", err) != nil {
+			return
+		}
+	}
+
+	// Sync account.
+	err = w.syncAccount(ctx, pt, siamuxAddr, rsr.HostKey)
+	if err != nil {
+		w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rsr.HostKey)
+	}
+	if jc.Check("couldn't fund account", err) != nil {
 		return
 	}
 }
@@ -830,17 +909,33 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// keep track of recent timings per host so we can favour faster hosts
 	performance := make(map[types.PublicKey]int64)
 
+	// fetch contracts
+	set, err := w.bus.Contracts(ctx, dp.ContractSet)
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	// build contract map
+	contracts := make(map[types.PublicKey]api.ContractMetadata)
+	for _, contract := range set {
+		contracts[contract.HostKey] = contract
+	}
+
+	// create a function that returns the contracts for a given slab
+	contractsForSlab := func(s object.Slab) (c []api.ContractMetadata) {
+		for _, shard := range s.Shards {
+			if contract, exists := contracts[shard.Host]; exists {
+				c = append(c, contract)
+			}
+		}
+		return
+	}
+
 	cw := obj.Key.Decrypt(jc.ResponseWriter, offset)
 	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
-		contracts, err := w.bus.ContractsForSlab(ctx, ss.Shards, dp.ContractSet)
-		if err != nil {
-			w.logger.Errorf("couldn't fetch contracts for object '%v' slab %d, err: %v", path, i, err)
-			if i == 0 {
-				jc.Error(err, http.StatusInternalServerError)
-			}
-			return
-		}
-
+		// fetch contracts for the slab
+		contracts := contractsForSlab(ss.Slab)
 		if len(contracts) < int(ss.MinShards) {
 			err = fmt.Errorf("not enough contracts to download the slab, %d<%d", len(contracts), ss.MinShards)
 			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
@@ -1103,6 +1198,7 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/form":             w.rhpFormHandler,
 		"POST   /rhp/renew":            w.rhpRenewHandler,
 		"POST   /rhp/fund":             w.rhpFundHandler,
+		"POST   /rhp/sync":             w.rhpSyncHandler,
 		"POST   /rhp/pricetable":       w.rhpPriceTableHandler,
 		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
