@@ -22,7 +22,7 @@ import (
 const (
 	contractLockingUploadPriority   = 1
 	contractLockingDownloadPriority = 2
-	defaultSectorDownloadTiming     = time.Second
+	defaultSectorDownloadTiming     = 200 * time.Millisecond
 )
 
 var (
