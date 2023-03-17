@@ -32,11 +32,13 @@ import (
 )
 
 const (
-	lockingPriorityRenew   = 100 // highest
-	lockingPriorityFunding = 90
+	lockingPriorityRenew      = 100 // highest
+	lockingPriorityPriceTable = 95
+	lockingPriorityFunding    = 90
 
-	lockingDurationRenew   = time.Minute
-	lockingDurationFunding = 30 * time.Second
+	lockingDurationRenew      = time.Minute
+	lockingDurationPriceTable = 30 * time.Second
+	lockingDurationFunding    = 30 * time.Second
 
 	queryStringParamContractSet = "contractset"
 	queryStringParamMinShards   = "minshards"

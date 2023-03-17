@@ -141,6 +141,11 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 
 	updatePTByContract := func() (rhpv3.HostPriceTable, error) {
 		var rev rhpv2.ContractRevision
+		lockID, err := w.bus.AcquireContract(ctx, contractID, lockingPriorityPriceTable, lockingDurationPriceTable)
+		if err != nil {
+			return rhpv3.HostPriceTable{}, err
+		}
+		defer w.bus.ReleaseContract(ctx, contractID, lockID)
 		if err = w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) (err error) {
 			rev, err = ss.(*sharedSession).Revision(ctx)
 			return err
