@@ -145,8 +145,14 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 				}
 			}()
 
+			// Fetch the account id.
+			accountID, err := w.Account(ctx, contract.HostKey)
+			if err != nil {
+				return err
+			}
+
 			// Fetch the account.
-			account, err := w.Account(ctx, contract.HostKey)
+			account, err := a.b.Account(ctx, accountID, contract.HostKey)
 			if err != nil {
 				return err
 			}
@@ -178,7 +184,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 					return err
 				}
 				// Re-fetch account after sync.
-				account, err = w.Account(ctx, contract.HostKey)
+				account, err = a.b.Account(ctx, accountID, contract.HostKey)
 				if err != nil {
 					return err
 				}

@@ -95,7 +95,7 @@ func (a *accounts) UnlockAccount(id rhpv3.Account, lockID uint64) error {
 	acc, exists := a.byID[id]
 	if !exists {
 		a.mu.Unlock()
-		return fmt.Errorf("account with id %v not found for unlocking", lockID)
+		return errAccountsNotFound
 	}
 	a.mu.Unlock()
 
@@ -182,6 +182,14 @@ func (a *account) convert() api.Account {
 		Host:         a.Host,
 		RequiresSync: a.RequiresSync,
 	}
+}
+
+// Account returns the account with the given id.
+func (a *accounts) Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, error) {
+	acc := a.account(id, hostKey)
+	acc.mu.Lock()
+	defer acc.mu.Unlock()
+	return acc.convert(), nil
 }
 
 // Accounts returns all accounts for a given owner. Usually called when workers

@@ -835,8 +835,24 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
+func (b *bus) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(b.accounts.Accounts())
+}
+
+func (b *bus) accountHandlerGET(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountHandlerPOST
+	if jc.Decode(&req) != nil {
+		return
+	}
+	acc, err := b.accounts.Account(id, req.HostKey)
+	if jc.Check("failed to fetch account", err) != nil {
+		return
+	}
+	jc.Encode(acc)
 }
 
 func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
@@ -992,40 +1008,11 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 	return b, nil
 }
 
-//func (w *worker) accountHandlerGET(jc jape.Context) {
-//	var host types.PublicKey
-//	if jc.DecodeParam("id", &host) != nil {
-//		return
-//	}
-//	account, err := w.accounts.ForHost(host)
-//	if jc.Check("failed to fetch accounts", err) != nil {
-//		return
-//	}
-//	jc.Encode(account.Convert())
-//}
-//
-//func (w *worker) accountsHandlerGET(jc jape.Context) {
-//	accounts, err := w.accounts.All()
-//	if jc.Check("failed to fetch accounts", err) != nil {
-//		return
-//	}
-//	jc.Encode(accounts)
-//}
-//
-//func (w *worker) accountsResetDriftHandlerPOST(jc jape.Context) {
-//	var id rhpv3.Account
-//	if jc.DecodeParam("id", &id) != nil {
-//		return
-//	}
-//	if jc.Check("failed to reset drift", w.accounts.ResetDrift(jc.Request.Context(), id)) != nil {
-//		return
-//	}
-//}
-
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /accounts":                  b.accountsOwnerHandlerGET,
+		"GET    /accounts":                  b.accountsHandlerGET,
+		"POST   /accounts/:id":              b.accountHandlerGET,
 		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
 		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
 		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,

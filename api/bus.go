@@ -46,6 +46,11 @@ var (
 	}
 )
 
+// AccountHandlerPOST is the request type for the /account/:id endpoint.
+type AccountHandlerPOST struct {
+	HostKey types.PublicKey `json:"hostKey"`
+}
+
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
 	BlockHeight uint64

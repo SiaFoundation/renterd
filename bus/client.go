@@ -533,6 +533,14 @@ func (c *Client) GougingParams(ctx context.Context) (gp api.GougingParams, err e
 	return
 }
 
+// Account requests the worker's /accounts/:host endpoint.
+func (c *Client) Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s", id), api.AccountHandlerPOST{
+		HostKey: host,
+	}, &account)
+	return
+}
+
 // Accounts returns the ephemeral accounts for a given owner.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
 	err = c.c.WithContext(ctx).GET("/accounts", &accounts)

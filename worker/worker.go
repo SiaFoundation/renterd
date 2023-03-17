@@ -1140,6 +1140,15 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
+func (w *worker) accountHandlerGET(jc jape.Context) {
+	var hostKey types.PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	account := rhpv3.Account(w.accounts.deriveAccountKey(hostKey).PublicKey())
+	jc.Encode(account)
+}
+
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) *worker {
 	w := &worker{
@@ -1161,7 +1170,8 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /id": w.idHandlerGET,
+		"GET    /account/:hostkey": w.accountHandlerGET,
+		"GET    /id":               w.idHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,
