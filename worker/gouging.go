@@ -114,7 +114,7 @@ func checkUploadGouging(gs api.GougingSettings, hs rhpv2.HostSettings, minShards
 
 	// check max storage price
 	if !gs.MaxStoragePrice.IsZero() && hs.StoragePrice.Cmp(gs.MaxStoragePrice) > 0 {
-		return fmt.Errorf("storage price exceeds max: %v>%v", hs.StoragePrice, gs.MaxUploadPrice)
+		return fmt.Errorf("storage price exceeds max: %v>%v", hs.StoragePrice, gs.MaxStoragePrice)
 	}
 
 	// check upload cost
