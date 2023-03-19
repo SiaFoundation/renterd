@@ -10,12 +10,15 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
 )
 
 type mockHost struct {
+	account    rhpv3.Account
 	contractID types.FileContractID
 	publicKey  types.PublicKey
 	sectors    map[types.Hash256][]byte
@@ -25,7 +28,7 @@ func (h *mockHost) Contract() types.FileContractID {
 	return h.contractID
 }
 
-func (h *mockHost) PublicKey() types.PublicKey {
+func (h *mockHost) HostKey() types.PublicKey {
 	return h.publicKey
 }
 
@@ -35,7 +38,7 @@ func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byt
 	return root, nil
 }
 
-func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")
@@ -83,6 +86,36 @@ func (l *mockContractLocker) ReleaseContract(ctx context.Context, fcid types.Fil
 	return nil
 }
 
+type mockStoreProvider struct {
+	hosts map[types.PublicKey]sectorStore
+}
+
+func newMockStoreProvider(hosts []sectorStore) *mockStoreProvider {
+	sp := &mockStoreProvider{
+		hosts: make(map[types.PublicKey]sectorStore),
+	}
+	for _, h := range hosts {
+		sp.hosts[h.HostKey()] = h
+	}
+	return sp
+}
+
+func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(sectorStore) error) (err error) {
+	h, exists := sp.hosts[hostKey]
+	if !exists {
+		panic("doesn't exist")
+	}
+	return f(h)
+}
+
+func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, f func(sectorStore) error) (err error) {
+	h, exists := sp.hosts[hostKey]
+	if !exists {
+		panic("doesn't exist")
+	}
+	return f(h)
+}
+
 func TestMultipleObjects(t *testing.T) {
 	mockLocker := &mockContractLocker{}
 	// generate object data
@@ -103,14 +136,21 @@ func TestMultipleObjects(t *testing.T) {
 	}
 	r := io.MultiReader(rs...)
 
-	// upload
+	// Prepare hosts.
 	var hosts []sectorStore
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, newMockHost())
 	}
+	sp := newMockStoreProvider(hosts)
+	var contracts []api.ContractMetadata
+	for _, h := range hosts {
+		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.HostKey()})
+	}
+
+	// upload
 	var slabs []object.Slab
 	for {
-		s, _, _, err := uploadSlab(context.Background(), r, 3, 10, hosts, mockLocker, 0)
+		s, _, _, err := uploadSlab(context.Background(), sp, r, 3, 10, contracts, mockLocker, 0)
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -140,7 +180,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), dst, s, hosts, mockLocker, 0); err != nil {
+			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0); err != nil {
 				t.Error(err)
 				return
 			}
@@ -174,10 +214,12 @@ func TestMultipleObjects(t *testing.T) {
 		}
 	}
 
+	mockLocker.mu.Lock()
 	if mockLocker.acquired == 0 {
 		t.Errorf("should have acquired")
 	}
 	if mockLocker.released == 0 {
 		t.Errorf("should have released")
 	}
+	mockLocker.mu.Unlock()
 }

@@ -23,6 +23,7 @@ import (
 	sianode "go.sia.tech/siad/node"
 	"go.sia.tech/siad/node/api/client"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
@@ -30,8 +31,9 @@ import (
 )
 
 const (
-	testInteractionsFlushInterval = 100 * time.Millisecond
-	testPersistInterval           = 2 * time.Second
+	testBusFlushInterval = 100 * time.Millisecond
+	testPersistInterval  = 2 * time.Second
+	latestHardforkHeight = 50 // foundation hardfork height in testing
 )
 
 var (
@@ -55,17 +57,20 @@ var (
 		},
 	}
 
-	defaultRedundancy = api.RedundancySettings{
+	testRedundancySettings = api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 3,
 	}
 
-	defaultGouging = api.GougingSettings{
-		MaxRPCPrice:      types.Siacoins(1),
-		MaxContractPrice: types.Siacoins(1),
-		MaxDownloadPrice: types.Siacoins(1).Mul64(2500),
-		MaxUploadPrice:   types.Siacoins(1).Mul64(2500),
-		MaxStoragePrice:  types.Siacoins(1),
+	testGougingSettings = api.GougingSettings{
+		MinMaxCollateral: types.Siacoins(10),                   // at least up to 10 SC per contract
+		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
+		MaxContractPrice: types.Siacoins(10),                   // 10 SC per contract
+		MaxDownloadPrice: types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
+		MaxUploadPrice:   types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
+		MaxStoragePrice:  types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
+
+		HostBlockHeightLeeway: 120, // amount of leeway given to host block height
 	}
 )
 
@@ -93,9 +98,12 @@ type TestCluster struct {
 
 	cleanups []func(context.Context) error
 
-	miner *node.Miner
-	dir   string
-	wg    sync.WaitGroup
+	miner  *node.Miner
+	dbName string
+	dir    string
+	logger *zap.Logger
+	wk     types.PrivateKey
+	wg     sync.WaitGroup
 }
 
 // randomPassword creates a random 32 byte password encoded as a string.
@@ -118,22 +126,51 @@ func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (e
 	return fn()
 }
 
-func withCtx(f func() error) func(context.Context) error {
-	return func(context.Context) error {
-		return f()
+// Reboot simulates a reboot of the cluster by calling Shutdown and creating a
+// new cluster using the same settings as the previous one.
+// NOTE: Simulating a reboot means that the hosts stay active and are not
+// restarted.
+func (c *TestCluster) Reboot(ctx context.Context) (*TestCluster, error) {
+	hosts := c.hosts
+	c.hosts = nil
+	if err := c.Shutdown(ctx); err != nil {
+		return nil, err
 	}
+
+	newCluster, err := newTestClusterWithFunding(c.dir, c.dbName, false, c.wk, c.logger)
+	if err != nil {
+		return nil, err
+	}
+	newCluster.hosts = hosts
+	return newCluster, nil
 }
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
-	return newTestClusterWithFunding(dir, true, logger)
+	wk := types.GeneratePrivateKey()
+	return newTestClusterWithFunding(dir, "", true, wk, logger)
 }
 
 // newTestClusterWithFunding creates a new cluster without hosts that is funded
 // by mining multiple blocks if 'funding' is set.
-func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*TestCluster, error) {
-	// Use shared wallet key.
-	wk := types.GeneratePrivateKey()
+func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.PrivateKey, logger *zap.Logger) (*TestCluster, error) {
+	// Check if we are testing against an external database. If so, we create a
+	// database with a random name first.
+	var dialector gorm.Dialector
+	uri, user, password, _ := stores.DBConfigFromEnv()
+	if uri != "" {
+		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
+		if err != nil {
+			return nil, err
+		}
+		if dbName == "" {
+			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
+		}
+		if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error; err != nil {
+			return nil, err
+		}
+		dialector = stores.NewMySQLConnection(user, password, uri, dbName)
+	}
 
 	// Prepare individual dirs.
 	busDir := filepath.Join(dir, "bus")
@@ -169,14 +206,13 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	miner := node.NewMiner(busClient)
 
 	// Create bus.
-	var cleanups []func(context.Context) error
-	b, bCleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:          false,
-		GatewayAddr:        "127.0.0.1:0",
-		Miner:              miner,
-		PersistInterval:    testPersistInterval,
-		GougingSettings:    defaultGouging,
-		RedundancySettings: defaultRedundancy,
+	var shutdownFns []func(context.Context) error
+	b, bStopFn, err := node.NewBus(node.BusConfig{
+		DBDialector:     dialector,
+		Bootstrap:       false,
+		GatewayAddr:     "127.0.0.1:0",
+		Miner:           miner,
+		PersistInterval: testPersistInterval,
 	}, busDir, wk, logger)
 	if err != nil {
 		return nil, err
@@ -185,15 +221,15 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	busServer := http.Server{
 		Handler: busAuth(b),
 	}
-	cleanups = append(cleanups, withCtx(bCleanup))
-	cleanups = append(cleanups, busServer.Shutdown)
+	shutdownFns = append(shutdownFns, bStopFn)
+	shutdownFns = append(shutdownFns, busServer.Shutdown)
 
 	// Create worker.
-	w, wCleanup, err := node.NewWorker(node.WorkerConfig{
-		ID:                       "worker",
-		InteractionFlushInterval: testInteractionsFlushInterval,
-		SessionReconnectTimeout:  10 * time.Second,
-		SessionTTL:               2 * time.Minute,
+	w, wStopFn, err := node.NewWorker(node.WorkerConfig{
+		ID:                      "worker",
+		BusFlushInterval:        testBusFlushInterval,
+		SessionReconnectTimeout: 10 * time.Second,
+		SessionTTL:              2 * time.Minute,
 	}, busClient, wk, logger)
 	if err != nil {
 		return nil, err
@@ -202,8 +238,8 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	workerServer := http.Server{
 		Handler: workerAuth(w),
 	}
-	cleanups = append(cleanups, withCtx(wCleanup))
-	cleanups = append(cleanups, workerServer.Shutdown)
+	shutdownFns = append(shutdownFns, wStopFn)
+	shutdownFns = append(shutdownFns, workerServer.Shutdown)
 
 	// Create autopilot store.
 	autopilotStore, err := stores.NewJSONAutopilotStore(autopilotDir)
@@ -212,31 +248,36 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	}
 
 	// Create autopilot.
-	ap, aCleanup, err := node.NewAutopilot(node.AutopilotConfig{
-		Heartbeat:         time.Second,
-		ScannerInterval:   time.Second,
-		ScannerBatchSize:  10,
-		ScannerNumThreads: 1,
-	}, autopilotStore, busClient, workerClient, logger)
+	ap, aStartFn, aStopFn, err := node.NewAutopilot(node.AutopilotConfig{
+		AccountsRefillInterval: time.Second,
+		Heartbeat:              time.Second,
+		MigrationHealthCutoff:  0.99,
+		ScannerInterval:        time.Second,
+		ScannerBatchSize:       10,
+		ScannerNumThreads:      1,
+	}, autopilotStore, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err
 	}
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
 	autopilotServer := http.Server{
-		Handler: autopilotAuth(autopilot.NewServer(ap)),
+		Handler: autopilotAuth(ap),
 	}
-	cleanups = append(cleanups, withCtx(aCleanup))
-	cleanups = append(cleanups, autopilotServer.Shutdown)
+	shutdownFns = append(shutdownFns, aStopFn)
+	shutdownFns = append(shutdownFns, autopilotServer.Shutdown)
 
 	cluster := &TestCluster{
-		dir:   dir,
-		miner: miner,
+		dir:    dir,
+		dbName: dbName,
+		logger: logger,
+		miner:  miner,
+		wk:     wk,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,
 		Worker:    workerClient,
 
-		cleanups: cleanups,
+		cleanups: shutdownFns,
 	}
 
 	// Spin up the servers.
@@ -257,15 +298,38 @@ func newTestClusterWithFunding(dir string, funding bool, logger *zap.Logger) (*T
 	}()
 	cluster.wg.Add(1)
 	go func() {
-		_ = ap.Run()
+		_ = aStartFn()
 		cluster.wg.Done()
 	}()
 
 	// Fund the bus.
 	if funding {
-		if err := cluster.MineBlocks(20); err != nil {
+		if err := cluster.MineBlocks(latestHardforkHeight); err != nil {
 			return nil, err
 		}
+		err = Retry(1000, 100*time.Millisecond, func() error {
+			resp, err := busClient.ConsensusState(context.Background())
+			if err != nil {
+				return err
+			}
+			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
+				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Update the bus settings.
+	err = busClient.UpdateGougingSettings(context.Background(), testGougingSettings)
+	if err != nil {
+		return nil, err
+	}
+	err = busClient.UpdateRedundancySettings(context.Background(), testRedundancySettings)
+	if err != nil {
+		return nil, err
 	}
 
 	// Set autopilot config.
@@ -370,11 +434,27 @@ func (c *TestCluster) MineBlocks(n int) error {
 	return c.miner.Mine(addr, n)
 }
 
+func (c *TestCluster) WaitForAccounts() ([]api.Account, error) {
+	// build hosts map
+	hostsMap := make(map[types.PublicKey]struct{})
+	for _, host := range c.hosts {
+		hostsMap[host.HostKey()] = struct{}{}
+	}
+
+	//  wait for accounts to be filled
+	if err := c.waitForHostAccounts(hostsMap); err != nil {
+		return nil, err
+	}
+
+	// fetch all accounts
+	return c.Worker.Accounts(context.Background())
+}
+
 func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	// build hosts map
-	hostsMap := make(map[string]struct{})
+	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {
-		hostsMap[host.HostKey().String()] = struct{}{}
+		hostsMap[host.HostKey()] = struct{}{}
 	}
 
 	//  wait for the contracts to form
@@ -386,6 +466,9 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	resp, err := c.Worker.ActiveContracts(context.Background(), time.Minute)
 	if err != nil {
 		return nil, err
+	}
+	if resp.Error != "" {
+		return nil, errors.New(resp.Error)
 	}
 	return resp.Contracts, nil
 }
@@ -497,9 +580,9 @@ func (c *TestCluster) AddHostsBlocking(n int) ([]*TestNode, error) {
 	}
 
 	// build hosts map
-	hostsmap := make(map[string]struct{})
+	hostsmap := make(map[types.PublicKey]struct{})
 	for _, host := range hosts {
-		hostsmap[host.HostKey().String()] = struct{}{}
+		hostsmap[host.HostKey()] = struct{}{}
 	}
 
 	// wait for contracts to form
@@ -531,18 +614,43 @@ func (c *TestCluster) Sync() error {
 	return c.sync(c.hosts)
 }
 
+// waitForHostAccounts will fetch the accounts from the worker and wait until
+// they have money in them
+func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) error {
+	return Retry(30, time.Second, func() error {
+		accounts, err := c.Worker.Accounts(context.Background())
+		if err != nil {
+			return err
+		}
+
+		funded := make(map[types.PublicKey]struct{})
+		for _, a := range accounts {
+			if a.Balance.Uint64() > 0 {
+				funded[a.Host] = struct{}{}
+			}
+		}
+
+		for hpk := range hosts {
+			if _, exists := funded[hpk]; !exists {
+				return fmt.Errorf("missing funded account for host %v", hpk)
+			}
+		}
+		return nil
+	})
+}
+
 // waitForHostContracts will fetch the active contracts from the bus and wait
 // until we have a contract with every host in the given hosts map
-func (c *TestCluster) waitForHostContracts(hosts map[string]struct{}) error {
+func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) error {
 	return Retry(30, time.Second, func() error {
 		contracts, err := c.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			return err
 		}
 
-		existing := make(map[string]struct{})
+		existing := make(map[types.PublicKey]struct{})
 		for _, c := range contracts {
-			existing[c.HostKey.String()] = struct{}{}
+			existing[c.HostKey] = struct{}{}
 		}
 
 		for hpk := range hosts {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 	"time"
 
@@ -18,17 +17,24 @@ func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	}
 	storageDuration := uint64(s.Revision().Revision.WindowStart) - currentHeight
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
-	return s.Append(ctx, sector, price, collateral)
+	root, err := s.Append(ctx, sector, price, collateral)
+	if err != nil {
+		return root, err
+	}
+	return root, nil
 }
 
-func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sections := []rhpv2.RPCReadRequestSection{{
 		MerkleRoot: root,
-		Offset:     uint64(offset),
-		Length:     uint64(length),
+		Offset:     offset,
+		Length:     length,
 	}}
 	price := rhpv2.RPCReadCost(s.settings, sections)
-	return s.Read(ctx, w, sections, price)
+	if err := s.Read(ctx, w, sections, price); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Session) deleteSectors(ctx context.Context, roots []types.Hash256) error {
@@ -77,7 +83,7 @@ func (ss *sharedSession) Contract() types.FileContractID {
 	return ss.contractID
 }
 
-func (ss *sharedSession) PublicKey() types.PublicKey {
+func (ss *sharedSession) HostKey() types.PublicKey {
 	return ss.hostKey
 }
 
@@ -90,6 +96,29 @@ func (ss *sharedSession) Revision(ctx context.Context) (rhpv2.ContractRevision, 
 	return s.Revision(), nil
 }
 
+func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error)) (rhpv2.ContractRevision, []types.Transaction, error) {
+	s, err := ss.pool.acquire(ctx, ss)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	defer ss.pool.release(s)
+
+	if errs := PerformGougingChecks(ctx, &s.settings, nil).CanUpload(); len(errs) > 0 {
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed reneww contract, gouging check failed: %v", errs)
+	}
+
+	renterTxnSet, finalPayment, discard, err := prepareFn(s.Revision().Revision, s.Settings())
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	rev, txnSet, err := s.RenewContract(ctx, renterTxnSet, finalPayment)
+	if err != nil {
+		discard()
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	return rev, txnSet, nil
+}
+
 func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
 	currentHeight := ss.pool.currentHeight()
 	if currentHeight == 0 {
@@ -100,19 +129,19 @@ func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.Sector
 		return types.Hash256{}, err
 	}
 	defer ss.pool.release(s)
-	if errs := PerformGougingChecks(ctx, s.settings).CanUpload(); len(errs) > 0 {
+	if errs := PerformGougingChecks(ctx, &s.settings, nil).CanUpload(); len(errs) > 0 {
 		return types.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
 	}
 	return s.appendSector(ctx, sector, currentHeight)
 }
 
-func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	s, err := ss.pool.acquire(ctx, ss)
 	if err != nil {
 		return err
 	}
 	defer ss.pool.release(s)
-	if errs := PerformGougingChecks(ctx, s.settings).CanDownload(); len(errs) > 0 {
+	if errs := PerformGougingChecks(ctx, &s.settings, nil).CanDownload(); len(errs) > 0 {
 		return fmt.Errorf("failed to download sector, gouging check failed: %v", errs)
 	}
 	return s.readSector(ctx, w, root, offset, length)
@@ -153,67 +182,24 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 		}
 	}()
 
-	// reuse existing transport if possible
-	if t := s.transport; t != nil {
-		if time.Since(s.lastSeen) >= sp.sessionTTL {
-			// use RPCSettings as a generic "ping"
-			s.settings, err = RPCSettings(ctx, t)
-			if err != nil {
-				t.Close()
-				goto reconnect
-			}
-		}
-		if s.Revision().ID() != ss.contractID {
-			// connected, but not locking the correct contract
-			if s.Revision().ID() != (types.FileContractID{}) {
-				if err := s.Unlock(); err != nil {
-					t.Close()
-					goto reconnect
-				}
-			}
-			s.revision, err = RPCLock(ctx, t, ss.contractID, ss.renterKey, 10*time.Second)
-			if err != nil {
-				t.Close()
-				goto reconnect
-			}
-			s.key = ss.renterKey
-			s.settings, err = RPCSettings(ctx, t)
-			if err != nil {
-				t.Close()
-				return nil, err
-			}
-		}
-		s.lastSeen = time.Now()
-		return s, nil
+	// if contract of session was renewed, update the sharedSession.
+	if s.renewedFrom != (types.FileContractID{}) && ss.contractID == s.renewedFrom {
+		ss.contractID = s.renewedTo
 	}
 
-reconnect:
-	if sp.sessionReconnectTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, sp.sessionReconnectTimeout)
-		defer cancel()
+	// try refreshing the session and reconnect if it failed
+	if err := s.Refresh(ctx, sp.sessionTTL, ss.renterKey, ss.contractID); err != nil {
+		if sp.sessionReconnectTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, sp.sessionReconnectTimeout)
+			defer cancel()
+		}
+
+		if err := s.Reconnect(ctx, ss.hostIP, ss.hostKey, ss.renterKey, ss.contractID); err != nil {
+			return nil, err
+		}
 	}
 
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", ss.hostIP)
-	if err != nil {
-		return nil, err
-	}
-	s.transport, err = rhpv2.NewRenterTransport(conn, ss.hostKey)
-	if err != nil {
-		return nil, err
-	}
-	s.key = ss.renterKey
-	s.revision, err = RPCLock(ctx, s.transport, ss.contractID, ss.renterKey, 10*time.Second)
-	if err != nil {
-		s.transport.Close()
-		return nil, err
-	}
-	s.settings, err = RPCSettings(ctx, s.transport)
-	if err != nil {
-		s.transport.Close()
-		return nil, err
-	}
-	s.lastSeen = time.Now()
 	return s, nil
 }
 
@@ -248,7 +234,7 @@ func (sp *sessionPool) session(hostKey types.PublicKey, hostIP string, contractI
 	}
 }
 
-func (sp *sessionPool) unlockContract(ss *sharedSession) {
+func (sp *sessionPool) unlockContract(ctx context.Context, ss *sharedSession) {
 	sp.mu.Lock()
 	s, ok := ss.pool.hosts[ss.hostKey]
 	sp.mu.Unlock()
@@ -258,22 +244,7 @@ func (sp *sessionPool) unlockContract(ss *sharedSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.transport != nil && s.Revision().ID() == ss.contractID {
-		s.Unlock()
-	}
-}
-
-func (sp *sessionPool) forceClose(ss *sharedSession) {
-	sp.mu.Lock()
-	s, ok := ss.pool.hosts[ss.hostKey]
-	sp.mu.Unlock()
-	if !ok {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.transport != nil {
-		s.Close()
-		s.transport = nil
+		s.Unlock(ctx)
 	}
 }
 

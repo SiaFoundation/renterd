@@ -14,10 +14,17 @@ type (
 
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
-		ID          types.FileContractID `json:"id"`
-		HostIP      string               `json:"hostIP"`
-		HostKey     types.PublicKey      `json:"hostKey"`
-		StartHeight uint64               `json:"startHeight"`
+		ID         types.FileContractID `json:"id"`
+		HostIP     string               `json:"hostIP"`
+		HostKey    types.PublicKey      `json:"hostKey"`
+		SiamuxAddr string               `json:"siamuxAddr"`
+
+		ProofHeight    uint64 `json:"proofHeight"`
+		RevisionHeight uint64 `json:"revisionHeight"`
+		RevisionNumber uint64 `json:"revisionNumber"`
+		StartHeight    uint64 `json:"startHeight"`
+		WindowStart    uint64 `json:"windowStart"`
+		WindowEnd      uint64 `json:"windowEnd"`
 
 		RenewedFrom types.FileContractID `json:"renewedFrom"`
 		Spending    ContractSpending     `json:"spending"`
@@ -31,6 +38,11 @@ type (
 		FundAccount types.Currency `json:"fundAccount"`
 	}
 
+	ContractSpendingRecord struct {
+		ContractSpending
+		ContractID types.FileContractID `json:"contractID"`
+	}
+
 	// An ArchivedContract contains all information about a contract with a host
 	// that has been moved to the archive either due to expiring or being renewed.
 	ArchivedContract struct {
@@ -38,6 +50,13 @@ type (
 		HostKey   types.PublicKey      `json:"hostKey"`
 		RenewedTo types.FileContractID `json:"renewedTo"`
 		Spending  ContractSpending     `json:"spending"`
+
+		ProofHeight    uint64 `json:"proofHeight"`
+		RevisionHeight uint64 `json:"revisionHeight"`
+		RevisionNumber uint64 `json:"revisionNumber"`
+		StartHeight    uint64 `json:"startHeight"`
+		WindowStart    uint64 `json:"windowStart"`
+		WindowEnd      uint64 `json:"windowEnd"`
 	}
 )
 

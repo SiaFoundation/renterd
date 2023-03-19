@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
 
@@ -18,6 +19,7 @@ type (
 	fileContractID types.FileContractID
 	publicKey      types.PublicKey
 	hostSettings   rhpv2.HostSettings
+	hostPriceTable rhpv3.HostPriceTable
 	balance        big.Int
 )
 
@@ -50,9 +52,14 @@ func (currency) GormDataType() string {
 
 // Scan scan value into currency, implements sql.Scanner interface.
 func (c *currency) Scan(value interface{}) error {
-	s, ok := value.(string)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal currency value:", value))
+	var s string
+	switch value.(type) {
+	case string:
+		s = value.(string)
+	case []byte:
+		s = string(value.([]byte))
+	default:
+		return fmt.Errorf("failed to unmarshal currency value: %v %t", value, value)
 	}
 	curr, err := types.ParseCurrency(s)
 	if err != nil {
@@ -107,15 +114,38 @@ func (hs hostSettings) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }
 
+func (hs hostPriceTable) GormDataType() string {
+	return "string"
+}
+
+// Scan scan value into hostPriceTable, implements sql.Scanner interface.
+func (hpt *hostPriceTable) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal hostPriceTable value:", value))
+	}
+	return json.Unmarshal(bytes, hpt)
+}
+
+// Value returns a hostPriceTable value, implements driver.Valuer interface.
+func (hs hostPriceTable) Value() (driver.Value, error) {
+	return json.Marshal(hs)
+}
+
 func (balance) GormDataType() string {
 	return "string"
 }
 
 // Scan scan value into balance, implements sql.Scanner interface.
 func (hs *balance) Scan(value interface{}) error {
-	s, ok := value.(string)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal balance value:", value))
+	var s string
+	switch value.(type) {
+	case string:
+		s = value.(string)
+	case []byte:
+		s = string(value.([]byte))
+	default:
+		return fmt.Errorf("failed to unmarshal balance value: %v %t", value, value)
 	}
 	if _, success := (*big.Int)(hs).SetString(s, 10); !success {
 		return errors.New(fmt.Sprint("failed to scan balance value", value))

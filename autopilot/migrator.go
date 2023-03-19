@@ -15,46 +15,49 @@ const (
 )
 
 type migrator struct {
-	ap     *Autopilot
-	logger *zap.SugaredLogger
+	ap           *Autopilot
+	logger       *zap.SugaredLogger
+	healthCutoff float64
 
 	mu      sync.Mutex
 	running bool
 }
 
-func newMigrator(ap *Autopilot) *migrator {
+func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
 	return &migrator{
-		ap:     ap,
-		logger: ap.logger.Named("migrator"),
+		ap:           ap,
+		logger:       ap.logger.Named("migrator"),
+		healthCutoff: healthCutoff,
 	}
 }
 
-func (m *migrator) TryPerformMigrations(ctx context.Context, cfg api.AutopilotConfig) {
+func (m *migrator) tryPerformMigrations(ctx context.Context, w Worker) {
 	m.mu.Lock()
-	if m.running {
+	if m.running || m.ap.isStopped() {
 		m.mu.Unlock()
 		return
 	}
 	m.running = true
 	m.mu.Unlock()
 
-	m.logger.Info("performing migrations")
-	go func() {
-		m.performMigrations(cfg)
+	m.ap.wg.Add(1)
+	go func(cfg api.AutopilotConfig) {
+		defer m.ap.wg.Done()
+		m.performMigrations(w, cfg)
 		m.mu.Lock()
 		m.running = false
 		m.mu.Unlock()
-	}()
+	}(m.ap.state.cfg)
 }
 
-func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
+func (m *migrator) performMigrations(w Worker, cfg api.AutopilotConfig) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
 	defer span.End()
 
 	// fetch slabs for migration
-	toMigrate, err := b.SlabsForMigration(ctx, cfg.Contracts.Set, migratorBatchSize)
+	toMigrate, err := b.SlabsForMigration(ctx, m.healthCutoff, cfg.Contracts.Set, migratorBatchSize)
 	if err != nil {
 		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 		return
@@ -70,11 +73,15 @@ func (m *migrator) performMigrations(cfg api.AutopilotConfig) {
 	//
 	// TODO: when we support parallel uploads we should parallelize this
 	for i, slab := range toMigrate {
-		err := m.ap.worker.MigrateSlab(ctx, slab)
+		if m.ap.isStopped() {
+			break
+		}
+
+		err := w.MigrateSlab(ctx, slab)
 		if err != nil {
 			m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
 			continue
 		}
-		m.logger.Debugf("successfully migrated slab %d/%d", i+1, len(toMigrate))
+		m.logger.Debugf("successfully migrated slab '%v' %d/%d", slab.Key, i+1, len(toMigrate))
 	}
 }

@@ -21,9 +21,15 @@ type RHPScanRequest struct {
 	Timeout time.Duration   `json:"timeout"`
 }
 
+// RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
+type RHPPriceTableRequest struct {
+	HostKey    types.PublicKey `json:"hostKey"`
+	SiamuxAddr string          `json:"siamuxAddr"`
+}
+
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
 type RHPScanResponse struct {
-	Ping      Duration           `json:"ping"`
+	Ping      ParamDuration      `json:"ping"`
 	ScanError string             `json:"scanError,omitempty"`
 	Settings  rhpv2.HostSettings `json:"settings,omitempty"`
 }
@@ -68,7 +74,13 @@ type RHPRenewResponse struct {
 type RHPFundRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
-	Amount     types.Currency       `json:"amount"`
+	Balance    types.Currency       `json:"balance"`
+}
+
+// RHPSyncRequest is the request type for the /rhp/sync endpoint.
+type RHPSyncRequest struct {
+	ContractID types.FileContractID `json:"contractID"`
+	HostKey    types.PublicKey      `json:"hostKey"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment

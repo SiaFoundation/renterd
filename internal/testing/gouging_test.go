@@ -82,6 +82,11 @@ func TestGouging(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// wait until accounts are ready and funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
 	// upload and download some data, asserting we have a working contract set
 	data := make([]byte, rhpv2.SectorSize/12)
 	if _, err := frand.Read(data); err != nil {
@@ -99,6 +104,9 @@ func TestGouging(t *testing.T) {
 	if err := w.DownloadObject(ctx, &buffer, name); err != nil {
 		t.Fatal(err)
 	}
+	if !bytes.Equal(data, buffer.Bytes()) {
+		t.Fatal("unexpected data")
+	}
 
 	cases := []struct {
 		param client.HostParam
@@ -106,7 +114,7 @@ func TestGouging(t *testing.T) {
 	}{
 		{"mindownloadbandwidthprice", stypes.SiacoinPrecision},
 		{"minuploadbandwidthprice", stypes.SiacoinPrecision},
-		{"mincontractprice", stypes.SiacoinPrecision.Mul64(10)},
+		{"mincontractprice", stypes.SiacoinPrecision.Mul64(11)},
 	}
 
 	for _, c := range cases {
@@ -138,10 +146,18 @@ func TestGouging(t *testing.T) {
 		if err := h.HostModifySettingPost("mindownloadbandwidthprice", stypes.SiacoinPrecision); err != nil {
 			t.Fatal(err)
 		}
+		// assert it was removed from the contract set
+		if err := waitForHostRemoval(h.HostKey()); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// download the data - should fail
+	buffer.Reset()
 	if err := w.DownloadObject(ctx, &buffer, name); err == nil {
+		t.Fatal(err)
+	}
+	if len(buffer.Bytes()) > 0 {
 		t.Fatal("expected download to fail")
 	}
 }

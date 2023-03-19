@@ -22,6 +22,11 @@ type Client struct {
 	c jape.Client
 }
 
+func (c *Client) ID(ctx context.Context) (id string, err error) {
+	err = c.c.WithContext(ctx).GET("/id", &id)
+	return
+}
+
 // RHPScan scans a host, returning its current settings.
 func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/rhp/scan", api.RHPScanRequest{
@@ -64,13 +69,33 @@ func (c *Client) RHPRenew(ctx context.Context, fcid types.FileContractID, endHei
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, amount types.Currency) (err error) {
+func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, balance types.Currency) (err error) {
 	req := api.RHPFundRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
-		Amount:     amount,
+		Balance:    balance,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/fund", req, nil)
+	return
+}
+
+// RHPSync funds an ephemeral account using the supplied contract.
+func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey) (err error) {
+	req := api.RHPSyncRequest{
+		ContractID: contractID,
+		HostKey:    hostKey,
+	}
+	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
+	return
+}
+
+// RHPPriceTable fetches a price table for a host.
+func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (pt rhpv3.HostPriceTable, err error) {
+	req := api.RHPPriceTableRequest{
+		HostKey:    hostKey,
+		SiamuxAddr: siamuxAddr,
+	}
+	err = c.c.WithContext(ctx).POST("/rhp/pricetable", req, &pt)
 	return
 }
 
@@ -102,11 +127,11 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
 	return c.c.WithContext(ctx).POST("/slab/migrate", slab, nil)
 }
 
-// UploadObject uploads the data in r, creating an object with the given name.
-func (c *Client) UploadObject(ctx context.Context, r io.Reader, name string) (err error) {
-	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", name), []byte{}, nil)
+// UploadObject uploads the data in r, creating an object at the given path.
+func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string) (err error) {
+	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, name), r)
+	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), r)
 	if err != nil {
 		panic(err)
 	}
@@ -163,22 +188,34 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (
 	return
 }
 
-// DeleteObject deletes the object with the given name.
-func (c *Client) DeleteObject(ctx context.Context, name string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", name))
+// DeleteObject deletes the object at the given path.
+func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
 	return
 }
 
 // ActiveContracts returns all active contracts from the worker. These contracts
 // decorate a bus contract with the contract's latest revision.
 func (c *Client) ActiveContracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.Duration(hostTimeout)), &resp)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts/active?hosttimeout=%s", api.ParamDuration(hostTimeout)), &resp)
+	return
+}
+
+// Account requests the worker's /accounts/:host endpoint.
+func (c *Client) Account(ctx context.Context, host types.PublicKey) (account api.Account, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts/host/%s", host), &account)
 	return
 }
 
 // Accounts requests the worker's /accounts endpoint.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
 	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
+	return
+}
+
+// ResetDrift resets the drift of an account to zero.
+func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
 	return
 }
 

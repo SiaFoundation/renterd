@@ -212,7 +212,7 @@ func (c *Client) WalletPending(ctx context.Context) (resp []types.Transaction, e
 }
 
 // Host returns information about a particular host known to the server.
-func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.Host, err error) {
+func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.HostInfo, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/host/%s", hostKey), &h)
 	return
 }
@@ -230,6 +230,27 @@ func (c *Client) Hosts(ctx context.Context, offset, limit int) (hosts []hostdb.H
 // haven't been scanned after lastScan.
 func (c *Client) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) (hosts []hostdb.HostAddress, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/hosts/scanning?offset=%v&limit=%v&lastScan=%s", offset, limit, api.ParamTime(maxLastScan)), &hosts)
+	return
+}
+
+// RemoveOfflineHosts removes all hosts that have been offline for longer than the given max downtime.
+func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
+	err = c.c.WithContext(ctx).POST("/hosts/remove", api.HostsRemoveRequest{
+		MinRecentScanFailures: minRecentScanFailures,
+		MaxDowntimeHours:      api.ParamDurationHour(maxDowntime),
+	}, &removed)
+	return
+}
+
+// HostAllowlist returns the allowlist.
+func (c *Client) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
+	err = c.c.WithContext(ctx).GET("/hosts/allowlist", &allowlist)
+	return
+}
+
+// UpdateHostAllowlist updates the host allowlist, adding and removing the given entries.
+func (c *Client) UpdateHostAllowlist(ctx context.Context, add, remove []types.PublicKey) (err error) {
+	err = c.c.WithContext(ctx).PUT("/hosts/allowlist", api.UpdateAllowlistRequest{Add: add, Remove: remove})
 	return
 }
 
@@ -251,13 +272,19 @@ func (c *Client) RecordInteractions(ctx context.Context, interactions []hostdb.I
 	return
 }
 
-// ActiveContracts returns all active contracts in the contract store.
+// RecordContractSpending records contract spending metrics for contrats.
+func (c *Client) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) (err error) {
+	err = c.c.WithContext(ctx).POST("/contracts/spending", records, nil)
+	return
+}
+
+// ActiveContracts returns all active contracts in the metadata store.
 func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/active", &contracts)
 	return
 }
 
-// Contracts returns the contracts for the given set from the contract store.
+// Contracts returns the contracts for the given set from the metadata store.
 func (c *Client) Contracts(ctx context.Context, set string) (contracts []api.ContractMetadata, err error) {
 	if set == "" {
 		return nil, errors.New("set cannot be empty")
@@ -272,7 +299,13 @@ func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contrac
 	return
 }
 
-// AddContract adds the provided contract to the contract store.
+// ContractSets returns the contract sets of the bus.
+func (c *Client) ContractSets(ctx context.Context) (sets []string, err error) {
+	err = c.c.WithContext(ctx).GET("/contracts/sets", &sets)
+	return
+}
+
+// AddContract adds the provided contract to the metadata store.
 func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
 		Contract:    contract,
@@ -282,7 +315,7 @@ func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevisio
 	return
 }
 
-// AddRenewedContract adds the provided contract to the contract store.
+// AddRenewedContract adds the provided contract to the metadata store.
 func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
 		Contract:    contract,
@@ -329,7 +362,7 @@ func (c *Client) DeleteContract(ctx context.Context, id types.FileContractID) (e
 func (c *Client) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
-		Duration: api.Duration(d),
+		Duration: api.ParamDuration(d),
 		Priority: priority,
 	}, &resp)
 	lockID = resp.LockID
@@ -348,31 +381,6 @@ func (c *Client) ReleaseContract(ctx context.Context, fcid types.FileContractID,
 func (c *Client) RecommendedFee(ctx context.Context) (fee types.Currency, err error) {
 	err = c.c.WithContext(ctx).GET("/txpool/recommendedfee", &fee)
 	return
-}
-
-// ContractsForSlab returns contracts that can be used to download the provided
-// slab.
-func (c *Client) ContractsForSlab(ctx context.Context, shards []object.Sector, contractSetName string) ([]api.ContractMetadata, error) {
-	// build hosts map
-	hosts := make(map[string]struct{})
-	for _, shard := range shards {
-		hosts[shard.Host.String()] = struct{}{}
-	}
-
-	// fetch all contracts from the set
-	contracts, err := c.Contracts(ctx, contractSetName)
-	if err != nil {
-		return nil, err
-	}
-
-	// filter contracts
-	filtered := contracts[:0]
-	for _, contract := range contracts {
-		if _, ok := hosts[contract.HostKey.String()]; ok {
-			filtered = append(filtered, contract)
-		}
-	}
-	return filtered, nil
 }
 
 // Setting returns the value for the setting with given key.
@@ -435,11 +443,38 @@ func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.Redundancy
 	return c.UpdateSetting(ctx, SettingRedundancy, string(b))
 }
 
-// Object returns the object at the given path, or, if path ends in '/', the
-// entries under that path.
-func (c *Client) Object(ctx context.Context, path string) (o object.Object, entries []string, err error) {
+// SearchHosts returns all hosts that match certain search criteria.
+func (c *Client) SearchHosts(ctx context.Context, filterMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (hosts []hostdb.Host, err error) {
+	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
+		Offset:          offset,
+		Limit:           limit,
+		FilterMode:      filterMode,
+		AddressContains: addressContains,
+		KeyIn:           keyIn,
+	}, &hosts)
+	return
+}
+
+// SearchObjects returns all objects that contains a sub-string in their key.
+func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit int) (entries []string, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+	values.Set("key", key)
+	err = c.c.WithContext(ctx).GET("/search/objects?"+values.Encode(), &entries)
+	return
+}
+
+// Object returns the object at the given path with the given prefix, or, if
+// path ends in '/', the entries under that path.
+func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit int) (o object.Object, entries []string, err error) {
+	values := url.Values{}
+	values.Set("prefix", prefix)
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+
 	var or api.ObjectsResponse
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &or)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s?"+values.Encode(), path), &or)
 	if or.Object != nil {
 		o = *or.Object
 	} else {
@@ -448,26 +483,26 @@ func (c *Client) Object(ctx context.Context, path string) (o object.Object, entr
 	return
 }
 
-// AddObject stores the provided object under the given name.
-func (c *Client) AddObject(ctx context.Context, name string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", name), api.AddObjectRequest{
+// AddObject stores the provided object under the given path.
+func (c *Client) AddObject(ctx context.Context, path string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
 		Object:        o,
 		UsedContracts: usedContract,
 	})
 	return
 }
 
-// DeleteObject deletes the object with the given name.
-func (c *Client) DeleteObject(ctx context.Context, name string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", name))
+// DeleteObject deletes the object at the given path.
+func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
 	return
 }
 
 // SlabsForMigration returns up to 'limit' slabs which require migration. A slab
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.
-func (c *Client) SlabsForMigration(ctx context.Context, set string, limit int) (slabs []object.Slab, err error) {
-	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, Limit: limit}, &slabs)
+func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) (slabs []object.Slab, err error) {
+	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, HealthCutoff: healthCutoff, Limit: limit}, &slabs)
 	return
 }
 
@@ -515,12 +550,29 @@ func (c *Client) AddBalance(ctx context.Context, id rhpv3.Account, owner string,
 }
 
 // SetBalance sets the given account's balance to a certain amount.
-func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amount *big.Int) (err error) {
+func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amount, drift *big.Int) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
 		Host:   hk,
 		Owner:  api.ParamString(owner),
 		Amount: amount,
+		Drift:  drift,
 	}, nil)
+	return
+}
+
+// SetRequiresSync sets the requiresSync flag of an account.
+func (c *Client) SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/requiressync", id), api.AccountsRequiresSyncRequest{
+		Host:         hk,
+		Owner:        api.ParamString(owner),
+		RequiresSync: requiresSync,
+	}, nil)
+	return
+}
+
+// ResetDrift resets the drift of an account to zero.
+func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
 	return
 }
 

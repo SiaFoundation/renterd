@@ -39,6 +39,11 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// wait until we have accounts
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
 	// add an object
 	data := make([]byte, rhpv2.SectorSize*4)
 	frand.Read(data)
@@ -48,7 +53,7 @@ func TestMigrations(t *testing.T) {
 
 	usedHosts := func() []types.PublicKey {
 		t.Helper()
-		obj, _, err := b.Object(context.Background(), "foo")
+		obj, _, err := b.Object(context.Background(), "foo", "", 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}

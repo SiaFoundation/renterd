@@ -16,15 +16,6 @@ func errStr(err error) string {
 	return ""
 }
 
-func includesError(errs []error, err error) bool {
-	for _, e := range errs {
-		if e == err || errors.Unwrap(e) == err {
-			return true
-		}
-	}
-	return false
-}
-
 func joinErrors(errs []error) error {
 	filtered := errs[:0]
 	for _, err := range errs {

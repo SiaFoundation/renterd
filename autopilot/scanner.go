@@ -3,6 +3,7 @@ package autopilot
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,6 +16,10 @@ import (
 )
 
 const (
+	// minRecentScanFailures is the minimum amount of (consecutive) failed scans
+	// a host must have before it is removed for exceeding the max downtime.
+	minRecentScanFailures = 10
+
 	// TODO: make these configurable
 	scannerTimeoutInterval   = 10 * time.Minute
 	scannerTimeoutMinTimeout = time.Second * 5
@@ -33,13 +38,12 @@ type (
 		bus interface {
 			Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 			HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
-		}
-		worker interface {
-			RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
+			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
 
 		tracker *tracker
 		logger  *zap.SugaredLogger
+		ap      *Autopilot
 
 		scanBatchSize   uint64
 		scanThreads     uint64
@@ -48,13 +52,14 @@ type (
 		timeoutMinInterval time.Duration
 		timeoutMinTimeout  time.Duration
 
-		stopChan chan struct{}
-
 		mu                sync.Mutex
 		scanning          bool
 		scanningLastStart time.Time
 		timeout           time.Duration
 		timeoutLastUpdate time.Time
+	}
+	scanWorker interface {
+		RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 	}
 
 	scanReq struct {
@@ -126,16 +131,14 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}
 
 	return &scanner{
-		bus:    ap.bus,
-		worker: ap.worker,
+		bus: ap.bus,
 		tracker: newTracker(
 			trackerMinDataPoints,
 			trackerNumDataPoints,
 			trackerTimeoutPercentile,
 		),
 		logger: ap.logger.Named("scanner"),
-
-		stopChan: ap.stopChan,
+		ap:     ap,
 
 		scanBatchSize:   scanBatchSize,
 		scanThreads:     scanThreads,
@@ -146,9 +149,9 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context) {
+func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker) {
 	s.mu.Lock()
-	if s.scanning || !s.isScanRequired() {
+	if s.scanning || !s.isScanRequired() || s.ap.isStopped() {
 		s.mu.Unlock()
 		return
 	}
@@ -158,13 +161,23 @@ func (s *scanner) tryPerformHostScan(ctx context.Context) {
 	s.scanning = true
 	s.mu.Unlock()
 
-	go func() {
-		for resp := range s.launchScanWorkers(ctx, s.launchHostScans()) {
-			if s.isStopped() {
+	go func(cfg api.AutopilotConfig) {
+		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
+			if s.ap.isStopped() {
 				break
 			}
-			if resp.err != nil {
+			if resp.err != nil && !strings.Contains(resp.err.Error(), "connection refused") {
 				s.logger.Error(resp.err)
+			}
+		}
+
+		if !s.ap.isStopped() && cfg.Hosts.MaxDowntimeHours > 0 {
+			s.logger.Debugf("removing hosts that have been offline for more than %v hours", cfg.Hosts.MaxDowntimeHours)
+			maxDowntime := time.Hour * time.Duration(cfg.Hosts.MaxDowntimeHours)
+			if removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime); err != nil {
+				s.logger.Error(err)
+			} else if removed > 0 {
+				s.logger.Infof("removed %v offline hosts", removed)
 			}
 		}
 
@@ -172,7 +185,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context) {
 		s.scanning = false
 		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
 		s.mu.Unlock()
-	}()
+	}(s.ap.state.cfg)
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -198,11 +211,14 @@ func (s *scanner) tryUpdateTimeout() {
 func (s *scanner) launchHostScans() chan scanReq {
 	reqChan := make(chan scanReq, s.scanBatchSize)
 
+	s.ap.wg.Add(1)
 	go func() {
+		defer s.ap.wg.Done()
+
 		var offset int
 		var exhausted bool
 		cutoff := time.Now().Add(-s.scanMinInterval)
-		for !s.isStopped() && !exhausted {
+		for !s.ap.isStopped() && !exhausted {
 			// fetch next batch
 			hosts, err := s.bus.HostsForScanning(context.Background(), cutoff, offset, int(s.scanBatchSize))
 			if err != nil {
@@ -233,18 +249,18 @@ func (s *scanner) launchHostScans() chan scanReq {
 	return reqChan
 }
 
-func (s *scanner) launchScanWorkers(ctx context.Context, reqs chan scanReq) chan scanResp {
+func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan scanReq) chan scanResp {
 	respChan := make(chan scanResp, s.scanThreads)
 	liveThreads := s.scanThreads
 
 	for i := uint64(0); i < s.scanThreads; i++ {
 		go func() {
 			for req := range reqs {
-				if s.isStopped() {
+				if s.ap.isStopped() {
 					break
 				}
 
-				scan, err := s.worker.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
+				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				respChan <- scanResp{req.hostKey, scan.Settings, err}
 				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}
@@ -260,15 +276,6 @@ func (s *scanner) launchScanWorkers(ctx context.Context, reqs chan scanReq) chan
 
 func (s *scanner) isScanRequired() bool {
 	return s.scanningLastStart.IsZero() || time.Since(s.scanningLastStart) > s.scanMinInterval/20 // check 20 times per minInterval, so every 30 minutes
-}
-
-func (s *scanner) isStopped() bool {
-	select {
-	case <-s.stopChan:
-		return true
-	default:
-	}
-	return false
 }
 
 func (s *scanner) isTimeoutUpdateRequired() bool {

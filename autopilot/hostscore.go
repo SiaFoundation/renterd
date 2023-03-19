@@ -6,6 +6,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/build"
@@ -29,14 +30,79 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
-func hostScore(cfg api.AutopilotConfig, h hostdb.Host) float64 {
-	// TODO: priceAdjustmentScore
-	// TODO: storageRemainingScore
-	return ageScore(h) *
-		collateralScore(cfg, *h.Settings) *
-		interactionScore(h) *
-		uptimeScore(h) *
-		versionScore(*h.Settings)
+func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+	return api.HostScoreBreakdown{
+		Age:              ageScore(h),
+		Collateral:       collateralScore(cfg, *h.Settings, expectedRedundancy),
+		Interactions:     interactionScore(h),
+		StorageRemaining: storageRemainingScore(cfg, *h.Settings, storedData, expectedRedundancy),
+		Uptime:           uptimeScore(h),
+		Version:          versionScore(*h.Settings),
+		Prices:           priceAdjustmentScore(hostPeriodCostForScore(h, cfg, expectedRedundancy), cfg),
+	}
+}
+
+// priceAdjustmentScore computes a score between 0 and 1 for a host giving its
+// price settings and the autopilot's configuration.
+//   - 0.5 is returned if the host's costs exactly match the settings.
+//   - If the host is cheaper than expected, a linear bonus is applied. The best
+//     score of 1 is reached when the ratio between host cost and expectations is
+//     10x.
+//   - If the host is more expensive than expected, an exponential malus is applied.
+//     A 2x ratio will already cause the score to drop to 0.16 and a 3x ratio causes
+//     it to drop to 0.05.
+func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.AutopilotConfig) float64 {
+	hostPeriodBudget := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
+
+	ratio := new(big.Rat).SetFrac(hostCostPerPeriod.Big(), hostPeriodBudget.Big())
+	fRatio, _ := ratio.Float64()
+	switch ratio.Cmp(new(big.Rat).SetUint64(1)) {
+	case 0:
+		return 0.5 // ratio is exactly 1 -> score is 0.5
+	case 1:
+		// cost is greater than budget -> score is in range (0; 0.5)
+		//
+		return 1.5 / math.Pow(3, fRatio)
+	case -1:
+		// cost < budget -> score is (0.5; 1]
+		s := 0.4 + 0.06*(1/fRatio)
+		if s > 1.0 {
+			s = 1.0
+		}
+		return s
+	}
+	panic("unreachable")
+}
+
+func storageRemainingScore(cfg api.AutopilotConfig, h rhpv2.HostSettings, storedData uint64, expectedRedundancy float64) float64 {
+	// idealDataPerHost is the amount of data that we would have to put on each
+	// host assuming that our storage requirements were spread evenly across
+	// every single host.
+	idealDataPerHost := float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount)
+	// allocationPerHost is the amount of data that we would like to be able to
+	// put on each host, because data is not always spread evenly across the
+	// hosts during upload. Slower hosts may get very little data, more
+	// expensive hosts may get very little data, and other factors can skew the
+	// distribution. allocationPerHost takes into account the skew and tries to
+	// ensure that there's enough allocation per host to accommodate for a skew.
+	// NOTE: assume that data is not spread evenly and the host with the most
+	// data will store twice the expectation
+	allocationPerHost := idealDataPerHost * 2
+	// hostExpectedStorage is the amount of storage that we expect to be able to
+	// store on this host overall, which should include the stored data that is
+	// already on the host.
+	hostExpectedStorage := (float64(h.RemainingStorage) * 0.25) + float64(storedData)
+	// The score for the host is the square of the amount of storage we
+	// expected divided by the amount of storage we want. If we expect to be
+	// able to store more data on the host than we need to allocate, the host
+	// gets full score for storage.
+	if hostExpectedStorage >= allocationPerHost {
+		return 1
+	}
+	// Otherwise, the score of the host is the fraction of the data we expect
+	// raised to the storage penalty exponentiation.
+	storageRatio := hostExpectedStorage / allocationPerHost
+	return math.Pow(storageRatio, 2.0)
 }
 
 func ageScore(h hostdb.Host) float64 {
@@ -72,21 +138,23 @@ func ageScore(h hostdb.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings) float64 {
+func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings, expectedRedundancy float64) float64 {
+	// Ignore hosts which have set their max collateral to 0.
+	if s.MaxCollateral.IsZero() {
+		return 0
+	}
+
 	// NOTE: This math is copied directly from the old siad hostdb. It would
 	// probably benefit from a thorough review.
-
-	// NOTE: We are not multiplying the `Storage` with redundancy, which is
-	// different from the siad implementation
 
 	// convenience variables
 	allowance := cfg.Contracts.Allowance
 	numContracts := cfg.Contracts.Amount
 	duration := cfg.Contracts.Period
-	storage := cfg.Contracts.Storage
+	storage := float64(cfg.Contracts.Storage) * expectedRedundancy
 
 	// calculate the collateral
-	contractCollateral := s.Collateral.Mul64(storage).Mul64(duration)
+	contractCollateral := s.Collateral.Mul64(uint64(storage)).Mul64(duration)
 	contractCollateralMax := s.MaxCollateral.Div64(2) // 2x buffer - renter may end up storing extra data
 	if contractCollateral.Cmp(contractCollateralMax) > 0 {
 		contractCollateral = contractCollateralMax
@@ -209,4 +277,90 @@ func randSelectByWeight(weights []float64) int {
 		}
 	}
 	return len(weights) - 1
+}
+
+// contractPriceForScore returns the contract price of the host used for
+// scoring. Since we don't know whether rhpv2 or rhpv3 are used, we return the
+// bigger one for a pesimistic score.
+func contractPriceForScore(h hostdb.Host) types.Currency {
+	cp := h.Settings.ContractPrice
+	if cp.Cmp(h.PriceTable.ContractPrice) > 0 {
+		cp = h.PriceTable.ContractPrice
+	}
+	return cp
+}
+
+func bytesToSectors(bytes uint64) uint64 {
+	numSectors := bytes / rhpv2.SectorSize
+	if bytes%rhpv2.SectorSize != 0 {
+		numSectors++
+	}
+	return numSectors
+}
+
+func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+	uploadSectorCostRHPv2, _ := rhpv2.RPCAppendCost(*h.Settings, cfg.Contracts.Period)
+
+	asc := h.PriceTable.AppendSectorCost(cfg.Contracts.Period)
+	uploadSectorCostRHPv3, _ := asc.Total()
+
+	numSectors := bytesToSectors(bytes)
+	if uploadSectorCostRHPv2.Cmp(uploadSectorCostRHPv3) > 0 {
+		return uploadSectorCostRHPv2.Mul64(numSectors)
+	}
+	return uploadSectorCostRHPv3.Mul64(numSectors)
+}
+
+func downloadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+	downloadSectorCostRHPv2 := rhpv2.RPCReadCost(*h.Settings, []rhpv2.RPCReadRequestSection{{Offset: 0, Length: rhpv2.SectorSize}})
+	rsc := h.PriceTable.ReadSectorCost(rhpv2.SectorSize)
+	downloadSectorCostRHPv3, _ := rsc.Total()
+
+	numSectors := bytesToSectors(bytes)
+	if downloadSectorCostRHPv2.Cmp(downloadSectorCostRHPv3) > 0 {
+		return downloadSectorCostRHPv2.Mul64(numSectors)
+	}
+	return downloadSectorCostRHPv3.Mul64(numSectors)
+}
+
+func storageCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+	storeSectorCostRHPv2 := h.Settings.StoragePrice.Mul64(bytes)
+
+	asc := h.PriceTable.AppendSectorCost(cfg.Contracts.Period)
+	storeSectorCostRHPv3 := asc.Storage
+
+	numSectors := bytesToSectors(bytes)
+	if storeSectorCostRHPv2.Cmp(storeSectorCostRHPv3) > 0 {
+		return storeSectorCostRHPv2.Mul64(numSectors)
+	}
+	return storeSectorCostRHPv3.Mul64(numSectors)
+}
+
+func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
+	// compute how much data we upload, download and store.
+	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
+	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))
+	storagePerHost := uint64(float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount))
+
+	// compute the individual costs.
+	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, *h.Settings)
+	hostContractPrice := contractPriceForScore(h)
+	hostUploadCost := uploadCostForScore(cfg, h, uploadPerHost)
+	hostDownloadCost := downloadCostForScore(cfg, h, downloadPerHost)
+	hostStorageCost := storageCostForScore(cfg, h, storagePerHost)
+	siafundFee := hostCollateral.
+		Add(hostContractPrice).
+		Add(hostUploadCost).
+		Add(hostDownloadCost).
+		Add(hostStorageCost).
+		Mul64(39).
+		Div64(1000)
+
+	// add it all up. We multiply the contract price here since we might refresh
+	// a contract multiple times.
+	return hostContractPrice.Mul64(3).
+		Add(hostUploadCost).
+		Add(hostDownloadCost).
+		Add(hostStorageCost).
+		Add(siafundFee)
 }

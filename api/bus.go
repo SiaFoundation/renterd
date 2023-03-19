@@ -3,11 +3,47 @@ package api
 import (
 	"errors"
 	"math/big"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
+)
+
+const (
+	HostFilterModeAll     = "all"
+	HostFilterModeAllowed = "allowed"
+	HostFilterModeBlocked = "blocked"
+)
+
+var (
+	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
+	// the database.
+	ErrObjectNotFound = errors.New("object not found")
+
+	// ErrSettingNotFound is returned if a requested setting is not present in the
+	// database.
+	ErrSettingNotFound = errors.New("setting not found")
+
+	// DefaultRedundancySettings define the default redundancy settings the bus
+	// is configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultRedundancySettings = RedundancySettings{
+		MinShards:   10,
+		TotalShards: 30,
+	}
+
+	// DefaultGougingSettings define the default gouging settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultGougingSettings = GougingSettings{
+		MinMaxCollateral:      types.Siacoins(10),                   // at least up to 10 SC per contract
+		MaxRPCPrice:           types.Siacoins(1).Div64(1000),        // 1mS per RPC
+		MaxContractPrice:      types.Siacoins(15),                   // 15 SC per contract
+		MaxDownloadPrice:      types.Siacoins(3000),                 // 3000 SC per 1 TiB
+		MaxUploadPrice:        types.Siacoins(3000),                 // 3000 SC per 1 TiB
+		MaxStoragePrice:       types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
+		HostBlockHeightLeeway: 3,                                    // 3 blocks
+	}
 )
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
@@ -35,8 +71,8 @@ type ContractsIDRenewedRequest struct {
 // ContractAcquireRequest is the request type for the /contract/acquire
 // endpoint.
 type ContractAcquireRequest struct {
-	Duration Duration `json:"duration"`
-	Priority int      `json:"priority"`
+	Duration ParamDuration `json:"duration"`
+	Priority int           `json:"priority"`
 }
 
 // ContractAcquireRequest is the request type for the /contract/:id/release
@@ -51,10 +87,10 @@ type ContractAcquireResponse struct {
 	LockID uint64 `json:"lockID"`
 }
 
-type HostsScanPubkeyHandlerPOSTRequest struct {
-	Time     time.Time          `json:"time"`
-	Success  bool               `json:"success"`
-	Settings rhpv2.HostSettings `json:"settings"`
+// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
+type HostsRemoveRequest struct {
+	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
+	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
@@ -130,14 +166,21 @@ type AddObjectRequest struct {
 
 // MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
 type MigrationSlabsRequest struct {
-	ContractSet string `json:"contractset"`
-	Limit       int    `json:"limit"`
+	ContractSet  string  `json:"contractset"`
+	HealthCutoff float64 `json:"healthCutoff"`
+	Limit        int     `json:"limit"`
 }
 
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
 	Slab          object.Slab                              `json:"slab"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+}
+
+// UpdateAllowlistRequest is the request type for /hosts/allowlist endpoint.
+type UpdateAllowlistRequest struct {
+	Add    []types.PublicKey `json:"add"`
+	Remove []types.PublicKey `json:"remove"`
 }
 
 // UpdateBlocklistRequest is the request type for /hosts/blocklist endpoint.
@@ -152,6 +195,15 @@ type AccountsUpdateBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
 	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
+	Drift  *big.Int        `json:"drift"`
+}
+
+// AccountsRequiresSyncRequest is the request type for
+// /accounts/:id/requiressync endpoint.
+type AccountsRequiresSyncRequest struct {
+	Host         types.PublicKey `json:"host"`
+	Owner        ParamString     `json:"owner"`
+	RequiresSync bool            `json:"requiresSync"`
 }
 
 // AccountsAddBalanceRequest is the request type for /accounts/:id/add
@@ -178,23 +230,56 @@ type UploadParams struct {
 // GougingParams contains the metadata needed by a worker to perform gouging
 // checks.
 type GougingParams struct {
+	ConsensusState     ConsensusState
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
+	TransactionFee     types.Currency
 }
 
 // GougingSettings contain some price settings used in price gouging.
 type GougingSettings struct {
-	MaxRPCPrice      types.Currency
-	MaxContractPrice types.Currency
-	MaxDownloadPrice types.Currency // per TiB
-	MaxUploadPrice   types.Currency // per TiB
-	MaxStoragePrice  types.Currency // per byte per block
+	// MinMaxCollateral is the minimum value for 'MaxCollateral' in the host's
+	// price settings
+	MinMaxCollateral types.Currency `json:"minMaxCollateral"`
+
+	// MaxRPCPrice is the maximum allowed base price for RPCs
+	MaxRPCPrice types.Currency `json:"maxRPCPrice"`
+
+	// MaxContractPrice is the maximum allowed price to form a contract
+	MaxContractPrice types.Currency `json:"maxContractPrice"`
+
+	// MaxDownloadPrice is the maximum allowed price to download 1TiB of data
+	MaxDownloadPrice types.Currency `json:"maxDownloadPrice"`
+
+	// MaxUploadPrice is the maximum allowed price to upload 1TiB of data
+	MaxUploadPrice types.Currency `json:"maxUploadPrice"`
+
+	// MaxStoragePrice is the maximum allowed price to store 1 byte per block
+	MaxStoragePrice types.Currency `json:"maxStoragePrice"`
+
+	// HostBlockHeightLeeway is the amount of blocks of leeway given to the host
+	// block height in the host's price table
+	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
+}
+
+type SearchHostsRequest struct {
+	Offset          int               `json:"offset"`
+	Limit           int               `json:"limit"`
+	FilterMode      string            `json:"filterMode"`
+	AddressContains string            `json:"addressContains"`
+	KeyIn           []types.PublicKey `json:"keyIn"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
 type RedundancySettings struct {
-	MinShards   int
-	TotalShards int
+	MinShards   int `json:"minShards"`
+	TotalShards int `json:"totalShards"`
+}
+
+// Redundancy returns the effective storage redundancy of the
+// RedundancySettings.
+func (rs RedundancySettings) Redundancy() float64 {
+	return float64(rs.TotalShards) / float64(rs.MinShards)
 }
 
 // Validate returns an error if the redundancy settings are not considered
@@ -211,7 +296,3 @@ func (rs RedundancySettings) Validate() error {
 	}
 	return nil
 }
-
-// ErrSettingNotFound is returned if a requested setting is not present in the
-// database.
-var ErrSettingNotFound = errors.New("setting not found")

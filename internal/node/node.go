@@ -3,16 +3,17 @@ package node
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/stores"
@@ -26,15 +27,16 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
+	"gorm.io/gorm"
 )
 
 type WorkerConfig struct {
-	ID                       string
-	InteractionFlushInterval time.Duration
-	SessionReconnectTimeout  time.Duration
-	SessionTTL               time.Duration
-	DownloadSectorTimeout    time.Duration
-	UploadSectorTimeout      time.Duration
+	ID                      string
+	BusFlushInterval        time.Duration
+	SessionReconnectTimeout time.Duration
+	SessionTTL              time.Duration
+	DownloadSectorTimeout   time.Duration
+	UploadSectorTimeout     time.Duration
 }
 
 type BusConfig struct {
@@ -43,16 +45,19 @@ type BusConfig struct {
 	Miner           *Miner
 	PersistInterval time.Duration
 
-	api.GougingSettings
-	api.RedundancySettings
+	DBDialector gorm.Dialector
 }
 
 type AutopilotConfig struct {
-	Heartbeat         time.Duration
-	ScannerInterval   time.Duration
-	ScannerBatchSize  uint64
-	ScannerNumThreads uint64
+	AccountsRefillInterval time.Duration
+	Heartbeat              time.Duration
+	MigrationHealthCutoff  float64
+	ScannerInterval        time.Duration
+	ScannerBatchSize       uint64
+	ScannerNumThreads      uint64
 }
+
+type ShutdownFn = func(context.Context) error
 
 func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	var buf bytes.Buffer
@@ -179,7 +184,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
+func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -231,7 +236,12 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 	if err := os.MkdirAll(dbDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	dbConn := stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
+
+	// If no DB dialector was provided, use SQLite.
+	dbConn := cfg.DBDialector
+	if dbConn == nil {
+		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
+	}
 
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), nil)
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, sqlLogger)
@@ -248,45 +258,38 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, busCleanup, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, cfg.GougingSettings, cfg.RedundancySettings, l)
+	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cleanup := func() error {
-		errs := []error{
+	shutdownFn := func(ctx context.Context) error {
+		return joinErrors([]error{
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
-			busCleanup(),
+			b.Shutdown(ctx),
 			sqlStore.Close(),
-		}
-		for _, err := range errs {
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+		})
 	}
-	return b, cleanup, nil
+	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, func() error, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
-	w, cleanup, err := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.InteractionFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, l)
-	return w, cleanup, err
+	w := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, l)
+	return w.Handler(), w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, w autopilot.Worker, l *zap.Logger) (_ *autopilot.Autopilot, cleanup func() error, _ error) {
-	ap, err := autopilot.New(s, b, w, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads)
+func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
+	ap, err := autopilot.New(s, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-
-	return ap, ap.Stop, nil
+	return ap.Handler(), ap.Run, ap.Shutdown, nil
 }
 
-func NewLogger(path string) (*zap.Logger, func(), error) {
+func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {
 	writer, closeFn, err := zap.Open(path)
 	if err != nil {
 		return nil, nil, err
@@ -319,8 +322,31 @@ func NewLogger(path string) (*zap.Logger, func(), error) {
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	)
 
-	return logger, func() {
+	return logger, func(_ context.Context) error {
 		_ = logger.Sync() // ignore Error
 		closeFn()
+		return nil
 	}, nil
+}
+
+func joinErrors(errs []error) error {
+	filtered := errs[:0]
+	for _, err := range errs {
+		if err != nil {
+			filtered = append(filtered, err)
+		}
+	}
+
+	switch len(filtered) {
+	case 0:
+		return nil
+	case 1:
+		return filtered[0]
+	default:
+		strs := make([]string, len(filtered))
+		for i := range strs {
+			strs[i] = filtered[i].Error()
+		}
+		return errors.New(strings.Join(strs, ";"))
+	}
 }
