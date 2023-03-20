@@ -86,6 +86,7 @@ func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, h
 	req := api.RHPSyncRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
+		HostIP:     hostIP,
 		SiamuxAddr: siamuxAddr,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
