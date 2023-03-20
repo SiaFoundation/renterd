@@ -36,7 +36,7 @@ var (
 	errHostBadSettings  = errors.New("host has bad settings")
 	errHostPriceGouging = errors.New("host is price gouging")
 	errHostNotAnnounced = errors.New("host is not announced")
-	errHostNoPriceTable = errors.New("no pricetable")
+	errHostNoPriceTable = errors.New("host has no pricetable")
 
 	errContractOutOfCollateral   = errors.New("contract is out of collateral")
 	errContractOutOfFunds        = errors.New("contract is out of funds")
@@ -55,9 +55,14 @@ type unusableHostResult struct {
 	notannounced uint64
 	nopricetable uint64
 	unknown      uint64
+
+	// unusableHostResult is overloaded with a breakdown of the host score, this
+	// field might not be set and is mostly ignored, it is currently only used
+	// by the host infos endpoint `/hosts/:hostkey`
+	scoreBreakdown api.HostScoreBreakdown
 }
 
-func newUnusableHostResult(errs []error) (u unusableHostResult) {
+func newUnusableHostResult(errs []error, scoreBreakdown api.HostScoreBreakdown) (u unusableHostResult) {
 	for _, err := range errs {
 		switch err {
 		case errHostBlocked:
@@ -80,6 +85,8 @@ func newUnusableHostResult(errs []error) (u unusableHostResult) {
 			u.unknown++
 		}
 	}
+
+	u.scoreBreakdown = scoreBreakdown
 	return
 }
 
@@ -129,6 +136,8 @@ func (u *unusableHostResult) merge(other unusableHostResult) {
 	u.notannounced += other.notannounced
 	u.nopricetable += other.nopricetable
 	u.unknown += other.unknown
+
+	// scoreBreakdown is not merged
 }
 
 func (u *unusableHostResult) keysAndValues() []interface{} {
@@ -160,24 +169,25 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 	if !h.IsOnline() {
 		errs = append(errs, errHostOffline)
 	}
+	if h.NetAddress == "" {
+		errs = append(errs, errHostNotAnnounced)
+	}
 	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
 		errs = append(errs, errHostRedundantIP)
 	}
+
+	var breakdown api.HostScoreBreakdown
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		errs = append(errs, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if h.PriceTable == nil {
 		errs = append(errs, errHostNoPriceTable)
 	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, h.PriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
 		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
-	} else if score := hostScore(cfg, h, storedData, rs.Redundancy()).Score(); score < minScore {
-		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, score, minScore))
+	} else if breakdown = hostScore(cfg, h, storedData, rs.Redundancy()); breakdown.Score() < minScore {
+		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, breakdown.Score(), minScore))
 	}
 
-	// sanity check - should never happen but this would cause a zero score
-	if h.NetAddress == "" {
-		errs = append(errs, errHostNotAnnounced)
-	}
-	return len(errs) == 0, newUnusableHostResult(errs)
+	return len(errs) == 0, newUnusableHostResult(errs, breakdown)
 }
 
 // isUsableContract returns whether the given contract is usable and whether it

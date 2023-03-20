@@ -125,9 +125,20 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 }
 
 func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerGET, error) {
+	cfg := c.ap.Config()
+	if cfg.Contracts.Allowance.IsZero() {
+		return nil, fmt.Errorf("can not score hosts because contracts allowance is zero")
+	}
+	if cfg.Contracts.Amount == 0 {
+		return nil, fmt.Errorf("can not score hosts because contracts amount is zero")
+	}
+	if cfg.Contracts.Period == 0 {
+		return nil, fmt.Errorf("can not score hosts because contract period is zero")
+	}
+
 	hosts, err := c.ap.bus.SearchHosts(ctx, filterMode, addressContains, keyIn, offset, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+		return nil, fmt.Errorf("failed to fetch requested hosts from bus: %w", err)
 	}
 	gs, err := c.ap.bus.GougingSettings(ctx)
 	if err != nil {
@@ -145,7 +156,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
 	}
-	cfg := c.ap.Config()
+
 	f := newIPFilter(c.logger)
 
 	c.mu.Lock()
@@ -158,13 +169,11 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 
 	var hostInfos []api.HostHandlerGET
 	for _, host := range hosts {
-		storedData := storedData[host.PublicKey]
-		sb := hostScore(cfg, host, 0, 0)
-		isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData, fee, true)
+		isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData[host.PublicKey], fee, true)
 		hostInfos = append(hostInfos, api.HostHandlerGET{
 			Host:            host,
-			Score:           sb.Score(),
-			ScoreBreakdown:  sb,
+			Score:           unusableResult.scoreBreakdown.Score(),
+			ScoreBreakdown:  unusableResult.scoreBreakdown,
 			Usable:          isUsable,
 			UnusableReasons: unusableResult.reasons(),
 		})
@@ -188,6 +197,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// no maintenance if no hosts are requested
 	if state.cfg.Contracts.Amount == 0 {
 		c.logger.Debug("no hosts requested, skipping contract maintenance")
+		return nil
+	}
+
+	// no maintenace if no allowance was set
+	if state.cfg.Contracts.Allowance.IsZero() {
+		c.logger.Debug("allowance is set to zero, skipping contract maintenance")
 		return nil
 	}
 
