@@ -786,10 +786,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 
 	// Sync account.
 	err = w.syncAccount(ctx, pt, siamuxAddr, rsr.HostKey)
-	if err != nil {
-		w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rsr.HostKey)
-	}
-	if jc.Check("couldn't fund account", err) != nil {
+	if jc.Check("couldn't sync account", err) != nil {
 		return
 	}
 }
