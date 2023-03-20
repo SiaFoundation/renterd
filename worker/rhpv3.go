@@ -562,7 +562,7 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 	p.mu.Unlock()
 
 	// price table is valid, no update necessary, return early
-	priceTableUpdateLeeway := -time.Duration(frand.Intn(180)) * time.Second // update 0-3 minutes early
+	priceTableUpdateLeeway := -time.Duration(frand.Intn(60)) * time.Second
 	if time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway).Add(priceTableUpdateLeeway)) {
 		return
 	}
@@ -598,7 +598,7 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 	// fetch the host info from the bus, it might have a new price table already
 	// in which case we can return without having to update it
 	host, err := b.Host(ctx, hk)
-	if err == nil && host.PriceTable != nil && host.PriceTable.Expiry.After(hpt.Expiry) {
+	if err == nil && host.PriceTable != nil && time.Now().Before(host.PriceTable.Expiry.Add(priceTableValidityLeeway)) {
 		hpt = *host.PriceTable
 		return
 	}
