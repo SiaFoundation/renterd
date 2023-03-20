@@ -524,7 +524,7 @@ func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsHostHandlerGET(jc jape.Context) {
+func (b *bus) contractsActiveHostHandlerGET(jc jape.Context) {
 	var hk types.PublicKey
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
@@ -1032,19 +1032,19 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
-		"GET    /contracts/active":        b.contractsActiveHandlerGET,
-		"GET    /contracts/host/:hostkey": b.contractsHostHandlerGET,
-		"GET    /contracts/sets":          b.contractsSetsHandlerGET,
-		"GET    /contracts/set/:set":      b.contractsSetHandlerGET,
-		"PUT    /contracts/set/:set":      b.contractsSetHandlerPUT,
-		"POST   /contracts/spending":      b.contractsSpendingHandlerPOST,
-		"GET    /contract/:id":            b.contractIDHandlerGET,
-		"POST   /contract/:id":            b.contractIDHandlerPOST,
-		"GET    /contract/:id/ancestors":  b.contractIDAncestorsHandler,
-		"POST   /contract/:id/renewed":    b.contractIDRenewedHandlerPOST,
-		"DELETE /contract/:id":            b.contractIDHandlerDELETE,
-		"POST   /contract/:id/acquire":    b.contractAcquireHandlerPOST,
-		"POST   /contract/:id/release":    b.contractReleaseHandlerPOST,
+		"GET    /contracts/active":          b.contractsActiveHandlerGET,
+		"GET    /contracts/active/:hostkey": b.contractsActiveHostHandlerGET,
+		"GET    /contracts/sets":            b.contractsSetsHandlerGET,
+		"GET    /contracts/set/:set":        b.contractsSetHandlerGET,
+		"PUT    /contracts/set/:set":        b.contractsSetHandlerPUT,
+		"POST   /contracts/spending":        b.contractsSpendingHandlerPOST,
+		"GET    /contract/:id":              b.contractIDHandlerGET,
+		"POST   /contract/:id":              b.contractIDHandlerPOST,
+		"GET    /contract/:id/ancestors":    b.contractIDAncestorsHandler,
+		"POST   /contract/:id/renewed":      b.contractIDRenewedHandlerPOST,
+		"DELETE /contract/:id":              b.contractIDHandlerDELETE,
+		"POST   /contract/:id/acquire":      b.contractAcquireHandlerPOST,
+		"POST   /contract/:id/release":      b.contractReleaseHandlerPOST,
 
 		"POST /search/hosts":  b.searchHostsHandlerPOST,
 		"GET /search/objects": b.searchObjectsHandlerGET,
