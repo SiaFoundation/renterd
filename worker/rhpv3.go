@@ -628,7 +628,9 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 
 	// scan host and pay by EA if possible
 	var pt rhpv3.HostPriceTable
-	if cs, errr := b.ConsensusState(ctx); errr == nil && cs.Synced {
+	if revision != nil {
+		pt, err = payByFC() // pay by FC if a revision is given
+	} else if cs, errr := b.ConsensusState(ctx); errr == nil && cs.Synced {
 		_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
 		if err == nil && pt.Validity < 0 {
 			pt, err = payByFC() // fallback to paying by FC
