@@ -123,6 +123,7 @@ func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable) (results GougingResul
 func (gr GougingResults) CanDownload() (errs []error) {
 	return filterErrors(
 		gr.downloadErr,
+		gr.gougingErr,
 	)
 }
 

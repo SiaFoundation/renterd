@@ -46,6 +46,48 @@ var (
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 )
 
+func (w *worker) FetchRevisionWithAccount(ctx context.Context, pt rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+	if errs := PerformGougingChecks(ctx, nil, &pt).CanDownload(); len(errs) > 0 {
+		return types.FileContractRevision{}, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
+	}
+	acc, err := w.accounts.ForHost(hostKey)
+	if err != nil {
+		return types.FileContractRevision{}, err
+	}
+	err = acc.WithWithdrawal(ctx, func() (types.Currency, error) {
+		cost := pt.LatestRevisionCost
+		return cost, withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) (err error) {
+			rev, err = RPCLatestRevision(t, contractID, func(rev *types.FileContractRevision) (rhpv3.PaymentMethod, error) {
+				payment := rhpv3.PayByEphemeralAccount(acc.id, cost, bh+defaultWithdrawalExpiryBlocks, w.accounts.deriveAccountKey(hostKey))
+				return &payment, nil
+			})
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	})
+	return rev, err
+}
+
+func (w *worker) FetchRevisionWithContract(ctx context.Context, pt rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+	if errs := PerformGougingChecks(ctx, nil, &pt).CanDownload(); len(errs) > 0 {
+		return types.FileContractRevision{}, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
+	}
+	cost := pt.LatestRevisionCost
+	err = withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) (err error) {
+		rev, err = RPCLatestRevision(t, contractID, func(paymentRev *types.FileContractRevision) (rhpv3.PaymentMethod, error) {
+			payment, ok := rhpv3.PayByContract(paymentRev, cost, rhpv3.Account{}, w.deriveRenterKey(hostKey))
+			if !ok {
+				return nil, errors.New("insufficient funds")
+			}
+			return &payment, nil
+		})
+		return err
+	})
+	return rev, err
+}
+
 func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, revision *types.FileContractRevision) error {
 	// fetch the account
 	account, err := w.accounts.ForHost(hk)
@@ -101,7 +143,6 @@ func (w *worker) syncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 	if err != nil {
 		return err
 	}
-
 	// fetch the price table
 	pt, valid := w.priceTables.PriceTable(hk)
 	if !valid {
@@ -192,21 +233,21 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr, hostIP string, hostKey types.PublicKey) (pt rhpv3.HostPriceTable, err error) {
+func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr string, hostKey types.PublicKey) (pt rhpv3.HostPriceTable, err error) {
 	pt, ptValid := w.priceTables.PriceTable(hostKey)
 	if ptValid {
 		return pt, nil
 	}
 
 	updatePTByContract := func() {
-		var rev rhpv2.ContractRevision
-		if err = w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) (err error) {
-			rev, err = ss.(*sharedSession).Revision(ctx)
-			return
-		}); err != nil {
+		rev, err := w.FetchRevisionWithContract(ctx, pt, hostKey, siamuxAddr, contractID)
+		if err != nil {
 			return
 		}
-		pt, err = w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, &rev.Revision), siamuxAddr, hostKey)
+		pt, err = w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, &rev), siamuxAddr, hostKey)
+		if err != nil {
+			return
+		}
 	}
 
 	// update price table using contract payment if we don't have a funded account
@@ -230,13 +271,13 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 	return
 }
 
-func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, fn func(sectorStore) error) (err error) {
+func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(sectorStore) error) (err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
 	}
 
-	pt, err := w.fetchPriceTable(ctx, contractID, siamuxAddr, hostIP, hostKey)
+	pt, err := w.fetchPriceTable(ctx, contractID, siamuxAddr, hostKey)
 	if err != nil {
 		return err
 	}
@@ -795,6 +836,26 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 		return err
 	}
 	return nil
+}
+
+func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.PaymentMethod, error)) (rev types.FileContractRevision, err error) {
+	defer wrapErr(&err, "LatestRevision")
+	s := t.DialStream()
+	defer s.Close()
+	req := rhpv3.RPCLatestRevisionRequest{
+		ContractID: contractID,
+	}
+	var resp rhpv3.RPCLatestRevisionResponse
+	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &req); err != nil {
+		return types.FileContractRevision{}, err
+	} else if err := s.ReadResponse(&resp, 4096); err != nil {
+		return types.FileContractRevision{}, err
+	} else if payment, err := paymentFunc(&resp.Revision); err != nil {
+		return types.FileContractRevision{}, err
+	} else if err := processPayment(s, payment); err != nil {
+		return types.FileContractRevision{}, err
+	}
+	return
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.

@@ -43,7 +43,7 @@ type sectorStore interface {
 
 type storeProvider interface {
 	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStore) error) (err error)
-	withHostV3(context.Context, types.FileContractID, types.PublicKey, string, string, func(sectorStore) error) (err error)
+	withHostV3(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStore) error) (err error)
 }
 
 func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration) ([]object.Sector, []int, error) {
@@ -244,7 +244,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			}
 
 			offset, length := ss.SectorRegion()
-			_ = sp.withHostV3(ctx, c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, func(ss sectorStore) error {
+			_ = sp.withHostV3(ctx, c.ID, c.HostKey, c.SiamuxAddr, func(ss sectorStore) error {
 				buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 				err := ss.DownloadSector(ctx, buf, shard.Root, uint64(offset), uint64(length))
 				if err != nil {
