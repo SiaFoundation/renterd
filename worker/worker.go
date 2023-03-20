@@ -616,13 +616,6 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 
-	// Get IP of host.
-	h, err := w.bus.Host(ctx, rfr.HostKey)
-	if jc.Check("failed to fetch host", err) != nil {
-		return
-	}
-	siamuxAddr := h.Settings.SiamuxAddr()
-
 	// Get contract revision.
 	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityFunding, lockingDurationFunding)
 	if jc.Check("failed to acquire contract for funding EA", err) != nil {
@@ -634,7 +627,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// Get contract revision.
 	var revision types.FileContractRevision
-	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, h.NetAddress, func(ss sectorStore) error {
+	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, rfr.HostIP, func(ss sectorStore) error {
 		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
 		if err != nil {
 			return err
@@ -642,7 +635,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		revision = rev.Revision
 		return nil
 	})
-	if jc.Check(fmt.Sprintf("failed to fetch revision from host '%s'", siamuxAddr), err) != nil {
+	if jc.Check(fmt.Sprintf("failed to fetch revision from host '%s'", rfr.HostKey), err) != nil {
 		return
 	}
 
@@ -650,7 +643,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
 	if !ptValid {
 		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
-		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rfr.HostKey)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, rfr.SiamuxAddr, rfr.HostKey)
 		if jc.Check("failed to update outdated price table", err) != nil {
 			return
 		}
@@ -665,12 +658,12 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	fundAmount := rfr.Balance.Sub(balance)
 
 	// Fund account.
-	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
+	err = w.fundAccount(ctx, account, pt, rfr.SiamuxAddr, rfr.HostKey, fundAmount, &revision)
 
 	// If funding failed due to an exceeded max balance, we sync the account and
 	// try funding the account again.
 	if isMaxBalanceExceeded(err) {
-		err = w.syncAccount(ctx, pt, siamuxAddr, rfr.HostKey)
+		err = w.syncAccount(ctx, pt, rfr.SiamuxAddr, rfr.HostKey)
 		if err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 		}
@@ -678,7 +671,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		balance = account.Balance()
 		if balance.Cmp(rfr.Balance) < 0 {
 			fundAmount = rfr.Balance.Sub(balance)
-			err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
+			err = w.fundAccount(ctx, account, pt, rfr.SiamuxAddr, rfr.HostKey, fundAmount, &revision)
 			if err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to fund account right after a sync: %v", err), "host", rfr.HostKey, "balance", balance, "requested", rfr.Balance, "fund", fundAmount)
 			}
@@ -729,14 +722,6 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 		return
 	}
 
-	// Get IP of host.
-	h, err := w.bus.Host(ctx, rsr.HostKey)
-	if jc.Check("failed to fetch host", err) != nil {
-		return
-	}
-	hostIP := h.Settings.NetAddress
-	siamuxAddr := h.Settings.SiamuxAddr()
-
 	// Get contract revision.
 	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rsr.ContractID, lockingPriorityFunding, lockingDurationFunding)
 	if jc.Check("failed to acquire contract for funding EA", err) != nil {
@@ -750,7 +735,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 
 	// Get contract revision.
 	var revision types.FileContractRevision
-	err = w.withHostV2(jc.Request.Context(), rsr.ContractID, rsr.HostKey, hostIP, func(ss sectorStore) error {
+	err = w.withHostV2(jc.Request.Context(), rsr.ContractID, rsr.HostKey, rsr.HostIP, func(ss sectorStore) error {
 		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
 		if err != nil {
 			return err
@@ -766,14 +751,14 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	pt, ptValid := w.priceTables.PriceTable(rsr.HostKey)
 	if !ptValid {
 		paymentFunc := w.preparePriceTableContractPayment(rsr.HostKey, &revision)
-		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rsr.HostKey)
+		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, rsr.SiamuxAddr, rsr.HostKey)
 		if jc.Check("failed to update outdated price table", err) != nil {
 			return
 		}
 	}
 
 	// Sync account.
-	err = w.syncAccount(ctx, pt, siamuxAddr, rsr.HostKey)
+	err = w.syncAccount(ctx, pt, rsr.SiamuxAddr, rsr.HostKey)
 	if err != nil {
 		w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rsr.HostKey)
 	}
