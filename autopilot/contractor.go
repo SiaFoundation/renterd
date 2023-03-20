@@ -428,7 +428,10 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
-		host.PriceTable = &pt
+		host.PriceTable = &hostdb.HostPriceTable{
+			HostPriceTable: &pt,
+			Expiry:         time.Now().Add(pt.Validity), // this is a lie, but it's not used
+		}
 
 		// decide whether the host is still good
 		usable, unusableResult := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)

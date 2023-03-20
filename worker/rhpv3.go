@@ -17,8 +17,10 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -42,7 +44,7 @@ var (
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 )
 
-func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey, amount types.Currency, revision *types.FileContractRevision) error {
+func (w *worker) fundAccount(ctx context.Context, account *account, pt *rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey, amount types.Currency, revision *types.FileContractRevision) error {
 	return account.WithDeposit(ctx, func() (types.Currency, error) {
 		return amount, withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(hostKey)
@@ -60,7 +62,7 @@ func (w *worker) fundAccount(ctx context.Context, account *account, pt rhpv3.Hos
 	})
 }
 
-func (w *worker) syncAccount(ctx context.Context, pt rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey) error {
+func (w *worker) syncAccount(ctx context.Context, pt *rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey) error {
 	account, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
@@ -145,51 +147,13 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr, hostIP string, hostKey types.PublicKey) (pt rhpv3.HostPriceTable, err error) {
-	pt, ptValid := w.priceTables.PriceTable(hostKey)
-	if ptValid {
-		return pt, nil
-	}
-
-	updatePTByContract := func() {
-		var rev rhpv2.ContractRevision
-		if err = w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) (err error) {
-			rev, err = ss.(*sharedSession).Revision(ctx)
-			return
-		}); err != nil {
-			return
-		}
-		pt, err = w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, &rev.Revision), siamuxAddr, hostKey)
-	}
-
-	// update price table using contract payment if we don't have a funded account
-	acc, err := w.accounts.ForHost(hostKey)
-	if err != nil || acc.Balance().IsZero() {
-		updatePTByContract()
-		return
-	}
-
-	// fetch block height
-	cs, err := w.bus.ConsensusState(ctx)
-	if err != nil {
-		return rhpv3.HostPriceTable{}, err
-	}
-
-	// update price table using account payment if possible, but fall back to ensure we have a valid price table
-	pt, err = w.priceTables.Update(ctx, w.preparePriceTableAccountPayment(hostKey, cs.BlockHeight), siamuxAddr, hostKey)
-	if err != nil {
-		updatePTByContract()
-	}
-	return
-}
-
 func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, fn func(sectorStore) error) (err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
 	}
 
-	pt, err := w.fetchPriceTable(ctx, contractID, siamuxAddr, hostIP, hostKey)
+	pt, err := w.priceTable(hostKey).fetch(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -198,7 +162,7 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 		acc:        acc,
 		bh:         pt.HostBlockHeight,
 		fcid:       contractID,
-		pt:         &pt,
+		pt:         pt.HostPriceTable,
 		siamuxAddr: siamuxAddr,
 		sk:         w.accounts.deriveAccountKey(hostKey),
 	})
@@ -504,111 +468,147 @@ func readSectorCost(pt *rhpv3.HostPriceTable) (types.Currency, error) {
 // price table when we start considering it invalid.
 const priceTableValidityLeeway = -30 * time.Second
 
-type priceTables struct {
-	mu          sync.Mutex
-	priceTables map[types.PublicKey]*priceTable
-}
-
 type priceTable struct {
-	pt     *rhpv3.HostPriceTable
-	hk     types.PublicKey
-	expiry time.Time
+	w  *worker
+	hk types.PublicKey
 
-	mu            sync.Mutex
-	ongoingUpdate *priceTableUpdate
+	mu     sync.Mutex
+	hpt    hostdb.HostPriceTable
+	update *priceTableUpdate
 }
 
 type priceTableUpdate struct {
 	err  error
 	done chan struct{}
-	pt   *rhpv3.HostPriceTable
+	hpt  hostdb.HostPriceTable
 }
 
-func newPriceTables() *priceTables {
-	return &priceTables{
-		priceTables: make(map[types.PublicKey]*priceTable),
+// priceTable returns a price table for the given host
+func (w *worker) priceTable(hk types.PublicKey) *priceTable {
+	w.priceTablesMu.Lock()
+	defer w.priceTablesMu.Unlock()
+
+	if _, exists := w.priceTables[hk]; !exists {
+		w.priceTables[hk] = &priceTable{
+			w:  w,
+			hk: hk,
+		}
 	}
+	return w.priceTables[hk]
 }
 
-// PriceTable returns a price table for the given host and an bool to indicate
-// whether it is valid or not.
-func (pts *priceTables) PriceTable(hk types.PublicKey) (rhpv3.HostPriceTable, bool) {
-	pt := pts.priceTable(hk)
+func (pt *priceTable) ongoingUpdate() (bool, *priceTableUpdate) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
-	if pt.pt == nil {
-		return rhpv3.HostPriceTable{}, false
+
+	var ongoing bool
+	if pt.update == nil {
+		pt.update = &priceTableUpdate{done: make(chan struct{})}
+	} else {
+		ongoing = true
 	}
-	return *pt.pt, time.Now().Before(pt.expiry.Add(priceTableValidityLeeway))
+
+	return ongoing, pt.update
 }
 
-// Update updates a price table with the given host using the provided payment
-// function to pay for it.
-func (pts *priceTables) Update(ctx context.Context, payFn PriceTablePaymentFunc, siamuxAddr string, hk types.PublicKey) (rhpv3.HostPriceTable, error) {
-	// Fetch the price table to update.
-	pt := pts.priceTable(hk)
+func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+	// convenience variables
+	hk := p.hk
+	w := p.w
+	b := p.w.bus
 
-	// Check if there is some update going on already. If not, create one.
-	pt.mu.Lock()
-	ongoing := pt.ongoingUpdate
-	var performUpdate bool
-	if ongoing == nil {
-		ongoing = &priceTableUpdate{
-			done: make(chan struct{}),
-		}
-		pt.ongoingUpdate = ongoing
-		performUpdate = true
+	// grab the current price table
+	p.mu.Lock()
+	hpt = p.hpt
+	p.mu.Unlock()
+
+	// price table is valid, no update necessary, return early
+	priceTableUpdateLeeway := -time.Duration(frand.Intn(180)) * time.Second // update 0-3 minutes early
+	if time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway).Add(priceTableUpdateLeeway)) {
+		return
 	}
-	pt.mu.Unlock()
 
-	// If this thread is not supposed to perform the update, just block and
-	// return the result.
-	if !performUpdate {
+	// price table is valid and update ongoing, return early
+	ongoing, update := p.ongoingUpdate()
+	if ongoing && time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway)) {
+		return
+	}
+
+	// price table is being updated, wait for the update
+	if ongoing {
 		select {
 		case <-ctx.Done():
-			return rhpv3.HostPriceTable{}, errors.New("timeout while blocking for pricetable update")
-		case <-ongoing.done:
+			return hostdb.HostPriceTable{}, errors.New("timeout while blocking for pricetable update")
+		case <-update.done:
 		}
-		if ongoing.err != nil {
-			return rhpv3.HostPriceTable{}, ongoing.err
-		} else {
-			return *ongoing.pt, nil
+		return update.hpt, update.err
+	}
+
+	// this thread is updating the price table
+	defer func() {
+		update.hpt = hpt
+		update.err = err
+		close(update.done)
+
+		p.mu.Lock()
+		p.hpt = hpt
+		p.update = nil
+		p.mu.Unlock()
+	}()
+
+	// fetch the host info from the bus, it might have a new price table already
+	// in which case we can return without having to update it
+	host, err := b.Host(ctx, hk)
+	if err == nil && host.PriceTable != nil && host.PriceTable.Expiry.After(hpt.Expiry) {
+		hpt = *host.PriceTable
+		return
+	}
+	hostIP := host.NetAddress
+	siamuxAddr := host.Settings.SiamuxAddr()
+
+	payByFC := func() (pt rhpv3.HostPriceTable, err error) {
+		// if revision was given, use it to pay for the scan
+		if revision != nil {
+			_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableContractPayment(hk, revision))
+			return
+		}
+
+		// otherwise we fetch the active contract
+		contract, err := b.ActiveContract(ctx, hk)
+		if err != nil {
+			return rhpv3.HostPriceTable{}, err
+		}
+
+		// and scan the host
+		_ = w.withHostV2Revision(ctx, contract.ID, hk, hostIP, func(revision types.FileContractRevision) error {
+			_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableContractPayment(hk, &revision))
+			return err
+		})
+		return
+	}
+
+	// scan host and pay by EA if possible
+	var pt rhpv3.HostPriceTable
+	if cs, errr := b.ConsensusState(ctx); errr == nil && cs.Synced {
+		_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
+		if err == nil && pt.Validity < 0 {
+			pt, err = payByFC() // fallback to paying by FC
+		}
+	} else {
+		pt, err = payByFC() // fallback to paying by FC
+	}
+
+	// only overwrite the price table if it's valid
+	if err == nil && pt.Validity <= 0 {
+		err = errors.New("failed to get valid price table, likely payment failure")
+	} else if err == nil {
+		hpt = hostdb.HostPriceTable{
+			HostPriceTable: &pt,
+			Expiry:         time.Now().Add(pt.Validity),
 		}
 	}
 
-	// Update price table.
-	var hpt rhpv3.HostPriceTable
-	err := withTransportV3(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) (err error) {
-		hpt, err = RPCPriceTable(t, payFn)
-		return err
-	})
-
-	pt.mu.Lock()
-	defer pt.mu.Unlock()
-
-	// On success we update the pt.
-	if err == nil {
-		ongoing.pt = &hpt
-		pt.pt = &hpt
-		pt.expiry = time.Now().Add(hpt.Validity)
-	}
-	// Signal that the update is over.
-	ongoing.err = err
-	close(ongoing.done)
-	pt.ongoingUpdate = nil
-	return hpt, err
-}
-
-// priceTable returns a priceTable from priceTables for the given host or
-// creates a new one.
-func (pts *priceTables) priceTable(hk types.PublicKey) *priceTable {
-	pts.mu.Lock()
-	defer pts.mu.Unlock()
-
-	if _, exists := pts.priceTables[hk]; !exists {
-		pts.priceTables[hk] = &priceTable{hk: hk}
-	}
-	return pts.priceTables[hk]
+	return
 }
 
 // preparePriceTableContractPayment prepare a payment function to pay for a
@@ -684,25 +684,40 @@ func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rh
 	s := t.DialStream()
 	defer s.Close()
 
-	s.SetDeadline(time.Now().Add(5 * time.Second))
+	s.SetDeadline(time.Now().Add(15 * time.Second))
 	const maxPriceTableSize = 16 * 1024
 	var ptr rhpv3.RPCUpdatePriceTableResponse
-	if err := s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
-		return rhpv3.HostPriceTable{}, err
-	} else if err := s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
-		return rhpv3.HostPriceTable{}, err
-	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
-		return rhpv3.HostPriceTable{}, err
-	} else if payment, err := paymentFunc(pt); err != nil {
-		return rhpv3.HostPriceTable{}, err
+
+	if err = s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
+		return
+	} else if err = s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
+		return
+	} else if err = json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
+		return
+	}
+
+	var tracked bool
+	defer func() {
+		if !tracked {
+			pt.Validity = -time.Second // expiry in the past
+		}
+	}()
+
+	var payment rhpv3.PaymentMethod
+	if payment, err = paymentFunc(pt); err != nil {
+		return pt, nil // failed to pay
 	} else if payment == nil {
 		return pt, nil // intended not to pay
-	} else if err := processPayment(s, payment); err != nil {
-		return rhpv3.HostPriceTable{}, err
-	} else if err := s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
-		return rhpv3.HostPriceTable{}, err
 	}
-	return pt, nil
+
+	if err = processPayment(s, payment); err != nil {
+		return pt, nil // failed to pay
+	} else if err = s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
+		return pt, nil // failed to pay
+	}
+
+	tracked = true
+	return
 }
 
 // RPCAccountBalance calls the AccountBalance RPC.

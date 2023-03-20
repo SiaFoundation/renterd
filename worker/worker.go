@@ -32,11 +32,13 @@ import (
 )
 
 const (
-	lockingPriorityRenew   = 100 // highest
-	lockingPriorityFunding = 90
+	lockingPriorityRenew      = 100 // highest
+	lockingPriorityFunding    = 90
+	lockingPriorityPriceTable = 80
 
-	lockingDurationRenew   = time.Minute
-	lockingDurationFunding = 30 * time.Second
+	lockingDurationRenew      = time.Minute
+	lockingDurationFunding    = 30 * time.Second
+	lockingDurationPriceTable = 30 * time.Second
 
 	queryStringParamContractSet = "contractset"
 	queryStringParamMinShards   = "minshards"
@@ -222,6 +224,7 @@ type Bus interface {
 
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
+	ActiveContract(ctx context.Context, hk types.PublicKey) (api.ContractMetadata, error)
 	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
@@ -286,8 +289,10 @@ type worker struct {
 	pool      *sessionPool
 	masterKey [32]byte
 
-	accounts    *accounts
-	priceTables *priceTables
+	accounts *accounts
+
+	priceTablesMu sync.Mutex
+	priceTables   map[types.PublicKey]*priceTable
 
 	busFlushInterval time.Duration
 
@@ -312,8 +317,9 @@ func (w *worker) recordScan(hostKey types.PublicKey, pt rhpv3.HostPriceTable, se
 	}
 	if err == nil {
 		hi.Result, _ = json.Marshal(hostdb.ScanResult{
-			PriceTable: pt,
-			Settings:   settings,
+			PriceTable:       pt,
+			PriceTableExpiry: time.Now().Add(pt.Validity),
+			Settings:         settings,
 		})
 	} else {
 		hi.Result, _ = json.Marshal(hostdb.ScanResult{
@@ -392,6 +398,34 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
+func (w *worker) withHostV2Revision(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(revision types.FileContractRevision) error) error {
+	// acquire contract lock
+	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockingPriorityFunding, lockingDurationFunding); err != nil {
+		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
+	} else {
+		defer func() {
+			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
+				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hostKey, "fcid", contractID)
+			}
+		}()
+	}
+
+	// fetch contract revision
+	var revision types.FileContractRevision
+	if err := w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) error {
+		rev, err := ss.(*sharedSession).Revision(ctx)
+		if err != nil {
+			return err
+		}
+		revision = rev.Revision
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return fn(revision)
+}
+
 func (w *worker) unlockHosts(hosts []sectorStore) {
 	// apply a pessimistic timeout, ensuring unlocking the contract or force
 	// closing the session does not deadlock and keep this goroutine around
@@ -450,37 +484,65 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		defer cancel()
 	}
 
-	var settings rhpv2.HostSettings
-	start := time.Now()
-	pingErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
-		settings, err = RPCSettings(ctx, t)
-		return err
-	})
-	elapsed := time.Since(start)
-
-	var pt rhpv3.HostPriceTable
-	ptErr := withTransportV3(ctx, settings.SiamuxAddr(), rsr.HostKey, func(t *rhpv3.Transport) (err error) {
-		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
-		return err
-	})
-
-	w.recordScan(rsr.HostKey, pt, settings, pingErr)
-
-	var scanErrStr string
-	if pingErr != nil {
-		scanErrStr = pingErr.Error()
+	// when scanning we want to use the siamux address from the host settings
+	ping, hs, _, err := w.scanHost(ctx, rsr.HostKey, rsr.HostIP, "", func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+	if err != nil {
+		jc.Encode(api.RHPScanResponse{
+			Ping:      api.ParamDuration(ping),
+			ScanError: err.Error(),
+		})
+		return
 	}
-	if ptErr != nil {
-		if scanErrStr != "" {
-			scanErrStr += "; "
-		}
-		scanErrStr += ptErr.Error()
-	}
+
 	jc.Encode(api.RHPScanResponse{
-		Ping:      api.ParamDuration(elapsed),
-		ScanError: scanErrStr,
-		Settings:  settings,
+		Ping:     api.ParamDuration(ping),
+		Settings: hs,
 	})
+}
+
+func (w *worker) scanHost(ctx context.Context, hk types.PublicKey, hostIP, siamuxAddr string, paymentFn PriceTablePaymentFunc) (ping time.Duration, hs rhpv2.HostSettings, pt rhpv3.HostPriceTable, err error) {
+	defer func() { w.recordScan(hk, pt, hs, err) }()
+
+	var err1, err2 error
+	pingDone := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(pingDone)
+
+		start := time.Now()
+		err1 = w.withTransportV2(ctx, hostIP, hk, func(t *rhpv2.Transport) (err error) {
+			hs, err = RPCSettings(ctx, t)
+			return err
+		})
+		ping = time.Since(start)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		if siamuxAddr == "" {
+			<-pingDone
+			siamuxAddr = hs.SiamuxAddr()
+		}
+		err2 = withTransportV3(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) (err error) {
+			pt, err = RPCPriceTable(t, paymentFn)
+			return err
+		})
+	}()
+
+	wg.Wait()
+
+	// merge errors
+	err = err1
+	if err2 != nil {
+		err = fmt.Errorf("%s;%s", err.Error(), err2.Error())
+	}
+
+	return
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
@@ -567,13 +629,17 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 
-	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rrr.ContractID, lockingPriorityRenew, lockingDurationRenew)
-	if jc.Check("could not lock contract for renewal", err) != nil {
+	// acquire contract lock
+	if lockID, err := w.bus.AcquireContract(ctx, rrr.ContractID, lockingPriorityRenew, lockingPriorityRenew); err != nil {
+		jc.Error(fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err), http.StatusInternalServerError)
 		return
+	} else {
+		defer func() {
+			if err := w.bus.ReleaseContract(ctx, rrr.ContractID, lockID); err != nil {
+				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", rrr.HostKey, "fcid", rrr.ContractID)
+			}
+		}()
 	}
-	defer func() {
-		_ = w.bus.ReleaseContract(ctx, rrr.ContractID, lockID) // TODO: log error
-	}()
 
 	hostIP, hostKey, toRenewID, renterFunds, newCollateral := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds, rrr.NewCollateral
 	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
@@ -605,6 +671,8 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 
 func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
+
+	// Decode request.
 	var rfr api.RHPFundRequest
 	if jc.Decode(&rfr) != nil {
 		return
@@ -616,46 +684,6 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 
-	// Get IP of host.
-	h, err := w.bus.Host(ctx, rfr.HostKey)
-	if jc.Check("failed to fetch host", err) != nil {
-		return
-	}
-	siamuxAddr := h.Settings.SiamuxAddr()
-
-	// Get contract revision.
-	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rfr.ContractID, lockingPriorityFunding, lockingDurationFunding)
-	if jc.Check("failed to acquire contract for funding EA", err) != nil {
-		return
-	}
-	defer func() {
-		_ = w.bus.ReleaseContract(ctx, rfr.ContractID, lockID) // TODO: log error
-	}()
-
-	// Get contract revision.
-	var revision types.FileContractRevision
-	err = w.withHostV2(jc.Request.Context(), rfr.ContractID, rfr.HostKey, h.NetAddress, func(ss sectorStore) error {
-		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
-		if err != nil {
-			return err
-		}
-		revision = rev.Revision
-		return nil
-	})
-	if jc.Check(fmt.Sprintf("failed to fetch revision from host '%s'", siamuxAddr), err) != nil {
-		return
-	}
-
-	// Get price table.
-	pt, ptValid := w.priceTables.PriceTable(rfr.HostKey)
-	if !ptValid {
-		paymentFunc := w.preparePriceTableContractPayment(rfr.HostKey, &revision)
-		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rfr.HostKey)
-		if jc.Check("failed to update outdated price table", err) != nil {
-			return
-		}
-	}
-
 	// Calculate the fund amount
 	balance := account.Balance()
 	if balance.Cmp(rfr.Balance) >= 0 {
@@ -664,29 +692,34 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 	fundAmount := rfr.Balance.Sub(balance)
 
-	// Fund account.
-	err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
-
-	// If funding failed due to an exceeded max balance, we sync the account and
-	// try funding the account again.
-	if isMaxBalanceExceeded(err) {
-		err = w.syncAccount(ctx, pt, siamuxAddr, rfr.HostKey)
+	// Fund the account.
+	jc.Check("couldn't fund account", w.withHostV2Revision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, func(revision types.FileContractRevision) error {
+		// Get price table.
+		pt, err := w.priceTable(rfr.HostKey).fetch(ctx, &revision)
 		if err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+			return err
 		}
 
-		balance = account.Balance()
-		if balance.Cmp(rfr.Balance) < 0 {
-			fundAmount = rfr.Balance.Sub(balance)
-			err = w.fundAccount(ctx, account, pt, siamuxAddr, rfr.HostKey, fundAmount, &revision)
-			if err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to fund account right after a sync: %v", err), "host", rfr.HostKey, "balance", balance, "requested", rfr.Balance, "fund", fundAmount)
+		// Fund account.
+		err = w.fundAccount(ctx, account, pt.HostPriceTable, rfr.SiamuxAddr, rfr.HostKey, fundAmount, &revision)
+		if isMaxBalanceExceeded(err) {
+			// Sync account
+			err = w.syncAccount(ctx, pt.HostPriceTable, rfr.SiamuxAddr, rfr.HostKey)
+			if err == nil {
+				// Try funding again with new balance.
+				if account.Balance().Cmp(rfr.Balance) < 0 {
+					fundAmount = rfr.Balance.Sub(account.Balance())
+					err = w.fundAccount(ctx, account, pt.HostPriceTable, rfr.SiamuxAddr, rfr.HostKey, fundAmount, &revision)
+					if err != nil {
+						w.logger.Errorw(fmt.Sprintf("failed to fund account: %v", err), "host", rfr.HostKey, "balance", balance, "requested", rfr.Balance, "fund", fundAmount)
+					}
+				}
+			} else {
+				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 			}
 		}
-	}
-	if jc.Check("couldn't fund account", err) != nil {
-		return
-	}
+		return err
+	}))
 }
 
 func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
@@ -729,51 +762,21 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 		return
 	}
 
-	// Get IP of host.
+	// Get price table.
+	pt, err := w.priceTable(rsr.HostKey).fetch(jc.Request.Context(), nil)
+	if jc.Check("failed to get price table", err) != nil {
+		return
+	}
+
+	// Get the host
 	h, err := w.bus.Host(ctx, rsr.HostKey)
 	if jc.Check("failed to fetch host", err) != nil {
 		return
 	}
-	hostIP := h.Settings.NetAddress
 	siamuxAddr := h.Settings.SiamuxAddr()
 
-	// Get contract revision.
-	lockID, err := w.bus.AcquireContract(jc.Request.Context(), rsr.ContractID, lockingPriorityFunding, lockingDurationFunding)
-	if jc.Check("failed to acquire contract for funding EA", err) != nil {
-		return
-	}
-	defer func() {
-		if err := w.bus.ReleaseContract(ctx, rsr.ContractID, lockID); err != nil {
-			w.logger.Warnf("failed to release lock for contract %v: %v", rsr.ContractID, err)
-		}
-	}()
-
-	// Get contract revision.
-	var revision types.FileContractRevision
-	err = w.withHostV2(jc.Request.Context(), rsr.ContractID, rsr.HostKey, hostIP, func(ss sectorStore) error {
-		rev, err := ss.(*sharedSession).Revision(jc.Request.Context())
-		if err != nil {
-			return err
-		}
-		revision = rev.Revision
-		return nil
-	})
-	if jc.Check("failed to fetch revision", err) != nil {
-		return
-	}
-
-	// Get price table.
-	pt, ptValid := w.priceTables.PriceTable(rsr.HostKey)
-	if !ptValid {
-		paymentFunc := w.preparePriceTableContractPayment(rsr.HostKey, &revision)
-		pt, err = w.priceTables.Update(jc.Request.Context(), paymentFunc, siamuxAddr, rsr.HostKey)
-		if jc.Check("failed to update outdated price table", err) != nil {
-			return
-		}
-	}
-
 	// Sync account.
-	err = w.syncAccount(ctx, pt, siamuxAddr, rsr.HostKey)
+	err = w.syncAccount(ctx, pt.HostPriceTable, siamuxAddr, rsr.HostKey)
 	if err != nil {
 		w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rsr.HostKey)
 	}
@@ -1156,7 +1159,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		id:                    id,
 		bus:                   b,
 		pool:                  newSessionPool(sessionReconectTimeout, sessionTTL),
-		priceTables:           newPriceTables(),
+		priceTables:           make(map[types.PublicKey]*priceTable),
 		masterKey:             masterKey,
 		busFlushInterval:      busFlushInterval,
 		downloadSectorTimeout: downloadSectorTimeout,

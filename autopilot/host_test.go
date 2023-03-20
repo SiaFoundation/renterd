@@ -64,7 +64,7 @@ func newTestHost(hk types.PublicKey, pt *rhpv3.HostPriceTable, settings *rhpv2.H
 			FailedInteractions:     0,
 		},
 		PublicKey:  hk,
-		PriceTable: pt,
+		PriceTable: &hostdb.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
 		Settings:   settings,
 	}
 }

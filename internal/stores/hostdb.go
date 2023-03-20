@@ -50,9 +50,10 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey  publicKey `gorm:"unique;index;NOT NULL;size:32"`
-		Settings   hostSettings
-		PriceTable hostPriceTable
+		PublicKey        publicKey `gorm:"unique;index;NOT NULL;size:32"`
+		Settings         hostSettings
+		PriceTable       hostPriceTable
+		PriceTableExpiry time.Time
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -311,7 +312,10 @@ func (h dbHost) convert() hostdb.Host {
 		hdbHost.PriceTable = nil
 	} else {
 		pt := h.PriceTable.convert()
-		hdbHost.PriceTable = &pt
+		hdbHost.PriceTable = &hostdb.HostPriceTable{
+			HostPriceTable: &pt,
+			Expiry:         h.PriceTableExpiry,
+		}
 	}
 	return hdbHost
 }
@@ -737,7 +741,12 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 						return err
 					}
 					host.Settings = convertHostSettings(sr.Settings)
-					host.PriceTable = convertHostPriceTable(sr.PriceTable)
+
+					// only update the price table if it is newer
+					if sr.PriceTableExpiry.After(host.PriceTableExpiry) {
+						host.PriceTable = convertHostPriceTable(sr.PriceTable)
+						host.PriceTableExpiry = sr.PriceTableExpiry
+					}
 				}
 			}
 
@@ -763,6 +772,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					"last_scan":                   h.LastScan,
 					"settings":                    h.Settings,
 					"price_table":                 h.PriceTable,
+					"price_table_expiry":          h.PriceTableExpiry,
 					"successful_interactions":     h.SuccessfulInteractions,
 					"failed_interactions":         h.FailedInteractions,
 				}).Error

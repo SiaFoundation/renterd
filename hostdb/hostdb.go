@@ -25,9 +25,10 @@ type hostAnnouncement struct {
 }
 
 type ScanResult struct {
-	Error      string
-	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
-	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
+	Error            string
+	PriceTable       rhpv3.HostPriceTable `json:"priceTable,omitempty"`
+	PriceTableExpiry time.Time            `json:"priceTableExpiry,omitempty"`
+	Settings         rhpv2.HostSettings   `json:"settings,omitempty"`
 }
 
 const InteractionTypeScan = "scan"
@@ -93,12 +94,18 @@ type HostAddress struct {
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	KnownSince   time.Time             `json:"knownSince"`
-	PublicKey    types.PublicKey       `json:"public_key"`
-	NetAddress   string                `json:"netAddress"`
-	PriceTable   *rhpv3.HostPriceTable `json:"priceTable"`
-	Settings     *rhpv2.HostSettings   `json:"settings"`
-	Interactions Interactions          `json:"interactions"`
+	KnownSince   time.Time           `json:"knownSince"`
+	PublicKey    types.PublicKey     `json:"public_key"`
+	NetAddress   string              `json:"netAddress"`
+	PriceTable   *HostPriceTable     `json:"priceTable"`
+	Settings     *rhpv2.HostSettings `json:"settings"`
+	Interactions Interactions        `json:"interactions"`
+}
+
+// A HostPriceTable extends the host price table with its expiry.
+type HostPriceTable struct {
+	*rhpv3.HostPriceTable
+	Expiry time.Time `json:"expiry"`
 }
 
 // HostInfo extends the host type with a field indicating whether it is blocked or not.
