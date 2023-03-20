@@ -196,13 +196,19 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 
 	// no maintenance if no hosts are requested
 	if state.cfg.Contracts.Amount == 0 {
-		c.logger.Debug("no hosts requested, skipping contract maintenance")
+		c.logger.Warn("contracts is set to zero, skipping contract maintenance")
 		return nil
 	}
 
 	// no maintenace if no allowance was set
 	if state.cfg.Contracts.Allowance.IsZero() {
-		c.logger.Debug("allowance is set to zero, skipping contract maintenance")
+		c.logger.Warn("allowance is set to zero, skipping contract maintenance")
+		return nil
+	}
+
+	// no maintenace if no period was set
+	if state.cfg.Contracts.Period == 0 {
+		c.logger.Warn("period is set to zero, skipping contract maintenance")
 		return nil
 	}
 
