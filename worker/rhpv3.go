@@ -838,14 +838,42 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 	return nil
 }
 
+type RPCLatestRevisionRequest struct {
+	ContractID types.FileContractID
+}
+
+type RPCLatestRevisionResponse struct {
+	Revision types.FileContractRevision
+}
+
+// EncodeTo implements ProtocolObject.
+func (r *RPCLatestRevisionRequest) EncodeTo(e *types.Encoder) {
+	r.ContractID.EncodeTo(e)
+}
+
+// DecodeFrom implements ProtocolObject.
+func (r *RPCLatestRevisionRequest) DecodeFrom(d *types.Decoder) {
+	r.ContractID.DecodeFrom(d)
+}
+
+// EncodeTo implements ProtocolObject.
+func (r *RPCLatestRevisionResponse) EncodeTo(e *types.Encoder) {
+	r.Revision.EncodeTo(e)
+}
+
+// DecodeFrom implements ProtocolObject.
+func (r *RPCLatestRevisionResponse) DecodeFrom(d *types.Decoder) {
+	r.Revision.DecodeFrom(d)
+}
+
 func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.PaymentMethod, error)) (rev types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
 	s := t.DialStream()
 	defer s.Close()
-	req := rhpv3.RPCLatestRevisionRequest{
+	req := RPCLatestRevisionRequest{
 		ContractID: contractID,
 	}
-	var resp rhpv3.RPCLatestRevisionResponse
+	var resp RPCLatestRevisionResponse
 	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &req); err != nil {
 		return types.FileContractRevision{}, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
