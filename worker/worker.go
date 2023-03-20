@@ -638,7 +638,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
+	jc.Check("couldn't fund account", w.withRevision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
 		if err := w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision); isMaxBalanceExceeded(err) {
 			// sync and retry funding
 			if err := w.syncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &revision); err != nil {
