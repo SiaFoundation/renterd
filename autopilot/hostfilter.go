@@ -59,24 +59,23 @@ type unusableHostResult struct {
 
 func newUnusableHostResult(errs []error) (u unusableHostResult) {
 	for _, err := range errs {
-		switch err {
-		case errHostBlocked:
+		if errors.Is(err, errHostBlocked) {
 			u.blocked++
-		case errHostOffline:
+		} else if errors.Is(err, errHostOffline) {
 			u.offline++
-		case errLowScore:
+		} else if errors.Is(err, errLowScore) {
 			u.lowscore++
-		case errHostRedundantIP:
+		} else if errors.Is(err, errHostRedundantIP) {
 			u.redundantip++
-		case errHostBadSettings:
+		} else if errors.Is(err, errHostBadSettings) {
 			u.badsettings++
-		case errHostPriceGouging:
+		} else if errors.Is(err, errHostPriceGouging) {
 			u.gouging++
-		case errHostNotAnnounced:
+		} else if errors.Is(err, errHostNotAnnounced) {
 			u.notannounced++
-		case errHostNoPriceTable:
+		} else if errors.Is(err, errHostNoPriceTable) {
 			u.nopricetable++
-		default:
+		} else {
 			u.unknown++
 		}
 	}
