@@ -200,13 +200,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 		return nil
 	}
 
-	// no maintenace if no allowance was set
+	// no maintenance if no allowance was set
 	if state.cfg.Contracts.Allowance.IsZero() {
 		c.logger.Warn("allowance is set to zero, skipping contract maintenance")
 		return nil
 	}
 
-	// no maintenace if no period was set
+	// no maintenance if no period was set
 	if state.cfg.Contracts.Period == 0 {
 		c.logger.Warn("period is set to zero, skipping contract maintenance")
 		return nil
