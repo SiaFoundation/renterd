@@ -74,6 +74,8 @@ type RHPRenewResponse struct {
 type RHPFundRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
+	HostIP     string               `json:"hostIP"`
+	SiamuxAddr string               `json:"siamuxAddr"`
 	Balance    types.Currency       `json:"balance"`
 }
 
@@ -81,6 +83,8 @@ type RHPFundRequest struct {
 type RHPSyncRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
+	HostIP     string               `json:"hostIP"`
+	SiamuxAddr string               `json:"siamuxAddr"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
