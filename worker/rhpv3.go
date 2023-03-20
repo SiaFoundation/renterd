@@ -69,6 +69,15 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 		}
 	}
 
+	// Handle contracts that are either out of money or don't have enough funds
+	// left for a full fund.
+	renterFunds := revision.ValidRenterPayout()
+	if renterFunds.Cmp(pt.FundAccountCost) <= 0 {
+		return fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, pt.FundAccountCost)
+	} else if maxAmount := renterFunds.Sub(pt.FundAccountCost); maxAmount.Cmp(amount) < 0 {
+		amount = maxAmount
+	}
+
 	return account.WithDeposit(ctx, func() (types.Currency, error) {
 		return amount, withTransportV3(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(hk)
