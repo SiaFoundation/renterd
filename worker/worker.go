@@ -667,8 +667,8 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	// Handle contracts that are either out of money or don't have enough funds
 	// left for a full fund.
 	renterFunds := revision.ValidRenterPayout()
-	if renterFunds.IsZero() {
-		jc.Error(errors.New("contract is out of funds"), http.StatusBadRequest)
+	if renterFunds.Cmp(pt.FundAccountCost) <= 0 {
+		jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, pt.FundAccountCost), http.StatusBadRequest)
 		return
 	} else if maxFundingAmount := renterFunds.Sub(pt.FundAccountCost); maxFundingAmount.Cmp(fundAmount) < 0 {
 		fundAmount = maxFundingAmount
