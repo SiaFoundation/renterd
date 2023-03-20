@@ -83,6 +83,7 @@ type RHPFundRequest struct {
 type RHPSyncRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
+	HostIP     string               `json:"hostIP"`
 	SiamuxAddr string               `json:"siamuxAddr"`
 }
 

@@ -170,7 +170,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 
 			// Check if a resync is needed.
 			if account.RequiresSync {
-				err := w.RHPSync(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
+				err := w.RHPSync(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr)
 				if err != nil {
 					a.logger.Errorw(fmt.Sprintf("failed to sync account's balance: %s", err),
 						"account", account.ID,

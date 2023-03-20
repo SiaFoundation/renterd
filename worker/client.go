@@ -72,9 +72,9 @@ func (c *Client) RHPRenew(ctx context.Context, fcid types.FileContractID, endHei
 func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error) {
 	req := api.RHPFundRequest{
 		ContractID: contractID,
-		SiamuxAddr: siamuxAddr,
-		HostIP:     hostIP,
 		HostKey:    hostKey,
+		HostIP:     hostIP,
+		SiamuxAddr: siamuxAddr,
 		Balance:    balance,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/fund", req, nil)
@@ -82,10 +82,11 @@ func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, h
 }
 
 // RHPSync funds an ephemeral account using the supplied contract.
-func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (err error) {
+func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string) (err error) {
 	req := api.RHPSyncRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
+		HostIP:     hostIP,
 		SiamuxAddr: siamuxAddr,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)

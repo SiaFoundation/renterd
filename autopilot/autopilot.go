@@ -85,7 +85,7 @@ type Worker interface {
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error)
 	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds, newCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
-	RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (err error)
+	RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string) (err error)
 }
 
 type Autopilot struct {

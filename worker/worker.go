@@ -34,10 +34,12 @@ import (
 const (
 	lockingPriorityRenew      = 100 // highest
 	lockingPriorityFunding    = 90
-	lockingPriorityPriceTable = 80
+	lockingPrioritySyncing    = 80
+	lockingPriorityPriceTable = 70
 
 	lockingDurationRenew      = time.Minute
 	lockingDurationFunding    = 30 * time.Second
+	lockingDurationSyncing    = 30 * time.Second
 	lockingDurationPriceTable = 30 * time.Second
 
 	queryStringParamContractSet = "contractset"
@@ -398,21 +400,21 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) withHostV2Revision(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
+func (w *worker) withRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
 	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
 			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hostKey, "fcid", contractID)
+				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
 	}
 
 	// fetch contract revision
 	var revision types.FileContractRevision
-	if err := w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) error {
+	if err := w.withHostV2(ctx, contractID, hk, hostIP, func(ss sectorStore) error {
 		rev, err := ss.(*sharedSession).Revision(ctx)
 		if err != nil {
 			return err
@@ -619,52 +621,43 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 func (w *worker) rhpRenewHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
+
+	// decode request
 	var rrr api.RHPRenewRequest
 	if jc.Decode(&rrr) != nil {
 		return
 	}
 
+	// attach gouging checker
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
+	ctx = WithGougingChecker(ctx, gp)
 
-	// acquire contract lock
-	if lockID, err := w.bus.AcquireContract(ctx, rrr.ContractID, lockingPriorityRenew, lockingPriorityRenew); err != nil {
-		jc.Error(fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err), http.StatusInternalServerError)
-		return
-	} else {
-		defer func() {
-			if err := w.bus.ReleaseContract(ctx, rrr.ContractID, lockID); err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", rrr.HostKey, "fcid", rrr.ContractID)
-			}
-		}()
-	}
-
-	hostIP, hostKey, toRenewID, renterFunds, newCollateral := rrr.HostIP, rrr.HostKey, rrr.ContractID, rrr.RenterFunds, rrr.NewCollateral
-	renterAddress, endHeight := rrr.RenterAddress, rrr.EndHeight
-	renterKey := w.deriveRenterKey(hostKey)
-
-	var contract rhpv2.ContractRevision
+	// renew the contract
+	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	ctx = WithGougingChecker(jc.Request.Context(), gp)
-	err = w.withHostV2(ctx, toRenewID, hostKey, hostIP, func(ss sectorStore) error {
-		session := ss.(*sharedSession)
-		contract, txnSet, err = session.RenewContract(ctx, func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error) {
-			renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev, renterAddress, renterKey, renterFunds, newCollateral, hostKey, host, endHeight)
-			if err != nil {
-				return nil, types.Currency{}, nil, err
-			}
-			return renterTxnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
+	if jc.Check("couldn't renew contract", w.withRevision(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
+		return w.withHostV2(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, func(ss sectorStore) error {
+			session := ss.(*sharedSession)
+			renewed, txnSet, err = session.RenewContract(ctx, func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error) {
+				renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev, rrr.RenterAddress, w.deriveRenterKey(rrr.HostKey), rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, host, rrr.EndHeight)
+				if err != nil {
+					return nil, types.Currency{}, nil, err
+				}
+				return renterTxnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
+			})
+			return err
 		})
-		return err
-	})
-	if jc.Check("couldn't renew contract", err) != nil {
+	})) != nil {
 		return
 	}
+
+	// send the response
 	jc.Encode(api.RHPRenewResponse{
-		ContractID:     contract.ID(),
-		Contract:       contract,
+		ContractID:     renewed.ID(),
+		Contract:       renewed,
 		TransactionSet: txnSet,
 	})
 }
@@ -672,29 +665,33 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
-	// Decode request.
+	// decode request
 	var rfr api.RHPFundRequest
 	if jc.Decode(&rfr) != nil {
 		return
 	}
 
-	// Fund the account.
-	jc.Check("couldn't fund account", w.withHostV2Revision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
-		err := w.fundAccount(ctx, rfr.SiamuxAddr, rfr.HostKey, rfr.Balance, &revision)
-		if isMaxBalanceExceeded(err) {
-			// Sync account.
-			err = w.syncAccount(ctx, rfr.SiamuxAddr, rfr.HostKey)
-			if err == nil {
-				// Retry funding the account after syncing.
-				err := w.fundAccount(ctx, rfr.SiamuxAddr, rfr.HostKey, rfr.Balance, &revision)
-				if err != nil && errors.Is(err, errBalanceSufficient) {
-					w.logger.Errorw(fmt.Sprintf("failed to fund account: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
-				}
-			} else {
+	// fund the account
+	jc.Check("couldn't fund account", w.withRevision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
+		if err := w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision); isMaxBalanceExceeded(err) {
+			// sync and retry funding
+			if err := w.syncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &revision); err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+				return err
+			} else if err := w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision); errors.Is(err, errBalanceSufficient) {
+				// sync succeeded and the balance is greater than the requested balance
+				return nil
+			} else if err != nil {
+				// sync succeeded and funding failed again
+				w.logger.Errorw(fmt.Sprintf("failed to fund account: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
+				return err
+			} else {
+				return nil
 			}
+		} else {
+			// funding failed and syncing won't fix it
+			return err
 		}
-		return err
 	}))
 }
 
@@ -733,16 +730,17 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 
 func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
+
+	// decode the request
 	var rsr api.RHPSyncRequest
 	if jc.Decode(&rsr) != nil {
 		return
 	}
 
-	// Sync account.
-	if err := jc.Check("couldn't sync account", w.syncAccount(ctx, rsr.SiamuxAddr, rsr.HostKey)); err != nil {
-		w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rsr.HostKey)
-		return
-	}
+	// sync the account
+	jc.Check("couldn't sync account", w.withRevision(ctx, rsr.ContractID, rsr.HostKey, rsr.HostIP, lockingPrioritySyncing, lockingDurationSyncing, func(revision types.FileContractRevision) error {
+		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
+	}))
 }
 
 func (w *worker) slabMigrateHandler(jc jape.Context) {

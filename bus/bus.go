@@ -888,6 +888,7 @@ func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	err := b.accounts.ResetDrift(id)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
+		return
 	}
 	if jc.Check("failed to reset drift", err) != nil {
 		return
@@ -942,6 +943,7 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 	err := b.accounts.SetRequiresSync(id, string(req.Owner), req.Host, req.RequiresSync)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
+		return
 	}
 	if jc.Check("failed tot set requiresSync flag on account", err) != nil {
 		return
