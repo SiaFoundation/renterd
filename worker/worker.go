@@ -394,21 +394,21 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) withRevision(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
+func (w *worker) withRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
 	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
 			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hostKey, "fcid", contractID)
+				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
 	}
 
 	// fetch contract revision
 	var revision types.FileContractRevision
-	if err := w.withHostV2(ctx, contractID, hostKey, hostIP, func(ss sectorStore) error {
+	if err := w.withHostV2(ctx, contractID, hk, hostIP, func(ss sectorStore) error {
 		rev, err := ss.(*sharedSession).Revision(ctx)
 		if err != nil {
 			return err
