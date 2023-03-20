@@ -743,6 +743,9 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					host.Settings = convertHostSettings(sr.Settings)
 
 					// only update the price table if it is newer
+					//
+					// TODO: this can eventually be smarter and select the new
+					// price table if its prices are better
 					if sr.PriceTableExpiry.After(host.PriceTableExpiry) {
 						host.PriceTable = convertHostPriceTable(sr.PriceTable)
 						host.PriceTableExpiry = sr.PriceTableExpiry

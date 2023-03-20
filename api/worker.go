@@ -83,6 +83,7 @@ type RHPFundRequest struct {
 type RHPSyncRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
+	SiamuxAddr string               `json:"siamuxAddr"`
 }
 
 // RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment

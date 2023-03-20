@@ -398,9 +398,9 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) withHostV2Revision(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(revision types.FileContractRevision) error) error {
+func (w *worker) withHostV2Revision(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockingPriorityFunding, lockingDurationFunding); err != nil {
+	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
@@ -678,41 +678,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 
-	// Get account for the host.
-	account, err := w.accounts.ForHost(rfr.HostKey)
-	if jc.Check("failed to get account for provided host", err) != nil {
-		return
-	}
-
-	// Calculate the fund amount
-	balance := account.Balance()
-	if balance.Cmp(rfr.Balance) >= 0 {
-		jc.Error(fmt.Errorf("account balance %v is already greater than or equal to requested balance %v", balance, rfr.Balance), http.StatusBadRequest)
-		return
-	}
-	fundAmount := rfr.Balance.Sub(balance)
-
 	// Fund the account.
-	jc.Check("couldn't fund account", w.withHostV2Revision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, func(revision types.FileContractRevision) error {
-		// Get price table.
-		pt, err := w.priceTable(rfr.HostKey).fetch(ctx, &revision)
-		if err != nil {
-			return err
-		}
-
-		// Fund account.
-		err = w.fundAccount(ctx, account, pt.HostPriceTable, rfr.SiamuxAddr, rfr.HostKey, fundAmount, &revision)
+	jc.Check("couldn't fund account", w.withHostV2Revision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
+		err := w.fundAccount(ctx, rfr.SiamuxAddr, rfr.HostKey, rfr.Balance, &revision)
 		if isMaxBalanceExceeded(err) {
-			// Sync account
-			err = w.syncAccount(ctx, pt.HostPriceTable, rfr.SiamuxAddr, rfr.HostKey)
+			// Sync account.
+			err = w.syncAccount(ctx, rfr.SiamuxAddr, rfr.HostKey)
 			if err == nil {
-				// Try funding again with new balance.
-				if account.Balance().Cmp(rfr.Balance) < 0 {
-					fundAmount = rfr.Balance.Sub(account.Balance())
-					err = w.fundAccount(ctx, account, pt.HostPriceTable, rfr.SiamuxAddr, rfr.HostKey, fundAmount, &revision)
-					if err != nil {
-						w.logger.Errorw(fmt.Sprintf("failed to fund account: %v", err), "host", rfr.HostKey, "balance", balance, "requested", rfr.Balance, "fund", fundAmount)
-					}
+				// Retry funding the account after syncing.
+				err := w.fundAccount(ctx, rfr.SiamuxAddr, rfr.HostKey, rfr.Balance, &revision)
+				if err != nil && errors.Is(err, errBalanceSufficient) {
+					w.logger.Errorw(fmt.Sprintf("failed to fund account: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
 				}
 			} else {
 				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
@@ -762,25 +738,9 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 		return
 	}
 
-	// Get price table.
-	pt, err := w.priceTable(rsr.HostKey).fetch(jc.Request.Context(), nil)
-	if jc.Check("failed to get price table", err) != nil {
-		return
-	}
-
-	// Get the host
-	h, err := w.bus.Host(ctx, rsr.HostKey)
-	if jc.Check("failed to fetch host", err) != nil {
-		return
-	}
-	siamuxAddr := h.Settings.SiamuxAddr()
-
 	// Sync account.
-	err = w.syncAccount(ctx, pt.HostPriceTable, siamuxAddr, rsr.HostKey)
-	if err != nil {
+	if err := jc.Check("couldn't sync account", w.syncAccount(ctx, rsr.SiamuxAddr, rsr.HostKey)); err != nil {
 		w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rsr.HostKey)
-	}
-	if jc.Check("couldn't fund account", err) != nil {
 		return
 	}
 }

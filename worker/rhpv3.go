@@ -35,6 +35,10 @@ const (
 )
 
 var (
+	// errBalanceSufficient occurs when funding an account to a desired balance
+	// that's lower than its current balance.
+	errBalanceSufficient = errors.New("ephemeral account balance greater than desired balance")
+
 	// errBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
@@ -44,7 +48,26 @@ var (
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 )
 
-func (w *worker) fundAccount(ctx context.Context, account *account, pt *rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey, amount types.Currency, revision *types.FileContractRevision) error {
+func (w *worker) fundAccount(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, balance types.Currency, revision *types.FileContractRevision) error {
+	// fetch account
+	account, err := w.accounts.ForHost(hostKey)
+	if err != nil {
+		return err
+	}
+
+	// fetch pricetable
+	pt, err := w.priceTable(hostKey).fetch(ctx, revision)
+	if err != nil {
+		return err
+	}
+
+	// calculate the amount to deposit
+	curr := account.Balance()
+	if curr.Cmp(balance) >= 0 {
+		return fmt.Errorf("%w; %v>%v", errBalanceSufficient, curr, balance)
+	}
+	amount := balance.Sub(curr)
+
 	return account.WithDeposit(ctx, func() (types.Currency, error) {
 		return amount, withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(hostKey)
@@ -62,11 +85,19 @@ func (w *worker) fundAccount(ctx context.Context, account *account, pt *rhpv3.Ho
 	})
 }
 
-func (w *worker) syncAccount(ctx context.Context, pt *rhpv3.HostPriceTable, siamuxAddr string, hostKey types.PublicKey) error {
+func (w *worker) syncAccount(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) error {
+	// fetch account
 	account, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
 	}
+
+	// fetch pricetable
+	pt, err := w.priceTable(hostKey).fetch(ctx, nil)
+	if err != nil {
+		return err
+	}
+
 	payment := w.preparePayment(hostKey, pt.AccountBalanceCost, pt.HostBlockHeight)
 	return account.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
@@ -580,7 +611,7 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 		}
 
 		// and scan the host
-		_ = w.withHostV2Revision(ctx, contract.ID, hk, hostIP, func(revision types.FileContractRevision) error {
+		_ = w.withHostV2Revision(ctx, contract.ID, hk, hostIP, lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
 			_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableContractPayment(hk, &revision))
 			return err
 		})

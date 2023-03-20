@@ -82,10 +82,11 @@ func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, h
 }
 
 // RHPSync funds an ephemeral account using the supplied contract.
-func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey) (err error) {
+func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (err error) {
 	req := api.RHPSyncRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
+		SiamuxAddr: siamuxAddr,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
 	return
