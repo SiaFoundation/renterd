@@ -883,6 +883,7 @@ func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	err := b.accounts.ResetDrift(id)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
+		return
 	}
 	if jc.Check("failed to reset drift", err) != nil {
 		return
@@ -1067,8 +1068,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
-		"POST /search/hosts":  b.searchHostsHandlerPOST,
-		"GET /search/objects": b.searchObjectsHandlerGET,
+		"POST /search/hosts":   b.searchHostsHandlerPOST,
+		"GET  /search/objects": b.searchObjectsHandlerGET,
 
 		"GET    /objects/*path": b.objectsHandlerGET,
 		"PUT    /objects/*path": b.objectsHandlerPUT,
