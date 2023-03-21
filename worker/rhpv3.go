@@ -57,9 +57,9 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, pt rhpv3.HostPric
 	err = acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		cost := pt.LatestRevisionCost
 		return cost, withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) (err error) {
-			rev, err = RPCLatestRevision(t, contractID, func(rev *types.FileContractRevision) (rhpv3.PaymentMethod, error) {
+			rev, err = RPCLatestRevision(t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				payment := rhpv3.PayByEphemeralAccount(acc.id, cost, bh+defaultWithdrawalExpiryBlocks, w.accounts.deriveAccountKey(hostKey))
-				return &payment, nil
+				return pt, &payment, nil
 			})
 			if err != nil {
 				return err
@@ -74,24 +74,30 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, pt rhpv3.HostPric
 // a contract to pay for it. If no pricetable is provided, a new one is
 // requested.
 func (w *worker) FetchRevisionWithContract(ctx context.Context, pt *rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+	acc, err := w.accounts.ForHost(hostKey)
+	if err != nil {
+		return types.FileContractRevision{}, err
+	}
 	err = withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) (err error) {
-		rev, err = RPCLatestRevision(t, contractID, func(paymentRev *types.FileContractRevision) (rhpv3.PaymentMethod, error) {
+		rev, err = RPCLatestRevision(t, contractID, func(paymentRev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// If there is no pricetable, fetch a new one using the revision.
-			newPT, err := w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, paymentRev), siamuxAddr, hostKey)
-			if err != nil {
-				return nil, err
+			if pt == nil {
+				newPT, err := w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, paymentRev), siamuxAddr, hostKey)
+				if err != nil {
+					return rhpv3.HostPriceTable{}, nil, err
+				}
+				pt = &newPT
 			}
-			pt = &newPT
 			// Check pt.
 			if errs := PerformGougingChecks(ctx, nil, pt).CanDownload(); len(errs) > 0 {
-				return nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
+				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
 			}
 			// Pay for the revision.
-			payment, ok := rhpv3.PayByContract(paymentRev, pt.LatestRevisionCost, rhpv3.Account{}, w.deriveRenterKey(hostKey))
+			payment, ok := rhpv3.PayByContract(paymentRev, pt.LatestRevisionCost, acc.id, w.deriveRenterKey(hostKey))
 			if !ok {
-				return nil, errors.New("insufficient funds")
+				return rhpv3.HostPriceTable{}, nil, errors.New("insufficient funds")
 			}
-			return &payment, nil
+			return *pt, &payment, nil
 		})
 		return err
 	})
@@ -243,31 +249,31 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr string, hostKey types.PublicKey) (pt rhpv3.HostPriceTable, err error) {
+func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContractID, siamuxAddr string, hostKey types.PublicKey) (rhpv3.HostPriceTable, error) {
 	pt, ptValid := w.priceTables.PriceTable(hostKey)
 	if ptValid {
 		return pt, nil
 	}
 
-	updatePTByContract := func() {
+	updatePTByContract := func() (rhpv3.HostPriceTable, error) {
 		// Fetch a revision to pay for the pricetable. This will implicitly
 		// update the pricetable if no pricetable is provided.
 		_, err := w.FetchRevisionWithContract(ctx, nil, hostKey, siamuxAddr, contractID)
 		if err != nil {
-			return
+			return rhpv3.HostPriceTable{}, err
 		}
 		// Check that we got a valid pricetable now.
 		pt, ptValid = w.priceTables.PriceTable(hostKey)
 		if !ptValid {
-			err = errors.New("pricetable wasn't valid after successfully fetching a revision")
+			return pt, errors.New("pricetable wasn't valid after successfully fetching a revision")
 		}
+		return pt, nil
 	}
 
 	// update price table using contract payment if we don't have a funded account
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil || acc.Balance().IsZero() {
-		updatePTByContract()
-		return
+		return updatePTByContract()
 	}
 
 	// fetch block height
@@ -279,9 +285,9 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 	// update price table using account payment if possible, but fall back to ensure we have a valid price table
 	pt, err = w.priceTables.Update(ctx, w.preparePriceTableAccountPayment(hostKey, cs.BlockHeight), siamuxAddr, hostKey)
 	if err != nil {
-		updatePTByContract()
+		return updatePTByContract()
 	}
-	return
+	return pt, nil
 }
 
 func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(sectorStore) error) (err error) {
@@ -879,7 +885,7 @@ func (r *RPCLatestRevisionResponse) DecodeFrom(d *types.Decoder) {
 	r.Revision.DecodeFrom(d)
 }
 
-func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.PaymentMethod, error)) (rev types.FileContractRevision, err error) {
+func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
 	s := t.DialStream()
 	defer s.Close()
@@ -887,16 +893,18 @@ func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paym
 		ContractID: contractID,
 	}
 	var resp RPCLatestRevisionResponse
-	if err := s.WriteRequest(rhpv3.RPCAccountBalanceID, &req); err != nil {
+	if err := s.WriteRequest(rhpv3.RPCLatestRevisionID, &req); err != nil {
 		return types.FileContractRevision{}, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
 		return types.FileContractRevision{}, err
-	} else if payment, err := paymentFunc(&resp.Revision); err != nil {
+	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil {
+		return types.FileContractRevision{}, err
+	} else if err := s.WriteResponse(&pt.UID); err != nil {
 		return types.FileContractRevision{}, err
 	} else if err := processPayment(s, payment); err != nil {
 		return types.FileContractRevision{}, err
 	}
-	return
+	return resp.Revision, nil
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.

@@ -438,7 +438,7 @@ func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContra
 	pt, valid := w.priceTables.PriceTable(hk)
 	var rev types.FileContractRevision
 	var err error
-	if !valid {
+	if valid {
 		rev, err = w.FetchRevisionWithContract(ctx, &pt, hk, siamuxAddr, contractID)
 	} else {
 		rev, err = w.FetchRevisionWithContract(ctx, nil, hk, siamuxAddr, contractID)
@@ -663,6 +663,13 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	if jc.Decode(&rfr) != nil {
 		return
 	}
+
+	// attach gouging checker
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	ctx = WithGougingChecker(ctx, gp)
 
 	// fund the account
 	jc.Check("couldn't fund account", w.withRevisionV3(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
