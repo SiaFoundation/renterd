@@ -316,46 +316,6 @@ func (h dbHost) convert() hostdb.Host {
 	return hdbHost
 }
 
-func (h *dbHost) AfterCreate(tx *gorm.DB) (err error) {
-	// fetch allowlist and filter the entries that apply to this host
-	var dbAllowlist []dbAllowlistEntry
-	if err := tx.
-		Model(&dbAllowlistEntry{}).
-		Find(&dbAllowlist).
-		Error; err != nil {
-		return err
-	}
-	allowlist := dbAllowlist[:0]
-	for _, entry := range dbAllowlist {
-		if entry.Entry == h.PublicKey {
-			allowlist = append(allowlist, entry)
-		}
-	}
-
-	// update the association on the host
-	if err := tx.Model(h).Association("Allowlist").Replace(&allowlist); err != nil {
-		return err
-	}
-
-	// fetch blocklist and filter the entries that apply to this host
-	var dbBlocklist []dbBlocklistEntry
-	if err := tx.
-		Model(&dbBlocklistEntry{}).
-		Find(&dbBlocklist).
-		Error; err != nil {
-		return err
-	}
-	blocklist := dbBlocklist[:0]
-	for _, entry := range dbBlocklist {
-		if entry.blocks(h) {
-			blocklist = append(blocklist, entry)
-		}
-	}
-
-	// update the association on the host
-	return tx.Model(h).Association("Blocklist").Replace(&blocklist)
-}
-
 func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
 	tx.Statement.AddClause(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "public_key"}},
@@ -445,7 +405,7 @@ func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
-func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
+func (e *dbBlocklistEntry) blocks(h dbHost) bool {
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
 		return false // do nothing
@@ -907,14 +867,61 @@ func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
 }
 
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {
+	if len(as) == 0 {
+		return nil
+	}
+
+	// fetch allowlist
+	var dbAllowlist []dbAllowlistEntry
+	if err := tx.
+		Model(&dbAllowlistEntry{}).
+		Find(&dbAllowlist).
+		Error; err != nil {
+		return err
+	}
+
+	// fetch blocklist
+	var dbBlocklist []dbBlocklistEntry
+	if err := tx.
+		Model(&dbBlocklistEntry{}).
+		Find(&dbBlocklist).
+		Error; err != nil {
+		return err
+	}
+
+	// insert hosts
 	var hosts []dbHost
-	var announcements []dbAnnouncement
-	for _, a := range as {
+	for i, a := range as {
 		hosts = append(hosts, dbHost{
 			PublicKey:        a.hostKey,
 			LastAnnouncement: a.announcement.Timestamp.UTC(),
 			NetAddress:       a.announcement.NetAddress,
+
+			Allowlist: make([]dbAllowlistEntry, 0, len(dbAllowlist)),
+			Blocklist: make([]dbBlocklistEntry, 0, len(dbBlocklist)),
 		})
+
+		// add allowlist entries
+		for _, entry := range dbAllowlist {
+			if entry.Entry == hosts[i].PublicKey {
+				hosts[i].Allowlist = append(hosts[i].Allowlist, entry)
+			}
+		}
+
+		// add blocklist entries
+		for _, entry := range dbBlocklist {
+			if entry.blocks(hosts[i]) {
+				hosts[i].Blocklist = append(hosts[i].Blocklist, entry)
+			}
+		}
+	}
+	if err := tx.CreateInBatches(&hosts, 100).Error; err != nil {
+		return err
+	}
+
+	// insert announcements
+	var announcements []dbAnnouncement
+	for _, a := range as {
 		announcements = append(announcements, dbAnnouncement{
 			HostKey:     a.hostKey,
 			BlockHeight: a.announcement.Index.Height,
@@ -922,10 +929,11 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 			NetAddress:  a.announcement.NetAddress,
 		})
 	}
-	if err := tx.Create(&announcements).Error; err != nil {
+	if err := tx.CreateInBatches(&announcements, 100).Error; err != nil {
 		return err
 	}
-	return tx.Create(&hosts).Error
+
+	return nil
 }
 
 func updateRevisionNumberAndHeight(db *gorm.DB, fcid types.FileContractID, revisionHeight, revisionNumber uint64) error {
