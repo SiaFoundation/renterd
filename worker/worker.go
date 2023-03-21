@@ -737,6 +737,15 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 		return
 	}
 
+	// fetch gouging params
+	up, err := w.bus.UploadParams(ctx)
+	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
+		return
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, up.GougingParams)
+
 	// sync the account
 	jc.Check("couldn't sync account", w.withRevisionV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, lockingDurationSyncing, func(revision types.FileContractRevision) error {
 		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
