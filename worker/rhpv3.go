@@ -70,14 +70,24 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, pt rhpv3.HostPric
 	return rev, err
 }
 
-func (w *worker) FetchRevisionWithContract(ctx context.Context, pt rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
-	if errs := PerformGougingChecks(ctx, nil, &pt).CanDownload(); len(errs) > 0 {
-		return types.FileContractRevision{}, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
-	}
-	cost := pt.LatestRevisionCost
+// FetchRevisionWithContract fetches the latest revision of a contract and uses
+// a contract to pay for it. If no pricetable is provided, a new one is
+// requested.
+func (w *worker) FetchRevisionWithContract(ctx context.Context, pt *rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = withTransportV3(ctx, siamuxAddr, hostKey, func(t *rhpv3.Transport) (err error) {
 		rev, err = RPCLatestRevision(t, contractID, func(paymentRev *types.FileContractRevision) (rhpv3.PaymentMethod, error) {
-			payment, ok := rhpv3.PayByContract(paymentRev, cost, rhpv3.Account{}, w.deriveRenterKey(hostKey))
+			// If there is no pricetable, fetch a new one using the revision.
+			newPT, err := w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, paymentRev), siamuxAddr, hostKey)
+			if err != nil {
+				return nil, err
+			}
+			pt = &newPT
+			// Check pt.
+			if errs := PerformGougingChecks(ctx, nil, pt).CanDownload(); len(errs) > 0 {
+				return nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
+			}
+			// Pay for the revision.
+			payment, ok := rhpv3.PayByContract(paymentRev, pt.LatestRevisionCost, rhpv3.Account{}, w.deriveRenterKey(hostKey))
 			if !ok {
 				return nil, errors.New("insufficient funds")
 			}
@@ -240,13 +250,16 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 	}
 
 	updatePTByContract := func() {
-		rev, err := w.FetchRevisionWithContract(ctx, pt, hostKey, siamuxAddr, contractID)
+		// Fetch a revision to pay for the pricetable. This will implicitly
+		// update the pricetable if no pricetable is provided.
+		_, err := w.FetchRevisionWithContract(ctx, nil, hostKey, siamuxAddr, contractID)
 		if err != nil {
 			return
 		}
-		pt, err = w.priceTables.Update(ctx, w.preparePriceTableContractPayment(hostKey, &rev), siamuxAddr, hostKey)
-		if err != nil {
-			return
+		// Check that we got a valid pricetable now.
+		pt, ptValid = w.priceTables.PriceTable(hostKey)
+		if !ptValid {
+			err = errors.New("pricetable wasn't valid after successfully fetching a revision")
 		}
 	}
 
