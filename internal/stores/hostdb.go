@@ -751,6 +751,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 				hostKey:      publicKey(hostKey),
 				announcement: ha,
 			})
+			ss.unappliedHostKeys[hostKey] = struct{}{}
 		})
 		// Update RevisionHeight and RevisionNumber for our contracts.
 		for _, txn := range sb.Transactions {
@@ -775,39 +776,69 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
 	ss.unappliedCCID = cc.ID
 
-	// Apply updates.
+	if err := ss.applyUpdates(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ss.logger.Error(ctx, fmt.Sprintf("failed to apply updates, err: %v", err))
+		cancel()
+	}
+}
+
+// applyUpdates applies all unapplied updates to the database.
+func (ss *SQLStore) applyUpdates() (err error) {
 	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval ||
 		len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit ||
 		len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0 {
-		err := ss.retryTransaction(func(tx *gorm.DB) error {
-			// Apply announcements.
+		// Fetch allowlist
+		var allowlist []dbAllowlistEntry
+		if err := ss.db.
+			Model(&dbAllowlistEntry{}).
+			Find(&allowlist).
+			Error; err != nil {
+			ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
+		}
+
+		// Fetch blocklist
+		var blocklist []dbBlocklistEntry
+		if err := ss.db.
+			Model(&dbBlocklistEntry{}).
+			Find(&blocklist).
+			Error; err != nil {
+			ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
+		}
+
+		err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
 			if len(ss.unappliedAnnouncements) > 0 {
-				if err := insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
-					return err
+				if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
+					return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
+				}
+			}
+			if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
+				for host := range ss.unappliedHostKeys {
+					if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
+						ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
+					}
 				}
 			}
 			for fcid, rev := range ss.unappliedRevisions {
 				if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
-					return err
+					return fmt.Errorf("%w; failed to update revision number and height", err)
 				}
 			}
 			for fcid, proofHeight := range ss.unappliedProofs {
 				if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
-					return err
+					return fmt.Errorf("%w; failed to update proof height", err)
 				}
 			}
 			return updateCCID(tx, ss.unappliedCCID)
 		})
-		if err != nil {
-			// NOTE: print error. If we failed due to a temporary error
-			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(ss.unappliedAnnouncements)))
-		}
 
 		ss.unappliedProofs = make(map[types.FileContractID]uint64)
 		ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
+		ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
 		ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
 		ss.lastAnnouncementSave = time.Now()
 	}
+	return
 }
 
 // excludeBlocked can be used as a scope for a db transaction to exclude blocked
@@ -867,63 +898,14 @@ func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
 }
 
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {
-	if len(as) == 0 {
-		return nil
-	}
-
-	// fetch allowlist
-	var dbAllowlist []dbAllowlistEntry
-	if err := tx.
-		Model(&dbAllowlistEntry{}).
-		Find(&dbAllowlist).
-		Error; err != nil {
-		return err
-	}
-
-	// fetch blocklist
-	var dbBlocklist []dbBlocklistEntry
-	if err := tx.
-		Model(&dbBlocklistEntry{}).
-		Find(&dbBlocklist).
-		Error; err != nil {
-		return err
-	}
-
-	// insert hosts
 	var hosts []dbHost
-	for i, a := range as {
+	var announcements []dbAnnouncement
+	for _, a := range as {
 		hosts = append(hosts, dbHost{
 			PublicKey:        a.hostKey,
 			LastAnnouncement: a.announcement.Timestamp.UTC(),
 			NetAddress:       a.announcement.NetAddress,
-
-			Allowlist: make([]dbAllowlistEntry, 0, len(dbAllowlist)),
-			Blocklist: make([]dbBlocklistEntry, 0, len(dbBlocklist)),
 		})
-
-		// add allowlist entries
-		for _, entry := range dbAllowlist {
-			if entry.Entry == hosts[i].PublicKey {
-				hosts[i].Allowlist = append(hosts[i].Allowlist, entry)
-			}
-		}
-
-		// add blocklist entries
-		for _, entry := range dbBlocklist {
-			if entry.blocks(hosts[i]) {
-				hosts[i].Blocklist = append(hosts[i].Blocklist, entry)
-			}
-		}
-	}
-
-	// NOTE: this upsert works because of the BeforeCreate hook on dbHost
-	if err := tx.CreateInBatches(&hosts, 100).Error; err != nil {
-		return err
-	}
-
-	// insert announcements
-	var announcements []dbAnnouncement
-	for _, a := range as {
 		announcements = append(announcements, dbAnnouncement{
 			HostKey:     a.hostKey,
 			BlockHeight: a.announcement.Index.Height,
@@ -931,11 +913,10 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 			NetAddress:  a.announcement.NetAddress,
 		})
 	}
-	if err := tx.CreateInBatches(&announcements, 100).Error; err != nil {
+	if err := tx.Create(&announcements).Error; err != nil {
 		return err
 	}
-
-	return nil
+	return tx.Create(&hosts).Error
 }
 
 func updateRevisionNumberAndHeight(db *gorm.DB, fcid types.FileContractID, revisionHeight, revisionNumber uint64) error {
@@ -962,4 +943,36 @@ func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, upd
 		return fmt.Errorf("%s; %s", err1, err2)
 	}
 	return nil
+}
+
+func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEntry, blocklist []dbBlocklistEntry) error {
+	// fetch the host
+	var host dbHost
+	if err := tx.
+		Model(&dbHost{}).
+		Where("public_key = ?", publicKey(hk)).
+		First(&host).
+		Error; err != nil {
+		return err
+	}
+
+	// update host allowlist
+	var dbAllowlist []dbAllowlistEntry
+	for _, entry := range allowlist {
+		if entry.Entry == host.PublicKey {
+			dbAllowlist = append(dbAllowlist, entry)
+		}
+	}
+	if err := tx.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
+		return err
+	}
+
+	// update host blocklist
+	var dbBlocklist []dbBlocklistEntry
+	for _, entry := range blocklist {
+		if entry.blocks(host) {
+			dbBlocklist = append(dbBlocklist, entry)
+		}
+	}
+	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
 }
