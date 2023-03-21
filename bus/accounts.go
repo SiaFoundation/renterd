@@ -129,9 +129,6 @@ func (a *accounts) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
 	// Update balance.
 	acc.mu.Lock()
 	acc.Balance.Add(acc.Balance, amt)
-	if amt.Cmp(new(big.Int)) < 0 {
-		acc.RequiresSync = false // a successful withdrawal resets the sync flag
-	}
 	acc.mu.Unlock()
 }
 
@@ -149,18 +146,18 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 	acc.mu.Unlock()
 }
 
-// SetRequiresSync sets the requiresSync flag of an account.
-func (a *accounts) SetRequiresSync(id rhpv3.Account, hk types.PublicKey, requiresSync bool) error {
+// ScheduleSync sets the requiresSync flag of an account.
+func (a *accounts) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 	acc := a.account(id, hk)
 	acc.mu.Lock()
 	// Only update the sync flag to 'true' if some time has passed since the
 	// last time it was set. That way we avoid multiple workers setting it after
 	// failing at the same time, causing multiple syncs in the process.
-	if requiresSync && time.Since(acc.requiresSyncTime) < 30*time.Second {
+	if time.Since(acc.requiresSyncTime) < 30*time.Second {
 		acc.mu.Unlock()
-		return nil
+		return api.ErrRequiresSyncSetRecently
 	}
-	acc.RequiresSync = requiresSync
+	acc.RequiresSync = true
 	acc.requiresSyncTime = time.Now()
 	acc.mu.Unlock()
 
@@ -192,8 +189,7 @@ func (a *accounts) Account(id rhpv3.Account, hostKey types.PublicKey) (api.Accou
 	return acc.convert(), nil
 }
 
-// Accounts returns all accounts for a given owner. Usually called when workers
-// request their accounts on startup.
+// Accounts returns all accounts.
 func (a *accounts) Accounts() []api.Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()

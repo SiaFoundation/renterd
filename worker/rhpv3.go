@@ -98,9 +98,8 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
-		store    AccountStore
-		workerID string
-		key      types.PrivateKey
+		store AccountStore
+		key   types.PrivateKey
 	}
 
 	// account contains information regarding a specific account of the
@@ -127,9 +126,8 @@ func (w *worker) initAccounts(as AccountStore) {
 		panic("accounts already initialized") // developer error
 	}
 	w.accounts = &accounts{
-		store:    as,
-		workerID: w.id,
-		key:      w.deriveSubKey("accountkey"),
+		store: as,
+		key:   w.deriveSubKey("accountkey"),
 	}
 }
 
@@ -257,7 +255,7 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 
 	amt, err := amtFn()
 	if err != nil && isBalanceInsufficient(err) {
-		err2 := a.bus.SetRequiresSync(ctx, a.id, a.host, true)
+		err2 := a.bus.ScheduleSync(ctx, a.id, a.host)
 		if err2 != nil {
 			err = fmt.Errorf("failed to set requiresSync flag on bus: %w", err)
 		}
@@ -272,7 +270,7 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 // WithSync syncs an accounts balance with the bus. To do so, the account is
 // locked while the balance is fetched through balanceFn.
 func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency, error)) error {
-	_, lockID, err := a.bus.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
+	_, lockID, err := a.bus.LockAccount(ctx, a.id, a.host, true, accountLockingDuration)
 	if err != nil {
 		return err
 	}
@@ -291,8 +289,8 @@ func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency
 func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	index := byte(0) // not used yet but can be used to derive more than 1 account per host
 
-	// Append the owner of the account (worker's id), the host for which to
-	// create it and the index to the corresponding sub-key.
+	// Append the the host for which to create it and the index to the
+	// corresponding sub-key.
 	subKey := a.key
 	data := append(subKey, hostKey[:]...)
 	data = append(data, index)

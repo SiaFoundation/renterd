@@ -834,7 +834,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.Host, new(big.Int)); err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.Bus.SetRequiresSync(context.Background(), acc.ID, acc.Host, true); err != nil {
+	if err := cluster.Bus.ScheduleSync(context.Background(), acc.ID, acc.Host); err != nil {
 		t.Fatal(err)
 	}
 	accounts, err = cluster.Bus.Accounts(context.Background())

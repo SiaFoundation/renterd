@@ -926,12 +926,12 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	err := b.accounts.SetRequiresSync(id, req.Host, req.RequiresSync)
+	err := b.accounts.ScheduleSync(id, req.Host)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
-	if jc.Check("failed tot set requiresSync flag on account", err) != nil {
+	if jc.Check("failed to set requiresSync flag on account", err) != nil {
 		return
 	}
 }

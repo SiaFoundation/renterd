@@ -16,6 +16,10 @@ const (
 )
 
 var (
+	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
+	// yet because it has been set too recently.
+	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
+
 	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
@@ -204,8 +208,7 @@ type AccountsUpdateBalanceRequest struct {
 // AccountsRequiresSyncRequest is the request type for
 // /accounts/:id/requiressync endpoint.
 type AccountsRequiresSyncRequest struct {
-	Host         types.PublicKey `json:"host"`
-	RequiresSync bool            `json:"requiresSync"`
+	Host types.PublicKey `json:"host"`
 }
 
 // AccountsAddBalanceRequest is the request type for /accounts/:id/add

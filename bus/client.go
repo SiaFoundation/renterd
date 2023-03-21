@@ -533,7 +533,7 @@ func (c *Client) GougingParams(ctx context.Context) (gp api.GougingParams, err e
 	return
 }
 
-// Account requests the worker's /accounts/:host endpoint.
+// Account requests the bus's /accounts/:host endpoint.
 func (c *Client) Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s", id), api.AccountHandlerPOST{
 		HostKey: host,
@@ -541,7 +541,7 @@ func (c *Client) Account(ctx context.Context, id rhpv3.Account, host types.Publi
 	return
 }
 
-// Accounts returns the ephemeral accounts for a given owner.
+// Accounts returns the ephemeral accounts known to the bus.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
 	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
 	return
@@ -582,11 +582,10 @@ func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, hk types.Publ
 	return
 }
 
-// SetRequiresSync sets the requiresSync flag of an account.
-func (c *Client) SetRequiresSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey, requiresSync bool) (err error) {
+// ScheduleSync sets the requiresSync flag of an account.
+func (c *Client) ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/requiressync", id), api.AccountsRequiresSyncRequest{
-		Host:         hk,
-		RequiresSync: requiresSync,
+		Host: hk,
 	}, nil)
 	return
 }

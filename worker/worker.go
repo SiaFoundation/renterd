@@ -213,7 +213,7 @@ type AccountStore interface {
 
 	ResetDrift(ctx context.Context, id rhpv3.Account) error
 	SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
-	SetRequiresSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey, requiresSync bool) error
+	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 }
 
 type contractLocker interface {
