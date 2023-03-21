@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
-	"go.sia.tech/core/chain"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/autopilot"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
@@ -60,12 +60,6 @@ type AutopilotConfig struct {
 
 type ShutdownFn = func(context.Context) error
 
-var mainnet *consensus.Network
-
-func init() {
-	mainnet, _ = chain.Mainnet()
-}
-
 func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
@@ -102,7 +96,7 @@ func (cm chainManager) Synced(ctx context.Context) bool {
 
 func (cm chainManager) TipState(ctx context.Context) consensus.State {
 	return consensus.State{
-		Network: mainnet,
+		Network: build.ConsensusNetwork,
 		Index: types.ChainIndex{
 			Height: uint64(cm.cs.Height()),
 			ID:     types.BlockID(cm.cs.CurrentBlock().ID()),
