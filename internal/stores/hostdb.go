@@ -915,6 +915,8 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 			}
 		}
 	}
+
+	// NOTE: this upsert works because of the BeforeCreate hook on dbHost
 	if err := tx.CreateInBatches(&hosts, 100).Error; err != nil {
 		return err
 	}
