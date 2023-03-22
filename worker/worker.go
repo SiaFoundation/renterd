@@ -32,13 +32,15 @@ import (
 )
 
 const (
-	lockingPriorityRenew   = 100 // highest
-	lockingPriorityFunding = 90
-	lockingPrioritySyncing = 80
+	lockingPriorityRenew      = 100 // highest
+	lockingPriorityPriceTable = 95
+	lockingPriorityFunding    = 90
+	lockingPrioritySyncing    = 80
 
-	lockingDurationRenew   = time.Minute
-	lockingDurationFunding = 30 * time.Second
-	lockingDurationSyncing = 30 * time.Second
+	lockingDurationRenew      = time.Minute
+	lockingDurationPriceTable = 30 * time.Second
+	lockingDurationFunding    = 30 * time.Second
+	lockingDurationSyncing    = 30 * time.Second
 
 	queryStringParamContractSet = "contractset"
 	queryStringParamMinShards   = "minshards"
@@ -205,11 +207,15 @@ func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
 }
 
 type AccountStore interface {
-	Accounts(ctx context.Context, owner string) ([]api.Account, error)
-	AddBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt *big.Int) error
+	Accounts(ctx context.Context) ([]api.Account, error)
+	AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
+
+	LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
+	UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
+
 	ResetDrift(ctx context.Context, id rhpv3.Account) error
-	SetBalance(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, amt, drift *big.Int) error
-	SetRequiresSync(ctx context.Context, id rhpv3.Account, owner string, hk types.PublicKey, requiresSync bool) error
+	SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
+	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 }
 
 type contractLocker interface {
@@ -239,7 +245,7 @@ type Bus interface {
 	AddObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string) error
 
-	Accounts(ctx context.Context, owner string) ([]api.Account, error)
+	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
@@ -1053,28 +1059,17 @@ func (w *worker) preparePayment(hk types.PublicKey, amt types.Currency, blockHei
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(pk.PublicKey()), amt, blockHeight+6, pk) // 1 hour valid
 }
 
-func (w *worker) accountHandlerGET(jc jape.Context) {
-	var host types.PublicKey
-	if jc.DecodeParam("id", &host) != nil {
-		return
-	}
-	account, err := w.accounts.ForHost(host)
-	if jc.Check("failed to fetch accounts", err) != nil {
-		return
-	}
-	jc.Encode(account.Convert())
-}
-
-func (w *worker) accountsHandlerGET(jc jape.Context) {
-	accounts, err := w.accounts.All()
-	if jc.Check("failed to fetch accounts", err) != nil {
-		return
-	}
-	jc.Encode(accounts)
-}
-
 func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
+}
+
+func (w *worker) accountHandlerGET(jc jape.Context) {
+	var hostKey types.PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	account := rhpv3.Account(w.accounts.deriveAccountKey(hostKey).PublicKey())
+	jc.Encode(account)
 }
 
 // New returns an HTTP handler that serves the worker API.
@@ -1095,24 +1090,11 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	return w
 }
 
-func (w *worker) accountsResetDriftHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	if jc.Check("failed to reset drift", w.accounts.ResetDrift(jc.Request.Context(), id)) != nil {
-		return
-	}
-}
-
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /accounts":                w.accountsHandlerGET,
-		"GET    /accounts/host/:id":       w.accountHandlerGET,
-		"POST   /accounts/:id/resetdrift": w.accountsResetDriftHandlerPOST,
-
-		"GET    /id": w.idHandlerGET,
+		"GET    /account/:hostkey": w.accountHandlerGET,
+		"GET    /id":               w.idHandlerGET,
 
 		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
 		"POST   /rhp/scan":             w.rhpScanHandler,

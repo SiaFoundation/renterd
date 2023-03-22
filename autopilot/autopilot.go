@@ -29,6 +29,10 @@ type Store interface {
 }
 
 type Bus interface {
+	// Accounts
+	Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error)
+	Accounts(ctx context.Context) (accounts []api.Account, err error)
+
 	// wallet
 	WalletAddress(ctx context.Context) (types.Address, error)
 	WalletBalance(ctx context.Context) (types.Currency, error)
@@ -75,8 +79,7 @@ type Bus interface {
 }
 
 type Worker interface {
-	Account(ctx context.Context, host types.PublicKey) (account api.Account, err error)
-	Accounts(ctx context.Context) (accounts []api.Account, err error)
+	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
 	ActiveContracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
 	MigrateSlab(ctx context.Context, s object.Slab) error

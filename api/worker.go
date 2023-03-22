@@ -8,6 +8,21 @@ import (
 	"go.sia.tech/core/types"
 )
 
+type AccountsLockHandlerRequest struct {
+	HostKey   types.PublicKey `json:"hostKey"`
+	Exclusive bool            `json:"exclusive"`
+	Duration  ParamDuration   `json:"duration"`
+}
+
+type AccountsLockHandlerResponse struct {
+	Account Account `json:"account"`
+	LockID  uint64  `json:"lockID"`
+}
+
+type AccountsUnlockHandlerRequest struct {
+	LockID uint64 `json:"lockID"`
+}
+
 // ContractsResponse is the response type for the /rhp/contracts/active endpoint.
 type ContractsResponse struct {
 	Contracts []Contract `json:"contracts"`
