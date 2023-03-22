@@ -539,12 +539,11 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 		hpt = *host.PriceTable
 		return
 	}
-	siamuxAddr := host.Settings.SiamuxAddr()
 
 	// try to pay by EA if possible
 	if revision == nil {
-		if cs, errr := b.ConsensusState(ctx); errr == nil && cs.Synced {
-			if pt, errr := w.fetchPriceTable(ctx, hk, siamuxAddr, w.preparePriceTableAccountPayment(hk, cs.BlockHeight)); errr == nil {
+		if cs, err1 := b.ConsensusState(ctx); err1 == nil && cs.Synced {
+			if pt, err2 := w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), w.preparePriceTableAccountPayment(hk, cs.BlockHeight)); err2 == nil {
 				hpt = pt
 				return
 			}
@@ -553,7 +552,7 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 
 	// pay by FC if EA payment failed or if a revision was given
 	if revision != nil {
-		return w.fetchPriceTable(ctx, hk, siamuxAddr, w.preparePriceTableContractPayment(hk, revision))
+		return w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), w.preparePriceTableContractPayment(hk, revision))
 	}
 
 	// fetch the active contract
@@ -563,8 +562,8 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 	}
 
 	// fetch the price table
-	_ = w.withRevisionV3(ctx, contract.ID, hk, siamuxAddr, lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
-		hpt, err = w.fetchPriceTable(ctx, hk, siamuxAddr, w.preparePriceTableContractPayment(hk, &revision))
+	_ = w.withRevisionV3(ctx, contract.ID, hk, host.Settings.SiamuxAddr(), lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
+		hpt, err = w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), w.preparePriceTableContractPayment(hk, &revision))
 		return err
 	})
 	return

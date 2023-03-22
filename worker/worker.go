@@ -318,7 +318,7 @@ func (w *worker) recordPriceTableUpdate(hostKey types.PublicKey, pt hostdb.HostP
 	hi := hostdb.Interaction{
 		Host:      hostKey,
 		Timestamp: time.Now(),
-		Type:      hostdb.InteractionTypeScan,
+		Type:      hostdb.InteractionTypePriceTableUpdate,
 		Success:   err == nil,
 	}
 	if err == nil {
@@ -568,12 +568,13 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 	err = withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 		pt, err := RPCPriceTable(t, paymentFn)
 		if err != nil {
-			hpt = hostdb.HostPriceTable{
-				HostPriceTable: pt,
-				Expiry:         time.Now().Add(pt.Validity),
-			}
+			return err
 		}
-		return err
+		hpt = hostdb.HostPriceTable{
+			HostPriceTable: pt,
+			Expiry:         time.Now().Add(pt.Validity),
+		}
+		return nil
 	})
 	return
 }
