@@ -758,16 +758,14 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			// NOTE: a host's uptime or downtime is only updated by scans, we do
 			// this mostly to keep things simple, host scans should be performed
 			// frequently enough for this not to be a problem
-			if isPriceTableUpdate {
-				if interaction.Success {
-					var hpt hostdb.HostPriceTable
-					if err := json.Unmarshal(interaction.Result, &hpt); err != nil {
-						return err
-					}
-
-					host.PriceTable = convertHostPriceTable(hpt.HostPriceTable)
-					host.PriceTableExpiry = hpt.Expiry
+			if isPriceTableUpdate && interaction.Success {
+				var hpt hostdb.HostPriceTable
+				if err := json.Unmarshal(interaction.Result, &hpt); err != nil {
+					return err
 				}
+
+				host.PriceTable = convertHostPriceTable(hpt.HostPriceTable)
+				host.PriceTableExpiry = hpt.Expiry
 			}
 
 			// Save to map again.

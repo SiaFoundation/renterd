@@ -532,41 +532,15 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 		p.mu.Unlock()
 	}()
 
-	// fetch the host info from the bus, it might have a new price table already
-	// in which case we can return without having to update it
+	// fetch the host, return early if it has a valid price table
 	host, err := b.Host(ctx, hk)
 	if err == nil && host.PriceTable != nil && time.Now().Before(host.PriceTable.Expiry.Add(priceTableValidityLeeway)) {
 		hpt = *host.PriceTable
 		return
 	}
 
-	// try to pay by EA if possible
-	if revision == nil {
-		if cs, err1 := b.ConsensusState(ctx); err1 == nil && cs.Synced {
-			if pt, err2 := w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), w.preparePriceTableAccountPayment(hk, cs.BlockHeight)); err2 == nil {
-				hpt = pt
-				return
-			}
-		}
-	}
-
-	// pay by FC if EA payment failed or if a revision was given
-	if revision != nil {
-		return w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), w.preparePriceTableContractPayment(hk, revision))
-	}
-
-	// fetch the active contract
-	contract, err := b.ActiveContract(ctx, hk)
-	if err != nil {
-		return hostdb.HostPriceTable{}, err
-	}
-
-	// fetch the price table
-	_ = w.withRevisionV3(ctx, contract.ID, hk, host.Settings.SiamuxAddr(), lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
-		hpt, err = w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), w.preparePriceTableContractPayment(hk, &revision))
-		return err
-	})
-	return
+	// otherwise fetch it
+	return w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), revision)
 }
 
 // preparePriceTableContractPayment prepare a payment function to pay for a

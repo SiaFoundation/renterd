@@ -562,20 +562,49 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
+func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
-	err = withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
-		pt, err := RPCPriceTable(t, paymentFn)
-		if err != nil {
-			return err
+	// fetchPT is a helper function that performs the RPC given a payment function
+	fetchPT := func(paymentFn PriceTablePaymentFunc) {
+		err = withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+			pt, err := RPCPriceTable(t, paymentFn)
+			if err != nil {
+				return err
+			}
+			hpt = hostdb.HostPriceTable{
+				HostPriceTable: pt,
+				Expiry:         time.Now().Add(pt.Validity),
+			}
+			return nil
+		})
+	}
+
+	// pay by contract if a revision is given
+	if revision != nil {
+		fetchPT(w.preparePriceTableContractPayment(hk, revision))
+		return
+	}
+
+	// pay by account if possible
+	cs, errr := w.bus.ConsensusState(ctx)
+	if errr == nil && cs.Synced {
+		fetchPT(w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
+		if err == nil {
+			return // success
 		}
-		hpt = hostdb.HostPriceTable{
-			HostPriceTable: pt,
-			Expiry:         time.Now().Add(pt.Validity),
-		}
+	}
+
+	// pay by contract if account payment failed
+	contract, err := w.bus.ActiveContract(ctx, hk)
+	if err != nil {
+		return hostdb.HostPriceTable{}, err
+	}
+	_ = w.withRevisionV3(ctx, contract.ID, hk, siamuxAddr, lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
+		fetchPT(w.preparePriceTableContractPayment(hk, &revision))
 		return nil
 	})
+
 	return
 }
 
