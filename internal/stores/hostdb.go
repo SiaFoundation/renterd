@@ -777,9 +777,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	ss.unappliedCCID = cc.ID
 
 	if err := ss.applyUpdates(); err != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ss.logger.Error(ctx, fmt.Sprintf("failed to apply updates, err: %v", err))
-		cancel()
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
 }
 
