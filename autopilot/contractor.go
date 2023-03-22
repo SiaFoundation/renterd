@@ -574,14 +574,14 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// fetch price table on the fly
-		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		host.PriceTable, err = c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host, err)
 			continue
 		}
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &pt.HostPriceTable, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
+		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &host.PriceTable.HostPriceTable, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
 			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
 			continue
 		}

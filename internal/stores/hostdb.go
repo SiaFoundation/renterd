@@ -717,7 +717,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			interactionTime := interaction.Timestamp.UnixNano()
 			if interaction.Success {
 				host.SuccessfulInteractions++
-				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
+				if (isScan || isPriceTableUpdate) && host.LastScan > 0 && host.LastScan < interactionTime {
 					host.Uptime += time.Duration(interactionTime - host.LastScan)
 				}
 				host.RecentDowntime = 0
@@ -745,7 +745,10 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					host.Settings = convertHostSettings(sr.Settings)
 
 					// scans can only update the price table if the current
-					// pricetable is expired anyway
+					// pricetable is expired anyway, ensuring scans never
+					// overwrite a valid price table since the price table from
+					// scans are not paid for and thus not useful for anything
+					// aside from gouging checks
 					if time.Now().After(host.PriceTableExpiry) {
 						host.PriceTable = convertHostPriceTable(sr.PriceTable)
 						host.PriceTableExpiry = time.Now()
