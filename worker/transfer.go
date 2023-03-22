@@ -356,7 +356,6 @@ func downloadSlab(ctx context.Context, sp storeProvider, out io.Writer, ss objec
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("slab download complete")
 	return timings, nil
 }
 
