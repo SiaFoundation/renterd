@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -212,6 +213,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 		Bootstrap:       false,
 		GatewayAddr:     "127.0.0.1:0",
 		Miner:           miner,
+		Network:         testNetwork(),
 		PersistInterval: testPersistInterval,
 	}, busDir, wk, logger)
 	if err != nil {
@@ -660,4 +662,36 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) e
 		}
 		return nil
 	})
+}
+
+// testNetwork returns a custom network for testing which matches the
+// configuration of siad consensus in testing.
+func testNetwork() *consensus.Network {
+	n := &consensus.Network{
+		InitialCoinbase: types.Siacoins(300000),
+		MinimumCoinbase: types.Siacoins(299990),
+		InitialTarget:   types.BlockID{4: 32},
+	}
+
+	n.HardforkDevAddr.Height = 3
+	n.HardforkDevAddr.OldAddress = types.Address{}
+	n.HardforkDevAddr.NewAddress = types.Address{}
+
+	n.HardforkTax.Height = 10
+
+	n.HardforkStorageProof.Height = 10
+
+	n.HardforkOak.Height = 20
+	n.HardforkOak.FixHeight = 23
+	n.HardforkOak.GenesisTimestamp = time.Now().Add(-1e6 * time.Second)
+
+	n.HardforkASIC.Height = 5
+	n.HardforkASIC.OakTime = 10000 * time.Second
+	n.HardforkASIC.OakTarget = types.BlockID{255, 255}
+
+	n.HardforkFoundation.Height = 50
+	n.HardforkFoundation.PrimaryAddress = types.GeneratePrivateKey().PublicKey().StandardAddress()
+	n.HardforkFoundation.FailsafeAddress = types.GeneratePrivateKey().PublicKey().StandardAddress()
+
+	return n
 }

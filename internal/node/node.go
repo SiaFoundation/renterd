@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/autopilot"
-	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/renterd/wallet"
@@ -43,6 +42,7 @@ type WorkerConfig struct {
 type BusConfig struct {
 	Bootstrap       bool
 	GatewayAddr     string
+	Network         *consensus.Network
 	Miner           *Miner
 	PersistInterval time.Duration
 
@@ -81,7 +81,8 @@ func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
 }
 
 type chainManager struct {
-	cs modules.ConsensusSet
+	cs      modules.ConsensusSet
+	network *consensus.Network
 }
 
 func (cm chainManager) AcceptBlock(ctx context.Context, b types.Block) error {
@@ -96,7 +97,7 @@ func (cm chainManager) Synced(ctx context.Context) bool {
 
 func (cm chainManager) TipState(ctx context.Context) consensus.State {
 	return consensus.State{
-		Network: build.ConsensusNetwork,
+		Network: cm.network,
 		Index: types.ChainIndex{
 			Height: uint64(cm.cs.Height()),
 			ID:     types.BlockID(cm.cs.CurrentBlock().ID()),
@@ -260,7 +261,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs, network: cfg.Network}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}

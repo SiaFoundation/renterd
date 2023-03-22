@@ -11,7 +11,6 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -719,7 +718,6 @@ func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.Autopil
 
 func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, renewing bool) (types.Currency, error) {
 	cfg := c.ap.state.cfg
-	cs := c.ap.state.cs
 
 	// estimate the cost of the current data stored
 	dataStored := ci.contract.FileSize()
@@ -763,7 +761,10 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	// the file contract (and the transaction fee goes to the miners, not the
 	// file contract).
 	subTotal := storageCost.Add(newUploadsCost).Add(newDownloadsCost).Add(newFundAccountCost).Add(ci.settings.ContractPrice)
-	siaFundFeeEstimate := (consensus.State{Index: types.ChainIndex{Height: cs.BlockHeight}}).FileContractTax(types.FileContract{Payout: subTotal})
+	siaFundFeeEstimate, err := c.ap.bus.FileContractTax(ctx, subTotal)
+	if err != nil {
+		return types.ZeroCurrency, err
+	}
 
 	// estimate the txn fee
 	txnFeeEstimate := c.ap.state.fee.Mul64(estimatedFileContractTransactionSetSize)

@@ -576,6 +576,13 @@ func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 	return
 }
 
+// FileContractTax asks the bus for the siafund fee that has to be paid for a
+// contract with a given payout.
+func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (tax types.Currency, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/consensus/siafundfee/%s", api.ParamCurrency(payout)), &tax)
+	return
+}
+
 // NewClient returns a client that communicates with a renterd store server
 // listening on the specified address.
 func NewClient(addr, password string) *Client {

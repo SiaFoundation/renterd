@@ -148,6 +148,7 @@ func main() {
 	}
 	busCfg.PersistInterval = 10 * time.Minute
 	busCfg.DBDialector = getDBDialectorFromEnv()
+	busCfg.Network = build.ConsensusNetwork
 
 	var workerCfg struct {
 		enabled     bool
