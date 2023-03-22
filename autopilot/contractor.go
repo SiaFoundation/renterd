@@ -806,11 +806,11 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// worthwhile.
 	numContracts := c.ap.state.cfg.Contracts.Amount
 	buffer := 50
-	hosts, err := c.candidateHosts(ctx, w, hosts, nil, storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	candidates, err := c.candidateHosts(ctx, w, hosts, nil, storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
-	if len(hosts) == 0 {
+	if len(candidates) == 0 {
 		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
 		return math.SmallestNonzeroFloat64, nil
 	}
@@ -818,8 +818,8 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// Find the minimum score that a host is allowed to have to be considered
 	// good for upload.
 	lowestScore := math.MaxFloat64
-	for i := 0; i < len(hosts); i++ {
-		score := hostScore(c.ap.state.cfg, hosts[i], 0, c.ap.state.rs.Redundancy()).Score()
+	for i := 0; i < len(candidates); i++ {
+		score := hostScore(c.ap.state.cfg, candidates[i], 0, c.ap.state.rs.Redundancy()).Score()
 		if score < lowestScore {
 			lowestScore = score
 		}
@@ -847,7 +847,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	ipFilter := newIPFilter(c.logger)
 
 	// create list of candidate hosts
-	candidates := hosts[:0]
+	var candidates []hostdb.Host
 	var excluded, unscanned int
 	for _, h := range hosts {
 		// filter out used hosts
@@ -871,8 +871,8 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	// score all candidate hosts
 	start := time.Now()
 	var results unusableHostResult
-	scores := make([]float64, 0, len(hosts))
-	scored := make([]hostdb.Host, 0, len(hosts))
+	scores := make([]float64, 0, len(candidates))
+	scored := make([]hostdb.Host, 0, len(candidates))
 	var unusable, zeros int
 	for _, h := range candidates {
 		// NOTE: use the price table stored on the host for gouging checks when
