@@ -248,7 +248,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 				}
 			}
 			if shard == nil {
-				respChan <- resp{r, nil, time.Since(start), fmt.Errorf("host %v, err: %w", c.HostKey, errUnusedHost)}
+				respChan <- resp{r, nil, time.Time{}, fmt.Errorf("host %v, err: %w", c.HostKey, errUnusedHost)}
 				return
 			}
 
