@@ -8,6 +8,21 @@ import (
 	"go.sia.tech/core/types"
 )
 
+type AccountsLockHandlerRequest struct {
+	HostKey   types.PublicKey `json:"hostKey"`
+	Exclusive bool            `json:"exclusive"`
+	Duration  ParamDuration   `json:"duration"`
+}
+
+type AccountsLockHandlerResponse struct {
+	Account Account `json:"account"`
+	LockID  uint64  `json:"lockID"`
+}
+
+type AccountsUnlockHandlerRequest struct {
+	LockID uint64 `json:"lockID"`
+}
+
 // ContractsResponse is the response type for the /rhp/contracts/active endpoint.
 type ContractsResponse struct {
 	Contracts []Contract `json:"contracts"`
@@ -74,7 +89,6 @@ type RHPRenewResponse struct {
 type RHPFundRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
-	HostIP     string               `json:"hostIP"`
 	SiamuxAddr string               `json:"siamuxAddr"`
 	Balance    types.Currency       `json:"balance"`
 }
@@ -83,7 +97,6 @@ type RHPFundRequest struct {
 type RHPSyncRequest struct {
 	ContractID types.FileContractID `json:"contractID"`
 	HostKey    types.PublicKey      `json:"hostKey"`
-	HostIP     string               `json:"hostIP"`
 	SiamuxAddr string               `json:"siamuxAddr"`
 }
 
@@ -100,7 +113,7 @@ type RHPPreparePaymentRequest struct {
 // endpoint.
 type RHPRegistryReadRequest struct {
 	HostKey     types.PublicKey                    `json:"hostKey"`
-	HostIP      string                             `json:"hostIP"`
+	SiamuxAddr  string                             `json:"siamuxAddr"`
 	RegistryKey rhpv3.RegistryKey                  `json:"registryKey"`
 	Payment     rhpv3.PayByEphemeralAccountRequest `json:"payment"`
 }
@@ -109,7 +122,7 @@ type RHPRegistryReadRequest struct {
 // endpoint.
 type RHPRegistryUpdateRequest struct {
 	HostKey       types.PublicKey     `json:"hostKey"`
-	HostIP        string              `json:"hostIP"`
+	SiamuxAddr    string              `json:"siamuxAddr"`
 	RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
 }

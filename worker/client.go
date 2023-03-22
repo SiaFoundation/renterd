@@ -73,7 +73,6 @@ func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, h
 	req := api.RHPFundRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
-		HostIP:     hostIP,
 		SiamuxAddr: siamuxAddr,
 		Balance:    balance,
 	}
@@ -86,7 +85,6 @@ func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, h
 	req := api.RHPSyncRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
-		HostIP:     hostIP,
 		SiamuxAddr: siamuxAddr,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
@@ -104,10 +102,10 @@ func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, sia
 }
 
 // RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
+func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
 	req := api.RHPRegistryReadRequest{
 		HostKey:     hostKey,
-		HostIP:      hostIP,
+		SiamuxAddr:  siamuxAddr,
 		RegistryKey: key,
 		Payment:     payment,
 	}
@@ -205,21 +203,9 @@ func (c *Client) ActiveContracts(ctx context.Context, hostTimeout time.Duration)
 	return
 }
 
-// Account requests the worker's /accounts/:host endpoint.
-func (c *Client) Account(ctx context.Context, host types.PublicKey) (account api.Account, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts/host/%s", host), &account)
-	return
-}
-
-// Accounts requests the worker's /accounts endpoint.
-func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
-	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
-	return
-}
-
-// ResetDrift resets the drift of an account to zero.
-func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
+// Account returns the account id for a given host.
+func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account rhpv3.Account, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
 	return
 }
 

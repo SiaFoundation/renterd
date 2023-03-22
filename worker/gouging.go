@@ -11,7 +11,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/modules"
 )
 
 const (
@@ -123,6 +122,7 @@ func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable) (results GougingResul
 func (gr GougingResults) CanDownload() (errs []error) {
 	return filterErrors(
 		gr.downloadErr,
+		gr.gougingErr,
 	)
 }
 
@@ -336,7 +336,7 @@ func checkDownloadGougingRHPv3(gs api.GougingSettings, rs api.RedundancySettings
 }
 
 func checkDownloadGouging(gs api.GougingSettings, rs api.RedundancySettings, sectorDownloadPrice types.Currency) error {
-	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(1 << 40 / modules.SectorSize) // sectors per TiB
+	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(1 << 40 / rhpv2.SectorSize) // sectors per TiB
 	if overflow {
 		return fmt.Errorf("overflow detected when computing download price per TiB")
 	}
@@ -368,7 +368,7 @@ func checkUploadGougingRHPv3(gs api.GougingSettings, rs api.RedundancySettings, 
 }
 
 func checkUploadGouging(gs api.GougingSettings, rs api.RedundancySettings, sectorUploadPricePerMonth types.Currency) error {
-	upptb, overflow := sectorUploadPricePerMonth.Mul64WithOverflow(1 << 40 / modules.SectorSize) // sectors per TiB
+	upptb, overflow := sectorUploadPricePerMonth.Mul64WithOverflow(1 << 40 / rhpv2.SectorSize) // sectors per TiB
 	if overflow {
 		return fmt.Errorf("overflow detected when computing upload price per TiB")
 	}
