@@ -840,7 +840,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	if strings.HasSuffix(path, "/") {
+	if strings.HasSuffix(jc.PathParam("path"), "/") {
 		jc.Encode(entries)
 		return
 	}
