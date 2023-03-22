@@ -284,12 +284,6 @@ func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractM
 	return
 }
 
-// ActiveContract returns the active contract for the host with given host key.
-func (c *Client) ActiveContract(ctx context.Context, hk types.PublicKey) (contract api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/active/%s", hk), &contract)
-	return
-}
-
 // Contracts returns the contracts for the given set from the metadata store.
 func (c *Client) Contracts(ctx context.Context, set string) (contracts []api.ContractMetadata, err error) {
 	if set == "" {

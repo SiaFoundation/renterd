@@ -85,7 +85,6 @@ type (
 		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
-		ActiveContract(ctx context.Context, hk types.PublicKey) (api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
@@ -521,18 +520,6 @@ func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
 	cs, err := b.ms.ActiveContracts(jc.Request.Context())
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
-	}
-}
-
-func (b *bus) contractsActiveHostHandlerGET(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
-		return
-	}
-
-	c, err := b.ms.ActiveContract(jc.Request.Context(), hk)
-	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(c)
 	}
 }
 
@@ -1068,19 +1055,18 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
-		"GET    /contracts/active":          b.contractsActiveHandlerGET,
-		"GET    /contracts/active/:hostkey": b.contractsActiveHostHandlerGET,
-		"GET    /contracts/sets":            b.contractsSetsHandlerGET,
-		"GET    /contracts/set/:set":        b.contractsSetHandlerGET,
-		"PUT    /contracts/set/:set":        b.contractsSetHandlerPUT,
-		"POST   /contracts/spending":        b.contractsSpendingHandlerPOST,
-		"GET    /contract/:id":              b.contractIDHandlerGET,
-		"POST   /contract/:id":              b.contractIDHandlerPOST,
-		"GET    /contract/:id/ancestors":    b.contractIDAncestorsHandler,
-		"POST   /contract/:id/renewed":      b.contractIDRenewedHandlerPOST,
-		"DELETE /contract/:id":              b.contractIDHandlerDELETE,
-		"POST   /contract/:id/acquire":      b.contractAcquireHandlerPOST,
-		"POST   /contract/:id/release":      b.contractReleaseHandlerPOST,
+		"GET    /contracts/active":       b.contractsActiveHandlerGET,
+		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
+		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
+		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
+		"GET    /contract/:id":           b.contractIDHandlerGET,
+		"POST   /contract/:id":           b.contractIDHandlerPOST,
+		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
+		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
+		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
+		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,

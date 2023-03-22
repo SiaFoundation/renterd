@@ -230,7 +230,6 @@ type Bus interface {
 
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
-	ActiveContract(ctx context.Context, hk types.PublicKey) (api.ContractMetadata, error)
 	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
@@ -295,10 +294,8 @@ type worker struct {
 	pool      *sessionPool
 	masterKey [32]byte
 
-	accounts *accounts
-
-	priceTablesMu sync.Mutex
-	priceTables   map[types.PublicKey]*priceTable
+	accounts    *accounts
+	priceTables *priceTables
 
 	busFlushInterval time.Duration
 
@@ -566,7 +563,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
 	// fetchPT is a helper function that performs the RPC given a payment function
-	fetchPT := func(paymentFn PriceTablePaymentFunc) {
+	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 			pt, err := RPCPriceTable(t, paymentFn)
 			if err != nil {
@@ -578,34 +575,20 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 			}
 			return nil
 		})
+		return
 	}
 
 	// pay by contract if a revision is given
 	if revision != nil {
-		fetchPT(w.preparePriceTableContractPayment(hk, revision))
-		return
+		return fetchPT(w.preparePriceTableContractPayment(hk, revision))
 	}
 
-	// pay by account if possible
-	cs, errr := w.bus.ConsensusState(ctx)
-	if errr == nil && cs.Synced {
-		fetchPT(w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
-		if err == nil {
-			return // success
-		}
-	}
-
-	// pay by contract if account payment failed
-	contract, err := w.bus.ActiveContract(ctx, hk)
+	// pay by account
+	cs, err := w.bus.ConsensusState(ctx)
 	if err != nil {
 		return hostdb.HostPriceTable{}, err
 	}
-	_ = w.withRevisionV3(ctx, contract.ID, hk, siamuxAddr, lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
-		fetchPT(w.preparePriceTableContractPayment(hk, &revision))
-		return nil
-	})
-
-	return
+	return fetchPT(w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
@@ -1189,7 +1172,6 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 		id:                    id,
 		bus:                   b,
 		pool:                  newSessionPool(sessionReconectTimeout, sessionTTL),
-		priceTables:           make(map[types.PublicKey]*priceTable),
 		masterKey:             masterKey,
 		busFlushInterval:      busFlushInterval,
 		downloadSectorTimeout: downloadSectorTimeout,
@@ -1198,6 +1180,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionReconectTimeout, sessionTT
 	}
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
+	w.initPriceTables()
 	return w
 }
 

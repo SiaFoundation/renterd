@@ -87,7 +87,7 @@ func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.Pu
 	err = withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 		rev, err = RPCLatestRevision(t, contractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Fetch pt.
-			pt, err := w.priceTable(hostKey).fetch(ctx, revision)
+			pt, err := w.priceTables.fetch(ctx, hostKey, revision)
 			if err != nil {
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 			}
@@ -115,7 +115,7 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 	}
 
 	// fetch pricetable
-	pt, err := w.priceTable(hk).fetch(ctx, revision)
+	pt, err := w.priceTables.fetch(ctx, hk, revision)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (w *worker) syncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 	}
 
 	// fetch pricetable
-	pt, err := w.priceTable(hk).fetch(ctx, revision)
+	pt, err := w.priceTables.fetch(ctx, hk, revision)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 		return err
 	}
 
-	pt, err := w.priceTable(hostKey).fetch(ctx, nil)
+	pt, err := w.priceTables.fetch(ctx, hostKey, nil)
 	if err != nil {
 		return err
 	}
@@ -442,6 +442,13 @@ func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
 // price table when we start considering it invalid.
 const priceTableValidityLeeway = -30 * time.Second
 
+type priceTables struct {
+	w *worker
+
+	mu          sync.Mutex
+	priceTables map[types.PublicKey]*priceTable
+}
+
 type priceTable struct {
 	w  *worker
 	hk types.PublicKey
@@ -457,18 +464,30 @@ type priceTableUpdate struct {
 	hpt  hostdb.HostPriceTable
 }
 
-// priceTable returns a price table for the given host
-func (w *worker) priceTable(hk types.PublicKey) *priceTable {
-	w.priceTablesMu.Lock()
-	defer w.priceTablesMu.Unlock()
+func (w *worker) initPriceTables() {
+	if w.priceTables != nil {
+		panic("priceTables already initialized") // developer error
+	}
+	w.priceTables = &priceTables{
+		w:           w,
+		priceTables: make(map[types.PublicKey]*priceTable),
+	}
+}
 
-	if _, exists := w.priceTables[hk]; !exists {
-		w.priceTables[hk] = &priceTable{
-			w:  w,
+// fetch returns a price table for the given host
+func (pts *priceTables) fetch(ctx context.Context, hk types.PublicKey, revision *types.FileContractRevision) (hostdb.HostPriceTable, error) {
+	pts.mu.Lock()
+	pt, exists := pts.priceTables[hk]
+	if !exists {
+		pt = &priceTable{
+			w:  pts.w,
 			hk: hk,
 		}
+		pts.priceTables[hk] = pt
 	}
-	return w.priceTables[hk]
+	pts.mu.Unlock()
+
+	return pt.fetch(ctx, revision)
 }
 
 func (pt *priceTable) ongoingUpdate() (bool, *priceTableUpdate) {

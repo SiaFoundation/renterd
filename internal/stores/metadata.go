@@ -290,20 +290,6 @@ func (s *SQLStore) ActiveContracts(ctx context.Context) ([]api.ContractMetadata,
 	return contracts, nil
 }
 
-func (s *SQLStore) ActiveContract(ctx context.Context, hk types.PublicKey) (api.ContractMetadata, error) {
-	var c dbContract
-	err := s.db.
-		Model(&dbContract{}).
-		Preload("Host").
-		Where(&dbContract{Host: dbHost{PublicKey: publicKey(hk)}}).
-		Take(&c).
-		Error
-	if err != nil {
-		return api.ContractMetadata{}, err
-	}
-	return c.convert(), nil
-}
-
 // AddRenewedContract adds a new contract which was created as the result of a renewal to the store.
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
