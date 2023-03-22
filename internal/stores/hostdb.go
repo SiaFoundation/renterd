@@ -313,7 +313,7 @@ func (h dbHost) convert() hostdb.Host {
 	} else {
 		pt := h.PriceTable.convert()
 		hdbHost.PriceTable = &hostdb.HostPriceTable{
-			HostPriceTable: &pt,
+			HostPriceTable: pt,
 			Expiry:         h.PriceTableExpiry,
 		}
 	}
@@ -705,6 +705,8 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				continue // host doesn't exist
 			}
 			isScan := interaction.Type == hostdb.InteractionTypeScan
+			isPriceTableUpdate := interaction.Type == hostdb.InteractionTypePriceTableUpdate
+
 			dbInteractions = append(dbInteractions, dbInteraction{
 				Host:      publicKey(interaction.Host),
 				Result:    interaction.Result,
@@ -742,14 +744,23 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					}
 					host.Settings = convertHostSettings(sr.Settings)
 
-					// only update the price table if it is newer
-					//
-					// TODO: this can eventually be smarter and select the new
-					// price table if its prices are better
-					if sr.PriceTableExpiry.After(host.PriceTableExpiry) {
+					// scans can only update the price table if the current
+					// pricetable is expired anyway
+					if time.Now().After(host.PriceTableExpiry) {
 						host.PriceTable = convertHostPriceTable(sr.PriceTable)
-						host.PriceTableExpiry = sr.PriceTableExpiry
+						host.PriceTableExpiry = time.Now()
 					}
+				}
+			}
+			if isPriceTableUpdate {
+				if interaction.Success {
+					var hpt hostdb.HostPriceTable
+					if err := json.Unmarshal(interaction.Result, &hpt); err != nil {
+						return err
+					}
+
+					host.PriceTable = convertHostPriceTable(hpt.HostPriceTable)
+					host.PriceTableExpiry = hpt.Expiry
 				}
 			}
 

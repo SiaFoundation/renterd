@@ -48,7 +48,7 @@ func newTestHosts(n int) []hostdb.Host {
 	return hosts
 }
 
-func newTestHost(hk types.PublicKey, pt *rhpv3.HostPriceTable, settings *rhpv2.HostSettings) hostdb.Host {
+func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings *rhpv2.HostSettings) hostdb.Host {
 	return hostdb.Host{
 		NetAddress: randomIP().String(),
 		KnownSince: time.Now(),
@@ -79,13 +79,13 @@ func newTestHostSettings() *rhpv2.HostSettings {
 	}
 }
 
-func newTestHostPriceTable() *rhpv3.HostPriceTable {
+func newTestHostPriceTable() rhpv3.HostPriceTable {
 	oneSC := types.Siacoins(1)
 
 	dlbwPrice := oneSC.Mul64(25).Div64(1 << 40) // 25 SC / TiB
 	ulbwPrice := oneSC.Div64(1 << 40)           // 1 SC / TiB
 
-	return &rhpv3.HostPriceTable{
+	return rhpv3.HostPriceTable{
 		Validity: time.Minute,
 
 		// fields that are currently always set to 1H.

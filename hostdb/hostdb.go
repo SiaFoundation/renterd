@@ -25,13 +25,18 @@ type hostAnnouncement struct {
 }
 
 type ScanResult struct {
-	Error            string
-	PriceTable       rhpv3.HostPriceTable `json:"priceTable,omitempty"`
-	PriceTableExpiry time.Time            `json:"priceTableExpiry,omitempty"`
-	Settings         rhpv2.HostSettings   `json:"settings,omitempty"`
+	Error      string               `json:"error,omitempty"`
+	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
+	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
+}
+
+type PriceTableUpdateResult struct {
+	Error      string         `json:"error,omitempty"`
+	PriceTable HostPriceTable `json:"priceTable,omitempty"`
 }
 
 const InteractionTypeScan = "scan"
+const InteractionTypePriceTableUpdate = "pricetableupdate"
 
 // ForEachAnnouncement calls fn on each host announcement in a block.
 func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, Announcement)) {
@@ -104,7 +109,7 @@ type Host struct {
 
 // A HostPriceTable extends the host price table with its expiry.
 type HostPriceTable struct {
-	*rhpv3.HostPriceTable
+	rhpv3.HostPriceTable
 	Expiry time.Time `json:"expiry"`
 }
 

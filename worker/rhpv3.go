@@ -77,7 +77,7 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 	}
 
 	return account.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, withTransportV3(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) (err error) {
+		return amount, withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(hk)
 			cost := amount.Add(pt.FundAccountCost)
 			payment, ok := rhpv3.PayByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
@@ -108,7 +108,7 @@ func (w *worker) syncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 
 	return account.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
-		err := withTransportV3(ctx, siamuxAddr, hk, func(t *rhpv3.Transport) error {
+		err := withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) error {
 			payment := w.preparePayment(hk, pt.AccountBalanceCost, pt.HostBlockHeight)
 			balance, err = RPCAccountBalance(t, &payment, account.id, pt.UID)
 			return err
@@ -169,7 +169,7 @@ type (
 		acc        *account
 		bh         uint64
 		fcid       types.FileContractID
-		pt         *rhpv3.HostPriceTable
+		pt         rhpv3.HostPriceTable
 		siamuxAddr string
 		sk         types.PrivateKey
 	}
@@ -441,7 +441,7 @@ func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 
 func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
 	// return errGougingHost if gouging checks fail
-	if errs := PerformGougingChecks(ctx, nil, r.pt).CanDownload(); len(errs) > 0 {
+	if errs := PerformGougingChecks(ctx, nil, &r.pt).CanDownload(); len(errs) > 0 {
 		return fmt.Errorf("failed to download sector, %w: %v", errGougingHost, errs)
 	}
 	// return errBalanceInsufficient if balance insufficient
@@ -452,7 +452,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 	}()
 
 	return r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = withTransportV3(ctx, r.siamuxAddr, r.HostKey(), func(t *rhpv3.Transport) error {
+		err = withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *rhpv3.Transport) error {
 			cost, err := readSectorCost(r.pt)
 			if err != nil {
 				return err
@@ -469,7 +469,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
-func readSectorCost(pt *rhpv3.HostPriceTable) (types.Currency, error) {
+func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
 	cost, overflow := pt.InitBaseCost.AddWithOverflow(pt.ReadBaseCost)
 	if overflow {
 		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, base cost overflow")
@@ -590,7 +590,9 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 		close(update.done)
 
 		p.mu.Lock()
-		p.hpt = hpt
+		if err == nil {
+			p.hpt = hpt
+		}
 		p.update = nil
 		p.mu.Unlock()
 	}()
@@ -605,50 +607,30 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 	hostIP := host.NetAddress
 	siamuxAddr := host.Settings.SiamuxAddr()
 
-	payByFC := func() (pt rhpv3.HostPriceTable, err error) {
-		// if revision was given, use it to pay for the scan
-		if revision != nil {
-			_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableContractPayment(hk, revision))
-			return
+	// try to pay by EA if possible
+	if revision == nil {
+		cs, err := b.ConsensusState(ctx)
+		if err == nil && cs.Synced {
+			return w.fetchPriceTable(ctx, hk, siamuxAddr, w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
 		}
-
-		// otherwise we fetch the active contract
-		contract, err := b.ActiveContract(ctx, hk)
-		if err != nil {
-			return rhpv3.HostPriceTable{}, err
-		}
-
-		// and scan the host
-		_ = w.withRevision(ctx, contract.ID, hk, hostIP, lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
-			_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableContractPayment(hk, &revision))
-			return err
-		})
-		return
 	}
 
-	// scan host and pay by EA if possible
-	var pt rhpv3.HostPriceTable
+	// pay by FC if EA payment failed or if a revision was given
 	if revision != nil {
-		pt, err = payByFC() // pay by FC if a revision is given
-	} else if cs, errr := b.ConsensusState(ctx); errr == nil && cs.Synced {
-		_, _, pt, err = w.scanHost(ctx, hk, hostIP, siamuxAddr, w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
-		if err == nil && pt.Validity < 0 {
-			pt, err = payByFC() // fallback to paying by FC
-		}
-	} else {
-		pt, err = payByFC() // fallback to paying by FC
+		return w.fetchPriceTable(ctx, hk, siamuxAddr, w.preparePriceTableContractPayment(hk, revision))
 	}
 
-	// only overwrite the price table if it's valid
-	if err == nil && pt.Validity <= 0 {
-		err = errors.New("failed to get valid price table, likely payment failure")
-	} else if err == nil {
-		hpt = hostdb.HostPriceTable{
-			HostPriceTable: &pt,
-			Expiry:         time.Now().Add(pt.Validity),
-		}
+	// fetch the active contract
+	contract, err := b.ActiveContract(ctx, hk)
+	if err != nil {
+		return hostdb.HostPriceTable{}, err
 	}
 
+	// fetch the price table
+	_ = w.withRevision(ctx, contract.ID, hk, hostIP, lockingPriorityPriceTable, lockingDurationPriceTable, func(revision types.FileContractRevision) error {
+		hpt, err = w.fetchPriceTable(ctx, hk, hostIP, w.preparePriceTableContractPayment(hk, &revision))
+		return err
+	})
 	return
 }
 
@@ -728,37 +710,22 @@ func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rh
 	s.SetDeadline(time.Now().Add(15 * time.Second))
 	const maxPriceTableSize = 16 * 1024
 	var ptr rhpv3.RPCUpdatePriceTableResponse
-
-	if err = s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
-		return
-	} else if err = s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
-		return
-	} else if err = json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
-		return
-	}
-
-	var tracked bool
-	defer func() {
-		if !tracked {
-			pt.Validity = -time.Second // expiry in the past
-		}
-	}()
-
-	var payment rhpv3.PaymentMethod
-	if payment, err = paymentFunc(pt); err != nil {
-		return pt, nil // failed to pay
+	if err := s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
+		return rhpv3.HostPriceTable{}, err
+	} else if err := s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
+		return rhpv3.HostPriceTable{}, err
+	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
+		return rhpv3.HostPriceTable{}, err
+	} else if payment, err := paymentFunc(pt); err != nil {
+		return rhpv3.HostPriceTable{}, err
 	} else if payment == nil {
 		return pt, nil // intended not to pay
+	} else if err := processPayment(s, payment); err != nil {
+		return rhpv3.HostPriceTable{}, err
+	} else if err := s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
+		return rhpv3.HostPriceTable{}, err
 	}
-
-	if err = processPayment(s, payment); err != nil {
-		return pt, nil // failed to pay
-	} else if err = s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
-		return pt, nil // failed to pay
-	}
-
-	tracked = true
-	return
+	return pt, nil
 }
 
 // RPCAccountBalance calls the AccountBalance RPC.
@@ -807,7 +774,7 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
+func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
 	s := t.DialStream()
 	defer s.Close()

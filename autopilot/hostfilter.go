@@ -180,7 +180,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		errs = append(errs, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if h.PriceTable == nil {
 		errs = append(errs, errHostNoPriceTable)
-	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, h.PriceTable.HostPriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
+	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, &h.PriceTable.HostPriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
 		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
 	} else if breakdown = hostScore(cfg, h, storedData, rs.Redundancy()); breakdown.Score() < minScore {
 		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, breakdown.Score(), minScore))
