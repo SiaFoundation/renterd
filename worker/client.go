@@ -102,10 +102,10 @@ func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, sia
 }
 
 // RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
+func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
 	req := api.RHPRegistryReadRequest{
 		HostKey:     hostKey,
-		SiamuxAddr:  hostIP,
+		SiamuxAddr:  siamuxAddr,
 		RegistryKey: key,
 		Payment:     payment,
 	}
