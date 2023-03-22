@@ -108,7 +108,7 @@ func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.Fi
 	return f(h)
 }
 
-func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, f func(sectorStore) error) (err error) {
+func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, f func(sectorStore) error) (err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")

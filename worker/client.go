@@ -73,7 +73,6 @@ func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, h
 	req := api.RHPFundRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
-		HostIP:     hostIP,
 		SiamuxAddr: siamuxAddr,
 		Balance:    balance,
 	}
@@ -86,7 +85,6 @@ func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, h
 	req := api.RHPSyncRequest{
 		ContractID: contractID,
 		HostKey:    hostKey,
-		HostIP:     hostIP,
 		SiamuxAddr: siamuxAddr,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
@@ -104,10 +102,10 @@ func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, sia
 }
 
 // RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, hostIP string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
+func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
 	req := api.RHPRegistryReadRequest{
 		HostKey:     hostKey,
-		HostIP:      hostIP,
+		SiamuxAddr:  siamuxAddr,
 		RegistryKey: key,
 		Payment:     payment,
 	}

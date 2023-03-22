@@ -400,7 +400,7 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) withRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
+func (w *worker) withRevisionV2(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
 	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
@@ -426,6 +426,33 @@ func (w *worker) withRevision(ctx context.Context, contractID types.FileContract
 	}
 
 	return fn(revision)
+}
+
+func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
+	// acquire contract lock
+	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
+		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
+	} else {
+		defer func() {
+			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
+				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
+			}
+		}()
+	}
+
+	// fetch contract revision
+	pt, valid := w.priceTables.PriceTable(hk)
+	var rev types.FileContractRevision
+	var err error
+	if valid {
+		rev, err = w.FetchRevisionWithContract(ctx, &pt, hk, siamuxAddr, contractID)
+	} else {
+		rev, err = w.FetchRevisionWithContract(ctx, nil, hk, siamuxAddr, contractID)
+	}
+	if err != nil {
+		return err
+	}
+	return fn(rev)
 }
 
 func (w *worker) unlockHosts(hosts []sectorStore) {
@@ -610,7 +637,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	// renew the contract
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	if jc.Check("couldn't renew contract", w.withRevision(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
+	if jc.Check("couldn't renew contract", w.withRevisionV2(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
 		return w.withHostV2(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, func(ss sectorStore) error {
 			session := ss.(*sharedSession)
 			renewed, txnSet, err = session.RenewContract(ctx, func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error) {
@@ -643,8 +670,15 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		return
 	}
 
+	// attach gouging checker
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	ctx = WithGougingChecker(ctx, gp)
+
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, rfr.ContractID, rfr.HostKey, rfr.HostIP, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
+	jc.Check("couldn't fund account", w.withRevisionV3(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
 		if err := w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision); isMaxBalanceExceeded(err) {
 			// sync and retry funding
 			if err := w.syncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &revision); err != nil {
@@ -673,7 +707,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 		return
 	}
 	var value rhpv3.RegistryValue
-	err := withTransportV3(jc.Request.Context(), rrrr.HostIP, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrrr.SiamuxAddr, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
 		value, err = RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
@@ -692,7 +726,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
-	err := withTransportV3(jc.Request.Context(), rrur.HostIP, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrur.SiamuxAddr, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
@@ -709,8 +743,17 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 		return
 	}
 
+	// fetch gouging params
+	up, err := w.bus.UploadParams(ctx)
+	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
+		return
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, up.GougingParams)
+
 	// sync the account
-	jc.Check("couldn't sync account", w.withRevision(ctx, rsr.ContractID, rsr.HostKey, rsr.HostIP, lockingPrioritySyncing, lockingDurationSyncing, func(revision types.FileContractRevision) error {
+	jc.Check("couldn't sync account", w.withRevisionV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, lockingDurationSyncing, func(revision types.FileContractRevision) error {
 		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
 	}))
 }
