@@ -155,6 +155,9 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		}
 	}
 	if rem > 0 {
+		if errs == nil {
+			return nil, nil, fmt.Errorf("rem > 0 (%v) but errs is nil - this should not happen", rem)
+		}
 		return nil, nil, errs
 	}
 
