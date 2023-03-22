@@ -164,7 +164,17 @@ func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange
 		}
 	}
 
-	for _, block := range cc.AppliedBlocks {
+	spentOutputs := make(map[types.SiacoinOutputID]types.SiacoinOutput)
+	for i, block := range cc.AppliedBlocks {
+		appliedDiff := cc.AppliedDiffs[i]
+		for _, diff := range appliedDiff.SiacoinOutputDiffs {
+			if diff.Direction == modules.DiffRevert {
+				var so types.SiacoinOutput
+				convertToCore(diff.SiacoinOutput, &so)
+				spentOutputs[types.SiacoinOutputID(diff.ID)] = so
+			}
+		}
+
 		for _, stxn := range block.Transactions {
 			var txn types.Transaction
 			convertToCore(stxn, &txn)
@@ -177,8 +187,11 @@ func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange
 				}
 				for _, in := range txn.SiacoinInputs {
 					if in.UnlockConditions.UnlockHash() == s.addr {
-						inputValue := types.ZeroCurrency // V2: use in.Parent.value
-						outflow = outflow.Add(inputValue)
+						so, ok := spentOutputs[in.ParentID]
+						if !ok {
+							panic("spent output not found")
+						}
+						outflow = outflow.Add(so.Value)
 					}
 				}
 
