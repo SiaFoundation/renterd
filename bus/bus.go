@@ -835,12 +835,24 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *bus) accountsOwnerHandlerGET(jc jape.Context) {
-	var owner api.ParamString
-	if jc.DecodeParam("owner", &owner) != nil {
+func (b *bus) accountsHandlerGET(jc jape.Context) {
+	jc.Encode(b.accounts.Accounts())
+}
+
+func (b *bus) accountHandlerGET(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	jc.Encode(b.accounts.Accounts(owner.String()))
+	var req api.AccountHandlerPOST
+	if jc.Decode(&req) != nil {
+		return
+	}
+	acc, err := b.accounts.Account(id, req.HostKey)
+	if jc.Check("failed to fetch account", err) != nil {
+		return
+	}
+	jc.Encode(acc)
 }
 
 func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
@@ -856,15 +868,11 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Owner == "" {
-		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
-		return
-	}
 	if req.Host == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.AddAmount(id, string(req.Owner), req.Host, req.Amount)
+	b.accounts.AddAmount(id, req.Host, req.Amount)
 }
 
 func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
@@ -895,15 +903,11 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Owner == "" {
-		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
-		return
-	}
 	if req.Host == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.SetBalance(id, string(req.Owner), req.Host, req.Amount, req.Drift)
+	b.accounts.SetBalance(id, req.Host, req.Amount)
 }
 
 func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
@@ -919,20 +923,49 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Owner == "" {
-		jc.Error(errors.New("owner needs to be set"), http.StatusBadRequest)
-		return
-	}
 	if req.Host == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	err := b.accounts.SetRequiresSync(id, string(req.Owner), req.Host, req.RequiresSync)
+	err := b.accounts.ScheduleSync(id, req.Host)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
-	if jc.Check("failed tot set requiresSync flag on account", err) != nil {
+	if jc.Check("failed to set requiresSync flag on account", err) != nil {
+		return
+	}
+}
+
+func (b *bus) accountsLockHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsLockHandlerRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	acc, lockID := b.accounts.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
+	jc.Encode(api.AccountsLockHandlerResponse{
+		Account: acc,
+		LockID:  lockID,
+	})
+}
+
+func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.AccountsUnlockHandlerRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	err := b.accounts.UnlockAccount(id, req.LockID)
+	if jc.Check("failed to unlock account", err) != nil {
 		return
 	}
 }
@@ -980,7 +1013,10 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /accounts/:owner":           b.accountsOwnerHandlerGET,
+		"GET    /accounts":                  b.accountsHandlerGET,
+		"POST   /accounts/:id":              b.accountHandlerGET,
+		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
+		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
 		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
 		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
 		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
@@ -1032,8 +1068,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 
-		"POST /search/hosts":  b.searchHostsHandlerPOST,
-		"GET /search/objects": b.searchObjectsHandlerGET,
+		"POST /search/hosts":   b.searchHostsHandlerPOST,
+		"GET  /search/objects": b.searchObjectsHandlerGET,
 
 		"GET    /objects/*path": b.objectsHandlerGET,
 		"PUT    /objects/*path": b.objectsHandlerPUT,

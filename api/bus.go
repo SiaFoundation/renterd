@@ -16,6 +16,10 @@ const (
 )
 
 var (
+	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
+	// yet because it has been set too recently.
+	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
+
 	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
@@ -45,6 +49,11 @@ var (
 		HostBlockHeightLeeway: 3,                                    // 3 blocks
 	}
 )
+
+// AccountHandlerPOST is the request type for the /account/:id endpoint.
+type AccountHandlerPOST struct {
+	HostKey types.PublicKey `json:"hostKey"`
+}
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
@@ -193,24 +202,19 @@ type UpdateBlocklistRequest struct {
 // endpoint.
 type AccountsUpdateBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
-	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
-	Drift  *big.Int        `json:"drift"`
 }
 
 // AccountsRequiresSyncRequest is the request type for
 // /accounts/:id/requiressync endpoint.
 type AccountsRequiresSyncRequest struct {
-	Host         types.PublicKey `json:"host"`
-	Owner        ParamString     `json:"owner"`
-	RequiresSync bool            `json:"requiresSync"`
+	Host types.PublicKey `json:"host"`
 }
 
 // AccountsAddBalanceRequest is the request type for /accounts/:id/add
 // endpoint.
 type AccountsAddBalanceRequest struct {
 	Host   types.PublicKey `json:"host"`
-	Owner  ParamString     `json:"owner"`
 	Amount *big.Int        `json:"amount"`
 }
 
