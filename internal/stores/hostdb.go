@@ -717,7 +717,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			interactionTime := interaction.Timestamp.UnixNano()
 			if interaction.Success {
 				host.SuccessfulInteractions++
-				if (isScan || isPriceTableUpdate) && host.LastScan > 0 && host.LastScan < interactionTime {
+				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
 					host.Uptime += time.Duration(interactionTime - host.LastScan)
 				}
 				host.RecentDowntime = 0
@@ -755,6 +755,9 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					}
 				}
 			}
+			// NOTE: a host's uptime or downtime is only updated by scans, we do
+			// this mostly to keep things simple, host scans should be performed
+			// frequently enough for this not to be a problem
 			if isPriceTableUpdate {
 				if interaction.Success {
 					var hpt hostdb.HostPriceTable
