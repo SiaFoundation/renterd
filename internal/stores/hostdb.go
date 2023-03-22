@@ -316,46 +316,6 @@ func (h dbHost) convert() hostdb.Host {
 	return hdbHost
 }
 
-func (h *dbHost) AfterCreate(tx *gorm.DB) (err error) {
-	// fetch allowlist and filter the entries that apply to this host
-	var dbAllowlist []dbAllowlistEntry
-	if err := tx.
-		Model(&dbAllowlistEntry{}).
-		Find(&dbAllowlist).
-		Error; err != nil {
-		return err
-	}
-	allowlist := dbAllowlist[:0]
-	for _, entry := range dbAllowlist {
-		if entry.Entry == h.PublicKey {
-			allowlist = append(allowlist, entry)
-		}
-	}
-
-	// update the association on the host
-	if err := tx.Model(h).Association("Allowlist").Replace(&allowlist); err != nil {
-		return err
-	}
-
-	// fetch blocklist and filter the entries that apply to this host
-	var dbBlocklist []dbBlocklistEntry
-	if err := tx.
-		Model(&dbBlocklistEntry{}).
-		Find(&dbBlocklist).
-		Error; err != nil {
-		return err
-	}
-	blocklist := dbBlocklist[:0]
-	for _, entry := range dbBlocklist {
-		if entry.blocks(h) {
-			blocklist = append(blocklist, entry)
-		}
-	}
-
-	// update the association on the host
-	return tx.Model(h).Association("Blocklist").Replace(&blocklist)
-}
-
 func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
 	tx.Statement.AddClause(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "public_key"}},
@@ -445,7 +405,7 @@ func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
-func (e *dbBlocklistEntry) blocks(h *dbHost) bool {
+func (e *dbBlocklistEntry) blocks(h dbHost) bool {
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err != nil {
 		return false // do nothing
@@ -791,6 +751,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 				hostKey:      publicKey(hostKey),
 				announcement: ha,
 			})
+			ss.unappliedHostKeys[hostKey] = struct{}{}
 		})
 		// Update RevisionHeight and RevisionNumber for our contracts.
 		for _, txn := range sb.Transactions {
@@ -815,39 +776,71 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
 	ss.unappliedCCID = cc.ID
 
-	// Apply updates.
-	if time.Since(ss.lastAnnouncementSave) > ss.persistInterval ||
-		len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit ||
-		len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0 {
-		err := ss.retryTransaction(func(tx *gorm.DB) error {
-			// Apply announcements.
-			if len(ss.unappliedAnnouncements) > 0 {
-				if err := insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
-					return err
-				}
-			}
-			for fcid, rev := range ss.unappliedRevisions {
-				if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
-					return err
-				}
-			}
-			for fcid, proofHeight := range ss.unappliedProofs {
-				if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
-					return err
-				}
-			}
-			return updateCCID(tx, ss.unappliedCCID)
-		})
-		if err != nil {
-			// NOTE: print error. If we failed due to a temporary error
-			println(fmt.Sprintf("failed to apply %v announcements - should never happen", len(ss.unappliedAnnouncements)))
-		}
-
-		ss.unappliedProofs = make(map[types.FileContractID]uint64)
-		ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
-		ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
-		ss.lastAnnouncementSave = time.Now()
+	if err := ss.applyUpdates(); err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
+}
+
+// applyUpdates applies all unapplied updates to the database.
+func (ss *SQLStore) applyUpdates() (err error) {
+	// Check if we need to apply changes
+	persistIntervalPassed := time.Since(ss.lastAnnouncementSave) > ss.persistInterval
+	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
+	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
+	if !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
+		return nil
+	}
+
+	// Fetch allowlist
+	var allowlist []dbAllowlistEntry
+	if err := ss.db.
+		Model(&dbAllowlistEntry{}).
+		Find(&allowlist).
+		Error; err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
+	}
+
+	// Fetch blocklist
+	var blocklist []dbBlocklistEntry
+	if err := ss.db.
+		Model(&dbBlocklistEntry{}).
+		Find(&blocklist).
+		Error; err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
+	}
+
+	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
+		if len(ss.unappliedAnnouncements) > 0 {
+			if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
+				return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
+			}
+		}
+		if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
+			for host := range ss.unappliedHostKeys {
+				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
+					ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
+				}
+			}
+		}
+		for fcid, rev := range ss.unappliedRevisions {
+			if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
+				return fmt.Errorf("%w; failed to update revision number and height", err)
+			}
+		}
+		for fcid, proofHeight := range ss.unappliedProofs {
+			if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
+				return fmt.Errorf("%w; failed to update proof height", err)
+			}
+		}
+		return updateCCID(tx, ss.unappliedCCID)
+	})
+
+	ss.unappliedProofs = make(map[types.FileContractID]uint64)
+	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
+	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
+	ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
+	ss.lastAnnouncementSave = time.Now()
+	return
 }
 
 // excludeBlocked can be used as a scope for a db transaction to exclude blocked
@@ -952,4 +945,36 @@ func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, upd
 		return fmt.Errorf("%s; %s", err1, err2)
 	}
 	return nil
+}
+
+func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEntry, blocklist []dbBlocklistEntry) error {
+	// fetch the host
+	var host dbHost
+	if err := tx.
+		Model(&dbHost{}).
+		Where("public_key = ?", publicKey(hk)).
+		First(&host).
+		Error; err != nil {
+		return err
+	}
+
+	// update host allowlist
+	var dbAllowlist []dbAllowlistEntry
+	for _, entry := range allowlist {
+		if entry.Entry == host.PublicKey {
+			dbAllowlist = append(dbAllowlist, entry)
+		}
+	}
+	if err := tx.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
+		return err
+	}
+
+	// update host blocklist
+	var dbBlocklist []dbBlocklistEntry
+	for _, entry := range blocklist {
+		if entry.blocks(host) {
+			dbBlocklist = append(dbBlocklist, entry)
+		}
+	}
+	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
 }
