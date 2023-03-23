@@ -84,6 +84,17 @@ func newContractor(ap *Autopilot) *contractor {
 }
 
 func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerGET, error) {
+	cfg := c.ap.Config()
+	if cfg.Contracts.Allowance.IsZero() {
+		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
+	}
+	if cfg.Contracts.Amount == 0 {
+		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contracts amount is zero")
+	}
+	if cfg.Contracts.Period == 0 {
+		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contract period is zero")
+	}
+
 	host, err := c.ap.bus.Host(ctx, hostKey)
 	if err != nil {
 		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch requested host from bus: %w", err)
@@ -109,7 +120,6 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	minScore := c.cachedMinScore
 	c.mu.Unlock()
 
-	cfg := c.ap.Config()
 	f := newIPFilter(c.logger)
 
 	isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
