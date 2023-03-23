@@ -280,8 +280,17 @@ func TestUploadDownloadBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// fetch all entries from the worker
+	entries, err := cluster.Worker.ObjectEntries(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatal("expected one entry to be returned", len(entries))
+	}
+
 	// fetch entries with "file" prefix
-	_, entries, err := cluster.Bus.Object(context.Background(), "foo/", "file", 0, -1)
+	_, entries, err = cluster.Bus.Object(context.Background(), "foo/", "file", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
