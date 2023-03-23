@@ -253,16 +253,20 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			}
 
 			offset, length := ss.SectorRegion()
-			_ = sp.withHostV3(ctx, c.ID, c.HostKey, c.SiamuxAddr, func(ss sectorStore) error {
+			if err := sp.withHostV3(ctx, c.ID, c.HostKey, c.SiamuxAddr, func(ss sectorStore) (err error) {
 				buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
-				err := ss.DownloadSector(ctx, buf, shard.Root, uint64(offset), uint64(length))
+				err = ss.DownloadSector(ctx, buf, shard.Root, uint64(offset), uint64(length))
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")
 					span.RecordError(err)
 				}
+
 				respChan <- resp{r, buf.Bytes(), time.Since(start), err}
+
 				return err
-			})
+			}); err != nil {
+				respChan <- resp{r, nil, 0, fmt.Errorf("withHostV3 failed, err: %v", err)}
+			}
 		}(r)
 
 		if downloadSectorTimeout > 0 {

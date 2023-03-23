@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strings"
 	"sync"
@@ -516,14 +517,17 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 	p.mu.Unlock()
 
 	// price table is valid, no update necessary, return early
-	priceTableUpdateLeeway := -time.Duration(frand.Intn(60)) * time.Second
-	if time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway).Add(priceTableUpdateLeeway)) {
-		return
+	if !hpt.Expiry.IsZero() {
+		total := int(math.Floor(hpt.HostPriceTable.Validity.Seconds() * 0.1))
+		priceTableUpdateLeeway := -time.Duration(frand.Intn(total)) * time.Second
+		if time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway).Add(priceTableUpdateLeeway)) {
+			return
+		}
 	}
 
 	// price table is valid and update ongoing, return early
 	ongoing, update := p.ongoingUpdate()
-	if ongoing && time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway)) {
+	if ongoing && !hpt.Expiry.IsZero() && time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway)) {
 		return
 	}
 
