@@ -445,7 +445,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		// if the host is blocked we ignore it, it might be unblocked later
 		if host.Blocked {
-			c.logger.Infow("blocked host", "hk", hk, "fcid", fcid, "reasons", errHostBlocked.Error())
+			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errHostBlocked.Error())
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
