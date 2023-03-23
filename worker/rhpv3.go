@@ -148,7 +148,7 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 				return errors.New("insufficient funds")
 			}
 			if err := RPCFundAccount(t, &payment, account.id, pt.UID); err != nil {
-				return err
+				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
 			}
 			w.contractSpendingRecorder.Record(revision.ParentID, api.ContractSpending{FundAccount: cost})
 			return nil

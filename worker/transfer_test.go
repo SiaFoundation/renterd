@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -150,7 +151,7 @@ func TestMultipleObjects(t *testing.T) {
 	// upload
 	var slabs []object.Slab
 	for {
-		s, _, _, err := uploadSlab(context.Background(), sp, r, 3, 10, contracts, mockLocker, 0)
+		s, _, _, err := uploadSlab(context.Background(), sp, r, 3, 10, contracts, mockLocker, 0, zap.NewNop().Sugar())
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -180,7 +181,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0); err != nil {
+			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0, zap.NewNop().Sugar()); err != nil {
 				t.Error(err)
 				return
 			}
