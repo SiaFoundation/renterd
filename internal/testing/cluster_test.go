@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -194,7 +195,8 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal(err)
 		}
 		if hi.ScoreBreakdown.Score() == 0 {
-			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
 		if hi.Score == 0 {
 			t.Fatal("score shouldn't be 0")
@@ -215,7 +217,8 @@ func TestNewTestCluster(t *testing.T) {
 	}
 	for _, hi := range hostInfos {
 		if hi.ScoreBreakdown.Score() == 0 {
-			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
 		if hi.Score == 0 {
 			t.Fatal("score shouldn't be 0")
