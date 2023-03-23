@@ -691,6 +691,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			// try funding the account again
 			err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
 			if errors.Is(err, errBalanceSufficient) {
+				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
 				return nil
 			}
 
