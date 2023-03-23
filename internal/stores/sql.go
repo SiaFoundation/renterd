@@ -33,6 +33,7 @@ type (
 		lastAnnouncementSave   time.Time
 		persistInterval        time.Duration
 		unappliedAnnouncements []announcement
+		unappliedHostKeys      map[types.PublicKey]struct{}
 		unappliedCCID          modules.ConsensusChangeID
 		unappliedRevisions     map[types.FileContractID]revisionUpdate
 		unappliedProofs        map[types.FileContractID]uint64
@@ -203,6 +204,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		persistInterval:      persistInterval,
 		hasAllowlist:         allowlistCnt > 0,
 		hasBlocklist:         blocklistCnt > 0,
+		unappliedHostKeys:    make(map[types.PublicKey]struct{}),
 		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:      make(map[types.FileContractID]uint64),
 	}

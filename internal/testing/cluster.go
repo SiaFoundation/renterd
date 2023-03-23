@@ -449,7 +449,7 @@ func (c *TestCluster) WaitForAccounts() ([]api.Account, error) {
 	}
 
 	// fetch all accounts
-	return c.Worker.Accounts(context.Background())
+	return c.Bus.Accounts(context.Background())
 }
 
 func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
@@ -620,7 +620,7 @@ func (c *TestCluster) Sync() error {
 // they have money in them
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) error {
 	return Retry(30, time.Second, func() error {
-		accounts, err := c.Worker.Accounts(context.Background())
+		accounts, err := c.Bus.Accounts(context.Background())
 		if err != nil {
 			return err
 		}

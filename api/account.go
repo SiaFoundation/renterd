@@ -22,10 +22,6 @@ type (
 		// an account and the balance reported by a host.
 		Drift *big.Int `json:"drift"`
 
-		// Owner marks the owner of an account. This is usually a unique
-		// identifier for a worker.
-		Owner string `json:"owner"`
-
 		// RequiresSync indicates whether an account needs to be synced with the
 		// host before it can be used again.
 		RequiresSync bool `json:"requiresSync"`

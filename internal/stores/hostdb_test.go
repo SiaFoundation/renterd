@@ -1091,6 +1091,44 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 }
 
+func TestSQLHostBlocklistBasic(t *testing.T) {
+	hdb, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	// add a host
+	hk1 := types.GeneratePrivateKey().PublicKey()
+	if err := hdb.addCustomTestHost(hk1, "foo.bar.com:1000"); err != nil {
+		t.Fatal(err)
+	}
+
+	// block that host
+	err = hdb.UpdateHostBlocklistEntries(ctx, []string{"foo.bar.com"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's blocked
+	host, _ := hdb.Host(ctx, hk1)
+	if !host.Blocked {
+		t.Fatal("unexpected")
+	}
+
+	// reannounce to ensure it's no longer blocked
+	if err := hdb.addCustomTestHost(hk1, "bar.baz.com:1000"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's no longer blocked
+	host, _ = hdb.Host(ctx, hk1)
+	if host.Blocked {
+		t.Fatal("unexpected")
+	}
+}
+
 // addTestHosts adds 'n' hosts to the db and returns their keys.
 func (s *SQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 	cnt, err := s.contractsCount()
@@ -1114,10 +1152,13 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
-	return insertAnnouncements(s.db, []announcement{{
+	s.unappliedHostKeys[hk] = struct{}{}
+	s.unappliedAnnouncements = append(s.unappliedAnnouncements, []announcement{{
 		hostKey:      publicKey(hk),
 		announcement: hostdb.Announcement{NetAddress: na},
-	}})
+	}}...)
+	s.lastAnnouncementSave = time.Now().Add(s.persistInterval * -2)
+	return s.applyUpdates()
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all
