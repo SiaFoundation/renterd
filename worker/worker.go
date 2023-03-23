@@ -957,6 +957,9 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
 
+	// fetch the path
+	path := strings.TrimPrefix(jc.PathParam("path"), "/")
+
 	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
@@ -1039,6 +1042,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			)
 			break
 		} else if jc.Check("couldn't upload slab", err); err != nil {
+			w.logger.Errorf("couldn't upload object '%v' slab %d, err: %v", path, len(o.Slabs), err)
 			return
 		}
 
@@ -1061,7 +1065,6 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	path := strings.TrimPrefix(jc.PathParam("path"), "/")
 	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, o, usedContracts)) != nil {
 		return
 	}

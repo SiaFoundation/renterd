@@ -162,9 +162,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	}
 	if rem > 0 {
 		if errs == nil {
-			err := fmt.Errorf("rem > 0 (%v) but errs is nil - this should not happen", rem)
-			logger.Errorf("upload failed, err: %v", err)
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("rem > 0 (%v) but errs is nil - this should not happen", rem)
 		}
 		return nil, nil, errs
 	}
@@ -353,9 +351,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 	}
 	if rem > 0 {
 		if errs == nil {
-			err := fmt.Errorf("rem > 0 (%v) but errs is nil - this should not happen", rem)
-			logger.Errorf("download failed, err: %v", err)
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("rem > 0 (%v) but errs is nil - this should not happen", rem)
 		}
 		return nil, nil, errs
 	}
