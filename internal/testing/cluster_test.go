@@ -119,19 +119,18 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Wait for the contract to be renewed.
-	err = Retry(100, 100*time.Millisecond, func() error {
-		resp, err := w.ActiveContracts(context.Background(), time.Minute)
+	err = Retry(1000, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			return err
 		}
-		contracts := resp.Contracts
 		if len(contracts) != 1 {
 			return errors.New("no renewed contract")
 		}
 		if contracts[0].RenewedFrom != contract.ID {
 			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
 		}
-		if contracts[0].EndHeight() != contract.EndHeight()+cfg.Contracts.Period {
+		if contracts[0].ProofHeight != contract.EndHeight()+cfg.Contracts.Period {
 			t.Fatal("wrong endHeight")
 		}
 		return nil
@@ -550,10 +549,6 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := nodes[0]
-	hg, err := host.HostGet()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Wait for contracts to form.
 	var contract api.Contract
@@ -575,7 +570,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
 	}
-	if acc.Host != types.PublicKey(hg.PublicKey.ToPublicKey()) {
+	if acc.Host != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
 	}
 

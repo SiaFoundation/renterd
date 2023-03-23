@@ -87,7 +87,7 @@ func TestMigrations(t *testing.T) {
 		t.Helper()
 		hks := usedHosts()
 		for _, h := range hosts {
-			if hk = h.HostKey(); isUsed(hk, hks) {
+			if hk = h.PublicKey(); isUsed(hk, hks) {
 				if err := cluster.RemoveHost(h); err != nil {
 					t.Fatal(err)
 				}

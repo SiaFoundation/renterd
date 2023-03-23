@@ -434,7 +434,9 @@ func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContra
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
-			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := w.bus.ReleaseContract(releaseCtx, contractID, lockID); err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
