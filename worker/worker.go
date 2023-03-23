@@ -678,26 +678,29 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevisionV3(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) error {
-		if err := w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision); isMaxBalanceExceeded(err) {
-			// sync and retry funding
-			if err := w.syncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &revision); err != nil {
+	jc.Check("couldn't fund account", w.withRevisionV3(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) (err error) {
+		err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
+		if isMaxBalanceExceeded(err) {
+			// sync the account
+			err = w.syncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &revision)
+			if err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
-				return err
-			} else if err := w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision); errors.Is(err, errBalanceSufficient) {
-				// sync succeeded and the balance is greater than the requested balance
-				return nil
-			} else if err != nil {
-				// sync succeeded and funding failed again
-				w.logger.Errorw(fmt.Sprintf("failed to fund account: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
-				return err
-			} else {
+				return
+			}
+
+			// try funding the account again
+			err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
+			if errors.Is(err, errBalanceSufficient) {
+				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
 				return nil
 			}
-		} else {
-			// funding failed and syncing won't fix it
-			return err
+
+			// funding failed after syncing the account successfully
+			if err != nil {
+				w.logger.Errorw(fmt.Sprintf("failed to fund account after syncing: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
+			}
 		}
+		return
 	}))
 }
 
@@ -790,7 +793,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout)
+	err = migrateSlab(ctx, w, &slab, contracts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -927,7 +930,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 			return performance[contracts[i].HostKey] < performance[contracts[j].HostKey]
 		})
 
-		timings, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout)
+		timings, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout, w.logger)
 
 		// update historic host performance
 		//
@@ -953,6 +956,9 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
+
+	// fetch the path
+	path := strings.TrimPrefix(jc.PathParam("path"), "/")
 
 	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
@@ -1024,7 +1030,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		})
 
 		// upload the slab
-		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout)
+		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout, w.logger)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
 		}
@@ -1036,6 +1042,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			)
 			break
 		} else if jc.Check("couldn't upload slab", err); err != nil {
+			w.logger.Errorf("couldn't upload object '%v' slab %d, err: %v", path, len(o.Slabs), err)
 			return
 		}
 
@@ -1058,7 +1065,6 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	path := strings.TrimPrefix(jc.PathParam("path"), "/")
 	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, o, usedContracts)) != nil {
 		return
 	}
