@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/modules"
 )
 
 const (
@@ -800,7 +799,7 @@ func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, pa
 		return
 	} else if err = s.ReadResponse(&cancellationToken, 16); err != nil {
 		return
-	} else if err = s.ReadResponse(&resp, modules.SectorSize+responseLeeway); err != nil {
+	} else if err = s.ReadResponse(&resp, rhpv2.SectorSize+responseLeeway); err != nil {
 		return
 	}
 

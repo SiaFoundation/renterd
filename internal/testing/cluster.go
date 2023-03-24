@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -21,7 +22,6 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/siad/build"
-	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"
@@ -45,9 +45,9 @@ var (
 			Period:      50,
 			RenewWindow: 24,
 
-			Download: modules.SectorSize * 500,
-			Upload:   modules.SectorSize * 500,
-			Storage:  modules.SectorSize * 5e3,
+			Download: rhpv2.SectorSize * 500,
+			Upload:   rhpv2.SectorSize * 500,
+			Storage:  rhpv2.SectorSize * 5e3,
 
 			Set: "autopilot",
 		},
@@ -330,7 +330,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 // addStorageFolderToHosts adds a single storage folder to each host.
 func addStorageFolderToHost(hosts []*Host) error {
 	for _, host := range hosts {
-		storage := 512 * modules.SectorSize
+		storage := uint64(512 * rhpv2.SectorSize)
 		volumeDir := filepath.Join(host.dir, "volumes")
 		if err := os.MkdirAll(volumeDir, 0777); err != nil {
 			return err
