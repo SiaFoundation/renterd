@@ -43,7 +43,7 @@ var (
 			Allowance:   types.Siacoins(1).Mul64(1e3),
 			Amount:      5,
 			Period:      50,
-			RenewWindow: 144, // TODO: set back to 24 once hostd allows for configuring this value
+			RenewWindow: 24,
 
 			Download: modules.SectorSize * 500,
 			Upload:   modules.SectorSize * 500,
@@ -347,7 +347,7 @@ func addStorageFolderToHost(hosts []*Host) error {
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
-		settings.NetAddress = host.rhpv2.LocalAddr()
+		settings.NetAddress = host.RHPv2Addr()
 		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}
@@ -551,16 +551,6 @@ func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
 	if err := c.Sync(); err != nil {
 		return nil, err
 	}
-	for _, h := range newHosts {
-		spendable, confirmed, unconfirmed, err := h.wallet.Balance()
-		if err != nil {
-			return nil, err
-		}
-		fmt.Println("spendable", spendable)
-		fmt.Println("confirmed", confirmed)
-		fmt.Println("unconfirmed", unconfirmed)
-	}
-
 	return newHosts, nil
 }
 

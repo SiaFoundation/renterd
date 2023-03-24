@@ -71,6 +71,7 @@ var defaultHostSettings = settings.Settings{
 	MinStoragePrice: types.Siacoins(100).Div64(1e12).Div64(blocksPerMonth),
 	MinEgressPrice:  types.Siacoins(100).Div64(1e12),
 	MinIngressPrice: types.Siacoins(100).Div64(1e12),
+	WindowSize:      5,
 
 	AccountExpiry:      30 * 24 * time.Hour, // 1 month
 	MaxAccountBalance:  types.Siacoins(10),
@@ -285,13 +286,7 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	_, rhp2Port, err := net.SplitHostPort(rhp2Listener.Addr().String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse rhp2 addr: %w", err)
-	}
-	discoveredAddr := net.JoinHostPort(rhp2Listener.Addr().String(), rhp2Port)
-
-	settings, err := settings.NewConfigManager(privKey, discoveredAddr, db, cm, tp, wallet, log.Named("settings"))
+	settings, err := settings.NewConfigManager(privKey, rhp2Listener.Addr().String(), db, cm, tp, wallet, log.Named("settings"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}

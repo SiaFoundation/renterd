@@ -119,7 +119,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Wait for the contract to be renewed.
-	err = Retry(1000, 100*time.Millisecond, func() error {
+	err = Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			return err
@@ -130,8 +130,8 @@ func TestNewTestCluster(t *testing.T) {
 		if contracts[0].RenewedFrom != contract.ID {
 			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
 		}
-		if contracts[0].ProofHeight != contract.EndHeight()+cfg.Contracts.Period {
-			t.Fatal("wrong endHeight")
+		if contracts[0].ProofHeight != 0 {
+			return errors.New("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
 		}
 		return nil
 	})
