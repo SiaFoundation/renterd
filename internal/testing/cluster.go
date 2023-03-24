@@ -330,12 +330,12 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 // addStorageFolderToHosts adds a single storage folder to each host.
 func addStorageFolderToHost(hosts []*Host) error {
 	for _, host := range hosts {
-		storage := uint64(512 * rhpv2.SectorSize)
+		sectors := uint64(10)
 		volumeDir := filepath.Join(host.dir, "volumes")
 		if err := os.MkdirAll(volumeDir, 0777); err != nil {
 			return err
 		}
-		if err := host.AddVolume(filepath.Join(volumeDir, "volume.dat"), storage); err != nil {
+		if err := host.AddVolume(filepath.Join(volumeDir, "volume.dat"), sectors); err != nil {
 			return err
 		}
 	}
