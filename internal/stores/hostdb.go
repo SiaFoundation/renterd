@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,7 +54,7 @@ type (
 		PublicKey        publicKey `gorm:"unique;index;NOT NULL;size:32"`
 		Settings         hostSettings
 		PriceTable       hostPriceTable
-		PriceTableExpiry time.Time
+		PriceTableExpiry sql.NullTime
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -314,7 +315,7 @@ func (h dbHost) convert() hostdb.Host {
 		pt := h.PriceTable.convert()
 		hdbHost.PriceTable = &hostdb.HostPriceTable{
 			HostPriceTable: pt,
-			Expiry:         h.PriceTableExpiry,
+			Expiry:         h.PriceTableExpiry.Time,
 		}
 	}
 	return hdbHost
@@ -709,9 +710,12 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					// overwrite a valid price table since the price table from
 					// scans are not paid for and thus not useful for anything
 					// aside from gouging checks
-					if time.Now().After(host.PriceTableExpiry) {
+					if time.Now().After(host.PriceTableExpiry.Time) {
 						host.PriceTable = convertHostPriceTable(sr.PriceTable)
-						host.PriceTableExpiry = time.Now()
+						host.PriceTableExpiry = sql.NullTime{
+							Time:  time.Now(),
+							Valid: true,
+						}
 					}
 				}
 			}
@@ -725,7 +729,10 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				}
 
 				host.PriceTable = convertHostPriceTable(hpt.HostPriceTable)
-				host.PriceTableExpiry = hpt.Expiry
+				host.PriceTableExpiry = sql.NullTime{
+					Time:  hpt.Expiry,
+					Valid: hpt.Expiry != time.Time{},
+				}
 			}
 
 			// Save to map again.
