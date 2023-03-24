@@ -36,8 +36,8 @@ func TestHostScore(t *testing.T) {
 
 	// assert collateral affects the score
 	settings := newTestHostSettings()
-	settings.Collateral = types.NewCurrency64(1)
-	settings.MaxCollateral = types.NewCurrency64(10)
+	settings.Collateral = settings.Collateral.Div64(2)
+	settings.MaxCollateral = settings.MaxCollateral.Div64(2)
 	h1 = newHost(settings) // reset
 	if hostScore(cfg, h1, 0, redundancy).Score() <= hostScore(cfg, h2, 0, redundancy).Score() {
 		t.Fatal("unexpected")
@@ -131,19 +131,19 @@ func TestPriceAdjustmentScore(t *testing.T) {
 		i := uint64(f * 100.0)
 		return float64(i) / 100.0
 	}
-	if s := score(50); s != 0.56 {
+	if s := round(score(50)); s != 0.56 {
 		t.Errorf("expected %v but got %v", 0.56, s)
 	}
 	if s := round(score(25)); s != 0.68 {
 		t.Errorf("expected %v but got %v", 0.64, s)
 	}
-	if s := score(15); s != 0.84 {
+	if s := round(score(15)); s != 0.84 {
 		t.Errorf("expected %v but got %v", 0.84, s)
 	}
-	if s := score(10); s != 1 {
+	if s := round(score(10)); s != 1 {
 		t.Errorf("expected %v but got %v", 1, s)
 	}
-	if s := score(1); s != 1 {
+	if s := round(score(1)); s != 1 {
 		t.Errorf("expected %v but got %v", 1, s)
 	}
 
