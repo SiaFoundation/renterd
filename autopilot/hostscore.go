@@ -65,7 +65,7 @@ func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.AutopilotCon
 		return 1.5 / math.Pow(3, fRatio)
 	case -1:
 		// cost < budget -> score is (0.5; 1]
-		s := 0.4 + 0.06*(1/fRatio)
+		s := 0.44 + 0.06*(1/fRatio)
 		if s > 1.0 {
 			s = 1.0
 		}
@@ -140,12 +140,9 @@ func ageScore(h hostdb.Host) float64 {
 
 func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings, expectedRedundancy float64) float64 {
 	// Ignore hosts which have set their max collateral to 0.
-	if s.MaxCollateral.IsZero() {
+	if s.MaxCollateral.IsZero() || s.Collateral.IsZero() {
 		return 0
 	}
-
-	// NOTE: This math is copied directly from the old siad hostdb. It would
-	// probably benefit from a thorough review.
 
 	// convenience variables
 	allowance := cfg.Contracts.Allowance
@@ -153,27 +150,39 @@ func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings, expectedRedu
 	duration := cfg.Contracts.Period
 	storage := float64(cfg.Contracts.Storage) * expectedRedundancy
 
-	// calculate the collateral
-	contractCollateral := s.Collateral.Mul64(uint64(storage)).Mul64(duration)
-	contractCollateralMax := s.MaxCollateral.Div64(2) // 2x buffer - renter may end up storing extra data
-	if contractCollateral.Cmp(contractCollateralMax) > 0 {
-		contractCollateral = contractCollateralMax
+	// calculate the expected collateral
+	expectedCollateral := s.Collateral.Mul64(uint64(storage)).Mul64(duration)
+	expectedCollateralMax := s.MaxCollateral.Div64(2) // 2x buffer - renter may end up storing extra data
+	if expectedCollateral.Cmp(expectedCollateralMax) > 0 {
+		expectedCollateral = expectedCollateralMax
 	}
-	collateral, _ := new(big.Rat).SetInt(contractCollateral.Big()).Float64()
-	collateral = math.Max(1, collateral) // ensure collateral is at least 1
 
-	// calculate the cutoff
-	expectedFundsPerHost := allowance.Div64(numContracts)
-	cutoff, _ := new(big.Rat).SetInt(expectedFundsPerHost.Div64(5).Big()).Float64()
-	cutoff = math.Max(1, cutoff)          // ensure cutoff is at least 1
-	cutoff = math.Min(cutoff, collateral) // ensure cutoff is not greater than collateral
+	// determine a cutoff at 20% of the budgeted per-host funds.
+	// Meaning that an 'ok' host puts in 1/5 of what the renter puts into a
+	// contract. Beyond that the score increases linearly and below that
+	// decreases exponentially.
+	cutoff := allowance.Div64(numContracts).Div64(5)
 
-	// calculate the weight
-	ratio := collateral / cutoff
-	smallWeight := math.Pow(cutoff, 4)
-	largeWeight := math.Pow(ratio, 0.5)
-	weight := smallWeight * largeWeight
-	return weight
+	// calculate the weight. We use the same approach here as in
+	// priceAdjustScore but with a different cutoff.
+	ratio := new(big.Rat).SetFrac(cutoff.Big(), expectedCollateral.Big())
+	fRatio, _ := ratio.Float64()
+	switch ratio.Cmp(new(big.Rat).SetUint64(1)) {
+	case 0:
+		return 0.5 // ratio is exactly 1 -> score is 0.5
+	case 1:
+		// collateral is below cutoff -> score is in range (0; 0.5)
+		//
+		return 1.5 / math.Pow(3, fRatio)
+	case -1:
+		// collateral is beyond cutoff -> score is (0.5; 1]
+		s := 0.5 * (1 / fRatio)
+		if s > 1.0 {
+			s = 1.0
+		}
+		return s
+	}
+	panic("unreachable")
 }
 
 func interactionScore(h hostdb.Host) float64 {
