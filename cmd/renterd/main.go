@@ -46,7 +46,7 @@ var (
 
 	// fetched once, then cached
 	apiPassword *string
-	walletKey   *types.PrivateKey
+	seed        *types.PrivateKey
 )
 
 func check(context string, err error) {
@@ -75,13 +75,13 @@ func getAPIPassword() string {
 	return *apiPassword
 }
 
-func getWalletKey() types.PrivateKey {
-	if walletKey == nil {
-		phrase := os.Getenv("RENTERD_WALLET_SEED")
+func getSeed() types.PrivateKey {
+	if seed == nil {
+		phrase := os.Getenv("RENTERD_SEED")
 		if phrase != "" {
-			fmt.Println("Using RENTERD_WALLET_SEED environment variable")
+			fmt.Println("Using RENTERD_SEED environment variable")
 		} else {
-			fmt.Print("Enter wallet seed: ")
+			fmt.Print("Enter seed: ")
 			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			check("Could not read seed phrase:", err)
 			fmt.Println()
@@ -91,9 +91,9 @@ func getWalletKey() types.PrivateKey {
 		if err != nil {
 			log.Fatal(err)
 		}
-		walletKey = &key
+		seed = &key
 	}
-	return *walletKey
+	return *seed
 }
 
 type currencyVar types.Currency
@@ -250,7 +250,7 @@ func main() {
 
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getWalletKey(), logger)
+		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getSeed(), logger)
 		if err != nil {
 			log.Fatal("failed to create bus, err: ", err)
 		}
@@ -268,7 +268,7 @@ func main() {
 	workerAddrs, workerPassword := workerCfg.remoteAddrs, workerCfg.apiPassword
 	if workerAddrs == "" {
 		if workerCfg.enabled {
-			w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getWalletKey(), logger)
+			w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getSeed(), logger)
 			if err != nil {
 				log.Fatal("failed to create worker", err)
 			}

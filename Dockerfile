@@ -18,7 +18,7 @@ ENV PGID=0
 
 # Renterd env args..
 ENV RENTERD_API_PASSWORD= 
-ENV RENTERD_WALLET_SEED=
+ENV RENTERD_SEED=
 
 # Copy binary and prepare data dir.
 COPY --from=builder /renterd/renterd /usr/bin/renterd
