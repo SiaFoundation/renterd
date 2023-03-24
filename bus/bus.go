@@ -91,7 +91,9 @@ type (
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContract(ctx context.Context, id types.FileContractID) error
+		RemoveContracts(ctx context.Context) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+		DeleteContractSet(ctx context.Context, name string) error
 
 		Object(ctx context.Context, path string) (object.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]string, error)
@@ -546,6 +548,12 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractsSetHandlerDELETE(jc jape.Context) {
+	if set := jc.PathParam("set"); set != "" {
+		jc.Check("could not remove contract set", b.ms.DeleteContractSet(jc.Request.Context(), set))
+	}
+}
+
 func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
@@ -630,6 +638,10 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 		return
 	}
 	jc.Check("couldn't remove contract", b.ms.RemoveContract(jc.Request.Context(), id))
+}
+
+func (b *bus) contractsAllHandlerDELETE(jc jape.Context) {
+	jc.Check("couldn't remove contracts", b.ms.RemoveContracts(jc.Request.Context()))
 }
 
 func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
@@ -1059,6 +1071,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
@@ -1067,6 +1080,7 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
+		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
