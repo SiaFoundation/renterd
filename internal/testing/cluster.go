@@ -41,7 +41,7 @@ var (
 	defaultAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
 			Allowance:   types.Siacoins(1).Mul64(1e3),
-			Amount:      5,
+			Amount:      3,
 			Period:      50,
 			RenewWindow: 24,
 
