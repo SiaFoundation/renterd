@@ -364,7 +364,7 @@ func announceHosts(hosts []*TestNode) error {
 		if err := host.HostModifySettingPost(client.HostParamMaxCollateral, types.Siacoins(100).ExactString()); err != nil {
 			return err
 		}
-		if err := host.HostModifySettingPost(client.HostParamCollateral, types.Siacoins(1).Div64(4096).ExactString()); err != nil {
+		if err := host.HostModifySettingPost(client.HostParamCollateral, types.Siacoins(1).Div64(4096).Div64(defaultAutopilotConfig.Contracts.Period).ExactString()); err != nil {
 			return err
 		}
 		if err := host.HostAnnouncePost(); err != nil {
