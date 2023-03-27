@@ -377,7 +377,11 @@ func (c *TestCluster) MineToRenewWindow() error {
 	if cs.BlockHeight >= renewWindowStart {
 		return fmt.Errorf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, currentPeriod, cfg.Contracts.Period, renewWindowStart)
 	}
-	return c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
+	err = c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
+	if err != nil {
+		return err
+	}
+	return c.Sync()
 }
 
 // sync blocks until the cluster is synced.
@@ -502,10 +506,12 @@ func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
 	fundAmt := balance.Div64(2).Div64(uint64(len(newHosts))) // 50% of bus balance
 	var scos []types.SiacoinOutput
 	for _, h := range newHosts {
-		scos = append(scos, types.SiacoinOutput{
-			Value:   fundAmt,
-			Address: h.WalletAddress(),
-		})
+		for i := 0; i < 10; i++ {
+			scos = append(scos, types.SiacoinOutput{
+				Value:   fundAmt.Div64(10),
+				Address: h.WalletAddress(),
+			})
+		}
 	}
 	if err := c.Bus.SendSiacoins(context.Background(), scos); err != nil {
 		return nil, err
