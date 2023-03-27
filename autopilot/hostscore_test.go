@@ -176,17 +176,15 @@ func TestCollateralScore(t *testing.T) {
 		t.Helper()
 		cfg := api.AutopilotConfig{
 			Contracts: api.ContractsConfig{
-				Allowance: types.NewCurrency64(10000),
-				Amount:    2,
-				Period:    5,
-				Storage:   5,
+				Period:  5,
+				Storage: 5,
 			},
 		}
 		settings := rhpv2.HostSettings{
 			Collateral:    types.NewCurrency64(collateral),
 			MaxCollateral: types.NewCurrency64(maxCollateral),
 		}
-		return collateralScore(cfg, settings, 2.0)
+		return collateralScore(cfg, types.NewCurrency64(5000), settings, 2.0)
 	}
 
 	// NOTE: with the above settings, the cutoff is at 1000H.
@@ -214,7 +212,7 @@ func TestCollateralScore(t *testing.T) {
 		t.Errorf("expected %v but got %v", 1, s)
 	}
 
-	// Decrease collateral. Score should approach 1.
+	// Decrease collateral. Score should approach 0.
 	round := func(f float64) float64 {
 		i := uint64(f * 100.0)
 		return float64(i) / 100.0

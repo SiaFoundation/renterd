@@ -31,14 +31,15 @@ const (
 )
 
 func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+	hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h),
-		Collateral:       collateralScore(cfg, *h.Settings, expectedRedundancy),
+		Collateral:       collateralScore(cfg, hostPeriodCost, *h.Settings, expectedRedundancy),
 		Interactions:     interactionScore(h),
 		StorageRemaining: storageRemainingScore(cfg, *h.Settings, storedData, expectedRedundancy),
 		Uptime:           uptimeScore(h),
 		Version:          versionScore(*h.Settings),
-		Prices:           priceAdjustmentScore(hostPeriodCostForScore(h, cfg, expectedRedundancy), cfg),
+		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
 	}
 }
 
@@ -138,15 +139,13 @@ func ageScore(h hostdb.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings, expectedRedundancy float64) float64 {
+func collateralScore(cfg api.AutopilotConfig, hostCostPerPeriod types.Currency, s rhpv2.HostSettings, expectedRedundancy float64) float64 {
 	// Ignore hosts which have set their max collateral to 0.
 	if s.MaxCollateral.IsZero() || s.Collateral.IsZero() {
 		return 0
 	}
 
 	// convenience variables
-	allowance := cfg.Contracts.Allowance
-	numContracts := cfg.Contracts.Amount
 	duration := cfg.Contracts.Period
 	storage := float64(cfg.Contracts.Storage) * expectedRedundancy
 
@@ -161,7 +160,7 @@ func collateralScore(cfg api.AutopilotConfig, s rhpv2.HostSettings, expectedRedu
 	// Meaning that an 'ok' host puts in 1/5 of what the renter puts into a
 	// contract. Beyond that the score increases linearly and below that
 	// decreases exponentially.
-	cutoff := allowance.Div64(numContracts).Div64(5)
+	cutoff := hostCostPerPeriod.Div64(5)
 
 	// calculate the weight. We use the same approach here as in
 	// priceAdjustScore but with a different cutoff.
