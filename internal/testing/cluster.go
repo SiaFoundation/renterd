@@ -348,6 +348,9 @@ func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
 		settings.NetAddress = host.RHPv2Addr()
+		settings.MaxRegistryEntries = 1 << 18
+		settings.MaxCollateral = types.Siacoins(100)
+		settings.Collateral = types.Siacoins(1).Div64(4096).Div64(defaultAutopilotConfig.Contracts.Period)
 		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}
