@@ -72,6 +72,7 @@ func newTestHost(hk types.PublicKey, pt *rhpv3.HostPriceTable, settings *rhpv2.H
 func newTestHostSettings() *rhpv2.HostSettings {
 	return &rhpv2.HostSettings{
 		AcceptingContracts: true,
+		Collateral:         types.Siacoins(1).Div64(1 << 40),
 		MaxCollateral:      types.Siacoins(10000),
 		MaxDuration:        144 * 7 * 12, // 12w
 		Version:            "1.5.10",
