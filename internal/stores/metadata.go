@@ -458,9 +458,7 @@ func (s *SQLStore) RemoveContracts(ctx context.Context) error {
 	if err := s.db.Where("TRUE").Delete(&dbContract{}).Error; err != nil {
 		return err
 	}
-	for c := range s.knownContracts {
-		delete(s.knownContracts, c)
-	}
+	s.knownContracts = make(map[types.FileContractID]struct{})
 	return nil
 }
 
