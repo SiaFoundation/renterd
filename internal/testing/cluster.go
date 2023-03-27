@@ -361,6 +361,12 @@ func announceHosts(hosts []*TestNode) error {
 		if err := host.HostModifySettingPost(client.HostParamRegistrySize, 1<<18); err != nil {
 			return err
 		}
+		if err := host.HostModifySettingPost(client.HostParamMaxCollateral, types.Siacoins(100).ExactString()); err != nil {
+			return err
+		}
+		if err := host.HostModifySettingPost(client.HostParamCollateral, types.Siacoins(1).Div64(4096).ExactString()); err != nil {
+			return err
+		}
 		if err := host.HostAnnouncePost(); err != nil {
 			return err
 		}

@@ -113,7 +113,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	cfg := c.ap.Config()
 	f := newIPFilter(c.logger)
 
-	sb := hostScore(cfg, host.Host, 0, 0)
+	sb := hostScore(cfg, host.Host, storedData, rs.Redundancy())
 	isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
 	return api.HostHandlerGET{
 		Host:            host.Host,

@@ -163,6 +163,9 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
 func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency, ignoreBlockHeight bool) (bool, unusableHostResult) {
+	if rs.Validate() != nil {
+		panic("invalid redundancy settings were supplied - developer error")
+	}
 	var errs []error
 
 	if !h.IsOnline() {
