@@ -461,6 +461,7 @@ func (s *SQLStore) RemoveContracts(ctx context.Context) error {
 	for c := range s.knownContracts {
 		delete(s.knownContracts, c)
 	}
+	s.knownContracts = make(map[types.FileContractID]struct{})
 	return nil
 }
 
