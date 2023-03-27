@@ -161,11 +161,12 @@ func main() {
 
 	apiAddr := flag.String("http", "localhost:9980", "address to serve API on")
 	tracingEnabled := flag.Bool("tracing-enabled", false, "Enables tracing through OpenTelemetry. If RENTERD_TRACING_ENABLED is set, it overwrites the CLI flag's value. Tracing can be configured using the standard OpenTelemetry environment variables. https://github.com/open-telemetry/opentelemetry-specification/blob/v1.8.0/specification/protocol/exporter.md")
+	tracingServiceInstanceId := flag.String("tracing-service-id", "cluster", "ID of the service instance used for tracing. If RENTERD_TRACING_SERVICE_INSTANCE_ID is set, it overwrites the CLI flag's value.")
 	dir := flag.String("dir", ".", "directory to store node state in")
 	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
 	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
 	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
-	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", ":9981", "address to listen on for Sia peer connections")
+	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", "localhost:9981", "address to listen on for Sia peer connections - can be overwritten using RENTERD_BUS_GATEWAY_ADDR environment variable")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker used internally - can be overwritten using the RENTERD_WORKER_ID environment variable")
@@ -199,19 +200,21 @@ func main() {
 	// Overwrite flags from environment if set.
 	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &busCfg.remoteAddr)
 	parseEnvVar("RENTERD_BUS_API_PASSWORD", &busCfg.apiPassword)
+	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &busCfg.GatewayAddr)
 	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerCfg.remoteAddrs)
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerCfg.apiPassword)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &workerCfg.enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &workerCfg.ID)
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
 	parseEnvVar("RENTERD_TRACING_ENABLED", &tracingEnabled)
+	parseEnvVar("RENTERD_TRACING_SERVICE_INSTANCE_ID", &tracingServiceInstanceId)
 
 	var autopilotShutdownFn func(context.Context) error
 	var shutdownFns []func(context.Context) error
 
 	// Init tracing.
 	if *tracingEnabled {
-		shutdownFn, err := tracing.Init(workerCfg.ID)
+		shutdownFn, err := tracing.Init(*tracingServiceInstanceId)
 		if err != nil {
 			log.Fatal("failed to init tracing", err)
 		}
