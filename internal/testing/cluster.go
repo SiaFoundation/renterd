@@ -423,7 +423,29 @@ func (c *TestCluster) MineBlocks(n int) error {
 	if err != nil {
 		return err
 	}
-	return c.miner.Mine(addr, n)
+	// If we don't have any hosts in the cluster mine all blocks right away.
+	if len(c.hosts) == 0 {
+		if err := c.miner.Mine(addr, n); err != nil {
+			return err
+		}
+		return c.Sync()
+	}
+	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
+	// hosts by too many blocks.
+	for mined := 0; mined < n; {
+		toMine := n - mined
+		if toMine > 3 {
+			toMine = 3
+		}
+		if err := c.miner.Mine(addr, toMine); err != nil {
+			return err
+		}
+		if err := c.Sync(); err != nil {
+			return err
+		}
+		mined += toMine
+	}
+	return nil
 }
 
 func (c *TestCluster) WaitForAccounts() ([]api.Account, error) {
