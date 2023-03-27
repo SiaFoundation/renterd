@@ -305,6 +305,12 @@ func (c *Client) ContractSets(ctx context.Context) (sets []string, err error) {
 	return
 }
 
+// DeleteContractSet removes the contract set from the bus.
+func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/contracts/set/%s", set))
+	return
+}
+
 // AddContract adds the provided contract to the metadata store.
 func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
@@ -354,6 +360,12 @@ func (c *Client) DeleteContracts(ctx context.Context, ids []types.FileContractID
 // DeleteContract deletes the contract with the given ID.
 func (c *Client) DeleteContract(ctx context.Context, id types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/contract/%s", id))
+	return
+}
+
+// DeleteAllContracts deletes all contracts from the bus.
+func (c *Client) DeleteAllContracts(ctx context.Context) (err error) {
+	err = c.c.WithContext(ctx).DELETE("/contracts/all")
 	return
 }
 
