@@ -272,8 +272,8 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 				}
 				res = resp{r, buf.Bytes(), time.Since(start), err}
 				return nil // only return the error in the response
-			}); err != nil {
-				logger.Errorf("withHostV3 failed when downloading sector, err: %v, download failed: ", err, res.err != nil)
+			}); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Errorf("withHostV3 failed when downloading sector, err: %v, download failed: %v", err, res.err != nil)
 			}
 			respChan <- res
 		}(r)
