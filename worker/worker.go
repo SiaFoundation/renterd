@@ -1031,6 +1031,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		})
 
 		// upload the slab
+		start := time.Now()
 		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout, w.logger)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
@@ -1042,7 +1043,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 				"objectSize", objectSize,
 			)
 			break
-		} else if jc.Check("couldn't upload slab", err); err != nil {
+		} else if jc.Check(fmt.Sprintf("uploading slab failed after %v", time.Since(start)), err); err != nil {
 			w.logger.Errorf("couldn't upload object '%v' slab %d, err: %v", path, len(o.Slabs), err)
 			return
 		}
