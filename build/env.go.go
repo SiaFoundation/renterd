@@ -7,7 +7,9 @@ import (
 )
 
 const (
-	ConsensusNetworkName = "Mainnet"
+	ConsensusNetworkName  = "Mainnet"
+	DefaultAPIAddress     = "localhost:9980"
+	DefaultGatewayAddress = ":9981"
 )
 
 var ConsensusNetwork, _ = chain.Mainnet()
