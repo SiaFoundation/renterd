@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"go.sia.tech/core/consensus"
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -19,15 +22,11 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
 	"go.sia.tech/siad/build"
-	"go.sia.tech/siad/modules"
-	sianode "go.sia.tech/siad/node"
-	"go.sia.tech/siad/node/api/client"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
-	"go.sia.tech/siad/siatest"
 )
 
 const (
@@ -42,13 +41,13 @@ var (
 	defaultAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
 			Allowance:   types.Siacoins(1).Mul64(1e3),
-			Amount:      5,
+			Amount:      3,
 			Period:      50,
 			RenewWindow: 24,
 
-			Download: modules.SectorSize * 500,
-			Upload:   modules.SectorSize * 500,
-			Storage:  modules.SectorSize * 5e3,
+			Download: rhpv2.SectorSize * 500,
+			Upload:   rhpv2.SectorSize * 500,
+			Storage:  rhpv2.SectorSize * 5e3,
 
 			Set: "autopilot",
 		},
@@ -74,23 +73,10 @@ var (
 	}
 )
 
-type TestNode struct {
-	*siatest.TestNode
-}
-
-func (n *TestNode) HostKey() (hk types.PublicKey) {
-	spk, err := n.HostPublicKey()
-	if err != nil {
-		panic(err)
-	}
-	copy(hk[:], spk.Key)
-	return
-}
-
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
-	hosts []*TestNode
+	hosts []*Host
 
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
@@ -212,6 +198,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 		Bootstrap:       false,
 		GatewayAddr:     "127.0.0.1:0",
 		Miner:           miner,
+		Network:         testNetwork(),
 		PersistInterval: testPersistInterval,
 	}, busDir, wk, logger)
 	if err != nil {
@@ -341,10 +328,14 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.
-func addStorageFolderToHost(hosts []*TestNode) error {
+func addStorageFolderToHost(hosts []*Host) error {
 	for _, host := range hosts {
-		storage := 512 * modules.SectorSize
-		if err := host.HostStorageFoldersAddPost(host.Dir, storage); err != nil {
+		sectors := uint64(10)
+		volumeDir := filepath.Join(host.dir, "volumes")
+		if err := os.MkdirAll(volumeDir, 0777); err != nil {
+			return err
+		}
+		if err := host.AddVolume(filepath.Join(volumeDir, "volume.dat"), sectors); err != nil {
 			return err
 		}
 	}
@@ -353,21 +344,15 @@ func addStorageFolderToHost(hosts []*TestNode) error {
 
 // announceHosts adds storage and a registry to each host and announces them to
 // the group
-func announceHosts(hosts []*TestNode) error {
+func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
-		if err := host.HostModifySettingPost(client.HostParamAcceptingContracts, true); err != nil {
+		settings := defaultHostSettings
+		settings.NetAddress = host.RHPv2Addr()
+		settings.MaxRegistryEntries = 1 << 18
+		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}
-		if err := host.HostModifySettingPost(client.HostParamRegistrySize, 1<<18); err != nil {
-			return err
-		}
-		if err := host.HostModifySettingPost(client.HostParamMaxCollateral, types.Siacoins(100).ExactString()); err != nil {
-			return err
-		}
-		if err := host.HostModifySettingPost(client.HostParamCollateral, types.Siacoins(1).Div64(4096).Div64(defaultAutopilotConfig.Contracts.Period).ExactString()); err != nil {
-			return err
-		}
-		if err := host.HostAnnouncePost(); err != nil {
+		if err := host.settings.Announce(); err != nil {
 			return err
 		}
 	}
@@ -393,11 +378,15 @@ func (c *TestCluster) MineToRenewWindow() error {
 	if cs.BlockHeight >= renewWindowStart {
 		return fmt.Errorf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, currentPeriod, cfg.Contracts.Period, renewWindowStart)
 	}
-	return c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
+	err = c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
+	if err != nil {
+		return err
+	}
+	return c.Sync()
 }
 
 // sync blocks until the cluster is synced.
-func (c *TestCluster) sync(hosts []*TestNode) error {
+func (c *TestCluster) sync(hosts []*Host) error {
 	return Retry(100, 100*time.Millisecond, func() error {
 		synced, err := c.synced(hosts)
 		if err != nil {
@@ -411,7 +400,7 @@ func (c *TestCluster) sync(hosts []*TestNode) error {
 }
 
 // synced returns true if bus and hosts are at the same blockheight.
-func (c *TestCluster) synced(hosts []*TestNode) (bool, error) {
+func (c *TestCluster) synced(hosts []*Host) (bool, error) {
 	cs, err := c.Bus.ConsensusState(context.Background())
 	if err != nil {
 		return false, err
@@ -420,10 +409,7 @@ func (c *TestCluster) synced(hosts []*TestNode) (bool, error) {
 		return false, nil // can't be synced if bus itself isn't synced
 	}
 	for _, h := range hosts {
-		bh, err := h.BlockHeight()
-		if err != nil {
-			return false, err
-		}
+		bh := h.cs.Height()
 		if cs.BlockHeight != uint64(bh) {
 			return false, nil
 		}
@@ -437,14 +423,36 @@ func (c *TestCluster) MineBlocks(n int) error {
 	if err != nil {
 		return err
 	}
-	return c.miner.Mine(addr, n)
+	// If we don't have any hosts in the cluster mine all blocks right away.
+	if len(c.hosts) == 0 {
+		if err := c.miner.Mine(addr, n); err != nil {
+			return err
+		}
+		return c.Sync()
+	}
+	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
+	// hosts by too many blocks.
+	for mined := 0; mined < n; {
+		toMine := n - mined
+		if toMine > 3 {
+			toMine = 3
+		}
+		if err := c.miner.Mine(addr, toMine); err != nil {
+			return err
+		}
+		if err := c.Sync(); err != nil {
+			return err
+		}
+		mined += toMine
+	}
+	return nil
 }
 
 func (c *TestCluster) WaitForAccounts() ([]api.Account, error) {
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {
-		hostsMap[host.HostKey()] = struct{}{}
+		hostsMap[host.PublicKey()] = struct{}{}
 	}
 
 	//  wait for accounts to be filled
@@ -460,7 +468,7 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {
-		hostsMap[host.HostKey()] = struct{}{}
+		hostsMap[host.PublicKey()] = struct{}{}
 	}
 
 	//  wait for the contracts to form
@@ -479,13 +487,13 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 	return resp.Contracts, nil
 }
 
-func (c *TestCluster) RemoveHost(host *TestNode) error {
+func (c *TestCluster) RemoveHost(host *Host) error {
 	if err := host.Close(); err != nil {
 		return err
 	}
 
 	for i, h := range c.hosts {
-		if h.HostKey().String() == host.HostKey().String() {
+		if h.PublicKey().String() == host.PublicKey().String() {
 			c.hosts = append(c.hosts[:i], c.hosts[i+1:]...)
 			break
 		}
@@ -495,20 +503,20 @@ func (c *TestCluster) RemoveHost(host *TestNode) error {
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
 // themselves on the network, ready to form contracts.
-func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
+func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
 	// Create hosts.
-	var newHosts []*TestNode
+	var newHosts []*Host
 	for i := 0; i < n; i++ {
 		hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-		n, err := siatest.NewCleanNodeAsync(sianode.Host(hostDir))
+		h, err := NewHost(types.GeneratePrivateKey(), hostDir, false)
 		if err != nil {
 			return nil, err
 		}
-		c.hosts = append(c.hosts, &TestNode{n})
-		newHosts = append(newHosts, &TestNode{n})
+		c.hosts = append(c.hosts, h)
+		newHosts = append(newHosts, h)
 
 		// Connect gateways.
-		if err := c.Bus.SyncerConnect(context.Background(), string(n.GatewayAddress())); err != nil {
+		if err := c.Bus.SyncerConnect(context.Background(), h.GatewayAddr()); err != nil {
 			return nil, err
 		}
 	}
@@ -521,14 +529,12 @@ func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 	fundAmt := balance.Div64(2).Div64(uint64(len(newHosts))) // 50% of bus balance
 	var scos []types.SiacoinOutput
 	for _, h := range newHosts {
-		wag, err := h.WalletAddressGet()
-		if err != nil {
-			return nil, err
+		for i := 0; i < 10; i++ {
+			scos = append(scos, types.SiacoinOutput{
+				Value:   fundAmt.Div64(10),
+				Address: h.WalletAddress(),
+			})
 		}
-		scos = append(scos, types.SiacoinOutput{
-			Value:   fundAmt,
-			Address: types.Address(wag.Address),
-		})
 	}
 	if err := c.Bus.SendSiacoins(context.Background(), scos); err != nil {
 		return nil, err
@@ -559,7 +565,7 @@ func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 		}
 
 		for _, h := range newHosts {
-			_, err = c.Bus.Host(context.Background(), h.HostKey())
+			_, err = c.Bus.Host(context.Background(), h.PublicKey())
 			if err != nil {
 				return err
 			}
@@ -574,11 +580,10 @@ func (c *TestCluster) AddHosts(n int) ([]*TestNode, error) {
 	if err := c.Sync(); err != nil {
 		return nil, err
 	}
-
 	return newHosts, nil
 }
 
-func (c *TestCluster) AddHostsBlocking(n int) ([]*TestNode, error) {
+func (c *TestCluster) AddHostsBlocking(n int) ([]*Host, error) {
 	// add hosts
 	hosts, err := c.AddHosts(n)
 	if err != nil {
@@ -588,7 +593,7 @@ func (c *TestCluster) AddHostsBlocking(n int) ([]*TestNode, error) {
 	// build hosts map
 	hostsmap := make(map[types.PublicKey]struct{})
 	for _, host := range hosts {
-		hostsmap[host.HostKey()] = struct{}{}
+		hostsmap[host.PublicKey()] = struct{}{}
 	}
 
 	// wait for contracts to form
@@ -666,4 +671,36 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) e
 		}
 		return nil
 	})
+}
+
+// testNetwork returns a custom network for testing which matches the
+// configuration of siad consensus in testing.
+func testNetwork() *consensus.Network {
+	n := &consensus.Network{
+		InitialCoinbase: types.Siacoins(300000),
+		MinimumCoinbase: types.Siacoins(299990),
+		InitialTarget:   types.BlockID{4: 32},
+	}
+
+	n.HardforkDevAddr.Height = 3
+	n.HardforkDevAddr.OldAddress = types.Address{}
+	n.HardforkDevAddr.NewAddress = types.Address{}
+
+	n.HardforkTax.Height = 10
+
+	n.HardforkStorageProof.Height = 10
+
+	n.HardforkOak.Height = 20
+	n.HardforkOak.FixHeight = 23
+	n.HardforkOak.GenesisTimestamp = time.Now().Add(-1e6 * time.Second)
+
+	n.HardforkASIC.Height = 5
+	n.HardforkASIC.OakTime = 10000 * time.Second
+	n.HardforkASIC.OakTarget = types.BlockID{255, 255}
+
+	n.HardforkFoundation.Height = 50
+	n.HardforkFoundation.PrimaryAddress = types.GeneratePrivateKey().PublicKey().StandardAddress()
+	n.HardforkFoundation.FailsafeAddress = types.GeneratePrivateKey().PublicKey().StandardAddress()
+
+	return n
 }

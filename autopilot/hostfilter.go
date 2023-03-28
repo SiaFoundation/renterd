@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
-	"go.sia.tech/siad/modules"
 )
 
 const (
@@ -226,10 +225,10 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 }
 
 func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract) bool {
-	blockBytes := types.NewCurrency64(modules.SectorSize * cfg.Contracts.Period)
+	blockBytes := types.NewCurrency64(rhpv2.SectorSize * cfg.Contracts.Period)
 	sectorStoragePrice := s.StoragePrice.Mul(blockBytes)
-	sectorUploadBandwidthPrice := s.UploadBandwidthPrice.Mul64(modules.SectorSize)
-	sectorDownloadBandwidthPrice := s.DownloadBandwidthPrice.Mul64(modules.SectorSize)
+	sectorUploadBandwidthPrice := s.UploadBandwidthPrice.Mul64(rhpv2.SectorSize)
+	sectorDownloadBandwidthPrice := s.DownloadBandwidthPrice.Mul64(rhpv2.SectorSize)
 	sectorBandwidthPrice := sectorUploadBandwidthPrice.Add(sectorDownloadBandwidthPrice)
 	sectorPrice := sectorStoragePrice.Add(sectorBandwidthPrice)
 	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.TotalCost.Big()).Float64()

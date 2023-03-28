@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/autopilot"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
@@ -147,6 +148,7 @@ func main() {
 	}
 	busCfg.PersistInterval = 10 * time.Minute
 	busCfg.DBDialector = getDBDialectorFromEnv()
+	busCfg.Network = build.ConsensusNetwork
 
 	var workerCfg struct {
 		enabled     bool
@@ -187,6 +189,7 @@ func main() {
 	flag.Parse()
 
 	log.Println("renterd v0.1.0")
+	log.Println("Network", build.ConsensusNetworkName)
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
 		log.Println("Build Date:", builddate)

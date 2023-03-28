@@ -60,6 +60,7 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	DeleteContracts(ctx context.Context, ids []types.FileContractID) error
+	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 	// txpool
