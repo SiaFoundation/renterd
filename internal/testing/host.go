@@ -246,17 +246,7 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 	}
 	tp := &TXPool{tpool}
 
-	opt := zap.NewDevelopmentConfig()
-	if !debugLogging {
-		opt.OutputPaths = []string{filepath.Join(dir, "hostd.log")}
-	} else {
-		opt.OutputPaths = []string{"stdout", filepath.Join(dir, "hostd.log")}
-	}
-	log, err := opt.Build()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create logger: %w", err)
-	}
-
+	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sql store: %w", err)
