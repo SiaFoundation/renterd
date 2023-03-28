@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -434,9 +435,7 @@ func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContra
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
-			releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := w.bus.ReleaseContract(releaseCtx, contractID, lockID); err != nil {
+			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
@@ -1250,9 +1249,18 @@ func (l *tracedContractLocker) AcquireContract(ctx context.Context, fcid types.F
 }
 
 func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
-	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
+	_, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
 	defer span.End()
-	err = l.l.ReleaseContract(ctx, fcid, lockID)
+
+	// Create a new context with the span that times out after a certain amount
+	// of time.  That's because the context passed to this method might be
+	// cancelled but we still want to release the contract.
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
+
+	// Release the contract.
+	err = l.l.ReleaseContract(timeoutCtx, fcid, lockID)
 	if err != nil {
 		span.SetStatus(codes.Error, "failed to release contract")
 		span.RecordError(err)
