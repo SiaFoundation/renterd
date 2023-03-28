@@ -403,11 +403,11 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 
 func (w *worker) withRevisionV2(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
+	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
-			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
+			if err := w.ReleaseContract(ctx, contractID, lockID); err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
@@ -431,11 +431,11 @@ func (w *worker) withRevisionV2(ctx context.Context, contractID types.FileContra
 
 func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
+	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
-			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
+			if err := w.ReleaseContract(ctx, contractID, lockID); err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
@@ -794,7 +794,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w, &slab, contracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1268,4 +1268,12 @@ func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.F
 	}
 	span.SetAttributes(attribute.Stringer("contract", fcid))
 	return
+}
+
+func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+	return (&tracedContractLocker{w.bus}).AcquireContract(ctx, fcid, priority, d)
+}
+
+func (w *worker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+	return (&tracedContractLocker{w.bus}).ReleaseContract(ctx, fcid, lockID)
 }

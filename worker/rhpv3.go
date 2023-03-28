@@ -244,11 +244,11 @@ func (w *worker) fetchPriceTable(ctx context.Context, contractID types.FileContr
 	}
 
 	updatePTByContract := func() (rhpv3.HostPriceTable, error) {
-		lockID, err := w.bus.AcquireContract(ctx, contractID, lockingPriorityPriceTable, lockingDurationPriceTable)
+		lockID, err := w.AcquireContract(ctx, contractID, lockingPriorityPriceTable, lockingDurationPriceTable)
 		if err != nil {
 			return rhpv3.HostPriceTable{}, err
 		}
-		defer w.bus.ReleaseContract(ctx, contractID, lockID)
+		defer w.ReleaseContract(ctx, contractID, lockID)
 		// Fetch a revision to pay for the pricetable. This will implicitly
 		// update the pricetable if no pricetable is provided.
 		_, err = w.FetchRevisionWithContract(ctx, nil, hostKey, siamuxAddr, contractID)
