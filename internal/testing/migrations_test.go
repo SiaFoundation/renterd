@@ -29,7 +29,7 @@ func TestMigrations(t *testing.T) {
 	}()
 
 	// convenience variables
-	cfg := defaultAutopilotConfig
+	cfg := testAutopilotConfig
 	w := cluster.Worker
 	b := cluster.Bus
 
