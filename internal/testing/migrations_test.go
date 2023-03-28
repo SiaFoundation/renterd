@@ -33,6 +33,13 @@ func TestMigrations(t *testing.T) {
 	w := cluster.Worker
 	b := cluster.Bus
 
+	// configure the cluster to use 1 more host than the total shards in the
+	// redundancy settings.
+	cfg.Contracts.Amount = uint64(testRedundancySettings.TotalShards) + 1
+	if err := cluster.Autopilot.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
 	// add hosts
 	hosts, err := cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
 	if err != nil {
@@ -87,7 +94,7 @@ func TestMigrations(t *testing.T) {
 		t.Helper()
 		hks := usedHosts()
 		for _, h := range hosts {
-			if hk = h.HostKey(); isUsed(hk, hks) {
+			if hk = h.PublicKey(); isUsed(hk, hks) {
 				if err := cluster.RemoveHost(h); err != nil {
 					t.Fatal(err)
 				}

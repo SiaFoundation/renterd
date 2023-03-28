@@ -5,9 +5,14 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"go.sia.tech/core/types"
 )
 
 type (
+	// ParamCurrency aliases types.Currency and marshal them in hastings.
+	ParamCurrency types.Currency
+
 	// ParamTime aliases time.Time to add marshaling functions that url escape
 	// and format a time in the RFC3339 format.
 	ParamTime time.Time
@@ -27,6 +32,21 @@ type (
 	// A SlabID uniquely identifies a slab.
 	SlabID uint
 )
+
+// String implements fmt.Stringer.
+func (c ParamCurrency) String() string { return types.Currency(c).ExactString() }
+
+// MarshalText implements encoding.TextMarshaler.
+func (c ParamCurrency) MarshalText() ([]byte, error) {
+	return []byte(c.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (c *ParamCurrency) UnmarshalText(b []byte) error {
+	curr, err := types.ParseCurrency(string(b))
+	*c = ParamCurrency(curr)
+	return err
+}
 
 // String implements fmt.Stringer.
 func (s ParamString) String() string { return string(s) }
