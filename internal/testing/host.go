@@ -2,6 +2,7 @@ package testing
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -127,7 +128,7 @@ func (tp TXPool) AcceptTransactionSet(txns []types.Transaction) error {
 		convertToSiad(&txns[i], &stxns[i])
 	}
 	err := tp.tp.AcceptTransactionSet(stxns)
-	if err == modules.ErrDuplicateTransactionSet {
+	if errors.Is(err, modules.ErrDuplicateTransactionSet) {
 		err = nil
 	}
 	return err

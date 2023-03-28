@@ -10,7 +10,7 @@ import (
 )
 
 type (
-	// ParamTime aliases types.Currency and marshal them in hastings.
+	// ParamCurrency aliases types.Currency and marshal them in hastings.
 	ParamCurrency types.Currency
 
 	// ParamTime aliases time.Time to add marshaling functions that url escape
