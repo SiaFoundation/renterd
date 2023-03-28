@@ -29,7 +29,7 @@ func TestGouging(t *testing.T) {
 		}
 	}()
 
-	cfg := defaultAutopilotConfig.Contracts
+	cfg := testAutopilotConfig.Contracts
 	b := cluster.Bus
 	w := cluster.Worker
 

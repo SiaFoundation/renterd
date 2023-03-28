@@ -67,11 +67,17 @@ func (a *accounts) markRefillDone(workerID string, host types.PublicKey) {
 }
 
 func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig) {
+	if cfg.Contracts.Set == "" {
+		a.logger.Warn("could not update contracts, no contract set configured")
+		return
+	}
+
 	contracts, err := a.b.Contracts(ctx, cfg.Contracts.Set)
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch contract set for refill: %v", err))
 		return
 	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.fundingContracts = append(a.fundingContracts[:0], contracts...)

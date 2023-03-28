@@ -36,9 +36,9 @@ const (
 )
 
 var (
-	// defaultAutopilotConfig is the autopilot used for testing unless a
-	// different one is explicitly set.
-	defaultAutopilotConfig = api.AutopilotConfig{
+	// testAutopilotConfig is the autopilot used for testing unless a different
+	// one is explicitly set.
+	testAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
 			Allowance:   types.Siacoins(1).Mul64(1e3),
 			Amount:      3,
@@ -52,7 +52,7 @@ var (
 			Set: "autopilot",
 		},
 		Hosts: api.HostsConfig{
-			IgnoreRedundantIPs: true, // ignore for integration tests by default // TODO: add test for IP filter.
+			IgnoreRedundantIPs: true, // ignore for integration tests by default
 		},
 	}
 
@@ -234,6 +234,12 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 		return nil, err
 	}
 
+	// Set autopilot config.
+	err = autopilotStore.SetConfig(testAutopilotConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create autopilot.
 	ap, aStartFn, aStopFn, err := node.NewAutopilot(node.AutopilotConfig{
 		AccountsRefillInterval: time.Second,
@@ -319,11 +325,6 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 		return nil, err
 	}
 
-	// Set autopilot config.
-	err = autopilotClient.SetConfig(defaultAutopilotConfig)
-	if err != nil {
-		return nil, err
-	}
 	return cluster, nil
 }
 
