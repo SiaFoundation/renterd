@@ -46,7 +46,7 @@ var (
 		MaxDownloadPrice:      types.Siacoins(3000),                 // 3000 SC per 1 TiB
 		MaxUploadPrice:        types.Siacoins(3000),                 // 3000 SC per 1 TiB
 		MaxStoragePrice:       types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
-		HostBlockHeightLeeway: 3,                                    // 3 blocks
+		HostBlockHeightLeeway: 6,                                    // 6 blocks
 	}
 )
 

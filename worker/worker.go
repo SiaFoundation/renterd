@@ -1037,7 +1037,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			slow[contracts[h].HostKey]++
 		}
 		if err == io.EOF {
-			w.logger.Debugw("objectsHandlerPUT: succes",
+			w.logger.Debugw("objectsHandlerPUT: success",
 				"path", jc.PathParam("path"),
 				"numSlabs", len(o.Slabs),
 				"objectSize", objectSize,
