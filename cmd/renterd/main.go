@@ -209,8 +209,8 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_ENABLED", &workerCfg.enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &workerCfg.ID)
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
-	parseEnvVar("RENTERD_TRACING_ENABLED", &tracingEnabled)
-	parseEnvVar("RENTERD_TRACING_SERVICE_INSTANCE_ID", &tracingServiceInstanceId)
+	parseEnvVar("RENTERD_TRACING_ENABLED", tracingEnabled)
+	parseEnvVar("RENTERD_TRACING_SERVICE_INSTANCE_ID", tracingServiceInstanceId)
 
 	var autopilotShutdownFn func(context.Context) error
 	var shutdownFns []func(context.Context) error
