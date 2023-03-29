@@ -378,7 +378,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	// not enough balance - nothing to do
 	balance, err := b.WalletBalance(ctx)
 	if err != nil {
-		l.Errorf("wallet maintenance skipped, failed to fetch wallet balance err: %v", err)
+		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
 		return err
 	}
 	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
