@@ -95,8 +95,8 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 				}
 				res = resp{r, root, err}
 				return nil // only return the error in the response
-			}); err != nil {
-				logger.Errorf("withHostV2 failed when uploading sector, err: %v, upload failed: ", err, res.err != nil)
+			}); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Errorf("withHostV2 failed when uploading sector, err: %v, upload failed: %v", err, res.err != nil)
 			}
 
 			// NOTE: we release before sending the response to ensure the context isn't cancelled
@@ -272,8 +272,8 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 				}
 				res = resp{r, buf.Bytes(), time.Since(start), err}
 				return nil // only return the error in the response
-			}); err != nil {
-				logger.Errorf("withHostV3 failed when downloading sector, err: %v, download failed: ", err, res.err != nil)
+			}); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Errorf("withHostV3 failed when downloading sector, err: %v, download failed: %v", err, res.err != nil)
 			}
 			respChan <- res
 		}(r)
