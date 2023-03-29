@@ -194,21 +194,15 @@ func (ap *Autopilot) Run() error {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
 
-	// trigger the first iteration as soon as consensus is synced
-	go ap.triggerInitialLoopIteration()
+	// block until consensus is synced
+	if !ap.blockUntilSynced() {
+		ap.logger.Error("autopilot stopped before consensus was synced")
+		return nil
+	}
 
 	var launchAccountRefillsOnce sync.Once
 	for {
-		select {
-		case <-ap.stopChan:
-			return nil
-		case <-ap.triggerChan:
-			ap.logger.Info("autopilot iteration triggered")
-			ap.ticker.Reset(ap.tickerDuration)
-		case <-ap.ticker.C:
-			ap.logger.Info("autopilot iteration starting")
-		}
-
+		ap.logger.Info("autopilot iteration starting")
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
@@ -281,6 +275,15 @@ func (ap *Autopilot) Run() error {
 			// migration
 			ap.m.tryPerformMigrations(ctx, w)
 		})
+
+		select {
+		case <-ap.stopChan:
+			return nil
+		case <-ap.triggerChan:
+			ap.logger.Info("autopilot iteration triggered")
+			ap.ticker.Reset(ap.tickerDuration)
+		case <-ap.ticker.C:
+		}
 	}
 }
 
@@ -311,14 +314,14 @@ func (ap *Autopilot) Trigger() bool {
 	}
 }
 
-func (ap *Autopilot) triggerInitialLoopIteration() {
+func (ap *Autopilot) blockUntilSynced() bool {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ap.stopChan:
-			return
+			return false
 		case <-ticker.C:
 			if synced := func() bool {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -331,10 +334,7 @@ func (ap *Autopilot) triggerInitialLoopIteration() {
 
 				return cs.Synced
 			}(); synced {
-				if ap.Trigger() {
-					return
-				}
-				ap.logger.Debug("failed to trigger the autopilot loop")
+				return true
 			}
 		}
 	}
