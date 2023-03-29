@@ -188,6 +188,9 @@ func (ap *Autopilot) Run() error {
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
 
+	// trigger the first iteration as soon as consensus is synced
+	go ap.triggerInitialLoopIteration()
+
 	// update the contract set setting
 	err := ap.bus.UpdateSetting(context.Background(), bus.SettingContractSet, ap.store.Config().Contracts.Set)
 	if err != nil {
@@ -305,6 +308,33 @@ func (ap *Autopilot) Trigger() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (ap *Autopilot) triggerInitialLoopIteration() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ap.stopChan:
+			return
+		case <-ticker.C:
+			if synced := func() bool {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				cs, err := ap.bus.ConsensusState(ctx)
+				if err != nil {
+					ap.logger.Errorf("failed to get consensus state, err: %v", err)
+				}
+
+				return cs.Synced
+			}(); synced {
+				ap.triggerChan <- struct{}{}
+				return
+			}
+		}
 	}
 }
 
