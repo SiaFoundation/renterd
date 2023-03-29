@@ -1004,13 +1004,6 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	w.logger.Debugw("objectsHandlerPUT: starting upload",
-		"path", jc.PathParam("path"),
-		"minShards", rs.MinShards,
-		"totalShards", rs.TotalShards,
-		"contracts", len(contracts),
-	)
-
 	// randomize order of contracts so we don't always upload to the same hosts
 	frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
 
@@ -1037,11 +1030,6 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			slow[contracts[h].HostKey]++
 		}
 		if err == io.EOF {
-			w.logger.Debugw("objectsHandlerPUT: succes",
-				"path", jc.PathParam("path"),
-				"numSlabs", len(o.Slabs),
-				"objectSize", objectSize,
-			)
 			break
 		} else if jc.Check(fmt.Sprintf("uploading slab failed after %v", time.Since(start)), err); err != nil {
 			w.logger.Errorf("couldn't upload object '%v' slab %d, err: %v", path, len(o.Slabs), err)
