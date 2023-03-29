@@ -31,13 +31,13 @@ var (
 // variables for configuration, check out
 // https://opentelemetry.io/docs/reference/specification/sdk-environment-variables/.
 // https://github.com/open-telemetry/opentelemetry-go/tree/main/exporters/otlp/otlptrace
-func Init(workerID string) (func(ctx context.Context) error, error) {
+func Init(serviceInstanceId string) (func(ctx context.Context) error, error) {
 	// Create resources.
 	resources := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceNameKey.String(service),
 		semconv.ServiceVersionKey.String(serviceVersion),
-		semconv.ServiceInstanceIDKey.String(workerID),
+		semconv.ServiceInstanceIDKey.String(serviceInstanceId),
 	)
 
 	// Create exporter.
