@@ -188,14 +188,14 @@ func (ap *Autopilot) Run() error {
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
 
-	// trigger the first iteration as soon as consensus is synced
-	go ap.triggerInitialLoopIteration()
-
 	// update the contract set setting
 	err := ap.bus.UpdateSetting(context.Background(), bus.SettingContractSet, ap.store.Config().Contracts.Set)
 	if err != nil {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
+
+	// trigger the first iteration as soon as consensus is synced
+	go ap.triggerInitialLoopIteration()
 
 	var launchAccountRefillsOnce sync.Once
 	for {
