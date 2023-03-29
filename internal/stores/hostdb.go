@@ -448,7 +448,6 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	var hostAddresses []hostdb.HostAddress
 
 	err := ss.db.
-		Scopes(ss.excludeBlocked).
 		Model(&dbHost{}).
 		Where("last_scan < ?", maxLastScan.UnixNano()).
 		Offset(offset).
