@@ -589,8 +589,15 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			continue
 		}
 
+		// fetch consensus state on the fly for the gouging check.
+		cs, err := c.ap.bus.ConsensusState(ctx)
+		if err != nil {
+			c.logger.Errorf("failed to fetch consensus state for gouging check: %v", err)
+			continue
+		}
+
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &pt, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
+		if gouging, reasons := worker.IsGouging(state.gs, state.rs, cs, nil, &pt, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
 			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
 			continue
 		}
