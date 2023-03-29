@@ -331,8 +331,10 @@ func (ap *Autopilot) triggerInitialLoopIteration() {
 
 				return cs.Synced
 			}(); synced {
-				ap.triggerChan <- struct{}{}
-				return
+				if ap.Trigger() {
+					return
+				}
+				ap.logger.Debug("failed to trigger the autopilot loop")
 			}
 		}
 	}
