@@ -10,8 +10,6 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/siad/node/api/client"
-	stypes "go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 
@@ -31,7 +29,7 @@ func TestGouging(t *testing.T) {
 		}
 	}()
 
-	cfg := defaultAutopilotConfig.Contracts
+	cfg := testAutopilotConfig.Contracts
 	b := cluster.Bus
 	w := cluster.Worker
 
@@ -42,9 +40,9 @@ func TestGouging(t *testing.T) {
 	}
 
 	// build a hosts map
-	hostsMap := make(map[string]*TestNode)
+	hostsMap := make(map[string]*Host)
 	for _, h := range hosts {
-		hostsMap[h.HostKey().String()] = h
+		hostsMap[h.PublicKey().String()] = h
 	}
 
 	// helper that waits until the contract set is ready
@@ -108,32 +106,26 @@ func TestGouging(t *testing.T) {
 		t.Fatal("unexpected data")
 	}
 
-	cases := []struct {
-		param client.HostParam
-		value stypes.Currency
-	}{
-		{"mindownloadbandwidthprice", stypes.SiacoinPrecision},
-		{"minuploadbandwidthprice", stypes.SiacoinPrecision},
-		{"mincontractprice", stypes.SiacoinPrecision.Mul64(11)},
+	// fetch current contract set
+	contracts, err := b.Contracts(ctx, cfg.Set)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for _, c := range cases {
-		// fetch current contract set
-		contracts, err := b.Contracts(ctx, cfg.Set)
-		if err != nil {
-			t.Fatal(err)
-		}
+	// update the host settings so it's gouging
+	hk := contracts[0].HostKey
+	host := hostsMap[hk.String()]
+	settings := host.settings.Settings()
+	settings.MinIngressPrice = types.Siacoins(1)
+	settings.MinEgressPrice = types.Siacoins(1)
+	settings.ContractPrice = types.Siacoins(11)
+	if err := host.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
 
-		// update the host settings so it's gouging
-		hk := contracts[0].HostKey
-		if err := hostsMap[hk.String()].HostModifySettingPost(c.param, c.value); err != nil {
-			t.Fatal(err)
-		}
-
-		// assert it was removed from the contract set
-		if err := waitForHostRemoval(hk); err != nil {
-			t.Fatal(err)
-		}
+	// assert it was removed from the contract set
+	if err := waitForHostRemoval(hk); err != nil {
+		t.Fatal(err)
 	}
 
 	// upload some data - should fail
@@ -143,11 +135,13 @@ func TestGouging(t *testing.T) {
 
 	// update all host settings so they're gouging
 	for _, h := range hosts {
-		if err := h.HostModifySettingPost("mindownloadbandwidthprice", stypes.SiacoinPrecision); err != nil {
+		settings := h.settings.Settings()
+		settings.MinEgressPrice = types.Siacoins(1)
+		if err := h.UpdateSettings(settings); err != nil {
 			t.Fatal(err)
 		}
 		// assert it was removed from the contract set
-		if err := waitForHostRemoval(h.HostKey()); err != nil {
+		if err := waitForHostRemoval(h.PublicKey()); err != nil {
 			t.Fatal(err)
 		}
 	}

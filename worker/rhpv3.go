@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/modules"
 )
 
 const (
@@ -744,42 +743,14 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 	return nil
 }
 
-type RPCLatestRevisionRequest struct {
-	ContractID types.FileContractID
-}
-
-type RPCLatestRevisionResponse struct {
-	Revision types.FileContractRevision
-}
-
-// EncodeTo implements ProtocolObject.
-func (r *RPCLatestRevisionRequest) EncodeTo(e *types.Encoder) {
-	r.ContractID.EncodeTo(e)
-}
-
-// DecodeFrom implements ProtocolObject.
-func (r *RPCLatestRevisionRequest) DecodeFrom(d *types.Decoder) {
-	r.ContractID.DecodeFrom(d)
-}
-
-// EncodeTo implements ProtocolObject.
-func (r *RPCLatestRevisionResponse) EncodeTo(e *types.Encoder) {
-	r.Revision.EncodeTo(e)
-}
-
-// DecodeFrom implements ProtocolObject.
-func (r *RPCLatestRevisionResponse) DecodeFrom(d *types.Decoder) {
-	r.Revision.DecodeFrom(d)
-}
-
 func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
 	s := t.DialStream()
 	defer s.Close()
-	req := RPCLatestRevisionRequest{
+	req := rhpv3.RPCLatestRevisionRequest{
 		ContractID: contractID,
 	}
-	var resp RPCLatestRevisionResponse
+	var resp rhpv3.RPCLatestRevisionResponse
 	if err := s.WriteRequest(rhpv3.RPCLatestRevisionID, &req); err != nil {
 		return types.FileContractRevision{}, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
@@ -828,7 +799,7 @@ func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt *rhpv3.HostPriceTable, pa
 		return
 	} else if err = s.ReadResponse(&cancellationToken, 16); err != nil {
 		return
-	} else if err = s.ReadResponse(&resp, modules.SectorSize+responseLeeway); err != nil {
+	} else if err = s.ReadResponse(&resp, rhpv2.SectorSize+responseLeeway); err != nil {
 		return
 	}
 

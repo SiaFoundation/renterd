@@ -438,12 +438,27 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	return s.db.Model(&contractset).Association("Contracts").Replace(&dbContracts)
 }
 
+func (s *SQLStore) DeleteContractSet(ctx context.Context, name string) error {
+	return s.db.
+		Where(dbContractSet{Name: name}).
+		Delete(&dbContractSet{}).
+		Error
+}
+
 func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) error {
 	err := removeContract(s.db, fileContractID(id))
 	if err != nil {
 		return err
 	}
 	delete(s.knownContracts, id)
+	return nil
+}
+
+func (s *SQLStore) RemoveContracts(ctx context.Context) error {
+	if err := s.db.Where("TRUE").Delete(&dbContract{}).Error; err != nil {
+		return err
+	}
+	s.knownContracts = make(map[types.FileContractID]struct{})
 	return nil
 }
 

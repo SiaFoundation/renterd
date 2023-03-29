@@ -91,7 +91,9 @@ type (
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContract(ctx context.Context, id types.FileContractID) error
+		RemoveContracts(ctx context.Context) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+		DeleteContractSet(ctx context.Context, name string) error
 
 		Object(ctx context.Context, path string) (object.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]string, error)
@@ -300,19 +302,20 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
+	cs := b.cm.TipState(ctx)
 
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
-	cost := rhpv2.ContractFormationCost(fc, wpfr.HostSettings.ContractPrice)
+	cost := rhpv2.ContractFormationCost(cs, fc, wpfr.HostSettings.ContractPrice)
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(ctx), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(b.cm.TipState(ctx), &txn, toSign, cf)
+	err = b.w.SignTransaction(cs, &txn, toSign, cf)
 	if jc.Check("couldn't sign transaction", err) != nil {
 		b.w.ReleaseInputs(txn)
 		return
@@ -338,6 +341,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
+	cs := b.cm.TipState(jc.Request.Context())
 
 	fc, basePrice := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.HostSettings, wprr.EndHeight)
 	finalPayment := wprr.HostSettings.BaseRPCPrice
@@ -348,13 +352,13 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice, txn.MinerFees[0], basePrice)
-	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, cost, b.tp.Transactions())
+	cost := rhpv2.ContractRenewalCost(cs, fc, wprr.HostSettings.ContractPrice, txn.MinerFees[0], basePrice)
+	toSign, err := b.w.FundTransaction(cs, &txn, cost, b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(b.cm.TipState(jc.Request.Context()), &txn, toSign, cf)
+	err = b.w.SignTransaction(cs, &txn, toSign, cf)
 	if jc.Check("couldn't sign transaction", err) != nil {
 		b.w.ReleaseInputs(txn)
 		return
@@ -546,6 +550,12 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractsSetHandlerDELETE(jc jape.Context) {
+	if set := jc.PathParam("set"); set != "" {
+		jc.Check("could not remove contract set", b.ms.DeleteContractSet(jc.Request.Context(), set))
+	}
+}
+
 func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
@@ -630,6 +640,10 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 		return
 	}
 	jc.Check("couldn't remove contract", b.ms.RemoveContract(jc.Request.Context(), id))
+}
+
+func (b *bus) contractsAllHandlerDELETE(jc jape.Context) {
+	jc.Check("couldn't remove contracts", b.ms.RemoveContracts(jc.Request.Context()))
 }
 
 func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
@@ -970,6 +984,15 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractTaxHandlerGET(jc jape.Context) {
+	var payout types.Currency
+	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
+		return
+	}
+	cs := b.cm.TipState(jc.Request.Context())
+	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
+}
+
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
@@ -1026,8 +1049,9 @@ func (b *bus) Handler() http.Handler {
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
 
-		"POST   /consensus/acceptblock": b.consensusAcceptBlock,
-		"GET    /consensus/state":       b.consensusStateHandler,
+		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
+		"GET    /consensus/state":              b.consensusStateHandler,
+		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 
 		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
@@ -1059,6 +1083,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
@@ -1067,6 +1092,7 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
+		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
