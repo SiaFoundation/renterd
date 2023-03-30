@@ -53,19 +53,3 @@ func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
 		Value: value,
 	}).Error
 }
-
-// UpdateSettings implements the bus.SettingStore interface.
-func (s *SQLStore) UpdateSettings(ctx context.Context, settings map[string]string) error {
-	var dbSettings []dbSetting
-	for key, value := range settings {
-		dbSettings = append(dbSettings, dbSetting{
-			Key:   key,
-			Value: value,
-		})
-	}
-
-	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(&dbSettings).Error
-}

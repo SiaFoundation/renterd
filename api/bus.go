@@ -175,7 +175,7 @@ type AddObjectRequest struct {
 
 // MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
 type MigrationSlabsRequest struct {
-	ContractSet  string  `json:"contractset"`
+	ContractSet  string  `json:"contractSet"`
 	HealthCutoff float64 `json:"healthCutoff"`
 	Limit        int     `json:"limit"`
 }
@@ -238,6 +238,12 @@ type GougingParams struct {
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
 	TransactionFee     types.Currency
+}
+
+// ContractSetSettings contains settings needed by the worker to figure out what
+// contract set to use.
+type ContractSetSettings struct {
+	Set string `json:"set"`
 }
 
 // GougingSettings contain some price settings used in price gouging.

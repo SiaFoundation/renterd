@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	SettingContractSet = "contract_set"
+	SettingContractSet = "contractset"
 	SettingGouging     = "gouging"
 	SettingRedundancy  = "redundancy"
 )
@@ -110,7 +110,6 @@ type (
 		Setting(ctx context.Context, key string) (string, error)
 		Settings(ctx context.Context) ([]string, error)
 		UpdateSetting(ctx context.Context, key, value string) error
-		UpdateSettings(ctx context.Context, settings map[string]string) error
 	}
 
 	// EphemeralAccountStore persists information about accounts. Since
@@ -734,32 +733,51 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) settingsHandlerPUT(jc jape.Context) {
-	var settings map[string]string
-	if jc.Decode(&settings) == nil {
-		jc.Check("couldn't update settings", b.ss.UpdateSettings(jc.Request.Context(), settings))
-	}
-}
-
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
-	if key := jc.PathParam("key"); key == "" {
+	key := jc.PathParam("key")
+	if key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.Request.Context(), jc.PathParam("key")); errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-	} else {
-		jc.Encode(setting)
+		return
 	}
+
+	setting, err := b.ss.Setting(jc.Request.Context(), jc.PathParam("key"))
+	if errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+	}
+
+	var resp interface{}
+	err = json.Unmarshal([]byte(setting), &resp)
+	if err != nil {
+		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(resp)
 }
 
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
-	var value string
-	if key := jc.PathParam("key"); key == "" {
+	key := jc.PathParam("key")
+	if key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if jc.Decode(&value) == nil {
-		jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, value))
+		return
 	}
+
+	var value interface{}
+	if jc.Decode(&value) != nil {
+		return
+	}
+
+	js, err := json.Marshal(value)
+	if err != nil {
+		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(js)))
 }
 
 func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
@@ -1105,7 +1123,6 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /slab":            b.slabHandlerPUT,
 
 		"GET    /settings":     b.settingsHandlerGET,
-		"PUT    /settings":     b.settingsHandlerPUT,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 

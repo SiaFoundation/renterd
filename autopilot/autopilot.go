@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
@@ -74,7 +73,7 @@ type Bus interface {
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 
 	// settings
-	UpdateSetting(ctx context.Context, key string, value string) error
+	UpdateContractSetSettings(ctx context.Context, css api.ContractSetSettings) error
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
 }
@@ -189,7 +188,8 @@ func (ap *Autopilot) Run() error {
 	ap.startStopMu.Unlock()
 
 	// update the contract set setting
-	err := ap.bus.UpdateSetting(context.Background(), bus.SettingContractSet, ap.store.Config().Contracts.Set)
+	setting := api.ContractSetSettings{Set: ap.store.Config().Contracts.Set}
+	err := ap.bus.UpdateContractSetSettings(context.Background(), setting)
 	if err != nil {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
@@ -233,7 +233,8 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// update the contract set setting
-			err = ap.bus.UpdateSetting(ctx, bus.SettingContractSet, ap.state.cfg.Contracts.Set)
+			setting = api.ContractSetSettings{Set: ap.store.Config().Contracts.Set}
+			err = ap.bus.UpdateContractSetSettings(context.Background(), setting)
 			if err != nil {
 				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 			}
