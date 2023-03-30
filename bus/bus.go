@@ -101,6 +101,10 @@ type (
 		UpdateObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 
+		ObjectsSize(ctx context.Context) (uint64, error)
+		SectorsSize(ctx context.Context) (uint64, error)
+		UploadedSize(ctx context.Context) (uint64, error)
+
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
@@ -712,6 +716,26 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path")))
 }
 
+func (b *bus) ObjectsSizeHandlerGET(jc jape.Context) {
+	objectsSize, err := b.ms.ObjectsSize(jc.Request.Context())
+	if jc.Check("couldn't get objects size", err) != nil {
+		return
+	}
+	sectorsSize, err := b.ms.SectorsSize(jc.Request.Context())
+	if jc.Check("couldn't get sectors size", err) != nil {
+		return
+	}
+	uploadedSize, err := b.ms.UploadedSize(jc.Request.Context())
+	if jc.Check("couldn't get uploaded size", err) != nil {
+		return
+	}
+	jc.Encode(api.ObjectsSizeResponse{
+		Objects:  objectsSize,
+		Sectors:  sectorsSize,
+		Uploaded: uploadedSize,
+	})
+}
+
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
@@ -1097,6 +1121,7 @@ func (b *bus) Handler() http.Handler {
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
 
+		"GET    /objectssize":   b.objectsSizeHandlerGET,
 		"GET    /objects/*path": b.objectsHandlerGET,
 		"PUT    /objects/*path": b.objectsHandlerPUT,
 		"DELETE /objects/*path": b.objectsHandlerDELETE,
