@@ -284,6 +284,15 @@ func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractM
 	return
 }
 
+// ArchiveContracts archives the contracts with the given IDs and archival reason.
+func (c *Client) ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) (err error) {
+	err = c.c.WithContext(ctx).POST("/contracts/archive", api.ArchiveContractsRequest{
+		ContractIDs: ids,
+		Reason:      reason,
+	}, nil)
+	return
+}
+
 // Contracts returns the contracts for the given set from the metadata store.
 func (c *Client) Contracts(ctx context.Context, set string) (contracts []api.ContractMetadata, err error) {
 	if set == "" {

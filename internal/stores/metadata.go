@@ -18,6 +18,12 @@ const (
 	// archivalReasonRenewed describes why a contract was archived
 	archivalReasonRenewed = "renewed"
 
+	// archivalReasonRemoved describes why a contract was archived
+	archivalReasonRemoved = "removed"
+
+	// archivalReasonHostPruned describes why a contract was archived
+	archivalReasonHostPruned = "hostpruned"
+
 	// slabRetrievalBatchSize is the number of slabs we fetch from the
 	// database per batch
 	// NOTE: This value can't be too big or otherwise UnhealthySlabs will fail
@@ -44,7 +50,7 @@ type (
 		Model
 
 		ContractCommon
-		RenewedTo fileContractID `gorm:"unique;index;size:32"`
+		RenewedTo fileContractID `gorm:"index;size:32"`
 
 		Host   publicKey `gorm:"index;NOT NULL;size:32"`
 		Reason string
@@ -379,6 +385,17 @@ func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractI
 	return contracts, nil
 }
 
+func (s *SQLStore) ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) error {
+	cs, err := contracts(s.db, ids)
+	if err != nil {
+		return err
+	}
+
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		return archiveContracts(tx, cs, reason)
+	})
+}
+
 func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error) {
 	contract, err := s.contract(ctx, fileContractID(id))
 	if err != nil {
@@ -438,28 +455,49 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	return s.db.Model(&contractset).Association("Contracts").Replace(&dbContracts)
 }
 
-func (s *SQLStore) DeleteContractSet(ctx context.Context, name string) error {
-	return s.db.
-		Where(dbContractSet{Name: name}).
-		Delete(&dbContractSet{}).
-		Error
-}
-
 func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) error {
-	err := removeContract(s.db, fileContractID(id))
+	contract, err := s.contract(ctx, fileContractID(id))
 	if err != nil {
 		return err
 	}
+
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
+		return archiveContracts(tx, []dbContract{contract}, archivalReasonRemoved)
+	}); err != nil {
+		return err
+	}
+
 	delete(s.knownContracts, id)
 	return nil
 }
 
 func (s *SQLStore) RemoveContracts(ctx context.Context) error {
-	if err := s.db.Where("TRUE").Delete(&dbContract{}).Error; err != nil {
+	var contracts []dbContract
+
+	// fetch contracts
+	if err := s.db.
+		Model(&dbContract{}).
+		Find(&contracts).
+		Error; err != nil {
 		return err
 	}
+
+	// archive all contracts
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
+		return archiveContracts(tx, contracts, archivalReasonRemoved)
+	}); err != nil {
+		return nil
+	}
+
 	s.knownContracts = make(map[types.FileContractID]struct{})
 	return nil
+}
+
+func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
+	return s.db.
+		Where(dbContractSet{Name: name}).
+		Delete(&dbContractSet{}).
+		Error
 }
 
 func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]string, error) {
@@ -919,6 +957,31 @@ func contract(tx *gorm.DB, id fileContractID) (contract dbContract, err error) {
 	return
 }
 
+// contracts retrieves all contracts for the given ids from the store.
+func contracts(tx *gorm.DB, ids []types.FileContractID) (dbContracts []dbContract, err error) {
+	fcids := make([]fileContractID, len(ids))
+	for i, fcid := range ids {
+		fcids[i] = fileContractID(fcid)
+	}
+
+	// fetch contracts
+	err = tx.
+		Model(&dbContract{}).
+		Where("fcid IN (?)", fcids).
+		Find(&dbContracts).
+		Error
+	return
+}
+
+// contractsForHost retrieves all contracts for the given host
+func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err error) {
+	err = tx.
+		Where(&dbContract{Host: host}).
+		Find(&contracts).
+		Error
+	return
+}
+
 // addContract adds a contract to the store.
 func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
 	fcid := c.ID()
@@ -959,6 +1022,45 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	// Populate host.
 	contract.Host = host
 	return contract, nil
+}
+
+// archiveContracts archives the given contracts and uses the given reason as
+// archival reason
+//
+// NOTE: this function archives the contracts without setting a renewed ID
+func archiveContracts(tx *gorm.DB, contracts []dbContract, reason string) error {
+	for _, contract := range contracts {
+		// create a copy in the archive
+		if err := tx.Create(&dbArchivedContract{
+			Host:   publicKey(contract.Host.PublicKey),
+			Reason: reason,
+
+			ContractCommon: ContractCommon{
+				FCID:        contract.FCID,
+				RenewedFrom: contract.RenewedFrom,
+
+				TotalCost:      contract.TotalCost,
+				ProofHeight:    contract.ProofHeight,
+				RevisionHeight: contract.RevisionHeight,
+				RevisionNumber: contract.RevisionNumber,
+				StartHeight:    contract.StartHeight,
+				WindowStart:    contract.WindowStart,
+				WindowEnd:      contract.WindowEnd,
+
+				UploadSpending:      contract.UploadSpending,
+				DownloadSpending:    contract.DownloadSpending,
+				FundAccountSpending: contract.FundAccountSpending,
+			},
+		}).Error; err != nil {
+			return err
+		}
+
+		// remove the contract
+		if err := removeContract(tx, contract.FCID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // removeObject removes an object from the store.

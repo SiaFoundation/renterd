@@ -267,16 +267,16 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	c.mu.Unlock()
 
 	// run checks
-	toDelete, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, active, minScore)
+	toArchive, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, active, minScore)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
 
-	// delete contracts
-	if len(toDelete) > 0 {
-		c.logger.Debugf("deleting %d contracts: %+v", len(toDelete), toDelete)
-		if err := c.ap.bus.DeleteContracts(ctx, toDelete); err != nil {
-			c.logger.Errorf("failed to delete contracts, err: %v", err) // continue
+	// archive contracts
+	if len(toArchive) > 0 {
+		c.logger.Debugf("archiving %d contracts: %+v", len(toArchive), toArchive)
+		if err := c.ap.bus.ArchiveContracts(ctx, toArchive, api.ArchivalReasonFailedChecks); err != nil {
+			c.logger.Errorf("failed to archive contracts, err: %v", err) // continue
 		}
 	}
 
@@ -299,7 +299,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	}
 
 	// build the new contract set (excluding formed contracts)
-	contractset := buildContractSet(active, toDelete, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
+	contractset := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
 	numContracts := uint64(len(contractset))
 
 	// check if we need to form contracts and add them to the contract set
@@ -397,7 +397,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toArchive, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -409,7 +409,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			"contracts checks completed",
 			"active", len(contracts),
 			"notfound", notfound,
-			"toDelete", len(toDelete),
+			"toArchive", len(toArchive),
 			"toIgnore", len(toIgnore),
 			"toRefresh", len(toRefresh),
 			"toRenew", len(toRenew),
@@ -499,7 +499,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 					settings: settings,
 				})
 			} else {
-				toDelete = append(toDelete, fcid)
+				toArchive = append(toArchive, fcid)
 				continue
 			}
 		}
@@ -511,7 +511,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	}
 
 	// apply active contract limit
-	numContractsTooMany := len(contracts) - len(toIgnore) - len(toDelete) - int(state.cfg.Contracts.Amount)
+	numContractsTooMany := len(contracts) - len(toIgnore) - len(toArchive) - int(state.cfg.Contracts.Amount)
 	if numContractsTooMany > 0 {
 		// sort by contract size
 		sort.Slice(contractIds, func(i, j int) bool {
@@ -530,7 +530,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		c.logger.Debugf("%d contracts too many, added %d smallest contracts to the ignore list", numContractsTooMany, len(toIgnore)-prev)
 	}
 
-	return toDelete, toIgnore, toRefresh, toRenew, nil
+	return toArchive, toIgnore, toRefresh, toRenew, nil
 }
 
 func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts []hostdb.Host, active []api.Contract, missing uint64, budget *types.Currency, renterAddress types.Address, minScore float64) ([]types.FileContractID, error) {
@@ -1162,7 +1162,7 @@ func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKe
 	return w.RHPPriceTable(ctx, hk, siamuxAddr)
 }
 
-func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
+func buildContractSet(active []api.Contract, toArchive, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
 	// collect ids
 	var activeIds []types.FileContractID
 	for _, c := range active {
@@ -1174,7 +1174,7 @@ func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileCont
 	}
 
 	// build some maps
-	isDeleted := contractMapBool(toDelete)
+	isArchived := contractMapBool(toArchive)
 	isIgnored := contractMapBool(toIgnore)
 	isUpForRenew := contractMapBool(renewIds)
 
@@ -1189,8 +1189,8 @@ func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileCont
 	// build new contract set
 	var contracts []types.FileContractID
 	for _, fcid := range append(activeIds, renewedIDs...) {
-		if isDeleted[fcid] {
-			continue // exclude deleted contracts
+		if isArchived[fcid] {
+			continue // exclude archived contracts
 		}
 		if isIgnored[fcid] {
 			continue // exclude ignored contracts (contracts that became unusable)

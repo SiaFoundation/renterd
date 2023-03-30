@@ -52,6 +52,9 @@ var (
 			Set: "autopilot",
 		},
 		Hosts: api.HostsConfig{
+			AcceptZeroDowntimeHours: true, // accept for integration tests by default
+			MaxDowntimeHours:        0,    // 0 hours for testing
+
 			IgnoreRedundantIPs: true, // ignore for integration tests by default
 		},
 	}
@@ -242,12 +245,13 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 
 	// Create autopilot.
 	ap, aStartFn, aStopFn, err := node.NewAutopilot(node.AutopilotConfig{
-		AccountsRefillInterval: time.Second,
-		Heartbeat:              time.Second,
-		MigrationHealthCutoff:  0.99,
-		ScannerInterval:        time.Second,
-		ScannerBatchSize:       10,
-		ScannerNumThreads:      1,
+		AccountsRefillInterval:   time.Second,
+		Heartbeat:                time.Second,
+		MigrationHealthCutoff:    0.99,
+		ScannerInterval:          time.Second,
+		ScannerBatchSize:         10,
+		ScannerNumThreads:        1,
+		ScannerMinRecentFailures: 5,
 	}, autopilotStore, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err

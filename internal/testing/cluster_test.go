@@ -670,6 +670,12 @@ func TestEphemeralAccounts(t *testing.T) {
 
 // newTestLogger creates a console logger used for testing.
 func newTestLogger() *zap.Logger {
+	return newTestLoggerCustom(zapcore.ErrorLevel)
+}
+
+// newTestLoggerCustom creates a console logger used for testing and allows
+// passing in the desired log level.
+func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 	config := zap.NewProductionEncoderConfig()
 	config.EncodeTime = zapcore.RFC3339TimeEncoder
 	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
@@ -677,9 +683,9 @@ func newTestLogger() *zap.Logger {
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
 
 	return zap.New(
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.ErrorLevel),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level),
 		zap.AddCaller(),
-		zap.AddStacktrace(zapcore.ErrorLevel),
+		zap.AddStacktrace(level),
 	)
 }
 

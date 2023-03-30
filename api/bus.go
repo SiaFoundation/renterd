@@ -13,6 +13,9 @@ const (
 	HostFilterModeAll     = "all"
 	HostFilterModeAllowed = "allowed"
 	HostFilterModeBlocked = "blocked"
+
+	// ArchivalReasonFailedChecks describes why a contract was archived
+	ArchivalReasonFailedChecks = "failedchecks"
 )
 
 var (
@@ -49,6 +52,12 @@ var (
 		HostBlockHeightLeeway: 6,                                    // 6 blocks
 	}
 )
+
+// ArchiveContractsRequest is the request type for the /contracts/archive endpoint.
+type ArchiveContractsRequest struct {
+	ContractIDs []types.FileContractID `json:"contractIDs"`
+	Reason      string                 `json:"reason"`
+}
 
 // AccountHandlerPOST is the request type for the /account/:id endpoint.
 type AccountHandlerPOST struct {
