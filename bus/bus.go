@@ -76,8 +76,8 @@ type (
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
-		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey) error
-		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string) error
+		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
+		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -497,7 +497,10 @@ func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateAllowlistRequest
 	if jc.Decode(&req) == nil {
-		if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove)) != nil {
+		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
+			jc.Error(errors.New("cannot add or remove entries while clearing the allowlist"), http.StatusBadRequest)
+			return
+		} else if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
@@ -514,7 +517,10 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateBlocklistRequest
 	if jc.Decode(&req) == nil {
-		if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove)) != nil {
+		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
+			jc.Error(errors.New("cannot add or remove entries while clearing the blocklist"), http.StatusBadRequest)
+			return
+		} else if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}

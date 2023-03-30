@@ -540,11 +540,19 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	return
 }
 
-func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey) (err error) {
-	if len(add)+len(remove) == 0 {
+func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) (err error) {
+	// nothing to do
+	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
 	defer ss.updateHasAllowlist(&err)
+
+	// clear allowlist
+	if clear {
+		return ss.retryTransaction(func(tx *gorm.DB) error {
+			return tx.Where("TRUE").Delete(&dbAllowlistEntry{}).Error
+		})
+	}
 
 	var toInsert []dbAllowlistEntry
 	for _, entry := range add {
@@ -571,11 +579,19 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 	})
 }
 
-func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string) (err error) {
-	if len(add)+len(remove) == 0 {
+func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) (err error) {
+	// nothing to do
+	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
 	defer ss.updateHasBlocklist(&err)
+
+	// clear blocklist
+	if clear {
+		return ss.retryTransaction(func(tx *gorm.DB) error {
+			return tx.Where("TRUE").Delete(&dbBlocklistEntry{}).Error
+		})
+	}
 
 	var toInsert []dbBlocklistEntry
 	for _, entry := range add {
