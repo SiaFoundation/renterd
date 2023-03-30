@@ -331,6 +331,26 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}
 
+	// check objects info.
+	info, err := cluster.Bus.ObjectsInfo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
+	if info.ObjectsSize != objectsSize {
+		t.Error("wrong size", info.ObjectsSize, len(small)+len(large))
+	}
+	sectorsSize := 15 * rhpv2.SectorSize
+	if info.SectorsSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.SectorsSize, sectorsSize)
+	}
+	if info.UploadedSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.UploadedSize, sectorsSize)
+	}
+	if info.NumObjects != 4 {
+		t.Error("wrong number of objects", info.NumObjects, 4)
+	}
+
 	// download the data
 	for _, data := range [][]byte{small, large} {
 		name := fmt.Sprintf("data_%v", len(data))

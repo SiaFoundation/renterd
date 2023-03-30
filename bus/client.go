@@ -615,6 +615,12 @@ func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (ta
 	return
 }
 
+// ObjectsInfo returns information about the number of objects and their size.
+func (c *Client) ObjectsInfo() (osr api.ObjectsInfo, err error) {
+	err = c.c.GET("/objectsinfo", &osr)
+	return
+}
+
 // NewClient returns a client that communicates with a renterd store server
 // listening on the specified address.
 func NewClient(addr, password string) *Client {

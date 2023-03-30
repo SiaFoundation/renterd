@@ -102,11 +102,12 @@ type HostsRemoveRequest struct {
 	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
 }
 
-// ObjectsSize is the response type for the /objectssize endpoint.
-type ObjectsSizeResponse struct {
-	Objects  uint64 `json:"objects"`  // size of all objects
-	Sectors  uint64 `json:"sectors"`  // uploaded size of all objects
-	Uploaded uint64 `json:"uploaded"` // uploaded size of all objects including redundant sectors
+// ObjectsInfo is the response type for the /objectssize endpoint.
+type ObjectsInfo struct {
+	NumObjects   uint64 `json:"numObjects"`   // number of objects
+	ObjectsSize  uint64 `json:"objectsSize"`  // size of all objects
+	SectorsSize  uint64 `json:"sectorsSize"`  // uploaded size of all objects
+	UploadedSize uint64 `json:"uploadedSize"` // uploaded size of all objects including redundant sectors
 
 }
 

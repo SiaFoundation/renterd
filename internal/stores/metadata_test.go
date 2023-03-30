@@ -1639,8 +1639,8 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 }
 
-// TestSizes is a unit tset for ObjectsSize, SectorsSize and UploadedSize.
-func TestSizes(t *testing.T) {
+// TestObjectsInfo is a unit test for ObjectsInfo.
+func TestObjectsInfo(t *testing.T) {
 	cs, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
@@ -1699,25 +1699,20 @@ func TestSizes(t *testing.T) {
 	}
 
 	// Check sizes.
-	size, err := cs.ObjectsSize(context.Background())
+	info, err := cs.ObjectsInfo(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if size != objectsSize {
-		t.Fatal("wrong size", size, objectsSize)
+	if info.ObjectsSize != objectsSize {
+		t.Fatal("wrong size", info.ObjectsSize, objectsSize)
 	}
-	size, err = cs.SectorsSize(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if info.SectorsSize != sectorsSize {
+		t.Fatal("wrong size", info.SectorsSize, sectorsSize)
 	}
-	if size != sectorsSize {
-		t.Fatal("wrong size", size, sectorsSize)
+	if info.UploadedSize != sectorsSize*2 {
+		t.Fatal("wrong size", info.UploadedSize, sectorsSize*2)
 	}
-	size, err = cs.UploadedSize(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if size != sectorsSize*2 {
-		t.Fatal("wrong size", size, sectorsSize*2)
+	if info.NumObjects != 2 {
+		t.Fatal("wrong number of objects", info.NumObjects, 2)
 	}
 }

@@ -263,44 +263,47 @@ func (o dbObject) convert() (object.Object, error) {
 	return obj, nil
 }
 
-// ObjectsSize returns the sum of the length field from the slices table. So the
-// total, reconstructed size of all objects. This does not reflect the actual
-// uploaded data.
-func (s *SQLStore) ObjectsSize(ctx context.Context) (uint64, error) {
-	var size uint64
-	err := s.db.
-		Model(&dbSlice{}).
-		Select("SUM(length)").
-		Scan(&size).
-		Error
-	return size, err
-}
-
-// SectorsSize returns the size of all uploaded sectors. Excluding the size of
-// sectors that have been uploaded to multiple contracts. This equals
-// rhpv2.Sectorsize times the number of distinct sector ids in the
-// contract_sectors table.
-func (s *SQLStore) SectorsSize(ctx context.Context) (uint64, error) {
-	var size uint64
-	err := s.db.
-		Model(&dbContractSector{}).
-		Select("COUNT(DISTINCT db_sector_id) * ?", rhpv2.SectorSize).
-		Scan(&size).
-		Error
-	return size, err
-}
-
-// UploadedSize returns the size of all uploaded sectors. Including the size of
-// sectors that have been uploaded to multiple contracts. This equals
-// rhpv2.SectorSize times the number of entries in the contract_sectors table.
-func (s *SQLStore) UploadedSize(ctx context.Context) (uint64, error) {
-	var size uint64
-	err := s.db.
-		Model(&dbContractSector{}).
-		Select("COUNT(*) * ?", rhpv2.SectorSize).
-		Scan(&size).
-		Error
-	return size, err
+// ObjectsInfo returns some info related to the objects stored in the store. To
+// make reduce locking and make sure all results are consistent, everything is
+// done within a single transaction.
+func (s *SQLStore) ObjectsInfo(ctx context.Context) (api.ObjectsInfo, error) {
+	var resp api.ObjectsInfo
+	return resp, s.db.Transaction(func(tx *gorm.DB) error {
+		// Number of objects.
+		err := tx.
+			Model(&dbObject{}).
+			Select("COUNT(*)").
+			Scan(&resp.NumObjects).
+			Error
+		if err != nil {
+			return err
+		}
+		// Size of objects.
+		err = tx.
+			Model(&dbSlice{}).
+			Select("SUM(length)").
+			Scan(&resp.ObjectsSize).
+			Error
+		if err != nil {
+			return err
+		}
+		// Size of sectors
+		var sectorSizes struct {
+			SectorsSize  uint64
+			UploadedSize uint64
+		}
+		err = tx.
+			Model(&dbContractSector{}).
+			Select("COUNT(DISTINCT db_sector_id) * ? as sectors_size, COUNT(*) * ? as uploaded_size", rhpv2.SectorSize, rhpv2.SectorSize).
+			Scan(&sectorSizes).
+			Error
+		if err != nil {
+			return err
+		}
+		resp.SectorsSize = sectorSizes.SectorsSize
+		resp.UploadedSize = sectorSizes.UploadedSize
+		return nil
+	})
 }
 
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
