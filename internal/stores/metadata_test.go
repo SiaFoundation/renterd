@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -1551,9 +1552,11 @@ func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileCont
 			Length: length,
 		}
 		for j := range obj.Slabs[i].Shards {
+			var fcid types.FileContractID
+			frand.Read(fcid[:])
 			obj.Slabs[i].Shards[j].Root = frand.Entropy256()
 			obj.Slabs[i].Shards[j].Host = frand.Entropy256()
-			usedContracts[obj.Slabs[i].Shards[j].Host] = types.FileContractID{}
+			usedContracts[obj.Slabs[i].Shards[j].Host] = fcid
 		}
 	}
 	return obj, usedContracts
@@ -1633,5 +1636,88 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 	if cm3.Spending != expectedSpending {
 		t.Fatal("invalid spending")
+	}
+}
+
+// TestSizes is a unit tset for ObjectsSize, SectorsSize and UploadedSize.
+func TestSizes(t *testing.T) {
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a few objects of different size.
+	var objectsSize uint64
+	var sectorsSize uint64
+	for i := 0; i < 2; i++ {
+		obj, contracts := newTestObject(1)
+		objectsSize += uint64(obj.Size())
+		for _, slab := range obj.Slabs {
+			sectorsSize += uint64(len(slab.Shards) * rhpv2.SectorSize)
+		}
+
+		for hpk, fcid := range contracts {
+			if err := cs.addTestHost(hpk); err != nil {
+				t.Fatal(err)
+			}
+			_, err := cs.addTestContract(fcid, hpk)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		key := hex.EncodeToString(frand.Bytes(32))
+		err := cs.UpdateObject(context.Background(), key, obj, contracts)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Get all entries in contract_sectors and store them again with a different
+	// contract id. This should cause the uploaded size to double.
+	var contractSectors []dbContractSector
+	err = cs.db.Find(&contractSectors).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newContractID types.FileContractID
+	frand.Read(newContractID[:])
+	_, err = cs.addTestContract(newContractID, types.PublicKey{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newContract, err := cs.contract(context.Background(), fileContractID(newContractID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contractSector := range contractSectors {
+		contractSector.DBContractID = newContract.ID
+		err = cs.db.Create(&contractSector).Error
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Check sizes.
+	size, err := cs.ObjectsSize(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != objectsSize {
+		t.Fatal("wrong size", size, objectsSize)
+	}
+	size, err = cs.SectorsSize(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != sectorsSize {
+		t.Fatal("wrong size", size, sectorsSize)
+	}
+	size, err = cs.UploadedSize(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != sectorsSize*2 {
+		t.Fatal("wrong size", size, sectorsSize*2)
 	}
 }

@@ -263,6 +263,46 @@ func (o dbObject) convert() (object.Object, error) {
 	return obj, nil
 }
 
+// ObjectsSize returns the sum of the length field from the slices table. So the
+// total, reconstructed size of all objects. This does not reflect the actual
+// uploaded data.
+func (s *SQLStore) ObjectsSize(ctx context.Context) (uint64, error) {
+	var size uint64
+	err := s.db.
+		Model(&dbSlice{}).
+		Select("SUM(length)").
+		Scan(&size).
+		Error
+	return size, err
+}
+
+// SectorsSize returns the size of all uploaded sectors. Excluding the size of
+// sectors that have been uploaded to multiple contracts. This equals
+// rhpv2.Sectorsize times the number of distinct sector ids in the
+// contract_sectors table.
+func (s *SQLStore) SectorsSize(ctx context.Context) (uint64, error) {
+	var size uint64
+	err := s.db.
+		Model(&dbContractSector{}).
+		Select("COUNT(DISTINCT db_sector_id) * ?", rhpv2.SectorSize).
+		Scan(&size).
+		Error
+	return size, err
+}
+
+// UploadedSize returns the size of all uploaded sectors. Including the size of
+// sectors that have been uploaded to multiple contracts. This equals
+// rhpv2.SectorSize times the number of entries in the contract_sectors table.
+func (s *SQLStore) UploadedSize(ctx context.Context) (uint64, error) {
+	var size uint64
+	err := s.db.
+		Model(&dbContractSector{}).
+		Select("COUNT(*) * ?", rhpv2.SectorSize).
+		Scan(&size).
+		Error
+	return size, err
+}
+
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
 	added, err := addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
 	if err != nil {
