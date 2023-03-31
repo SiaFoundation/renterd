@@ -201,12 +201,14 @@ type UpdateSlabRequest struct {
 type UpdateAllowlistRequest struct {
 	Add    []types.PublicKey `json:"add"`
 	Remove []types.PublicKey `json:"remove"`
+	Clear  bool              `json:"clear"`
 }
 
 // UpdateBlocklistRequest is the request type for /hosts/blocklist endpoint.
 type UpdateBlocklistRequest struct {
 	Add    []string `json:"add"`
 	Remove []string `json:"remove"`
+	Clear  bool     `json:"clear"`
 }
 
 // AccountsUpdateBalanceRequest is the request type for /accounts/:id/update

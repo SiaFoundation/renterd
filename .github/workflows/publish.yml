@@ -6,9 +6,14 @@ on:
   push:
     branches:
       - master
+      - stable
     tags: 
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   docker:
@@ -28,7 +33,7 @@ jobs:
         name: generate tags
         id: meta
         with:
-          images: ghcr.io/SiaFoundation/renterd
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=sha,prefix=

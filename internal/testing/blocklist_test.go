@@ -55,7 +55,7 @@ func TestBlocklist(t *testing.T) {
 	hk1 := contracts[0].HostKey
 	hk2 := contracts[1].HostKey
 	hk3 := contracts[2].HostKey
-	err = b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil)
+	err = b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestBlocklist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil)
+	err = b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,11 +107,11 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// clear the allowlist and blocklist and assert we have 3 contracts again
-	err = b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2})
+	err = b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress})
+	err = b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

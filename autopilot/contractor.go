@@ -343,13 +343,13 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	// no contracts - nothing to do
 	cfg := c.ap.state.cfg
 	if cfg.Contracts.Amount == 0 {
-		l.Debug("wallet maintenance skipped, no contracts wanted")
+		l.Warn("wallet maintenance skipped, no contracts wanted")
 		return nil
 	}
 
 	// no allowance - nothing to do
 	if cfg.Contracts.Allowance.IsZero() {
-		l.Debug("wallet maintenance skipped, no allowance set")
+		l.Warn("wallet maintenance skipped, no allowance set")
 		return nil
 	}
 
@@ -366,30 +366,35 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	}
 
 	// enough outputs - nothing to do
-	outputs, err := b.WalletOutputs(ctx)
+	available, err := b.WalletOutputs(ctx)
 	if err != nil {
 		return err
 	}
-	if uint64(len(outputs)) >= cfg.Contracts.Amount {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(outputs), cfg.Contracts.Amount)
+	if uint64(len(available)) >= cfg.Contracts.Amount {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), cfg.Contracts.Amount)
 		return nil
 	}
 
 	// not enough balance - nothing to do
-	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
 	balance, err := b.WalletBalance(ctx)
 	if err != nil {
+		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
 		return err
 	}
-	if balance.Cmp(amount.Mul64(cfg.Contracts.Amount)) < 0 {
-		l.Debugf("wallet maintenance skipped, insufficient balance %v < (%v*%v)", balance, cfg.Contracts.Amount, amount)
-		return nil
+	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
+	outputs := balance.Div(amount).Big().Uint64()
+	if outputs < 2 {
+		l.Warnf("wallet maintenance skipped, wallet has insufficient balance %v", balance)
+		return err
+	}
+	if outputs > cfg.Contracts.Amount {
+		outputs = cfg.Contracts.Amount
 	}
 
 	// redistribute outputs
-	id, err := b.WalletRedistribute(ctx, int(cfg.Contracts.Amount), amount)
+	id, err := b.WalletRedistribute(ctx, int(outputs), amount)
 	if err != nil {
-		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", cfg.Contracts.Amount, amount, balance, err)
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", outputs, amount, balance, err)
 	}
 
 	l.Debugf("wallet maintenance succeeded, tx %v", id)
