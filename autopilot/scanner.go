@@ -169,7 +169,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker) {
 			}
 		}
 
-		if !s.ap.isStopped() && (cfg.Hosts.AcceptZeroDowntimeHours || cfg.Hosts.MaxDowntimeHours > 0) {
+		if !s.ap.isStopped() && cfg.Hosts.MaxDowntimeHours > 0 {
 			s.logger.Debugf("removing hosts that have been offline for more than %v hours", cfg.Hosts.MaxDowntimeHours)
 			maxDowntime := time.Hour * time.Duration(cfg.Hosts.MaxDowntimeHours)
 			removed, err := s.bus.RemoveOfflineHosts(ctx, s.scanMinRecentFailures, maxDowntime)

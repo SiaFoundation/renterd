@@ -53,12 +53,9 @@ type (
 
 	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
-		MaxDowntimeHours uint64                      `json:"maxDowntimeHours"`
-		ScoreOverrides   map[types.PublicKey]float64 `json:"scoreOverrides"`
-
-		// used for testing
-		AcceptZeroDowntimeHours bool `json:"acceptZeroDowntimeHours"`
-		IgnoreRedundantIPs      bool `json:"ignoreRedundantIPs"`
+		IgnoreRedundantIPs bool                        `json:"ignoreRedundantIPs"`
+		MaxDowntimeHours   uint64                      `json:"maxDowntimeHours"`
+		ScoreOverrides     map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 
 	// ContractsConfig contains all contracts configuration parameters.

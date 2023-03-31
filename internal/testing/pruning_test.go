@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/build"
 )
 
@@ -34,6 +35,13 @@ func TestHostPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// remove the first host manually and close it
+	cluster.hosts = cluster.hosts[1:]
+	err = hosts[0].Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// add h1 to the blocklist
 	hk1 := hosts[0].PublicKey()
 	err = b.UpdateHostBlocklist(ctx, []string{hk1.String()}, nil, false)
@@ -41,10 +49,21 @@ func TestHostPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// remove the first host manually and close it
-	cluster.hosts = cluster.hosts[1:]
-	err = hosts[0].Close()
-	if err != nil {
+	// record a couple of failed interactions for h1 that push his downtime well
+	// over the default 'MaxDowntimeHours' setting of 10 hours, and his recent
+	// scan failures over the default 'MinRecentScanFailures'
+	//
+	// NOTE: we do this manually to avoid bypassing the condition by adding
+	// flags or extending the config with properties only used in testing
+	his := make([]hostdb.Interaction, 10)
+	for i := 0; i < 10; i++ {
+		his[i] = hostdb.Interaction{
+			Host:      hk1,
+			Timestamp: time.Now().Add(time.Hour * 20),
+			Type:      hostdb.InteractionTypeScan,
+		}
+	}
+	if err = b.RecordInteractions(context.Background(), his); err != nil {
 		t.Fatal(err)
 	}
 

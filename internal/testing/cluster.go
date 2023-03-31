@@ -52,9 +52,7 @@ var (
 			Set: "autopilot",
 		},
 		Hosts: api.HostsConfig{
-			AcceptZeroDowntimeHours: true, // accept for integration tests by default
-			MaxDowntimeHours:        0,    // 0 hours for testing
-
+			MaxDowntimeHours:   10,
 			IgnoreRedundantIPs: true, // ignore for integration tests by default
 		},
 	}

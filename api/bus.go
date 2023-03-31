@@ -109,8 +109,8 @@ type ContractAcquireResponse struct {
 
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.
 type HostsRemoveRequest struct {
-	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
 	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
+	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
 }
 
 // ObjectsStats is the response type for the /stats/objects endpoint.

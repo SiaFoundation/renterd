@@ -236,8 +236,8 @@ func (c *Client) HostsForScanning(ctx context.Context, maxLastScan time.Time, of
 // RemoveOfflineHosts removes all hosts that have been offline for longer than the given max downtime.
 func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
 	err = c.c.WithContext(ctx).POST("/hosts/remove", api.HostsRemoveRequest{
-		MinRecentScanFailures: minRecentScanFailures,
 		MaxDowntimeHours:      api.ParamDurationHour(maxDowntime),
+		MinRecentScanFailures: minRecentScanFailures,
 	}, &removed)
 	return
 }

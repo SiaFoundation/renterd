@@ -236,14 +236,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 	w := wallet.NewSingleAddressWallet(seed, ws)
 
-	dbDir := filepath.Join(dir, "db")
-	if err := os.MkdirAll(dbDir, 0700); err != nil {
-		return nil, nil, err
-	}
-
 	// If no DB dialector was provided, use SQLite.
 	dbConn := cfg.DBDialector
 	if dbConn == nil {
+		dbDir := filepath.Join(dir, "db")
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			return nil, nil, err
+		}
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
 

@@ -96,6 +96,7 @@ Especially the `contracts` section is important, make sure the `amount` is set t
 		"defragThreshold": 1000
 	},
 	"hosts": {
+		"ignoreRedundantIPs": false,
 		"scoreOverrides": {}
 	},
 	"contracts": {
