@@ -332,20 +332,20 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// check objects info.
-	info, err := cluster.Bus.ObjectsInfo()
+	info, err := cluster.Bus.ObjectsStats()
 	if err != nil {
 		t.Fatal(err)
 	}
 	objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
-	if info.ObjectsSize != objectsSize {
-		t.Error("wrong size", info.ObjectsSize, len(small)+len(large))
+	if info.TotalObjectsSize != objectsSize {
+		t.Error("wrong size", info.TotalObjectsSize, len(small)+len(large))
 	}
 	sectorsSize := 15 * rhpv2.SectorSize
-	if info.SectorsSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.SectorsSize, sectorsSize)
+	if info.TotalSectorsSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
 	}
-	if info.UploadedSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.UploadedSize, sectorsSize)
+	if info.TotalUploadedSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
 	}
 	if info.NumObjects != 4 {
 		t.Error("wrong number of objects", info.NumObjects, 4)

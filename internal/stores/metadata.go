@@ -263,11 +263,11 @@ func (o dbObject) convert() (object.Object, error) {
 	return obj, nil
 }
 
-// ObjectsInfo returns some info related to the objects stored in the store. To
-// make reduce locking and make sure all results are consistent, everything is
-// done within a single transaction.
-func (s *SQLStore) ObjectsInfo(ctx context.Context) (api.ObjectsInfo, error) {
-	var resp api.ObjectsInfo
+// ObjectsStats returns some info related to the objects stored in the store. To
+// reduce locking and make sure all results are consistent, everything is done
+// within a single transaction.
+func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
+	var resp api.ObjectsStats
 	return resp, s.db.Transaction(func(tx *gorm.DB) error {
 		// Number of objects.
 		err := tx.
@@ -282,7 +282,7 @@ func (s *SQLStore) ObjectsInfo(ctx context.Context) (api.ObjectsInfo, error) {
 		err = tx.
 			Model(&dbSlice{}).
 			Select("SUM(length)").
-			Scan(&resp.ObjectsSize).
+			Scan(&resp.TotalObjectsSize).
 			Error
 		if err != nil {
 			return err
@@ -300,8 +300,8 @@ func (s *SQLStore) ObjectsInfo(ctx context.Context) (api.ObjectsInfo, error) {
 		if err != nil {
 			return err
 		}
-		resp.SectorsSize = sectorSizes.SectorsSize
-		resp.UploadedSize = sectorSizes.UploadedSize
+		resp.TotalSectorsSize = sectorSizes.SectorsSize
+		resp.TotalUploadedSize = sectorSizes.UploadedSize
 		return nil
 	})
 }

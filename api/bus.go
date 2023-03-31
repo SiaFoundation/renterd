@@ -102,13 +102,12 @@ type HostsRemoveRequest struct {
 	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
 }
 
-// ObjectsInfo is the response type for the /objectssize endpoint.
-type ObjectsInfo struct {
-	NumObjects   uint64 `json:"numObjects"`   // number of objects
-	ObjectsSize  uint64 `json:"objectsSize"`  // size of all objects
-	SectorsSize  uint64 `json:"sectorsSize"`  // uploaded size of all objects
-	UploadedSize uint64 `json:"uploadedSize"` // uploaded size of all objects including redundant sectors
-
+// ObjectsStats is the response type for the /stats/objects endpoint.
+type ObjectsStats struct {
+	NumObjects        uint64 `json:"numObjects"`        // number of objects
+	TotalObjectsSize  uint64 `json:"totalObjectsSize"`  // size of all objects
+	TotalSectorsSize  uint64 `json:"totalSectorsSize"`  // uploaded size of all objects
+	TotalUploadedSize uint64 `json:"totalUploadedSize"` // uploaded size of all objects including redundant sectors
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.

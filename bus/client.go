@@ -615,9 +615,9 @@ func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (ta
 	return
 }
 
-// ObjectsInfo returns information about the number of objects and their size.
-func (c *Client) ObjectsInfo() (osr api.ObjectsInfo, err error) {
-	err = c.c.GET("/objectsinfo", &osr)
+// ObjectsStats returns information about the number of objects and their size.
+func (c *Client) ObjectsStats() (osr api.ObjectsStats, err error) {
+	err = c.c.GET("/stats/objects", &osr)
 	return
 }
 

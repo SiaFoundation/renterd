@@ -1699,18 +1699,18 @@ func TestObjectsInfo(t *testing.T) {
 	}
 
 	// Check sizes.
-	info, err := cs.ObjectsInfo(context.Background())
+	info, err := cs.ObjectsStats(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ObjectsSize != objectsSize {
-		t.Fatal("wrong size", info.ObjectsSize, objectsSize)
+	if info.TotalObjectsSize != objectsSize {
+		t.Fatal("wrong size", info.TotalObjectsSize, objectsSize)
 	}
-	if info.SectorsSize != sectorsSize {
-		t.Fatal("wrong size", info.SectorsSize, sectorsSize)
+	if info.TotalSectorsSize != sectorsSize {
+		t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
 	}
-	if info.UploadedSize != sectorsSize*2 {
-		t.Fatal("wrong size", info.UploadedSize, sectorsSize*2)
+	if info.TotalUploadedSize != sectorsSize*2 {
+		t.Fatal("wrong size", info.TotalUploadedSize, sectorsSize*2)
 	}
 	if info.NumObjects != 2 {
 		t.Fatal("wrong number of objects", info.NumObjects, 2)
