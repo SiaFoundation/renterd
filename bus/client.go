@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -396,7 +395,7 @@ func (c *Client) RecommendedFee(ctx context.Context) (fee types.Currency, err er
 }
 
 // Setting returns the value for the setting with given key.
-func (c *Client) Setting(ctx context.Context, key string) (value string, err error) {
+func (c *Client) Setting(ctx context.Context, key string, value interface{}) (err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/setting/%s", key), &value)
 	return
 }
@@ -408,51 +407,31 @@ func (c *Client) Settings(ctx context.Context) (settings []string, err error) {
 }
 
 // UpdateSetting will update the given setting under the given key.
-func (c *Client) UpdateSetting(ctx context.Context, key string, value string) error {
+func (c *Client) UpdateSetting(ctx context.Context, key string, value interface{}) error {
 	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/setting/%s", key), value)
 }
 
-// UpdateSettings will bulk update the given settings.
-func (c *Client) UpdateSettings(ctx context.Context, settings map[string]string) error {
-	return c.c.WithContext(ctx).PUT("/settings", settings)
+// DeleteSetting will delete the setting with given key.
+func (c *Client) DeleteSetting(ctx context.Context, key string) error {
+	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/setting/%s", key))
+}
+
+// ContractSetSettings returns the contract set settings.
+func (c *Client) ContractSetSettings(ctx context.Context) (css api.ContractSetSettings, err error) {
+	err = c.Setting(ctx, api.SettingContractSet, &css)
+	return
 }
 
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
-	setting, err := c.Setting(ctx, SettingGouging)
-	if err != nil {
-		return api.GougingSettings{}, err
-	}
-	err = json.Unmarshal([]byte(setting), &gs)
+	err = c.Setting(ctx, api.SettingGouging, &gs)
 	return
-}
-
-// UpdateGougingSettings allows configuring the gouging settings.
-func (c *Client) UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error {
-	b, err := json.Marshal(gs)
-	if err != nil {
-		return err
-	}
-	return c.UpdateSetting(ctx, SettingGouging, string(b))
 }
 
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
-	setting, err := c.Setting(ctx, SettingRedundancy)
-	if err != nil {
-		return api.RedundancySettings{}, err
-	}
-	err = json.Unmarshal([]byte(setting), &rs)
+	err = c.Setting(ctx, api.SettingRedundancy, &rs)
 	return
-}
-
-// UpdateRedundancySettings allows configuring the redundancy.
-func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.RedundancySettings) error {
-	b, err := json.Marshal(rs)
-	if err != nil {
-		return err
-	}
-	return c.UpdateSetting(ctx, SettingRedundancy, string(b))
 }
 
 // SearchHosts returns all hosts that match certain search criteria.
