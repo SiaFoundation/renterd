@@ -316,11 +316,11 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 	}
 
 	// Update the bus settings.
-	err = busClient.UpdateGougingSettings(context.Background(), testGougingSettings)
+	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
 	if err != nil {
 		return nil, err
 	}
-	err = busClient.UpdateRedundancySettings(context.Background(), testRedundancySettings)
+	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
 	if err != nil {
 		return nil, err
 	}

@@ -23,12 +23,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	SettingContractSet = "contract_set"
-	SettingGouging     = "gouging"
-	SettingRedundancy  = "redundancy"
-)
-
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
@@ -109,10 +103,10 @@ type (
 
 	// A SettingStore stores settings.
 	SettingStore interface {
+		DeleteSetting(ctx context.Context, key string) error
 		Setting(ctx context.Context, key string) (string, error)
 		Settings(ctx context.Context) ([]string, error)
 		UpdateSetting(ctx context.Context, key, value string) error
-		UpdateSettings(ctx context.Context, settings map[string]string) error
 	}
 
 	// EphemeralAccountStore persists information about accounts. Since
@@ -750,32 +744,61 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) settingsHandlerPUT(jc jape.Context) {
-	var settings map[string]string
-	if jc.Decode(&settings) == nil {
-		jc.Check("couldn't update settings", b.ss.UpdateSettings(jc.Request.Context(), settings))
-	}
-}
-
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
-	if key := jc.PathParam("key"); key == "" {
+	key := jc.PathParam("key")
+	if key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if setting, err := b.ss.Setting(jc.Request.Context(), jc.PathParam("key")); errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-	} else {
-		jc.Encode(setting)
+		return
 	}
+
+	setting, err := b.ss.Setting(jc.Request.Context(), jc.PathParam("key"))
+	if errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	var resp interface{}
+	err = json.Unmarshal([]byte(setting), &resp)
+	if err != nil {
+		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(resp)
 }
 
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
-	var value string
-	if key := jc.PathParam("key"); key == "" {
+	key := jc.PathParam("key")
+	if key == "" {
 		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
-	} else if jc.Decode(&value) == nil {
-		jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, value))
+		return
 	}
+
+	var value interface{}
+	if jc.Decode(&value) != nil {
+		return
+	}
+
+	js, err := json.Marshal(value)
+	if err != nil {
+		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(js)))
+}
+
+func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
+	key := jc.PathParam("key")
+	if key == "" {
+		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+		return
+	}
+	jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key))
 }
 
 func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
@@ -800,13 +823,16 @@ func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
 		return
 	}
 
-	cs, err := b.ss.Setting(jc.Request.Context(), SettingContractSet)
-	if jc.Check("could not get contract set setting", err) != nil {
+	var css api.ContractSetSettings
+	if csss, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet); err != nil {
+		jc.Error(fmt.Errorf("could not fetch contract set setting, err: %v", err), http.StatusInternalServerError)
 		return
+	} else if err := json.Unmarshal([]byte(csss), &css); err != nil {
+		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", csss, err)
 	}
 
 	jc.Encode(api.DownloadParams{
-		ContractSet:   cs,
+		ContractSet:   css.Set,
 		GougingParams: gp,
 	})
 }
@@ -817,13 +843,16 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	cs, err := b.ss.Setting(jc.Request.Context(), SettingContractSet)
-	if jc.Check("could not get contract set setting", err) != nil {
+	var css api.ContractSetSettings
+	if csss, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet); err != nil {
+		jc.Error(fmt.Errorf("could not fetch contract set setting, err: %v", err), http.StatusInternalServerError)
 		return
+	} else if err := json.Unmarshal([]byte(csss), &css); err != nil {
+		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", csss, err)
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:   cs,
+		ContractSet:   css.Set,
 		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams: gp,
 	})
@@ -839,14 +868,14 @@ func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
 
 func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, SettingGouging); err != nil {
+	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
 		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
 	}
 
 	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, SettingRedundancy); err != nil {
+	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
 		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
@@ -1028,8 +1057,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 
 	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
-		SettingGouging:    api.DefaultGougingSettings,
-		SettingRedundancy: api.DefaultRedundancySettings,
+		api.SettingGouging:    api.DefaultGougingSettings,
+		api.SettingRedundancy: api.DefaultRedundancySettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
@@ -1123,9 +1152,9 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /slab":            b.slabHandlerPUT,
 
 		"GET    /settings":     b.settingsHandlerGET,
-		"PUT    /settings":     b.settingsHandlerPUT,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
+		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,
