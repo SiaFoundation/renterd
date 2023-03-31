@@ -73,7 +73,7 @@ type Bus interface {
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 
 	// settings
-	UpdateContractSetSettings(ctx context.Context, css api.ContractSetSettings) error
+	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
 }
@@ -189,7 +189,7 @@ func (ap *Autopilot) Run() error {
 
 	// update the contract set setting
 	setting := api.ContractSetSettings{Set: ap.store.Config().Contracts.Set}
-	err := ap.bus.UpdateContractSetSettings(context.Background(), setting)
+	err := ap.bus.UpdateSetting(context.Background(), api.SettingContractSet, setting)
 	if err != nil {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
@@ -234,7 +234,7 @@ func (ap *Autopilot) Run() error {
 
 			// update the contract set setting
 			setting = api.ContractSetSettings{Set: ap.store.Config().Contracts.Set}
-			err = ap.bus.UpdateContractSetSettings(context.Background(), setting)
+			err = ap.bus.UpdateSetting(context.Background(), api.SettingContractSet, setting)
 			if err != nil {
 				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 			}

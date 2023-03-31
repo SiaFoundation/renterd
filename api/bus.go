@@ -15,6 +15,12 @@ const (
 	HostFilterModeBlocked = "blocked"
 )
 
+const (
+	SettingContractSet = "contractset"
+	SettingGouging     = "gouging"
+	SettingRedundancy  = "redundancy"
+)
+
 var (
 	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
 	// yet because it has been set too recently.
