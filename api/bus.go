@@ -14,8 +14,10 @@ const (
 	HostFilterModeAllowed = "allowed"
 	HostFilterModeBlocked = "blocked"
 
-	// ArchivalReasonFailedChecks describes why a contract was archived
-	ArchivalReasonFailedChecks = "failedchecks"
+	ContractArchivalReasonFailedChecks = "failedchecks"
+	ContractArchivalReasonHostPruned   = "hostpruned"
+	ContractArchivalReasonRemoved      = "removed"
+	ContractArchivalReasonRenewed      = "renewed"
 )
 
 var (

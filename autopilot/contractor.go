@@ -275,7 +275,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// archive contracts
 	if len(toArchive) > 0 {
 		c.logger.Debugf("archiving %d contracts: %+v", len(toArchive), toArchive)
-		if err := c.ap.bus.ArchiveContracts(ctx, toArchive, api.ArchivalReasonFailedChecks); err != nil {
+		if err := c.ap.bus.ArchiveContracts(ctx, toArchive, api.ContractArchivalReasonFailedChecks); err != nil {
 			c.logger.Errorf("failed to archive contracts, err: %v", err) // continue
 		}
 	}

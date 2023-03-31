@@ -15,15 +15,6 @@ import (
 )
 
 const (
-	// archivalReasonRenewed describes why a contract was archived
-	archivalReasonRenewed = "renewed"
-
-	// archivalReasonRemoved describes why a contract was archived
-	archivalReasonRemoved = "removed"
-
-	// archivalReasonHostPruned describes why a contract was archived
-	archivalReasonHostPruned = "hostpruned"
-
 	// slabRetrievalBatchSize is the number of slabs we fetch from the
 	// database per batch
 	// NOTE: This value can't be too big or otherwise UnhealthySlabs will fail
@@ -313,7 +304,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		// Create copy in archive.
 		err = tx.Create(&dbArchivedContract{
 			Host:      publicKey(oldContract.Host.PublicKey),
-			Reason:    archivalReasonRenewed,
+			Reason:    api.ContractArchivalReasonRenewed,
 			RenewedTo: fileContractID(c.ID()),
 
 			ContractCommon: ContractCommon{
@@ -462,7 +453,7 @@ func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) 
 	}
 
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, []dbContract{contract}, archivalReasonRemoved)
+		return archiveContracts(tx, []dbContract{contract}, api.ContractArchivalReasonRemoved)
 	}); err != nil {
 		return err
 	}
@@ -484,7 +475,7 @@ func (s *SQLStore) RemoveContracts(ctx context.Context) error {
 
 	// archive all contracts
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, contracts, archivalReasonRemoved)
+		return archiveContracts(tx, contracts, api.ContractArchivalReasonRemoved)
 	}); err != nil {
 		return nil
 	}
