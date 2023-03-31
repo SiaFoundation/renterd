@@ -434,6 +434,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	contractMap := make(map[types.FileContractID]api.ContractMetadata)
 	renewIndices := make(map[types.FileContractID]int)
 
+	// return variables
+	toArchive = make(map[types.FileContractID]string)
+
 	// check every active contract
 	for _, contract := range contracts {
 		// convenience variables
