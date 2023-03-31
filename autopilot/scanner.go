@@ -247,7 +247,6 @@ func (s *scanner) launchHostScans() chan scanReq {
 				}:
 				}
 			}
-
 		}
 	}()
 
