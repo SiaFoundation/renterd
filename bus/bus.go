@@ -87,7 +87,7 @@ type (
 		ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
-		ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) error
+		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
@@ -537,11 +537,12 @@ func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
-	var req api.ArchiveContractsRequest
-	if jc.Decode(&req) != nil {
+	var toArchive api.ArchiveContractsRequest
+	if jc.Decode(&toArchive) != nil {
 		return
 	}
-	jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), req.ContractIDs, req.Reason))
+
+	jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive))
 }
 
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {

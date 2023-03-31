@@ -275,7 +275,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// archive contracts
 	if len(toArchive) > 0 {
 		c.logger.Debugf("archiving %d contracts: %+v", len(toArchive), toArchive)
-		if err := c.ap.bus.ArchiveContracts(ctx, toArchive, api.ContractArchivalReasonFailedChecks); err != nil {
+		if err := c.ap.bus.ArchiveContracts(ctx, toArchive); err != nil {
 			c.logger.Errorf("failed to archive contracts, err: %v", err) // continue
 		}
 	}
@@ -299,6 +299,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	}
 
 	// build the new contract set (excluding formed contracts)
+
 	contractset := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
 	numContracts := uint64(len(contractset))
 
@@ -402,7 +403,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toArchive, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toArchive map[types.FileContractID]string, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -504,7 +505,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 					settings: settings,
 				})
 			} else {
-				toArchive = append(toArchive, fcid)
+				toArchive[fcid] = errStr(joinErrors(reasons))
 				continue
 			}
 		}
@@ -1167,7 +1168,7 @@ func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKe
 	return w.RHPPriceTable(ctx, hk, siamuxAddr)
 }
 
-func buildContractSet(active []api.Contract, toArchive, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
+func buildContractSet(active []api.Contract, toArchive map[types.FileContractID]string, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {
 	// collect ids
 	var activeIds []types.FileContractID
 	for _, c := range active {
@@ -1177,9 +1178,13 @@ func buildContractSet(active []api.Contract, toArchive, toIgnore []types.FileCon
 	for _, c := range append(toRefresh, toRenew...) {
 		renewIds = append(renewIds, c.contract.ID)
 	}
+	var toArchiveIds []types.FileContractID
+	for id := range toArchive {
+		toArchiveIds = append(toArchiveIds, id)
+	}
 
 	// build some maps
-	isArchived := contractMapBool(toArchive)
+	isArchived := contractMapBool(toArchiveIds)
 	isIgnored := contractMapBool(toIgnore)
 	isUpForRenew := contractMapBool(renewIds)
 

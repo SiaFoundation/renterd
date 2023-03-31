@@ -420,10 +420,16 @@ func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractI
 }
 
 func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error {
-	return s.ArchiveContracts(ctx, []types.FileContractID{id}, reason)
+	return s.ArchiveContracts(ctx, map[types.FileContractID]string{id: reason})
 }
 
-func (s *SQLStore) ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) error {
+func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error {
+	// fetch ids
+	var ids []types.FileContractID
+	for id := range toArchive {
+		ids = append(ids, id)
+	}
+
 	// fetch contracts
 	cs, err := contracts(s.db, ids)
 	if err != nil {
@@ -432,7 +438,7 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, ids []types.FileContrac
 
 	// archive them
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, cs, reason)
+		return archiveContracts(tx, cs, toArchive)
 	}); err != nil {
 		return err
 	}
@@ -454,9 +460,15 @@ func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error
 		return err
 	}
 
+	// create map
+	toArchive := make(map[types.FileContractID]string)
+	for _, c := range contracts {
+		toArchive[types.FileContractID(c.FCID)] = reason
+	}
+
 	// archive all contracts
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, contracts, reason)
+		return archiveContracts(tx, contracts, toArchive)
 	}); err != nil {
 		return err
 	}
@@ -1060,12 +1072,12 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 // archival reason
 //
 // NOTE: this function archives the contracts without setting a renewed ID
-func archiveContracts(tx *gorm.DB, contracts []dbContract, reason string) error {
+func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
 	for _, contract := range contracts {
 		// create a copy in the archive
 		if err := tx.Create(&dbArchivedContract{
 			Host:   publicKey(contract.Host.PublicKey),
-			Reason: reason,
+			Reason: toArchive[types.FileContractID(contract.FCID)],
 
 			ContractCommon: ContractCommon{
 				FCID:        contract.FCID,

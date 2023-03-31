@@ -555,8 +555,14 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 				return err
 			}
 
+			// create map
+			toArchive := make(map[types.FileContractID]string)
+			for _, c := range hcs {
+				toArchive[types.FileContractID(c.FCID)] = api.ContractArchivalReasonHostPruned
+			}
+
 			// archive host contracts
-			if err := archiveContracts(tx, hcs, api.ContractArchivalReasonHostPruned); err != nil {
+			if err := archiveContracts(tx, hcs, toArchive); err != nil {
 				return err
 			}
 

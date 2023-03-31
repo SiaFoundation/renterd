@@ -285,11 +285,8 @@ func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractM
 }
 
 // ArchiveContracts archives the contracts with the given IDs and archival reason.
-func (c *Client) ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) (err error) {
-	err = c.c.WithContext(ctx).POST("/contracts/archive", api.ArchiveContractsRequest{
-		ContractIDs: ids,
-		Reason:      reason,
-	}, nil)
+func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) (err error) {
+	err = c.c.WithContext(ctx).POST("/contracts/archive", toArchive, nil)
 	return
 }
 

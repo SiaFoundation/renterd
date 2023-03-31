@@ -14,10 +14,9 @@ const (
 	HostFilterModeAllowed = "allowed"
 	HostFilterModeBlocked = "blocked"
 
-	ContractArchivalReasonFailedChecks = "failedchecks"
-	ContractArchivalReasonHostPruned   = "hostpruned"
-	ContractArchivalReasonRemoved      = "removed"
-	ContractArchivalReasonRenewed      = "renewed"
+	ContractArchivalReasonHostPruned = "hostpruned"
+	ContractArchivalReasonRemoved    = "removed"
+	ContractArchivalReasonRenewed    = "renewed"
 )
 
 var (
@@ -56,10 +55,7 @@ var (
 )
 
 // ArchiveContractsRequest is the request type for the /contracts/archive endpoint.
-type ArchiveContractsRequest struct {
-	ContractIDs []types.FileContractID `json:"contractIDs"`
-	Reason      string                 `json:"reason"`
-}
+type ArchiveContractsRequest = map[types.FileContractID]string
 
 // AccountHandlerPOST is the request type for the /account/:id endpoint.
 type AccountHandlerPOST struct {

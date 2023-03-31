@@ -58,7 +58,7 @@ type Bus interface {
 	AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
-	ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) error
+	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
