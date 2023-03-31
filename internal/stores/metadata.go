@@ -455,34 +455,22 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 }
 
 func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error {
-	// fetch contracts
-	var contracts []dbContract
+	// fetch contract ids
+	var fcids []fileContractID
 	if err := s.db.
 		Model(&dbContract{}).
-		Find(&contracts).
+		Pluck("fcid", &fcids).
 		Error; err != nil {
 		return err
 	}
 
 	// create map
 	toArchive := make(map[types.FileContractID]string)
-	for _, c := range contracts {
-		toArchive[types.FileContractID(c.FCID)] = reason
+	for _, fcid := range fcids {
+		toArchive[types.FileContractID(fcid)] = reason
 	}
 
-	// archive all contracts
-	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, contracts, toArchive)
-	}); err != nil {
-		return err
-	}
-
-	// NOTE: for the time being, we do not clear known contracts when we archive
-	// a contract, this avoids a race condition when process consensus changes
-	// for recently archived contracts
-	//
-	// s.knownContracts = make(map[types.FileContractID]struct{})
-	return nil
+	return s.ArchiveContracts(ctx, toArchive)
 }
 
 func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error) {
