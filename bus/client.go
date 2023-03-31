@@ -395,7 +395,7 @@ func (c *Client) RecommendedFee(ctx context.Context) (fee types.Currency, err er
 }
 
 // Setting returns the value for the setting with given key.
-func (c *Client) Setting(ctx context.Context, key string) (value interface{}, err error) {
+func (c *Client) Setting(ctx context.Context, key string, value interface{}) (err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/setting/%s", key), &value)
 	return
 }
@@ -413,47 +413,20 @@ func (c *Client) UpdateSetting(ctx context.Context, key string, value interface{
 
 // ContractSetSettings returns the contract set settings.
 func (c *Client) ContractSetSettings(ctx context.Context) (css api.ContractSetSettings, err error) {
-	setting, err := c.Setting(ctx, api.SettingContractSet)
-	if err != nil {
-		return api.ContractSetSettings{}, err
-	}
-
-	css, ok := setting.(api.ContractSetSettings)
-	if !ok {
-		return api.ContractSetSettings{}, fmt.Errorf("invalid contractset settings: %v", setting)
-	}
-
-	return css, nil
+	err = c.Setting(ctx, api.SettingContractSet, &css)
+	return
 }
 
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
-	setting, err := c.Setting(ctx, api.SettingGouging)
-	if err != nil {
-		return api.GougingSettings{}, err
-	}
-
-	gs, ok := setting.(api.GougingSettings)
-	if !ok {
-		return api.GougingSettings{}, fmt.Errorf("invalid gouging settings: %v", setting)
-	}
-
-	return gs, nil
+	err = c.Setting(ctx, api.SettingGouging, &gs)
+	return
 }
 
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
-	setting, err := c.Setting(ctx, api.SettingRedundancy)
-	if err != nil {
-		return api.RedundancySettings{}, err
-	}
-
-	rs, ok := setting.(api.RedundancySettings)
-	if !ok {
-		return api.RedundancySettings{}, fmt.Errorf("invalid redundancy settings: %v", setting)
-	}
-
-	return rs, nil
+	err = c.Setting(ctx, api.SettingRedundancy, &rs)
+	return
 }
 
 // SearchHosts returns all hosts that match certain search criteria.
