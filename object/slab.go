@@ -92,14 +92,14 @@ type SlabSlice struct {
 
 // SectorRegion returns the offset and length of the sector region that must be
 // downloaded in order to recover the data referenced by the SlabSlice.
-func (ss SlabSlice) SectorRegion() (offset, length uint32) {
+func (ss SlabSlice) SectorRegion() (offset, length uint64) {
 	minChunkSize := rhpv2.LeafSize * uint32(ss.MinShards)
 	start := (ss.Offset / minChunkSize) * rhpv2.LeafSize
 	end := ((ss.Offset + ss.Length) / minChunkSize) * rhpv2.LeafSize
 	if (ss.Offset+ss.Length)%minChunkSize != 0 {
 		end += rhpv2.LeafSize
 	}
-	return start, end - start
+	return uint64(start), uint64(end - start)
 }
 
 // Decrypt xors shards with the keystream derived from s.Key (starting at the

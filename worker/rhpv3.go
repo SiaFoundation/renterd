@@ -560,8 +560,10 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 		hpt = *host.PriceTable
 		return
 	}
+
+	// sanity check the host has settings to avoid nil panic
 	if host.Settings == nil {
-		return hostdb.HostPriceTable{}, errors.New("host has no settings")
+		return hostdb.HostPriceTable{}, fmt.Errorf("host %v has no settings", hk)
 	}
 
 	// otherwise fetch it
