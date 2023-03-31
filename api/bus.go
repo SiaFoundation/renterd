@@ -217,21 +217,21 @@ type UpdateBlocklistRequest struct {
 // AccountsUpdateBalanceRequest is the request type for /accounts/:id/update
 // endpoint.
 type AccountsUpdateBalanceRequest struct {
-	Host   types.PublicKey `json:"host"`
-	Amount *big.Int        `json:"amount"`
+	HostKey types.PublicKey `json:"hostKey"`
+	Amount  *big.Int        `json:"amount"`
 }
 
 // AccountsRequiresSyncRequest is the request type for
 // /accounts/:id/requiressync endpoint.
 type AccountsRequiresSyncRequest struct {
-	Host types.PublicKey `json:"host"`
+	HostKey types.PublicKey `json:"hostKey"`
 }
 
 // AccountsAddBalanceRequest is the request type for /accounts/:id/add
 // endpoint.
 type AccountsAddBalanceRequest struct {
-	Host   types.PublicKey `json:"host"`
-	Amount *big.Int        `json:"amount"`
+	HostKey types.PublicKey `json:"hostKey"`
+	Amount  *big.Int        `json:"amount"`
 }
 
 // DownloadParams contains the metadata needed by a worker to download an object.

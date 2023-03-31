@@ -541,8 +541,8 @@ func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err erro
 // AddBalance adds the given amount to an account's balance.
 func (c *Client) AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amount *big.Int) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/add", id), api.AccountsAddBalanceRequest{
-		Host:   hk,
-		Amount: amount,
+		HostKey: hk,
+		Amount:  amount,
 	}, nil)
 	return
 }
@@ -567,8 +567,8 @@ func (c *Client) UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uin
 // SetBalance sets the given account's balance to a certain amount.
 func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amount *big.Int) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/update", id), api.AccountsUpdateBalanceRequest{
-		Host:   hk,
-		Amount: amount,
+		HostKey: hk,
+		Amount:  amount,
 	}, nil)
 	return
 }
@@ -576,7 +576,7 @@ func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, hk types.Publ
 // ScheduleSync sets the requiresSync flag of an account.
 func (c *Client) ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/requiressync", id), api.AccountsRequiresSyncRequest{
-		Host: hk,
+		HostKey: hk,
 	}, nil)
 	return
 }

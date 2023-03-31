@@ -927,11 +927,11 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Host == (types.PublicKey{}) {
+	if req.HostKey == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.AddAmount(id, req.Host, req.Amount)
+	b.accounts.AddAmount(id, req.HostKey, req.Amount)
 }
 
 func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
@@ -962,11 +962,11 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Host == (types.PublicKey{}) {
+	if req.HostKey == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.SetBalance(id, req.Host, req.Amount)
+	b.accounts.SetBalance(id, req.HostKey, req.Amount)
 }
 
 func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
@@ -982,11 +982,11 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
 		return
 	}
-	if req.Host == (types.PublicKey{}) {
+	if req.HostKey == (types.PublicKey{}) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	err := b.accounts.ScheduleSync(id, req.Host)
+	err := b.accounts.ScheduleSync(id, req.HostKey)
 	if errors.Is(err, errAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
