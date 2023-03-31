@@ -560,6 +560,9 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 		hpt = *host.PriceTable
 		return
 	}
+	if host.Settings == nil {
+		return hostdb.HostPriceTable{}, errors.New("host has no settings")
+	}
 
 	// otherwise fetch it
 	return w.fetchPriceTable(ctx, hk, host.Settings.SiamuxAddr(), revision)
