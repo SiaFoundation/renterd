@@ -21,8 +21,6 @@ import (
 	"go.sia.tech/renterd/metrics"
 )
 
-const sessionLockTimeout = 30 * time.Second
-
 var (
 	// ErrInsufficientFunds is returned by various RPCs when the renter is
 	// unable to provide sufficient payment to the host.
@@ -371,7 +369,7 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 
 // Reconnect re-establishes a connection to the host by recreating the
 // transport, updating the settings and calling the lock RPC.
-func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID) (err error) {
+func (s *Session) Reconnect(ctx context.Context, sessionLockTimeout time.Duration, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID) (err error) {
 	defer wrapErr(&err, "Reconnect")
 
 	s.closeTransport()
@@ -402,7 +400,7 @@ func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.Pu
 
 // Refresh checks whether the session is still usable, if an error is returned
 // the session must be reconnected.
-func (s *Session) Refresh(ctx context.Context, sessionTTL time.Duration, renterKey types.PrivateKey, contractID types.FileContractID) error {
+func (s *Session) Refresh(ctx context.Context, sessionLockTimeout, sessionTTL time.Duration, renterKey types.PrivateKey, contractID types.FileContractID) error {
 	if s.transport == nil {
 		return errors.New("no transport")
 	}
