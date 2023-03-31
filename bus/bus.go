@@ -102,6 +102,8 @@ type (
 		UpdateObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 
+		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
+
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
@@ -723,6 +725,14 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path")))
 }
 
+func (b *bus) objectsStatshandlerGET(jc jape.Context) {
+	info, err := b.ms.ObjectsStats(jc.Request.Context())
+	if jc.Check("couldn't get objects stats", err) != nil {
+		return
+	}
+	jc.Encode(info)
+}
+
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
@@ -1108,6 +1118,8 @@ func (b *bus) Handler() http.Handler {
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
+
+		"GET    /stats/objects": b.objectsStatshandlerGET,
 
 		"GET    /objects/*path": b.objectsHandlerGET,
 		"PUT    /objects/*path": b.objectsHandlerPUT,
