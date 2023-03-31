@@ -36,7 +36,7 @@ func TestHostPruning(t *testing.T) {
 
 	// add h1 to the blocklist
 	hk1 := hosts[0].PublicKey()
-	err = b.UpdateHostBlocklist(ctx, []string{hk1.String()}, nil)
+	err = b.UpdateHostBlocklist(ctx, []string{hk1.String()}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
