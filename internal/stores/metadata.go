@@ -396,7 +396,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Finally delete the old contract.
-		return removeContract(tx, fileContractID(renewedFrom))
+		return deleteContract(tx, fileContractID(renewedFrom))
 	}); err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -419,15 +419,51 @@ func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractI
 	return contracts, nil
 }
 
+func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error {
+	return s.ArchiveContracts(ctx, []types.FileContractID{id}, reason)
+}
+
 func (s *SQLStore) ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) error {
+	// fetch contracts
 	cs, err := contracts(s.db, ids)
 	if err != nil {
 		return err
 	}
 
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	// archive them
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		return archiveContracts(tx, cs, reason)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// remove from known contracts
+	for _, id := range ids {
+		delete(s.knownContracts, id)
+	}
+	return nil
+}
+
+func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error {
+	// fetch contracts
+	var contracts []dbContract
+	if err := s.db.
+		Model(&dbContract{}).
+		Find(&contracts).
+		Error; err != nil {
+		return err
+	}
+
+	// archive all contracts
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
+		return archiveContracts(tx, contracts, reason)
+	}); err != nil {
+		return err
+	}
+
+	// clear known contracts
+	s.knownContracts = make(map[types.FileContractID]struct{})
+	return nil
 }
 
 func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error) {
@@ -487,44 +523,6 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 
 	// update contracts
 	return s.db.Model(&contractset).Association("Contracts").Replace(&dbContracts)
-}
-
-func (s *SQLStore) RemoveContract(ctx context.Context, id types.FileContractID) error {
-	contract, err := s.contract(ctx, fileContractID(id))
-	if err != nil {
-		return err
-	}
-
-	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, []dbContract{contract}, api.ContractArchivalReasonRemoved)
-	}); err != nil {
-		return err
-	}
-
-	delete(s.knownContracts, id)
-	return nil
-}
-
-func (s *SQLStore) RemoveContracts(ctx context.Context) error {
-	var contracts []dbContract
-
-	// fetch contracts
-	if err := s.db.
-		Model(&dbContract{}).
-		Find(&contracts).
-		Error; err != nil {
-		return err
-	}
-
-	// archive all contracts
-	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, contracts, api.ContractArchivalReasonRemoved)
-	}); err != nil {
-		return nil
-	}
-
-	s.knownContracts = make(map[types.FileContractID]struct{})
-	return nil
 }
 
 func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
@@ -649,7 +647,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
 		// slabs if it exists.
-		err := removeObject(tx, key)
+		err := deleteObject(tx, key)
 		if err != nil {
 			return err
 		}
@@ -765,7 +763,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
-	return removeObject(s.db, key)
+	return deleteObject(s.db, key)
 }
 
 func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error {
@@ -1090,20 +1088,20 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, reason string) error 
 		}
 
 		// remove the contract
-		if err := removeContract(tx, contract.FCID); err != nil {
+		if err := deleteContract(tx, contract.FCID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// removeObject removes an object from the store.
-func removeObject(tx *gorm.DB, key string) error {
+// deleteObject deletes an object from the store.
+func deleteObject(tx *gorm.DB, key string) error {
 	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
 }
 
-// removeContract removes a contract from the store.
-func removeContract(tx *gorm.DB, id fileContractID) error {
+// deleteContract deletes a contract from the store.
+func deleteContract(tx *gorm.DB, id fileContractID) error {
 	return tx.
 		Where(&dbContract{ContractCommon: ContractCommon{FCID: id}}).
 		Delete(&dbContract{}).

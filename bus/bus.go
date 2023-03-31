@@ -86,13 +86,13 @@ type (
 		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, ids []types.FileContractID, reason string) error
+		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-		RemoveContract(ctx context.Context, id types.FileContractID) error
-		RemoveContracts(ctx context.Context) error
 		RemoveContractSet(ctx context.Context, name string) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
@@ -652,11 +652,11 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	jc.Check("couldn't remove contract", b.ms.RemoveContract(jc.Request.Context(), id))
+	jc.Check("couldn't remove contract", b.ms.ArchiveContract(jc.Request.Context(), id, api.ContractArchivalReasonRemoved))
 }
 
 func (b *bus) contractsAllHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't remove contracts", b.ms.RemoveContracts(jc.Request.Context()))
+	jc.Check("couldn't remove contracts", b.ms.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
 }
 
 func (b *bus) searchObjectsHandlerGET(jc jape.Context) {

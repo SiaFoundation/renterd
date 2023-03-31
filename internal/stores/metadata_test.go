@@ -190,7 +190,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Delete the contract.
-	if err := cs.RemoveContract(ctx, c.ID()); err != nil {
+	if err := cs.ArchiveContract(ctx, c.ID(), api.ContractArchivalReasonRemoved); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1308,7 +1308,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Delete the contract.
-	err = db.RemoveContract(ctx, fcid1)
+	err = db.ArchiveContract(ctx, fcid1, api.ContractArchivalReasonRemoved)
 	if err != nil {
 		t.Fatal(err)
 	}
