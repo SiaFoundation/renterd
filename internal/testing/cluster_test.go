@@ -331,7 +331,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}
 
-	// check objects info.
+	// check objects stats.
 	info, err := cluster.Bus.ObjectsStats()
 	if err != nil {
 		t.Fatal(err)

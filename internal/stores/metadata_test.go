@@ -1639,8 +1639,8 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 }
 
-// TestObjectsInfo is a unit test for ObjectsInfo.
-func TestObjectsInfo(t *testing.T) {
+// TestObjectsStats is a unit test for ObjectsStats.
+func TestObjectsStats(t *testing.T) {
 	cs, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
