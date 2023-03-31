@@ -742,6 +742,7 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	}
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
+		return
 	}
 
 	var resp interface{}
