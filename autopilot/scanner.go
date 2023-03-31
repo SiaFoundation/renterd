@@ -214,6 +214,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 	s.ap.wg.Add(1)
 	go func() {
 		defer s.ap.wg.Done()
+		defer close(reqChan)
 
 		var offset int
 		var exhausted bool
@@ -231,19 +232,23 @@ func (s *scanner) launchHostScans() chan scanReq {
 			if len(hosts) < int(s.scanBatchSize) {
 				exhausted = true
 			}
+
 			s.logger.Debugf("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
+			offset += int(s.scanBatchSize)
 
 			// add batch to scan queue
 			for _, h := range hosts {
-				reqChan <- scanReq{
+				select {
+				case <-s.ap.stopChan:
+					return
+				case reqChan <- scanReq{
 					hostKey: h.PublicKey,
 					hostIP:  h.NetAddress,
+				}:
 				}
 			}
 
-			offset += int(s.scanBatchSize)
 		}
-		close(reqChan)
 	}()
 
 	return reqChan
