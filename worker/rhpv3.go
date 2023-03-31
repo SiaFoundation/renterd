@@ -534,7 +534,7 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 	if ongoing {
 		select {
 		case <-ctx.Done():
-			return hostdb.HostPriceTable{}, errors.New("timeout while blocking for pricetable update")
+			return hostdb.HostPriceTable{}, fmt.Errorf("%w; timeout while blocking for pricetable update", ctx.Err())
 		case <-update.done:
 		}
 		return update.hpt, update.err
