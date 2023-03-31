@@ -443,10 +443,14 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 		return err
 	}
 
-	// remove from known contracts
-	for _, id := range ids {
-		delete(s.knownContracts, id)
-	}
+	// NOTE: for the time being, we do not remove known contracts when we
+	// archive a contract, this avoids a race condition when process consensus
+	// changes for recently archived contracts
+	//
+	// remove from known contracts for _, id := range ids {
+	//  delete(s.knownContracts, id)
+	// }
+
 	return nil
 }
 
@@ -473,8 +477,11 @@ func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error
 		return err
 	}
 
-	// clear known contracts
-	s.knownContracts = make(map[types.FileContractID]struct{})
+	// NOTE: for the time being, we do not clear known contracts when we archive
+	// a contract, this avoids a race condition when process consensus changes
+	// for recently archived contracts
+	//
+	// s.knownContracts = make(map[types.FileContractID]struct{})
 	return nil
 }
 
