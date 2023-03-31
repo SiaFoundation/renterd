@@ -77,11 +77,11 @@ type Interactions struct {
 }
 
 type Interaction struct {
-	Host      types.PublicKey
-	Result    json.RawMessage
-	Success   bool
-	Timestamp time.Time
-	Type      string
+	Host      types.PublicKey `json:"host"`
+	Result    json.RawMessage `json:"result"`
+	Success   bool            `json:"success"`
+	Timestamp time.Time       `json:"timestamp"`
+	Type      string          `json:"type"`
 }
 
 // HostAddress contains the address of a specific host identified by a public
