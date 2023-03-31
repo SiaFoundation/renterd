@@ -413,7 +413,7 @@ func (c *Client) UpdateSetting(ctx context.Context, key string, value interface{
 
 // ContractSetSettings returns the contract set settings.
 func (c *Client) ContractSetSettings(ctx context.Context) (css api.ContractSetSettings, err error) {
-	setting, err := c.Setting(ctx, SettingContractSet)
+	setting, err := c.Setting(ctx, api.SettingContractSet)
 	if err != nil {
 		return api.ContractSetSettings{}, err
 	}
@@ -426,14 +426,9 @@ func (c *Client) ContractSetSettings(ctx context.Context) (css api.ContractSetSe
 	return css, nil
 }
 
-// UpdateContractSetSettings allows configuring the contractset settings.
-func (c *Client) UpdateContractSetSettings(ctx context.Context, css api.ContractSetSettings) error {
-	return c.UpdateSetting(ctx, SettingContractSet, css)
-}
-
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
-	setting, err := c.Setting(ctx, SettingGouging)
+	setting, err := c.Setting(ctx, api.SettingGouging)
 	if err != nil {
 		return api.GougingSettings{}, err
 	}
@@ -446,14 +441,9 @@ func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, e
 	return gs, nil
 }
 
-// UpdateGougingSettings allows configuring the gouging settings.
-func (c *Client) UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error {
-	return c.UpdateSetting(ctx, SettingGouging, gs)
-}
-
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
-	setting, err := c.Setting(ctx, SettingRedundancy)
+	setting, err := c.Setting(ctx, api.SettingRedundancy)
 	if err != nil {
 		return api.RedundancySettings{}, err
 	}
@@ -464,11 +454,6 @@ func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySetti
 	}
 
 	return rs, nil
-}
-
-// UpdateRedundancySettings allows configuring the redundancy.
-func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.RedundancySettings) error {
-	return c.UpdateSetting(ctx, SettingRedundancy, rs)
 }
 
 // SearchHosts returns all hosts that match certain search criteria.

@@ -23,12 +23,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	SettingContractSet = "contractset"
-	SettingGouging     = "gouging"
-	SettingRedundancy  = "redundancy"
-)
-
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
@@ -812,7 +806,7 @@ func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
 		return
 	}
 
-	cs, err := b.ss.Setting(jc.Request.Context(), SettingContractSet)
+	cs, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
 	if jc.Check("could not get contract set setting", err) != nil {
 		return
 	}
@@ -829,7 +823,7 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	cs, err := b.ss.Setting(jc.Request.Context(), SettingContractSet)
+	cs, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
 	if jc.Check("could not get contract set setting", err) != nil {
 		return
 	}
@@ -851,14 +845,14 @@ func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
 
 func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, SettingGouging); err != nil {
+	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
 		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
 	}
 
 	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, SettingRedundancy); err != nil {
+	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
 		return api.GougingParams{}, err
 	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
 		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
@@ -1040,8 +1034,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 
 	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
-		SettingGouging:    api.DefaultGougingSettings,
-		SettingRedundancy: api.DefaultRedundancySettings,
+		api.SettingGouging:    api.DefaultGougingSettings,
+		api.SettingRedundancy: api.DefaultRedundancySettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
