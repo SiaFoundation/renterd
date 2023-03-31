@@ -21,6 +21,8 @@ import (
 	"go.sia.tech/renterd/metrics"
 )
 
+const sessionLockTimeout = 30 * time.Second
+
 var (
 	// ErrInsufficientFunds is returned by various RPCs when the renter is
 	// unable to provide sufficient payment to the host.
@@ -384,7 +386,7 @@ func (s *Session) Reconnect(ctx context.Context, hostIP string, hostKey types.Pu
 	}
 
 	s.key = renterKey
-	if err = s.lock(ctx, contractID, renterKey, 10*time.Second); err != nil {
+	if err = s.lock(ctx, contractID, renterKey, sessionLockTimeout); err != nil {
 		s.closeTransport()
 		return err
 	}
@@ -419,7 +421,7 @@ func (s *Session) Refresh(ctx context.Context, sessionTTL time.Duration, renterK
 				return err
 			}
 		}
-		if err := s.lock(ctx, contractID, renterKey, 10*time.Second); err != nil {
+		if err := s.lock(ctx, contractID, renterKey, sessionLockTimeout); err != nil {
 			return err
 		}
 
