@@ -411,7 +411,7 @@ func (c *Client) UpdateSetting(ctx context.Context, key string, value interface{
 	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/setting/%s", key), value)
 }
 
-// ContractSetSettings returns the contractset settings.
+// ContractSetSettings returns the contract set settings.
 func (c *Client) ContractSetSettings(ctx context.Context) (css api.ContractSetSettings, err error) {
 	setting, err := c.Setting(ctx, SettingContractSet)
 	if err != nil {
