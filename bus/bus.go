@@ -107,6 +107,7 @@ type (
 
 	// A SettingStore stores settings.
 	SettingStore interface {
+		DeleteSetting(ctx context.Context, key string) error
 		Setting(ctx context.Context, key string) (string, error)
 		Settings(ctx context.Context) ([]string, error)
 		UpdateSetting(ctx context.Context, key, value string) error
@@ -780,6 +781,15 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(js)))
 }
 
+func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
+	key := jc.PathParam("key")
+	if key == "" {
+		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+		return
+	}
+	jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key))
+}
+
 func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
@@ -1125,6 +1135,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
+		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
 		"GET    /params/download": b.paramsHandlerDownloadGET,
 		"GET    /params/upload":   b.paramsHandlerUploadGET,

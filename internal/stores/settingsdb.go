@@ -22,6 +22,11 @@ type (
 // TableName implements the gorm.Tabler interface.
 func (dbSetting) TableName() string { return "settings" }
 
+// DeleteSetting implements the bus.SettingStore interface.
+func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
+	return s.db.Where(&dbSetting{Key: key}).Delete(&dbSetting{}).Error
+}
+
 // Setting implements the bus.SettingStore interface.
 func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	var entry dbSetting
