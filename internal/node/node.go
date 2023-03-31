@@ -42,6 +42,7 @@ type WorkerConfig struct {
 type BusConfig struct {
 	Bootstrap       bool
 	GatewayAddr     string
+	Network         *consensus.Network
 	Miner           *Miner
 	PersistInterval time.Duration
 
@@ -80,7 +81,8 @@ func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
 }
 
 type chainManager struct {
-	cs modules.ConsensusSet
+	cs      modules.ConsensusSet
+	network *consensus.Network
 }
 
 func (cm chainManager) AcceptBlock(ctx context.Context, b types.Block) error {
@@ -95,6 +97,7 @@ func (cm chainManager) Synced(ctx context.Context) bool {
 
 func (cm chainManager) TipState(ctx context.Context) consensus.State {
 	return consensus.State{
+		Network: cm.network,
 		Index: types.ChainIndex{
 			Height: uint64(cm.cs.Height()),
 			ID:     types.BlockID(cm.cs.CurrentBlock().ID()),
@@ -184,7 +187,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
 		return nil, nil, err
@@ -223,14 +226,14 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 	if err := os.MkdirAll(walletDir, 0700); err != nil {
 		return nil, nil, err
 	}
-	walletAddr := wallet.StandardAddress(walletKey.PublicKey())
+	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	ws, ccid, err := stores.NewJSONWalletStore(walletDir, walletAddr)
 	if err != nil {
 		return nil, nil, err
 	} else if err := cs.ConsensusSetSubscribe(ws, ccid, nil); err != nil {
 		return nil, nil, err
 	}
-	w := wallet.NewSingleAddressWallet(walletKey, ws)
+	w := wallet.NewSingleAddressWallet(seed, ws)
 
 	dbDir := filepath.Join(dir, "db")
 	if err := os.MkdirAll(dbDir, 0700); err != nil {
@@ -258,7 +261,7 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs, network: cfg.Network}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -275,8 +278,8 @@ func NewBus(cfg BusConfig, dir string, walletKey types.PrivateKey, l *zap.Logger
 	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, walletKey types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
-	workerKey := blake2b.Sum256(append([]byte("worker"), walletKey...))
+func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
 	w := worker.New(workerKey, cfg.ID, b, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, l)
 	return w.Handler(), w.Shutdown, nil
 }

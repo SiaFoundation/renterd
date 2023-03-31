@@ -249,8 +249,8 @@ func (c *Client) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey
 }
 
 // UpdateHostAllowlist updates the host allowlist, adding and removing the given entries.
-func (c *Client) UpdateHostAllowlist(ctx context.Context, add, remove []types.PublicKey) (err error) {
-	err = c.c.WithContext(ctx).PUT("/hosts/allowlist", api.UpdateAllowlistRequest{Add: add, Remove: remove})
+func (c *Client) UpdateHostAllowlist(ctx context.Context, add, remove []types.PublicKey, clear bool) (err error) {
+	err = c.c.WithContext(ctx).PUT("/hosts/allowlist", api.UpdateAllowlistRequest{Add: add, Remove: remove, Clear: clear})
 	return
 }
 
@@ -261,8 +261,8 @@ func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err err
 }
 
 // UpdateHostBlocklist updates the host blocklist, adding and removing the given entries.
-func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string) (err error) {
-	err = c.c.WithContext(ctx).PUT("/hosts/blocklist", api.UpdateBlocklistRequest{Add: add, Remove: remove})
+func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, clear bool) (err error) {
+	err = c.c.WithContext(ctx).PUT("/hosts/blocklist", api.UpdateBlocklistRequest{Add: add, Remove: remove, Clear: clear})
 	return
 }
 
@@ -605,6 +605,19 @@ func (c *Client) ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.Pu
 // ResetDrift resets the drift of an account to zero.
 func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/resetdrift", id), nil, nil)
+	return
+}
+
+// FileContractTax asks the bus for the siafund fee that has to be paid for a
+// contract with a given payout.
+func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (tax types.Currency, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/consensus/siafundfee/%s", api.ParamCurrency(payout)), &tax)
+	return
+}
+
+// ObjectsStats returns information about the number of objects and their size.
+func (c *Client) ObjectsStats() (osr api.ObjectsStats, err error) {
+	err = c.c.GET("/stats/objects", &osr)
 	return
 }
 

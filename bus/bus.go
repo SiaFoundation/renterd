@@ -76,8 +76,8 @@ type (
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
-		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey) error
-		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string) error
+		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
+		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -100,6 +100,8 @@ type (
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]string, error)
 		UpdateObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
+
+		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
@@ -302,19 +304,20 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
+	cs := b.cm.TipState(ctx)
 
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
-	cost := rhpv2.ContractFormationCost(fc, wpfr.HostSettings.ContractPrice)
+	cost := rhpv2.ContractFormationCost(cs, fc, wpfr.HostSettings.ContractPrice)
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(ctx), &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(b.cm.TipState(ctx), &txn, toSign, cf)
+	err = b.w.SignTransaction(cs, &txn, toSign, cf)
 	if jc.Check("couldn't sign transaction", err) != nil {
 		b.w.ReleaseInputs(txn)
 		return
@@ -340,6 +343,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
+	cs := b.cm.TipState(jc.Request.Context())
 
 	fc, basePrice := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.HostSettings, wprr.EndHeight)
 	finalPayment := wprr.HostSettings.BaseRPCPrice
@@ -350,13 +354,13 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
-	cost := rhpv2.ContractRenewalCost(fc, wprr.HostSettings.ContractPrice, txn.MinerFees[0], basePrice)
-	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, cost, b.tp.Transactions())
+	cost := rhpv2.ContractRenewalCost(cs, fc, wprr.HostSettings.ContractPrice, txn.MinerFees[0], basePrice)
+	toSign, err := b.w.FundTransaction(cs, &txn, cost, b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(b.cm.TipState(jc.Request.Context()), &txn, toSign, cf)
+	err = b.w.SignTransaction(cs, &txn, toSign, cf)
 	if jc.Check("couldn't sign transaction", err) != nil {
 		b.w.ReleaseInputs(txn)
 		return
@@ -495,7 +499,10 @@ func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateAllowlistRequest
 	if jc.Decode(&req) == nil {
-		if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove)) != nil {
+		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
+			jc.Error(errors.New("cannot add or remove entries while clearing the allowlist"), http.StatusBadRequest)
+			return
+		} else if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
@@ -512,7 +519,10 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateBlocklistRequest
 	if jc.Decode(&req) == nil {
-		if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove)) != nil {
+		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
+			jc.Error(errors.New("cannot add or remove entries while clearing the blocklist"), http.StatusBadRequest)
+			return
+		} else if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
@@ -708,6 +718,14 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 
 func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path")))
+}
+
+func (b *bus) objectsStatshandlerGET(jc jape.Context) {
+	info, err := b.ms.ObjectsStats(jc.Request.Context())
+	if jc.Check("couldn't get objects stats", err) != nil {
+		return
+	}
+	jc.Encode(info)
 }
 
 func (b *bus) slabHandlerPUT(jc jape.Context) {
@@ -982,6 +1000,15 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractTaxHandlerGET(jc jape.Context) {
+	var payout types.Currency
+	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
+		return
+	}
+	cs := b.cm.TipState(jc.Request.Context())
+	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
+}
+
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
@@ -1038,8 +1065,9 @@ func (b *bus) Handler() http.Handler {
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
 
-		"POST   /consensus/acceptblock": b.consensusAcceptBlock,
-		"GET    /consensus/state":       b.consensusStateHandler,
+		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
+		"GET    /consensus/state":              b.consensusStateHandler,
+		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 
 		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
@@ -1084,6 +1112,8 @@ func (b *bus) Handler() http.Handler {
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
+
+		"GET    /stats/objects": b.objectsStatshandlerGET,
 
 		"GET    /objects/*path": b.objectsHandlerGET,
 		"PUT    /objects/*path": b.objectsHandlerPUT,

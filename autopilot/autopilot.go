@@ -60,6 +60,7 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	DeleteContracts(ctx context.Context, ids []types.FileContractID) error
+	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 	// txpool
@@ -193,18 +194,15 @@ func (ap *Autopilot) Run() error {
 		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
 	}
 
+	// block until consensus is synced
+	if !ap.blockUntilSynced() {
+		ap.logger.Error("autopilot stopped before consensus was synced")
+		return nil
+	}
+
 	var launchAccountRefillsOnce sync.Once
 	for {
-		select {
-		case <-ap.stopChan:
-			return nil
-		case <-ap.triggerChan:
-			ap.logger.Info("autopilot iteration triggered")
-			ap.ticker.Reset(ap.tickerDuration)
-		case <-ap.ticker.C:
-			ap.logger.Info("autopilot iteration starting")
-		}
-
+		ap.logger.Info("autopilot iteration starting")
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
@@ -277,6 +275,15 @@ func (ap *Autopilot) Run() error {
 			// migration
 			ap.m.tryPerformMigrations(ctx, w)
 		})
+
+		select {
+		case <-ap.stopChan:
+			return nil
+		case <-ap.triggerChan:
+			ap.logger.Info("autopilot iteration triggered")
+			ap.ticker.Reset(ap.tickerDuration)
+		case <-ap.ticker.C:
+		}
 	}
 }
 
@@ -304,6 +311,32 @@ func (ap *Autopilot) Trigger() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (ap *Autopilot) blockUntilSynced() bool {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ap.stopChan:
+			return false
+		case <-ticker.C:
+			if synced := func() bool {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				cs, err := ap.bus.ConsensusState(ctx)
+				if err != nil {
+					ap.logger.Errorf("failed to get consensus state, err: %v", err)
+				}
+
+				return cs.Synced
+			}(); synced {
+				return true
+			}
+		}
 	}
 }
 

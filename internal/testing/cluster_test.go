@@ -121,19 +121,18 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Wait for the contract to be renewed.
 	err = Retry(100, 100*time.Millisecond, func() error {
-		resp, err := w.ActiveContracts(context.Background(), time.Minute)
+		contracts, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			return err
 		}
-		contracts := resp.Contracts
 		if len(contracts) != 1 {
 			return errors.New("no renewed contract")
 		}
 		if contracts[0].RenewedFrom != contract.ID {
 			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
 		}
-		if contracts[0].EndHeight() != contract.EndHeight()+cfg.Contracts.Period {
-			t.Fatal("wrong endHeight")
+		if contracts[0].ProofHeight != 0 {
+			return errors.New("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
 		}
 		return nil
 	})
@@ -243,7 +242,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if defaultAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
@@ -335,6 +334,26 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}
 
+	// check objects stats.
+	info, err := cluster.Bus.ObjectsStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
+	if info.TotalObjectsSize != objectsSize {
+		t.Error("wrong size", info.TotalObjectsSize, len(small)+len(large))
+	}
+	sectorsSize := 15 * rhpv2.SectorSize
+	if info.TotalSectorsSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
+	}
+	if info.TotalUploadedSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
+	}
+	if info.NumObjects != 4 {
+		t.Error("wrong number of objects", info.NumObjects, 4)
+	}
+
 	// download the data
 	for _, data := range [][]byte{small, large} {
 		name := fmt.Sprintf("data_%v", len(data))
@@ -359,7 +378,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if defaultAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
@@ -478,7 +497,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), "12288", 0, -1)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "1258", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +511,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	}
 
 	// wait for the contract to be renewed
-	err = Retry(100, time.Second, func() error {
+	err = Retry(100, 100*time.Millisecond, func() error {
 		cms, err := cluster.Bus.ActiveContracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -562,10 +581,6 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := nodes[0]
-	hg, err := host.HostGet()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Wait for contracts to form.
 	var contract api.Contract
@@ -587,7 +602,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
 	}
-	if acc.Host != types.PublicKey(hg.PublicKey.ToPublicKey()) {
+	if acc.Host != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
 	}
 

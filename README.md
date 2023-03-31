@@ -59,7 +59,7 @@ From within the root of the repo run the following command to build an image of
 Run `renterd` in the background as a container named `renterd` that exposes its
 API to the host system and the gateway to the world.
 
-`docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_WALLET_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp <IMAGE_ID>`
+`docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp <IMAGE_ID>`
 
 # Usage
 

@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -421,11 +422,11 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 
 func (w *worker) withRevisionV2(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
+	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
-			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
+			if err := w.ReleaseContract(ctx, contractID, lockID); err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
@@ -449,11 +450,11 @@ func (w *worker) withRevisionV2(ctx context.Context, contractID types.FileContra
 
 func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	if lockID, err := w.bus.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
+	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	} else {
 		defer func() {
-			if err := w.bus.ReleaseContract(ctx, contractID, lockID); err != nil {
+			if err := w.ReleaseContract(ctx, contractID, lockID); err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
 			}
 		}()
@@ -838,7 +839,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w.bus, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w, &slab, contracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1048,13 +1049,6 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	w.logger.Debugw("objectsHandlerPUT: starting upload",
-		"path", jc.PathParam("path"),
-		"minShards", rs.MinShards,
-		"totalShards", rs.TotalShards,
-		"contracts", len(contracts),
-	)
-
 	// randomize order of contracts so we don't always upload to the same hosts
 	frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
 
@@ -1075,18 +1069,14 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		})
 
 		// upload the slab
+		start := time.Now()
 		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout, w.logger)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
 		}
 		if err == io.EOF {
-			w.logger.Debugw("objectsHandlerPUT: succes",
-				"path", jc.PathParam("path"),
-				"numSlabs", len(o.Slabs),
-				"objectSize", objectSize,
-			)
 			break
-		} else if jc.Check("couldn't upload slab", err); err != nil {
+		} else if jc.Check(fmt.Sprintf("uploading slab failed after %v", time.Since(start)), err); err != nil {
 			w.logger.Errorf("couldn't upload object '%v' slab %d, err: %v", path, len(o.Slabs), err)
 			return
 		}
@@ -1293,13 +1283,30 @@ func (l *tracedContractLocker) AcquireContract(ctx context.Context, fcid types.F
 }
 
 func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
-	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
+	_, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
 	defer span.End()
-	err = l.l.ReleaseContract(ctx, fcid, lockID)
+
+	// Create a new context with the span that times out after a certain amount
+	// of time.  That's because the context passed to this method might be
+	// cancelled but we still want to release the contract.
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
+
+	// Release the contract.
+	err = l.l.ReleaseContract(timeoutCtx, fcid, lockID)
 	if err != nil {
 		span.SetStatus(codes.Error, "failed to release contract")
 		span.RecordError(err)
 	}
 	span.SetAttributes(attribute.Stringer("contract", fcid))
 	return
+}
+
+func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+	return (&tracedContractLocker{w.bus}).AcquireContract(ctx, fcid, priority, d)
+}
+
+func (w *worker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+	return (&tracedContractLocker{w.bus}).ReleaseContract(ctx, fcid, lockID)
 }

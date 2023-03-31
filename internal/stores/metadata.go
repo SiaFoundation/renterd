@@ -263,6 +263,49 @@ func (o dbObject) convert() (object.Object, error) {
 	return obj, nil
 }
 
+// ObjectsStats returns some info related to the objects stored in the store. To
+// reduce locking and make sure all results are consistent, everything is done
+// within a single transaction.
+func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
+	var resp api.ObjectsStats
+	return resp, s.db.Transaction(func(tx *gorm.DB) error {
+		// Number of objects.
+		err := tx.
+			Model(&dbObject{}).
+			Select("COUNT(*)").
+			Scan(&resp.NumObjects).
+			Error
+		if err != nil {
+			return err
+		}
+		// Size of objects.
+		err = tx.
+			Model(&dbSlice{}).
+			Select("SUM(length)").
+			Scan(&resp.TotalObjectsSize).
+			Error
+		if err != nil {
+			return err
+		}
+		// Size of sectors
+		var sectorSizes struct {
+			SectorsSize  uint64
+			UploadedSize uint64
+		}
+		err = tx.
+			Model(&dbContractSector{}).
+			Select("COUNT(DISTINCT db_sector_id) * ? as sectors_size, COUNT(*) * ? as uploaded_size", rhpv2.SectorSize, rhpv2.SectorSize).
+			Scan(&sectorSizes).
+			Error
+		if err != nil {
+			return err
+		}
+		resp.TotalSectorsSize = sectorSizes.SectorsSize
+		resp.TotalUploadedSize = sectorSizes.UploadedSize
+		return nil
+	})
+}
+
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
 	added, err := addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
 	if err != nil {
@@ -458,7 +501,7 @@ func (s *SQLStore) RemoveContracts(ctx context.Context) error {
 	if err := s.db.Where("TRUE").Delete(&dbContract{}).Error; err != nil {
 		return err
 	}
-	s.knownContracts = nil
+	s.knownContracts = make(map[types.FileContractID]struct{})
 	return nil
 }
 

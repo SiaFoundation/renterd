@@ -11,7 +11,6 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -121,7 +120,6 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	c.mu.Unlock()
 
 	f := newIPFilter(c.logger)
-
 	isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
 	return api.HostHandlerGET{
 		Host:            host.Host,
@@ -344,13 +342,13 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	// no contracts - nothing to do
 	cfg := c.ap.state.cfg
 	if cfg.Contracts.Amount == 0 {
-		l.Debug("wallet maintenance skipped, no contracts wanted")
+		l.Warn("wallet maintenance skipped, no contracts wanted")
 		return nil
 	}
 
 	// no allowance - nothing to do
 	if cfg.Contracts.Allowance.IsZero() {
-		l.Debug("wallet maintenance skipped, no allowance set")
+		l.Warn("wallet maintenance skipped, no allowance set")
 		return nil
 	}
 
@@ -367,30 +365,35 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	}
 
 	// enough outputs - nothing to do
-	outputs, err := b.WalletOutputs(ctx)
+	available, err := b.WalletOutputs(ctx)
 	if err != nil {
 		return err
 	}
-	if uint64(len(outputs)) >= cfg.Contracts.Amount {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(outputs), cfg.Contracts.Amount)
+	if uint64(len(available)) >= cfg.Contracts.Amount {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), cfg.Contracts.Amount)
 		return nil
 	}
 
 	// not enough balance - nothing to do
-	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
 	balance, err := b.WalletBalance(ctx)
 	if err != nil {
+		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
 		return err
 	}
-	if balance.Cmp(amount.Mul64(cfg.Contracts.Amount)) < 0 {
-		l.Debugf("wallet maintenance skipped, insufficient balance %v < (%v*%v)", balance, cfg.Contracts.Amount, amount)
-		return nil
+	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
+	outputs := balance.Div(amount).Big().Uint64()
+	if outputs < 2 {
+		l.Warnf("wallet maintenance skipped, wallet has insufficient balance %v", balance)
+		return err
+	}
+	if outputs > cfg.Contracts.Amount {
+		outputs = cfg.Contracts.Amount
 	}
 
 	// redistribute outputs
-	id, err := b.WalletRedistribute(ctx, int(cfg.Contracts.Amount), amount)
+	id, err := b.WalletRedistribute(ctx, int(outputs), amount)
 	if err != nil {
-		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", cfg.Contracts.Amount, amount, balance, err)
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", outputs, amount, balance, err)
 	}
 
 	l.Debugf("wallet maintenance succeeded, tx %v", id)
@@ -589,8 +592,15 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			continue
 		}
 
+		// fetch consensus state on the fly for the gouging check.
+		cs, err := c.ap.bus.ConsensusState(ctx)
+		if err != nil {
+			c.logger.Errorf("failed to fetch consensus state for gouging check: %v", err)
+			continue
+		}
+
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if gouging, reasons := worker.IsGouging(state.gs, state.rs, state.cs, nil, &host.PriceTable.HostPriceTable, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
+		if gouging, reasons := worker.IsGouging(state.gs, state.rs, cs, nil, &host.PriceTable.HostPriceTable, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
 			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
 			continue
 		}
@@ -726,7 +736,6 @@ func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.Autopil
 
 func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, renewing bool) (types.Currency, error) {
 	cfg := c.ap.state.cfg
-	cs := c.ap.state.cs
 
 	// estimate the cost of the current data stored
 	dataStored := ci.contract.FileSize()
@@ -770,7 +779,10 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	// the file contract (and the transaction fee goes to the miners, not the
 	// file contract).
 	subTotal := storageCost.Add(newUploadsCost).Add(newDownloadsCost).Add(newFundAccountCost).Add(ci.settings.ContractPrice)
-	siaFundFeeEstimate := (consensus.State{Index: types.ChainIndex{Height: cs.BlockHeight}}).FileContractTax(types.FileContract{Payout: subTotal})
+	siaFundFeeEstimate, err := c.ap.bus.FileContractTax(ctx, subTotal)
+	if err != nil {
+		return types.ZeroCurrency, err
+	}
 
 	// estimate the txn fee
 	txnFeeEstimate := c.ap.state.fee.Mul64(estimatedFileContractTransactionSetSize)
