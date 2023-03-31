@@ -806,13 +806,16 @@ func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
 		return
 	}
 
-	cs, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
-	if jc.Check("could not get contract set setting", err) != nil {
+	var css api.ContractSetSettings
+	if csss, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet); err != nil {
+		jc.Error(fmt.Errorf("could not fetch contract set setting, err: %v", err), http.StatusInternalServerError)
 		return
+	} else if err := json.Unmarshal([]byte(csss), &css); err != nil {
+		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", csss, err)
 	}
 
 	jc.Encode(api.DownloadParams{
-		ContractSet:   cs,
+		ContractSet:   css.Set,
 		GougingParams: gp,
 	})
 }
@@ -823,13 +826,16 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	cs, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
-	if jc.Check("could not get contract set setting", err) != nil {
+	var css api.ContractSetSettings
+	if csss, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet); err != nil {
+		jc.Error(fmt.Errorf("could not fetch contract set setting, err: %v", err), http.StatusInternalServerError)
 		return
+	} else if err := json.Unmarshal([]byte(csss), &css); err != nil {
+		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", csss, err)
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:   cs,
+		ContractSet:   css.Set,
 		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams: gp,
 	})
