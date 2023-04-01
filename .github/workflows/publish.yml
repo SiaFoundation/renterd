@@ -11,6 +11,10 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+'
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -60,7 +64,11 @@ jobs:
           GOOS: linux
           GOARCH: amd64
         run: |
-          go build -trimpath -o bin/linux_amd64/ -a -ldflags '-s -w' ./cmd/renterd
+          mkdir -p release
+          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
+          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
+          cp README.md LICENSE api/openapi.yml bin/
+          zip -qj $ZIP_OUTPUT bin/*
       - name: Build arm64
         env:
           CGO_ENABLED: 1
@@ -68,12 +76,15 @@ jobs:
           GOARCH: arm64
           CC: aarch64-linux-gnu-gcc
         run: |
-          go build -trimpath -o bin/linux_arm64/ -a -ldflags '-s -w' ./cmd/renterd
-      - uses: actions/upload-artifact@v2
+          mkdir -p release
+          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
+          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
+          cp README.md LICENSE api/openapi.yml bin/
+          zip -qj $ZIP_OUTPUT bin/*
+      - uses: actions/upload-artifact@v3
         with:
-          name: renterd-linux
-          path: bin/
-          retention-days: 30
+          name: renterd
+          path: release/
   build-mac: 
     runs-on: macos-latest
     steps:
@@ -81,24 +92,79 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 'stable'
+      - name: Setup Notarization
+        env:
+          APPLE_CERT_ID: ${{ secrets.APPLE_CERT_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_KEY_B64: ${{ secrets.APPLE_KEY_B64 }}
+          APPLE_CERT_B64: ${{ secrets.APPLE_CERT_B64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          # extract apple cert
+          APPLE_CERT_PATH=$RUNNER_TEMP/apple_cert.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          echo -n "$APPLE_CERT_B64" | base64 --decode --output $APPLE_CERT_PATH
+
+          # extract apple key
+          mkdir -p ~/private_keys
+          APPLE_API_KEY_PATH=~/private_keys/AuthKey_$APPLE_API_KEY.p8
+          echo -n "$APPLE_KEY_B64" | base64 --decode --output $APPLE_API_KEY_PATH
+
+          # create temp keychain
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # import keychain
+          security import $APPLE_CERT_PATH -P $APPLE_CERT_PASSWORD -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security find-identity -v $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $APPLE_KEYCHAIN_PASSWORD $KEYCHAIN_PATH
       - name: Build amd64
         env:
+          APPLE_CERT_ID: ${{ secrets.APPLE_CERT_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_KEY_B64: ${{ secrets.APPLE_KEY_B64 }}
+          APPLE_CERT_B64: ${{ secrets.APPLE_CERT_B64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
           CGO_ENABLED: 1
           GOOS: darwin
           GOARCH: amd64
         run: |
-          go build -trimpath -o bin/macos_amd64/ -a -ldflags '-s -w' ./cmd/renterd
+          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
+          mkdir -p release
+          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
+          cp README.md LICENSE api/openapi.yml bin/
+          codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
+          ditto -ck bin $ZIP_OUTPUT
+          xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
       - name: Build arm64
         env:
+          APPLE_CERT_ID: ${{ secrets.APPLE_CERT_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_KEY_B64: ${{ secrets.APPLE_KEY_B64 }}
+          APPLE_CERT_B64: ${{ secrets.APPLE_CERT_B64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
           CGO_ENABLED: 1
           GOOS: darwin
           GOARCH: arm64
         run: |
-          go build -trimpath -o bin/macos_arm64/ -a -ldflags '-s -w' ./cmd/renterd
-      - uses: actions/upload-artifact@v2
+          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
+          mkdir -p release
+          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
+          cp README.md LICENSE api/openapi.yml bin/
+          codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
+          ditto -ck bin $ZIP_OUTPUT
+          xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
+      - uses: actions/upload-artifact@v3
         with:
-          name: renterd-macos
-          path: bin/
+          name: renterd
+          path: release/
   build-windows: 
     runs-on: windows-latest
     steps:
@@ -111,9 +177,14 @@ jobs:
           CGO_ENABLED: 1
           GOOS: windows
           GOARCH: amd64
+        shell: bash
         run: |
-          go build -trimpath -o bin/windows_amd64/ -a -ldflags '-s -w' ./cmd/renterd
-      - uses: actions/upload-artifact@v2
+          mkdir -p release
+          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
+          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
+          cp README.md LICENSE api/openapi.yml bin/
+          7z a $ZIP_OUTPUT bin/*
+      - uses: actions/upload-artifact@v3
         with:
-          name: renterd-macos
-          path: bin/
+          name: renterd
+          path: release/
