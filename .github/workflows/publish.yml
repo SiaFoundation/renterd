@@ -114,12 +114,13 @@ jobs:
 
           # create temp keychain
           security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security default-keychain -s $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
           # import keychain
           security import $APPLE_CERT_PATH -P $APPLE_CERT_PASSWORD -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security find-identity -v $KEYCHAIN_PATH
+          security find-identity -v $KEYCHAIN_PATH -p codesigning
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $APPLE_KEYCHAIN_PASSWORD $KEYCHAIN_PATH
       - name: Build amd64
         env:
@@ -138,7 +139,7 @@ jobs:
           mkdir -p release
           go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
           cp README.md LICENSE bin/
-          codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
+          /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
           ditto -ck bin $ZIP_OUTPUT
           xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
       - name: Build arm64
@@ -158,7 +159,7 @@ jobs:
           mkdir -p release
           go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
           cp README.md LICENSE bin/
-          codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
+          /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
           ditto -ck bin $ZIP_OUTPUT
           xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
       - uses: actions/upload-artifact@v3
