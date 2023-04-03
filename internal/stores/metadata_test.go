@@ -424,6 +424,7 @@ func TestRenewedContract(t *testing.T) {
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
 		Host:      publicKey(c.HostKey()),
+		HostID:    1,
 		RenewedTo: fileContractID(fcid1Renewed),
 		Reason:    api.ContractArchivalReasonRenewed,
 
@@ -518,6 +519,62 @@ func TestAncestorsContracts(t *testing.T) {
 		}) {
 			t.Fatal("wrong contract", i)
 		}
+	}
+}
+
+func TestArchiveContracts(t *testing.T) {
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 hosts
+	hks, err := cs.addTestHosts(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 contracts
+	fcids, _, err := cs.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// archive 2 of them
+	toArchive := map[types.FileContractID]string{
+		fcids[1]: "foo",
+		fcids[2]: "bar",
+	}
+	if err := cs.ArchiveContracts(context.Background(), toArchive); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the first one is still active
+	active, err := cs.ActiveContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || active[0].ID != fcids[0] {
+		t.Fatal("wrong active contracts", active)
+	}
+
+	// assert the two others were archived
+	ffcids := make([]fileContractID, 2)
+	ffcids[0] = fileContractID(fcids[1])
+	ffcids[1] = fileContractID(fcids[2])
+	var acs []dbArchivedContract
+	err = cs.db.Model(&dbArchivedContract{}).
+		Where("fcid IN (?)", ffcids).
+		Find(&acs).
+		Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acs) != 2 {
+		t.Fatal("wrong number of archived contracts", len(acs))
+	}
+	if acs[0].Reason != "foo" || acs[1].Reason != "bar" {
+		t.Fatal("unexpected reason", acs[0].Reason, acs[1].Reason)
 	}
 }
 
