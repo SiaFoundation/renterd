@@ -361,17 +361,11 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	// Compute how much renter funds to put into the new contract.
 	cost := rhpv2.ContractRenewalCost(cs, fc, wprr.PriceTable.ContractPrice, txn.MinerFees[0], basePrice)
 
-	// Fund the txn.
+	// Fund the txn. We are not signing it yet since it's not complete. The host
+	// still needs to complete it and the revision + contract are signed with
+	// the renter key by the worker.
 	toSign, err := b.w.FundTransaction(cs, &txn, cost, b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
-		return
-	}
-
-	// Sign it.
-	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(cs, &txn, toSign, cf)
-	if jc.Check("couldn't sign transaction", err) != nil {
-		b.w.ReleaseInputs(txn)
 		return
 	}
 
@@ -382,6 +376,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(api.WalletPrepareRenewResponse{
+		ToSign:         toSign,
 		TransactionSet: append(parents, txn),
 	})
 }

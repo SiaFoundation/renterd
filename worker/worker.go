@@ -251,7 +251,8 @@ type Bus interface {
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) ([]types.Transaction, error)
+	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
+	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -673,6 +674,12 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 
+	// get consensus state
+	cs, err := w.bus.ConsensusState(ctx)
+	if jc.Check("could not get consensus state", err) != nil {
+		return
+	}
+
 	// attach gouging checker
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
@@ -686,7 +693,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	if jc.Check("couldn't renew contract", w.withRevisionV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
 		return withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
-			renewed, txnSet, err = RPCRenew(ctx, t, &revision, rk, func(pt rhpv3.HostPriceTable) ([]types.Transaction, error) {
+			renewed, txnSet, err = w.RPCRenew(ctx, cs, t, &revision, rk, func(pt rhpv3.HostPriceTable) (api.WalletPrepareRenewResponse, error) {
 				return w.bus.WalletPrepareRenew(ctx, revision, rrr.HostAddress, rrr.RenterAddress, rk, rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, pt, rrr.EndHeight, rrr.WindowSize)
 			})
 			return err

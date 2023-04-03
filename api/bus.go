@@ -181,6 +181,7 @@ type WalletPrepareRenewRequest struct {
 // WalletPrepareRenewResponse is the response type for the /wallet/prepare/renew
 // endpoint.
 type WalletPrepareRenewResponse struct {
+	ToSign         []types.Hash256     `json:"toSign"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
 }
 

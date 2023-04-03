@@ -837,7 +837,7 @@ func RPCReadRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.
 	}, nil
 }
 
-func RPCRenew(ctx context.Context, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey, prepareFunc func(rhpv3.HostPriceTable) ([]types.Transaction, error)) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func (w *worker) RPCRenew(ctx context.Context, cs api.ConsensusState, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey, prepareFunc func(rhpv3.HostPriceTable) (api.WalletPrepareRenewResponse, error)) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RPCRenew")
 	s := t.DialStream()
 	defer s.Close()
@@ -860,20 +860,25 @@ func RPCRenew(ctx context.Context, t *rhpv3.Transport, rev *types.FileContractRe
 
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
-	txnSet, err := prepareFunc(pt)
+	wprr, err := prepareFunc(pt)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+	txnSet := wprr.TransactionSet
 
 	// TODO: starting from here, we need to make sure to release the txn on
 	// error.
 
-	// Strip our signatures before sending.
-	txn := txnSet[len(txnSet)-1]
-	var finalRevisionSignature types.Signature
-	copy(finalRevisionSignature[:], txn.Signatures[0].Signature[:])
-	txnSet[len(txnSet)-1].Signatures = nil
+	txn, parents := txnSet[len(txnSet)-1], txnSet[:len(txnSet)-1]
 
+	// Sign only the revision and contract. We can't sign everything because
+	// then the host can't add its own outputs.
+	h := types.NewHasher()
+	txn.FileContracts[0].EncodeTo(h.E)
+	txn.FileContractRevisions[0].EncodeTo(h.E)
+	finalRevisionSignature := renterKey.SignHash(h.Sum())
+
+	// Send the request.
 	req := rhpv3.RPCRenewContractRequest{
 		TransactionSet:         txnSet,
 		RenterKey:              rev.UnlockConditions.PublicKeys[0],
@@ -882,28 +887,88 @@ func RPCRenew(ctx context.Context, t *rhpv3.Transport, rev *types.FileContractRe
 	if err = s.WriteResponse(&req); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+
+	// Incorporate the host's additions.
 	var hostAdditions rhpv3.RPCRenewContractHostAdditions
 	if err = s.ReadResponse(&hostAdditions, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+	parents = append(parents, hostAdditions.Parents...)
+	txn.SiacoinInputs = append(txn.SiacoinInputs, hostAdditions.SiacoinInputs...)
+	txn.SiacoinOutputs = append(txn.SiacoinOutputs, hostAdditions.SiacoinOutputs...)
+	finalRevRenterSig := types.TransactionSignature{
+		ParentID:       types.Hash256(rev.ParentID),
+		PublicKeyIndex: 0, // renter key is first
+		CoveredFields: types.CoveredFields{
+			FileContracts:         []uint64{0},
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: finalRevisionSignature[:],
+	}
+	finalRevHostSig := types.TransactionSignature{
+		ParentID:       types.Hash256(rev.ParentID),
+		PublicKeyIndex: 1,
+		CoveredFields: types.CoveredFields{
+			FileContracts:         []uint64{0},
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: hostAdditions.FinalRevisionSignature[:],
+	}
+	txn.Signatures = []types.TransactionSignature{finalRevRenterSig, finalRevHostSig}
+
+	// Sign the inputs we funded the txn with and cover the whole txn including
+	// the existing signatures.
+	cf := types.CoveredFields{
+		WholeTransaction: true,
+		Signatures:       []uint64{0, 1},
+	}
+	if err := w.bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// Create a new no-op revision and sign it.
+	// TODO:
+
+	// Send the newly added signatures to the host and the signature for the
+	// initial no-op revision.
+	rs := rhpv3.RPCRenewSignatures{
+		TransactionSignatures: txn.Signatures[2:],
+		RevisionSignature:     types.Signature{}, // TODO
+	}
+	if err = s.WriteResponse(&rs); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// Receive the host's signatures.
+	var hostSigs rhpv3.RPCRenewSignatures
+	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
 
 	panic("not done yet")
-	//	rs := rhpv3.RPCRenewSignatures{
-	//		TransactionSignatures: nil,               // TODO
-	//		RevisionSignature:     types.Signature{}, // TODO
-	//	}
-	//
-	//	if err = s.WriteResponse(&rs); err != nil {
-	//		return rhpv2.ContractRevision{}, nil, err
-	//	}
-	//
-	// var hostSigs rhpv3.RPCRenewSignatures
-	//
-	//	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
-	//		return rhpv2.ContractRevision{}, nil, err
-	//	}
-	//
-	// return rhpv2.ContractRevision{}, nil, nil
+}
+
+// initialRevision returns the first revision of a file contract formation
+// transaction.
+func initialRevision(formationTxn *types.Transaction, hostPubKey, renterPubKey types.UnlockKey) types.FileContractRevision {
+	fc := formationTxn.FileContracts[0]
+	return types.FileContractRevision{
+		ParentID: formationTxn.FileContractID(0),
+		UnlockConditions: types.UnlockConditions{
+			PublicKeys:         []types.UnlockKey{renterPubKey, hostPubKey},
+			SignaturesRequired: 2,
+		},
+		FileContract: types.FileContract{
+			Filesize:           fc.Filesize,
+			FileMerkleRoot:     fc.FileMerkleRoot,
+			WindowStart:        fc.WindowStart,
+			WindowEnd:          fc.WindowEnd,
+			ValidProofOutputs:  fc.ValidProofOutputs,
+			MissedProofOutputs: fc.MissedProofOutputs,
+			UnlockHash:         fc.UnlockHash,
+			RevisionNumber:     1,
+		},
+	}
 }
 
 // RPCUpdateRegistry calls the ExecuteProgram RPC with an MDM program that
