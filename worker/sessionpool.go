@@ -159,6 +159,7 @@ func (ss *sharedSession) DeleteSectors(ctx context.Context, roots []types.Hash25
 // A sessionPool is a set of sessions that can be used for uploading and
 // downloading.
 type sessionPool struct {
+	sessionLockTimeout      time.Duration
 	sessionReconnectTimeout time.Duration
 	sessionTTL              time.Duration
 
@@ -188,14 +189,14 @@ func (sp *sessionPool) acquire(ctx context.Context, ss *sharedSession) (_ *Sessi
 	}
 
 	// try refreshing the session and reconnect if it failed
-	if err := s.Refresh(ctx, sp.sessionTTL, ss.renterKey, ss.contractID); err != nil {
+	if err := s.Refresh(ctx, sp.sessionLockTimeout, sp.sessionTTL, ss.renterKey, ss.contractID); err != nil {
 		if sp.sessionReconnectTimeout > 0 {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, sp.sessionReconnectTimeout)
 			defer cancel()
 		}
 
-		if err := s.Reconnect(ctx, ss.hostIP, ss.hostKey, ss.renterKey, ss.contractID); err != nil {
+		if err := s.Reconnect(ctx, sp.sessionLockTimeout, ss.hostIP, ss.hostKey, ss.renterKey, ss.contractID); err != nil {
 			return nil, err
 		}
 	}
@@ -258,8 +259,9 @@ func (sp *sessionPool) Close() error {
 }
 
 // newSessionPool creates a new sessionPool.
-func newSessionPool(sessionReconectTimeout, sessionTTL time.Duration) *sessionPool {
+func newSessionPool(sessionLockTimeout, sessionReconectTimeout, sessionTTL time.Duration) *sessionPool {
 	return &sessionPool{
+		sessionLockTimeout:      sessionLockTimeout,
 		sessionReconnectTimeout: sessionReconectTimeout,
 		sessionTTL:              sessionTTL,
 		hosts:                   make(map[types.PublicKey]*Session),
