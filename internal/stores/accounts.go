@@ -40,7 +40,7 @@ func (dbAccount) TableName() string {
 func (a dbAccount) convert() api.Account {
 	return api.Account{
 		ID:           rhpv3.Account(a.AccountID),
-		Host:         types.PublicKey(a.Host),
+		HostKey:      types.PublicKey(a.Host),
 		Balance:      (*big.Int)(a.Balance),
 		Drift:        (*big.Int)(a.Drift),
 		RequiresSync: a.RequiresSync,
@@ -70,7 +70,7 @@ func (s *SQLStore) SaveAccounts(ctx context.Context, accounts []api.Account) err
 	for i, acc := range accounts {
 		dbAccounts[i] = dbAccount{
 			AccountID:    publicKey(acc.ID),
-			Host:         publicKey(acc.Host),
+			Host:         publicKey(acc.HostKey),
 			Balance:      (*balance)(acc.Balance),
 			Drift:        (*balance)(acc.Drift),
 			RequiresSync: acc.RequiresSync,

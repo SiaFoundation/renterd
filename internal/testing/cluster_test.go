@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -32,7 +33,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +194,8 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal(err)
 		}
 		if hi.ScoreBreakdown.Score() == 0 {
-			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
 		if hi.Score == 0 {
 			t.Fatal("score shouldn't be 0")
@@ -214,7 +216,8 @@ func TestNewTestCluster(t *testing.T) {
 	}
 	for _, hi := range hostInfos {
 		if hi.ScoreBreakdown.Score() == 0 {
-			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
 		if hi.Score == 0 {
 			t.Fatal("score shouldn't be 0")
@@ -599,7 +602,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
 	}
-	if acc.Host != types.PublicKey(host.PublicKey()) {
+	if acc.HostKey != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
 	}
 
@@ -632,7 +635,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// Update the balance to create some drift.
 	newBalance := fundAmt.Div64(2)
 	newDrift := new(big.Int).Sub(newBalance.Big(), fundAmt.Big())
-	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, acc.Host, newBalance.Big()); err != nil {
+	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, acc.HostKey, newBalance.Big()); err != nil {
 		t.Fatal(err)
 	}
 	busAccounts, err = cluster.Bus.Accounts(context.Background())
@@ -861,10 +864,10 @@ func TestEphemeralAccountSync(t *testing.T) {
 	balanceBefore := acc.Balance
 
 	// Set requiresSync flag on bus and balance to 0.
-	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.Host, new(big.Int)); err != nil {
+	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, new(big.Int)); err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.Bus.ScheduleSync(context.Background(), acc.ID, acc.Host); err != nil {
+	if err := cluster.Bus.ScheduleSync(context.Background(), acc.ID, acc.HostKey); err != nil {
 		t.Fatal(err)
 	}
 	accounts, err = cluster.Bus.Accounts(context.Background())
@@ -887,7 +890,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}()
 
 	// Account should need a sync.
-	account, err := cluster2.Bus.Account(context.Background(), acc.ID, acc.Host)
+	account, err := cluster2.Bus.Account(context.Background(), acc.ID, acc.HostKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +900,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// Wait for autopilot to sync and reset flag.
 	err = Retry(100, 100*time.Millisecond, func() error {
-		account, err := cluster2.Bus.Account(context.Background(), acc.ID, acc.Host)
+		account, err := cluster2.Bus.Account(context.Background(), acc.ID, acc.HostKey)
 		if err != nil {
 			t.Fatal(err)
 		}

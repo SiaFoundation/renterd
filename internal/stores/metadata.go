@@ -443,14 +443,6 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 		return err
 	}
 
-	// NOTE: for the time being, we do not remove known contracts when we
-	// archive a contract, this avoids a race condition when process consensus
-	// changes for recently archived contracts
-	//
-	// remove from known contracts for _, id := range ids {
-	//  delete(s.knownContracts, id)
-	// }
-
 	return nil
 }
 

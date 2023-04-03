@@ -34,7 +34,7 @@ func TestClient(t *testing.T) {
 	go serveFn()
 
 	// assert setting 'foo' is not found
-	if _, err := c.Setting(ctx, "foo"); err == nil || !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
+	if err := c.Setting(ctx, "foo", nil); err == nil || !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
 		t.Fatal("unexpected err", err)
 	}
 
@@ -44,7 +44,8 @@ func TestClient(t *testing.T) {
 	}
 
 	// fetch setting 'foo' and assert it matches
-	if value, err := c.Setting(ctx, "foo"); err != nil {
+	var value string
+	if err := c.Setting(ctx, "foo", &value); err != nil {
 		t.Fatal("unexpected err", err)
 	} else if value != "bar" {
 		t.Fatal("unexpected result", value)

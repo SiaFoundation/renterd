@@ -12,7 +12,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -459,13 +458,12 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// fetch recent price table and attach it to host.
-		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		host.PriceTable, err = c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
-		host.PriceTable = &pt
 
 		// decide whether the host is still good
 		usable, unusableResult := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
@@ -592,7 +590,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// fetch price table on the fly
-		pt, err := c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		host.PriceTable, err = c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
 		if err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host, err)
 			continue
@@ -606,7 +604,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if gouging, reasons := worker.IsGouging(state.gs, state.rs, cs, nil, &pt, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
+		if gouging, reasons := worker.IsGouging(state.gs, state.rs, cs, nil, &host.PriceTable.HostPriceTable, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
 			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
 			continue
 		}
@@ -1165,10 +1163,19 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error) {
+func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKey, siamuxAddr string) (*hostdb.HostPriceTable, error) {
 	ctx, cancel := context.WithTimeout(ctx, contractHostPriceTableTimeout)
 	defer cancel()
-	return w.RHPPriceTable(ctx, hk, siamuxAddr)
+
+	pt, err := w.RHPPriceTable(ctx, hk, siamuxAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	return &hostdb.HostPriceTable{
+		HostPriceTable: pt,
+		Expiry:         time.Now().Add(pt.Validity),
+	}, nil
 }
 
 func buildContractSet(active []api.Contract, toArchive map[types.FileContractID]string, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {

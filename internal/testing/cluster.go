@@ -318,11 +318,11 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 	}
 
 	// Update the bus settings.
-	err = busClient.UpdateGougingSettings(context.Background(), testGougingSettings)
+	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
 	if err != nil {
 		return nil, err
 	}
-	err = busClient.UpdateRedundancySettings(context.Background(), testRedundancySettings)
+	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +640,7 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) er
 		funded := make(map[types.PublicKey]struct{})
 		for _, a := range accounts {
 			if a.Balance.Uint64() > 0 {
-				funded[a.Host] = struct{}{}
+				funded[a.HostKey] = struct{}{}
 			}
 		}
 
