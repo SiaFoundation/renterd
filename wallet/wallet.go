@@ -1,7 +1,6 @@
 package wallet
 
 import (
-	"bytes"
 	"errors"
 	"reflect"
 	"sort"
@@ -223,16 +222,6 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
 	for _, in := range txn.SiacoinInputs {
 		delete(w.used, types.Hash256(in.ParentID))
-	}
-}
-
-func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	core.EncodeTo(e)
-	e.Flush()
-	if err := siad.UnmarshalSia(&buf); err != nil {
-		panic(err)
 	}
 }
 
