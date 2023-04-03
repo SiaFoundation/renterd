@@ -837,6 +837,75 @@ func RPCReadRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.
 	}, nil
 }
 
+func RPCRenew(ctx context.Context, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey, prepareFunc func(rhpv3.HostPriceTable) ([]types.Transaction, error)) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	defer wrapErr(&err, "RPCRenew")
+	s := t.DialStream()
+	defer s.Close()
+
+	// Send the zero uid to get a temporary pricetable for this RPC.
+	var ptUID rhpv3.SettingsID
+	if err = s.WriteRequest(rhpv3.RPCRenewContractID, &ptUID); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	var ptResp rhpv3.RPCUpdatePriceTableResponse
+	if err = s.ReadResponse(&ptResp, 4096); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	var pt rhpv3.HostPriceTable
+	if err = json.Unmarshal(ptResp.PriceTableJSON, &pt); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// TODO: Gouging check.
+
+	// Prepare the signed transaction that contains the final revision as well
+	// as the new contract
+	txnSet, err := prepareFunc(pt)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// TODO: starting from here, we need to make sure to release the txn on
+	// error.
+
+	// Strip our signatures before sending.
+	txn := txnSet[len(txnSet)-1]
+	var finalRevisionSignature types.Signature
+	copy(finalRevisionSignature[:], txn.Signatures[0].Signature[:])
+	txnSet[len(txnSet)-1].Signatures = nil
+
+	req := rhpv3.RPCRenewContractRequest{
+		TransactionSet:         txnSet,
+		RenterKey:              rev.UnlockConditions.PublicKeys[0],
+		FinalRevisionSignature: finalRevisionSignature,
+	}
+	if err = s.WriteResponse(&req); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	var hostAdditions rhpv3.RPCRenewContractHostAdditions
+	if err = s.ReadResponse(&hostAdditions, 4096); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	panic("not done yet")
+	//	rs := rhpv3.RPCRenewSignatures{
+	//		TransactionSignatures: nil,               // TODO
+	//		RevisionSignature:     types.Signature{}, // TODO
+	//	}
+	//
+	//	if err = s.WriteResponse(&rs); err != nil {
+	//		return rhpv2.ContractRevision{}, nil, err
+	//	}
+	//
+	// var hostSigs rhpv3.RPCRenewSignatures
+	//
+	//	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
+	//		return rhpv2.ContractRevision{}, nil, err
+	//	}
+	//
+	// return rhpv2.ContractRevision{}, nil, nil
+}
+
 // RPCUpdateRegistry calls the ExecuteProgram RPC with an MDM program that
 // updates the specified registry value.
 func RPCUpdateRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {

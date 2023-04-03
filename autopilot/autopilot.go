@@ -40,7 +40,7 @@ type Bus interface {
 	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(ctx context.Context, contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
+	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) ([]types.Transaction, error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 

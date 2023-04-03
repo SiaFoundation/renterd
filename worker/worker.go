@@ -251,7 +251,7 @@ type Bus interface {
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(ctx context.Context, contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
+	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) ([]types.Transaction, error)
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -679,19 +679,15 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 	ctx = WithGougingChecker(ctx, gp)
+	rk := w.deriveRenterKey(rrr.HostKey)
 
 	// renew the contract
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
-	if jc.Check("couldn't renew contract", w.withRevisionV2(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
-		return w.withHostV2(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, func(ss sectorStore) error {
-			session := ss.(*sharedSession)
-			renewed, txnSet, err = session.RenewContract(ctx, func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error) {
-				renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev, rrr.RenterAddress, w.deriveRenterKey(rrr.HostKey), rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, host, rrr.EndHeight)
-				if err != nil {
-					return nil, types.Currency{}, nil, err
-				}
-				return renterTxnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
+	if jc.Check("couldn't renew contract", w.withRevisionV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
+		return withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+			renewed, txnSet, err = RPCRenew(ctx, t, &revision, rk, func(pt rhpv3.HostPriceTable) ([]types.Transaction, error) {
+				return w.bus.WalletPrepareRenew(ctx, revision, rrr.HostAddress, rrr.RenterAddress, rk, rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, pt, rrr.EndHeight, rrr.WindowSize)
 			})
 			return err
 		})

@@ -187,20 +187,22 @@ func (c *Client) WalletPrepareForm(ctx context.Context, renterAddress types.Addr
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(ctx context.Context, contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error) {
+func (c *Client) WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) ([]types.Transaction, error) {
 	req := api.WalletPrepareRenewRequest{
-		Contract:      contract,
+		Revision:      revision,
 		EndHeight:     endHeight,
+		HostAddress:   hostAddress,
 		HostKey:       hostKey,
-		HostSettings:  hostSettings,
+		PriceTable:    pt,
 		NewCollateral: newCollateral,
 		RenterAddress: renterAddress,
 		RenterFunds:   renterFunds,
 		RenterKey:     renterKey,
+		WindowSize:    windowSize,
 	}
 	var resp api.WalletPrepareRenewResponse
 	err := c.c.WithContext(ctx).POST("/wallet/prepare/renew", req, &resp)
-	return resp.TransactionSet, resp.FinalPayment, err
+	return resp.TransactionSet, err
 }
 
 // WalletPending returns the txpool transactions that are relevant to the

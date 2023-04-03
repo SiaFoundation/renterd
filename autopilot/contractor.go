@@ -989,7 +989,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
 
 	// renew the contract
-	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
+	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, renterAddress, renterFunds, newCollateral)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
 		if containsError(err, wallet.ErrInsufficientBalance) {
@@ -1065,7 +1065,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	}
 
 	// renew the contract
-	newRevision, _, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.HostIP, renterAddress, renterFunds, newCollateral)
+	newRevision, _, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, renterAddress, renterFunds, newCollateral)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		if containsError(err, wallet.ErrInsufficientBalance) {
