@@ -22,14 +22,6 @@ import (
 )
 
 const (
-	// contractHostPriceTableTimeout is the amount of time we wait to receive a
-	// price table from the host
-	contractHostPriceTableTimeout = 30 * time.Second
-
-	// contractHostTimeout is the amount of time we wait to receive the latest
-	// revision from the host
-	contractHostTimeout = 30 * time.Second
-
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
@@ -54,6 +46,18 @@ const (
 	// score found in a random sample of scores before being considered not
 	// usable.
 	minAllowedScoreLeeway = 500
+
+	// timeoutHostPriceTable is the amount of time we wait to receive a price
+	// table from the host
+	timeoutHostPriceTable = 30 * time.Second
+
+	// timeoutHostRevision is the amount of time we wait to receive the latest
+	// revision from the host
+	timeoutHostRevision = 30 * time.Second
+
+	// timeoutHostScan is the amount of time we wait for a host scan to be
+	// completed
+	timeoutHostScan = 30 * time.Second
 )
 
 type (
@@ -226,7 +230,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 
 	// fetch all active contracts from the worker
 	start := time.Now()
-	resp, err := w.ActiveContracts(ctx, contractHostTimeout)
+	resp, err := w.ActiveContracts(ctx, timeoutHostRevision)
 	if err != nil {
 		return err
 	}
@@ -454,7 +458,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// fetch recent price table and attach it to host.
-		host.PriceTable, err = c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		host.PriceTable, err = c.priceTable(ctx, w, host.Host)
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			toIgnore = append(toIgnore, fcid)
@@ -586,7 +590,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// fetch price table on the fly
-		host.PriceTable, err = c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		host.PriceTable, err = c.priceTable(ctx, w, host)
 		if err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host, err)
 			continue
@@ -1159,11 +1163,21 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKey, siamuxAddr string) (*hostdb.HostPriceTable, error) {
-	ctx, cancel := context.WithTimeout(ctx, contractHostPriceTableTimeout)
+func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (*hostdb.HostPriceTable, error) {
+	// fetch the settings if necessary
+	if host.Settings == nil {
+		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
+		if err != nil {
+			return nil, err
+		}
+		host.Settings = &scan.Settings
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeoutHostPriceTable)
 	defer cancel()
 
-	pt, err := w.RHPPriceTable(ctx, hk, siamuxAddr)
+	// fetch the price table
+	pt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
 	if err != nil {
 		return nil, err
 	}
