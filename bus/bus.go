@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -219,7 +218,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		return
 	}
 	txn := wfr.Transaction
-	fee := b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))
+	fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
 	txn.MinerFees = []types.Currency{fee}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
@@ -305,7 +304,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))}
 	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -347,7 +346,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(len(encoding.Marshal(txn))))}
+	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))}
 	cost := rhpv2.ContractRenewalCost(cs, fc, wprr.HostSettings.ContractPrice, txn.MinerFees[0], basePrice)
 	toSign, err := b.w.FundTransaction(cs, &txn, cost, b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
