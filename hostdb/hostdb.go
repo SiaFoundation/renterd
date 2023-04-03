@@ -25,12 +25,18 @@ type hostAnnouncement struct {
 }
 
 type ScanResult struct {
-	Error      string
+	Error      string               `json:"error,omitempty"`
 	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
 }
 
+type PriceTableUpdateResult struct {
+	Error      string         `json:"error,omitempty"`
+	PriceTable HostPriceTable `json:"priceTable,omitempty"`
+}
+
 const InteractionTypeScan = "scan"
+const InteractionTypePriceTableUpdate = "pricetableupdate"
 
 // ForEachAnnouncement calls fn on each host announcement in a block.
 func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, Announcement)) {
@@ -77,11 +83,11 @@ type Interactions struct {
 }
 
 type Interaction struct {
-	Host      types.PublicKey
-	Result    json.RawMessage
-	Success   bool
-	Timestamp time.Time
-	Type      string
+	Host      types.PublicKey `json:"host"`
+	Result    json.RawMessage `json:"result"`
+	Success   bool            `json:"success"`
+	Timestamp time.Time       `json:"timestamp"`
+	Type      string          `json:"type"`
 }
 
 // HostAddress contains the address of a specific host identified by a public
@@ -93,12 +99,18 @@ type HostAddress struct {
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	KnownSince   time.Time             `json:"knownSince"`
-	PublicKey    types.PublicKey       `json:"public_key"`
-	NetAddress   string                `json:"netAddress"`
-	PriceTable   *rhpv3.HostPriceTable `json:"priceTable"`
-	Settings     *rhpv2.HostSettings   `json:"settings"`
-	Interactions Interactions          `json:"interactions"`
+	KnownSince   time.Time           `json:"knownSince"`
+	PublicKey    types.PublicKey     `json:"public_key"`
+	NetAddress   string              `json:"netAddress"`
+	PriceTable   *HostPriceTable     `json:"priceTable"`
+	Settings     *rhpv2.HostSettings `json:"settings"`
+	Interactions Interactions        `json:"interactions"`
+}
+
+// A HostPriceTable extends the host price table with its expiry.
+type HostPriceTable struct {
+	rhpv3.HostPriceTable
+	Expiry time.Time `json:"expiry"`
 }
 
 // HostInfo extends the host type with a field indicating whether it is blocked or not.

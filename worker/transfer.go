@@ -96,7 +96,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 				res = resp{r, root, err}
 				return nil // only return the error in the response
 			}); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Errorf("withHostV2 failed when uploading sector, err: %v, upload failed: %v", err, res.err != nil)
+				logger.Errorf("withHostV2 failed when uploading sector, err: %v", err)
 			}
 
 			// NOTE: we release before sending the response to ensure the context isn't cancelled
@@ -230,6 +230,8 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 
 	type req struct {
 		hostIndex int
+		offset    uint64
+		length    uint64
 	}
 	type resp struct {
 		req   req
@@ -261,21 +263,18 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 				return
 			}
 
-			var res resp
-			offset, length := ss.SectorRegion()
 			if err := sp.withHostV3(ctx, c.ID, c.HostKey, c.SiamuxAddr, func(ss sectorStore) error {
 				buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
-				err := ss.DownloadSector(ctx, buf, shard.Root, uint64(offset), uint64(length))
+				err := ss.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")
 					span.RecordError(err)
 				}
-				res = resp{r, buf.Bytes(), time.Since(start), err}
+				respChan <- resp{r, buf.Bytes(), time.Since(start), err}
 				return nil // only return the error in the response
 			}); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Errorf("withHostV3 failed when downloading sector, err: %v, download failed: %v", err, res.err != nil)
+				logger.Errorf("withHostV3 failed when downloading sector, err: %v", err)
 			}
-			respChan <- res
 		}(r)
 
 		if downloadSectorTimeout > 0 {
@@ -299,10 +298,11 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 	}
 
 	// spawn workers and send initial requests
+	offset, length := ss.SectorRegion()
 	hostIndex := 0
 	inflight := 0
 	for i := uint8(0); i < ss.MinShards; i++ {
-		go worker(req{hostIndex})
+		go worker(req{hostIndex, offset, length})
 		hostIndex++
 		inflight++
 	}
@@ -334,7 +334,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 
 			// try next host
 			if hostIndex < len(contracts) {
-				go worker(req{hostIndex})
+				go worker(req{hostIndex, offset, length})
 				hostIndex++
 				inflight++
 			}

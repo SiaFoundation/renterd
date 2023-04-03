@@ -312,6 +312,25 @@ type worker struct {
 	logger *zap.SugaredLogger
 }
 
+func (w *worker) recordPriceTableUpdate(hostKey types.PublicKey, pt hostdb.HostPriceTable, err error) {
+	hi := hostdb.Interaction{
+		Host:      hostKey,
+		Timestamp: time.Now(),
+		Type:      hostdb.InteractionTypePriceTableUpdate,
+		Success:   err == nil,
+	}
+	if err == nil {
+		hi.Result, _ = json.Marshal(hostdb.PriceTableUpdateResult{
+			PriceTable: pt,
+		})
+	} else {
+		hi.Result, _ = json.Marshal(hostdb.PriceTableUpdateResult{
+			Error: errToStr(err),
+		})
+	}
+	w.recordInteractions([]hostdb.Interaction{hi})
+}
+
 func (w *worker) recordScan(hostKey types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings, err error) {
 	hi := hostdb.Interaction{
 		Host:      hostKey,
@@ -332,7 +351,7 @@ func (w *worker) recordScan(hostKey types.PublicKey, pt rhpv3.HostPriceTable, se
 	w.recordInteractions([]hostdb.Interaction{hi})
 }
 
-func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey types.PublicKey, fn func(*rhpv2.Transport) error) (err error) {
+func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
 		w.recordInteractions(mr.interactions())
@@ -364,7 +383,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostIP string, hostKey typ
 	return fn(t)
 }
 
-func withTransportV3(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, fn func(*rhpv3.Transport) error) (err error) {
+func withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(*rhpv3.Transport) error) (err error) {
 	conn, err := dial(ctx, siamuxAddr, hostKey)
 	if err != nil {
 		return err
@@ -442,14 +461,7 @@ func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContra
 	}
 
 	// fetch contract revision
-	pt, valid := w.priceTables.PriceTable(hk)
-	var rev types.FileContractRevision
-	var err error
-	if valid {
-		rev, err = w.FetchRevisionWithContract(ctx, &pt, hk, siamuxAddr, contractID)
-	} else {
-		rev, err = w.FetchRevisionWithContract(ctx, nil, hk, siamuxAddr, contractID)
-	}
+	rev, err := w.FetchRevisionWithContract(ctx, hk, siamuxAddr, contractID)
 	if err != nil {
 		return err
 	}
@@ -516,14 +528,14 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	var settings rhpv2.HostSettings
 	start := time.Now()
-	pingErr := w.withTransportV2(ctx, rsr.HostIP, rsr.HostKey, func(t *rhpv2.Transport) (err error) {
+	pingErr := w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
 		settings, err = RPCSettings(ctx, t)
 		return err
 	})
 	elapsed := time.Since(start)
 
 	var pt rhpv3.HostPriceTable
-	ptErr := withTransportV3(ctx, settings.SiamuxAddr(), rsr.HostKey, func(t *rhpv3.Transport) (err error) {
+	ptErr := withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
 		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return err
 	})
@@ -540,11 +552,44 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		}
 		scanErrStr += ptErr.Error()
 	}
+
 	jc.Encode(api.RHPScanResponse{
 		Ping:      api.ParamDuration(elapsed),
 		ScanError: scanErrStr,
 		Settings:  settings,
 	})
+}
+
+func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
+
+	// fetchPT is a helper function that performs the RPC given a payment function
+	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
+		err = withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+			pt, err := RPCPriceTable(t, paymentFn)
+			if err != nil {
+				return err
+			}
+			hpt = hostdb.HostPriceTable{
+				HostPriceTable: pt,
+				Expiry:         time.Now().Add(pt.Validity),
+			}
+			return nil
+		})
+		return
+	}
+
+	// pay by contract if a revision is given
+	if revision != nil {
+		return fetchPT(w.preparePriceTableContractPayment(hk, revision))
+	}
+
+	// pay by account
+	cs, err := w.bus.ConsensusState(ctx)
+	if err != nil {
+		return hostdb.HostPriceTable{}, err
+	}
+	return fetchPT(w.preparePriceTableAccountPayment(hk, cs.BlockHeight))
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
@@ -554,7 +599,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	}
 
 	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", withTransportV3(jc.Request.Context(), rptr.SiamuxAddr, rptr.HostKey, func(t *rhpv3.Transport) (err error) {
+	if jc.Check("could not get price table", withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
@@ -587,7 +632,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	var contract rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	ctx = WithGougingChecker(ctx, gp)
-	err = w.withTransportV2(ctx, hostIP, rfr.HostKey, func(t *rhpv2.Transport) (err error) {
+	err = w.withTransportV2(ctx, rfr.HostKey, hostIP, func(t *rhpv2.Transport) (err error) {
 		hostSettings, err := RPCSettings(ctx, t)
 		if err != nil {
 			return err
@@ -711,7 +756,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 		return
 	}
 	var value rhpv3.RegistryValue
-	err := withTransportV3(jc.Request.Context(), rrrr.SiamuxAddr, rrrr.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		value, err = RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
@@ -730,7 +775,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
-	err := withTransportV3(jc.Request.Context(), rrur.SiamuxAddr, rrur.HostKey, func(t *rhpv3.Transport) (err error) {
+	err := withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
@@ -1137,7 +1182,6 @@ func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionRecone
 		id:                    id,
 		bus:                   b,
 		pool:                  newSessionPool(sessionLockTimeout, sessionReconectTimeout, sessionTTL),
-		priceTables:           newPriceTables(),
 		masterKey:             masterKey,
 		busFlushInterval:      busFlushInterval,
 		downloadSectorTimeout: downloadSectorTimeout,
@@ -1146,6 +1190,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionRecone
 	}
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
+	w.initPriceTables()
 	return w
 }
 

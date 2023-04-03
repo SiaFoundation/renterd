@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -32,7 +33,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +194,8 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal(err)
 		}
 		if hi.ScoreBreakdown.Score() == 0 {
-			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
 		if hi.Score == 0 {
 			t.Fatal("score shouldn't be 0")
@@ -214,7 +216,8 @@ func TestNewTestCluster(t *testing.T) {
 	}
 	for _, hi := range hostInfos {
 		if hi.ScoreBreakdown.Score() == 0 {
-			t.Fatal("score shouldn't be 0 because that means one of the fields was 0")
+			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
 		if hi.Score == 0 {
 			t.Fatal("score shouldn't be 0")
@@ -690,6 +693,12 @@ func TestEphemeralAccounts(t *testing.T) {
 
 // newTestLogger creates a console logger used for testing.
 func newTestLogger() *zap.Logger {
+	return newTestLoggerCustom(zapcore.ErrorLevel)
+}
+
+// newTestLoggerCustom creates a console logger used for testing and allows
+// passing in a log level
+func newTestLoggerCustom(logLevel zapcore.Level) *zap.Logger {
 	config := zap.NewProductionEncoderConfig()
 	config.EncodeTime = zapcore.RFC3339TimeEncoder
 	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
@@ -697,9 +706,9 @@ func newTestLogger() *zap.Logger {
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
 
 	return zap.New(
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.ErrorLevel),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), logLevel),
 		zap.AddCaller(),
-		zap.AddStacktrace(zapcore.ErrorLevel),
+		zap.AddStacktrace(logLevel),
 	)
 }
 

@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,9 +51,10 @@ type (
 	dbHost struct {
 		Model
 
-		PublicKey  publicKey `gorm:"unique;index;NOT NULL;size:32"`
-		Settings   hostSettings
-		PriceTable hostPriceTable
+		PublicKey        publicKey `gorm:"unique;index;NOT NULL;size:32"`
+		Settings         hostSettings
+		PriceTable       hostPriceTable
+		PriceTableExpiry sql.NullTime
 
 		TotalScans              uint64
 		LastScan                int64 `gorm:"index"` // unix nano
@@ -311,7 +313,10 @@ func (h dbHost) convert() hostdb.Host {
 		hdbHost.PriceTable = nil
 	} else {
 		pt := h.PriceTable.convert()
-		hdbHost.PriceTable = &pt
+		hdbHost.PriceTable = &hostdb.HostPriceTable{
+			HostPriceTable: pt,
+			Expiry:         h.PriceTableExpiry.Time,
+		}
 	}
 	return hdbHost
 }
@@ -676,6 +681,8 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				continue // host doesn't exist
 			}
 			isScan := interaction.Type == hostdb.InteractionTypeScan
+			isPriceTableUpdate := interaction.Type == hostdb.InteractionTypePriceTableUpdate
+
 			dbInteractions = append(dbInteractions, dbInteraction{
 				Host:      publicKey(interaction.Host),
 				Result:    interaction.Result,
@@ -712,7 +719,34 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 						return err
 					}
 					host.Settings = convertHostSettings(sr.Settings)
-					host.PriceTable = convertHostPriceTable(sr.PriceTable)
+
+					// scans can only update the price table if the current
+					// pricetable is expired anyway, ensuring scans never
+					// overwrite a valid price table since the price table from
+					// scans are not paid for and thus not useful for anything
+					// aside from gouging checks
+					if time.Now().After(host.PriceTableExpiry.Time) {
+						host.PriceTable = convertHostPriceTable(sr.PriceTable)
+						host.PriceTableExpiry = sql.NullTime{
+							Time:  time.Now(),
+							Valid: true,
+						}
+					}
+				}
+			}
+			// NOTE: a host's uptime or downtime is only updated by scans, we do
+			// this mostly to keep things simple, host scans should be performed
+			// frequently enough for this not to be a problem
+			if isPriceTableUpdate && interaction.Success {
+				var hpt hostdb.HostPriceTable
+				if err := json.Unmarshal(interaction.Result, &hpt); err != nil {
+					return err
+				}
+
+				host.PriceTable = convertHostPriceTable(hpt.HostPriceTable)
+				host.PriceTableExpiry = sql.NullTime{
+					Time:  hpt.Expiry,
+					Valid: hpt.Expiry != time.Time{},
 				}
 			}
 
@@ -738,6 +772,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					"last_scan":                   h.LastScan,
 					"settings":                    h.Settings,
 					"price_table":                 h.PriceTable,
+					"price_table_expiry":          h.PriceTableExpiry,
 					"successful_interactions":     h.SuccessfulInteractions,
 					"failed_interactions":         h.FailedInteractions,
 				}).Error
