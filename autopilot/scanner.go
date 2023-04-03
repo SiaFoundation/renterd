@@ -16,10 +16,6 @@ import (
 )
 
 const (
-	// minRecentScanFailures is the minimum amount of (consecutive) failed scans
-	// a host must have before it is removed for exceeding the max downtime.
-	minRecentScanFailures = 10
-
 	// TODO: make these configurable
 	scannerTimeoutInterval   = 10 * time.Minute
 	scannerTimeoutMinTimeout = time.Second * 5
@@ -45,9 +41,10 @@ type (
 		logger  *zap.SugaredLogger
 		ap      *Autopilot
 
-		scanBatchSize   uint64
-		scanThreads     uint64
-		scanMinInterval time.Duration
+		scanBatchSize         uint64
+		scanThreads           uint64
+		scanMinInterval       time.Duration
+		scanMinRecentFailures uint64
 
 		timeoutMinInterval time.Duration
 		timeoutMinTimeout  time.Duration
@@ -122,7 +119,7 @@ func (t *tracker) timeout() time.Duration {
 	return time.Duration(percentile) * time.Millisecond
 }
 
-func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
+func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
 	if scanBatchSize == 0 {
 		return nil, errors.New("scanner batch size has to be greater than zero")
 	}
@@ -140,9 +137,10 @@ func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterva
 		logger: ap.logger.Named("scanner"),
 		ap:     ap,
 
-		scanBatchSize:   scanBatchSize,
-		scanThreads:     scanThreads,
-		scanMinInterval: scanMinInterval,
+		scanBatchSize:         scanBatchSize,
+		scanThreads:           scanThreads,
+		scanMinInterval:       scanMinInterval,
+		scanMinRecentFailures: scanMinRecentFailures,
 
 		timeoutMinInterval: timeoutMinInterval,
 		timeoutMinTimeout:  timeoutMinTimeout,
@@ -174,10 +172,12 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker) {
 		if !s.ap.isStopped() && cfg.Hosts.MaxDowntimeHours > 0 {
 			s.logger.Debugf("removing hosts that have been offline for more than %v hours", cfg.Hosts.MaxDowntimeHours)
 			maxDowntime := time.Hour * time.Duration(cfg.Hosts.MaxDowntimeHours)
-			if removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime); err != nil {
-				s.logger.Error(err)
-			} else if removed > 0 {
+			removed, err := s.bus.RemoveOfflineHosts(ctx, s.scanMinRecentFailures, maxDowntime)
+			if removed > 0 {
 				s.logger.Infof("removed %v offline hosts", removed)
+			}
+			if err != nil {
+				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
 			}
 		}
 

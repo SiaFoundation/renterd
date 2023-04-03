@@ -1,4 +1,4 @@
-name: Publish
+name: Publish - Zen Testnet
 
 # Controls when the action will run. 
 on:
@@ -38,6 +38,8 @@ jobs:
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            suffix=-testnet,onlatest=true
           tags: |
             type=ref,event=branch
             type=sha,prefix=
@@ -45,7 +47,7 @@ jobs:
       - uses: docker/build-push-action@v4
         with:
           context: .
-          file: ./docker/Dockerfile
+          file: ./docker/Dockerfile.testnet
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -66,8 +68,8 @@ jobs:
           GOARCH: amd64
         run: |
           mkdir -p release
-          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
-          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
+          ZIP_OUTPUT=release/renterd_zen_${GOOS}_${GOARCH}.zip
+          go build -tags='netgo testnet' -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           zip -qj $ZIP_OUTPUT bin/*
       - name: Build arm64
@@ -78,13 +80,13 @@ jobs:
           CC: aarch64-linux-gnu-gcc
         run: |
           mkdir -p release
-          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
-          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
+          ZIP_OUTPUT=release/renterd_zen_${GOOS}_${GOARCH}.zip
+          go build -tags='netgo testnet' -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           zip -qj $ZIP_OUTPUT bin/*
       - uses: actions/upload-artifact@v3
         with:
-          name: renterd
+          name: renterd-zen
           path: release/
   build-mac: 
     runs-on: macos-latest
@@ -136,9 +138,9 @@ jobs:
           GOOS: darwin
           GOARCH: amd64
         run: |
-          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
+          ZIP_OUTPUT=release/renterd_zen_${GOOS}_${GOARCH}.zip
           mkdir -p release
-          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
+          go build -tags='netgo testnet' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
           cp README.md LICENSE bin/
           /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
           ditto -ck bin $ZIP_OUTPUT
@@ -156,16 +158,16 @@ jobs:
           GOOS: darwin
           GOARCH: arm64
         run: |
-          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
+          ZIP_OUTPUT=release/renterd_zen_${GOOS}_${GOARCH}.zip
           mkdir -p release
-          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
+          go build -tags='netgo testnet' -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
           cp README.md LICENSE bin/
           /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
           ditto -ck bin $ZIP_OUTPUT
           xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
       - uses: actions/upload-artifact@v3
         with:
-          name: renterd
+          name: renterd-zen
           path: release/
   build-windows: 
     runs-on: windows-latest
@@ -182,11 +184,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p release
-          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
-          go build -tags='netgo' -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
+          ZIP_OUTPUT=release/renterd_zen_${GOOS}_${GOARCH}.zip
+          go build -tags='netgo testnet' -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           7z a $ZIP_OUTPUT bin/*
       - uses: actions/upload-artifact@v3
         with:
-          name: renterd
+          name: renterd-zen
           path: release/

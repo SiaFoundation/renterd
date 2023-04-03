@@ -21,7 +21,6 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/stores"
-	"go.sia.tech/siad/build"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"
@@ -52,6 +51,7 @@ var (
 			Set: "autopilot",
 		},
 		Hosts: api.HostsConfig{
+			MaxDowntimeHours:   10,
 			IgnoreRedundantIPs: true, // ignore for integration tests by default
 		},
 	}
@@ -242,12 +242,13 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 
 	// Create autopilot.
 	ap, aStartFn, aStopFn, err := node.NewAutopilot(node.AutopilotConfig{
-		AccountsRefillInterval: time.Second,
-		Heartbeat:              time.Second,
-		MigrationHealthCutoff:  0.99,
-		ScannerInterval:        time.Second,
-		ScannerBatchSize:       10,
-		ScannerNumThreads:      1,
+		AccountsRefillInterval:   time.Second,
+		Heartbeat:                time.Second,
+		MigrationHealthCutoff:    0.99,
+		ScannerInterval:          time.Second,
+		ScannerBatchSize:         10,
+		ScannerNumThreads:        1,
+		ScannerMinRecentFailures: 5,
 	}, autopilotStore, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err
@@ -560,7 +561,7 @@ func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
 	}
 
 	// Mine a few blocks. The host should show up eventually.
-	err = build.Retry(10, time.Second, func() error {
+	err = Retry(10, time.Second, func() error {
 		if err := c.MineBlocks(1); err != nil {
 			return err
 		}

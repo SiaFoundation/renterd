@@ -8,7 +8,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/build"
 )
 
 func TestBlocklist(t *testing.T) {
@@ -38,7 +37,7 @@ func TestBlocklist(t *testing.T) {
 
 	// wait until we have 3 contracts in the set
 	var contracts []api.ContractMetadata
-	if err := build.Retry(5, time.Second, func() (err error) {
+	if err := Retry(5, time.Second, func() (err error) {
 		contracts, err = b.Contracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
@@ -61,7 +60,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert h3 is no longer in the contract set
-	if err := build.Retry(5, time.Second, func() error {
+	if err := Retry(5, time.Second, func() error {
 		contracts, err := b.Contracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
@@ -89,7 +88,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert h1 is no longer in the contract set
-	if err := build.Retry(5, time.Second, func() error {
+	if err := Retry(5, time.Second, func() error {
 		contracts, err := b.Contracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
@@ -115,7 +114,7 @@ func TestBlocklist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := build.Retry(5, time.Second, func() error {
+	if err := Retry(5, time.Second, func() error {
 		contracts, err := b.Contracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
