@@ -235,8 +235,8 @@ func (c *Client) HostsForScanning(ctx context.Context, maxLastScan time.Time, of
 // RemoveOfflineHosts removes all hosts that have been offline for longer than the given max downtime.
 func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
 	err = c.c.WithContext(ctx).POST("/hosts/remove", api.HostsRemoveRequest{
-		MinRecentScanFailures: minRecentScanFailures,
 		MaxDowntimeHours:      api.ParamDurationHour(maxDowntime),
+		MinRecentScanFailures: minRecentScanFailures,
 	}, &removed)
 	return
 }
@@ -280,6 +280,12 @@ func (c *Client) RecordContractSpending(ctx context.Context, records []api.Contr
 // ActiveContracts returns all active contracts in the metadata store.
 func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/active", &contracts)
+	return
+}
+
+// ArchiveContracts archives the contracts with the given IDs and archival reason.
+func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) (err error) {
+	err = c.c.WithContext(ctx).POST("/contracts/archive", toArchive, nil)
 	return
 }
 

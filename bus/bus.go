@@ -79,14 +79,15 @@ type (
 		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
+		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-		RemoveContract(ctx context.Context, id types.FileContractID) error
-		RemoveContracts(ctx context.Context) error
+		RemoveContractSet(ctx context.Context, name string) error
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
-		DeleteContractSet(ctx context.Context, name string) error
 
 		Object(ctx context.Context, path string) (object.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]string, error)
@@ -528,6 +529,15 @@ func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
+	var toArchive api.ArchiveContractsRequest
+	if jc.Decode(&toArchive) != nil {
+		return
+	}
+
+	jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive))
+}
+
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {
 	cs, err := b.ms.Contracts(jc.Request.Context(), jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
@@ -553,7 +563,7 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 
 func (b *bus) contractsSetHandlerDELETE(jc jape.Context) {
 	if set := jc.PathParam("set"); set != "" {
-		jc.Check("could not remove contract set", b.ms.DeleteContractSet(jc.Request.Context(), set))
+		jc.Check("could not remove contract set", b.ms.RemoveContractSet(jc.Request.Context(), set))
 	}
 }
 
@@ -640,11 +650,11 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	jc.Check("couldn't remove contract", b.ms.RemoveContract(jc.Request.Context(), id))
+	jc.Check("couldn't remove contract", b.ms.ArchiveContract(jc.Request.Context(), id, api.ContractArchivalReasonRemoved))
 }
 
 func (b *bus) contractsAllHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't remove contracts", b.ms.RemoveContracts(jc.Request.Context()))
+	jc.Check("couldn't remove contracts", b.ms.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
 }
 
 func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
@@ -1124,6 +1134,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
 		"GET    /contracts/active":       b.contractsActiveHandlerGET,
+		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
@@ -1133,9 +1144,9 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
-		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
+		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,

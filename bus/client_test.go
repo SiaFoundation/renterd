@@ -68,7 +68,6 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 
 	// create client
 	client := bus.NewClient("http://"+l.Addr().String(), "test")
-
 	b, cleanup, err := node.NewBus(node.BusConfig{
 		Bootstrap:   false,
 		GatewayAddr: "127.0.0.1:0",

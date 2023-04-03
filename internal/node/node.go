@@ -51,12 +51,13 @@ type BusConfig struct {
 }
 
 type AutopilotConfig struct {
-	AccountsRefillInterval time.Duration
-	Heartbeat              time.Duration
-	MigrationHealthCutoff  float64
-	ScannerInterval        time.Duration
-	ScannerBatchSize       uint64
-	ScannerNumThreads      uint64
+	AccountsRefillInterval   time.Duration
+	Heartbeat                time.Duration
+	MigrationHealthCutoff    float64
+	ScannerInterval          time.Duration
+	ScannerBatchSize         uint64
+	ScannerMinRecentFailures uint64
+	ScannerNumThreads        uint64
 }
 
 type ShutdownFn = func(context.Context) error
@@ -236,14 +237,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 	w := wallet.NewSingleAddressWallet(seed, ws)
 
-	dbDir := filepath.Join(dir, "db")
-	if err := os.MkdirAll(dbDir, 0700); err != nil {
-		return nil, nil, err
-	}
-
 	// If no DB dialector was provided, use SQLite.
 	dbConn := cfg.DBDialector
 	if dbConn == nil {
+		dbDir := filepath.Join(dir, "db")
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			return nil, nil, err
+		}
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
 
@@ -286,7 +286,7 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Log
 }
 
 func NewAutopilot(cfg AutopilotConfig, s autopilot.Store, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
-	ap, err := autopilot.New(s, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
+	ap, err := autopilot.New(s, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
 	if err != nil {
 		return nil, nil, nil, err
 	}
