@@ -78,7 +78,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		go func(r req) {
 			defer close(doneChan)
 
-			lockID, err := locker.AcquireContract(ctx, r.contract.ID, contractLockingUploadPriority, 30*time.Second)
+			lockID, err := locker.AcquireContract(ctx, r.contract.ID, contractLockingUploadPriority, time.Minute)
 			if err != nil {
 				respChan <- resp{r, types.Hash256{}, err}
 				span.SetStatus(codes.Error, "acquiring the contract failed")

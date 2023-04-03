@@ -12,8 +12,8 @@ type (
 		// ID identifies an account. It's a public key.
 		ID rhpv3.Account `json:"id"`
 
-		// Host describes the host the account was created with.
-		Host types.PublicKey `json:"host"`
+		// HostKey describes the host the account was created with.
+		HostKey types.PublicKey `json:"hostKey"`
 
 		// Balance is the balance of the account.
 		Balance *big.Int `json:"balance"`

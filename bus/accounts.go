@@ -176,7 +176,7 @@ func (a *account) convert() api.Account {
 		ID:           a.ID,
 		Balance:      new(big.Int).Set(a.Balance),
 		Drift:        new(big.Int).Set(a.Drift),
-		Host:         a.Host,
+		HostKey:      a.HostKey,
 		RequiresSync: a.RequiresSync,
 	}
 }
@@ -227,7 +227,7 @@ func (a *accounts) ToPersist() []api.Account {
 			ID:           acc.ID,
 			Balance:      new(big.Int).Set(acc.Balance),
 			Drift:        new(big.Int).Set(acc.Drift),
-			Host:         acc.Host,
+			HostKey:      acc.HostKey,
 			RequiresSync: acc.RequiresSync,
 		})
 		acc.mu.Unlock()
@@ -245,7 +245,7 @@ func (a *accounts) account(id rhpv3.Account, hk types.PublicKey) *account {
 		acc = &account{
 			Account: api.Account{
 				ID:           id,
-				Host:         hk,
+				HostKey:      hk,
 				Balance:      big.NewInt(0),
 				Drift:        big.NewInt(0),
 				RequiresSync: false,

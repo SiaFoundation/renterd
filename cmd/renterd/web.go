@@ -1,16 +1,14 @@
 package main
 
 import (
-	"embed"
 	"errors"
 	"io/fs"
 	"net/http"
 	_ "net/http/pprof"
 	"strings"
-)
 
-//go:embed dist
-var dist embed.FS
+	"go.sia.tech/web/renterd/ui"
+)
 
 type clientRouterFS struct {
 	fs fs.FS
@@ -25,7 +23,7 @@ func (cr *clientRouterFS) Open(name string) (fs.File, error) {
 }
 
 func createUIHandler() http.Handler {
-	assets, err := fs.Sub(dist, "dist")
+	assets, err := fs.Sub(ui.Assets, "assets")
 	if err != nil {
 		panic(err)
 	}

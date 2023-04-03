@@ -638,7 +638,7 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) er
 		funded := make(map[types.PublicKey]struct{})
 		for _, a := range accounts {
 			if a.Balance.Uint64() > 0 {
-				funded[a.Host] = struct{}{}
+				funded[a.HostKey] = struct{}{}
 			}
 		}
 
