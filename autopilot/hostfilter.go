@@ -196,7 +196,6 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable bool, refresh bool, renew bool, reasons []error) {
 	c, s := ci.contract, ci.settings
 	if isOutOfCollateral(c, s, renterFunds, bh) {
-		panic("Y")
 		reasons = append(reasons, errContractOutOfCollateral)
 		renew = false
 		refresh = true

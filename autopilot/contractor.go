@@ -1165,8 +1165,6 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	endHeight := endHeight(state.cfg, c.currentPeriod())
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-state.cs.BlockHeight, scan.Settings)
 	hostCollateral := rhpv2.ContractFormationCollateral(state.cfg.Contracts.Period, expectedStorage, scan.Settings)
-	fmt.Println("expected storage", expectedStorage, expectedStorage/rhpv2.SectorSize)
-	fmt.Println("host collateral", hostCollateral.String())
 
 	// form contract
 	contract, _, err := w.RHPForm(ctx, endHeight, hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)
