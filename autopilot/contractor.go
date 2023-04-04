@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -187,7 +188,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 	return hostInfos, nil
 }
 
-func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) error {
+func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
 
@@ -221,6 +222,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// fetch our wallet address
 	address, err := c.ap.bus.WalletAddress(ctx)
 	if err != nil {
+		return err
+	}
+
+	// fetch current contract set
+	currentset, err := c.ap.bus.Contracts(ctx, state.cfg.Contracts.Set)
+	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
 		return err
 	}
 
@@ -266,7 +273,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	c.mu.Unlock()
 
 	// run checks
-	toArchive, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, active, minScore)
+	toArchive, toIgnore, toRefresh, toRenew, err := c.runContractChecks(ctx, w, active, minScore, len(currentset))
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -292,13 +299,15 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	}
 
 	// run contract refreshes
-	refreshed, err := c.runContractRefreshes(ctx, w, &remaining, address, toRefresh)
+	refreshed, discarded, err := c.runContractRefreshes(ctx, w, &remaining, address, toRefresh)
 	if err != nil {
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	}
 
-	// build the new contract set (excluding formed contracts)
+	// add discarded contracts to the ignore list
+	toIgnore = append(toIgnore, discarded...)
 
+	// build the new contract set (excluding formed contracts)
 	contractset := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
 	numContracts := uint64(len(contractset))
 
@@ -311,21 +320,36 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	}
 	contractset = append(contractset, formed...)
 
-	c.logger.Debugw(
-		"contracts after maintenance",
-		"formed", len(formed),
-		"renewed", len(renewed),
-		"contractset", len(contractset),
-	)
+	// defer logging
+	defer func() {
+		numcontracts := len(currentset)
+		if err == nil {
+			numcontracts = len(contractset)
+		}
+		if numcontracts < int(state.rs.TotalShards) {
+			c.logger.Debugw(
+				"contracts after maintenance are below the minimum required",
+				"formed", len(formed),
+				"renewed", len(renewed),
+				"contractset", numcontracts,
+			)
+		} else {
+			c.logger.Debugw(
+				"contracts after maintenance",
+				"formed", len(formed),
+				"renewed", len(renewed),
+				"contractset", numcontracts,
+			)
+		}
+	}()
 
 	// update contract set
-	if !c.ap.isStopped() {
-		if len(contractset) < int(state.rs.TotalShards) {
-			c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), state.rs.TotalShards)
-		}
-		return c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, contractset)
+	if c.ap.isStopped() {
+		err = errors.New("autopilot stopped before maintenance could be completed")
+		return
 	}
-	return nil
+	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, contractset)
+	return
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
@@ -402,7 +426,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toArchive map[types.FileContractID]string, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64, contractset int) (toArchive map[types.FileContractID]string, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -412,6 +436,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	defer func() {
 		c.logger.Debugw(
 			"contracts checks completed",
+			"contractset", contractset,
 			"active", len(contracts),
 			"notfound", notfound,
 			"toArchive", len(toArchive),
@@ -662,11 +687,12 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 	return renewed, nil
 }
 
-func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) ([]api.ContractMetadata, error) {
+func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) ([]api.ContractMetadata, []types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRefreshes")
 	defer span.End()
 
 	refreshed := make([]api.ContractMetadata, 0, len(toRefresh))
+	discarded := make([]types.FileContractID, 0, len(toRefresh))
 
 	c.logger.Debugw(
 		"run contracts refreshes",
@@ -676,6 +702,7 @@ func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget 
 	defer func() {
 		c.logger.Debugw(
 			"contracts refreshes completed",
+			"discarded", len(discarded),
 			"refreshed", len(refreshed),
 			"budget", budget,
 		)
@@ -689,16 +716,18 @@ func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget 
 			break
 		}
 
-		contract, proceed, err := c.refreshContract(ctx, w, ci, budget, renterAddress)
+		contract, proceed, discard, err := c.refreshContract(ctx, w, ci, budget, renterAddress)
 		if err == nil {
 			refreshed = append(refreshed, contract)
+		} else if !discard {
+			discarded = append(discarded, contract.ID)
 		}
 		if !proceed {
 			break
 		}
 	}
 
-	return refreshed, nil
+	return refreshed, discarded, nil
 }
 
 func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
@@ -717,8 +746,8 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 }
 
 func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.AutopilotConfig, ci contractInfo) (types.Currency, error) {
-	// refresh with double the funds
-	refreshAmount := ci.contract.TotalCost.Mul64(2)
+	// refresh with 1.2x the funds
+	refreshAmount := ci.contract.TotalCost.Mul64(6).Div64(5)
 
 	// estimate the txn fee
 	txnFeeEstimate := c.ap.state.fee.Mul64(estimatedFileContractTransactionSetSize)
@@ -1022,7 +1051,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	return renewedContract, true, nil
 }
 
-func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractInfo, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractInfo, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, discard bool, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "refreshContract")
 	defer span.End()
 	defer func() {
@@ -1047,13 +1076,13 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	renterFunds, err := c.refreshFundingEstimate(ctx, cfg, ci)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
-		return api.ContractMetadata{}, true, err
+		return api.ContractMetadata{}, true, false, err
 	}
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
-		c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
-		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
+		c.logger.Warnw("insufficient budget for refresh", "hk", hk, "fcid", fcid, "budget", budget, "needed", renterFunds)
+		return api.ContractMetadata{}, false, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
 	}
 
 	// calculate the new collateral
@@ -1062,10 +1091,14 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
 	_, hostMissedPayout, _, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
-	if isBelowCollateralThreshold(newCollateral, hostMissedPayout) {
-		err := fmt.Errorf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout)
+	var newRemainingCollateral types.Currency
+	if hostMissedPayout.Cmp(settings.ContractPrice) > 0 {
+		newRemainingCollateral = hostMissedPayout.Sub(settings.ContractPrice)
+	}
+	if isBelowCollateralThreshold(newCollateral, newRemainingCollateral) {
+		err := fmt.Errorf("discarding contract after a failed refresh, refreshed contract collateral (%v) is below threshold", hostMissedPayout)
 		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "newCollateral", newCollateral.String(), "hostMissedPayout", hostMissedPayout.String(), "maxCollateral", settings.MaxCollateral)
-		return api.ContractMetadata{}, true, err
+		return api.ContractMetadata{}, true, true, err
 	}
 
 	// renew the contract
@@ -1073,9 +1106,9 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		if containsError(err, wallet.ErrInsufficientBalance) {
-			return api.ContractMetadata{}, false, err
+			return api.ContractMetadata{}, false, false, err
 		}
-		return api.ContractMetadata{}, true, err
+		return api.ContractMetadata{}, true, false, err
 	}
 
 	// update the budget
@@ -1085,7 +1118,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, contract.ID)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
-		return api.ContractMetadata{}, false, err
+		return api.ContractMetadata{}, false, false, err
 	}
 
 	// add to renewed set
@@ -1095,7 +1128,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 		"renterFunds", renterFunds.String(),
 		"newCollateral", newCollateral.String(),
 	)
-	return refreshedContract, true, nil
+	return refreshedContract, true, false, nil
 }
 
 func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
@@ -1132,6 +1165,8 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	endHeight := endHeight(state.cfg, c.currentPeriod())
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-state.cs.BlockHeight, scan.Settings)
 	hostCollateral := rhpv2.ContractFormationCollateral(state.cfg.Contracts.Period, expectedStorage, scan.Settings)
+	fmt.Println("expected storage", expectedStorage, expectedStorage/rhpv2.SectorSize)
+	fmt.Println("host collateral", hostCollateral.String())
 
 	// form contract
 	contract, _, err := w.RHPForm(ctx, endHeight, hk, host.NetAddress, renterAddress, renterFunds, hostCollateral)

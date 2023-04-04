@@ -168,7 +168,7 @@ func TestSQLContractStore(t *testing.T) {
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := cs.Contracts(ctx, "bar"); err != ErrContractSetNotFound {
+	if _, err := cs.Contracts(ctx, "bar"); !errors.Is(err, api.ErrContractSetNotFound) {
 		t.Fatal(err)
 	}
 
