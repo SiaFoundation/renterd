@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
@@ -229,6 +230,7 @@ type Bus interface {
 	AccountStore
 	contractLocker
 
+	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
@@ -658,6 +660,13 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	if jc.Check("couldn't form contract", err) != nil {
 		return
 	}
+
+	// broadcast the transaction set
+	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
+	if err != nil && !strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error()) {
+		w.logger.Warnf("failed to broadcast formation txn set: %v", err)
+	}
+
 	jc.Encode(api.RHPFormResponse{
 		ContractID:     contract.ID(),
 		Contract:       contract,
@@ -700,6 +709,12 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		})
 	})) != nil {
 		return
+	}
+
+	// broadcast the transaction set
+	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
+	if err != nil && !strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error()) {
+		w.logger.Warnf("failed to broadcast renewal txn set: %v", err)
 	}
 
 	// send the response

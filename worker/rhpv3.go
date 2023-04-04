@@ -869,7 +869,7 @@ func (w *worker) RPCRenew(ctx context.Context, cs api.ConsensusState, t *rhpv3.T
 	// TODO: starting from here, we need to make sure to release the txn on
 	// error.
 
-	txn, parents := txnSet[len(txnSet)-1], txnSet[:len(txnSet)-1]
+	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
 
 	// Sign only the revision and contract. We can't sign everything because
 	// then the host can't add its own outputs.
@@ -927,13 +927,16 @@ func (w *worker) RPCRenew(ctx context.Context, cs api.ConsensusState, t *rhpv3.T
 	}
 
 	// Create a new no-op revision and sign it.
-	// TODO:
+	noOpRevision := initialRevision(txn, rev.UnlockConditions.PublicKeys[1], renterKey.PublicKey().UnlockKey())
+	h = types.NewHasher()
+	noOpRevision.EncodeTo(h.E)
+	noOpRevisionSignature := renterKey.SignHash(h.Sum())
 
 	// Send the newly added signatures to the host and the signature for the
 	// initial no-op revision.
 	rs := rhpv3.RPCRenewSignatures{
 		TransactionSignatures: txn.Signatures[2:],
-		RevisionSignature:     types.Signature{}, // TODO
+		RevisionSignature:     noOpRevisionSignature,
 	}
 	if err = s.WriteResponse(&rs); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
@@ -945,12 +948,36 @@ func (w *worker) RPCRenew(ctx context.Context, cs api.ConsensusState, t *rhpv3.T
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
-	panic("not done yet")
+	// Create transaction signatures.
+	renterNoOpRevisionSignature := types.TransactionSignature{
+		ParentID:       types.Hash256(noOpRevision.ParentID),
+		PublicKeyIndex: 0, // renter key is first
+		CoveredFields: types.CoveredFields{
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: noOpRevisionSignature[:],
+	}
+	hostNoOpRevisionSignature := types.TransactionSignature{
+		ParentID:       types.Hash256(rev.ParentID),
+		PublicKeyIndex: 1,
+		CoveredFields: types.CoveredFields{
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: hostSigs.RevisionSignature[:],
+	}
+
+	// Add the parents to get the full txnSet.
+	txnSet = append(parents, txn)
+
+	return rhpv2.ContractRevision{
+		Revision:   noOpRevision,
+		Signatures: [2]types.TransactionSignature{renterNoOpRevisionSignature, hostNoOpRevisionSignature},
+	}, txnSet, nil
 }
 
 // initialRevision returns the first revision of a file contract formation
 // transaction.
-func initialRevision(formationTxn *types.Transaction, hostPubKey, renterPubKey types.UnlockKey) types.FileContractRevision {
+func initialRevision(formationTxn types.Transaction, hostPubKey, renterPubKey types.UnlockKey) types.FileContractRevision {
 	fc := formationTxn.FileContracts[0]
 	return types.FileContractRevision{
 		ParentID: formationTxn.FileContractID(0),
