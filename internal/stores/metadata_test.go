@@ -424,7 +424,6 @@ func TestRenewedContract(t *testing.T) {
 	ac.Model = Model{}
 	expectedContract := dbArchivedContract{
 		Host:      publicKey(c.HostKey()),
-		HostID:    1,
 		RenewedTo: fileContractID(fcid1Renewed),
 		Reason:    api.ContractArchivalReasonRenewed,
 

@@ -43,7 +43,6 @@ type (
 		ContractCommon
 		RenewedTo fileContractID `gorm:"index;size:32"`
 
-		HostID uint      `gorm:"index"`
 		Host   publicKey `gorm:"index;NOT NULL;size:32"`
 		Reason string
 	}
@@ -352,7 +351,6 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		// Create copy in archive.
 		err = tx.Create(&dbArchivedContract{
 			Host:      publicKey(oldContract.Host.PublicKey),
-			HostID:    oldContract.HostID,
 			Reason:    api.ContractArchivalReasonRenewed,
 			RenewedTo: fileContractID(c.ID()),
 
@@ -1078,7 +1076,6 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 		// create a copy in the archive
 		if err := tx.Create(&dbArchivedContract{
 			Host:   publicKey(contract.Host.PublicKey),
-			HostID: contract.HostID,
 			Reason: toArchive[types.FileContractID(contract.FCID)],
 
 			ContractCommon: ContractCommon{
