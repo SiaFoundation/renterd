@@ -359,7 +359,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	}
 
 	// Compute how much renter funds to put into the new contract.
-	cost := rhpv2.ContractRenewalCost(cs, fc, wprr.PriceTable.ContractPrice, txn.MinerFees[0], basePrice)
+	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
 
 	// Fund the txn. We are not signing it yet since it's not complete. The host
 	// still needs to complete it and the revision + contract are signed with
