@@ -193,7 +193,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable bool, refresh bool, renew bool, reasons []error) {
+func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable, refresh, renew, archive bool, reasons []error) {
 	c, s := ci.contract, ci.settings
 	if isOutOfCollateral(c, s, renterFunds, bh) {
 		reasons = append(reasons, errContractOutOfCollateral)
@@ -214,11 +214,13 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 	}
 	if c.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, errContractMaxRevisionNumber)
+		archive = true // can't be revised anymore
 		renew = false
 		refresh = false
 	}
 	if bh > c.EndHeight() {
 		reasons = append(reasons, errContractExpired)
+		archive = true // expired
 		renew = false
 		refresh = false
 	}

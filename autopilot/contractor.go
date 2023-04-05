@@ -483,7 +483,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
+		usable, refresh, renew, archive, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
@@ -493,28 +493,28 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"refresh", refresh,
 				"renew", renew,
 			)
-
-			if renew {
-				renewIndices[fcid] = len(toRenew)
-				toRenew = append(toRenew, contractInfo{
-					contract: contract,
-					settings: settings,
-				})
-			} else if refresh {
-				toRefresh = append(toRefresh, contractInfo{
-					contract: contract,
-					settings: settings,
-				})
-			} else {
-				toArchive[fcid] = errStr(joinErrors(reasons))
-				continue
-			}
+		}
+		if renew {
+			renewIndices[fcid] = len(toRenew)
+			toRenew = append(toRenew, contractInfo{
+				contract: contract,
+				settings: settings,
+			})
+		} else if refresh {
+			toRefresh = append(toRefresh, contractInfo{
+				contract: contract,
+				settings: settings,
+			})
+		} else if archive {
+			toArchive[fcid] = errStr(joinErrors(reasons))
 		}
 
 		// keep track of file size
-		contractIds = append(contractIds, fcid)
-		contractMap[fcid] = contract.ContractMetadata
-		contractSizes[fcid] = contract.FileSize()
+		if usable {
+			contractIds = append(contractIds, fcid)
+			contractMap[fcid] = contract.ContractMetadata
+			contractSizes[fcid] = contract.FileSize()
+		}
 	}
 
 	// apply active contract limit
