@@ -837,7 +837,7 @@ func RPCReadRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.
 	}, nil
 }
 
-func (w *worker) RPCRenew(ctx context.Context, cs api.ConsensusState, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey, prepareFunc func(rhpv3.HostPriceTable) (api.WalletPrepareRenewResponse, error)) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RPCRenew")
 	s := t.DialStream()
 	defer s.Close()
@@ -856,19 +856,31 @@ func (w *worker) RPCRenew(ctx context.Context, cs api.ConsensusState, t *rhpv3.T
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
-	// TODO: Gouging check.
+	// Perform gouging checks.
+	if errs := PerformGougingChecks(ctx, nil, &pt).CanForm(); len(errs) > 0 {
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", errs)
+	}
 
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
-	wprr, err := prepareFunc(pt)
+	wprr, err := w.bus.WalletPrepareRenew(ctx, *rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, pt, rrr.EndHeight, rrr.WindowSize)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+
+	// Starting from here, we need to make sure to release the txn on error.
+	defer func() {
+		if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			discardErr := w.bus.WalletDiscard(ctx, wprr.TransactionSet[len(wprr.TransactionSet)-1])
+			if discardErr != nil {
+				w.logger.Errorf("failed to discard txn after failed renewal: %v", discardErr)
+			}
+		}
+	}()
+
 	txnSet := wprr.TransactionSet
-
-	// TODO: starting from here, we need to make sure to release the txn on
-	// error.
-
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
 
 	// Sign only the revision and contract. We can't sign everything because

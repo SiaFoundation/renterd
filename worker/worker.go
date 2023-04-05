@@ -652,7 +652,12 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
 		if err != nil {
-			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			discardErr := w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
+			if discardErr != nil {
+				w.logger.Errorf("failed to discard txn after failed formation: %v", discardErr)
+			}
 			return err
 		}
 		return
@@ -702,9 +707,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	if jc.Check("couldn't renew contract", w.withRevisionV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
 		return withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
-			renewed, txnSet, err = w.RPCRenew(ctx, cs, t, &revision, rk, func(pt rhpv3.HostPriceTable) (api.WalletPrepareRenewResponse, error) {
-				return w.bus.WalletPrepareRenew(ctx, revision, rrr.HostAddress, rrr.RenterAddress, rk, rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, pt, rrr.EndHeight, rrr.WindowSize)
-			})
+			renewed, txnSet, err = w.RPCRenew(ctx, rrr, cs, t, &revision, rk)
 			return err
 		})
 	})) != nil {
