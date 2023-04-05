@@ -205,8 +205,10 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 		renew = false
 		refresh = true
 	}
-	if isUpForRenewal(cfg, c.Revision, bh) {
-		reasons = append(reasons, errContractUpForRenewal)
+	if shouldRenew, secondHalf := isUpForRenewal(cfg, c.Revision, bh); shouldRenew {
+		if secondHalf {
+			reasons = append(reasons, errContractUpForRenewal) // only unusable if in second half of renew window
+		}
 		renew = true
 		refresh = false
 	}
@@ -259,8 +261,10 @@ func isBelowCollateralThreshold(expectedCollateral, actualCollateral types.Curre
 	return collateral.Cmp(threshold) < 0
 }
 
-func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) bool {
-	return blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
+func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) (shouldRenew, secondHalf bool) {
+	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
+	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= r.EndHeight()
+	return
 }
 
 func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (*rhpv2.HostSettings, bool, string) {
