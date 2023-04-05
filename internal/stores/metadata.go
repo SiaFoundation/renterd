@@ -304,11 +304,15 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
 }
 
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
-	added, err := addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
-	if err != nil {
-		return api.ContractMetadata{}, err
+	var added dbContract
+	if err = s.retryTransaction(func(tx *gorm.DB) error {
+		added, err = addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
+		return err
+	}); err != nil {
+		return
 	}
-	s.knownContracts[c.ID()] = struct{}{}
+
+	s.knownContracts[types.FileContractID(added.FCID)] = struct{}{}
 	return added.convert(), nil
 }
 
@@ -396,7 +400,15 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Finally delete the old contract.
-		return deleteContract(tx, fileContractID(renewedFrom))
+		res := tx.Delete(&oldContract)
+		if err := res.Error; err != nil {
+			return err
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
+		}
+
+		return nil
 	}); err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -902,12 +914,12 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 				    CASE
 					WHEN (COUNT(DISTINCT(c.host_id)) < slabs.min_shards)
 					THEN
-					  0
+					  -1
 					ELSE
 					  1
 					END
 				  ELSE
-				  CAST((COUNT(DISTINCT(c.host_id)) - slabs.min_shards) AS FLOAT) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+				  (CAST(COUNT(DISTINCT(c.host_id)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
 				  END AS health`).
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
@@ -918,7 +930,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
 		Where("cs.name = ?", set).
 		Group("slabs.id").
-		Having("health <= ?", healthCutoff).
+		Having("health >= 0 AND health <= ?", healthCutoff).
 		Order("health ASC").
 		Limit(limit).
 		Preload("Shards.DBSector").
@@ -1087,8 +1099,12 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 		}
 
 		// remove the contract
-		if err := deleteContract(tx, contract.FCID); err != nil {
+		res := tx.Delete(&contract)
+		if err := res.Error; err != nil {
 			return err
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
 		}
 	}
 	return nil
@@ -1097,12 +1113,4 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // deleteObject deletes an object from the store.
 func deleteObject(tx *gorm.DB, key string) error {
 	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
-}
-
-// deleteContract deletes a contract from the store.
-func deleteContract(tx *gorm.DB, id fileContractID) error {
-	return tx.
-		Where(&dbContract{ContractCommon: ContractCommon{FCID: id}}).
-		Delete(&dbContract{}).
-		Error
 }

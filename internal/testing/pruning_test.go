@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/siad/build"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -18,7 +18,7 @@ func TestHostPruning(t *testing.T) {
 	ctx := context.Background()
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.ErrorLevel))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,13 +35,6 @@ func TestHostPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// remove the first host manually and close it
-	cluster.hosts = cluster.hosts[1:]
-	err = hosts[0].Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// add h1 to the blocklist
 	hk1 := hosts[0].PublicKey()
 	err = b.UpdateHostBlocklist(ctx, []string{hk1.String()}, nil, false)
@@ -49,17 +42,36 @@ func TestHostPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// record a couple of failed interactions for h1 that push his downtime well
-	// over the default 'MaxDowntimeHours' setting of 10 hours, and his recent
-	// scan failures over the default 'MinRecentScanFailures'
+	// assert the host was scanned
+	h, err := b.Host(context.Background(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Interactions.LastScan.IsZero() {
+		t.Fatal("expected last scan to be set")
+	}
+
+	// remove the first host manually and close it
+	cluster.hosts = cluster.hosts[1:]
+	err = hosts[0].Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// record a number of failed interaction for h1 that push his downtime well
+	// over the default 'MaxDowntimeHours' setting of 10 hours and ensures we
+	// push it over the 'MinRecentScanFailures' limit
 	//
 	// NOTE: we do this manually to avoid bypassing the condition by adding
 	// flags or extending the config with properties only used in testing
-	his := make([]hostdb.Interaction, 10)
-	for i := 0; i < 10; i++ {
+	now := time.Now()
+	his := make([]hostdb.Interaction, 20)
+	for i := 0; i < 20; i++ {
+		now = now.Add(time.Hour * 20)
 		his[i] = hostdb.Interaction{
 			Host:      hk1,
-			Timestamp: time.Now().Add(time.Hour * 20),
+			Timestamp: now,
+			Success:   false,
 			Type:      hostdb.InteractionTypeScan,
 		}
 	}
@@ -68,8 +80,9 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// wait until we have 2 hosts in the set - we expect one host to be removed
-	// by the host pruning - this takes ~10 failed scans so we retry for 30s
-	if err := build.Retry(30, time.Second, func() error {
+	// by the host pruning
+	if err := Retry(30, 100*time.Millisecond, func() error {
+		// check if the host got pruned
 		hosts, err := b.Hosts(context.Background(), 0, -1)
 		if err != nil {
 			t.Fatal(err)

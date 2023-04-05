@@ -521,6 +521,62 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 }
 
+func TestArchiveContracts(t *testing.T) {
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 hosts
+	hks, err := cs.addTestHosts(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 contracts
+	fcids, _, err := cs.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// archive 2 of them
+	toArchive := map[types.FileContractID]string{
+		fcids[1]: "foo",
+		fcids[2]: "bar",
+	}
+	if err := cs.ArchiveContracts(context.Background(), toArchive); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the first one is still active
+	active, err := cs.ActiveContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || active[0].ID != fcids[0] {
+		t.Fatal("wrong active contracts", active)
+	}
+
+	// assert the two others were archived
+	ffcids := make([]fileContractID, 2)
+	ffcids[0] = fileContractID(fcids[1])
+	ffcids[1] = fileContractID(fcids[2])
+	var acs []dbArchivedContract
+	err = cs.db.Model(&dbArchivedContract{}).
+		Where("fcid IN (?)", ffcids).
+		Find(&acs).
+		Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acs) != 2 {
+		t.Fatal("wrong number of archived contracts", len(acs))
+	}
+	if acs[0].Reason != "foo" || acs[1].Reason != "bar" {
+		t.Fatal("unexpected reason", acs[0].Reason, acs[1].Reason)
+	}
+}
+
 func (s *SQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
 	cnt, err := s.contractsCount()
 	if err != nil {
@@ -1118,6 +1174,27 @@ func TestUnhealthySlabs(t *testing.T) {
 					},
 				},
 			},
+			// lost slab - no good pieces (0/3)
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: types.PublicKey{1},
+							Root: types.Hash256{16},
+						},
+						{
+							Host: types.PublicKey{2},
+							Root: types.Hash256{17},
+						},
+						{
+							Host: types.PublicKey{3},
+							Root: types.Hash256{18},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -1245,8 +1322,8 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(slabs) != 1 {
-		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
+	if len(slabs) != 0 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=0", len(slabs))
 	}
 
 	expected := []object.SlabSlice{
