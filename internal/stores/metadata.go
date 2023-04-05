@@ -300,11 +300,15 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
 }
 
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
-	added, err := addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
-	if err != nil {
-		return api.ContractMetadata{}, err
+	var added dbContract
+	if err = s.retryTransaction(func(tx *gorm.DB) error {
+		added, err = addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
+		return err
+	}); err != nil {
+		return
 	}
-	s.knownContracts[c.ID()] = struct{}{}
+
+	s.knownContracts[types.FileContractID(added.FCID)] = struct{}{}
 	return added.convert(), nil
 }
 
@@ -392,7 +396,15 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Finally delete the old contract.
-		return deleteContract(tx, fileContractID(renewedFrom))
+		res := tx.Delete(&oldContract)
+		if err := res.Error; err != nil {
+			return err
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
+		}
+
+		return nil
 	}); err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -1083,8 +1095,12 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 		}
 
 		// remove the contract
-		if err := deleteContract(tx, contract.FCID); err != nil {
+		res := tx.Delete(&contract)
+		if err := res.Error; err != nil {
 			return err
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
 		}
 	}
 	return nil
@@ -1093,12 +1109,4 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // deleteObject deletes an object from the store.
 func deleteObject(tx *gorm.DB, key string) error {
 	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
-}
-
-// deleteContract deletes a contract from the store.
-func deleteContract(tx *gorm.DB, id fileContractID) error {
-	return tx.
-		Where(&dbContract{ContractCommon: ContractCommon{FCID: id}}).
-		Delete(&dbContract{}).
-		Error
 }
