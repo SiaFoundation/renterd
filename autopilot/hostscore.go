@@ -13,23 +13,6 @@ import (
 	"lukechampine.com/frand"
 )
 
-const (
-	// maxBaseRPCPriceVsBandwidth is the max ratio for sane pricing between the
-	// MinBaseRPCPrice and the MinDownloadBandwidthPrice. This ensures that 1
-	// million base RPC charges are at most 1% of the cost to download 4TB. This
-	// ratio should be used by checking that the MinBaseRPCPrice is less than or
-	// equal to the MinDownloadBandwidthPrice multiplied by this constant
-	maxBaseRPCPriceVsBandwidth = uint64(40e3)
-
-	// maxSectorAccessPriceVsBandwidth is the max ratio for sane pricing between
-	// the MinSectorAccessPrice and the MinDownloadBandwidthPrice. This ensures
-	// that 1 million base accesses are at most 10% of the cost to download 4TB.
-	// This ratio should be used by checking that the MinSectorAccessPrice is
-	// less than or equal to the MinDownloadBandwidthPrice multiplied by this
-	// constant
-	maxSectorAccessPriceVsBandwidth = uint64(400e3)
-)
-
 func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
 	hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
 	return api.HostScoreBreakdown{
