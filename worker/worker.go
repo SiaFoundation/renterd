@@ -526,36 +526,39 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		defer cancel()
 	}
 
+	// defer scan result
+	var err error
 	var settings rhpv2.HostSettings
+	var priceTable rhpv3.HostPriceTable
+	defer func() {
+		w.recordScan(rsr.HostKey, priceTable, settings, err)
+	}()
+
+	// fetch the host settings
 	start := time.Now()
-	pingErr := w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
+	err = w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
 		settings, err = RPCSettings(ctx, t)
 		return err
 	})
 	elapsed := time.Since(start)
 
-	var pt rhpv3.HostPriceTable
-	ptErr := withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
-		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
-		return err
-	})
-
-	w.recordScan(rsr.HostKey, pt, settings, pingErr)
-
-	var scanErrStr string
-	if pingErr != nil {
-		scanErrStr = pingErr.Error()
+	// fetch the host pricetable
+	if err == nil {
+		err = withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
+			priceTable, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+			return err
+		})
 	}
-	if ptErr != nil {
-		if scanErrStr != "" {
-			scanErrStr += "; "
-		}
-		scanErrStr += ptErr.Error()
+
+	// check error
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
 	}
 
 	jc.Encode(api.RHPScanResponse{
 		Ping:      api.ParamDuration(elapsed),
-		ScanError: scanErrStr,
+		ScanError: errStr,
 		Settings:  settings,
 	})
 }

@@ -182,12 +182,18 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		errs = append(errs, errHostNotAnnounced)
 	} else if !h.Scanned {
 		errs = append(errs, errHostNotScanned)
-	} else if !h.IsOnline() {
-		errs = append(errs, errHostOffline)
 	} else {
+		// online check
+		if !h.IsOnline() {
+			errs = append(errs, errHostOffline)
+		}
+
+		// redundant IP check
 		if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
 			errs = append(errs, errHostRedundantIP)
 		}
+
+		// accepting contracts check
 		if !h.Settings.AcceptingContracts {
 			errs = append(errs, errHostNotAcceptingContracts)
 		}
