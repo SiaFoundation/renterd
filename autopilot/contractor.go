@@ -1089,7 +1089,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 		newRemainingCollateral = hostMissedPayout.Sub(settings.ContractPrice)
 	}
 	if isBelowCollateralThreshold(newCollateral, newRemainingCollateral) {
-		err := errors.New("refresh failed, new colleteral is below the threshold")
+		err := errors.New("refresh failed, new collateral is below the threshold")
 		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "expectedCollateral", newCollateral.String(), "actualCollateral", newRemainingCollateral.String(), "maxCollateral", settings.MaxCollateral)
 		return api.ContractMetadata{}, true, err
 	}
