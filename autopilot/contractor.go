@@ -1063,13 +1063,9 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
 	_, hostMissedPayout, _, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
-	var newRemainingCollateral types.Currency
-	if hostMissedPayout.Cmp(settings.ContractPrice) > 0 {
-		newRemainingCollateral = hostMissedPayout.Sub(settings.ContractPrice)
-	}
-	if isBelowCollateralThreshold(newCollateral, newRemainingCollateral) {
-		err := errors.New("refresh failed, new collateral is below the threshold")
-		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "expectedCollateral", newCollateral.String(), "actualCollateral", newRemainingCollateral.String(), "maxCollateral", settings.MaxCollateral)
+	if isBelowCollateralThreshold(newCollateral, hostMissedPayout) {
+		err := fmt.Errorf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout)
+		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "newCollateral", newCollateral.String(), "hostMissedPayout", hostMissedPayout.String(), "maxCollateral", settings.MaxCollateral)
 		return api.ContractMetadata{}, true, err
 	}
 
