@@ -306,8 +306,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// build the new contract set (excluding formed contracts)
-	contractset := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
-	numContracts := uint64(len(contractset))
+	contractSet := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
+	numContracts := uint64(len(contractSet))
 
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
@@ -316,27 +316,27 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
-	contractset = append(contractset, formed...)
+	contractSet = append(contractSet, formed...)
 
 	// defer logging
 	defer func() {
-		numcontracts := len(currentSet)
+		contractSetContracts := len(currentSet)
 		if err == nil {
-			numcontracts = len(contractset)
+			contractSetContracts = len(contractSet)
 		}
-		if numcontracts < int(state.rs.TotalShards) {
+		if contractSetContracts < int(state.rs.TotalShards) {
 			c.logger.Debugw(
 				"contracts after maintenance are below the minimum required",
 				"formed", len(formed),
 				"renewed", len(renewed),
-				"contractset", numcontracts,
+				"contractset", contractSetContracts,
 			)
 		} else {
 			c.logger.Debugw(
 				"contracts after maintenance",
 				"formed", len(formed),
 				"renewed", len(renewed),
-				"contractset", numcontracts,
+				"contractset", contractSetContracts,
 			)
 		}
 	}()
@@ -346,7 +346,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		err = errors.New("autopilot stopped before maintenance could be completed")
 		return
 	}
-	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, contractset)
+	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, contractSet)
 	return
 }
 
