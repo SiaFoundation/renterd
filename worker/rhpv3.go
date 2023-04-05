@@ -561,6 +561,11 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 		return
 	}
 
+	// sanity check the host has been scanned
+	if !host.Scanned {
+		return hostdb.HostPriceTable{}, fmt.Errorf("host %v was not scanned", hk)
+	}
+
 	// sanity check the host's net address
 	if host.Settings.NetAddress == "" {
 		return hostdb.HostPriceTable{}, fmt.Errorf("host %v has no net address", hk)

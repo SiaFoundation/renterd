@@ -1166,7 +1166,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 
 func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (hostdb.HostPriceTable, error) {
 	// fetch the settings if necessary
-	if host.Settings.NetAddress == "" {
+	if !host.Scanned || host.Settings.NetAddress == "" {
 		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
 		if err != nil {
 			return hostdb.HostPriceTable{}, err
