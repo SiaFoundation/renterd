@@ -1118,6 +1118,27 @@ func TestUnhealthySlabs(t *testing.T) {
 					},
 				},
 			},
+			// lost slab - no good pieces (0/3)
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: types.PublicKey{1},
+							Root: types.Hash256{16},
+						},
+						{
+							Host: types.PublicKey{2},
+							Root: types.Hash256{17},
+						},
+						{
+							Host: types.PublicKey{3},
+							Root: types.Hash256{18},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -1245,8 +1266,8 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(slabs) != 1 {
-		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
+	if len(slabs) != 0 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=0", len(slabs))
 	}
 
 	expected := []object.SlabSlice{

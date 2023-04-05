@@ -902,12 +902,12 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 				    CASE
 					WHEN (COUNT(DISTINCT(c.host_id)) < slabs.min_shards)
 					THEN
-					  0
+					  -1
 					ELSE
 					  1
 					END
 				  ELSE
-				  CAST((COUNT(DISTINCT(c.host_id)) - slabs.min_shards) AS FLOAT) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+				  (CAST(COUNT(DISTINCT(c.host_id)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
 				  END AS health`).
 		Model(&dbSlab{}).
 		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
@@ -918,7 +918,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
 		Where("cs.name = ?", set).
 		Group("slabs.id").
-		Having("health <= ?", healthCutoff).
+		Having("health >= 0 AND health <= ?", healthCutoff).
 		Order("health ASC").
 		Limit(limit).
 		Preload("Shards.DBSector").
