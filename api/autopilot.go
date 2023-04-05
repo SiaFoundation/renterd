@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -34,11 +35,26 @@ type (
 	}
 
 	HostHandlerGET struct {
-		ScoreBreakdown  HostScoreBreakdown `json:"scoreBreakdown"`
-		Score           float64            `json:"score"`
-		Usable          bool               `json:"usable"`
-		UnusableReasons []string           `json:"unusableReasons"`
-		Host            hostdb.Host        `json:"host"`
+		Host hostdb.Host `json:"host"`
+
+		Gouging          bool               `json:"gouging"`
+		GougingBreakdown GougingBreakdown   `json:"gougingBreakdown"`
+		Score            float64            `json:"score"`
+		ScoreBreakdown   HostScoreBreakdown `json:"scoreBreakdown"`
+		Usable           bool               `json:"usable"`
+		UnusableReasons  []string           `json:"unusableReasons"`
+	}
+
+	GougingBreakdown struct {
+		RHPv2ContractErr error `json:"rhpv2ContractErr"`
+		RHPv2DownloadErr error `json:"rhpv2DownloadErr"`
+		RHPv2GougingErr  error `json:"rhpv2GougingErr"`
+		RHPv2UploadErr   error `json:"rhpv2UploadErr"`
+
+		RHPv3ContractErr error `json:"rhpv3ContractErr"`
+		RHPv3DownloadErr error `json:"rhpv3DownloadErr"`
+		RHPv3GougingErr  error `json:"rhpv3GougingErr"`
+		RHPv3UploadErr   error `json:"rhpv3UploadErr"`
 	}
 
 	HostScoreBreakdown struct {
@@ -76,6 +92,46 @@ type (
 		CurrentPeriod uint64 `json:"currentPeriod"`
 	}
 )
+
+func (gb GougingBreakdown) Gouging() bool {
+	for _, err := range []error{
+		gb.RHPv2ContractErr,
+		gb.RHPv2DownloadErr,
+		gb.RHPv2GougingErr,
+		gb.RHPv2UploadErr,
+		gb.RHPv3ContractErr,
+		gb.RHPv3DownloadErr,
+		gb.RHPv3GougingErr,
+		gb.RHPv3UploadErr,
+	} {
+		if err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (gb GougingBreakdown) Reasons() string {
+	var reasons []string
+	for _, err := range []error{
+		gb.RHPv2ContractErr,
+		gb.RHPv2DownloadErr,
+		gb.RHPv2GougingErr,
+		gb.RHPv2UploadErr,
+		gb.RHPv3ContractErr,
+		gb.RHPv3DownloadErr,
+		gb.RHPv3GougingErr,
+		gb.RHPv3UploadErr,
+	} {
+		if err != nil {
+			reasons = append(reasons, err.Error())
+		}
+	}
+	if len(reasons) == 0 {
+		return ""
+	}
+	return strings.Join(reasons, ";")
+}
 
 func (sb HostScoreBreakdown) Score() float64 {
 	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices

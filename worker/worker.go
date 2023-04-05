@@ -638,7 +638,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return err
 		}
 
-		if errs := PerformGougingChecks(ctx, &hostSettings, nil).CanForm(); len(errs) > 0 {
+		if errs := GougingCheckerFromContext(ctx).Check(&hostSettings, nil).CanForm(); len(errs) > 0 {
 			return fmt.Errorf("failed to form contract, gouging check failed: %v", errs)
 		}
 

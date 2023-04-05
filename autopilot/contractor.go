@@ -120,13 +120,24 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	c.mu.Unlock()
 
 	f := newIPFilter(c.logger)
-	isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
+	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
+
+	// we do not care about validating the host blockheight in the pricetable so
+	// we set it to ours
+	if host.Host.PriceTable != nil {
+		host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
+	}
+
+	isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host.Host, minScore, storedData)
 	return api.HostHandlerGET{
-		Host:            host.Host,
-		Score:           unusableResult.scoreBreakdown.Score(),
-		ScoreBreakdown:  unusableResult.scoreBreakdown,
-		Usable:          isUsable,
-		UnusableReasons: unusableResult.reasons(),
+		Host: host.Host,
+
+		Gouging:          unusableResult.gougingBreakdown.Gouging(),
+		GougingBreakdown: unusableResult.gougingBreakdown,
+		Score:            unusableResult.scoreBreakdown.Score(),
+		ScoreBreakdown:   unusableResult.scoreBreakdown,
+		Usable:           isUsable,
+		UnusableReasons:  unusableResult.reasons(),
 	}, nil
 }
 
@@ -164,6 +175,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 	}
 
 	f := newIPFilter(c.logger)
+	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
 
 	c.mu.Lock()
 	storedData := make(map[types.PublicKey]uint64)
@@ -175,13 +187,22 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 
 	var hostInfos []api.HostHandlerGET
 	for _, host := range hosts {
-		isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData[host.PublicKey], fee, true)
+		// we do not care about validating the host blockheight in the pricetable so
+		// we set it to ours
+		if host.PriceTable != nil {
+			host.PriceTable.HostBlockHeight = cs.BlockHeight
+		}
+
+		isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host, minScore, storedData[host.PublicKey])
 		hostInfos = append(hostInfos, api.HostHandlerGET{
-			Host:            host,
-			Score:           unusableResult.scoreBreakdown.Score(),
-			ScoreBreakdown:  unusableResult.scoreBreakdown,
-			Usable:          isUsable,
-			UnusableReasons: unusableResult.reasons(),
+			Host: host,
+
+			Gouging:          unusableResult.gougingBreakdown.Gouging(),
+			GougingBreakdown: unusableResult.gougingBreakdown,
+			Score:            unusableResult.scoreBreakdown.Score(),
+			ScoreBreakdown:   unusableResult.scoreBreakdown,
+			Usable:           isUsable,
+			UnusableReasons:  unusableResult.reasons(),
 		})
 	}
 	return hostInfos, nil
@@ -427,6 +448,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	// convenience variables
 	state := c.ap.state
 
+	// create a gouging checker
+	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
 	// state variables
 	contractIds := make([]types.FileContractID, 0, len(contracts))
 	contractSizes := make(map[types.FileContractID]uint64)
@@ -466,7 +490,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, contract.FileSize())
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", unusableResult.reasons())
 			toIgnore = append(toIgnore, fcid)
@@ -603,9 +627,12 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			continue
 		}
 
+		// create a gouging checker
+		gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if gouging, reasons := worker.IsGouging(state.gs, state.rs, cs, nil, &host.PriceTable.HostPriceTable, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
-			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
+		if breakdown := gc.Breakdown(nil, &host.PriceTable.HostPriceTable); breakdown.Gouging() {
+			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", breakdown.Reasons())
 			continue
 		}
 
@@ -871,6 +898,9 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	// create an IP filter
 	ipFilter := newIPFilter(c.logger)
 
+	// create a gouging checker
+	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
 	// create list of candidate hosts
 	var candidates []hostdb.Host
 	var excluded, unscanned int
@@ -906,9 +936,12 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// right before forming the contract to ensure we do not form a contract
 		// with a host that's gouging its prices.
 		//
-		// NOTE: we ignore the host's blockheight here because we don't
-		// necessarily have a recent price table.
-		if usable, result := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+		// NOTE: we do not care about validating the host blockheight in the
+		// pricetable so we set it to ours
+		if h.PriceTable != nil {
+			h.PriceTable.HostBlockHeight = state.cs.BlockHeight
+		}
+		if usable, result := isUsableHost(state.cfg, state.rs, gc, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
 			results.merge(result)
 			unusable++
 			continue
