@@ -99,12 +99,13 @@ type HostAddress struct {
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
-	KnownSince   time.Time           `json:"knownSince"`
-	PublicKey    types.PublicKey     `json:"public_key"`
-	NetAddress   string              `json:"netAddress"`
-	PriceTable   *HostPriceTable     `json:"priceTable"`
-	Settings     *rhpv2.HostSettings `json:"settings"`
-	Interactions Interactions        `json:"interactions"`
+	KnownSince   time.Time          `json:"knownSince"`
+	PublicKey    types.PublicKey    `json:"public_key"`
+	NetAddress   string             `json:"netAddress"`
+	PriceTable   HostPriceTable     `json:"priceTable"`
+	Settings     rhpv2.HostSettings `json:"settings"`
+	Interactions Interactions       `json:"interactions"`
+	Scanned      bool               `json:"scanned"`
 }
 
 // A HostPriceTable extends the host price table with its expiry.
@@ -117,6 +118,11 @@ type HostPriceTable struct {
 type HostInfo struct {
 	Host
 	Blocked bool `json:"blocked"`
+}
+
+// IsAnnounced returns whether the host has been announced.
+func (h Host) IsAnnounced() bool {
+	return h.NetAddress != ""
 }
 
 // IsOnline returns whether a host is considered online.

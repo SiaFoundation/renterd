@@ -15,6 +15,21 @@ import (
 
 const (
 	keyGougingChecker contextKey = "GougingChecker"
+
+	// maxBaseRPCPriceVsBandwidth is the max ratio for sane pricing between the
+	// MinBaseRPCPrice and the MinDownloadBandwidthPrice. This ensures that 1
+	// million base RPC charges are at most 1% of the cost to download 4TB. This
+	// ratio should be used by checking that the MinBaseRPCPrice is less than or
+	// equal to the MinDownloadBandwidthPrice multiplied by this constant
+	maxBaseRPCPriceVsBandwidth = uint64(40e3)
+
+	// maxSectorAccessPriceVsBandwidth is the max ratio for sane pricing between
+	// the MinSectorAccessPrice and the MinDownloadBandwidthPrice. This ensures
+	// that 1 million base accesses are at most 10% of the cost to download 4TB.
+	// This ratio should be used by checking that the MinSectorAccessPrice is
+	// less than or equal to the MinDownloadBandwidthPrice multiplied by this
+	// constant
+	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
 type (
@@ -75,6 +90,7 @@ func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.Consens
 			checkDownloadGougingRHPv2(gs, rs, *hs),
 			checkPriceGougingHS(gs, hs),
 			checkUploadGougingRHPv2(gs, rs, *hs),
+			checkContractGougingHS(period, renewWindow, hs),
 		)
 	}
 
@@ -149,6 +165,16 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
 	}
+	maxBaseRPCPrice := hs.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
+	if hs.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
+		return fmt.Errorf("rpc price too high, %v > %v", hs.BaseRPCPrice, maxBaseRPCPrice)
+	}
+
+	// check sector access price
+	maxSectorAccessPrice := hs.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
+	if hs.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
+		return fmt.Errorf("sector access price too high, %v > %v", hs.SectorAccessPrice, maxSectorAccessPrice)
+	}
 
 	// check max storage price
 	if !gs.MaxStoragePrice.IsZero() && hs.StoragePrice.Cmp(gs.MaxStoragePrice) > 0 {
@@ -166,6 +192,20 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 	}
 	if hs.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
 		return fmt.Errorf("MaxCollateral is below minimum: %v<%v", hs.MaxCollateral, gs.MinMaxCollateral)
+	}
+
+	return nil
+}
+
+func checkContractGougingHS(period, renewWindow uint64, hs *rhpv2.HostSettings) error {
+	// check MaxDuration
+	if period != 0 && period > hs.MaxDuration {
+		return fmt.Errorf("MaxDuration %v is lower than the period %v", hs.MaxDuration, period)
+	}
+
+	// check WindowSize
+	if renewWindow != 0 && renewWindow < hs.WindowSize {
+		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", hs.WindowSize, renewWindow)
 	}
 
 	return nil

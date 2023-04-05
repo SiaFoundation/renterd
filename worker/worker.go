@@ -606,7 +606,10 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(pt)
+	jc.Encode(hostdb.HostPriceTable{
+		HostPriceTable: pt,
+		Expiry:         time.Now().Add(pt.Validity),
+	})
 }
 
 func (w *worker) rhpFormHandler(jc jape.Context) {

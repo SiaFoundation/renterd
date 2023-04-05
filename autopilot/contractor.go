@@ -473,11 +473,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// grab the settings - this is safe because bad settings make an unusable host
-		settings := *host.Settings
-
 		// decide whether the contract is still good
-		ci := contractInfo{contract: contract, settings: settings}
+		ci := contractInfo{contract: contract, settings: host.Settings}
 		renterFunds, err := c.renewFundingEstimate(ctx, ci, false)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
@@ -498,12 +495,12 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				renewIndices[fcid] = len(toRenew)
 				toRenew = append(toRenew, contractInfo{
 					contract: contract,
-					settings: settings,
+					settings: host.Settings,
 				})
 			} else if refresh {
 				toRefresh = append(toRefresh, contractInfo{
 					contract: contract,
-					settings: settings,
+					settings: host.Settings,
 				})
 			} else {
 				toDelete = append(toDelete, fcid)
@@ -882,7 +879,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 			continue
 		}
 		// filter out unscanned hosts
-		if h.Settings == nil || h.PriceTable == nil {
+		if !h.Scanned {
 			unscanned++
 			continue
 		}
@@ -1163,29 +1160,24 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (*hostdb.HostPriceTable, error) {
+func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (hostdb.HostPriceTable, error) {
 	// fetch the settings if necessary
-	if host.Settings == nil {
+	if host.Settings.NetAddress == "" {
 		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
 		if err != nil {
-			return nil, err
+			return hostdb.HostPriceTable{}, err
 		}
-		host.Settings = &scan.Settings
+		if scan.Settings.NetAddress == "" {
+			return hostdb.HostPriceTable{}, errors.New("host settings have invalid NetAddress")
+		}
+		host.Settings = scan.Settings
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeoutHostPriceTable)
 	defer cancel()
 
 	// fetch the price table
-	pt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
-	if err != nil {
-		return nil, err
-	}
-
-	return &hostdb.HostPriceTable{
-		HostPriceTable: pt,
-		Expiry:         time.Now().Add(pt.Validity),
-	}, nil
+	return w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
 }
 
 func buildContractSet(active []api.Contract, toDelete, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {

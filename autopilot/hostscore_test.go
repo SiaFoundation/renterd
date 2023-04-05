@@ -16,7 +16,7 @@ func TestHostScore(t *testing.T) {
 	cfg := api.DefaultAutopilotConfig()
 	day := 24 * time.Hour
 
-	newHost := func(s *rhpv2.HostSettings) hostdb.Host {
+	newHost := func(s rhpv2.HostSettings) hostdb.Host {
 		return newTestHost(randomHostKey(), newTestHostPriceTable(), s)
 	}
 	h1 := newHost(newTestHostSettings())

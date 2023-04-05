@@ -556,14 +556,14 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 
 	// fetch the host, return early if it has a valid price table
 	host, err := b.Host(ctx, hk)
-	if err == nil && host.PriceTable != nil && time.Now().Before(host.PriceTable.Expiry.Add(priceTableValidityLeeway)) {
-		hpt = *host.PriceTable
+	if err == nil && !host.PriceTable.Expiry.IsZero() && time.Now().Before(host.PriceTable.Expiry.Add(priceTableValidityLeeway)) {
+		hpt = host.PriceTable
 		return
 	}
 
-	// sanity check the host has settings to avoid nil panic
-	if host.Settings == nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("host %v has no settings", hk)
+	// sanity check the host's net address
+	if host.Settings.NetAddress == "" {
+		return hostdb.HostPriceTable{}, fmt.Errorf("host %v has no net address", hk)
 	}
 
 	// otherwise fetch it

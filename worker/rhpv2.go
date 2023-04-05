@@ -893,16 +893,6 @@ func (s *Session) withTransport(ctx context.Context, fn func(t *rhpv2.Transport)
 	return
 }
 
-// NewSession returns a Session locking the provided contract.
-func NewSession(t *rhpv2.Transport, key types.PrivateKey, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) *Session {
-	return &Session{
-		transport: t,
-		key:       key,
-		revision:  rev,
-		settings:  settings,
-	}
-}
-
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
 func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
 	defer wrapErr(&err, "Settings")

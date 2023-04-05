@@ -411,7 +411,7 @@ func TestRecordScan(t *testing.T) {
 	if host.Interactions != (hostdb.Interactions{}) {
 		t.Fatal("mismatch")
 	}
-	if host.Settings != nil {
+	if host.Settings != (rhpv2.HostSettings{}) {
 		t.Fatal("mismatch")
 	}
 
@@ -454,7 +454,7 @@ func TestRecordScan(t *testing.T) {
 	}) {
 		t.Fatal("mismatch")
 	}
-	if !reflect.DeepEqual(*host.Settings, settings) {
+	if !reflect.DeepEqual(host.Settings, settings) {
 		t.Fatal("mismatch")
 	}
 

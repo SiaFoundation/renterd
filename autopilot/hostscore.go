@@ -34,11 +34,11 @@ func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expect
 	hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h),
-		Collateral:       collateralScore(cfg, hostPeriodCost, *h.Settings, expectedRedundancy),
+		Collateral:       collateralScore(cfg, hostPeriodCost, h.Settings, expectedRedundancy),
 		Interactions:     interactionScore(h),
-		StorageRemaining: storageRemainingScore(cfg, *h.Settings, storedData, expectedRedundancy),
+		StorageRemaining: storageRemainingScore(cfg, h.Settings, storedData, expectedRedundancy),
 		Uptime:           uptimeScore(h),
-		Version:          versionScore(*h.Settings),
+		Version:          versionScore(h.Settings),
 		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
 	}
 }
@@ -307,7 +307,7 @@ func bytesToSectors(bytes uint64) uint64 {
 }
 
 func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
-	uploadSectorCostRHPv2, _ := rhpv2.RPCAppendCost(*h.Settings, cfg.Contracts.Period)
+	uploadSectorCostRHPv2, _ := rhpv2.RPCAppendCost(h.Settings, cfg.Contracts.Period)
 
 	asc := h.PriceTable.AppendSectorCost(cfg.Contracts.Period)
 	uploadSectorCostRHPv3, _ := asc.Total()
@@ -320,7 +320,7 @@ func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) ty
 }
 
 func downloadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
-	downloadSectorCostRHPv2 := rhpv2.RPCReadCost(*h.Settings, []rhpv2.RPCReadRequestSection{{Offset: 0, Length: rhpv2.SectorSize}})
+	downloadSectorCostRHPv2 := rhpv2.RPCReadCost(h.Settings, []rhpv2.RPCReadRequestSection{{Offset: 0, Length: rhpv2.SectorSize}})
 	rsc := h.PriceTable.ReadSectorCost(rhpv2.SectorSize)
 	downloadSectorCostRHPv3, _ := rsc.Total()
 
@@ -351,7 +351,7 @@ func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedu
 	storagePerHost := uint64(float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount))
 
 	// compute the individual costs.
-	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, *h.Settings)
+	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, h.Settings)
 	hostContractPrice := contractPriceForScore(h)
 	hostUploadCost := uploadCostForScore(cfg, h, uploadPerHost)
 	hostDownloadCost := downloadCostForScore(cfg, h, downloadPerHost)
