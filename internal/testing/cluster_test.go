@@ -697,8 +697,8 @@ func newTestLogger() *zap.Logger {
 }
 
 // newTestLoggerCustom creates a console logger used for testing and allows
-// passing in a log level
-func newTestLoggerCustom(logLevel zapcore.Level) *zap.Logger {
+// passing in the desired log level.
+func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 	config := zap.NewProductionEncoderConfig()
 	config.EncodeTime = zapcore.RFC3339TimeEncoder
 	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
@@ -706,9 +706,9 @@ func newTestLoggerCustom(logLevel zapcore.Level) *zap.Logger {
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
 
 	return zap.New(
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), logLevel),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level),
 		zap.AddCaller(),
-		zap.AddStacktrace(logLevel),
+		zap.AddStacktrace(level),
 	)
 }
 

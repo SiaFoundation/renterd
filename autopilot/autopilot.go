@@ -57,8 +57,8 @@ type Bus interface {
 	AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
-	DeleteContracts(ctx context.Context, ids []types.FileContractID) error
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
@@ -428,7 +428,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
+func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		bus:     bus,
 		logger:  logger.Sugar().Named("autopilot"),
@@ -440,6 +440,7 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 	scanner, err := newScanner(
 		ap,
 		scannerBatchSize,
+		scannerMinRecentFailures,
 		scannerNumThreads,
 		scannerScanInterval,
 		scannerTimeoutInterval,

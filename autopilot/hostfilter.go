@@ -214,7 +214,7 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable bool, refresh bool, renew bool, reasons []error) {
+func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable, refresh, renew, archive bool, reasons []error) {
 	c, s := ci.contract, ci.settings
 	if isOutOfCollateral(c, s, renterFunds, bh) {
 		reasons = append(reasons, errContractOutOfCollateral)
@@ -226,18 +226,22 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 		renew = false
 		refresh = true
 	}
-	if isUpForRenewal(cfg, c.Revision, bh) {
-		reasons = append(reasons, errContractUpForRenewal)
+	if shouldRenew, secondHalf := isUpForRenewal(cfg, c.Revision, bh); shouldRenew {
+		if secondHalf {
+			reasons = append(reasons, errContractUpForRenewal) // only unusable if in second half of renew window
+		}
 		renew = true
 		refresh = false
 	}
 	if c.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, errContractMaxRevisionNumber)
+		archive = true // can't be revised anymore
 		renew = false
 		refresh = false
 	}
 	if bh > c.EndHeight() {
 		reasons = append(reasons, errContractExpired)
+		archive = true // expired
 		renew = false
 		refresh = false
 	}
@@ -280,6 +284,8 @@ func isBelowCollateralThreshold(expectedCollateral, actualCollateral types.Curre
 	return collateral.Cmp(threshold) < 0
 }
 
-func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) bool {
-	return blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
+func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) (shouldRenew, secondHalf bool) {
+	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
+	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= r.EndHeight()
+	return
 }

@@ -13,6 +13,10 @@ const (
 	HostFilterModeAll     = "all"
 	HostFilterModeAllowed = "allowed"
 	HostFilterModeBlocked = "blocked"
+
+	ContractArchivalReasonHostPruned = "hostpruned"
+	ContractArchivalReasonRemoved    = "removed"
+	ContractArchivalReasonRenewed    = "renewed"
 )
 
 const (
@@ -55,6 +59,9 @@ var (
 		HostBlockHeightLeeway: 6,                                    // 6 blocks
 	}
 )
+
+// ArchiveContractsRequest is the request type for the /contracts/archive endpoint.
+type ArchiveContractsRequest = map[types.FileContractID]string
 
 // AccountHandlerPOST is the request type for the /account/:id endpoint.
 type AccountHandlerPOST struct {
@@ -104,8 +111,8 @@ type ContractAcquireResponse struct {
 
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.
 type HostsRemoveRequest struct {
-	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
 	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
+	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
 }
 
 // ObjectsStats is the response type for the /stats/objects endpoint.
