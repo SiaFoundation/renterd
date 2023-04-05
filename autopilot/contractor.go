@@ -631,7 +631,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if breakdown := gc.Breakdown(nil, &host.PriceTable.HostPriceTable); breakdown.Gouging() {
+		if breakdown := gc.Check(nil, &host.PriceTable.HostPriceTable); breakdown.Gouging() {
 			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", breakdown.Reasons())
 			continue
 		}

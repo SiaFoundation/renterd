@@ -55,14 +55,18 @@ type unusableHostResult struct {
 	nopricetable uint64
 	unknown      uint64
 
-	// unusableHostResult is overloaded with a gouging - and host score
-	// breakdown, these fields might not be set and are mostly ignored, they are
-	// used by the host infos endpoint `/hosts/:hostkey`
-	gougingBreakdown api.GougingBreakdown
-	scoreBreakdown   api.HostScoreBreakdown
+	// gougingBreakdown is mostly ignored, we overload the unusableHostResult
+	// with a gouging breakdown to be able to return it in the host infos
+	// endpoint `/hosts/:hostkey`
+	gougingBreakdown api.HostGougingBreakdown
+
+	// scoreBreakdown is mostly ignored, we overload the unusableHostResult with
+	// a score breakdown to be able to return it in the host infos endpoint
+	// `/hosts/:hostkey`
+	scoreBreakdown api.HostScoreBreakdown
 }
 
-func newUnusableHostResult(errs []error, gougingBreakdown api.GougingBreakdown, scoreBreakdown api.HostScoreBreakdown) (u unusableHostResult) {
+func newUnusableHostResult(errs []error, gougingBreakdown api.HostGougingBreakdown, scoreBreakdown api.HostScoreBreakdown) (u unusableHostResult) {
 	for _, err := range errs {
 		if errors.Is(err, errHostBlocked) {
 			u.blocked++
@@ -138,6 +142,8 @@ func (u *unusableHostResult) merge(other unusableHostResult) {
 	u.unknown += other.unknown
 
 	// scoreBreakdown is not merged
+	//
+	// gougingBreakdown is not merged
 }
 
 func (u *unusableHostResult) keysAndValues() []interface{} {
@@ -179,13 +185,13 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		errs = append(errs, errHostRedundantIP)
 	}
 
-	var gougingBreakdown api.GougingBreakdown
+	var gougingBreakdown api.HostGougingBreakdown
 	var scoreBreakdown api.HostScoreBreakdown
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		errs = append(errs, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if h.PriceTable == nil {
 		errs = append(errs, errHostNoPriceTable)
-	} else if gougingBreakdown := gc.Breakdown(settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
+	} else if gougingBreakdown := gc.Check(settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
 		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown.Reasons()))
 	} else if scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy()); scoreBreakdown.Score() < minScore {
 		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))

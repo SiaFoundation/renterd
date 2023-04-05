@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"strings"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -19,15 +18,7 @@ const (
 
 type (
 	GougingChecker interface {
-		Breakdown(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.GougingBreakdown
-		Check(*rhpv2.HostSettings, *rhpv3.HostPriceTable) GougingResults
-	}
-
-	GougingResults struct {
-		contractErr error
-		downloadErr error
-		gougingErr  error
-		uploadErr   error
+		Check(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
 	}
 
 	gougingChecker struct {
@@ -66,6 +57,8 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 		// checkers in the workers don't have easy access to these settings and
 		// thus ignore them when perform gouging checks, the autopilot however
 		// does have those and will pass them when performing gouging checks
+		period:      nil,
+		renewWindow: nil,
 	})
 }
 
@@ -81,89 +74,38 @@ func NewGougingChecker(gs api.GougingSettings, rs api.RedundancySettings, cs api
 	}
 }
 
-func (gc gougingChecker) Breakdown(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.GougingBreakdown {
+func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (breakdown api.HostGougingBreakdown) {
 	if hs == nil && pt == nil {
 		panic("gouging checker needs to be provided with at least host settings or a price table") // developer error
 	}
 
-	rhpv2 := gc.checkHS(hs)
-	rhpv3 := gc.checkPT(pt)
-
-	return api.GougingBreakdown{
-		RHPv2ContractErr: rhpv2.contractErr,
-		RHPv2DownloadErr: rhpv2.downloadErr,
-		RHPv2GougingErr:  rhpv2.gougingErr,
-		RHPv2UploadErr:   rhpv2.uploadErr,
-
-		RHPv3ContractErr: rhpv3.contractErr,
-		RHPv3DownloadErr: rhpv3.downloadErr,
-		RHPv3GougingErr:  rhpv3.gougingErr,
-		RHPv3UploadErr:   rhpv3.uploadErr,
-	}
-}
-
-func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (results GougingResults) {
-	if hs == nil && pt == nil {
-		panic("gouging checker needs to be provided with at least host settings or a price table") // developer error
-	}
-	results.merge(gc.checkHS(hs))
-	results.merge(gc.checkPT(pt))
+	breakdown.V2 = gc.checkHS(hs)
+	breakdown.V3 = gc.checkPT(pt)
 	return
 }
 
-func (gc gougingChecker) checkHS(hs *rhpv2.HostSettings) (results GougingResults) {
+func (gc gougingChecker) checkHS(hs *rhpv2.HostSettings) (check api.GougingChecks) {
 	if hs != nil {
-		results = GougingResults{
-			contractErr: checkContractGougingRHPv2(gc.period, gc.renewWindow, *hs),
-			downloadErr: checkDownloadGougingRHPv2(gc.settings, gc.redundancy, *hs),
-			gougingErr:  checkPriceGougingHS(gc.settings, *hs),
-			uploadErr:   checkUploadGougingRHPv2(gc.settings, gc.redundancy, *hs),
+		check = api.GougingChecks{
+			ContractErr: checkContractGougingRHPv2(gc.period, gc.renewWindow, *hs),
+			DownloadErr: checkDownloadGougingRHPv2(gc.settings, gc.redundancy, *hs),
+			GougingErr:  checkPriceGougingHS(gc.settings, *hs),
+			UploadErr:   checkUploadGougingRHPv2(gc.settings, gc.redundancy, *hs),
 		}
 	}
 	return
 }
 
-func (gc gougingChecker) checkPT(pt *rhpv3.HostPriceTable) (results GougingResults) {
+func (gc gougingChecker) checkPT(pt *rhpv3.HostPriceTable) (check api.GougingChecks) {
 	if pt != nil {
-		results = GougingResults{
-			contractErr: checkContractGougingRHPv3(gc.period, gc.renewWindow, *pt),
-			downloadErr: checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt),
-			gougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, *pt),
-			uploadErr:   checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt),
+		check = api.GougingChecks{
+			ContractErr: checkContractGougingRHPv3(gc.period, gc.renewWindow, *pt),
+			DownloadErr: checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt),
+			GougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, *pt),
+			UploadErr:   checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt),
 		}
 	}
 	return
-}
-
-func (gr GougingResults) CanDownload() (errs []error) {
-	return filterErrors(
-		gr.downloadErr,
-		gr.gougingErr,
-	)
-}
-
-func (gr GougingResults) CanForm() []error {
-	return filterErrors(
-		gr.contractErr,
-		gr.downloadErr,
-		gr.gougingErr,
-		gr.uploadErr,
-	)
-}
-
-func (gr GougingResults) CanUpload() []error {
-	return filterErrors(
-		gr.downloadErr,
-		gr.gougingErr,
-		gr.uploadErr,
-	)
-}
-
-func (gr *GougingResults) merge(other GougingResults) {
-	gr.downloadErr = joinErrors(gr.downloadErr, other.downloadErr)
-	gr.contractErr = joinErrors(gr.contractErr, other.contractErr)
-	gr.gougingErr = joinErrors(gr.gougingErr, other.gougingErr)
-	gr.uploadErr = joinErrors(gr.uploadErr, other.uploadErr)
 }
 
 func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
@@ -331,7 +273,6 @@ func checkContractGougingRHPv2(period, renewWindow *uint64, hs rhpv2.HostSetting
 	if period == nil || renewWindow == nil {
 		return nil
 	}
-
 	return checkContractGouging(*period, *renewWindow, hs.MaxDuration, hs.WindowSize)
 }
 
@@ -341,7 +282,6 @@ func checkContractGougingRHPv3(period, renewWindow *uint64, pt rhpv3.HostPriceTa
 	if period == nil || renewWindow == nil {
 		return nil
 	}
-
 	return checkContractGouging(*period, *renewWindow, pt.MaxDuration, pt.WindowSize)
 }
 
@@ -421,38 +361,6 @@ func checkUploadGouging(gs api.GougingSettings, rs api.RedundancySettings, secto
 		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
 	}
 	return nil
-}
-
-func filterErrors(errs ...error) []error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-	return filtered
-}
-
-func joinErrors(errs ...error) error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-
-	switch len(filtered) {
-	case 0:
-		return nil
-	case 1:
-		return filtered[0]
-	default:
-		strs := make([]string, len(filtered))
-		for i := range strs {
-			strs[i] = filtered[i].Error()
-		}
-		return errors.New(strings.Join(strs, ";"))
-	}
 }
 
 func sectorReadCostRHPv2(settings rhpv2.HostSettings) (types.Currency, bool) {

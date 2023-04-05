@@ -37,24 +37,24 @@ type (
 	HostHandlerGET struct {
 		Host hostdb.Host `json:"host"`
 
-		Gouging          bool               `json:"gouging"`
-		GougingBreakdown GougingBreakdown   `json:"gougingBreakdown"`
-		Score            float64            `json:"score"`
-		ScoreBreakdown   HostScoreBreakdown `json:"scoreBreakdown"`
-		Usable           bool               `json:"usable"`
-		UnusableReasons  []string           `json:"unusableReasons"`
+		Gouging          bool                 `json:"gouging"`
+		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
+		Score            float64              `json:"score"`
+		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
+		Usable           bool                 `json:"usable"`
+		UnusableReasons  []string             `json:"unusableReasons"`
 	}
 
-	GougingBreakdown struct {
-		RHPv2ContractErr error `json:"rhpv2ContractErr"`
-		RHPv2DownloadErr error `json:"rhpv2DownloadErr"`
-		RHPv2GougingErr  error `json:"rhpv2GougingErr"`
-		RHPv2UploadErr   error `json:"rhpv2UploadErr"`
+	HostGougingBreakdown struct {
+		V2 GougingChecks `json:"v2"`
+		V3 GougingChecks `json:"v3"`
+	}
 
-		RHPv3ContractErr error `json:"rhpv3ContractErr"`
-		RHPv3DownloadErr error `json:"rhpv3DownloadErr"`
-		RHPv3GougingErr  error `json:"rhpv3GougingErr"`
-		RHPv3UploadErr   error `json:"rhpv3UploadErr"`
+	GougingChecks struct {
+		ContractErr error `json:"contractErr"`
+		DownloadErr error `json:"downloadErr"`
+		GougingErr  error `json:"gougingErr"`
+		UploadErr   error `json:"uploadErr"`
 	}
 
 	HostScoreBreakdown struct {
@@ -93,16 +93,61 @@ type (
 	}
 )
 
-func (gb GougingBreakdown) Gouging() bool {
+func (hgb HostGougingBreakdown) CanDownload() (errs []error) {
 	for _, err := range []error{
-		gb.RHPv2ContractErr,
-		gb.RHPv2DownloadErr,
-		gb.RHPv2GougingErr,
-		gb.RHPv2UploadErr,
-		gb.RHPv3ContractErr,
-		gb.RHPv3DownloadErr,
-		gb.RHPv3GougingErr,
-		gb.RHPv3UploadErr,
+		hgb.V3.DownloadErr,
+		hgb.V2.GougingErr,
+		hgb.V3.GougingErr,
+	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) CanForm() (errs []error) {
+	for _, err := range []error{
+		hgb.V2.ContractErr,
+		hgb.V3.ContractErr,
+		hgb.V3.DownloadErr,
+		hgb.V2.GougingErr,
+		hgb.V3.GougingErr,
+		hgb.V2.UploadErr,
+	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) CanUpload() (errs []error) {
+	for _, err := range []error{
+		hgb.V2.ContractErr,
+		hgb.V3.ContractErr,
+		hgb.V3.DownloadErr,
+		hgb.V2.GougingErr,
+		hgb.V3.GougingErr,
+		hgb.V2.UploadErr,
+	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) Gouging() bool {
+	return hgb.V2.Gouging() || hgb.V3.Gouging()
+}
+
+func (gc GougingChecks) Gouging() bool {
+	for _, err := range []error{
+		gc.ContractErr,
+		gc.DownloadErr,
+		gc.GougingErr,
+		gc.UploadErr,
 	} {
 		if err != nil {
 			return true
@@ -111,18 +156,23 @@ func (gb GougingBreakdown) Gouging() bool {
 	return false
 }
 
-func (gb GougingBreakdown) Reasons() string {
-	var reasons []string
+func (gc GougingChecks) Errors() (errs []error) {
 	for _, err := range []error{
-		gb.RHPv2ContractErr,
-		gb.RHPv2DownloadErr,
-		gb.RHPv2GougingErr,
-		gb.RHPv2UploadErr,
-		gb.RHPv3ContractErr,
-		gb.RHPv3DownloadErr,
-		gb.RHPv3GougingErr,
-		gb.RHPv3UploadErr,
+		gc.ContractErr,
+		gc.DownloadErr,
+		gc.GougingErr,
+		gc.UploadErr,
 	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) Reasons() string {
+	var reasons []string
+	for _, err := range append(hgb.V2.Errors(), hgb.V3.Errors()...) {
 		if err != nil {
 			reasons = append(reasons, err.Error())
 		}
