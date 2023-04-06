@@ -91,6 +91,8 @@ func TestHostPruning(t *testing.T) {
 		}
 		return nil
 	}); err != nil {
+		h, _ := b.Host(context.Background(), hk1)
+		t.Logf("host interactions: %+v", h.Interactions)
 		t.Fatal(err)
 	}
 }
