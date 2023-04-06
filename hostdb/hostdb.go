@@ -49,11 +49,17 @@ func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, 
 			} else if ha.Specifier != modules.PrefixHostAnnouncement {
 				continue
 			}
+
 			// verify signature
 			var hostKey types.PublicKey
 			copy(hostKey[:], ha.PublicKey.Key)
 			annHash := types.Hash256(crypto.HashObject(ha.HostAnnouncement)) // TODO
 			if !hostKey.VerifyHash(annHash, ha.Signature) {
+				continue
+			}
+
+			// verify net address
+			if ha.NetAddress == "" {
 				continue
 			}
 

@@ -757,6 +757,11 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					if err := json.Unmarshal(interaction.Result, &sr); err != nil {
 						return err
 					}
+
+					// overwrite the NetAddress in the settings with the one we
+					// received through the host announcement
+					sr.Settings.NetAddress = host.NetAddress
+
 					host.Settings = convertHostSettings(sr.Settings)
 
 					// scans can only update the price table if the current

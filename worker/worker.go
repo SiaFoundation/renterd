@@ -537,7 +537,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	// fetch the host settings
 	start := time.Now()
 	err = w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
-		settings, err = RPCSettings(ctx, t)
+		settings, err = RPCSettings(ctx, t, rsr.HostIP)
 		return err
 	})
 	elapsed := time.Since(start)
@@ -639,7 +639,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	ctx = WithGougingChecker(ctx, gp)
 	err = w.withTransportV2(ctx, rfr.HostKey, hostIP, func(t *rhpv2.Transport) (err error) {
-		hostSettings, err := RPCSettings(ctx, t)
+		hostSettings, err := RPCSettings(ctx, t, hostIP)
 		if err != nil {
 			return err
 		}
