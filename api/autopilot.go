@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -34,11 +35,26 @@ type (
 	}
 
 	HostHandlerGET struct {
-		ScoreBreakdown  HostScoreBreakdown `json:"scoreBreakdown"`
-		Score           float64            `json:"score"`
-		Usable          bool               `json:"usable"`
-		UnusableReasons []string           `json:"unusableReasons"`
-		Host            hostdb.Host        `json:"host"`
+		Host hostdb.Host `json:"host"`
+
+		Gouging          bool                 `json:"gouging"`
+		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
+		Score            float64              `json:"score"`
+		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
+		Usable           bool                 `json:"usable"`
+		UnusableReasons  []string             `json:"unusableReasons"`
+	}
+
+	HostGougingBreakdown struct {
+		V2 GougingChecks `json:"v2"`
+		V3 GougingChecks `json:"v3"`
+	}
+
+	GougingChecks struct {
+		ContractErr error `json:"contractErr"`
+		DownloadErr error `json:"downloadErr"`
+		GougingErr  error `json:"gougingErr"`
+		UploadErr   error `json:"uploadErr"`
 	}
 
 	HostScoreBreakdown struct {
@@ -76,6 +92,96 @@ type (
 		CurrentPeriod uint64 `json:"currentPeriod"`
 	}
 )
+
+func (hgb HostGougingBreakdown) CanDownload() (errs []error) {
+	for _, err := range []error{
+		hgb.V3.DownloadErr,
+		hgb.V2.GougingErr,
+		hgb.V3.GougingErr,
+	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) CanForm() (errs []error) {
+	for _, err := range []error{
+		hgb.V2.ContractErr,
+		hgb.V3.ContractErr,
+		hgb.V3.DownloadErr,
+		hgb.V2.GougingErr,
+		hgb.V3.GougingErr,
+		hgb.V2.UploadErr,
+	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) CanUpload() (errs []error) {
+	for _, err := range []error{
+		hgb.V2.ContractErr,
+		hgb.V3.ContractErr,
+		hgb.V3.DownloadErr,
+		hgb.V2.GougingErr,
+		hgb.V3.GougingErr,
+		hgb.V2.UploadErr,
+	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) Gouging() bool {
+	return hgb.V2.Gouging() || hgb.V3.Gouging()
+}
+
+func (gc GougingChecks) Gouging() bool {
+	for _, err := range []error{
+		gc.ContractErr,
+		gc.DownloadErr,
+		gc.GougingErr,
+		gc.UploadErr,
+	} {
+		if err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (gc GougingChecks) Errors() (errs []error) {
+	for _, err := range []error{
+		gc.ContractErr,
+		gc.DownloadErr,
+		gc.GougingErr,
+		gc.UploadErr,
+	} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (hgb HostGougingBreakdown) Reasons() string {
+	var reasons []string
+	for _, err := range append(hgb.V2.Errors(), hgb.V3.Errors()...) {
+		if err != nil {
+			reasons = append(reasons, err.Error())
+		}
+	}
+	if len(reasons) == 0 {
+		return ""
+	}
+	return strings.Join(reasons, ";")
+}
 
 func (sb HostScoreBreakdown) Score() float64 {
 	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices

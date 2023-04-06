@@ -55,13 +55,18 @@ type unusableHostResult struct {
 	nopricetable uint64
 	unknown      uint64
 
-	// unusableHostResult is overloaded with a breakdown of the host score, this
-	// field might not be set and is mostly ignored, it is currently only used
-	// by the host infos endpoint `/hosts/:hostkey`
+	// gougingBreakdown is mostly ignored, we overload the unusableHostResult
+	// with a gouging breakdown to be able to return it in the host infos
+	// endpoint `/hosts/:hostkey`
+	gougingBreakdown api.HostGougingBreakdown
+
+	// scoreBreakdown is mostly ignored, we overload the unusableHostResult with
+	// a score breakdown to be able to return it in the host infos endpoint
+	// `/hosts/:hostkey`
 	scoreBreakdown api.HostScoreBreakdown
 }
 
-func newUnusableHostResult(errs []error, scoreBreakdown api.HostScoreBreakdown) (u unusableHostResult) {
+func newUnusableHostResult(errs []error, gougingBreakdown api.HostGougingBreakdown, scoreBreakdown api.HostScoreBreakdown) (u unusableHostResult) {
 	for _, err := range errs {
 		if errors.Is(err, errHostBlocked) {
 			u.blocked++
@@ -84,6 +89,7 @@ func newUnusableHostResult(errs []error, scoreBreakdown api.HostScoreBreakdown) 
 		}
 	}
 
+	u.gougingBreakdown = gougingBreakdown
 	u.scoreBreakdown = scoreBreakdown
 	return
 }
@@ -136,6 +142,8 @@ func (u *unusableHostResult) merge(other unusableHostResult) {
 	u.unknown += other.unknown
 
 	// scoreBreakdown is not merged
+	//
+	// gougingBreakdown is not merged
 }
 
 func (u *unusableHostResult) keysAndValues() []interface{} {
@@ -161,7 +169,7 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64, txnFee types.Currency, ignoreBlockHeight bool) (bool, unusableHostResult) {
+func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64) (bool, unusableHostResult) {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
@@ -177,18 +185,19 @@ func isUsableHost(cfg api.AutopilotConfig, gs api.GougingSettings, rs api.Redund
 		errs = append(errs, errHostRedundantIP)
 	}
 
-	var breakdown api.HostScoreBreakdown
+	var gougingBreakdown api.HostGougingBreakdown
+	var scoreBreakdown api.HostScoreBreakdown
 	if settings, bad, reason := hasBadSettings(cfg, h); bad {
 		errs = append(errs, fmt.Errorf("%w: %v", errHostBadSettings, reason))
 	} else if h.PriceTable == nil {
 		errs = append(errs, errHostNoPriceTable)
-	} else if gouging, reason := worker.IsGouging(gs, rs, cs, settings, &h.PriceTable.HostPriceTable, txnFee, cfg.Contracts.Period, cfg.Contracts.RenewWindow, ignoreBlockHeight); gouging {
-		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, reason))
-	} else if breakdown = hostScore(cfg, h, storedData, rs.Redundancy()); breakdown.Score() < minScore {
-		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, breakdown.Score(), minScore))
+	} else if gougingBreakdown := gc.Check(settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
+		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown.Reasons()))
+	} else if scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy()); scoreBreakdown.Score() < minScore {
+		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
 	}
 
-	return len(errs) == 0, newUnusableHostResult(errs, breakdown)
+	return len(errs) == 0, newUnusableHostResult(errs, gougingBreakdown, scoreBreakdown)
 }
 
 // isUsableContract returns whether the given contract is usable and whether it

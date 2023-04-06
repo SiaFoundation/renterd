@@ -18,7 +18,7 @@ func TestHostPruning(t *testing.T) {
 	ctx := context.Background()
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.ErrorLevel))
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
 	if err != nil {
 		t.Fatal(err)
 	}

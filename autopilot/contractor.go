@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,13 +121,24 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	c.mu.Unlock()
 
 	f := newIPFilter(c.logger)
-	isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host.Host, minScore, storedData, fee, true)
+	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
+
+	// we do not care about validating the host blockheight in the pricetable so
+	// we set it to ours
+	if host.Host.PriceTable != nil {
+		host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
+	}
+
+	isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host.Host, minScore, storedData)
 	return api.HostHandlerGET{
-		Host:            host.Host,
-		Score:           unusableResult.scoreBreakdown.Score(),
-		ScoreBreakdown:  unusableResult.scoreBreakdown,
-		Usable:          isUsable,
-		UnusableReasons: unusableResult.reasons(),
+		Host: host.Host,
+
+		Gouging:          unusableResult.gougingBreakdown.Gouging(),
+		GougingBreakdown: unusableResult.gougingBreakdown,
+		Score:            unusableResult.scoreBreakdown.Score(),
+		ScoreBreakdown:   unusableResult.scoreBreakdown,
+		Usable:           isUsable,
+		UnusableReasons:  unusableResult.reasons(),
 	}, nil
 }
 
@@ -164,6 +176,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 	}
 
 	f := newIPFilter(c.logger)
+	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
 
 	c.mu.Lock()
 	storedData := make(map[types.PublicKey]uint64)
@@ -175,19 +188,28 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 
 	var hostInfos []api.HostHandlerGET
 	for _, host := range hosts {
-		isUsable, unusableResult := isUsableHost(cfg, gs, rs, cs, f, host, minScore, storedData[host.PublicKey], fee, true)
+		// we do not care about validating the host blockheight in the pricetable so
+		// we set it to ours
+		if host.PriceTable != nil {
+			host.PriceTable.HostBlockHeight = cs.BlockHeight
+		}
+
+		isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host, minScore, storedData[host.PublicKey])
 		hostInfos = append(hostInfos, api.HostHandlerGET{
-			Host:            host,
-			Score:           unusableResult.scoreBreakdown.Score(),
-			ScoreBreakdown:  unusableResult.scoreBreakdown,
-			Usable:          isUsable,
-			UnusableReasons: unusableResult.reasons(),
+			Host: host,
+
+			Gouging:          unusableResult.gougingBreakdown.Gouging(),
+			GougingBreakdown: unusableResult.gougingBreakdown,
+			Score:            unusableResult.scoreBreakdown.Score(),
+			ScoreBreakdown:   unusableResult.scoreBreakdown,
+			Usable:           isUsable,
+			UnusableReasons:  unusableResult.reasons(),
 		})
 	}
 	return hostInfos, nil
 }
 
-func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) error {
+func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
 
@@ -223,6 +245,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	if err != nil {
 		return err
 	}
+
+	// fetch current contract set
+	currentSet, err := c.ap.bus.Contracts(ctx, state.cfg.Contracts.Set)
+	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
+		return err
+	}
+	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
 	// fetch all active contracts from the worker
 	start := time.Now()
@@ -298,34 +327,47 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	}
 
 	// build the new contract set (excluding formed contracts)
-
-	contractset := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
-	numContracts := uint64(len(contractset))
+	updatedSet := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
 
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
-	if numContracts < addLeeway(state.cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, w, hosts, active, state.cfg.Contracts.Amount-numContracts, &remaining, address, minScore); err != nil {
+	if uint64(len(updatedSet)) < addLeeway(state.cfg.Contracts.Amount, leewayPctRequiredContracts) {
+		if formed, err = c.runContractFormations(ctx, w, hosts, active, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, address, minScore); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
-	contractset = append(contractset, formed...)
+	updatedSet = append(updatedSet, formed...)
 
-	c.logger.Debugw(
-		"contracts after maintenance",
-		"formed", len(formed),
-		"renewed", len(renewed),
-		"contractset", len(contractset),
-	)
+	// defer logging
+	defer func() {
+		numContractsInSet := len(currentSet)
+		if err == nil {
+			numContractsInSet = len(updatedSet)
+		}
+		if numContractsInSet < int(state.rs.TotalShards) {
+			c.logger.Warnw(
+				"contracts after maintenance are below the minimum required",
+				"formed", len(formed),
+				"renewed", len(renewed),
+				"contractset", numContractsInSet,
+			)
+		} else {
+			c.logger.Debugw(
+				"contracts after maintenance",
+				"formed", len(formed),
+				"renewed", len(renewed),
+				"contractset", numContractsInSet,
+			)
+		}
+	}()
 
 	// update contract set
-	if !c.ap.isStopped() {
-		if len(contractset) < int(state.rs.TotalShards) {
-			c.logger.Warnf("contractset does not have enough contracts, %v<%v", len(contractset), state.rs.TotalShards)
-		}
-		return c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, contractset)
+	if c.ap.isStopped() {
+		err = errors.New("autopilot stopped before maintenance could be completed")
+		return
 	}
-	return nil
+	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
+	return
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
@@ -427,6 +469,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	// convenience variables
 	state := c.ap.state
 
+	// create a gouging checker
+	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
 	// state variables
 	contractIds := make([]types.FileContractID, 0, len(contracts))
 	contractSizes := make(map[types.FileContractID]uint64)
@@ -466,7 +511,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.gs, state.rs, state.cs, f, host.Host, minScore, contract.FileSize(), state.fee, false)
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, contract.FileSize())
 		if !usable {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", unusableResult.reasons())
 			toIgnore = append(toIgnore, fcid)
@@ -603,9 +648,12 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			continue
 		}
 
+		// create a gouging checker
+		gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if gouging, reasons := worker.IsGouging(state.gs, state.rs, cs, nil, &host.PriceTable.HostPriceTable, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow, false); gouging {
-			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", reasons)
+		if breakdown := gc.Check(nil, &host.PriceTable.HostPriceTable); breakdown.Gouging() {
+			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", breakdown.Reasons())
 			continue
 		}
 
@@ -717,8 +765,8 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 }
 
 func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.AutopilotConfig, ci contractInfo) (types.Currency, error) {
-	// refresh with double the funds
-	refreshAmount := ci.contract.TotalCost.Mul64(2)
+	// refresh with 1.2x the funds
+	refreshAmount := ci.contract.TotalCost.Mul64(6).Div64(5)
 
 	// estimate the txn fee
 	txnFeeEstimate := c.ap.state.fee.Mul64(estimatedFileContractTransactionSetSize)
@@ -871,6 +919,9 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	// create an IP filter
 	ipFilter := newIPFilter(c.logger)
 
+	// create a gouging checker
+	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
 	// create list of candidate hosts
 	var candidates []hostdb.Host
 	var excluded, unscanned int
@@ -906,9 +957,12 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// right before forming the contract to ensure we do not form a contract
 		// with a host that's gouging its prices.
 		//
-		// NOTE: we ignore the host's blockheight here because we don't
-		// necessarily have a recent price table.
-		if usable, result := isUsableHost(state.cfg, state.gs, state.rs, state.cs, ipFilter, h, minScore, storedData[h.PublicKey], state.fee, true); !usable {
+		// NOTE: we do not care about validating the host blockheight in the
+		// pricetable so we set it to ours
+		if h.PriceTable != nil {
+			h.PriceTable.HostBlockHeight = state.cs.BlockHeight
+		}
+		if usable, result := isUsableHost(state.cfg, state.rs, gc, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
 			results.merge(result)
 			unusable++
 			continue
@@ -1052,7 +1106,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
-		c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		c.logger.Warnw("insufficient budget for refresh", "hk", hk, "fcid", fcid, "budget", budget, "needed", renterFunds)
 		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
 	}
 
@@ -1062,9 +1116,13 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
 	_, hostMissedPayout, _, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
-	if isBelowCollateralThreshold(newCollateral, hostMissedPayout) {
-		err := fmt.Errorf("refresh failed, refreshed contract collateral (%v) is below threshold", hostMissedPayout)
-		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "newCollateral", newCollateral.String(), "hostMissedPayout", hostMissedPayout.String(), "maxCollateral", settings.MaxCollateral)
+	var newRemainingCollateral types.Currency
+	if hostMissedPayout.Cmp(settings.ContractPrice) > 0 {
+		newRemainingCollateral = hostMissedPayout.Sub(settings.ContractPrice)
+	}
+	if isBelowCollateralThreshold(newCollateral, newRemainingCollateral) {
+		err := errors.New("refresh failed, new collateral is below the threshold")
+		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "expectedCollateral", newCollateral.String(), "actualCollateral", newRemainingCollateral.String(), "maxCollateral", settings.MaxCollateral)
 		return api.ContractMetadata{}, true, err
 	}
 

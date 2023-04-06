@@ -53,7 +53,7 @@ var (
 )
 
 func (w *worker) FetchRevisionWithAccount(ctx context.Context, pt rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
-	if errs := PerformGougingChecks(ctx, nil, &pt).CanDownload(); len(errs) > 0 {
+	if errs := GougingCheckerFromContext(ctx).Check(nil, &pt).CanDownload(); len(errs) > 0 {
 		return types.FileContractRevision{}, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
 	}
 	acc, err := w.accounts.ForHost(hostKey)
@@ -92,7 +92,7 @@ func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.Pu
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 			}
 			// Check pt.
-			if errs := PerformGougingChecks(ctx, nil, &pt.HostPriceTable).CanDownload(); len(errs) > 0 {
+			if errs := GougingCheckerFromContext(ctx).Check(nil, &pt.HostPriceTable).CanDownload(); len(errs) > 0 {
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
 			}
 			// Pay for the revision.
@@ -376,7 +376,7 @@ func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 
 func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
 	// return errGougingHost if gouging checks fail
-	if errs := PerformGougingChecks(ctx, nil, &r.pt).CanDownload(); len(errs) > 0 {
+	if errs := GougingCheckerFromContext(ctx).Check(nil, &r.pt).CanDownload(); len(errs) > 0 {
 		return fmt.Errorf("failed to download sector, %w: %v", errGougingHost, errs)
 	}
 	// return errBalanceInsufficient if balance insufficient
