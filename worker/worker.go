@@ -1116,44 +1116,41 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var hosttimeout api.ParamDuration
-	if jc.DecodeForm("hosttimeout", &hosttimeout) != nil {
+	var hosttimeout time.Duration
+	if jc.DecodeForm("hosttimeout", (*api.ParamDuration)(&hosttimeout)) != nil {
 		return
 	}
 
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	ctx = WithGougingChecker(ctx, gp)
+
 	// fetch all contracts
 	var contracts []api.Contract
-	err = w.withHostsV2(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
-		var errs HostErrorSet
-		for i, store := range ss {
-			func() {
-				ctx := jc.Request.Context()
-				if hosttimeout > 0 {
-					var cancel context.CancelFunc
-					ctx, cancel = context.WithTimeout(ctx, time.Duration(hosttimeout))
-					defer cancel()
-				}
-
-				rev, err := store.(*sharedSession).Revision(ctx)
-				if err != nil {
-					errs = append(errs, &HostError{HostKey: store.HostKey(), Err: err})
-					return
-				}
-				contracts = append(contracts, api.Contract{
-					ContractMetadata: busContracts[i],
-					Revision:         rev.Revision,
-				})
-			}()
-		}
-		if len(errs) > 0 {
-			return fmt.Errorf("couldn't retrieve contract(s): %s", errs.Error())
-		}
-		return nil
-	})
-
+	var errs HostErrorSet
+	for _, contract := range busContracts {
+		func() {
+			if hosttimeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(hosttimeout))
+				defer cancel()
+			}
+			rev, err := w.FetchRevisionWithContract(ctx, contract.HostKey, contract.SiamuxAddr, contract.ID)
+			if err != nil {
+				errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
+				return
+			}
+			contracts = append(contracts, api.Contract{
+				ContractMetadata: contract,
+				Revision:         rev,
+			})
+		}()
+	}
 	resp := api.ContractsResponse{Contracts: contracts}
-	if err != nil {
-		resp.Error = err.Error()
+	if errs != nil {
+		resp.Error = errs.Error()
 	}
 	jc.Encode(resp)
 }
