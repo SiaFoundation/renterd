@@ -289,8 +289,9 @@ func (h dbHost) convert() hostdb.Host {
 		lastScan = time.Unix(0, h.LastScan)
 	}
 	return hostdb.Host{
-		KnownSince: h.CreatedAt,
-		NetAddress: h.NetAddress,
+		KnownSince:       h.CreatedAt,
+		LastAnnouncement: h.LastAnnouncement,
+		NetAddress:       h.NetAddress,
 		Interactions: hostdb.Interactions{
 			TotalScans:              h.TotalScans,
 			LastScan:                lastScan,

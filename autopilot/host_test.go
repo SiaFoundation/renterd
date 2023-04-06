@@ -50,8 +50,9 @@ func newTestHosts(n int) []hostdb.Host {
 
 func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings) hostdb.Host {
 	return hostdb.Host{
-		NetAddress: randomIP().String(),
-		KnownSince: time.Now(),
+		NetAddress:       randomIP().String(),
+		KnownSince:       time.Now(),
+		LastAnnouncement: time.Now(),
 		Interactions: hostdb.Interactions{
 			TotalScans:              2,
 			LastScan:                time.Now().Add(-time.Minute),
