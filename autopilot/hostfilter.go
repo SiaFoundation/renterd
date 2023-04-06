@@ -36,7 +36,6 @@ var (
 	errHostNotAcceptingContracts = errors.New("host is not accepting contracts")
 	errHostNotAnnounced          = errors.New("host is not announced")
 	errHostNotScanned            = errors.New("host has not been scanned")
-	errHostNoPriceTable          = errors.New("host has no pricetable")
 
 	errContractOutOfCollateral   = errors.New("contract is out of collateral")
 	errContractOutOfFunds        = errors.New("contract is out of funds")
@@ -54,7 +53,6 @@ type unusableHostResult struct {
 	notacceptingcontracts uint64
 	notannounced          uint64
 	notscanned            uint64
-	nopricetable          uint64
 	unknown               uint64
 
 	// gougingBreakdown is mostly ignored, we overload the unusableHostResult
@@ -86,8 +84,6 @@ func newUnusableHostResult(errs []error, gougingBreakdown api.HostGougingBreakdo
 			u.notannounced++
 		} else if errors.Is(err, errHostNotScanned) {
 			u.notscanned++
-		} else if errors.Is(err, errHostNoPriceTable) {
-			u.nopricetable++
 		} else {
 			u.unknown++
 		}
@@ -128,9 +124,6 @@ func (u unusableHostResult) reasons() []string {
 	if u.notscanned > 0 {
 		reasons = append(reasons, errHostNotScanned.Error())
 	}
-	if u.nopricetable > 0 {
-		reasons = append(reasons, errHostNoPriceTable.Error())
-	}
 	if u.unknown > 0 {
 		reasons = append(reasons, "unknown")
 	}
@@ -146,7 +139,6 @@ func (u *unusableHostResult) merge(other unusableHostResult) {
 	u.notacceptingcontracts += other.notacceptingcontracts
 	u.notannounced += other.notannounced
 	u.notscanned += other.notscanned
-	u.nopricetable += other.nopricetable
 	u.unknown += other.unknown
 
 	// scoreBreakdown is not merged
@@ -164,7 +156,6 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 		"notacceptingcontracts", u.notacceptingcontracts,
 		"notannounced", u.notannounced,
 		"notscanned", u.notscanned,
-		"nopricetable", u.nopricetable,
 		"unknown", u.unknown,
 	}
 	for i := 0; i < len(values); i += 2 {

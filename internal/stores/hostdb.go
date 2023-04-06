@@ -60,7 +60,7 @@ type (
 		LastScan                int64 `gorm:"index"` // unix nano
 		LastScanSuccess         bool
 		SecondToLastScanSuccess bool
-		Scanned                 bool
+		Scanned                 bool `gorm:"index"`
 		Uptime                  time.Duration
 		Downtime                time.Duration
 
