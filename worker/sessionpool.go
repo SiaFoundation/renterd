@@ -103,8 +103,8 @@ func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev t
 	}
 	defer ss.pool.release(s)
 
-	if errs := GougingCheckerFromContext(ctx).Check(&s.settings, nil).CanUpload(); len(errs) > 0 {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed reneww contract, gouging check failed: %v", errs)
+	if breakdown := GougingCheckerFromContext(ctx).Check(&s.settings, nil); breakdown.Gouging() {
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed reneww contract, gouging check failed: %v", breakdown.Reasons())
 	}
 
 	renterTxnSet, finalPayment, discard, err := prepareFn(s.Revision().Revision, s.Settings())
@@ -129,8 +129,8 @@ func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.Sector
 		return types.Hash256{}, err
 	}
 	defer ss.pool.release(s)
-	if errs := GougingCheckerFromContext(ctx).Check(&s.settings, nil).CanUpload(); len(errs) > 0 {
-		return types.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", errs)
+	if breakdown := GougingCheckerFromContext(ctx).Check(&s.settings, nil); breakdown.Gouging() {
+		return types.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", breakdown.Reasons())
 	}
 	return s.appendSector(ctx, sector, currentHeight)
 }
@@ -141,8 +141,8 @@ func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root t
 		return err
 	}
 	defer ss.pool.release(s)
-	if errs := GougingCheckerFromContext(ctx).Check(&s.settings, nil).CanDownload(); len(errs) > 0 {
-		return fmt.Errorf("failed to download sector, gouging check failed: %v", errs)
+	if breakdown := GougingCheckerFromContext(ctx).Check(&s.settings, nil); breakdown.Gouging() {
+		return fmt.Errorf("failed to download sector, gouging check failed: %v", breakdown.Reasons())
 	}
 	return s.readSector(ctx, w, root, offset, length)
 }

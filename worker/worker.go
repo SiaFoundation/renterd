@@ -641,8 +641,8 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return err
 		}
 
-		if errs := GougingCheckerFromContext(ctx).Check(&hostSettings, nil).CanForm(); len(errs) > 0 {
-			return fmt.Errorf("failed to form contract, gouging check failed: %v", errs)
+		if breakdown := GougingCheckerFromContext(ctx).Check(&hostSettings, nil); breakdown.Gouging() {
+			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown.Reasons())
 		}
 
 		renterTxnSet, err := w.bus.WalletPrepareForm(ctx, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)

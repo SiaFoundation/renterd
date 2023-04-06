@@ -102,8 +102,8 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.Pub
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 				}
 				// Check pt.
-				if errs := GougingCheckerFromContext(ctx).Check(nil, &pt.HostPriceTable).CanDownload(); len(errs) > 0 {
-					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
+				if breakdown := GougingCheckerFromContext(ctx).Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
 				}
 				cost = pt.LatestRevisionCost
 				payment := rhpv3.PayByEphemeralAccount(acc.id, cost, bh+defaultWithdrawalExpiryBlocks, w.accounts.deriveAccountKey(hostKey))
@@ -134,8 +134,8 @@ func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.Pu
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 			}
 			// Check pt.
-			if errs := GougingCheckerFromContext(ctx).Check(nil, &pt.HostPriceTable).CanDownload(); len(errs) > 0 {
-				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, errs)
+			if breakdown := GougingCheckerFromContext(ctx).Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
+				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
 			}
 			// Pay for the revision.
 			payment, ok := rhpv3.PayByContract(revision, pt.LatestRevisionCost, acc.id, w.deriveRenterKey(hostKey))
@@ -418,8 +418,8 @@ func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 
 func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
 	// return errGougingHost if gouging checks fail
-	if errs := GougingCheckerFromContext(ctx).Check(nil, &r.pt).CanDownload(); len(errs) > 0 {
-		return fmt.Errorf("failed to download sector, %w: %v", errGougingHost, errs)
+	if breakdown := GougingCheckerFromContext(ctx).Check(nil, &r.pt); breakdown.Gouging() {
+		return fmt.Errorf("failed to download sector, %w: %v", errGougingHost, breakdown.Reasons())
 	}
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
