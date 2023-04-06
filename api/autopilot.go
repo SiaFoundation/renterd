@@ -93,51 +93,6 @@ type (
 	}
 )
 
-func (hgb HostGougingBreakdown) CanDownload() (errs []error) {
-	for _, err := range []error{
-		hgb.V3.DownloadErr,
-		hgb.V2.GougingErr,
-		hgb.V3.GougingErr,
-	} {
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return
-}
-
-func (hgb HostGougingBreakdown) CanForm() (errs []error) {
-	for _, err := range []error{
-		hgb.V2.ContractErr,
-		hgb.V3.ContractErr,
-		hgb.V3.DownloadErr,
-		hgb.V2.GougingErr,
-		hgb.V3.GougingErr,
-		hgb.V2.UploadErr,
-	} {
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return
-}
-
-func (hgb HostGougingBreakdown) CanUpload() (errs []error) {
-	for _, err := range []error{
-		hgb.V2.ContractErr,
-		hgb.V3.ContractErr,
-		hgb.V3.DownloadErr,
-		hgb.V2.GougingErr,
-		hgb.V3.GougingErr,
-		hgb.V2.UploadErr,
-	} {
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return
-}
-
 func (hgb HostGougingBreakdown) Gouging() bool {
 	return hgb.V2.Gouging() || hgb.V3.Gouging()
 }
