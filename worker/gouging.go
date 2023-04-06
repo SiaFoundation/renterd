@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"strings"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -34,14 +33,7 @@ const (
 
 type (
 	GougingChecker interface {
-		CheckHS(*rhpv2.HostSettings) GougingResults
-		CheckPT(*rhpv3.HostPriceTable) GougingResults
-	}
-
-	GougingResults struct {
-		downloadErr error
-		gougingErr  error
-		uploadErr   error
+		Check(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
 	}
 
 	gougingChecker struct {
@@ -49,6 +41,9 @@ type (
 		settings       api.GougingSettings
 		redundancy     api.RedundancySettings
 		txFee          types.Currency
+
+		period      *uint64
+		renewWindow *uint64
 	}
 
 	contextKey string
@@ -56,15 +51,12 @@ type (
 
 var _ GougingChecker = gougingChecker{}
 
-func PerformGougingChecks(ctx context.Context, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (results GougingResults) {
+func GougingCheckerFromContext(ctx context.Context) GougingChecker {
 	gc, ok := ctx.Value(keyGougingChecker).(GougingChecker)
 	if !ok {
 		panic("no gouging checker attached to the context") // developer error
 	}
-
-	results.merge(gc.CheckHS(hs))
-	results.merge(gc.CheckPT(pt))
-	return
+	return gc
 }
 
 func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Context {
@@ -73,94 +65,65 @@ func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Conte
 		settings:       gp.GougingSettings,
 		redundancy:     gp.RedundancySettings,
 		txFee:          gp.TransactionFee,
+
+		// NOTE:
+		//
+		// period and renew window are nil here and that's fine, gouging
+		// checkers in the workers don't have easy access to these settings and
+		// thus ignore them when perform gouging checks, the autopilot however
+		// does have those and will pass them when performing gouging checks
+		period:      nil,
+		renewWindow: nil,
 	})
 }
 
-func IsGouging(gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable, txnFee types.Currency, period, renewWindow uint64, ignoreBlockHeight bool) (gouging bool, reasons string) {
+func NewGougingChecker(gs api.GougingSettings, rs api.RedundancySettings, cs api.ConsensusState, txnFee types.Currency, period, renewWindow uint64) GougingChecker {
+	return gougingChecker{
+		consensusState: cs,
+		settings:       gs,
+		redundancy:     rs,
+		txFee:          txnFee,
+
+		period:      &period,
+		renewWindow: &renewWindow,
+	}
+}
+
+func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (breakdown api.HostGougingBreakdown) {
 	if hs == nil && pt == nil {
-		panic("IsGouging needs to be provided with at least host settings or a price table") // developer error
+		panic("gouging checker needs to be provided with at least host settings or a price table") // developer error
 	}
 
-	var errs []error
-	if hs != nil {
-		errs = append(
-			errs,
-
-			// host setting checks
-			checkDownloadGougingRHPv2(gs, rs, *hs),
-			checkPriceGougingHS(gs, hs),
-			checkUploadGougingRHPv2(gs, rs, *hs),
-			checkContractGougingHS(period, renewWindow, hs),
-		)
-	}
-
-	if pt != nil {
-		errs = append(
-			errs,
-
-			// price table checks
-			checkDownloadGougingRHPv3(gs, rs, *pt),
-			checkPriceGougingPT(gs, cs, txnFee, pt, ignoreBlockHeight),
-			checkUploadGougingRHPv3(gs, rs, *pt),
-			checkContractGougingPT(period, renewWindow, pt),
-		)
-	}
-
-	if err := joinErrors(errs...); err != nil {
-		return true, err.Error()
-	}
-
-	return false, ""
+	breakdown.V2 = gc.checkHS(hs)
+	breakdown.V3 = gc.checkPT(pt)
+	return
 }
 
-func (gc gougingChecker) CheckHS(hs *rhpv2.HostSettings) (results GougingResults) {
+func (gc gougingChecker) checkHS(hs *rhpv2.HostSettings) (check api.GougingChecks) {
 	if hs != nil {
-		results = GougingResults{
-			downloadErr: checkDownloadGougingRHPv2(gc.settings, gc.redundancy, *hs),
-			gougingErr:  checkPriceGougingHS(gc.settings, hs),
-			uploadErr:   checkUploadGougingRHPv2(gc.settings, gc.redundancy, *hs),
+		check = api.GougingChecks{
+			ContractErr: checkContractGougingRHPv2(gc.period, gc.renewWindow, *hs),
+			DownloadErr: checkDownloadGougingRHPv2(gc.settings, gc.redundancy, *hs),
+			GougingErr:  checkPriceGougingHS(gc.settings, *hs),
+			UploadErr:   checkUploadGougingRHPv2(gc.settings, gc.redundancy, *hs),
 		}
 	}
 	return
 }
 
-func (gc gougingChecker) CheckPT(pt *rhpv3.HostPriceTable) (results GougingResults) {
+func (gc gougingChecker) checkPT(pt *rhpv3.HostPriceTable) (check api.GougingChecks) {
 	if pt != nil {
-		results = GougingResults{
-			downloadErr: checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt),
-			gougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, pt, false),
-			uploadErr:   checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt),
+		check = api.GougingChecks{
+			ContractErr: checkContractGougingRHPv3(gc.period, gc.renewWindow, *pt),
+			DownloadErr: checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt),
+			GougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, *pt),
+			UploadErr:   checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt),
 		}
 	}
 	return
 }
 
-func (gr GougingResults) CanDownload() (errs []error) {
-	return filterErrors(
-		gr.downloadErr,
-		gr.gougingErr,
-	)
-}
-
-func (gr GougingResults) CanForm() []error {
-	return gr.CanUpload() // same conditions apply
-}
-
-func (gr GougingResults) CanUpload() []error {
-	return filterErrors(
-		gr.downloadErr,
-		gr.gougingErr,
-		gr.uploadErr,
-	)
-}
-
-func (gr *GougingResults) merge(other GougingResults) {
-	gr.downloadErr = joinErrors(gr.downloadErr, other.downloadErr)
-	gr.gougingErr = joinErrors(gr.gougingErr, other.gougingErr)
-	gr.uploadErr = joinErrors(gr.uploadErr, other.uploadErr)
-}
-
-func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
+func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -197,38 +160,10 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 	return nil
 }
 
-func checkContractGougingHS(period, renewWindow uint64, hs *rhpv2.HostSettings) error {
-	// check MaxDuration
-	if period != 0 && period > hs.MaxDuration {
-		return fmt.Errorf("MaxDuration %v is lower than the period %v", hs.MaxDuration, period)
-	}
-
-	// check WindowSize
-	if renewWindow != 0 && renewWindow < hs.WindowSize {
-		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", hs.WindowSize, renewWindow)
-	}
-
-	return nil
-}
-
-func checkContractGougingPT(period, renewWindow uint64, pt *rhpv3.HostPriceTable) error {
-	// check MaxDuration
-	if period != 0 && period > pt.MaxDuration {
-		return fmt.Errorf("MaxDuration %v is lower than the period %v", pt.MaxDuration, period)
-	}
-
-	// check WindowSize
-	if renewWindow != 0 && renewWindow < pt.WindowSize {
-		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", pt.WindowSize, renewWindow)
-	}
-
-	return nil
-}
-
 // TODO: if we ever stop assuming that certain prices in the pricetable are
 // always set to 1H we should account for those fields in
 // `hostPeriodCostForScore` as well.
-func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable, ignoreBlockHeight bool) error {
+func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt rhpv3.HostPriceTable) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
 		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
@@ -329,20 +264,18 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	}
 
 	// check block height
-	if !ignoreBlockHeight {
-		if !cs.Synced {
-			if pt.HostBlockHeight < cs.BlockHeight {
-				return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
-			}
-		} else {
-			var min uint64
-			if cs.BlockHeight >= uint64(gs.HostBlockHeightLeeway) {
-				min = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
-			}
-			max := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
-			if !(min <= pt.HostBlockHeight && pt.HostBlockHeight <= max) {
-				return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", min, max, pt.HostBlockHeight)
-			}
+	if !cs.Synced {
+		if pt.HostBlockHeight < cs.BlockHeight {
+			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
+		}
+	} else {
+		var min uint64
+		if cs.BlockHeight >= uint64(gs.HostBlockHeightLeeway) {
+			min = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
+		}
+		max := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
+		if !(min <= pt.HostBlockHeight && pt.HostBlockHeight <= max) {
+			return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", min, max, pt.HostBlockHeight)
 		}
 	}
 
@@ -354,6 +287,38 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	// check TxnFeeMinRecommended - expect it to be lower or equal than the max
 	if pt.TxnFeeMinRecommended.Cmp(pt.TxnFeeMaxRecommended) > 0 {
 		return fmt.Errorf("TxnFeeMinRecommended is greater than TxnFeeMaxRecommended, %v>%v", pt.TxnFeeMinRecommended, pt.TxnFeeMaxRecommended)
+	}
+
+	return nil
+}
+
+func checkContractGougingRHPv2(period, renewWindow *uint64, hs rhpv2.HostSettings) error {
+	// period and renew window might be nil since we don't always have access to
+	// these settings when performing gouging checks
+	if period == nil || renewWindow == nil {
+		return nil
+	}
+	return checkContractGouging(*period, *renewWindow, hs.MaxDuration, hs.WindowSize)
+}
+
+func checkContractGougingRHPv3(period, renewWindow *uint64, pt rhpv3.HostPriceTable) error {
+	// period and renew window might be nil since we don't always have access to
+	// these settings when performing gouging checks
+	if period == nil || renewWindow == nil {
+		return nil
+	}
+	return checkContractGouging(*period, *renewWindow, pt.MaxDuration, pt.WindowSize)
+}
+
+func checkContractGouging(period, renewWindow, maxDuration, windowSize uint64) error {
+	// check MaxDuration
+	if period != 0 && period > maxDuration {
+		return fmt.Errorf("MaxDuration %v is lower than the period %v", maxDuration, period)
+	}
+
+	// check WindowSize
+	if renewWindow != 0 && renewWindow < windowSize {
+		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", windowSize, renewWindow)
 	}
 
 	return nil
@@ -421,38 +386,6 @@ func checkUploadGouging(gs api.GougingSettings, rs api.RedundancySettings, secto
 		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
 	}
 	return nil
-}
-
-func filterErrors(errs ...error) []error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-	return filtered
-}
-
-func joinErrors(errs ...error) error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-
-	switch len(filtered) {
-	case 0:
-		return nil
-	case 1:
-		return filtered[0]
-	default:
-		strs := make([]string, len(filtered))
-		for i := range strs {
-			strs[i] = filtered[i].Error()
-		}
-		return errors.New(strings.Join(strs, ";"))
-	}
 }
 
 func sectorReadCostRHPv2(settings rhpv2.HostSettings) (types.Currency, bool) {
