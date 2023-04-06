@@ -942,13 +942,21 @@ func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.C
 	noOpRevision := initialRevision(txn, rev.UnlockConditions.PublicKeys[1], renterKey.PublicKey().UnlockKey())
 	h = types.NewHasher()
 	noOpRevision.EncodeTo(h.E)
-	noOpRevisionSignature := renterKey.SignHash(h.Sum())
+	renterNoOpSig := renterKey.SignHash(h.Sum())
+	renterNoOpRevisionSignature := types.TransactionSignature{
+		ParentID:       types.Hash256(noOpRevision.ParentID),
+		PublicKeyIndex: 0, // renter key is first
+		CoveredFields: types.CoveredFields{
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: renterNoOpSig[:],
+	}
 
 	// Send the newly added signatures to the host and the signature for the
 	// initial no-op revision.
 	rs := rhpv3.RPCRenewSignatures{
 		TransactionSignatures: txn.Signatures[2:],
-		RevisionSignature:     noOpRevisionSignature,
+		RevisionSignature:     renterNoOpRevisionSignature,
 	}
 	if err = s.WriteResponse(&rs); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
@@ -960,30 +968,12 @@ func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.C
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
-	// Create transaction signatures.
-	renterNoOpRevisionSignature := types.TransactionSignature{
-		ParentID:       types.Hash256(noOpRevision.ParentID),
-		PublicKeyIndex: 0, // renter key is first
-		CoveredFields: types.CoveredFields{
-			FileContractRevisions: []uint64{0},
-		},
-		Signature: noOpRevisionSignature[:],
-	}
-	hostNoOpRevisionSignature := types.TransactionSignature{
-		ParentID:       types.Hash256(rev.ParentID),
-		PublicKeyIndex: 1,
-		CoveredFields: types.CoveredFields{
-			FileContractRevisions: []uint64{0},
-		},
-		Signature: hostSigs.RevisionSignature[:],
-	}
-
 	// Add the parents to get the full txnSet.
 	txnSet = append(parents, txn)
 
 	return rhpv2.ContractRevision{
 		Revision:   noOpRevision,
-		Signatures: [2]types.TransactionSignature{renterNoOpRevisionSignature, hostNoOpRevisionSignature},
+		Signatures: [2]types.TransactionSignature{renterNoOpRevisionSignature, hostSigs.RevisionSignature},
 	}, txnSet, nil
 }
 
