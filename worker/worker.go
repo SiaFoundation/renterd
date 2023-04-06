@@ -33,15 +33,18 @@ import (
 )
 
 const (
-	lockingPriorityRenew      = 100 // highest
-	lockingPriorityPriceTable = 95
-	lockingPriorityFunding    = 90
-	lockingPrioritySyncing    = 80
+	lockingPriorityActiveContractRevision = 105 // highest
+	lockingPriorityRenew                  = 100
+	lockingPriorityPriceTable             = 95
+	lockingPriorityFunding                = 90
+	lockingPrioritySyncing                = 80
+	lockingPriorityUpload                 = 1 // lowest
 
-	lockingDurationRenew      = time.Minute
-	lockingDurationPriceTable = 30 * time.Second
-	lockingDurationFunding    = 30 * time.Second
-	lockingDurationSyncing    = 30 * time.Second
+	lockingDurationActiveContractRevision = time.Minute
+	lockingDurationRenew                  = time.Minute
+	lockingDurationPriceTable             = 30 * time.Second
+	lockingDurationFunding                = 30 * time.Second
+	lockingDurationSyncing                = 30 * time.Second
 
 	queryStringParamContractSet = "contractset"
 	queryStringParamMinShards   = "minshards"
@@ -1121,6 +1124,10 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
+	cs, err := w.bus.ConsensusState(ctx)
+	if jc.Check("could not get consensus state", err) != nil {
+		return
+	}
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
@@ -1131,22 +1138,15 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	var contracts []api.Contract
 	var errs HostErrorSet
 	for _, contract := range busContracts {
-		func() {
-			if hosttimeout > 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, time.Duration(hosttimeout))
-				defer cancel()
-			}
-			rev, err := w.FetchRevisionWithContract(ctx, contract.HostKey, contract.SiamuxAddr, contract.ID)
-			if err != nil {
-				errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
-				return
-			}
-			contracts = append(contracts, api.Contract{
-				ContractMetadata: contract,
-				Revision:         rev,
-			})
-		}()
+		rev, err := w.FetchRevision(ctx, hosttimeout, contract, cs.BlockHeight, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+		if err != nil {
+			errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
+			continue
+		}
+		contracts = append(contracts, api.Contract{
+			ContractMetadata: contract,
+			Revision:         rev,
+		})
 	}
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
