@@ -908,7 +908,7 @@ func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSe
 	} else if err := json.Unmarshal(resp.Settings, &settings); err != nil {
 		return rhpv2.HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
 	} else if err := validateNetAddress(ctx, settings.NetAddress); err != nil {
-		return rhpv2.HostSettings{}, fmt.Errorf("%w; '%s' is invalid, err: %w", ErrInvalidNetAddress, settings.NetAddress, err)
+		return rhpv2.HostSettings{}, fmt.Errorf("%w; '%s' is invalid, err: %v", ErrInvalidNetAddress, settings.NetAddress, err)
 	}
 	return settings, nil
 }
