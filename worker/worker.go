@@ -703,14 +703,8 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	rk := w.deriveRenterKey(rrr.HostKey)
 
 	// renew the contract
-	var renewed rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	if jc.Check("couldn't renew contract", w.withRevisionV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
-		return withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
-			renewed, txnSet, err = w.RPCRenew(ctx, rrr, cs, t, &revision, rk)
-			return err
-		})
-	})) != nil {
+	renewed, txnSet, err := w.Renew(ctx, rrr, cs, rk)
+	if jc.Check("couldn't renew contract", err) != nil {
 		return
 	}
 

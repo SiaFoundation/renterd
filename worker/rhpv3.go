@@ -837,6 +837,28 @@ func RPCReadRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.
 	}, nil
 }
 
+// Renew renews a contract with a host. To avoid an edge case where the contract
+// is drained and can therefore not be used to pay for the revision, we simply
+// don't pay for it.
+func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	var rev rhpv2.ContractRevision
+	var txnSet []types.Transaction
+	var renewErr error
+	errAbort := errors.New("abort")
+	err = withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+		_, err = RPCLatestRevision(t, rrr.ContractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			// Renew contract.
+			rev, txnSet, renewErr = w.RPCRenew(ctx, rrr, cs, t, revision, renterKey)
+			return rhpv3.HostPriceTable{}, nil, errAbort // don't pay for revision
+		})
+		return err
+	})
+	if err != nil && !errors.Is(err, errAbort) {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	return rev, txnSet, renewErr
+}
+
 func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RPCRenew")
 	s := t.DialStream()
