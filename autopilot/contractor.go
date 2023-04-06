@@ -306,37 +306,36 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// build the new contract set (excluding formed contracts)
-	contractSet := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
-	numContracts := uint64(len(contractSet))
+	updatedSet := buildContractSet(active, toArchive, toIgnore, toRefresh, toRenew, append(renewed, refreshed...))
 
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
-	if numContracts < addLeeway(state.cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, w, hosts, active, state.cfg.Contracts.Amount-numContracts, &remaining, address, minScore); err != nil {
+	if uint64(len(updatedSet)) < addLeeway(state.cfg.Contracts.Amount, leewayPctRequiredContracts) {
+		if formed, err = c.runContractFormations(ctx, w, hosts, active, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, address, minScore); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
-	contractSet = append(contractSet, formed...)
+	updatedSet = append(updatedSet, formed...)
 
 	// defer logging
 	defer func() {
-		contractSetContracts := len(currentSet)
+		numContractsInSet := len(currentSet)
 		if err == nil {
-			contractSetContracts = len(contractSet)
+			numContractsInSet = len(updatedSet)
 		}
-		if contractSetContracts < int(state.rs.TotalShards) {
-			c.logger.Debugw(
+		if numContractsInSet < int(state.rs.TotalShards) {
+			c.logger.Warnw(
 				"contracts after maintenance are below the minimum required",
 				"formed", len(formed),
 				"renewed", len(renewed),
-				"contractset", contractSetContracts,
+				"contractset", numContractsInSet,
 			)
 		} else {
 			c.logger.Debugw(
 				"contracts after maintenance",
 				"formed", len(formed),
 				"renewed", len(renewed),
-				"contractset", contractSetContracts,
+				"contractset", numContractsInSet,
 			)
 		}
 	}()
@@ -346,7 +345,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		err = errors.New("autopilot stopped before maintenance could be completed")
 		return
 	}
-	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, contractSet)
+	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
 	return
 }
 
