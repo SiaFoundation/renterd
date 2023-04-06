@@ -879,8 +879,8 @@ func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.C
 	}
 
 	// Perform gouging checks.
-	if errs := PerformGougingChecks(ctx, nil, &pt).CanForm(); len(errs) > 0 {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", errs)
+	if gc := GougingCheckerFromContext(ctx).Check(nil, &pt); gc.Gouging() {
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", gc.Reasons())
 	}
 
 	// Prepare the signed transaction that contains the final revision as well
