@@ -397,7 +397,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Add a host.
 	hk := types.GeneratePrivateKey().PublicKey()
-	err = hdb.addTestHost(hk)
+	err = hdb.addCustomTestHost(hk, "host.com")
 	if err != nil {
 		t.Fatal(err)
 	}
