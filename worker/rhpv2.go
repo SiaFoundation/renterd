@@ -34,6 +34,10 @@ var (
 	// an invalid Merkle proof.
 	ErrInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
 
+	// ErrInvalidNetAddress is returned by RPCSettings when the host settings
+	// contain an invalid NetAddress.
+	ErrInvalidNetAddress = errors.New("host settings contain invalid NetAddress")
+
 	// ErrContractLocked is returned by the Lock RPC when the contract in
 	// question is already locked by another party. This is a transient error;
 	// the caller should retry later.
@@ -903,6 +907,8 @@ func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSe
 		return rhpv2.HostSettings{}, err
 	} else if err := json.Unmarshal(resp.Settings, &settings); err != nil {
 		return rhpv2.HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
+	} else if err := validateNetAddress(ctx, settings.NetAddress); err != nil {
+		return rhpv2.HostSettings{}, fmt.Errorf("%w; '%s' is invalid, err: %w", ErrInvalidNetAddress, settings.NetAddress, err)
 	}
 	return settings, nil
 }
@@ -990,4 +996,32 @@ func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.Pr
 			hostSigs.RevisionSignature,
 		},
 	}, signedTxnSet, nil
+}
+
+func validateNetAddress(ctx context.Context, netAddress string) error {
+	// check for empty net address
+	if netAddress == "" {
+		return errors.New("empty address")
+	}
+
+	// extract the hostname
+	host, _, err := net.SplitHostPort(netAddress)
+	if err != nil {
+		return fmt.Errorf("host can not be extracted, err: %v", err)
+	}
+
+	// lookup all IP addresses for the given host
+	addresses, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("IP lookup failed for host '%s', err: %v", host, err)
+	}
+
+	// loop through all addresses and ensure none are considered private IPs
+	for _, addr := range addresses {
+		if addr.IP.IsPrivate() {
+			return fmt.Errorf("IP '%v' for host '%v' is considered a private IP", host, addr.IP)
+		}
+	}
+
+	return nil
 }

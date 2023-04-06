@@ -1166,13 +1166,10 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 
 func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (hostdb.HostPriceTable, error) {
 	// fetch the settings if necessary
-	if !host.Scanned || host.Settings.NetAddress == "" {
+	if !host.Scanned {
 		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
 		if err != nil {
 			return hostdb.HostPriceTable{}, err
-		}
-		if scan.Settings.NetAddress == "" {
-			return hostdb.HostPriceTable{}, errors.New("host settings have invalid NetAddress")
 		}
 		host.Settings = scan.Settings
 	}
