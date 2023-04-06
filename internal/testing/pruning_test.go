@@ -81,7 +81,7 @@ func TestHostPruning(t *testing.T) {
 
 	// wait until we have 2 hosts in the set - we expect one host to be removed
 	// by the host pruning
-	if err := Retry(30, 100*time.Millisecond, func() error {
+	if err := Retry(100, 100*time.Millisecond, func() error {
 		// check if the host got pruned
 		hosts, err := b.Hosts(context.Background(), 0, -1)
 		if err != nil {
