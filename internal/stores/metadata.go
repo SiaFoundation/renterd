@@ -30,10 +30,6 @@ var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from
 	// the database.
 	ErrContractNotFound = errors.New("couldn't find contract")
-
-	// ErrContractSetNotFound is returned when a contract can't be retrieved
-	// from the database.
-	ErrContractSetNotFound = errors.New("couldn't find contract set")
 )
 
 type (
@@ -978,7 +974,7 @@ func (s *SQLStore) contracts(ctx context.Context, set string) ([]dbContract, err
 		Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrContractSetNotFound
+		return nil, fmt.Errorf("%w '%s'", api.ErrContractSetNotFound, set)
 	} else if err != nil {
 		return nil, err
 	}

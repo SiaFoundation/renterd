@@ -34,6 +34,10 @@ var (
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
 
+	// ErrContractSetNotFound is returned when a contract can't be retrieved
+	// from the database.
+	ErrContractSetNotFound = errors.New("couldn't find contract set")
+
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
