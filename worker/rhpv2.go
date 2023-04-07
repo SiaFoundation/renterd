@@ -894,7 +894,7 @@ func (s *Session) withTransport(ctx context.Context, fn func(t *rhpv2.Transport)
 }
 
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
-func RPCSettings(ctx context.Context, t *rhpv2.Transport, hostIP string) (settings rhpv2.HostSettings, err error) {
+func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
 	defer wrapErr(&err, "Settings")
 	defer recordRPC(ctx, t, rhpv2.ContractRevision{}, rhpv2.RPCSettingsID, &err)()
 
@@ -904,10 +904,6 @@ func RPCSettings(ctx context.Context, t *rhpv2.Transport, hostIP string) (settin
 	} else if err := json.Unmarshal(resp.Settings, &settings); err != nil {
 		return rhpv2.HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
 	}
-
-	// NOTE: we overwrite the NetAddress with the host address here since we
-	// just used it to dial the host we know it's valid
-	settings.NetAddress = hostIP
 
 	return settings, nil
 }

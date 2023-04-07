@@ -537,7 +537,11 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	// fetch the host settings
 	start := time.Now()
 	err = w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
-		settings, err = RPCSettings(ctx, t, rsr.HostIP)
+		if settings, err = RPCSettings(ctx, t); err == nil {
+			// NOTE: we overwrite the NetAddress with the host address here since we
+			// just used it to dial the host we know it's valid
+			settings.NetAddress = rsr.HostIP
+		}
 		return err
 	})
 	elapsed := time.Since(start)
@@ -639,10 +643,13 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	ctx = WithGougingChecker(ctx, gp)
 	err = w.withTransportV2(ctx, rfr.HostKey, hostIP, func(t *rhpv2.Transport) (err error) {
-		hostSettings, err := RPCSettings(ctx, t, hostIP)
+		hostSettings, err := RPCSettings(ctx, t)
 		if err != nil {
 			return err
 		}
+		// NOTE: we overwrite the NetAddress with the host address here since we
+		// just used it to dial the host we know it's valid
+		hostSettings.NetAddress = hostIP
 
 		if breakdown := GougingCheckerFromContext(ctx).Check(&hostSettings, nil); breakdown.Gouging() {
 			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown.Reasons())
