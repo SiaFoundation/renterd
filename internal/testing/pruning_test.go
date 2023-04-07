@@ -2,12 +2,13 @@ package testing
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -18,7 +19,7 @@ func TestHostPruning(t *testing.T) {
 	ctx := context.Background()
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,71 +29,106 @@ func TestHostPruning(t *testing.T) {
 		}
 	}()
 	b := cluster.Bus
+	w := cluster.Worker
+	a := cluster.Autopilot
 
-	// add 3 hosts
-	hosts, err := cluster.AddHostsBlocking(3)
+	// create a helper function that records n failed interactions
+	now := time.Now()
+	recordFailedInteractions := func(n int, hk types.PublicKey) {
+		his := make([]hostdb.Interaction, n)
+		for i := 0; i < n; i++ {
+			now = now.Add(time.Hour).Add(time.Minute) // 1m leeway
+			his[i] = hostdb.Interaction{
+				Host:      hk,
+				Timestamp: now,
+				Success:   false,
+				Type:      hostdb.InteractionTypeScan,
+			}
+		}
+		if err = b.RecordInteractions(context.Background(), his); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create a helper function that waits for an autopilot loop to finish
+	waitForAutopilotLoop := func() {
+		var triggered int
+		Retry(50, 100*time.Millisecond, func() error {
+			res, err := a.Trigger()
+			if err != nil {
+				t.Fatal(err)
+			} else if strings.Contains(res, "true") {
+				triggered++
+				if triggered > 1 {
+					return nil
+				}
+			}
+			return errors.New("autopilot loop has not finished")
+		})
+	}
+
+	// add a host
+	hosts, err := cluster.AddHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h1 := hosts[0]
+
+	// fetch the host
+	h, err := b.Host(context.Background(), h1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// add h1 to the blocklist
-	hk1 := hosts[0].PublicKey()
-	err = b.UpdateHostBlocklist(ctx, []string{hk1.String()}, nil, false)
+	// scan the host (lastScan needs to be > 0 for downtime to start counting)
+	_, err = w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// assert the host was scanned
-	h, err := b.Host(context.Background(), hk1)
+	// block the host
+	err = b.UpdateHostBlocklist(ctx, []string{h1.PublicKey().String()}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.Interactions.LastScan.IsZero() {
-		t.Fatal("expected last scan to be set")
-	}
 
-	// remove the first host manually and close it
+	// remove it from the cluster manually
 	cluster.hosts = cluster.hosts[1:]
 	err = hosts[0].Close()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// record a number of failed interaction for h1 that push his downtime well
-	// over the default 'MaxDowntimeHours' setting of 10 hours and ensures we
-	// push it over the 'MinRecentScanFailures' limit
-	//
-	// NOTE: we do this manually to avoid bypassing the condition by adding
-	// flags or extending the config with properties only used in testing
-	now := time.Now()
-	his := make([]hostdb.Interaction, 20)
-	for i := 0; i < 20; i++ {
-		now = now.Add(time.Hour * 20)
-		his[i] = hostdb.Interaction{
-			Host:      hk1,
-			Timestamp: now,
-			Success:   false,
-			Type:      hostdb.InteractionTypeScan,
-		}
-	}
-	if err = b.RecordInteractions(context.Background(), his); err != nil {
+	// shut down the worker manually, this will flush any interactions
+	err = cluster.cleanups[2](context.Background())
+	if err != nil {
 		t.Fatal(err)
+	}
+	cluster.cleanups = append(cluster.cleanups[:2], cluster.cleanups[3:]...)
+
+	// record 9 failed interactions, right before the pruning threshold, and
+	// wait for the autopilot loop to finish at least once
+	recordFailedInteractions(9, h1.PublicKey())
+	waitForAutopilotLoop()
+
+	// assert the host was not pruned
+	hostss, err := b.Hosts(context.Background(), 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hostss) != 1 {
+		t.Fatal("host was pruned")
 	}
 
-	// wait until we have 2 hosts in the set - we expect one host to be removed
-	// by the host pruning
-	if err := Retry(30, 100*time.Millisecond, func() error {
-		// check if the host got pruned
-		hosts, err := b.Hosts(context.Background(), 0, -1)
-		if err != nil {
-			t.Fatal(err)
-		} else if len(hosts) != 2 {
-			return fmt.Errorf("unexpected number of hosts, %v != 2", len(hosts))
-		}
-		return nil
-	}); err != nil {
-		h, _ := b.Host(context.Background(), hk1)
-		t.Logf("host interactions: %+v", h.Interactions)
+	// record one more failed interaction, this should push the host over the
+	// pruning threshold
+	recordFailedInteractions(1, h1.PublicKey())
+	waitForAutopilotLoop()
+
+	// assert the host was not pruned
+	hostss, err = b.Hosts(context.Background(), 0, -1)
+	if err != nil {
 		t.Fatal(err)
+	} else if len(hostss) != 0 {
+		t.Fatal("host was not pruned")
 	}
 }
