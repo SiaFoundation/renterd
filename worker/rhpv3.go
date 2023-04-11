@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/crypto"
 	"lukechampine.com/frand"
 )
@@ -709,6 +710,9 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 	return nil
 }
 
+// RPCLatestRevision calls the LatestRevision RPC. The paymentFunc allows for
+// fetching a pricetable using the fetched revision to pay for it. If
+// paymentFunc returns 'nil' as payment, the host is not paid.
 func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
 	s := t.DialStream()
@@ -721,7 +725,7 @@ func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paym
 		return types.FileContractRevision{}, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
 		return types.FileContractRevision{}, err
-	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil {
+	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil || payment == nil {
 		return types.FileContractRevision{}, err
 	} else if err := s.WriteResponse(&pt.UID); err != nil {
 		return types.FileContractRevision{}, err
@@ -844,16 +848,15 @@ func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.Cons
 	var rev rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var renewErr error
-	errAbort := errors.New("abort")
 	err = withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		_, err = RPCLatestRevision(t, rrr.ContractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
 			rev, txnSet, renewErr = w.RPCRenew(ctx, rrr, cs, t, revision, renterKey)
-			return rhpv3.HostPriceTable{}, nil, errAbort // don't pay for revision
+			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err
 	})
-	if err != nil && !errors.Is(err, errAbort) {
+	if err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 	return rev, txnSet, renewErr
@@ -891,16 +894,7 @@ func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.C
 	}
 
 	// Starting from here, we need to make sure to release the txn on error.
-	defer func() {
-		if err != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			discardErr := w.bus.WalletDiscard(ctx, wprr.TransactionSet[len(wprr.TransactionSet)-1])
-			if discardErr != nil {
-				w.logger.Errorf("failed to discard txn after failed renewal: %v", discardErr)
-			}
-		}
-	}()
+	defer w.discardTxnOnErr(ctx, wprr.TransactionSet[len(wprr.TransactionSet)-1], "RPCRenew", &err)
 
 	txnSet := wprr.TransactionSet
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
@@ -956,6 +950,7 @@ func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.C
 		WholeTransaction: true,
 		Signatures:       []uint64{0, 1},
 	}
+	cf = wallet.ExplicitCoveredFields(txn)
 	if err := w.bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}

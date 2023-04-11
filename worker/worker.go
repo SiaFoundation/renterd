@@ -39,7 +39,6 @@ const (
 	lockingPriorityFunding    = 90
 	lockingPrioritySyncing    = 80
 
-	lockingDurationRenew      = time.Minute
 	lockingDurationPriceTable = 30 * time.Second
 	lockingDurationFunding    = 30 * time.Second
 	lockingDurationSyncing    = 30 * time.Second
@@ -584,6 +583,21 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	jc.Encode(pt)
 }
 
+func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, errContext string, err *error) {
+	if *err == nil {
+		return
+	}
+	_, span := tracing.Tracer.Start(ctx, "discardTxn")
+	defer span.End()
+	// Attach the span to a new context derived from the background context.
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
+	if err := w.bus.WalletDiscard(timeoutCtx, txn); err != nil {
+		w.logger.Errorf("%v: failed to discard txn: %v", err)
+	}
+}
+
 func (w *worker) rhpFormHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var rfr api.RHPFormRequest
@@ -621,15 +635,10 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
+		defer w.discardTxnOnErr(ctx, renterTxnSet[len(renterTxnSet)-1], "rhpFormHandler", &err)
 
 		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
 		if err != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			discardErr := w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
-			if discardErr != nil {
-				w.logger.Errorf("failed to discard txn after failed formation: %v", discardErr)
-			}
 			return err
 		}
 		return
@@ -640,7 +649,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
-	if err != nil && !strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error()) {
+	if err != nil && !isErrDuplicateTransactionSet(err) {
 		w.logger.Warnf("failed to broadcast formation txn set: %v", err)
 	}
 
@@ -682,7 +691,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
-	if err != nil && !strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error()) {
+	if err != nil && !isErrDuplicateTransactionSet(err) {
 		w.logger.Warnf("failed to broadcast renewal txn set: %v", err)
 	}
 
@@ -1296,4 +1305,8 @@ func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID,
 
 func (w *worker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
 	return (&tracedContractLocker{w.bus}).ReleaseContract(ctx, fcid, lockID)
+}
+
+func isErrDuplicateTransactionSet(err error) bool {
+	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
 }
