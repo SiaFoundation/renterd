@@ -33,11 +33,11 @@ import (
 )
 
 const (
-	lockingPriorityActiveContractRevision = 105 // highest
-	lockingPriorityRenew                  = 100
-	lockingPriorityPriceTable             = 95
-	lockingPriorityFunding                = 90
-	lockingPrioritySyncing                = 80
+	lockingPriorityActiveContractRevision = 100 // highest
+	lockingPriorityRenew                  = 80
+	lockingPriorityPriceTable             = 60
+	lockingPriorityFunding                = 40
+	lockingPrioritySyncing                = 20
 	lockingPriorityUpload                 = 1 // lowest
 
 	lockingDurationActiveContractRevision = time.Minute

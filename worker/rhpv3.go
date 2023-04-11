@@ -62,18 +62,21 @@ func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contr
 		}
 		return ctx, func() {}
 	}
-	if timeout != 0 && timeout < lockDuration {
-		lockDuration = timeout
-	}
 
 	// Try to fetch the revision with an account first.
 	ctx, cancel := timeoutCtx()
 	defer cancel()
 	rev, err := w.FetchRevisionWithAccount(ctx, contract.HostKey, contract.SiamuxAddr, bh, contract.ID)
-	if err == nil {
-		return rev, nil
-	} else if !isBalanceInsufficient(err) {
+	if err != nil && !isBalanceInsufficient(err) {
 		return types.FileContractRevision{}, err
+	} else if err == nil {
+		return rev, nil
+	}
+
+	// Adjust the lockDuration if FetchRevision is intended to time out before
+	// the full lock duration anyway.
+	if timeout != 0 && timeout < lockDuration {
+		lockDuration = timeout
 	}
 
 	// Fall back to using the contract to pay for the revision.
