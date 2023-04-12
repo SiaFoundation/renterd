@@ -48,7 +48,7 @@ type storeProvider interface {
 	withHostV3(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStore) error) (err error)
 }
 
-func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration, logger *zap.SugaredLogger) ([]object.Sector, []int, error) {
+func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration, maxOverdrive int, logger *zap.SugaredLogger) ([]object.Sector, []int, error) {
 	// ensure the context is cancelled when the slab is uploaded
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -192,7 +192,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		}
 
 		// Launch overdrive workers as needed.
-		for inflight-rem < 5 && len(neededOverdrive) > 0 {
+		for inflight-rem < maxOverdrive && len(neededOverdrive) > 0 {
 			hostIndex := nextHost()
 			if hostIndex == -1 {
 				break
@@ -231,7 +231,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	return sectors, slowHosts, nil
 }
 
-func uploadSlab(ctx context.Context, sp storeProvider, r io.Reader, m, n uint8, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration, logger *zap.SugaredLogger) (object.Slab, int, []int, error) {
+func uploadSlab(ctx context.Context, sp storeProvider, r io.Reader, m, n uint8, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration, maxOverdrive int, logger *zap.SugaredLogger) (object.Slab, int, []int, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
 	defer span.End()
 
@@ -248,7 +248,7 @@ func uploadSlab(ctx context.Context, sp storeProvider, r io.Reader, m, n uint8, 
 	s.Encode(buf, shards)
 	s.Encrypt(shards)
 
-	sectors, slowHosts, err := parallelUploadSlab(ctx, sp, shards, contracts, locker, uploadSectorTimeout, logger)
+	sectors, slowHosts, err := parallelUploadSlab(ctx, sp, shards, contracts, locker, uploadSectorTimeout, maxOverdrive, logger)
 	if err != nil {
 		return object.Slab{}, 0, nil, err
 	}
@@ -398,7 +398,6 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 		if errs == nil {
 			return nil, nil, fmt.Errorf("rem > 0 (%v) but errs is nil - this should not happen", rem)
 		}
-		fmt.Println("download failed", len(contracts))
 		return nil, nil, errs
 	}
 
@@ -560,8 +559,9 @@ func migrateSlab(ctx context.Context, sp storeProvider, s *object.Slab, contract
 	// randomize order of hosts to make sure we don't migrate to the same hosts all the time
 	frand.Shuffle(len(filtered), func(i, j int) { filtered[i], filtered[j] = filtered[j], filtered[i] })
 
-	// reupload those shards
-	uploaded, _, err := parallelUploadSlab(ctx, sp, shards, filtered, locker, uploadSectorTimeout, logger)
+	// reupload those shards. migrations are not time-sensitive, so we can use a
+	// max overdrive of 0.
+	uploaded, _, err := parallelUploadSlab(ctx, sp, shards, filtered, locker, uploadSectorTimeout, 0, logger)
 	if err != nil {
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}

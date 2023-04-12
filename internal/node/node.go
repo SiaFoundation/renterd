@@ -38,6 +38,7 @@ type WorkerConfig struct {
 	SessionTTL              time.Duration
 	DownloadSectorTimeout   time.Duration
 	UploadSectorTimeout     time.Duration
+	UploadMaxOverdrive      int
 }
 
 type BusConfig struct {
@@ -281,7 +282,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
-	w := worker.New(workerKey, cfg.ID, b, cfg.SessionLockTimeout, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, l)
+	w := worker.New(workerKey, cfg.ID, b, cfg.SessionLockTimeout, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, cfg.UploadMaxOverdrive, l)
 	return w.Handler(), w.Shutdown, nil
 }
 
