@@ -93,14 +93,14 @@ type Interaction struct {
 // HostAddress contains the address of a specific host identified by a public
 // key.
 type HostAddress struct {
-	PublicKey  types.PublicKey `json:"public_key"`
-	NetAddress string          `json:"net_address"`
+	PublicKey  types.PublicKey `json:"publicKey"`
+	NetAddress string          `json:"netAddress"`
 }
 
 // A Host pairs a host's public key with a set of interactions.
 type Host struct {
 	KnownSince   time.Time           `json:"knownSince"`
-	PublicKey    types.PublicKey     `json:"public_key"`
+	PublicKey    types.PublicKey     `json:"publicKey"`
 	NetAddress   string              `json:"netAddress"`
 	PriceTable   *HostPriceTable     `json:"priceTable"`
 	Settings     *rhpv2.HostSettings `json:"settings"`
