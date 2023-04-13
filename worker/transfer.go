@@ -140,12 +140,39 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		return -1
 	}
 
-	// spawn workers and send initial requests
+	// helper to determine whether a request is finished.
+	isReqFinished := func(r req) bool {
+		select {
+		case <-r.finishedCtx.Done():
+			return true
+		default:
+			return false
+		}
+	}
+
+	// helper function for launching worker given an existing request. Returns
+	// true if a worker was launched for the request or if the request was
+	// already finished.
 	inflight := 0
+	launchWorker := func(r req) bool {
+		if isReqFinished(r) {
+			return true
+		}
+		hostIndex := nextHost()
+		if hostIndex == -1 {
+			return false
+		}
+		go worker(req{r.finishedCtx, r.finishedFn, hostIndex, r.shardIndex})
+		inflight++
+		return true
+	}
+
+	// spawn workers and send initial requests
 	for i := range shards {
 		finishedCtx, finishedFn := context.WithCancel(ctx)
-		go worker(req{finishedCtx, finishedFn, nextHost(), i})
-		inflight++
+		if !launchWorker(req{finishedCtx, finishedFn, -1, i}) {
+			panic("failed to launch worker for initial shard - should never happen")
+		}
 	}
 
 	// collect responses
@@ -159,17 +186,15 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			inflight--
 		}
 
-		if resp.err == nil {
-			// Upon success, mark the request as finished.
-			resp.req.finishedFn()
-		} else if resp.err != nil {
+		// Decide whether to reuse the host or not. We only do that if the
+		// worker finished executing and failed due to the request being
+		// finished already.
+		if resp.err != nil && !errors.Is(resp.err, errUploadSectorTimeout) {
 			// Otherwise remember the error and reuse the host if the request
 			// was already finished.
 			errs = append(errs, &HostError{contracts[resp.req.hostIndex].HostKey, resp.err})
-			select {
-			case <-resp.req.finishedCtx.Done():
+			if isReqFinished(resp.req) {
 				hostUsed[resp.req.hostIndex] = false
-			default:
 			}
 		}
 
@@ -178,10 +203,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			neededOverdrive = append(neededOverdrive, resp.req)
 		} else if resp.err != nil {
 			// host failed, replace it.
-			if hostIndex := nextHost(); hostIndex != -1 {
-				go worker(req{resp.req.finishedCtx, resp.req.finishedFn, hostIndex, resp.req.shardIndex})
-				inflight++
-			}
+			launchWorker(resp.req)
 		} else if sectors[resp.req.shardIndex].Root == (types.Hash256{}) {
 			// host succeeded.
 			sectors[resp.req.shardIndex] = object.Sector{
@@ -189,18 +211,15 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 				Root: resp.root,
 			}
 			rem--
+			resp.req.finishedFn()
 		}
 
 		// Launch overdrive workers as needed.
 		for inflight-rem < maxOverdrive && len(neededOverdrive) > 0 {
-			hostIndex := nextHost()
-			if hostIndex == -1 {
+			if !launchWorker(neededOverdrive[0]) {
 				break
 			}
-			var r req
-			r, neededOverdrive = neededOverdrive[0], neededOverdrive[1:]
-			go worker(req{r.finishedCtx, r.finishedFn, hostIndex, r.shardIndex})
-			inflight++
+			neededOverdrive = neededOverdrive[1:]
 		}
 	}
 
