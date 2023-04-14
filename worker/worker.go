@@ -49,6 +49,32 @@ const (
 	queryStringParamTotalShards = "totalshards"
 )
 
+// rangedResponseWriter is a wrapper around http.ResponseWriter. The difference
+// to the standard http.ResponseWriter is that it allows for overriding the
+// default status code that is sent upon the first call to Write with a custom
+// one.
+type rangedResponseWriter struct {
+	rw                http.ResponseWriter
+	defaultStatusCode int
+	headerWritten     bool
+}
+
+func (rw *rangedResponseWriter) Write(p []byte) (int, error) {
+	if !rw.headerWritten {
+		rw.WriteHeader(rw.defaultStatusCode)
+	}
+	return rw.rw.Write(p)
+}
+
+func (rw *rangedResponseWriter) Header() http.Header {
+	return rw.rw.Header()
+}
+
+func (rw *rangedResponseWriter) WriteHeader(statusCode int) {
+	rw.headerWritten = true
+	rw.rw.WriteHeader(statusCode)
+}
+
 func errToStr(err error) string {
 	if err != nil {
 		return err.Error()
@@ -876,7 +902,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	jc.ResponseWriter.Header().Set("Accept-Ranges", "bytes")
-	jc.ResponseWriter.WriteHeader(status) // need to write header after setting all header fields
+	rw := rangedResponseWriter{rw: jc.ResponseWriter, defaultStatusCode: status}
 
 	// keep track of recent timings per host so we can favour faster hosts
 	performance := make(map[types.PublicKey]int64)
@@ -904,7 +930,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	cw := obj.Key.Decrypt(jc.ResponseWriter, offset)
+	cw := obj.Key.Decrypt(&rw, offset)
 	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
 		// fetch contracts for the slab
 		contracts := contractsForSlab(ss.Slab)
