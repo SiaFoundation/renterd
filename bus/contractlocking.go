@@ -139,26 +139,18 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 	lock.mu.Unlock()
 	select {
 	case <-ctx.Done():
-		// NOTE: We need to acquire the lock again and check for a
-		// wakeup. That way we close a gap where a thread could time out
-		// while being woken up.
-		lock.mu.Lock()
-		select {
-		case <-wakeChan:
-		default:
-			lock.mu.Unlock()
-			return 0, ErrAcquireContractTimeout
-		}
+		return 0, ErrAcquireContractTimeout
 	case <-wakeChan:
-		lock.mu.Lock()
 	}
+	lock.mu.Lock()
+	defer lock.mu.Unlock()
 
 	if lock.heldByID != 0 {
+		lock.heldByID = 0 // fix the assertion
 		panic("lock should be released after being woken up")
 	}
 	lock.heldByID = ourLockID
 	lock.setTimer(l, ourLockID, id, d)
-	lock.mu.Unlock()
 	return ourLockID, nil
 }
 
@@ -195,16 +187,15 @@ func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 	// Wake the next candidate.
 	for lock.queue.Len() > 0 {
 		next := heap.Pop(lock.queue).(*lockCandidate)
-		// NOTE: We need to close the wake chan first and then check for
-		// the timeout. The code in Acquire does it the opposite way,
-		// also while holding the lock. That way we close a gap where a
-		// thread could time out while being woken, resulting in the
-		// next candidate not being actually woken.
-		close(next.wake)
-		select {
-		case <-next.timedOut:
-			// try next
-		default:
+		if func() bool {
+			defer close(next.wake)
+			select {
+			case next.wake <- struct{}{}:
+				return true // woken successfully
+			case <-next.timedOut:
+				return false // timed out already
+			}
+		}() {
 			return nil
 		}
 	}
