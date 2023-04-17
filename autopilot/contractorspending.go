@@ -45,38 +45,31 @@ func (c *contractor) contractSpending(ctx context.Context, contract api.Contract
 	return total, nil
 }
 
-func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Currency, error) {
+func (c *contractor) currentPeriodSpending(contracts []api.ContractMetadata) (types.Currency, error) {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
 	}
 
 	// filter contracts in the current period
-	var filtered []api.Contract
+	var filtered []api.ContractMetadata
 	c.mu.Lock()
-	for _, rev := range contracts {
-		if rev.EndHeight() <= c.currPeriod {
-			filtered = append(filtered, rev)
+	for _, contract := range contracts {
+		if contract.WindowStart <= c.currPeriod {
+			filtered = append(filtered, contract)
 		}
 	}
 	c.mu.Unlock()
 
-	// calculate the money spent
-	var spent types.Currency
-	for _, rev := range filtered {
-		remaining := rev.RenterFunds()
-		totalCost := totalCosts[rev.ID]
-		if remaining.Cmp(totalCost) <= 0 {
-			spent = spent.Add(totalCost.Sub(remaining))
-		} else {
-			c.logger.DPanicw("sanity check failed", "remaining", remaining, "totalcost", totalCost)
-		}
+	// calculate the money allocated
+	var totalAllocated types.Currency
+	for _, contract := range filtered {
+		totalAllocated = totalAllocated.Add(contract.TotalCost)
 	}
-
-	return spent, nil
+	return totalAllocated, nil
 }
 
-func (c *contractor) remainingFunds(contracts []api.Contract) (types.Currency, error) {
+func (c *contractor) remainingFunds(contracts []api.ContractMetadata) (types.Currency, error) {
 	cfg := c.ap.state.cfg
 
 	// find out how much we spent in the current period

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -471,7 +472,7 @@ func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit 
 	values.Set("prefix", prefix)
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
-
+	path = strings.TrimLeft(path, "/")
 	var or api.ObjectsResponse
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s?"+values.Encode(), path), &or)
 	if or.Object != nil {
