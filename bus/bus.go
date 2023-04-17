@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -339,34 +340,44 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	}
 	cs := b.cm.TipState(jc.Request.Context())
 
-	fc, basePrice := rhpv2.PrepareContractRenewal(wprr.Contract, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.HostSettings, wprr.EndHeight)
-	finalPayment := wprr.HostSettings.BaseRPCPrice
-	if finalPayment.Cmp(wprr.Contract.ValidRenterPayout()) > 0 {
-		finalPayment = wprr.Contract.ValidRenterPayout()
-	}
+	// Create the final revision from the provided revision.
+	finalRevision := wprr.Revision
+	finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
+	finalRevision.Filesize = 0
+	finalRevision.FileMerkleRoot = types.Hash256{}
+	finalRevision.RevisionNumber = math.MaxUint64
+
+	// Prepare the new contract.
+	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.PriceTable, wprr.EndHeight)
+
+	// Create the transaction containing both the final revision and new
+	// contract.
 	txn := types.Transaction{
-		FileContracts: []types.FileContract{fc},
+		FileContracts:         []types.FileContract{fc},
+		FileContractRevisions: []types.FileContractRevision{finalRevision},
+		MinerFees:             []types.Currency{wprr.PriceTable.TxnFeeMaxRecommended.Mul64(4096)},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))}
-	cost := rhpv2.ContractRenewalCost(cs, fc, wprr.HostSettings.ContractPrice, txn.MinerFees[0], basePrice)
+
+	// Compute how much renter funds to put into the new contract.
+	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
+
+	// Fund the txn. We are not signing it yet since it's not complete. The host
+	// still needs to complete it and the revision + contract are signed with
+	// the renter key by the worker.
 	toSign, err := b.w.FundTransaction(cs, &txn, cost, b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
-	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(cs, &txn, toSign, cf)
-	if jc.Check("couldn't sign transaction", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
+
+	// Add any required parents.
 	parents, err := b.tp.UnconfirmedParents(txn)
 	if jc.Check("couldn't load transaction dependencies", err) != nil {
 		b.w.ReleaseInputs(txn)
 		return
 	}
 	jc.Encode(api.WalletPrepareRenewResponse{
+		ToSign:         toSign,
 		TransactionSet: append(parents, txn),
-		FinalPayment:   finalPayment,
 	})
 }
 

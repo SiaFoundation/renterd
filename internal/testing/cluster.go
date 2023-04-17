@@ -41,8 +41,8 @@ var (
 		Contracts: api.ContractsConfig{
 			Allowance:   types.Siacoins(1).Mul64(1e3),
 			Amount:      3,
-			Period:      50,
-			RenewWindow: 24,
+			Period:      144,
+			RenewWindow: 72,
 
 			Download: rhpv2.SectorSize * 500,
 			Upload:   rhpv2.SectorSize * 500,
@@ -69,7 +69,7 @@ var (
 		MaxUploadPrice:   types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
 		MaxStoragePrice:  types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
 
-		HostBlockHeightLeeway: 120, // amount of leeway given to host block height
+		HostBlockHeightLeeway: 240, // amount of leeway given to host block height
 	}
 )
 
@@ -436,8 +436,8 @@ func (c *TestCluster) MineBlocks(n int) error {
 	// hosts by too many blocks.
 	for mined := 0; mined < n; {
 		toMine := n - mined
-		if toMine > 3 {
-			toMine = 3
+		if toMine > 10 {
+			toMine = 10
 		}
 		if err := c.miner.Mine(addr, toMine); err != nil {
 			return err
