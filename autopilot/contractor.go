@@ -534,7 +534,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"renew", renew,
 			)
 		}
-		if renew {
+		if archive {
+			toArchive[fcid] = errStr(joinErrors(reasons))
+		} else if renew {
 			renewIndices[fcid] = len(toRenew)
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
@@ -545,8 +547,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				contract: contract,
 				settings: host.Settings,
 			})
-		} else if archive {
-			toArchive[fcid] = errStr(joinErrors(reasons))
 		}
 
 		// keep track of file size

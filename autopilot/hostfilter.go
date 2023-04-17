@@ -216,35 +216,41 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 // can be renewed, along with a list of reasons why it was deemed unusable.
 func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable, refresh, renew, archive bool, reasons []error) {
 	c, s := ci.contract, ci.settings
-	if isOutOfCollateral(c, s, renterFunds, bh) {
-		reasons = append(reasons, errContractOutOfCollateral)
-		renew = false
-		refresh = true
-	}
-	if isOutOfFunds(cfg, s, c) {
-		reasons = append(reasons, errContractOutOfFunds)
-		renew = false
-		refresh = true
-	}
-	if shouldRenew, secondHalf := isUpForRenewal(cfg, c.Revision, bh); shouldRenew {
-		if secondHalf {
-			reasons = append(reasons, errContractUpForRenewal) // only unusable if in second half of renew window
-		}
-		renew = true
-		refresh = false
-	}
-	if c.Revision.RevisionNumber == math.MaxUint64 {
-		reasons = append(reasons, errContractMaxRevisionNumber)
-		archive = true // can't be revised anymore
-		renew = false
-		refresh = false
-	}
+
 	if bh > c.EndHeight() {
 		reasons = append(reasons, errContractExpired)
 		archive = true // expired
 		renew = false
 		refresh = false
 	}
+
+	if c.Revision.RevisionNumber == math.MaxUint64 {
+		reasons = append(reasons, errContractMaxRevisionNumber)
+		archive = true // can't be revised anymore
+		renew = false
+		refresh = false
+	}
+
+	if !archive {
+		if isOutOfCollateral(c, s, renterFunds, bh) {
+			reasons = append(reasons, errContractOutOfCollateral)
+			renew = false
+			refresh = true
+		}
+		if isOutOfFunds(cfg, s, c) {
+			reasons = append(reasons, errContractOutOfFunds)
+			renew = false
+			refresh = true
+		}
+		if shouldRenew, secondHalf := isUpForRenewal(cfg, c.Revision, bh); shouldRenew {
+			if secondHalf {
+				reasons = append(reasons, errContractUpForRenewal) // only unusable if in second half of renew window
+			}
+			renew = true
+			refresh = false
+		}
+	}
+
 	usable = len(reasons) == 0
 	return
 }

@@ -3,7 +3,6 @@ package testing
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -52,19 +51,22 @@ func TestHostPruning(t *testing.T) {
 
 	// create a helper function that waits for an autopilot loop to finish
 	waitForAutopilotLoop := func() {
-		var triggered int
-		Retry(50, 100*time.Millisecond, func() error {
-			res, err := a.Trigger()
+		var nTriggered int
+		err := Retry(50, 100*time.Millisecond, func() error {
+			triggered, err := a.Trigger()
 			if err != nil {
 				t.Fatal(err)
-			} else if strings.Contains(res, "true") {
-				triggered++
-				if triggered > 1 {
+			} else if triggered {
+				nTriggered++
+				if nTriggered > 1 {
 					return nil
 				}
 			}
 			return errors.New("autopilot loop has not finished")
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// add a host

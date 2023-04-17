@@ -424,7 +424,9 @@ func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
-	jc.Encode(fmt.Sprintf("triggered: %t", ap.Trigger()))
+	jc.Encode(api.AutopilotTriggeredPOST{
+		Triggered: ap.Trigger(),
+	})
 }
 
 // New initializes an Autopilot.

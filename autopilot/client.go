@@ -43,9 +43,10 @@ func (c *Client) Status() (uint64, error) {
 	return resp.CurrentPeriod, err
 }
 
-func (c *Client) Trigger() (res string, err error) {
-	err = c.c.POST("/debug/trigger", nil, &res)
-	return
+func (c *Client) Trigger() (_ bool, err error) {
+	var resp api.AutopilotTriggeredPOST
+	err = c.c.POST("/debug/trigger", nil, &resp)
+	return resp.Triggered, err
 }
 
 func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerGET, err error) {
