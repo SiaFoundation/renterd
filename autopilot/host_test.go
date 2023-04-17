@@ -48,10 +48,11 @@ func newTestHosts(n int) []hostdb.Host {
 	return hosts
 }
 
-func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings *rhpv2.HostSettings) hostdb.Host {
+func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings) hostdb.Host {
 	return hostdb.Host{
-		NetAddress: randomIP().String(),
-		KnownSince: time.Now(),
+		NetAddress:       randomIP().String(),
+		KnownSince:       time.Now(),
+		LastAnnouncement: time.Now(),
 		Interactions: hostdb.Interactions{
 			TotalScans:              2,
 			LastScan:                time.Now().Add(-time.Minute),
@@ -64,13 +65,14 @@ func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings *rhpv2.Ho
 			FailedInteractions:     0,
 		},
 		PublicKey:  hk,
-		PriceTable: &hostdb.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
+		PriceTable: hostdb.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
 		Settings:   settings,
+		Scanned:    true,
 	}
 }
 
-func newTestHostSettings() *rhpv2.HostSettings {
-	return &rhpv2.HostSettings{
+func newTestHostSettings() rhpv2.HostSettings {
+	return rhpv2.HostSettings{
 		AcceptingContracts: true,
 		Collateral:         types.Siacoins(1).Div64(1 << 40),
 		MaxCollateral:      types.Siacoins(10000),

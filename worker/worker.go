@@ -471,36 +471,43 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		defer cancel()
 	}
 
+	// defer scan result
+	var err error
 	var settings rhpv2.HostSettings
+	var priceTable rhpv3.HostPriceTable
+	defer func() {
+		w.recordScan(rsr.HostKey, priceTable, settings, err)
+	}()
+
+	// fetch the host settings
 	start := time.Now()
-	pingErr := w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
-		settings, err = RPCSettings(ctx, t)
+	err = w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
+		if settings, err = RPCSettings(ctx, t); err == nil {
+			// NOTE: we overwrite the NetAddress with the host address here since we
+			// just used it to dial the host we know it's valid
+			settings.NetAddress = rsr.HostIP
+		}
 		return err
 	})
 	elapsed := time.Since(start)
 
-	var pt rhpv3.HostPriceTable
-	ptErr := withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
-		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
-		return err
-	})
-
-	w.recordScan(rsr.HostKey, pt, settings, pingErr)
-
-	var scanErrStr string
-	if pingErr != nil {
-		scanErrStr = pingErr.Error()
+	// fetch the host pricetable
+	if err == nil {
+		err = withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
+			priceTable, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+			return err
+		})
 	}
-	if ptErr != nil {
-		if scanErrStr != "" {
-			scanErrStr += "; "
-		}
-		scanErrStr += ptErr.Error()
+
+	// check error
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
 	}
 
 	jc.Encode(api.RHPScanResponse{
 		Ping:      api.ParamDuration(elapsed),
-		ScanError: scanErrStr,
+		ScanError: errStr,
 		Settings:  settings,
 	})
 }
@@ -551,7 +558,10 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(pt)
+	jc.Encode(hostdb.HostPriceTable{
+		HostPriceTable: pt,
+		Expiry:         time.Now().Add(pt.Validity),
+	})
 }
 
 func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, errContext string, err *error) {
@@ -597,6 +607,9 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
+		// NOTE: we overwrite the NetAddress with the host address here since we
+		// just used it to dial the host we know it's valid
+		hostSettings.NetAddress = hostIP
 
 		if breakdown := GougingCheckerFromContext(ctx).Check(&hostSettings, nil); breakdown.Gouging() {
 			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown.Reasons())

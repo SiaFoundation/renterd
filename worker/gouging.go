@@ -14,6 +14,21 @@ import (
 
 const (
 	keyGougingChecker contextKey = "GougingChecker"
+
+	// maxBaseRPCPriceVsBandwidth is the max ratio for sane pricing between the
+	// MinBaseRPCPrice and the MinDownloadBandwidthPrice. This ensures that 1
+	// million base RPC charges are at most 1% of the cost to download 4TB. This
+	// ratio should be used by checking that the MinBaseRPCPrice is less than or
+	// equal to the MinDownloadBandwidthPrice multiplied by this constant
+	maxBaseRPCPriceVsBandwidth = uint64(40e3)
+
+	// maxSectorAccessPriceVsBandwidth is the max ratio for sane pricing between
+	// the MinSectorAccessPrice and the MinDownloadBandwidthPrice. This ensures
+	// that 1 million base accesses are at most 10% of the cost to download 4TB.
+	// This ratio should be used by checking that the MinSectorAccessPrice is
+	// less than or equal to the MinDownloadBandwidthPrice multiplied by this
+	// constant
+	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
 type (
@@ -112,6 +127,16 @@ func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
+	}
+	maxBaseRPCPrice := hs.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
+	if hs.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
+		return fmt.Errorf("rpc price too high, %v > %v", hs.BaseRPCPrice, maxBaseRPCPrice)
+	}
+
+	// check sector access price
+	maxSectorAccessPrice := hs.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
+	if hs.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
+		return fmt.Errorf("sector access price too high, %v > %v", hs.SectorAccessPrice, maxSectorAccessPrice)
 	}
 
 	// check max storage price

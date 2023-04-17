@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
-
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -75,8 +73,8 @@ func (w *mockWorker) RHPScan(ctx context.Context, hostKey types.PublicKey, hostI
 	return api.RHPScanResponse{}, nil
 }
 
-func (w *mockWorker) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (rhpv3.HostPriceTable, error) {
-	return rhpv3.HostPriceTable{}, nil
+func (w *mockWorker) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (hostdb.HostPriceTable, error) {
+	return hostdb.HostPriceTable{}, nil
 }
 
 func (s *scanner) isScanning() bool {

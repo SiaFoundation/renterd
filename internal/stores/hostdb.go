@@ -60,6 +60,7 @@ type (
 		LastScan                int64 `gorm:"index"` // unix nano
 		LastScanSuccess         bool
 		SecondToLastScanSuccess bool
+		Scanned                 bool `gorm:"index"`
 		Uptime                  time.Duration
 		Downtime                time.Duration
 
@@ -287,9 +288,10 @@ func (h dbHost) convert() hostdb.Host {
 	if h.LastScan > 0 {
 		lastScan = time.Unix(0, h.LastScan)
 	}
-	hdbHost := hostdb.Host{
-		KnownSince: h.CreatedAt,
-		NetAddress: h.NetAddress,
+	return hostdb.Host{
+		KnownSince:       h.CreatedAt,
+		LastAnnouncement: h.LastAnnouncement,
+		NetAddress:       h.NetAddress,
 		Interactions: hostdb.Interactions{
 			TotalScans:              h.TotalScans,
 			LastScan:                lastScan,
@@ -300,25 +302,14 @@ func (h dbHost) convert() hostdb.Host {
 			SuccessfulInteractions:  h.SuccessfulInteractions,
 			FailedInteractions:      h.FailedInteractions,
 		},
-		PublicKey: types.PublicKey(h.PublicKey),
-	}
-	if h.Settings == (hostSettings{}) {
-		hdbHost.Settings = nil
-	} else {
-		s := h.Settings.convert()
-		hdbHost.Settings = &s
-	}
-
-	if h.PriceTable == (hostPriceTable{}) {
-		hdbHost.PriceTable = nil
-	} else {
-		pt := h.PriceTable.convert()
-		hdbHost.PriceTable = &hostdb.HostPriceTable{
-			HostPriceTable: pt,
+		PriceTable: hostdb.HostPriceTable{
+			HostPriceTable: h.PriceTable.convert(),
 			Expiry:         h.PriceTableExpiry.Time,
-		}
+		},
+		PublicKey: types.PublicKey(h.PublicKey),
+		Scanned:   h.Scanned,
+		Settings:  h.Settings.convert(),
 	}
-	return hdbHost
 }
 
 func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
@@ -757,6 +748,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			}
 			if isScan {
 				host.TotalScans++
+				host.Scanned = host.Scanned || interaction.Success
 				host.SecondToLastScanSuccess = host.LastScanSuccess
 				host.LastScanSuccess = interaction.Success
 				host.LastScan = interaction.Timestamp.UnixNano()
@@ -765,6 +757,11 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					if err := json.Unmarshal(interaction.Result, &sr); err != nil {
 						return err
 					}
+
+					// overwrite the NetAddress in the settings with the one we
+					// received through the host announcement
+					sr.Settings.NetAddress = host.NetAddress
+
 					host.Settings = convertHostSettings(sr.Settings)
 
 					// scans can only update the price table if the current
@@ -809,6 +806,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			err := tx.Model(&dbHost{}).
 				Where("public_key", h.PublicKey).
 				Updates(map[string]interface{}{
+					"scanned":                     h.Scanned,
 					"total_scans":                 h.TotalScans,
 					"second_to_last_scan_success": h.SecondToLastScanSuccess,
 					"last_scan_success":           h.LastScanSuccess,

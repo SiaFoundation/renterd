@@ -23,14 +23,6 @@ import (
 )
 
 const (
-	// contractHostPriceTableTimeout is the amount of time we wait to receive a
-	// price table from the host
-	contractHostPriceTableTimeout = 30 * time.Second
-
-	// contractHostTimeout is the amount of time we wait to receive the latest
-	// revision from the host
-	contractHostTimeout = 30 * time.Second
-
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
@@ -55,6 +47,18 @@ const (
 	// score found in a random sample of scores before being considered not
 	// usable.
 	minAllowedScoreLeeway = 500
+
+	// timeoutHostPriceTable is the amount of time we wait to receive a price
+	// table from the host
+	timeoutHostPriceTable = 30 * time.Second
+
+	// timeoutHostRevision is the amount of time we wait to receive the latest
+	// revision from the host
+	timeoutHostRevision = 30 * time.Second
+
+	// timeoutHostScan is the amount of time we wait for a host scan to be
+	// completed
+	timeoutHostScan = 30 * time.Second
 )
 
 type (
@@ -123,11 +127,8 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	f := newIPFilter(c.logger)
 	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
 
-	// we do not care about validating the host blockheight in the pricetable so
-	// we set it to ours
-	if host.Host.PriceTable != nil {
-		host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
-	}
+	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
+	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 	isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host.Host, minScore, storedData)
 	return api.HostHandlerGET{
@@ -188,11 +189,8 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains 
 
 	var hostInfos []api.HostHandlerGET
 	for _, host := range hosts {
-		// we do not care about validating the host blockheight in the pricetable so
-		// we set it to ours
-		if host.PriceTable != nil {
-			host.PriceTable.HostBlockHeight = cs.BlockHeight
-		}
+		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
+		host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 		isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host, minScore, storedData[host.PublicKey])
 		hostInfos = append(hostInfos, api.HostHandlerGET{
@@ -265,7 +263,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// fetch all active contracts from the worker
 	start := time.Now()
-	resp, err := w.ActiveContracts(ctx, contractHostTimeout)
+	resp, err := w.ActiveContracts(ctx, timeoutHostRevision)
 	if err != nil {
 		return err
 	}
@@ -513,7 +511,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// fetch recent price table and attach it to host.
-		host.PriceTable, err = c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		host.PriceTable, err = c.priceTable(ctx, w, host.Host)
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			toIgnore = append(toIgnore, fcid)
@@ -528,11 +526,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// grab the settings - this is safe because bad settings make an unusable host
-		settings := *host.Settings
-
 		// decide whether the contract is still good
-		ci := contractInfo{contract: contract, settings: settings}
+		ci := contractInfo{contract: contract, settings: host.Settings}
 		renterFunds, err := c.renewFundingEstimate(ctx, ci, false)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
@@ -555,12 +550,12 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			renewIndices[fcid] = len(toRenew)
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
-				settings: settings,
+				settings: host.Settings,
 			})
 		} else if refresh {
 			toRefresh = append(toRefresh, contractInfo{
 				contract: contract,
-				settings: settings,
+				settings: host.Settings,
 			})
 		}
 
@@ -645,7 +640,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// fetch price table on the fly
-		host.PriceTable, err = c.priceTable(ctx, w, host.PublicKey, host.Settings.SiamuxAddr())
+		host.PriceTable, err = c.priceTable(ctx, w, host)
 		if err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host, err)
 			continue
@@ -937,7 +932,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 			continue
 		}
 		// filter out unscanned hosts
-		if h.Settings == nil || h.PriceTable == nil {
+		if !h.Scanned {
 			unscanned++
 			continue
 		}
@@ -961,11 +956,9 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// right before forming the contract to ensure we do not form a contract
 		// with a host that's gouging its prices.
 		//
-		// NOTE: we do not care about validating the host blockheight in the
-		// pricetable so we set it to ours
-		if h.PriceTable != nil {
-			h.PriceTable.HostBlockHeight = state.cs.BlockHeight
-		}
+		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
+		// own blockheight
+		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
 		if usable, result := isUsableHost(state.cfg, state.rs, gc, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
 			results.merge(result)
 			unusable++
@@ -1225,19 +1218,22 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) priceTable(ctx context.Context, w Worker, hk types.PublicKey, siamuxAddr string) (*hostdb.HostPriceTable, error) {
-	ctx, cancel := context.WithTimeout(ctx, contractHostPriceTableTimeout)
-	defer cancel()
-
-	pt, err := w.RHPPriceTable(ctx, hk, siamuxAddr)
-	if err != nil {
-		return nil, err
+func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (hostdb.HostPriceTable, error) {
+	// scan the host if it hasn't been successfully scanned before, which can
+	// occur when contracts are added manually to the bus or database
+	if !host.Scanned {
+		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
+		if err != nil {
+			return hostdb.HostPriceTable{}, err
+		}
+		host.Settings = scan.Settings
 	}
 
-	return &hostdb.HostPriceTable{
-		HostPriceTable: pt,
-		Expiry:         time.Now().Add(pt.Validity),
-	}, nil
+	ctx, cancel := context.WithTimeout(ctx, timeoutHostPriceTable)
+	defer cancel()
+
+	// fetch the price table
+	return w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
 }
 
 func buildContractSet(active []api.Contract, toArchive map[types.FileContractID]string, toIgnore []types.FileContractID, toRefresh, toRenew []contractInfo, renewed []api.ContractMetadata) []types.FileContractID {

@@ -28,14 +28,14 @@ const (
 )
 
 var (
-	errHostBlocked      = errors.New("host is blocked")
-	errHostOffline      = errors.New("host is offline")
-	errLowScore         = errors.New("host's score is below minimum")
-	errHostRedundantIP  = errors.New("host has redundant IP")
-	errHostBadSettings  = errors.New("host has bad settings")
-	errHostPriceGouging = errors.New("host is price gouging")
-	errHostNotAnnounced = errors.New("host is not announced")
-	errHostNoPriceTable = errors.New("host has no pricetable")
+	errHostBlocked               = errors.New("host is blocked")
+	errHostOffline               = errors.New("host is offline")
+	errLowScore                  = errors.New("host's score is below minimum")
+	errHostRedundantIP           = errors.New("host has redundant IP")
+	errHostPriceGouging          = errors.New("host is price gouging")
+	errHostNotAcceptingContracts = errors.New("host is not accepting contracts")
+	errHostNotAnnounced          = errors.New("host is not announced")
+	errHostNotScanned            = errors.New("host has not been scanned")
 
 	errContractOutOfCollateral   = errors.New("contract is out of collateral")
 	errContractOutOfFunds        = errors.New("contract is out of funds")
@@ -45,15 +45,15 @@ var (
 )
 
 type unusableHostResult struct {
-	blocked      uint64
-	offline      uint64
-	lowscore     uint64
-	redundantip  uint64
-	badsettings  uint64
-	gouging      uint64
-	notannounced uint64
-	nopricetable uint64
-	unknown      uint64
+	blocked               uint64
+	offline               uint64
+	lowscore              uint64
+	redundantip           uint64
+	gouging               uint64
+	notacceptingcontracts uint64
+	notannounced          uint64
+	notscanned            uint64
+	unknown               uint64
 
 	// gougingBreakdown is mostly ignored, we overload the unusableHostResult
 	// with a gouging breakdown to be able to return it in the host infos
@@ -76,14 +76,14 @@ func newUnusableHostResult(errs []error, gougingBreakdown api.HostGougingBreakdo
 			u.lowscore++
 		} else if errors.Is(err, errHostRedundantIP) {
 			u.redundantip++
-		} else if errors.Is(err, errHostBadSettings) {
-			u.badsettings++
 		} else if errors.Is(err, errHostPriceGouging) {
 			u.gouging++
+		} else if errors.Is(err, errHostNotAcceptingContracts) {
+			u.notacceptingcontracts++
 		} else if errors.Is(err, errHostNotAnnounced) {
 			u.notannounced++
-		} else if errors.Is(err, errHostNoPriceTable) {
-			u.nopricetable++
+		} else if errors.Is(err, errHostNotScanned) {
+			u.notscanned++
 		} else {
 			u.unknown++
 		}
@@ -112,17 +112,17 @@ func (u unusableHostResult) reasons() []string {
 	if u.redundantip > 0 {
 		reasons = append(reasons, errHostRedundantIP.Error())
 	}
-	if u.badsettings > 0 {
-		reasons = append(reasons, errHostBadSettings.Error())
-	}
 	if u.gouging > 0 {
 		reasons = append(reasons, errHostPriceGouging.Error())
+	}
+	if u.notacceptingcontracts > 0 {
+		reasons = append(reasons, errHostNotAcceptingContracts.Error())
 	}
 	if u.notannounced > 0 {
 		reasons = append(reasons, errHostNotAnnounced.Error())
 	}
-	if u.nopricetable > 0 {
-		reasons = append(reasons, errHostNoPriceTable.Error())
+	if u.notscanned > 0 {
+		reasons = append(reasons, errHostNotScanned.Error())
 	}
 	if u.unknown > 0 {
 		reasons = append(reasons, "unknown")
@@ -135,10 +135,10 @@ func (u *unusableHostResult) merge(other unusableHostResult) {
 	u.offline += other.offline
 	u.lowscore += other.lowscore
 	u.redundantip += other.redundantip
-	u.badsettings += other.badsettings
 	u.gouging += other.gouging
+	u.notacceptingcontracts += other.notacceptingcontracts
 	u.notannounced += other.notannounced
-	u.nopricetable += other.nopricetable
+	u.notscanned += other.notscanned
 	u.unknown += other.unknown
 
 	// scoreBreakdown is not merged
@@ -152,10 +152,10 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 		"offline", u.offline,
 		"lowscore", u.lowscore,
 		"redundantip", u.redundantip,
-		"badsettings", u.badsettings,
 		"gouging", u.gouging,
+		"notacceptingcontracts", u.notacceptingcontracts,
 		"notannounced", u.notannounced,
-		"nopricetable", u.nopricetable,
+		"notscanned", u.notscanned,
 		"unknown", u.unknown,
 	}
 	for i := 0; i < len(values); i += 2 {
@@ -173,28 +173,40 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
+
 	var errs []error
-
-	if !h.IsOnline() {
-		errs = append(errs, errHostOffline)
-	}
-	if h.NetAddress == "" {
-		errs = append(errs, errHostNotAnnounced)
-	}
-	if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
-		errs = append(errs, errHostRedundantIP)
-	}
-
 	var gougingBreakdown api.HostGougingBreakdown
 	var scoreBreakdown api.HostScoreBreakdown
-	if settings, bad, reason := hasBadSettings(cfg, h); bad {
-		errs = append(errs, fmt.Errorf("%w: %v", errHostBadSettings, reason))
-	} else if h.PriceTable == nil {
-		errs = append(errs, errHostNoPriceTable)
-	} else if gougingBreakdown := gc.Check(settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
-		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown.Reasons()))
-	} else if scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy()); scoreBreakdown.Score() < minScore {
-		errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
+
+	if !h.IsAnnounced() {
+		errs = append(errs, errHostNotAnnounced)
+	} else if !h.Scanned {
+		errs = append(errs, errHostNotScanned)
+	} else {
+		// online check
+		if !h.IsOnline() {
+			errs = append(errs, errHostOffline)
+		}
+
+		// redundant IP check
+		if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
+			errs = append(errs, errHostRedundantIP)
+		}
+
+		// accepting contracts check
+		if !h.Settings.AcceptingContracts {
+			errs = append(errs, errHostNotAcceptingContracts)
+		}
+
+		// perform gouging checks
+		if gougingBreakdown := gc.Check(&h.Settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
+			errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown.Reasons()))
+		}
+
+		// perform scoring checks
+		if scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy()); scoreBreakdown.Score() < minScore {
+			errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
+		}
 	}
 
 	return len(errs) == 0, newUnusableHostResult(errs, gougingBreakdown, scoreBreakdown)
@@ -282,26 +294,4 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= r.EndHeight()
 	return
-}
-
-func hasBadSettings(cfg api.AutopilotConfig, h hostdb.Host) (*rhpv2.HostSettings, bool, string) {
-	settings := h.Settings
-	if settings == nil {
-		return nil, true, "no settings"
-	}
-	if !settings.AcceptingContracts {
-		return nil, true, "not accepting contracts"
-	}
-	if cfg.Contracts.Period+cfg.Contracts.RenewWindow > settings.MaxDuration {
-		return nil, true, fmt.Sprintf("max duration too low, %v > %v", cfg.Contracts.Period+cfg.Contracts.RenewWindow, settings.MaxDuration)
-	}
-	maxBaseRPCPrice := settings.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
-	if settings.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
-		return nil, true, fmt.Sprintf("base RPC price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
-	}
-	maxSectorAccessPrice := settings.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
-	if settings.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
-		return nil, true, fmt.Sprintf("sector access price too high, %v > %v", settings.BaseRPCPrice, maxBaseRPCPrice)
-	}
-	return settings, false, ""
 }

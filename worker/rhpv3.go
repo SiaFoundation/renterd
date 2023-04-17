@@ -602,14 +602,14 @@ func (p *priceTable) fetch(ctx context.Context, revision *types.FileContractRevi
 
 	// fetch the host, return early if it has a valid price table
 	host, err := b.Host(ctx, hk)
-	if err == nil && host.PriceTable != nil && time.Now().Before(host.PriceTable.Expiry.Add(priceTableValidityLeeway)) {
-		hpt = *host.PriceTable
+	if err == nil && host.Scanned && time.Now().Before(host.PriceTable.Expiry.Add(priceTableValidityLeeway)) {
+		hpt = host.PriceTable
 		return
 	}
 
-	// sanity check the host has settings to avoid nil panic
-	if host.Settings == nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("host %v has no settings", hk)
+	// sanity check the host has been scanned before fetching the price table
+	if !host.Scanned {
+		return hostdb.HostPriceTable{}, fmt.Errorf("host %v was not scanned", hk)
 	}
 
 	// otherwise fetch it
