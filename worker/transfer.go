@@ -169,7 +169,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	for i := range shards {
 		finishedCtx, finishedFn := context.WithCancel(ctx)
 		if !launchWorker(req{finishedCtx, finishedFn, -1, i}) {
-			panic("failed to launch worker for initial shard - should never happen")
+			panic("failed to launch worker for initial shard")
 		}
 	}
 
