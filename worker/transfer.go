@@ -148,11 +148,11 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		}
 	}
 
-	// helper function for launching worker given an existing request. Returns
-	// true if a worker was launched for the request or if the request was
-	// already finished.
+	// helper function for handling requests. Will return true if either a new
+	// worker was launched for the request or if the request was already
+	// finished.
 	inflight := 0
-	launchWorker := func(r req) bool {
+	handleRequest := func(r req) bool {
 		if isReqFinished(r) {
 			return true
 		}
@@ -168,7 +168,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	// spawn workers and send initial requests
 	for i := range shards {
 		finishedCtx, finishedFn := context.WithCancel(ctx)
-		if !launchWorker(req{finishedCtx, finishedFn, -1, i}) {
+		if !handleRequest(req{finishedCtx, finishedFn, -1, i}) {
 			panic("failed to launch worker for initial shard - should never happen")
 		}
 	}
@@ -203,7 +203,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			slowRequests = append(slowRequests, resp.req)
 		} else if resp.err != nil {
 			// host failed, replace it.
-			launchWorker(resp.req)
+			handleRequest(resp.req)
 		} else if sectors[resp.req.shardIndex].Root == (types.Hash256{}) {
 			// host succeeded.
 			sectors[resp.req.shardIndex] = object.Sector{
@@ -219,7 +219,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 
 		// Launch overdrive workers as needed.
 		for inflight-rem < maxOverdrive && len(toOverdrive) > 0 {
-			if !launchWorker(toOverdrive[0]) {
+			if !handleRequest(toOverdrive[0]) {
 				break
 			}
 			toOverdrive = toOverdrive[1:]
