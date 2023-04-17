@@ -253,6 +253,16 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
+	// fetch used hosts.
+	allActiveContracts, err := c.ap.bus.ActiveContracts(ctx)
+	if err != nil {
+		return err
+	}
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, contract := range allActiveContracts {
+		usedHosts[contract.HostKey] = struct{}{}
+	}
+
 	// fetch all active contracts from the worker
 	start := time.Now()
 	resp, err := w.ActiveContracts(ctx, contractHostTimeout)
@@ -309,7 +319,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// calculate remaining funds
-	remaining, err := c.remainingFunds(active)
+	remaining, err := c.remainingFunds(allActiveContracts)
 	if err != nil {
 		return err
 	}
@@ -332,7 +342,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if uint64(len(updatedSet)) < addLeeway(state.cfg.Contracts.Amount, leewayPctRequiredContracts) {
-		if formed, err = c.runContractFormations(ctx, w, hosts, active, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, address, minScore); err != nil {
+		if formed, err = c.runContractFormations(ctx, w, hosts, usedHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, address, minScore); err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		}
 	}
@@ -539,7 +549,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"renew", renew,
 			)
 		}
-		if renew {
+		if archive {
+			toArchive[fcid] = errStr(joinErrors(reasons))
+		} else if renew {
 			renewIndices[fcid] = len(toRenew)
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
@@ -550,8 +562,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				contract: contract,
 				settings: settings,
 			})
-		} else if archive {
-			toArchive[fcid] = errStr(joinErrors(reasons))
 		}
 
 		// keep track of file size
@@ -585,7 +595,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	return toArchive, toIgnore, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts []hostdb.Host, active []api.Contract, missing uint64, budget *types.Currency, renterAddress types.Address, minScore float64) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, missing uint64, budget *types.Currency, renterAddress types.Address, minScore float64) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -596,7 +606,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 	c.logger.Debugw(
 		"run contract formations",
-		"active", len(active),
+		"usedHosts", len(usedHosts),
 		"required", c.ap.state.cfg.Contracts.Amount,
 		"missing", missing,
 		"budget", budget,
@@ -614,7 +624,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, err := c.candidateHosts(ctx, w, hosts, active, make(map[types.PublicKey]uint64), wanted, minScore)
+	candidates, err := c.candidateHosts(ctx, w, hosts, usedHosts, make(map[types.PublicKey]uint64), wanted, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -879,7 +889,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// worthwhile.
 	numContracts := c.ap.state.cfg.Contracts.Amount
 	buffer := 50
-	candidates, err := c.candidateHosts(ctx, w, hosts, nil, storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	candidates, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
@@ -900,7 +910,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	return lowestScore / minAllowedScoreLeeway, nil
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, active []api.Contract, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
+func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
 
 	// nothing to do
@@ -909,12 +919,6 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	}
 
 	state := c.ap.state
-
-	// create a map of used hosts
-	used := make(map[types.PublicKey]struct{})
-	for _, contract := range active {
-		used[contract.HostKey()] = struct{}{}
-	}
 
 	// create an IP filter
 	ipFilter := newIPFilter(c.logger)
@@ -927,7 +931,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	var excluded, unscanned int
 	for _, h := range hosts {
 		// filter out used hosts
-		if _, exclude := used[h.PublicKey]; exclude {
+		if _, exclude := usedHosts[h.PublicKey]; exclude {
 			_ = ipFilter.isRedundantIP(h) // ensure the host's IP is registered as used
 			excluded++
 			continue

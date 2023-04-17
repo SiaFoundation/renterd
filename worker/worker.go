@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gotd/contrib/http_range"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -51,64 +52,30 @@ const (
 	queryStringParamTotalShards = "totalshards"
 )
 
-// parseRange parses a Range header string as per RFC 7233. Only the first range
-// is returned. If no range is specified, parseRange returns 0, size.
-func parseRange(s string, size int64) (offset, length int64, _ error) {
-	if s == "" {
-		return 0, size, nil
+// rangedResponseWriter is a wrapper around http.ResponseWriter. The difference
+// to the standard http.ResponseWriter is that it allows for overriding the
+// default status code that is sent upon the first call to Write with a custom
+// one.
+type rangedResponseWriter struct {
+	rw                http.ResponseWriter
+	defaultStatusCode int
+	headerWritten     bool
+}
+
+func (rw *rangedResponseWriter) Write(p []byte) (int, error) {
+	if !rw.headerWritten {
+		rw.WriteHeader(rw.defaultStatusCode)
 	}
-	const b = "bytes="
-	if !strings.HasPrefix(s, b) {
-		return 0, 0, errors.New("invalid range")
-	}
-	rs := strings.Split(s[len(b):], ",")
-	if len(rs) == 0 {
-		return 0, 0, errors.New("invalid range")
-	}
-	ra := strings.TrimSpace(rs[0])
-	if ra == "" {
-		return 0, 0, errors.New("invalid range")
-	}
-	i := strings.Index(ra, "-")
-	if i < 0 {
-		return 0, 0, errors.New("invalid range")
-	}
-	start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
-	if start == "" {
-		if end == "" || end[0] == '-' {
-			return 0, 0, errors.New("invalid range")
-		}
-		i, err := strconv.ParseInt(end, 10, 64)
-		if i < 0 || err != nil {
-			return 0, 0, errors.New("invalid range")
-		}
-		if i > size {
-			i = size
-		}
-		offset = size - i
-		length = size - offset
-	} else {
-		i, err := strconv.ParseInt(start, 10, 64)
-		if err != nil || i < 0 {
-			return 0, 0, errors.New("invalid range")
-		} else if i >= size {
-			return 0, 0, errors.New("invalid range")
-		}
-		offset = i
-		if end == "" {
-			length = size - offset
-		} else {
-			i, err := strconv.ParseInt(end, 10, 64)
-			if err != nil || offset > i {
-				return 0, 0, errors.New("invalid range")
-			}
-			if i >= size {
-				i = size - 1
-			}
-			length = i - offset + 1
-		}
-	}
-	return offset, length, nil
+	return rw.rw.Write(p)
+}
+
+func (rw *rangedResponseWriter) Header() http.Header {
+	return rw.rw.Header()
+}
+
+func (rw *rangedResponseWriter) WriteHeader(statusCode int) {
+	rw.headerWritten = true
+	rw.rw.WriteHeader(statusCode)
 }
 
 func errToStr(err error) string {
@@ -923,16 +890,22 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// Read call. We can improve on this to some degree by buffering, but
 	// without knowing the exact ranges being requested, this will always be
 	// suboptimal. Thus, sadly, we have to roll our own range support.
-	offset, length, err := parseRange(jc.Request.Header.Get("Range"), obj.Size())
+	ranges, err := http_range.ParseRange(jc.Request.Header.Get("Range"), obj.Size())
 	if err != nil {
 		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
-	if length < obj.Size() {
-		jc.ResponseWriter.WriteHeader(http.StatusPartialContent)
-		jc.ResponseWriter.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, obj.Size()))
+	var offset int64
+	length := obj.Size()
+	status := http.StatusOK
+	if len(ranges) > 0 {
+		status = http.StatusPartialContent
+		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(obj.Size()))
+		offset, length = ranges[0].Start, ranges[0].Length
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	jc.ResponseWriter.Header().Set("Accept-Ranges", "bytes")
+	rw := rangedResponseWriter{rw: jc.ResponseWriter, defaultStatusCode: status}
 
 	// keep track of recent timings per host so we can favour faster hosts
 	performance := make(map[types.PublicKey]int64)
@@ -960,7 +933,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	cw := obj.Key.Decrypt(jc.ResponseWriter, offset)
+	cw := obj.Key.Decrypt(&rw, offset)
 	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
 		// fetch contracts for the slab
 		contracts := contractsForSlab(ss.Slab)

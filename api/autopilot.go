@@ -29,6 +29,10 @@ type (
 		Contracts ContractsConfig `json:"contracts"`
 	}
 
+	AutopilotTriggeredPOST struct {
+		Triggered bool `json:"triggered"`
+	}
+
 	// WalletConfig contains all wallet configuration parameters.
 	WalletConfig struct {
 		DefragThreshold uint64 `json:"defragThreshold"`
