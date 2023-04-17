@@ -131,6 +131,6 @@ func TestHostPruning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hostss) != 0 {
-		t.Fatal("host was not pruned")
+		t.Fatalf("host was not pruned, %+v", hostss[0].Interactions)
 	}
 }
