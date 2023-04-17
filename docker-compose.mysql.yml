@@ -51,8 +51,8 @@ services:
     ports:
       - 9980:9980
     environment:
-      - RENTERD_API_PASSWORD=
-      - RENTERD_SEED=
+      - RENTERD_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+      - RENTERD_SEED=[[ ENTER SEED HERE ]]
       - RENTERD_DB_URI=10.10.10.10
       - RENTERD_DB_USER=root
       - RENTERD_DB_PASSWORD=root

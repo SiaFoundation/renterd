@@ -1,0 +1,180 @@
+version: "3.9"
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  shared:
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.10.10.0/24
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    logging: *default-logging
+    container_name: db
+    cap_add:
+      - SYS_NICE
+    environment:
+      - MYSQL_DATABASE=renterd
+      - MYSQL_ROOT_PASSWORD=root
+    ports:
+      - '3306:3306'
+    volumes:
+      - ./docker/data/bus/db:/var/lib/mysql
+    networks:
+      shared:
+        ipv4_address: 10.10.10.10
+    healthcheck:
+      test: mysqladmin ping -h 10.10.10.10 -u root --password=$$MYSQL_ROOT_PASSWORD | grep 'mysqld is alive' || exit 1
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 6
+  bus:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+    container_name: bus
+    command: '--http 10.10.10.20:9980'
+    volumes:
+      - ./docker/data/bus:/data
+    networks:
+      shared:
+        ipv4_address: 10.10.10.20
+    expose:
+      - '9980'
+    ports:
+      - '2080:9980'
+      - '2081:9981'
+    environment:
+      - RENTERD_AUTOPILOT_ENABLED=false
+      - RENTERD_WORKER_ENABLED=false
+      - RENTERD_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+      - RENTERD_SEED=[[ ENTER SEED HERE ]]
+      - RENTERD_DB_URI=10.10.10.10
+      - RENTERD_DB_USER=root
+      - RENTERD_DB_PASSWORD=root
+      - RENTERD_DB_NAME=renterd
+    depends_on:
+      db:
+        condition: service_healthy
+  autopilot:
+    profiles:
+      - donotstart
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+    container_name: autopilot
+    command: '--http 10.10.10.30:9980'
+    volumes:
+      - ./docker/data/autopilot:/data
+    networks:
+      shared:
+        ipv4_address: 10.10.10.30
+    ports:
+      - '3080:9980'
+    environment:
+      - RENTERD_TRACING_ENABLED=true
+      - OTEL_EXPORTER_JAEGER_ENDPOINT=http://10.10.10.50:14268/api/traces
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://10.10.10.50:4318
+      - JAEGER_SERVICE_INSTANCE_ID=autopilot
+      - RENTERD_AUTOPILOT_ENABLED=true
+      - RENTERD_WORKER_ENABLED=false
+      - RENTERD_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+      - RENTERD_BUS_REMOTE_ADDR=http://10.10.10.20:9980/api/bus
+      - RENTERD_BUS_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+      - RENTERD_WORKER_REMOTE_ADDRS=http://10.10.10.41:9980/api/worker;http://10.10.10.42:9980/api/worker
+      - RENTERD_WORKER_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+    depends_on:
+      - bus
+  worker1:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    restart: unless-stopped
+    container_name: worker1
+    command: '--http 10.10.10.41:9980'
+    volumes:
+      - ./docker/data/workers/worker1:/data
+    networks:
+      shared:
+        ipv4_address: 10.10.10.41
+    expose:
+      - '9980'
+    ports:
+      - '4180:9980'
+    environment:
+      - RENTERD_TRACING_ENABLED=true
+      - OTEL_EXPORTER_JAEGER_ENDPOINT=http://10.10.10.50:14268/api/traces
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://10.10.10.50:4318
+      - JAEGER_SERVICE_INSTANCE_ID=worker1
+      - RENTERD_AUTOPILOT_ENABLED=false
+      - RENTERD_WORKER_ENABLED=true
+      - RENTERD_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+      - RENTERD_SEED=[[ ENTER SEED HERE ]]
+      - RENTERD_BUS_REMOTE_ADDR=http://10.10.10.20:9980/api/bus
+      - RENTERD_BUS_API_PASSWORD=[ENTER PASSWORD HERE]
+      - RENTERD_WORKER_ID=worker1
+    depends_on:
+      - bus
+      - jaeger
+  worker2:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    restart: unless-stopped
+    container_name: worker2
+    command: '--http 10.10.10.42:9980'
+    volumes:
+      - ./docker/data/workers/worker2:/data
+    networks:
+      shared:
+        ipv4_address: 10.10.10.42
+    expose:
+      - '9980'
+    ports:
+      - '4280:9980'
+    environment:
+      - RENTERD_TRACING_ENABLED=true
+      - OTEL_EXPORTER_JAEGER_ENDPOINT=http://10.10.10.50:14268/api/traces
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://10.10.10.50:4318
+      - JAEGER_SERVICE_INSTANCE_ID=worker2
+      - RENTERD_AUTOPILOT_ENABLED=false
+      - RENTERD_WORKER_ENABLED=true
+      - RENTERD_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+      - RENTERD_SEED=[[ ENTER SEED HERE ]]
+      - RENTERD_BUS_REMOTE_ADDR=http://10.10.10.20:9980/api/bus
+      - RENTERD_BUS_API_PASSWORD=[[ ENTER PASSWORD HERE ]]
+      - RENTERD_WORKER_ID=worker2
+    depends_on:
+      - bus
+      - jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:1.41.0
+    hostname: jaeger
+    restart: unless-stopped
+    networks:
+      shared:
+        ipv4_address: 10.10.10.50
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - 6831:6831/udp # accept jaeger.thrift in compact Thrift protocol used by most current Jaeger clients
+      - 6832:6832/udp # accept jaeger.thrift in binary Thrift protocol used by Node.js Jaeger client (because thriftrw npm package does not support compact protocol)
+      - 5775:5775/udp # accept zipkin.thrift in compact Thrift protocol (deprecated; only used by very old Jaeger clients, circa 2016)
+      - 5778:5778 # serve configs, sampling strategies
+      - 16686:16686 # UI port
+      - 14269:14269 # collector admin port: health check at / and metrics at /metrics
+      - 9411:9411 # Zipkin HTTP port
