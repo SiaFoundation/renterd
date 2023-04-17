@@ -179,8 +179,9 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	var errs HostErrorSet
 	sectors := make([]object.Sector, len(shards))
 	rem := len(shards)
-	var neededOverdrive []req
-	for rem > 0 && inflight > 0 {
+	var toOverdrive []req
+	var slowRequests []req
+	for inflight > 0 {
 		resp := <-respChan
 		if !errors.Is(resp.err, errUploadSectorTimeout) {
 			inflight--
@@ -190,7 +191,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		// worker finished executing and failed due to the request being
 		// finished already.
 		if resp.err != nil && !errors.Is(resp.err, errUploadSectorTimeout) {
-			// Otherwise remember the error and reuse the host if the request
+			// Remember the error and reuse the host if the request
 			// was already finished.
 			errs = append(errs, &HostError{contracts[resp.req.hostIndex].HostKey, resp.err})
 			if isReqFinished(resp.req) {
@@ -200,7 +201,8 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 
 		if errors.Is(resp.err, errUploadSectorTimeout) {
 			// for each slow host we eventually launch an overdrive worker
-			neededOverdrive = append(neededOverdrive, resp.req)
+			toOverdrive = append(toOverdrive, resp.req)
+			slowRequests = append(slowRequests, resp.req)
 		} else if resp.err != nil {
 			// host failed, replace it.
 			launchWorker(resp.req)
@@ -212,14 +214,17 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			}
 			rem--
 			resp.req.finishedFn()
+			if rem == 0 {
+				break // done
+			}
 		}
 
 		// Launch overdrive workers as needed.
-		for inflight-rem < maxOverdrive && len(neededOverdrive) > 0 {
-			if !launchWorker(neededOverdrive[0]) {
+		for inflight-rem < maxOverdrive && len(toOverdrive) > 0 {
+			if !launchWorker(toOverdrive[0]) {
 				break
 			}
-			neededOverdrive = neededOverdrive[1:]
+			toOverdrive = toOverdrive[1:]
 		}
 	}
 
@@ -231,21 +236,16 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		return nil, nil, fmt.Errorf("failed to upload slab: rem=%v, inflight=%v, contracts=%v, errs=%w", rem, inflight, len(contracts), errs)
 	}
 
-	// make hosts map
-	hostsMap := make(map[types.PublicKey]int)
-	for i, c := range contracts {
-		hostsMap[c.HostKey] = i
-	}
-
 	// collect slow host indices
 	var slowHosts []int
-	for _, he := range errs {
-		if errors.Is(he, errUploadSectorTimeout) {
-			if _, exists := hostsMap[he.HostKey]; !exists {
-				panic("host not found in hostsmap")
-			}
-			slowHosts = append(slowHosts, hostsMap[he.HostKey])
+	usedHosts := make(map[int]struct{})
+	for _, sr := range slowRequests {
+		_, found := usedHosts[sr.hostIndex]
+		if found {
+			continue
 		}
+		usedHosts[sr.hostIndex] = struct{}{}
+		slowHosts = append(slowHosts, sr.hostIndex)
 	}
 	return sectors, slowHosts, nil
 }
