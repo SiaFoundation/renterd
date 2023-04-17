@@ -867,18 +867,34 @@ func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.C
 	s := t.DialStream()
 	defer s.Close()
 
-	// Send the zero uid to get a temporary pricetable for this RPC.
+	// Try to get a valid pricetable.
 	var ptUID rhpv3.SettingsID
+	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var pt rhpv3.HostPriceTable
+	hpt, err := w.priceTables.fetch(ptCtx, rrr.HostKey, nil)
+	if err == nil {
+		pt = hpt.HostPriceTable
+		ptUID = hpt.UID
+	} else {
+		w.logger.Warnf("failed to fetch valid pricetable for renew: %v", err)
+	}
+
+	// Send the ptUID.
 	if err = s.WriteRequest(rhpv3.RPCRenewContractID, &ptUID); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
-	var ptResp rhpv3.RPCUpdatePriceTableResponse
-	if err = s.ReadResponse(&ptResp, 4096); err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-	var pt rhpv3.HostPriceTable
-	if err = json.Unmarshal(ptResp.PriceTableJSON, &pt); err != nil {
-		return rhpv2.ContractRevision{}, nil, err
+
+	// If we didn't have a valid pricetable, read the temporary one from the
+	// host.
+	if ptUID == (rhpv3.SettingsID{}) {
+		var ptResp rhpv3.RPCUpdatePriceTableResponse
+		if err = s.ReadResponse(&ptResp, 4096); err != nil {
+			return rhpv2.ContractRevision{}, nil, err
+		}
+		if err = json.Unmarshal(ptResp.PriceTableJSON, &pt); err != nil {
+			return rhpv2.ContractRevision{}, nil, err
+		}
 	}
 
 	// Perform gouging checks.
