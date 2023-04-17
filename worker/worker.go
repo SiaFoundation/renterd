@@ -281,6 +281,7 @@ type worker struct {
 
 	downloadSectorTimeout time.Duration
 	uploadSectorTimeout   time.Duration
+	uploadMaxOverdrive    int
 
 	logger *zap.SugaredLogger
 }
@@ -1056,7 +1057,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 		// upload the slab
 		start := time.Now()
-		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout, w.logger)
+		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
 		}
@@ -1157,7 +1158,7 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, l *zap.Logger) *worker {
+func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxUploadOverdrive int, l *zap.Logger) *worker {
 	w := &worker{
 		id:                    id,
 		bus:                   b,
@@ -1166,6 +1167,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionRecone
 		busFlushInterval:      busFlushInterval,
 		downloadSectorTimeout: downloadSectorTimeout,
 		uploadSectorTimeout:   uploadSectorTimeout,
+		uploadMaxOverdrive:    maxUploadOverdrive,
 		logger:                l.Sugar().Named("worker").Named(id),
 	}
 	w.initAccounts(b)

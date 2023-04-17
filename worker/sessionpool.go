@@ -9,6 +9,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/tracing"
 )
 
 func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, currentHeight uint64) (types.Hash256, error) {
@@ -120,6 +121,8 @@ func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev t
 }
 
 func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "sharedSession.UploadSector")
+	defer span.End()
 	currentHeight := ss.pool.currentHeight()
 	if currentHeight == 0 {
 		panic("cannot upload without knowing current height") // developer error
