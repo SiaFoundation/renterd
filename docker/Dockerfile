@@ -24,6 +24,7 @@ ENV RENTERD_SEED=
 COPY --from=builder /renterd/renterd /usr/bin/renterd
 VOLUME [ "/data" ]
 
+# Expose API and gateway ports.
 EXPOSE 9980/tcp
 EXPOSE 9981/tcp
 

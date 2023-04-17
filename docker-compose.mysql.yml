@@ -1,0 +1,62 @@
+version: "3.9"
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  shared:
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.10.10.0/24
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    logging: *default-logging
+    container_name: db
+    cap_add:
+      - SYS_NICE
+    environment:
+      - MYSQL_DATABASE=renterd
+      - MYSQL_ROOT_PASSWORD=root
+    ports:
+      - '3306:3306'
+    volumes:
+      - ./docker/data/bus/db:/var/lib/mysql
+    networks:
+      shared:
+        ipv4_address: 10.10.10.10
+    healthcheck:
+      test: mysqladmin ping -h 10.10.10.10 -u root --password=$$MYSQL_ROOT_PASSWORD | grep 'mysqld is alive' || exit 1
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 6
+  renterd:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    restart: unless-stopped
+    container_name: renterd
+    volumes:
+      - ./docker/data:/data
+    networks:
+      shared:
+        ipv4_address: 10.10.10.20
+    ports:
+      - 9980:9980
+    environment:
+      - RENTERD_API_PASSWORD=
+      - RENTERD_SEED=
+      - RENTERD_DB_URI=10.10.10.10
+      - RENTERD_DB_USER=root
+      - RENTERD_DB_PASSWORD=root
+      - RENTERD_DB_NAME=renterd
+    depends_on:
+      db:
+        condition: service_healthy

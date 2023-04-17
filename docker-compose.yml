@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  renterd:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    restart: unless-stopped
+    container_name: renterd
+    volumes:
+      - ./docker/data:/data
+    ports:
+      - 9980:9980
+    environment:
+      - RENTERD_API_PASSWORD=
+      - RENTERD_SEED=
