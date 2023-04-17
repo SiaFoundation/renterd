@@ -52,20 +52,65 @@ var (
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 )
 
-func (w *worker) FetchRevisionWithAccount(ctx context.Context, pt rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
-	if breakdown := GougingCheckerFromContext(ctx).Check(nil, &pt); breakdown.Gouging() {
-		return types.FileContractRevision{}, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
+// FetchRevision fetches the latest revision of a contract and uses an account
+// as the primary payment method. If the account balance is insufficient, it
+// falls back to using the contract as a payment method.
+func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contract api.ContractMetadata, bh uint64, lockPriority int, lockDuration time.Duration) (types.FileContractRevision, error) {
+	timeoutCtx := func() (context.Context, context.CancelFunc) {
+		if timeout > 0 {
+			return context.WithTimeout(ctx, timeout)
+		}
+		return ctx, func() {}
 	}
+
+	// Try to fetch the revision with an account first.
+	ctx, cancel := timeoutCtx()
+	defer cancel()
+	rev, err := w.FetchRevisionWithAccount(ctx, contract.HostKey, contract.SiamuxAddr, bh, contract.ID)
+	if err != nil && !isBalanceInsufficient(err) {
+		return types.FileContractRevision{}, err
+	} else if err == nil {
+		return rev, nil
+	}
+
+	// Adjust the lockDuration if FetchRevision is intended to time out before
+	// the full lock duration anyway.
+	if timeout != 0 && timeout < lockDuration {
+		lockDuration = timeout
+	}
+
+	// Fall back to using the contract to pay for the revision.
+	ctx, cancel = timeoutCtx()
+	defer cancel()
+	lockID, err := w.AcquireContract(ctx, contract.ID, lockPriority, lockDuration)
+	if err != nil {
+		return types.FileContractRevision{}, err
+	}
+	defer w.ReleaseContract(ctx, contract.ID, lockID)
+	return w.FetchRevisionWithContract(ctx, contract.HostKey, contract.SiamuxAddr, contract.ID)
+}
+
+func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return types.FileContractRevision{}, err
 	}
 	err = acc.WithWithdrawal(ctx, func() (types.Currency, error) {
-		cost := pt.LatestRevisionCost
+		var cost types.Currency
 		return cost, withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
-			rev, err = RPCLatestRevision(t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			rev, err = RPCLatestRevision(t, contractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+				// Fetch pt.
+				pt, err := w.priceTables.fetch(ctx, hostKey, nil)
+				if err != nil {
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
+				}
+				// Check pt.
+				if breakdown := GougingCheckerFromContext(ctx).Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
+				}
+				cost = pt.LatestRevisionCost
 				payment := rhpv3.PayByEphemeralAccount(acc.id, cost, bh+defaultWithdrawalExpiryBlocks, w.accounts.deriveAccountKey(hostKey))
-				return pt, &payment, nil
+				return pt.HostPriceTable, &payment, nil
 			})
 			if err != nil {
 				return err
