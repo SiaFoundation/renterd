@@ -21,9 +21,7 @@ import (
 )
 
 const (
-	contractLockingUploadPriority   = 1
-	contractLockingDownloadPriority = 2
-	defaultSectorDownloadTiming     = 200 * time.Millisecond
+	defaultSectorDownloadTiming = 200 * time.Millisecond
 )
 
 var (
@@ -81,7 +79,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		go func(r req) {
 			defer close(doneChan)
 
-			lockID, err := locker.AcquireContract(ctx, contract.ID, contractLockingUploadPriority, time.Minute)
+			lockID, err := locker.AcquireContract(ctx, contract.ID, lockingPriorityUpload, time.Minute)
 			if err != nil {
 				respChan <- resp{r, types.Hash256{}, err}
 				span.SetStatus(codes.Error, "acquiring the contract failed")

@@ -28,21 +28,25 @@ import (
 	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 )
 
 const (
-	lockingPriorityRenew      = 100 // highest
-	lockingPriorityPriceTable = 95
-	lockingPriorityFunding    = 90
-	lockingPrioritySyncing    = 80
+	lockingPriorityActiveContractRevision = 100 // highest
+	lockingPriorityRenew                  = 80
+	lockingPriorityPriceTable             = 60
+	lockingPriorityFunding                = 40
+	lockingPrioritySyncing                = 20
+	lockingPriorityUpload                 = 1 // lowest
 
-	lockingDurationRenew      = time.Minute
-	lockingDurationPriceTable = 30 * time.Second
-	lockingDurationFunding    = 30 * time.Second
-	lockingDurationSyncing    = 30 * time.Second
+	lockingDurationActiveContractRevision = time.Minute
+	lockingDurationRenew                  = time.Minute
+	lockingDurationPriceTable             = 30 * time.Second
+	lockingDurationFunding                = 30 * time.Second
+	lockingDurationSyncing                = 30 * time.Second
 
 	queryStringParamContractSet = "contractset"
 	queryStringParamMinShards   = "minshards"
@@ -196,6 +200,7 @@ type Bus interface {
 	AccountStore
 	contractLocker
 
+	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
@@ -218,7 +223,8 @@ type Bus interface {
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(ctx context.Context, contract types.FileContractRevision, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, types.Currency, error)
+	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
+	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -388,34 +394,6 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) withRevisionV2(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, hostIP string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
-	// acquire contract lock
-	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
-		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
-	} else {
-		defer func() {
-			if err := w.ReleaseContract(ctx, contractID, lockID); err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
-			}
-		}()
-	}
-
-	// fetch contract revision
-	var revision types.FileContractRevision
-	if err := w.withHostV2(ctx, contractID, hk, hostIP, func(ss sectorStore) error {
-		rev, err := ss.(*sharedSession).Revision(ctx)
-		if err != nil {
-			return err
-		}
-		revision = rev.Revision
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	return fn(revision)
-}
-
 func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
 	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
@@ -577,6 +555,21 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	jc.Encode(pt)
 }
 
+func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, errContext string, err *error) {
+	if *err == nil {
+		return
+	}
+	_, span := tracing.Tracer.Start(ctx, "discardTxn")
+	defer span.End()
+	// Attach the span to a new context derived from the background context.
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
+	if err := w.bus.WalletDiscard(timeoutCtx, txn); err != nil {
+		w.logger.Errorf("%v: failed to discard txn: %v", err)
+	}
+}
+
 func (w *worker) rhpFormHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var rfr api.RHPFormRequest
@@ -614,10 +607,10 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
+		defer w.discardTxnOnErr(ctx, renterTxnSet[len(renterTxnSet)-1], "rhpFormHandler", &err)
 
 		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
 		if err != nil {
-			w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1])
 			return err
 		}
 		return
@@ -625,6 +618,13 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	if jc.Check("couldn't form contract", err) != nil {
 		return
 	}
+
+	// broadcast the transaction set
+	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
+	if err != nil && !isErrDuplicateTransactionSet(err) {
+		w.logger.Warnf("failed to broadcast formation txn set: %v", err)
+	}
+
 	jc.Encode(api.RHPFormResponse{
 		ContractID:     contract.ID(),
 		Contract:       contract,
@@ -641,30 +641,30 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 		return
 	}
 
+	// get consensus state
+	cs, err := w.bus.ConsensusState(ctx)
+	if jc.Check("could not get consensus state", err) != nil {
+		return
+	}
+
 	// attach gouging checker
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 	ctx = WithGougingChecker(ctx, gp)
+	rk := w.deriveRenterKey(rrr.HostKey)
 
 	// renew the contract
-	var renewed rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	if jc.Check("couldn't renew contract", w.withRevisionV2(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, lockingPriorityRenew, lockingDurationRenew, func(revision types.FileContractRevision) error {
-		return w.withHostV2(ctx, rrr.ContractID, rrr.HostKey, rrr.HostIP, func(ss sectorStore) error {
-			session := ss.(*sharedSession)
-			renewed, txnSet, err = session.RenewContract(ctx, func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error) {
-				renterTxnSet, finalPayment, err := w.bus.WalletPrepareRenew(ctx, rev, rrr.RenterAddress, w.deriveRenterKey(rrr.HostKey), rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, host, rrr.EndHeight)
-				if err != nil {
-					return nil, types.Currency{}, nil, err
-				}
-				return renterTxnSet, finalPayment, func() { w.bus.WalletDiscard(ctx, renterTxnSet[len(renterTxnSet)-1]) }, nil
-			})
-			return err
-		})
-	})) != nil {
+	renewed, txnSet, err := w.Renew(ctx, rrr, cs, rk)
+	if jc.Check("couldn't renew contract", err) != nil {
 		return
+	}
+
+	// broadcast the transaction set
+	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
+	if err != nil && !isErrDuplicateTransactionSet(err) {
+		w.logger.Warnf("failed to broadcast renewal txn set: %v", err)
 	}
 
 	// send the response
@@ -1090,44 +1090,38 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var hosttimeout api.ParamDuration
-	if jc.DecodeForm("hosttimeout", &hosttimeout) != nil {
+	var hosttimeout time.Duration
+	if jc.DecodeForm("hosttimeout", (*api.ParamDuration)(&hosttimeout)) != nil {
 		return
 	}
 
+	cs, err := w.bus.ConsensusState(ctx)
+	if jc.Check("could not get consensus state", err) != nil {
+		return
+	}
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	ctx = WithGougingChecker(ctx, gp)
+
 	// fetch all contracts
 	var contracts []api.Contract
-	err = w.withHostsV2(jc.Request.Context(), busContracts, func(ss []sectorStore) error {
-		var errs HostErrorSet
-		for i, store := range ss {
-			func() {
-				ctx := jc.Request.Context()
-				if hosttimeout > 0 {
-					var cancel context.CancelFunc
-					ctx, cancel = context.WithTimeout(ctx, time.Duration(hosttimeout))
-					defer cancel()
-				}
-
-				rev, err := store.(*sharedSession).Revision(ctx)
-				if err != nil {
-					errs = append(errs, &HostError{HostKey: store.HostKey(), Err: err})
-					return
-				}
-				contracts = append(contracts, api.Contract{
-					ContractMetadata: busContracts[i],
-					Revision:         rev.Revision,
-				})
-			}()
+	var errs HostErrorSet
+	for _, contract := range busContracts {
+		rev, err := w.FetchRevision(ctx, hosttimeout, contract, cs.BlockHeight, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+		if err != nil {
+			errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
+			continue
 		}
-		if len(errs) > 0 {
-			return fmt.Errorf("couldn't retrieve contract(s): %s", errs.Error())
-		}
-		return nil
-	})
-
+		contracts = append(contracts, api.Contract{
+			ContractMetadata: contract,
+			Revision:         rev,
+		})
+	}
 	resp := api.ContractsResponse{Contracts: contracts}
-	if err != nil {
-		resp.Error = err.Error()
+	if errs != nil {
+		resp.Error = errs.Error()
 	}
 	jc.Encode(resp)
 }
@@ -1284,4 +1278,8 @@ func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID,
 
 func (w *worker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
 	return (&tracedContractLocker{w.bus}).ReleaseContract(ctx, fcid, lockID)
+}
+
+func isErrDuplicateTransactionSet(err error) bool {
+	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
 }

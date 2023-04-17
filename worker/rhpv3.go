@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/crypto"
 	"lukechampine.com/frand"
 )
@@ -52,20 +53,65 @@ var (
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 )
 
-func (w *worker) FetchRevisionWithAccount(ctx context.Context, pt rhpv3.HostPriceTable, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
-	if breakdown := GougingCheckerFromContext(ctx).Check(nil, &pt); breakdown.Gouging() {
-		return types.FileContractRevision{}, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
+// FetchRevision fetches the latest revision of a contract and uses an account
+// as the primary payment method. If the account balance is insufficient, it
+// falls back to using the contract as a payment method.
+func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contract api.ContractMetadata, bh uint64, lockPriority int, lockDuration time.Duration) (types.FileContractRevision, error) {
+	timeoutCtx := func() (context.Context, context.CancelFunc) {
+		if timeout > 0 {
+			return context.WithTimeout(ctx, timeout)
+		}
+		return ctx, func() {}
 	}
+
+	// Try to fetch the revision with an account first.
+	ctx, cancel := timeoutCtx()
+	defer cancel()
+	rev, err := w.FetchRevisionWithAccount(ctx, contract.HostKey, contract.SiamuxAddr, bh, contract.ID)
+	if err != nil && !isBalanceInsufficient(err) {
+		return types.FileContractRevision{}, err
+	} else if err == nil {
+		return rev, nil
+	}
+
+	// Adjust the lockDuration if FetchRevision is intended to time out before
+	// the full lock duration anyway.
+	if timeout != 0 && timeout < lockDuration {
+		lockDuration = timeout
+	}
+
+	// Fall back to using the contract to pay for the revision.
+	ctx, cancel = timeoutCtx()
+	defer cancel()
+	lockID, err := w.AcquireContract(ctx, contract.ID, lockPriority, lockDuration)
+	if err != nil {
+		return types.FileContractRevision{}, err
+	}
+	defer w.ReleaseContract(ctx, contract.ID, lockID)
+	return w.FetchRevisionWithContract(ctx, contract.HostKey, contract.SiamuxAddr, contract.ID)
+}
+
+func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return types.FileContractRevision{}, err
 	}
 	err = acc.WithWithdrawal(ctx, func() (types.Currency, error) {
-		cost := pt.LatestRevisionCost
+		var cost types.Currency
 		return cost, withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
-			rev, err = RPCLatestRevision(t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			rev, err = RPCLatestRevision(t, contractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+				// Fetch pt.
+				pt, err := w.priceTables.fetch(ctx, hostKey, nil)
+				if err != nil {
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
+				}
+				// Check pt.
+				if breakdown := GougingCheckerFromContext(ctx).Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
+				}
+				cost = pt.LatestRevisionCost
 				payment := rhpv3.PayByEphemeralAccount(acc.id, cost, bh+defaultWithdrawalExpiryBlocks, w.accounts.deriveAccountKey(hostKey))
-				return pt, &payment, nil
+				return pt.HostPriceTable, &payment, nil
 			})
 			if err != nil {
 				return err
@@ -709,6 +755,9 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 	return nil
 }
 
+// RPCLatestRevision calls the LatestRevision RPC. The paymentFunc allows for
+// fetching a pricetable using the fetched revision to pay for it. If
+// paymentFunc returns 'nil' as payment, the host is not paid.
 func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
 	s := t.DialStream()
@@ -721,7 +770,7 @@ func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paym
 		return types.FileContractRevision{}, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
 		return types.FileContractRevision{}, err
-	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil {
+	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil || payment == nil {
 		return types.FileContractRevision{}, err
 	} else if err := s.WriteResponse(&pt.UID); err != nil {
 		return types.FileContractRevision{}, err
@@ -835,6 +884,198 @@ func RPCReadRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.
 		Type:      typ,
 		Signature: sig,
 	}, nil
+}
+
+// Renew renews a contract with a host. To avoid an edge case where the contract
+// is drained and can therefore not be used to pay for the revision, we simply
+// don't pay for it.
+func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	var rev rhpv2.ContractRevision
+	var txnSet []types.Transaction
+	var renewErr error
+	err = withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+		_, err = RPCLatestRevision(t, rrr.ContractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			// Renew contract.
+			rev, txnSet, renewErr = w.RPCRenew(ctx, rrr, cs, t, revision, renterKey)
+			return rhpv3.HostPriceTable{}, nil, nil
+		})
+		return err
+	})
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	return rev, txnSet, renewErr
+}
+
+func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	defer wrapErr(&err, "RPCRenew")
+	s := t.DialStream()
+	defer s.Close()
+
+	// Try to get a valid pricetable.
+	var ptUID rhpv3.SettingsID
+	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var pt rhpv3.HostPriceTable
+	hpt, err := w.priceTables.fetch(ptCtx, rrr.HostKey, nil)
+	if err == nil {
+		pt = hpt.HostPriceTable
+		ptUID = hpt.UID
+	} else {
+		w.logger.Warnf("failed to fetch valid pricetable for renew: %v", err)
+	}
+
+	// Send the ptUID.
+	if err = s.WriteRequest(rhpv3.RPCRenewContractID, &ptUID); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// If we didn't have a valid pricetable, read the temporary one from the
+	// host.
+	if ptUID == (rhpv3.SettingsID{}) {
+		var ptResp rhpv3.RPCUpdatePriceTableResponse
+		if err = s.ReadResponse(&ptResp, 4096); err != nil {
+			return rhpv2.ContractRevision{}, nil, err
+		}
+		if err = json.Unmarshal(ptResp.PriceTableJSON, &pt); err != nil {
+			return rhpv2.ContractRevision{}, nil, err
+		}
+	}
+
+	// Perform gouging checks.
+	if gc := GougingCheckerFromContext(ctx).Check(nil, &pt); gc.Gouging() {
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", gc.Reasons())
+	}
+
+	// Prepare the signed transaction that contains the final revision as well
+	// as the new contract
+	wprr, err := w.bus.WalletPrepareRenew(ctx, *rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.NewCollateral, rrr.HostKey, pt, rrr.EndHeight, rrr.WindowSize)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// Starting from here, we need to make sure to release the txn on error.
+	defer w.discardTxnOnErr(ctx, wprr.TransactionSet[len(wprr.TransactionSet)-1], "RPCRenew", &err)
+
+	txnSet := wprr.TransactionSet
+	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
+
+	// Sign only the revision and contract. We can't sign everything because
+	// then the host can't add its own outputs.
+	h := types.NewHasher()
+	txn.FileContracts[0].EncodeTo(h.E)
+	txn.FileContractRevisions[0].EncodeTo(h.E)
+	finalRevisionSignature := renterKey.SignHash(h.Sum())
+
+	// Send the request.
+	req := rhpv3.RPCRenewContractRequest{
+		TransactionSet:         txnSet,
+		RenterKey:              rev.UnlockConditions.PublicKeys[0],
+		FinalRevisionSignature: finalRevisionSignature,
+	}
+	if err = s.WriteResponse(&req); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// Incorporate the host's additions.
+	var hostAdditions rhpv3.RPCRenewContractHostAdditions
+	if err = s.ReadResponse(&hostAdditions, 4096); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	parents = append(parents, hostAdditions.Parents...)
+	txn.SiacoinInputs = append(txn.SiacoinInputs, hostAdditions.SiacoinInputs...)
+	txn.SiacoinOutputs = append(txn.SiacoinOutputs, hostAdditions.SiacoinOutputs...)
+	finalRevRenterSig := types.TransactionSignature{
+		ParentID:       types.Hash256(rev.ParentID),
+		PublicKeyIndex: 0, // renter key is first
+		CoveredFields: types.CoveredFields{
+			FileContracts:         []uint64{0},
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: finalRevisionSignature[:],
+	}
+	finalRevHostSig := types.TransactionSignature{
+		ParentID:       types.Hash256(rev.ParentID),
+		PublicKeyIndex: 1,
+		CoveredFields: types.CoveredFields{
+			FileContracts:         []uint64{0},
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: hostAdditions.FinalRevisionSignature[:],
+	}
+	txn.Signatures = []types.TransactionSignature{finalRevRenterSig, finalRevHostSig}
+
+	// Sign the inputs we funded the txn with and cover the whole txn including
+	// the existing signatures.
+	cf := types.CoveredFields{
+		WholeTransaction: true,
+		Signatures:       []uint64{0, 1},
+	}
+	cf = wallet.ExplicitCoveredFields(txn)
+	if err := w.bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// Create a new no-op revision and sign it.
+	noOpRevision := initialRevision(txn, rev.UnlockConditions.PublicKeys[1], renterKey.PublicKey().UnlockKey())
+	h = types.NewHasher()
+	noOpRevision.EncodeTo(h.E)
+	renterNoOpSig := renterKey.SignHash(h.Sum())
+	renterNoOpRevisionSignature := types.TransactionSignature{
+		ParentID:       types.Hash256(noOpRevision.ParentID),
+		PublicKeyIndex: 0, // renter key is first
+		CoveredFields: types.CoveredFields{
+			FileContractRevisions: []uint64{0},
+		},
+		Signature: renterNoOpSig[:],
+	}
+
+	// Send the newly added signatures to the host and the signature for the
+	// initial no-op revision.
+	rs := rhpv3.RPCRenewSignatures{
+		TransactionSignatures: txn.Signatures[2:],
+		RevisionSignature:     renterNoOpRevisionSignature,
+	}
+	if err = s.WriteResponse(&rs); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// Receive the host's signatures.
+	var hostSigs rhpv3.RPCRenewSignatures
+	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+
+	// Add the parents to get the full txnSet.
+	txnSet = append(parents, txn)
+
+	return rhpv2.ContractRevision{
+		Revision:   noOpRevision,
+		Signatures: [2]types.TransactionSignature{renterNoOpRevisionSignature, hostSigs.RevisionSignature},
+	}, txnSet, nil
+}
+
+// initialRevision returns the first revision of a file contract formation
+// transaction.
+func initialRevision(formationTxn types.Transaction, hostPubKey, renterPubKey types.UnlockKey) types.FileContractRevision {
+	fc := formationTxn.FileContracts[0]
+	return types.FileContractRevision{
+		ParentID: formationTxn.FileContractID(0),
+		UnlockConditions: types.UnlockConditions{
+			PublicKeys:         []types.UnlockKey{renterPubKey, hostPubKey},
+			SignaturesRequired: 2,
+		},
+		FileContract: types.FileContract{
+			Filesize:           fc.Filesize,
+			FileMerkleRoot:     fc.FileMerkleRoot,
+			WindowStart:        fc.WindowStart,
+			WindowEnd:          fc.WindowEnd,
+			ValidProofOutputs:  fc.ValidProofOutputs,
+			MissedProofOutputs: fc.MissedProofOutputs,
+			UnlockHash:         fc.UnlockHash,
+			RevisionNumber:     1,
+		},
+	}
 }
 
 // RPCUpdateRegistry calls the ExecuteProgram RPC with an MDM program that

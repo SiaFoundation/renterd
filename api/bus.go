@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 )
@@ -169,21 +170,23 @@ type WalletPrepareFormRequest struct {
 // WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
 // endpoint.
 type WalletPrepareRenewRequest struct {
-	Contract      types.FileContractRevision `json:"contract"`
+	Revision      types.FileContractRevision `json:"revision"`
 	EndHeight     uint64                     `json:"endHeight"`
+	HostAddress   types.Address              `json:"hostAddress"`
 	HostKey       types.PublicKey            `json:"hostKey"`
-	HostSettings  rhpv2.HostSettings         `json:"hostSettings"`
+	PriceTable    rhpv3.HostPriceTable       `json:"priceTable"`
 	NewCollateral types.Currency             `json:"newCollateral"`
 	RenterAddress types.Address              `json:"renterAddress"`
 	RenterFunds   types.Currency             `json:"renterFunds"`
 	RenterKey     types.PrivateKey           `json:"renterKey"`
+	WindowSize    uint64                     `json:"windowSize"`
 }
 
 // WalletPrepareRenewResponse is the response type for the /wallet/prepare/renew
 // endpoint.
 type WalletPrepareRenewResponse struct {
+	ToSign         []types.Hash256     `json:"toSign"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
-	FinalPayment   types.Currency      `json:"finalPayment"`
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.

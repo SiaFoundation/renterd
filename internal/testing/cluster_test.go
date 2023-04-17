@@ -582,6 +582,15 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 	host := nodes[0]
 
+	// make the cost of fetching a revision 0. That allows us to check for exact
+	// balances when funding the account and avoid NDFs.
+	settings := host.settings.Settings()
+	settings.BaseRPCPrice = types.ZeroCurrency
+	settings.MinEgressPrice = types.ZeroCurrency
+	if err := host.settings.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
 	// Wait for contracts to form.
 	var contract api.Contract
 	if contracts, err := cluster.WaitForContracts(); err != nil {
@@ -847,8 +856,18 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// add host
-	_, err = cluster.AddHosts(1)
+	nodes, err := cluster.AddHosts(1)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make the cost of fetching a revision 0. That allows us to check for exact
+	// balances when funding the account and avoid NDFs.
+	host := nodes[0]
+	settings := host.settings.Settings()
+	settings.BaseRPCPrice = types.ZeroCurrency
+	settings.MinEgressPrice = types.ZeroCurrency
+	if err := host.settings.UpdateSettings(settings); err != nil {
 		t.Fatal(err)
 	}
 
