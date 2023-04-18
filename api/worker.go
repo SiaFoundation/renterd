@@ -1,12 +1,17 @@
 package api
 
 import (
+	"errors"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
+
+// ErrConsensusNotSynced is returned by the worker API by endpoints that rely on
+// consensus and the consensus is not synced.
+var ErrConsensusNotSynced = errors.New("consensus is not synced")
 
 type AccountsLockHandlerRequest struct {
 	HostKey   types.PublicKey `json:"hostKey"`

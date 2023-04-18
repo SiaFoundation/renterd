@@ -795,8 +795,16 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// fetch the upload parameters
 	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
+		return
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		w.logger.Errorf("migration cancelled, err: ", api.ErrConsensusNotSynced)
+		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
 	}
 
@@ -993,13 +1001,21 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// fetch the path
 	path := strings.TrimPrefix(jc.PathParam("path"), "/")
 
+	// fetch the upload parameters
 	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
-	rs := up.RedundancySettings
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		w.logger.Errorf("upload cancelled, err: ", api.ErrConsensusNotSynced)
+		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
+		return
+	}
 
 	// allow overriding the redundancy settings
+	rs := up.RedundancySettings
 	if jc.DecodeForm(queryStringParamMinShards, &rs.MinShards) != nil {
 		return
 	}
