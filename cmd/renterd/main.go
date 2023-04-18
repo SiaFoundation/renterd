@@ -240,7 +240,10 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to create listener", err)
 	}
-	shutdownFns = append(shutdownFns, func(_ context.Context) error { return l.Close() })
+	shutdownFns = append(shutdownFns, func(_ context.Context) error {
+		_ = l.Close()
+		return nil
+	})
 	*apiAddr = "http://" + l.Addr().String()
 
 	auth := jape.BasicAuth(getAPIPassword())
@@ -347,12 +350,12 @@ func main() {
 	defer cancel()
 	if autopilotShutdownFn != nil {
 		if err := autopilotShutdownFn(ctx); err != nil {
-			log.Printf("Failed to shut down autopilot: %v", err)
+			log.Fatalf("Failed to shut down autopilot: %v", err)
 		}
 	}
 	for i := len(shutdownFns) - 1; i >= 0; i-- {
 		if err := shutdownFns[i](ctx); err != nil {
-			log.Printf("Shutdown function %v failed: %v", i+1, err)
+			log.Fatalf("Shutdown function %v failed: %v", i+1, err)
 		}
 	}
 }
