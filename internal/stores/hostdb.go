@@ -871,18 +871,18 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
 	ss.unappliedCCID = cc.ID
 
-	if err := ss.applyUpdates(); err != nil {
+	if err := ss.applyUpdates(cc.Synced); err != nil {
 		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
 }
 
 // applyUpdates applies all unapplied updates to the database.
-func (ss *SQLStore) applyUpdates() (err error) {
+func (ss *SQLStore) applyUpdates(synced bool) (err error) {
 	// Check if we need to apply changes
-	persistIntervalPassed := ss.lastAnnouncementSave.IsZero() || time.Since(ss.lastAnnouncementSave) > ss.persistInterval
+	persistIntervalPassed := time.Since(ss.lastAnnouncementSave) > ss.persistInterval
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
-	if !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
+	if !synced && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
 		return nil
 	}
 
