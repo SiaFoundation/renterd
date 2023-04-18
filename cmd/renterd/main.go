@@ -347,12 +347,12 @@ func main() {
 	defer cancel()
 	if autopilotShutdownFn != nil {
 		if err := autopilotShutdownFn(ctx); err != nil {
-			log.Fatal(err)
+			log.Printf("Failed to shut down autopilot: %v", err)
 		}
 	}
 	for i := len(shutdownFns) - 1; i >= 0; i-- {
 		if err := shutdownFns[i](ctx); err != nil {
-			log.Fatal(err)
+			log.Printf("Shutdown function %v failed: %v", i+1, err)
 		}
 	}
 }
