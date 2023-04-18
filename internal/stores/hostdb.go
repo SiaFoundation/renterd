@@ -879,7 +879,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 // applyUpdates applies all unapplied updates to the database.
 func (ss *SQLStore) applyUpdates() (err error) {
 	// Check if we need to apply changes
-	persistIntervalPassed := time.Since(ss.lastAnnouncementSave) > ss.persistInterval
+	persistIntervalPassed := ss.lastAnnouncementSave.IsZero() || time.Since(ss.lastAnnouncementSave) > ss.persistInterval
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
 	if !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
