@@ -772,6 +772,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	expectedObj := dbObject{
 		ObjectID: objID,
 		Key:      obj1Key,
+		Size:     obj1.Size(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID: 1,
@@ -956,7 +957,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, o := range objects {
-		obj, ucs := newTestObject(frand.Intn(10))
+		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
 		os.UpdateObject(ctx, o.path, obj, ucs)
