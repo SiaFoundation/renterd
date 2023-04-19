@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"mime"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,6 +67,10 @@ type rangedResponseWriter struct {
 
 func (rw *rangedResponseWriter) Write(p []byte) (int, error) {
 	if !rw.headerWritten {
+		contentType := rw.Header().Get("Content-Type")
+		if contentType == "" {
+			rw.Header().Set("Content-Type", http.DetectContentType(p))
+		}
 		rw.WriteHeader(rw.defaultStatusCode)
 	}
 	return rw.rw.Write(p)
@@ -924,6 +930,11 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	jc.ResponseWriter.Header().Set("Accept-Ranges", "bytes")
+	if ext := filepath.Ext(path); ext != "" {
+		if mimeType := mime.TypeByExtension(ext); mimeType != "" {
+			jc.ResponseWriter.Header().Set("Content-Type", mimeType)
+		}
+	}
 	rw := rangedResponseWriter{rw: jc.ResponseWriter, defaultStatusCode: status}
 
 	// keep track of recent timings per host so we can favour faster hosts
