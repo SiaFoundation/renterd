@@ -171,6 +171,12 @@ func (b *bus) consensusStateHandler(jc jape.Context) {
 	})
 }
 
+func (b *bus) consensusNetworkHandler(jc jape.Context) {
+	jc.Encode(api.ConsensusNetwork{
+		Name: b.cm.TipState(jc.Request.Context()).Network.Name,
+	})
+}
+
 func (b *bus) txpoolFeeHandler(jc jape.Context) {
 	fee := b.tp.RecommendedFee()
 	jc.Encode(fee)
@@ -1116,6 +1122,7 @@ func (b *bus) Handler() http.Handler {
 
 		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
 		"GET    /consensus/state":              b.consensusStateHandler,
+		"GET    /consensus/network":            b.consensusNetworkHandler,
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 
 		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,

@@ -55,6 +55,12 @@ func (c *Client) ConsensusState(ctx context.Context) (resp api.ConsensusState, e
 	return
 }
 
+// ConsensusNetwork returns information about the consensus network.
+func (c *Client) ConsensusNetwork(ctx context.Context) (resp api.ConsensusNetwork, err error) {
+	err = c.c.WithContext(ctx).GET("/consensus/network", &resp)
+	return
+}
+
 // TransactionPool returns the transactions currently in the pool.
 func (c *Client) TransactionPool(ctx context.Context) (txns []types.Transaction, err error) {
 	err = c.c.WithContext(ctx).GET("/txpool/transactions", &txns)
