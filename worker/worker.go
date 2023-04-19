@@ -860,7 +860,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 func (w *worker) objectsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
-	jc.Custom(nil, []string{})
+	jc.Custom(nil, []api.ObjectMetadata{})
 
 	var off int
 	if jc.DecodeForm("offset", &off) != nil {
