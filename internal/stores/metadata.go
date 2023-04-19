@@ -569,31 +569,27 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 	}
 
 	// base query
-	query := s.db.Raw(fmt.Sprintf(`SELECT *, CASE slashindex WHEN 0 THEN %s ELSE %s END AS result
+	query := s.db.Raw(fmt.Sprintf(`SELECT SUM(size) AS size, CASE slashindex WHEN 0 THEN %s ELSE %s END AS name
 	FROM (
-		SELECT *, INSTR(trimmed, ?) AS slashindex
+		SELECT size, trimmed, INSTR(trimmed, ?) AS slashindex
 		FROM (
-			SELECT *, SUBSTR(object_id, ?) AS trimmed
+			SELECT size, SUBSTR(object_id, ?) AS trimmed
 			FROM objects
 			WHERE object_id LIKE ?
 		) AS i
 	) AS m
-	GROUP BY result
+	GROUP BY name
 	LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, "/", len(path)+1, path+"%", limit, offset)
 
 	// apply prefix
 	if prefix != "" {
-		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) AS i WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
+		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) AS i WHERE name LIKE %s", concat("?", "?")), query, path, prefix+"%")
 	}
 
-	var entries []dbObject
-	err := query.Scan(&entries).Error
+	var metadata []api.ObjectMetadata
+	err := query.Scan(&metadata).Error
 	if err != nil {
 		return nil, err
-	}
-	metadata := make([]api.ObjectMetadata, len(entries))
-	for i, entry := range entries {
-		metadata[i] = entry.metadata()
 	}
 	return metadata, nil
 }
