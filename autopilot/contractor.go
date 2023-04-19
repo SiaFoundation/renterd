@@ -967,7 +967,6 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 				zeros++
 			}
 			unusable++
-			continue
 		}
 	}
 

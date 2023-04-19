@@ -22,6 +22,9 @@ func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expect
 		Version:          versionScore(h.Settings),
 	}
 
+	// NOTE: if we know the host is gouging, we have to avoid calculating the
+	// period cost to calculate the collateral and price score as the core
+	// package does not have overflow checks in its cost calculations
 	if !gouging {
 		hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
 		breakdown.Collateral = collateralScore(cfg, hostPeriodCost, h.Settings, expectedRedundancy)
