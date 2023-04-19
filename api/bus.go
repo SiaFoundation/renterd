@@ -79,6 +79,11 @@ type ConsensusState struct {
 	Synced      bool
 }
 
+// ConsensusNetwork holds the name of the network.
+type ConsensusNetwork struct {
+	Name string
+}
+
 // ContractsIDAddRequest is the request type for the /contract/:id endpoint.
 type ContractsIDAddRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
