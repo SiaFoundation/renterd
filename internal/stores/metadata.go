@@ -302,7 +302,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
 	var added dbContract
 	if err = s.retryTransaction(func(tx *gorm.DB) error {
-		added, err = addContract(s.db, c, totalCost, startHeight, types.FileContractID{})
+		added, err = addContract(tx, c, totalCost, startHeight, types.FileContractID{})
 		return err
 	}); err != nil {
 		return
