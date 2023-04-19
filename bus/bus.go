@@ -91,8 +91,8 @@ type (
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		Object(ctx context.Context, path string) (object.Object, error)
-		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]string, error)
-		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]string, error)
+		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
+		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 

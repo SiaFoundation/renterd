@@ -772,6 +772,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	expectedObj := dbObject{
 		ObjectID: objID,
 		Key:      obj1Key,
+		Size:     obj1.Size(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID: 1,
@@ -944,32 +945,37 @@ func TestObjectEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{
-		"/foo/bar",
-		"/foo/bat",
-		"/foo/baz/quux",
-		"/foo/baz/quuz",
-		"/gab/guub",
+	objects := []struct {
+		path string
+		size int64
+	}{
+		{"/foo/bar", 1},
+		{"/foo/bat", 2},
+		{"/foo/baz/quux", 3},
+		{"/foo/baz/quuz", 4},
+		{"/gab/guub", 5},
 	}
 	ctx := context.Background()
-	for _, path := range paths {
-		obj, ucs := newTestObject(frand.Intn(10))
-		os.UpdateObject(ctx, path, obj, ucs)
+	for _, o := range objects {
+		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj.Slabs = obj.Slabs[:1]
+		obj.Slabs[0].Length = uint32(o.size)
+		os.UpdateObject(ctx, o.path, obj, ucs)
 	}
 	tests := []struct {
 		path   string
 		prefix string
-		want   []string
+		want   []api.ObjectMetadata
 	}{
-		{"/", "", []string{"/foo/", "/gab/"}},
-		{"/foo/", "", []string{"/foo/bar", "/foo/bat", "/foo/baz/"}},
-		{"/foo/baz/", "", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
-		{"/gab/", "", []string{"/gab/guub"}},
+		{"/", "", []api.ObjectMetadata{{Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
+		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/", Size: 7}}},
+		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
+		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5}}},
 
-		{"/", "f", []string{"/foo/"}},
-		{"/foo/", "fo", []string{}},
-		{"/foo/baz/", "quux", []string{"/foo/baz/quux"}},
-		{"/gab/", "/guub", []string{}},
+		{"/", "f", []api.ObjectMetadata{{Name: "/foo/", Size: 10}}},
+		{"/foo/", "fo", []api.ObjectMetadata{}},
+		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}}},
+		{"/gab/", "/guub", []api.ObjectMetadata{}},
 	}
 	for _, test := range tests {
 		got, err := os.ObjectEntries(ctx, test.path, test.prefix, 0, -1)
@@ -997,26 +1003,31 @@ func TestSearchObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{
-		"/foo/bar",
-		"/foo/bat",
-		"/foo/baz/quux",
-		"/foo/baz/quuz",
-		"/gab/guub",
+	objects := []struct {
+		path string
+		size int64
+	}{
+		{"/foo/bar", 1},
+		{"/foo/bat", 2},
+		{"/foo/baz/quux", 3},
+		{"/foo/baz/quuz", 4},
+		{"/gab/guub", 5},
 	}
 	ctx := context.Background()
-	for _, path := range paths {
-		obj, ucs := newTestObject(frand.Intn(10))
-		os.UpdateObject(ctx, path, obj, ucs)
+	for _, o := range objects {
+		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj.Slabs = obj.Slabs[:1]
+		obj.Slabs[0].Length = uint32(o.size)
+		os.UpdateObject(ctx, o.path, obj, ucs)
 	}
 	tests := []struct {
 		path string
-		want []string
+		want []api.ObjectMetadata
 	}{
-		{"/", []string{"/foo/bar", "/foo/bat", "/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
-		{"/foo/b", []string{"/foo/bar", "/foo/bat", "/foo/baz/quux", "/foo/baz/quuz"}},
-		{"o/baz/quu", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
-		{"uu", []string{"/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
+		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
+		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
+		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
+		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
 	}
 	for _, test := range tests {
 		got, err := os.SearchObjects(ctx, test.path, 0, -1)

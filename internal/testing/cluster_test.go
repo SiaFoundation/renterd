@@ -457,7 +457,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 			var found bool
 			for _, entry := range entries {
-				if entry == fmt.Sprintf("/%s", name) {
+				if entry.Name == fmt.Sprintf("/%s", name) {
 					found = true
 					break
 				}
@@ -485,7 +485,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	// Fuzzy search for uploaded data in various ways.
 	objects, err := cluster.Bus.SearchObjects(context.Background(), "", 0, -1)
 	if err != nil {
-		t.Fatal("should fail")
+		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
