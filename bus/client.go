@@ -462,7 +462,7 @@ func (c *Client) SearchHosts(ctx context.Context, filterMode string, addressCont
 }
 
 // SearchObjects returns all objects that contains a sub-string in their key.
-func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit int) (entries []string, err error) {
+func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
