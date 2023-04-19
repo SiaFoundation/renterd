@@ -1003,37 +1003,38 @@ func TestSearchObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{
-		"/foo/bar",
-		"/foo/bat",
-		"/foo/baz/quux",
-		"/foo/baz/quuz",
-		"/gab/guub",
+	objects := []struct {
+		path string
+		size int64
+	}{
+		{"/foo/bar", 1},
+		{"/foo/bat", 2},
+		{"/foo/baz/quux", 3},
+		{"/foo/baz/quuz", 4},
+		{"/gab/guub", 5},
 	}
 	ctx := context.Background()
-	for _, path := range paths {
-		obj, ucs := newTestObject(frand.Intn(10))
-		os.UpdateObject(ctx, path, obj, ucs)
+	for _, o := range objects {
+		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj.Slabs = obj.Slabs[:1]
+		obj.Slabs[0].Length = uint32(o.size)
+		os.UpdateObject(ctx, o.path, obj, ucs)
 	}
 	tests := []struct {
 		path string
-		want []string
+		want []api.ObjectMetadata
 	}{
-		{"/", []string{"/foo/bar", "/foo/bat", "/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
-		{"/foo/b", []string{"/foo/bar", "/foo/bat", "/foo/baz/quux", "/foo/baz/quuz"}},
-		{"o/baz/quu", []string{"/foo/baz/quux", "/foo/baz/quuz"}},
-		{"uu", []string{"/foo/baz/quux", "/foo/baz/quuz", "/gab/guub"}},
+		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
+		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
+		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
+		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
 	}
 	for _, test := range tests {
 		got, err := os.SearchObjects(ctx, test.path, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
-		objectIDs := make([]string, len(got))
-		for i, g := range got {
-			objectIDs[i] = g.Name
-		}
-		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(objectIDs, test.want) {
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
@@ -1041,8 +1042,8 @@ func TestSearchObjects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got) != 1 || got[0].Name != test.want[offset] || got[0].Size == 0 {
-				t.Errorf("\nkey: %v\ngot: %v\nwant: %v\nsize: %v", test.path, got, test.want[offset], got[0].Size)
+			if len(got) != 1 || got[0] != test.want[offset] {
+				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want[offset])
 			}
 		}
 	}
