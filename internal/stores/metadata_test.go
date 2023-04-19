@@ -984,8 +984,8 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got) != 1 || got[0] != test.want[offset] {
-				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
+			if len(got) != 1 || got[0].Name != test.want[offset] || got[0].Size == 0 {
+				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v\n size: %v", test.path, test.prefix, got, test.want[offset], got[0].Size)
 			}
 		}
 	}
@@ -1023,7 +1023,11 @@ func TestSearchObjects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+		objectIDs := make([]string, len(got))
+		for i, g := range got {
+			objectIDs[i] = g.Name
+		}
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(objectIDs, test.want) {
 			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
@@ -1031,8 +1035,8 @@ func TestSearchObjects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got) != 1 || got[0] != test.want[offset] {
-				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want[offset])
+			if len(got) != 1 || got[0].Name != test.want[offset] || got[0].Size == 0 {
+				t.Errorf("\nkey: %v\ngot: %v\nwant: %v\nsize: %v", test.path, got, test.want[offset], got[0].Size)
 			}
 		}
 	}

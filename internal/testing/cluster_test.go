@@ -457,7 +457,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 			var found bool
 			for _, entry := range entries {
-				if entry == fmt.Sprintf("/%s", name) {
+				if entry.Name == fmt.Sprintf("/%s", name) {
 					found = true
 					break
 				}

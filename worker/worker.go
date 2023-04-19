@@ -220,7 +220,7 @@ type Bus interface {
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []string, error)
+	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []api.ObjectMetadata, error)
 	AddObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string) error
 

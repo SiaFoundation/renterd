@@ -83,6 +83,7 @@ type (
 		Key      []byte
 		ObjectID string    `gorm:"index;unique"`
 		Slabs    []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+		Size     int64
 	}
 
 	dbSlice struct {
@@ -232,6 +233,13 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	return
 }
 
+func (o dbObject) metadata() api.ObjectMetadata {
+	return api.ObjectMetadata{
+		Name: o.ObjectID,
+		Size: o.Size,
+	}
+}
+
 // convert turns a dbObject into a object.Object.
 func (o dbObject) convert() (object.Object, error) {
 	var objKey object.EncryptionKey
@@ -350,22 +358,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			Reason:    api.ContractArchivalReasonRenewed,
 			RenewedTo: fileContractID(c.ID()),
 
-			ContractCommon: ContractCommon{
-				FCID:        oldContract.FCID,
-				RenewedFrom: oldContract.RenewedFrom,
-
-				TotalCost:      oldContract.TotalCost,
-				ProofHeight:    oldContract.ProofHeight,
-				RevisionHeight: oldContract.RevisionHeight,
-				RevisionNumber: oldContract.RevisionNumber,
-				StartHeight:    oldContract.StartHeight,
-				WindowStart:    oldContract.WindowStart,
-				WindowEnd:      oldContract.WindowEnd,
-
-				UploadSpending:      oldContract.UploadSpending,
-				DownloadSpending:    oldContract.DownloadSpending,
-				FundAccountSpending: oldContract.FundAccountSpending,
-			},
+			ContractCommon: oldContract.ContractCommon,
 		}).Error
 		if err != nil {
 			return err
@@ -539,22 +532,28 @@ func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
 		Error
 }
 
-func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]string, error) {
+func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
 
-	var ids []string
+	var objects []dbObject
 	err := s.db.Model(&dbObject{}).
-		Select("object_id").
 		Where("object_id LIKE ?", "%"+substring+"%").
 		Offset(offset).
 		Limit(limit).
-		Scan(&ids).Error
-	return ids, err
+		Find(&objects).Error
+	if err != nil {
+		return nil, err
+	}
+	metadata := make([]api.ObjectMetadata, len(objects))
+	for i, entry := range objects {
+		metadata[i] = entry.metadata()
+	}
+	return metadata, nil
 }
 
-func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]string, error) {
+func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
@@ -570,11 +569,11 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 	}
 
 	// base query
-	query := s.db.Raw(fmt.Sprintf(`SELECT CASE slashindex WHEN 0 THEN %s ELSE %s END AS result
+	query := s.db.Raw(fmt.Sprintf(`SELECT *, CASE slashindex WHEN 0 THEN %s ELSE %s END AS result
 	FROM (
-		SELECT trimmed, INSTR(trimmed, ?) AS slashindex
+		SELECT *, INSTR(trimmed, ?) AS slashindex
 		FROM (
-			SELECT SUBSTR(object_id, ?) AS trimmed
+			SELECT *, SUBSTR(object_id, ?) AS trimmed
 			FROM objects
 			WHERE object_id LIKE ?
 		) AS i
@@ -587,12 +586,16 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) AS i WHERE result LIKE %s", concat("?", "?")), query, path, prefix+"%")
 	}
 
-	var entries []string
+	var entries []dbObject
 	err := query.Scan(&entries).Error
 	if err != nil {
 		return nil, err
 	}
-	return entries, nil
+	metadata := make([]api.ObjectMetadata, len(entries))
+	for i, entry := range entries {
+		metadata[i] = entry.metadata()
+	}
+	return metadata, nil
 }
 
 func (s *SQLStore) Object(ctx context.Context, key string) (object.Object, error) {
@@ -667,6 +670,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 		obj := dbObject{
 			ObjectID: key,
 			Key:      objKey,
+			Size:     o.Size(),
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -1074,22 +1078,7 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 			Host:   publicKey(contract.Host.PublicKey),
 			Reason: toArchive[types.FileContractID(contract.FCID)],
 
-			ContractCommon: ContractCommon{
-				FCID:        contract.FCID,
-				RenewedFrom: contract.RenewedFrom,
-
-				TotalCost:      contract.TotalCost,
-				ProofHeight:    contract.ProofHeight,
-				RevisionHeight: contract.RevisionHeight,
-				RevisionNumber: contract.RevisionNumber,
-				StartHeight:    contract.StartHeight,
-				WindowStart:    contract.WindowStart,
-				WindowEnd:      contract.WindowEnd,
-
-				UploadSpending:      contract.UploadSpending,
-				DownloadSpending:    contract.DownloadSpending,
-				FundAccountSpending: contract.FundAccountSpending,
-			},
+			ContractCommon: contract.ContractCommon,
 		}).Error; err != nil {
 			return err
 		}

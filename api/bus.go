@@ -125,6 +125,11 @@ type HostsRemoveRequest struct {
 	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
 }
 
+type ObjectMetadata struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
 // ObjectsStats is the response type for the /stats/objects endpoint.
 type ObjectsStats struct {
 	NumObjects        uint64 `json:"numObjects"`        // number of objects
@@ -196,8 +201,8 @@ type WalletPrepareRenewResponse struct {
 
 // ObjectsResponse is the response type for the /objects endpoint.
 type ObjectsResponse struct {
-	Entries []string       `json:"entries,omitempty"`
-	Object  *object.Object `json:"object,omitempty"`
+	Entries []ObjectMetadata `json:"entries,omitempty"`
+	Object  *object.Object   `json:"object,omitempty"`
 }
 
 // AddObjectRequest is the request type for the /object/*key endpoint.

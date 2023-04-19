@@ -156,9 +156,9 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string) (er
 	return
 }
 
-func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *[]string) (err error) {
+func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
 	path = strings.TrimLeft(path, "/")
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]string)(nil))
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
 	if err != nil {
@@ -184,7 +184,7 @@ func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []string, err error) {
+func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []api.ObjectMetadata, err error) {
 	err = c.object(ctx, path, nil, &entries)
 	return
 }
