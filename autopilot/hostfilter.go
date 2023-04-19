@@ -205,7 +205,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		}
 
 		// perform scoring checks
-		scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy())
+		scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy(), gougingBreakdown.Gouging())
 		if scoreBreakdown.Score() < minScore {
 			errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
 		}

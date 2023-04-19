@@ -13,17 +13,25 @@ import (
 	"lukechampine.com/frand"
 )
 
-func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
-	hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
-	return api.HostScoreBreakdown{
+func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64, gouging bool) api.HostScoreBreakdown {
+	breakdown := api.HostScoreBreakdown{
 		Age:              ageScore(h),
-		Collateral:       collateralScore(cfg, hostPeriodCost, h.Settings, expectedRedundancy),
 		Interactions:     interactionScore(h),
 		StorageRemaining: storageRemainingScore(cfg, h.Settings, storedData, expectedRedundancy),
 		Uptime:           uptimeScore(h),
 		Version:          versionScore(h.Settings),
-		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
 	}
+
+	// NOTE: if we know the host is gouging, we have to avoid calculating the
+	// period cost to calculate the collateral and price score as the core
+	// package does not have overflow checks in its cost calculations
+	if !gouging {
+		hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
+		breakdown.Collateral = collateralScore(cfg, hostPeriodCost, h.Settings, expectedRedundancy)
+		breakdown.Prices = priceAdjustmentScore(hostPeriodCost, cfg)
+	}
+
+	return breakdown
 }
 
 // priceAdjustmentScore computes a score between 0 and 1 for a host giving its
