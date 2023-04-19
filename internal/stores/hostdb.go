@@ -831,6 +831,9 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 
 // ProcessConsensusChange implements consensus.Subscriber.
 func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
+	ss.persistMu.Lock()
+	defer ss.persistMu.Unlock()
+
 	height := uint64(cc.InitialHeight())
 	for range cc.RevertedBlocks {
 		height--
@@ -871,18 +874,34 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
 	ss.unappliedCCID = cc.ID
 
-	if err := ss.applyUpdates(); err != nil {
+	if err := ss.applyUpdates(false); err != nil {
 		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
+
+	// Force a persist if no block has been received for some time.
+	if ss.persistTimer != nil {
+		ss.persistTimer.Stop()
+		select {
+		case <-ss.persistTimer.C:
+		default:
+		}
+	}
+	ss.persistTimer = time.AfterFunc(10*time.Second, func() {
+		ss.persistMu.Lock()
+		defer ss.persistMu.Unlock()
+		if err := ss.applyUpdates(true); err != nil {
+			ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+		}
+	})
 }
 
 // applyUpdates applies all unapplied updates to the database.
-func (ss *SQLStore) applyUpdates() (err error) {
+func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	// Check if we need to apply changes
 	persistIntervalPassed := time.Since(ss.lastAnnouncementSave) > ss.persistInterval
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
-	if !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
+	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
 		return nil
 	}
 

@@ -32,6 +32,8 @@ type (
 		// HostDB related fields.
 		lastAnnouncementSave   time.Time
 		persistInterval        time.Duration
+		persistMu              sync.Mutex
+		persistTimer           *time.Timer
 		unappliedAnnouncements []announcement
 		unappliedHostKeys      map[types.PublicKey]struct{}
 		unappliedCCID          modules.ConsensusChangeID
