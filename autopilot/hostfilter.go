@@ -199,7 +199,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		}
 
 		// perform gouging checks
-		if gougingBreakdown := gc.Check(&h.Settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
+		if gougingBreakdown = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
 			errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown.Reasons()))
 		}
 
