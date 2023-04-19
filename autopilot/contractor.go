@@ -619,7 +619,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, err := c.candidateHosts(ctx, w, hosts, usedHosts, make(map[types.PublicKey]uint64), wanted, minScore)
+	candidates, _, err := c.candidateHosts(ctx, w, hosts, usedHosts, make(map[types.PublicKey]uint64), wanted, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -884,7 +884,7 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// worthwhile.
 	numContracts := c.ap.state.cfg.Contracts.Amount
 	buffer := 50
-	candidates, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	candidates, scores, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
@@ -893,17 +893,10 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 		return math.SmallestNonzeroFloat64, nil
 	}
 
-	// convenience variables
-	state := c.ap.state
-
-	// create a gouging checker
-	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-
 	// Find the minimum score that a host is allowed to have to be considered
 	// good for upload.
 	lowestScore := math.MaxFloat64
-	for i := 0; i < len(candidates); i++ {
-		score := hostScore(c.ap.state.cfg, candidates[i], 0, c.ap.state.rs.Redundancy(), gc.Check(&candidates[i].Settings, nil).Gouging()).Score()
+	for _, score := range scores {
 		if score < lowestScore {
 			lowestScore = score
 		}
@@ -911,12 +904,12 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	return lowestScore / minAllowedScoreLeeway, nil
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, error) {
+func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, []float64, error) {
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
 
 	// nothing to do
 	if wanted == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	state := c.ap.state
@@ -983,10 +976,12 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		"unusable", unusable)
 
 	// select hosts
-	var selected []hostdb.Host
-	for len(selected) < wanted && len(scored) > 0 {
+	var selectedHosts []hostdb.Host
+	var selectedScores []float64
+	for len(selectedHosts) < wanted && len(scored) > 0 {
 		i := randSelectByWeight(scores)
-		selected = append(selected, scored[i])
+		selectedHosts = append(selectedHosts, scored[i])
+		selectedScores = append(selectedScores, scores[i])
 
 		// remove selected host
 		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
@@ -994,17 +989,18 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	}
 
 	// print warning if no candidate hosts were found
-	if len(selected) == 0 {
+	if len(selectedHosts) == 0 {
 		c.logger.Warnf("no candidate hosts found")
-	} else if len(selected) < wanted {
+	} else if len(selectedHosts) < wanted {
+		msg := fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selectedHosts), wanted)
 		if len(candidates) >= wanted {
-			c.logger.Warnw(fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted), results.keysAndValues()...)
+			c.logger.Warnw(msg, results.keysAndValues()...)
 		} else {
-			c.logger.Debugf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted)
+			c.logger.Debugw(msg, results.keysAndValues()...)
 		}
 	}
 
-	return selected, nil
+	return selectedHosts, selectedScores, nil
 }
 
 func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInfo, budget *types.Currency, renterAddress types.Address) (cm api.ContractMetadata, proceed bool, err error) {
