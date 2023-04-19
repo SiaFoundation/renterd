@@ -893,11 +893,17 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 		return math.SmallestNonzeroFloat64, nil
 	}
 
+	// convenience variables
+	state := c.ap.state
+
+	// create a gouging checker
+	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
 	// Find the minimum score that a host is allowed to have to be considered
 	// good for upload.
 	lowestScore := math.MaxFloat64
 	for i := 0; i < len(candidates); i++ {
-		score := hostScore(c.ap.state.cfg, candidates[i], 0, c.ap.state.rs.Redundancy()).Score()
+		score := hostScore(c.ap.state.cfg, candidates[i], 0, c.ap.state.rs.Redundancy(), gc.Check(&candidates[i].Settings, nil).Gouging()).Score()
 		if score < lowestScore {
 			lowestScore = score
 		}
@@ -959,20 +965,17 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
-		if usable, result := isUsableHost(state.cfg, state.rs, gc, ipFilter, h, minScore, storedData[h.PublicKey]); !usable {
+		if usable, result := isUsableHost(state.cfg, state.rs, gc, ipFilter, h, minScore, storedData[h.PublicKey]); usable {
+			scored = append(scored, h)
+			scores = append(scores, result.scoreBreakdown.Score())
+		} else {
 			results.merge(result)
+			if result.scoreBreakdown.Score() == 0 {
+				zeros++
+			}
 			unusable++
 			continue
 		}
-
-		score := hostScore(state.cfg, h, 0, state.rs.Redundancy()).Score()
-		if score == 0 {
-			zeros++
-			continue
-		}
-
-		scored = append(scored, h)
-		scores = append(scores, score)
 	}
 
 	c.logger.Debugw(fmt.Sprintf("scored %d candidate hosts out of %v, took %v", len(scored), len(candidates), time.Since(start)),
