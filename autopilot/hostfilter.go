@@ -199,12 +199,14 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		}
 
 		// perform gouging checks
-		if gougingBreakdown := gc.Check(&h.Settings, &h.PriceTable.HostPriceTable); gougingBreakdown.Gouging() {
+		gougingBreakdown = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
+		if gougingBreakdown.Gouging() {
 			errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown.Reasons()))
 		}
 
 		// perform scoring checks
-		if scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy()); scoreBreakdown.Score() < minScore {
+		scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy())
+		if scoreBreakdown.Score() < minScore {
 			errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
 		}
 	}
