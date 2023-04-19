@@ -545,6 +545,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		nUploaded := 0
+		nFunded := 0
 		for _, c := range cms {
 			if !c.Spending.Uploads.IsZero() {
 				nUploaded++
@@ -552,9 +553,15 @@ func TestUploadDownloadSpending(t *testing.T) {
 			if !c.Spending.Downloads.IsZero() {
 				t.Fatal("download spending should be zero")
 			}
+			if !c.Spending.FundAccount.IsZero() {
+				nFunded++
+			}
 		}
 		if nUploaded < rs.TotalShards {
 			return fmt.Errorf("not enough contracts have upload spending, %v<%v", nUploaded, rs.TotalShards)
+		}
+		if nFunded < rs.MinShards {
+			return fmt.Errorf("not enough contracts have been funded for a download to succeed, %v<%v", nFunded, rs.MinShards)
 		}
 		return nil
 	})

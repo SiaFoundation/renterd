@@ -153,7 +153,7 @@ func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.Pu
 	return rev, err
 }
 
-func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, revision *types.FileContractRevision) error {
+func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, revision *types.FileContractRevision) (err error) {
 	// fetch account
 	account, err := w.accounts.ForHost(hk)
 	if err != nil {
@@ -175,6 +175,9 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 		return fmt.Errorf("%w; %v>%v", errBalanceSufficient, curr, balance)
 	}
 	amount := balance.Sub(curr)
+
+	// record the spending for the contract
+	defer recordContractSpending(ctx, revision.ParentID, api.ContractSpending{FundAccount: amount}, &err)
 
 	// cap the amount by the amount of money left in the contract
 	renterFunds := revision.ValidRenterPayout()
