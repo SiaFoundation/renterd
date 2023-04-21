@@ -102,10 +102,10 @@ func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable)
 func (gc gougingChecker) checkHS(hs *rhpv2.HostSettings) (check api.GougingChecks) {
 	if hs != nil {
 		check = api.GougingChecks{
-			ContractErr: checkContractGougingRHPv2(gc.period, gc.renewWindow, *hs),
-			DownloadErr: checkDownloadGougingRHPv2(gc.settings, gc.redundancy, *hs),
-			GougingErr:  checkPriceGougingHS(gc.settings, *hs),
-			UploadErr:   checkUploadGougingRHPv2(gc.settings, gc.redundancy, *hs),
+			ContractErr: errToStr(checkContractGougingRHPv2(gc.period, gc.renewWindow, *hs)),
+			DownloadErr: errToStr(checkDownloadGougingRHPv2(gc.settings, gc.redundancy, *hs)),
+			GougingErr:  errToStr(checkPriceGougingHS(gc.settings, *hs)),
+			UploadErr:   errToStr(checkUploadGougingRHPv2(gc.settings, gc.redundancy, *hs)),
 		}
 	}
 	return
@@ -114,10 +114,10 @@ func (gc gougingChecker) checkHS(hs *rhpv2.HostSettings) (check api.GougingCheck
 func (gc gougingChecker) checkPT(pt *rhpv3.HostPriceTable) (check api.GougingChecks) {
 	if pt != nil {
 		check = api.GougingChecks{
-			ContractErr: checkContractGougingRHPv3(gc.period, gc.renewWindow, *pt),
-			DownloadErr: checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt),
-			GougingErr:  checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, *pt),
-			UploadErr:   checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt),
+			ContractErr: errToStr(checkContractGougingRHPv3(gc.period, gc.renewWindow, *pt)),
+			DownloadErr: errToStr(checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt)),
+			GougingErr:  errToStr(checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, *pt)),
+			UploadErr:   errToStr(checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt)),
 		}
 	}
 	return
