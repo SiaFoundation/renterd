@@ -519,6 +519,65 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
+func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, bh uint64) (contracts []api.Contract, errs HostErrorSet) {
+	type req struct {
+		ContractMetadata api.ContractMetadata
+	}
+	type res struct {
+		Contract api.Contract
+		Err      *HostError
+	}
+
+	reqs := make(chan req, len(metadatas))
+	resps := make(chan res, len(metadatas))
+	worker := func(reqs chan req, resps chan res, wg *sync.WaitGroup) {
+		defer wg.Done()
+		for req := range reqs {
+			rev, err := w.FetchRevision(ctx, timeout, req.ContractMetadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+			if err != nil {
+				resps <- res{Err: &HostError{HostKey: req.ContractMetadata.HostKey, Err: err}}
+				continue
+			}
+			resps <- res{Contract: api.Contract{
+				ContractMetadata: req.ContractMetadata,
+				Revision:         rev,
+			}}
+		}
+	}
+
+	// define the amount of worker threads we'll launch
+	threads := len(metadatas)
+	if threads > 10 {
+		threads = 0
+	}
+
+	// launch all workers
+	var wg sync.WaitGroup
+	wg.Add(threads)
+	for t := 0; t < threads; t++ {
+		go worker(reqs, resps, &wg)
+	}
+
+	// fire all requests
+	for _, metadata := range metadatas {
+		reqs <- req{ContractMetadata: metadata}
+	}
+	close(reqs)
+
+	// wait for them to finish
+	wg.Wait()
+
+	// collect the responses
+	for res := range resps {
+		if res.Err != nil {
+			errs = append(errs, res.Err)
+			continue
+		}
+		contracts = append(contracts, res.Contract)
+	}
+	return
+}
+
 func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
@@ -1145,20 +1204,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, gp)
 
-	// fetch all contracts
-	var contracts []api.Contract
-	var errs HostErrorSet
-	for _, contract := range busContracts {
-		rev, err := w.FetchRevision(ctx, hosttimeout, contract, cs.BlockHeight, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
-		if err != nil {
-			errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
-			continue
-		}
-		contracts = append(contracts, api.Contract{
-			ContractMetadata: contract,
-			Revision:         rev,
-		})
-	}
+	contracts, errs := w.fetchActiveContracts(ctx, busContracts, hosttimeout, cs.BlockHeight)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()
