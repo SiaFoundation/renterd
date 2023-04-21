@@ -292,6 +292,10 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 	defer cancel()
 
 	// check whether we can recover the slab
+	// TODO: instead of comparing contracts to min shards, it would be more
+	// accurate to turn the contracts into a hostMap and then count the number
+	// of slabs for which we have hosts. Because just because we have minShards
+	// hosts, doesn't mean we have minShards hosts for a specific slab.
 	if len(contracts) < int(ss.MinShards) {
 		return nil, nil, errors.New("not enough hosts to recover slab")
 	}
