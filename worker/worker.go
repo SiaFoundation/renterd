@@ -1159,7 +1159,6 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 			Revision:         rev,
 		})
 	}
-
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()

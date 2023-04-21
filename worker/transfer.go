@@ -107,7 +107,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			respChan <- res
 		}(r)
 
-		if false && uploadSectorTimeout > 0 {
+		if uploadSectorTimeout > 0 {
 			timer := time.NewTimer(uploadSectorTimeout)
 			select {
 			case <-timer.C:
