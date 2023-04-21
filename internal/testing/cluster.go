@@ -40,7 +40,7 @@ var (
 	testAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
 			Allowance:   types.Siacoins(1).Mul64(1e3),
-			Amount:      3,
+			Amount:      10,
 			Period:      144,
 			RenewWindow: 72,
 
@@ -57,8 +57,8 @@ var (
 	}
 
 	testRedundancySettings = api.RedundancySettings{
-		MinShards:   2,
-		TotalShards: 3,
+		MinShards:   5,
+		TotalShards: 7,
 	}
 
 	testGougingSettings = api.GougingSettings{
@@ -217,6 +217,8 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 		BusFlushInterval:        testBusFlushInterval,
 		SessionReconnectTimeout: 10 * time.Second,
 		SessionTTL:              2 * time.Minute,
+		UploadSectorTimeout:     100 * time.Millisecond,
+		UploadMaxOverdrive:      5,
 	}, busClient, wk, logger)
 	if err != nil {
 		return nil, err
@@ -332,7 +334,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 // addStorageFolderToHosts adds a single storage folder to each host.
 func addStorageFolderToHost(hosts []*Host) error {
 	for _, host := range hosts {
-		sectors := uint64(10)
+		sectors := uint64(30)
 		volumeDir := filepath.Join(host.dir, "volumes")
 		if err := os.MkdirAll(volumeDir, 0777); err != nil {
 			return err

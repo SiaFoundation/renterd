@@ -20,7 +20,7 @@ func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
 	root, err := s.Append(ctx, sector, price, collateral)
 	if err != nil {
-		return root, err
+		return types.Hash256{}, err
 	}
 	return root, nil
 }
