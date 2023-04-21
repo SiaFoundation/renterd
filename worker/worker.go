@@ -520,60 +520,49 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 }
 
 func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, bh uint64) (contracts []api.Contract, errs HostErrorSet) {
-	type req struct {
-		ContractMetadata api.ContractMetadata
+	// fill requests channel
+	reqs := make(chan api.ContractMetadata, len(metadatas))
+	for _, metadata := range metadatas {
+		reqs <- metadata
 	}
+	close(reqs)
+
+	// prepare response channel
 	type res struct {
 		Contract api.Contract
 		Err      *HostError
 	}
-
-	reqs := make(chan req, len(metadatas))
 	resps := make(chan res, len(metadatas))
-	worker := func(reqs chan req, resps chan res, wg *sync.WaitGroup) {
-		defer wg.Done()
-		for req := range reqs {
-			rev, err := w.FetchRevision(ctx, timeout, req.ContractMetadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
-			if err != nil {
-				resps <- res{Err: &HostError{HostKey: req.ContractMetadata.HostKey, Err: err}}
-				continue
-			}
-			resps <- res{Contract: api.Contract{
-				ContractMetadata: req.ContractMetadata,
-				Revision:         rev,
-			}}
-		}
-	}
-
-	// define the amount of worker threads we'll launch
-	threads := len(metadatas)
-	if threads > 10 {
-		threads = 0
-	}
 
 	// launch all workers
 	var wg sync.WaitGroup
-	wg.Add(threads)
-	for t := 0; t < threads; t++ {
-		go worker(reqs, resps, &wg)
+	for t := 0; t < 10 && t < len(metadatas); t++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for metadata := range reqs {
+				rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+				if err != nil {
+					resps <- res{Err: &HostError{HostKey: metadata.HostKey, Err: err}}
+				} else {
+					resps <- res{Contract: api.Contract{
+						ContractMetadata: metadata,
+						Revision:         rev,
+					}}
+				}
+			}
+		}()
 	}
-
-	// fire all requests
-	for _, metadata := range metadatas {
-		reqs <- req{ContractMetadata: metadata}
-	}
-	close(reqs)
-
-	// wait for them to finish
-	wg.Wait()
 
 	// collect the responses
-	for res := range resps {
-		if res.Err != nil {
-			errs = append(errs, res.Err)
+	wg.Wait()
+	for i := 0; i < len(metadatas); i++ {
+		response := <-resps
+		if response.Err != nil {
+			errs = append(errs, response.Err)
 			continue
 		}
-		contracts = append(contracts, res.Contract)
+		contracts = append(contracts, response.Contract)
 	}
 	return
 }
@@ -1186,6 +1175,10 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 	busContracts, err := w.bus.ActiveContracts(ctx)
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
+		return
+	}
+	if len(busContracts) == 0 {
+		jc.Encode(api.ContractsResponse{Contracts: nil})
 		return
 	}
 
