@@ -47,7 +47,6 @@ type storeProvider interface {
 }
 
 func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration, maxOverdrive int, logger *zap.SugaredLogger) ([]object.Sector, []int, error) {
-	fmt.Println("-----start----")
 	// ensure the context is cancelled when the slab is uploaded
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -195,7 +194,6 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			// for each slow host we eventually launch an overdrive worker
 			toLaunch = append(toLaunch, resp.req)
 			slowResponses = append(slowResponses, resp)
-			fmt.Println("slow host", resp.hostIndex, resp.req.shardIndex)
 		} else if resp.err != nil {
 			// host failed.
 			errs = append(errs, &HostError{contracts[resp.hostIndex].HostKey, resp.err})
@@ -203,13 +201,11 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 				// if the request was finished, we can reuse the host since it
 				// probably failed due to the other host being faster.
 				hostUsed[resp.hostIndex] = false
-				fmt.Println("reuse", resp.hostIndex)
 			} else if !handleRequest(resp.req) {
 				// if the request wasn't finished we need to replace it. If
 				// replacing it failed since no worker is available, we add the
 				// request to the front of the overdrive slice.
 				toLaunch = append([]req{resp.req}, toLaunch...)
-				fmt.Println("rescue", resp.req.shardIndex)
 			}
 		} else if sectors[resp.req.shardIndex].Root == (types.Hash256{}) {
 			// host succeeded.
@@ -217,7 +213,6 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 				Host: contracts[resp.hostIndex].HostKey,
 				Root: resp.root,
 			}
-			fmt.Println("success", resp.hostIndex, resp.req.shardIndex)
 			rem--
 			resp.req.finishedFn()
 			if rem == 0 {
@@ -233,21 +228,8 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			if !handleRequest(toLaunch[0]) {
 				break
 			}
-			fmt.Println("overdriving", toLaunch[0].shardIndex)
 			toLaunch = toLaunch[1:]
 		}
-	}
-
-	duplicateMap := make(map[types.Hash256]struct{})
-	for i := range sectors {
-		if sectors[i].Root == (types.Hash256{}) {
-			fmt.Println("!!!!!!!ERROR: sector", i, "is empty")
-		}
-		_, exists := duplicateMap[sectors[i].Root]
-		if exists {
-			fmt.Println("!!!!!!!ERROR: duplicate root", i)
-		}
-		duplicateMap[sectors[i].Root] = struct{}{}
 	}
 
 	// if rem is still greater 0, we failed to upload the slab.
@@ -299,18 +281,6 @@ func uploadSlab(ctx context.Context, sp storeProvider, r io.Reader, m, n uint8, 
 }
 
 func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
-	duplicateMap := make(map[types.Hash256]struct{})
-	for _, shard := range ss.Slab.Shards {
-		if shard.Root == (types.Hash256{}) {
-			fmt.Println("!!!!!!!ERROR: shard is empty during download")
-		}
-		_, exists := duplicateMap[shard.Root]
-		if exists {
-			fmt.Println("!!!!!!!ERROR: duplicate root during download")
-		}
-		duplicateMap[shard.Root] = struct{}{}
-	}
-
 	// prepopulate the timings with a value for all contracts to ensure unused hosts aren't necessarily favoured in consecutive downloads
 	timings := make([]int64, len(contracts))
 	for i := 0; i < len(contracts); i++ {
