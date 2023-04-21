@@ -809,7 +809,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
-		w.logger.Errorf("migration cancelled, err: ", api.ErrConsensusNotSynced)
+		w.logger.Errorf("migration cancelled, err: %v", api.ErrConsensusNotSynced)
 		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
 	}
@@ -1020,7 +1020,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
-		w.logger.Errorf("upload cancelled, err: ", api.ErrConsensusNotSynced)
+		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
 		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
 	}
