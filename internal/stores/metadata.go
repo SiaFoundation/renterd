@@ -1015,7 +1015,8 @@ func contracts(tx *gorm.DB, ids []types.FileContractID) (dbContracts []dbContrac
 // contractsForHost retrieves all contracts for the given host
 func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err error) {
 	err = tx.
-		Where(&dbContract{Host: host}).
+		Where(&dbContract{HostID: host.ID}).
+		Preload("Host").
 		Find(&contracts).
 		Error
 	return
