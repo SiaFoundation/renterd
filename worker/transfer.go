@@ -238,10 +238,16 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		}
 	}
 
+	duplicateMap := make(map[types.Hash256]struct{})
 	for i := range sectors {
 		if sectors[i].Root == (types.Hash256{}) {
 			fmt.Println("!!!!!!!ERROR: sector", i, "is empty")
 		}
+		_, exists := duplicateMap[sectors[i].Root]
+		if exists {
+			fmt.Println("!!!!!!!ERROR: duplicate root", i)
+		}
+		duplicateMap[sectors[i].Root] = struct{}{}
 	}
 
 	// if rem is still greater 0, we failed to upload the slab.
@@ -293,6 +299,18 @@ func uploadSlab(ctx context.Context, sp storeProvider, r io.Reader, m, n uint8, 
 }
 
 func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
+	duplicateMap := make(map[types.Hash256]struct{})
+	for _, shard := range ss.Slab.Shards {
+		if shard.Root == (types.Hash256{}) {
+			fmt.Println("!!!!!!!ERROR: shard is empty during download")
+		}
+		_, exists := duplicateMap[shard.Root]
+		if exists {
+			fmt.Println("!!!!!!!ERROR: duplicate root during download")
+		}
+		duplicateMap[shard.Root] = struct{}{}
+	}
+
 	// prepopulate the timings with a value for all contracts to ensure unused hosts aren't necessarily favoured in consecutive downloads
 	timings := make([]int64, len(contracts))
 	for i := 0; i < len(contracts); i++ {
