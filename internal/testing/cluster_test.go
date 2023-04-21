@@ -258,10 +258,10 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}()
 
 	w := cluster.Worker
-	//rs := testRedundancySettings
+	rs := testRedundancySettings
 
 	// add hosts
-	if _, err := cluster.AddHostsBlocking(10); err != nil {
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
 		t.Fatal(err)
 	}
 
@@ -272,7 +272,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// upload two files under /foo
 	file1 := make([]byte, rhpv2.SectorSize/12)
-	file2 := make([]byte, rhpv2.SectorSize/12)
+	file2 := make([]byte, rhpv2.SectorSize*3)
 	frand.Read(file1)
 	frand.Read(file2)
 	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "foo/file1"); err != nil {
@@ -343,13 +343,13 @@ func TestUploadDownloadBasic(t *testing.T) {
 	if info.TotalObjectsSize != objectsSize {
 		t.Error("wrong size", info.TotalObjectsSize, len(small)+len(large))
 	}
-	//sectorsSize := 15 * rhpv2.SectorSize
-	//	if info.TotalSectorsSize != uint64(sectorsSize) {
-	//		t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
-	//	}
-	//	if info.TotalUploadedSize != uint64(sectorsSize) {
-	//		t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
-	//	}
+	sectorsSize := 15 * rhpv2.SectorSize
+	if info.TotalSectorsSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
+	}
+	if info.TotalUploadedSize != uint64(sectorsSize) {
+		t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
+	}
 	if info.NumObjects != 4 {
 		t.Error("wrong number of objects", info.NumObjects, 4)
 	}

@@ -40,7 +40,7 @@ var (
 	testAutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
 			Allowance:   types.Siacoins(1).Mul64(1e3),
-			Amount:      10,
+			Amount:      3,
 			Period:      144,
 			RenewWindow: 72,
 
@@ -57,8 +57,8 @@ var (
 	}
 
 	testRedundancySettings = api.RedundancySettings{
-		MinShards:   5,
-		TotalShards: 7,
+		MinShards:   2,
+		TotalShards: 3,
 	}
 
 	testGougingSettings = api.GougingSettings{
@@ -334,7 +334,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 // addStorageFolderToHosts adds a single storage folder to each host.
 func addStorageFolderToHost(hosts []*Host) error {
 	for _, host := range hosts {
-		sectors := uint64(30)
+		sectors := uint64(10)
 		volumeDir := filepath.Join(host.dir, "volumes")
 		if err := os.MkdirAll(volumeDir, 0777); err != nil {
 			return err
