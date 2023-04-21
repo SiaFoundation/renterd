@@ -73,9 +73,9 @@ type (
 
 	// HostsConfig contains all hosts configuration parameters.
 	HostsConfig struct {
-		IgnoreRedundantIPs bool                        `json:"ignoreRedundantIPs"`
-		MaxDowntimeHours   uint64                      `json:"maxDowntimeHours"`
-		ScoreOverrides     map[types.PublicKey]float64 `json:"scoreOverrides"`
+		AllowRedundantIPs bool                        `json:"allowRedundantIPs"`
+		MaxDowntimeHours  uint64                      `json:"maxDowntimeHours"`
+		ScoreOverrides    map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 
 	// ContractsConfig contains all contracts configuration parameters.
