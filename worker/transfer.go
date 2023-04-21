@@ -412,12 +412,9 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			}
 		} else {
 			timings[resp.req.hostIndex] = int64(resp.dur)
-			for i := range ss.Shards {
-				if len(shards[resp.shardIndex]) == 0 {
-					shards[i] = resp.shard
-					rem--
-					break
-				}
+			if len(shards[resp.shardIndex]) == 0 {
+				shards[resp.shardIndex] = resp.shard
+				rem--
 			}
 		}
 	}
