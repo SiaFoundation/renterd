@@ -527,26 +527,31 @@ func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.Contr
 	}
 	close(reqs)
 
+	// create worker function
+	var mu sync.Mutex
+	worker := func() {
+		for metadata := range reqs {
+			rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+			mu.Lock()
+			if err != nil {
+				errs = append(errs, &HostError{HostKey: metadata.HostKey, Err: err})
+			} else {
+				contracts = append(contracts, api.Contract{
+					ContractMetadata: metadata,
+					Revision:         rev,
+				})
+			}
+			mu.Unlock()
+		}
+	}
+
 	// launch all workers
 	var wg sync.WaitGroup
-	var mu sync.Mutex
 	for t := 0; t < 10 && t < len(metadatas); t++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for metadata := range reqs {
-				rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
-				mu.Lock()
-				if err != nil {
-					errs = append(errs, &HostError{HostKey: metadata.HostKey, Err: err})
-				} else {
-					contracts = append(contracts, api.Contract{
-						ContractMetadata: metadata,
-						Revision:         rev,
-					})
-				}
-				mu.Unlock()
-			}
+			worker()
 		}()
 	}
 
