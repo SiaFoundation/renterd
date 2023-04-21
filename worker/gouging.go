@@ -126,7 +126,7 @@ func (gc gougingChecker) checkPT(pt *rhpv3.HostPriceTable) (check api.GougingChe
 func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
-		return fmt.Errorf("rpc price exceeds max: %v>%v", hs.BaseRPCPrice, gs.MaxRPCPrice)
+		return fmt.Errorf("rpc price exceeds max: %v > %v", hs.BaseRPCPrice, gs.MaxRPCPrice)
 	}
 	maxBaseRPCPrice := hs.DownloadBandwidthPrice.Mul64(maxBaseRPCPriceVsBandwidth)
 	if hs.BaseRPCPrice.Cmp(maxBaseRPCPrice) > 0 {
@@ -141,12 +141,12 @@ func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 
 	// check max storage price
 	if !gs.MaxStoragePrice.IsZero() && hs.StoragePrice.Cmp(gs.MaxStoragePrice) > 0 {
-		return fmt.Errorf("storage price exceeds max: %v>%v", hs.StoragePrice, gs.MaxStoragePrice)
+		return fmt.Errorf("storage price exceeds max: %v > %v", hs.StoragePrice, gs.MaxStoragePrice)
 	}
 
 	// check contract price
 	if !gs.MaxContractPrice.IsZero() && hs.ContractPrice.Cmp(gs.MaxContractPrice) > 0 {
-		return fmt.Errorf("contract price exceeds max: %v>%v", hs.ContractPrice, gs.MaxContractPrice)
+		return fmt.Errorf("contract price exceeds max: %v > %v", hs.ContractPrice, gs.MaxContractPrice)
 	}
 
 	// check max collateral
@@ -154,7 +154,7 @@ func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 		return errors.New("MaxCollateral of host is 0")
 	}
 	if hs.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
-		return fmt.Errorf("MaxCollateral is below minimum: %v<%v", hs.MaxCollateral, gs.MinMaxCollateral)
+		return fmt.Errorf("MaxCollateral is below minimum: %v < %v", hs.MaxCollateral, gs.MinMaxCollateral)
 	}
 
 	return nil
@@ -166,17 +166,17 @@ func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt rhpv3.HostPriceTable) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
-		return fmt.Errorf("init base cost exceeds max: %v>%v", pt.InitBaseCost, gs.MaxRPCPrice)
+		return fmt.Errorf("init base cost exceeds max: %v > %v", pt.InitBaseCost, gs.MaxRPCPrice)
 	}
 
 	// check contract price
 	if !gs.MaxContractPrice.IsZero() && pt.ContractPrice.Cmp(gs.MaxContractPrice) > 0 {
-		return fmt.Errorf("contract price exceeds max: %v>%v", pt.ContractPrice, gs.MaxContractPrice)
+		return fmt.Errorf("contract price exceeds max: %v > %v", pt.ContractPrice, gs.MaxContractPrice)
 	}
 
 	// check max storage
 	if !gs.MaxStoragePrice.IsZero() && pt.WriteStoreCost.Cmp(gs.MaxStoragePrice) > 0 {
-		return fmt.Errorf("storage price exceeds max: %v>%v", pt.WriteStoreCost, gs.MaxStoragePrice)
+		return fmt.Errorf("storage price exceeds max: %v > %v", pt.WriteStoreCost, gs.MaxStoragePrice)
 	}
 
 	// check max collateral
@@ -184,7 +184,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 		return errors.New("MaxCollateral of host is 0")
 	}
 	if pt.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
-		return fmt.Errorf("MaxCollateral is below minimum: %v<%v", pt.MaxCollateral, gs.MinMaxCollateral)
+		return fmt.Errorf("MaxCollateral is below minimum: %v < %v", pt.MaxCollateral, gs.MinMaxCollateral)
 	}
 
 	// check ReadLengthCost - should be 1H as it's unused by hosts
@@ -286,7 +286,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 
 	// check TxnFeeMinRecommended - expect it to be lower or equal than the max
 	if pt.TxnFeeMinRecommended.Cmp(pt.TxnFeeMaxRecommended) > 0 {
-		return fmt.Errorf("TxnFeeMinRecommended is greater than TxnFeeMaxRecommended, %v>%v", pt.TxnFeeMinRecommended, pt.TxnFeeMaxRecommended)
+		return fmt.Errorf("TxnFeeMinRecommended is greater than TxnFeeMaxRecommended, %v > %v", pt.TxnFeeMinRecommended, pt.TxnFeeMaxRecommended)
 	}
 
 	return nil
@@ -351,7 +351,7 @@ func checkDownloadGouging(gs api.GougingSettings, rs api.RedundancySettings, sec
 	}
 	downloadPrice := downloadPriceTotalShards.Div64(uint64(rs.MinShards))
 	if !gs.MaxDownloadPrice.IsZero() && downloadPrice.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max dl price: %v>%v", downloadPrice, gs.MaxDownloadPrice)
+		return fmt.Errorf("cost per TiB exceeds max dl price: %v > %v", downloadPrice, gs.MaxDownloadPrice)
 	}
 	return nil
 }
@@ -383,7 +383,7 @@ func checkUploadGouging(gs api.GougingSettings, rs api.RedundancySettings, secto
 	}
 	uploadPrice := uploadPriceTotalShards.Div64(uint64(rs.MinShards))
 	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max ul price: %v>%v", uploadPrice, gs.MaxUploadPrice)
+		return fmt.Errorf("cost per TiB exceeds max ul price: %v > %v", uploadPrice, gs.MaxUploadPrice)
 	}
 	return nil
 }
