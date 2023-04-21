@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -127,6 +128,27 @@ func (gc GougingChecks) Errors() (errs []error) {
 		}
 	}
 	return
+}
+
+func (gc GougingChecks) MarshalJSON() ([]byte, error) {
+	errToStr := func(err error) string {
+		if err != nil {
+			return err.Error()
+		} else {
+			return ""
+		}
+	}
+	return json.Marshal(&struct {
+		ContractErr string `json:"contractErr"`
+		DownloadErr string `json:"downloadErr"`
+		GougingErr  string `json:"gougingErr"`
+		UploadErr   string `json:"uploadErr"`
+	}{
+		ContractErr: errToStr(gc.ContractErr),
+		DownloadErr: errToStr(gc.DownloadErr),
+		GougingErr:  errToStr(gc.GougingErr),
+		UploadErr:   errToStr(gc.UploadErr),
+	})
 }
 
 func (hgb HostGougingBreakdown) Reasons() string {

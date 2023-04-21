@@ -782,15 +782,15 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			// this mostly to keep things simple, host scans should be performed
 			// frequently enough for this not to be a problem
 			if isPriceTableUpdate && interaction.Success {
-				var hpt hostdb.HostPriceTable
-				if err := json.Unmarshal(interaction.Result, &hpt); err != nil {
+				var ptr hostdb.PriceTableUpdateResult
+				if err := json.Unmarshal(interaction.Result, &ptr); err != nil {
 					return err
 				}
 
-				host.PriceTable = convertHostPriceTable(hpt.HostPriceTable)
+				host.PriceTable = convertHostPriceTable(ptr.PriceTable.HostPriceTable)
 				host.PriceTableExpiry = sql.NullTime{
-					Time:  hpt.Expiry,
-					Valid: hpt.Expiry != time.Time{},
+					Time:  ptr.PriceTable.Expiry,
+					Valid: ptr.PriceTable.Expiry != time.Time{},
 				}
 			}
 
