@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -68,7 +67,6 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		root      types.Hash256
 		err       error
 	}
-	var atomicFailures uint64
 	respChan := make(chan resp, 2*len(contracts)) // every host can send up to 2 responses
 	worker := func(r req, hostIndex int) {
 		doneChan := make(chan struct{})
@@ -92,20 +90,10 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 
 			var res resp
 			if err := sp.withHostV2(ctx, contract.ID, contract.HostKey, contract.HostIP, func(ss sectorStore) error {
-				fail := false
-				if frand.Intn(2) == 0 && atomic.AddUint64(&atomicFailures, 1) < 3 {
-					fmt.Println("failure", hostIndex, r.shardIndex)
-					fail = true
-				} else {
-					time.Sleep(uploadSectorTimeout + time.Duration(frand.Uint64n(1000))*time.Millisecond)
-				}
 				root, err := ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]))
 				if err != nil {
 					span.SetStatus(codes.Error, "uploading the sector failed")
 					span.RecordError(err)
-				}
-				if fail {
-					err = errors.New("random failure")
 				}
 				res = resp{hostIndex, r, root, err}
 				return nil // only return the error in the response
@@ -250,13 +238,11 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		}
 	}
 
-	goodSectors := 0
 	for i := range sectors {
-		if sectors[i].Root != (types.Hash256{}) {
-			goodSectors++
+		if sectors[i].Root == (types.Hash256{}) {
+			fmt.Println("!!!!!!!ERROR: sector", i, "is empty")
 		}
 	}
-	fmt.Println("goodSectors", goodSectors)
 
 	// if rem is still greater 0, we failed to upload the slab.
 	if rem > 0 {
