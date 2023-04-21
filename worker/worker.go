@@ -1145,40 +1145,20 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, gp)
 
-	var mu sync.Mutex
+	// fetch all contracts
 	var contracts []api.Contract
 	var errs HostErrorSet
-	c := make(chan api.ContractMetadata)
-	fetcher := func() {
-		for contract := range c {
-			rev, err := w.FetchRevision(ctx, hosttimeout, contract, cs.BlockHeight, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
-			if err != nil {
-				errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
-				continue
-			}
-			mu.Lock()
-			contracts = append(contracts, api.Contract{
-				ContractMetadata: contract,
-				Revision:         rev,
-			})
-			mu.Unlock()
-		}
-	}
-
-	// fetch all contracts using multiple goroutines.
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			fetcher()
-			wg.Done()
-		}()
-	}
 	for _, contract := range busContracts {
-		c <- contract
+		rev, err := w.FetchRevision(ctx, hosttimeout, contract, cs.BlockHeight, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+		if err != nil {
+			errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
+			continue
+		}
+		contracts = append(contracts, api.Contract{
+			ContractMetadata: contract,
+			Revision:         rev,
+		})
 	}
-	close(c)
-	wg.Wait()
 
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
