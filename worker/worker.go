@@ -527,43 +527,31 @@ func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.Contr
 	}
 	close(reqs)
 
-	// prepare response channel
-	type res struct {
-		Contract api.Contract
-		Err      *HostError
-	}
-	resps := make(chan res, len(metadatas))
-
 	// launch all workers
 	var wg sync.WaitGroup
+	var mu sync.Mutex
 	for t := 0; t < 10 && t < len(metadatas); t++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for metadata := range reqs {
 				rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+				mu.Lock()
 				if err != nil {
-					resps <- res{Err: &HostError{HostKey: metadata.HostKey, Err: err}}
+					errs = append(errs, &HostError{HostKey: metadata.HostKey, Err: err})
 				} else {
-					resps <- res{Contract: api.Contract{
+					contracts = append(contracts, api.Contract{
 						ContractMetadata: metadata,
 						Revision:         rev,
-					}}
+					})
 				}
+				mu.Unlock()
 			}
 		}()
 	}
 
-	// collect the responses
+	// wait until they're done
 	wg.Wait()
-	for i := 0; i < len(metadatas); i++ {
-		response := <-resps
-		if response.Err != nil {
-			errs = append(errs, response.Err)
-			continue
-		}
-		contracts = append(contracts, response.Contract)
-	}
 	return
 }
 
