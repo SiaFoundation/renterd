@@ -802,7 +802,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 	// create list of candidate hosts
 	var candidates []hostdb.Host
-	var excluded, unscanned int
+	var excluded, notcompletedscan int
 	for _, h := range hosts {
 		// filter out used hosts
 		if _, exclude := usedHosts[h.PublicKey]; exclude {
@@ -812,7 +812,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		}
 		// filter out unscanned hosts
 		if !h.Scanned {
-			unscanned++
+			notcompletedscan++
 			continue
 		}
 		candidates = append(candidates, h)
@@ -820,7 +820,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 	c.logger.Debugw(fmt.Sprintf("selected %d candidate hosts out of %d", len(candidates), len(hosts)),
 		"excluded", excluded,
-		"unscanned", unscanned)
+		"notcompletedscan", notcompletedscan)
 
 	// score all candidate hosts
 	start := time.Now()

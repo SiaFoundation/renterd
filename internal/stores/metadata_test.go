@@ -232,6 +232,48 @@ func TestSQLContractStore(t *testing.T) {
 	}
 }
 
+func TestContractsForHost(t *testing.T) {
+	// create a SQL store
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 2 hosts
+	hks, err := cs.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 2 contracts
+	_, _, err = cs.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch raw hosts
+	var hosts []dbHost
+	if err := cs.db.
+		Model(&dbHost{}).
+		Find(&hosts).
+		Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 2 {
+		t.Fatal("unexpected number of hosts")
+	}
+
+	contracts, _ := contractsForHost(cs.db, hosts[0])
+	if len(contracts) != 1 || contracts[0].Host.convert().PublicKey.String() != hosts[0].convert().PublicKey.String() {
+		t.Fatal("unexpected", len(contracts), contracts)
+	}
+
+	contracts, _ = contractsForHost(cs.db, hosts[1])
+	if len(contracts) != 1 || contracts[0].Host.convert().PublicKey.String() != hosts[1].convert().PublicKey.String() {
+		t.Fatalf("unexpected contracts, %+v", contracts)
+	}
+}
+
 // TestRenewContract is a test for AddRenewedContract.
 func TestRenewedContract(t *testing.T) {
 	cs, _, _, err := newTestSQLStore()

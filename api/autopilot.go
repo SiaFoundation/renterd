@@ -55,10 +55,10 @@ type (
 	}
 
 	GougingChecks struct {
-		ContractErr error `json:"contractErr"`
-		DownloadErr error `json:"downloadErr"`
-		GougingErr  error `json:"gougingErr"`
-		UploadErr   error `json:"uploadErr"`
+		ContractErr string `json:"contractErr"`
+		DownloadErr string `json:"downloadErr"`
+		GougingErr  string `json:"gougingErr"`
+		UploadErr   string `json:"uploadErr"`
 	}
 
 	HostScoreBreakdown struct {
@@ -102,27 +102,27 @@ func (hgb HostGougingBreakdown) Gouging() bool {
 }
 
 func (gc GougingChecks) Gouging() bool {
-	for _, err := range []error{
+	for _, err := range []string{
 		gc.ContractErr,
 		gc.DownloadErr,
 		gc.GougingErr,
 		gc.UploadErr,
 	} {
-		if err != nil {
+		if err != "" {
 			return true
 		}
 	}
 	return false
 }
 
-func (gc GougingChecks) Errors() (errs []error) {
-	for _, err := range []error{
+func (gc GougingChecks) Errors() (errs []string) {
+	for _, err := range []string{
 		gc.ContractErr,
 		gc.DownloadErr,
 		gc.GougingErr,
 		gc.UploadErr,
 	} {
-		if err != nil {
+		if err != "" {
 			errs = append(errs, err)
 		}
 	}
@@ -132,8 +132,8 @@ func (gc GougingChecks) Errors() (errs []error) {
 func (hgb HostGougingBreakdown) Reasons() string {
 	var reasons []string
 	for _, err := range append(hgb.V2.Errors(), hgb.V3.Errors()...) {
-		if err != nil {
-			reasons = append(reasons, err.Error())
+		if err != "" {
+			reasons = append(reasons, err)
 		}
 	}
 	if len(reasons) == 0 {
