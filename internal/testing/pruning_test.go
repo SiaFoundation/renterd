@@ -135,11 +135,14 @@ func TestHostPruning(t *testing.T) {
 		t.Fatalf("host was not pruned, %+v", hostss[0].Interactions)
 	}
 
-	// try update the autopilot config with a value that would overflow the
-	// MaxDowntimeHours duration
+	// assert validation on MaxDowntimeHours
 	cfg := testAutopilotConfig
-	cfg.Hosts.MaxDowntimeHours = 9999999999
+	cfg.Hosts.MaxDowntimeHours = 99*365*24 + 1 // exceed by one
 	if err = a.SetConfig(cfg); errors.Is(err, api.ErrMaxDowntimeHoursTooHigh) {
+		t.Fatal(err)
+	}
+	cfg.Hosts.MaxDowntimeHours = 99 * 365 * 24 // allowed max
+	if err = a.SetConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
 }
