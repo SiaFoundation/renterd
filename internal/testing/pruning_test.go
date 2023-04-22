@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -18,7 +20,7 @@ func TestHostPruning(t *testing.T) {
 	ctx := context.Background()
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,5 +134,13 @@ func TestHostPruning(t *testing.T) {
 		t.Fatal(err)
 	} else if len(hostss) != 0 {
 		t.Fatalf("host was not pruned, %+v", hostss[0].Interactions)
+	}
+
+	// try update the autopilot config with a value that would overflow the
+	// MaxDowntimeHours duration
+	cfg := testAutopilotConfig
+	cfg.Hosts.MaxDowntimeHours = 9999999999
+	if err = a.SetConfig(cfg); errors.Is(err, api.ErrMaxDowntimeHoursTooHigh) {
+		t.Fatal(err)
 	}
 }

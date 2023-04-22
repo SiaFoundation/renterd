@@ -37,8 +37,9 @@ const (
 )
 
 var (
-	ErrHostNotFound   = errors.New("host doesn't exist in hostdb")
-	ErrNegativeOffset = errors.New("offset can not be negative")
+	ErrHostNotFound        = errors.New("host doesn't exist in hostdb")
+	ErrNegativeOffset      = errors.New("offset can not be negative")
+	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
 
 type (
@@ -526,6 +527,11 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
+	fmt.Println("DEBUG PJ: removing offline hosts", minRecentFailures, maxDowntime)
+	if maxDowntime < 0 {
+		return 0, ErrNegativeMaxDowntime
+	}
+
 	// fetch all hosts outside of the transaction
 	var hosts []dbHost
 	if err := ss.db.
