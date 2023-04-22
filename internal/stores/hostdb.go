@@ -527,7 +527,7 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
-	fmt.Println("DEBUG PJ: removing offline hosts", minRecentFailures, maxDowntime)
+	// sanity check 'maxDowntime'
 	if maxDowntime < 0 {
 		return 0, ErrNegativeMaxDowntime
 	}
