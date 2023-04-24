@@ -991,9 +991,9 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// build contract map
-	availableHosts := make(map[types.PublicKey]api.ContractMetadata)
+	availableContracts := make(map[types.PublicKey]api.ContractMetadata)
 	for _, contract := range set {
-		availableHosts[contract.HostKey] = contract
+		availableContracts[contract.HostKey] = contract
 	}
 
 	cw := obj.Key.Decrypt(&rw, offset)
@@ -1002,11 +1002,11 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		hostMap := make(map[types.PublicKey]api.ContractMetadata)
 		availableShards := 0
 		for _, shard := range ss.Shards {
-			if _, available := availableHosts[shard.Host]; !available {
+			if _, available := availableContracts[shard.Host]; !available {
 				continue
 			}
 			availableShards++
-			hostMap[shard.Host] = availableHosts[shard.Host]
+			hostMap[shard.Host] = availableContracts[shard.Host]
 		}
 
 		// check if enough slabs are available
@@ -1019,20 +1019,20 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 			return
 		}
 
-		// flatten host map to get a slice of hosts which is deduplicated
-		// already and contains only hosts relevant to the slab.
-		hosts := make([]api.ContractMetadata, 0, len(hostMap))
+		// flatten host map to get a slice of contracts which is deduplicated
+		// already and contains only contracts relevant to the slab.
+		contracts := make([]api.ContractMetadata, 0, len(hostMap))
 		for _, c := range hostMap {
-			hosts = append(hosts, c)
+			contracts = append(contracts, c)
 		}
 
 		// make sure consecutive slabs are downloaded from hosts that performed
 		// well on previous slab downloads
-		sort.SliceStable(hosts, func(i, j int) bool {
-			return performance[hosts[i].HostKey] < performance[hosts[j].HostKey]
+		sort.SliceStable(contracts, func(i, j int) bool {
+			return performance[contracts[i].HostKey] < performance[contracts[j].HostKey]
 		})
 
-		timings, err := downloadSlab(ctx, w, cw, ss, hosts, w.downloadSectorTimeout, w.logger)
+		timings, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout, w.logger)
 
 		// update historic host performance
 		//
@@ -1041,8 +1041,8 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		// necessarily want to try downloading from all hosts and we don't reset
 		// a host's performance to the default timing.
 		for i, timing := range timings {
-			if _, exists := performance[hosts[i].HostKey]; !exists || timing != int64(defaultSectorDownloadTiming) {
-				performance[hosts[i].HostKey] = timing
+			if _, exists := performance[contracts[i].HostKey]; !exists || timing != int64(defaultSectorDownloadTiming) {
+				performance[contracts[i].HostKey] = timing
 			}
 		}
 		if err != nil {
