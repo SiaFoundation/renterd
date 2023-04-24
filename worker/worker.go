@@ -520,12 +520,8 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 }
 
 func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, bh uint64) (contracts []api.Contract, errs HostErrorSet) {
-	// fill requests channel
-	reqs := make(chan api.ContractMetadata, len(metadatas))
-	for _, metadata := range metadatas {
-		reqs <- metadata
-	}
-	close(reqs)
+	// create requests channel
+	reqs := make(chan api.ContractMetadata)
 
 	// create worker function
 	var mu sync.Mutex
@@ -550,10 +546,16 @@ func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.Contr
 	for t := 0; t < 10 && t < len(metadatas); t++ {
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			worker()
+			wg.Done()
 		}()
 	}
+
+	// launch all requests
+	for _, metadata := range metadatas {
+		reqs <- metadata
+	}
+	close(reqs)
 
 	// wait until they're done
 	wg.Wait()
