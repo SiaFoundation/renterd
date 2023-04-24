@@ -382,8 +382,11 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 	workerForShard := func(shardIndex int) int {
 		si := &shardInfos[shardIndex]
 		for hostIndex := range hosts {
+			if ss.Shards[shardIndex].Host != hosts[hostIndex].HostKey {
+				continue // host is not useful
+			}
 			if _, used := si.usedWorkers[hosts[hostIndex].HostKey]; used {
-				continue
+				continue // host was already used
 			}
 			si.usedWorkers[hosts[hostIndex].HostKey] = struct{}{}
 			si.inflight++
