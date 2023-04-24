@@ -287,6 +287,7 @@ type worker struct {
 
 	downloadSectorTimeout time.Duration
 	uploadSectorTimeout   time.Duration
+	downloadMaxOverdrive  int
 	uploadMaxOverdrive    int
 
 	logger *zap.SugaredLogger
@@ -1032,7 +1033,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 			return performance[contracts[i].HostKey] < performance[contracts[j].HostKey]
 		})
 
-		timings, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout, w.logger)
+		timings, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout, w.downloadMaxOverdrive, w.logger)
 
 		// update historic host performance
 		//
@@ -1226,7 +1227,7 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxUploadOverdrive int, l *zap.Logger) *worker {
+func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive int, l *zap.Logger) *worker {
 	w := &worker{
 		id:                    id,
 		bus:                   b,
@@ -1235,6 +1236,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionRecone
 		busFlushInterval:      busFlushInterval,
 		downloadSectorTimeout: downloadSectorTimeout,
 		uploadSectorTimeout:   uploadSectorTimeout,
+		downloadMaxOverdrive:  maxDownloadOverdrive,
 		uploadMaxOverdrive:    maxUploadOverdrive,
 		logger:                l.Sugar().Named("worker").Named(id),
 	}

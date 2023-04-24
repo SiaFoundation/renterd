@@ -181,7 +181,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0, zap.NewNop().Sugar()); err != nil {
+			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0, 0, zap.NewNop().Sugar()); err != nil {
 				t.Error(err)
 				return
 			}
