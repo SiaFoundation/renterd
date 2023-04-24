@@ -272,7 +272,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// upload two files under /foo
 	file1 := make([]byte, rhpv2.SectorSize/12)
-	file2 := make([]byte, rhpv2.SectorSize*3)
+	file2 := make([]byte, rhpv2.SectorSize/12)
 	frand.Read(file1)
 	frand.Read(file2)
 	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "foo/file1"); err != nil {
@@ -320,7 +320,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// prepare two files, a small one and a large one
 	small := make([]byte, rhpv2.SectorSize/12)
-	large := make([]byte, rhpv2.SectorSize*12)
+	large := make([]byte, rhpv2.SectorSize*3)
 
 	// upload the data
 	for _, data := range [][]byte{small, large} {

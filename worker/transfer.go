@@ -292,10 +292,6 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 	defer cancel()
 
 	// check whether we can recover the slab
-	// TODO: instead of comparing contracts to min shards, it would be more
-	// accurate to turn the contracts into a hostMap and then count the number
-	// of slabs for which we have hosts. Because just because we have minShards
-	// hosts, doesn't mean we have minShards hosts for a specific slab.
 	if len(contracts) < int(ss.MinShards) {
 		return nil, nil, errors.New("not enough hosts to recover slab")
 	}
@@ -306,11 +302,10 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 		length    uint64
 	}
 	type resp struct {
-		req        req
-		shard      []byte
-		shardIndex int
-		dur        time.Duration
-		err        error
+		req   req
+		shard []byte
+		dur   time.Duration
+		err   error
 	}
 	respChan := make(chan resp, 2*len(contracts)) // every host can send up to 2 responses
 	worker := func(r req) {
@@ -325,16 +320,14 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			defer close(doneChan)
 			c := contracts[r.hostIndex]
 			var shard *object.Sector
-			shardIndex := -1
 			for i := range ss.Shards {
 				if ss.Shards[i].Host == c.HostKey {
 					shard = &ss.Shards[i]
-					shardIndex = i
 					break
 				}
 			}
 			if shard == nil {
-				respChan <- resp{r, nil, shardIndex, 0, fmt.Errorf("host %v, err: %w", c.HostKey, errUnusedHost)}
+				respChan <- resp{r, nil, 0, fmt.Errorf("host %v, err: %w", c.HostKey, errUnusedHost)}
 				return
 			}
 
@@ -345,7 +338,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 					span.SetStatus(codes.Error, "downloading the sector failed")
 					span.RecordError(err)
 				}
-				respChan <- resp{r, buf.Bytes(), shardIndex, time.Since(start), err}
+				respChan <- resp{r, buf.Bytes(), time.Since(start), err}
 				return nil // only return the error in the response
 			}); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Errorf("withHostV3 failed when downloading sector, err: %v", err)
@@ -358,10 +351,9 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			case <-timer.C:
 				span.SetAttributes(attribute.Bool("slow", true))
 				respChan <- resp{
-					req:        r,
-					dur:        time.Since(start),
-					shardIndex: -1,
-					err:        errDownloadSectorTimeout}
+					req: r,
+					dur: time.Since(start),
+					err: errDownloadSectorTimeout}
 			case <-doneChan:
 				if !timer.Stop() {
 					<-timer.C
@@ -416,9 +408,12 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			}
 		} else {
 			timings[resp.req.hostIndex] = int64(resp.dur)
-			if len(shards[resp.shardIndex]) == 0 {
-				shards[resp.shardIndex] = resp.shard
-				rem--
+			for i := range ss.Shards {
+				if ss.Shards[i].Host == contracts[resp.req.hostIndex].HostKey && len(shards[i]) == 0 {
+					shards[i] = resp.shard
+					rem--
+					break
+				}
 			}
 		}
 	}
