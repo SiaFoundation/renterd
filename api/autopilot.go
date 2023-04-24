@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -12,6 +13,12 @@ const (
 	// blocksPerDay defines the amount of blocks that are mined in a day (one
 	// block every 10 minutes roughly)
 	blocksPerDay = 144
+)
+
+var (
+	// ErrMaxDowntimeHoursTooHigh is returned if the autopilot config is updated
+	// with a value that exceeds the maximum of 99 years.
+	ErrMaxDowntimeHoursTooHigh = errors.New("MaxDowntimeHours is too high, exceeds max value of 99 years")
 )
 
 type (
@@ -144,6 +151,13 @@ func (hgb HostGougingBreakdown) Reasons() string {
 
 func (sb HostScoreBreakdown) Score() float64 {
 	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
+}
+
+func (c AutopilotConfig) Validate() error {
+	if c.Hosts.MaxDowntimeHours > 99*365*24 {
+		return ErrMaxDowntimeHoursTooHigh
+	}
+	return nil
 }
 
 // DefaultAutopilotConfig returns a configuration with sane default values.
