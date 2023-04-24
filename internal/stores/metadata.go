@@ -1007,6 +1007,7 @@ func contracts(tx *gorm.DB, ids []types.FileContractID) (dbContracts []dbContrac
 	err = tx.
 		Model(&dbContract{}).
 		Where("fcid IN (?)", fcids).
+		Preload("Host").
 		Find(&dbContracts).
 		Error
 	return
