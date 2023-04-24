@@ -991,32 +991,39 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// build contract map
-	contracts := make(map[types.PublicKey]api.ContractMetadata)
+	availableContracts := make(map[types.PublicKey]api.ContractMetadata)
 	for _, contract := range set {
-		contracts[contract.HostKey] = contract
-	}
-
-	// create a function that returns the contracts for a given slab
-	contractsForSlab := func(s object.Slab) (c []api.ContractMetadata) {
-		for _, shard := range s.Shards {
-			if contract, exists := contracts[shard.Host]; exists {
-				c = append(c, contract)
-			}
-		}
-		return
+		availableContracts[contract.HostKey] = contract
 	}
 
 	cw := obj.Key.Decrypt(&rw, offset)
 	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
-		// fetch contracts for the slab
-		contracts := contractsForSlab(ss.Slab)
-		if len(contracts) < int(ss.MinShards) {
-			err = fmt.Errorf("not enough contracts to download the slab, %d<%d", len(contracts), ss.MinShards)
+		// fetch available hosts for the slab
+		hostMap := make(map[types.PublicKey]api.ContractMetadata)
+		availableShards := 0
+		for _, shard := range ss.Shards {
+			if _, available := availableContracts[shard.Host]; !available {
+				continue
+			}
+			availableShards++
+			hostMap[shard.Host] = availableContracts[shard.Host]
+		}
+
+		// check if enough slabs are available
+		if availableShards < int(ss.MinShards) {
+			err = fmt.Errorf("not enough available shards to download the slab, %d<%d", availableShards, ss.MinShards)
 			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
 			if i == 0 {
 				jc.Error(err, http.StatusInternalServerError)
 			}
 			return
+		}
+
+		// flatten host map to get a slice of contracts which is deduplicated
+		// already and contains only contracts relevant to the slab.
+		contracts := make([]api.ContractMetadata, 0, len(hostMap))
+		for _, c := range hostMap {
+			contracts = append(contracts, c)
 		}
 
 		// make sure consecutive slabs are downloaded from hosts that performed
