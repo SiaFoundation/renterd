@@ -945,3 +945,96 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatal("account wasn't updated")
 	}
 }
+
+// TestUploadDownloadSameHost uploads a file to the same host through different
+// contracts and tries downloading the file again.
+func TestUploadDownloadSameHost(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// add host.
+	if _, err := cluster.AddHostsBlocking(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// get wallet address.
+	renterAddress, err := cluster.Bus.WalletAddress(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac, err := cluster.Worker.ActiveContracts(context.Background(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contracts := ac.Contracts
+	if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	}
+	c := contracts[0]
+
+	// Form 2 more contracts with the same host.
+	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey(), c.HostIP, renterAddress, c.RenterFunds(), c.Revision.ValidHostPayout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := cluster.Bus.AddContract(context.Background(), rev2, c.TotalCost, c.StartHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey(), c.HostIP, renterAddress, c.RenterFunds(), c.Revision.ValidHostPayout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c3, err := cluster.Bus.AddContract(context.Background(), rev3, c.TotalCost, c.StartHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a contract set with all 3 contracts.
+	err = cluster.Bus.SetContractSet(context.Background(), "test", []types.FileContractID{c.ID, c2.ID, c3.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingContractSet, api.ContractSetSettings{
+		Set: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Upload a file.
+	data := frand.Bytes(5*rhpv2.SectorSize + 1)
+	err = cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Download the file multiple times.
+	for i := 0; i < 5; i++ {
+		buf := &bytes.Buffer{}
+		err = cluster.Worker.DownloadObject(context.Background(), buf, "foo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(buf.Bytes(), data) {
+			t.Fatal("data mismatch")
+		}
+	}
+}
