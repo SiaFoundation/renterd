@@ -367,29 +367,23 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 		span.End()
 	}
 
-	// track some shard-related info.
-	type shardInfo struct {
-		inflight    int
-		usedWorkers map[types.PublicKey]struct{}
-	}
-	shardInfos := make([]shardInfo, len(ss.Shards))
-	for i := range shardInfos {
-		shardInfos[i].usedWorkers = make(map[types.PublicKey]struct{})
+	// track which hosts have tried a shard already.
+	shardsUsedWorkers := make([]map[types.PublicKey]struct{}, len(ss.Shards))
+	for i := range ss.Shards {
+		shardsUsedWorkers[i] = make(map[types.PublicKey]struct{})
 	}
 
 	// helper to find worker for a shard.
 	inflight := 0
 	workerForShard := func(shardIndex int) int {
-		si := &shardInfos[shardIndex]
 		for hostIndex := range hosts {
 			if ss.Shards[shardIndex].Host != hosts[hostIndex].HostKey {
 				continue // host is not useful
 			}
-			if _, used := si.usedWorkers[hosts[hostIndex].HostKey]; used {
+			if _, used := shardsUsedWorkers[shardIndex][hosts[hostIndex].HostKey]; used {
 				continue // host was already used
 			}
-			si.usedWorkers[hosts[hostIndex].HostKey] = struct{}{}
-			si.inflight++
+			shardsUsedWorkers[shardIndex][hosts[hostIndex].HostKey] = struct{}{}
 			inflight++
 			return hostIndex
 		}
@@ -432,7 +426,6 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 		// only slow downloads might still be in flight
 		if !errors.Is(resp.err, errDownloadSectorTimeout) {
 			inflight--
-			shardInfos[resp.req.shardIndex].inflight--
 		}
 
 		if resp.err != nil {

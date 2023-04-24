@@ -1019,7 +1019,8 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 			return
 		}
 
-		// flatten host map
+		// flatten host map to get a slice of hosts which is deduplicated
+		// already and contains only hosts relevant to the slab.
 		hosts := make([]api.ContractMetadata, 0, len(hostMap))
 		for _, c := range hostMap {
 			hosts = append(hosts, c)
