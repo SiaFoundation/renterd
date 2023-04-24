@@ -140,9 +140,13 @@ func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 // newTestClusterWithFunding creates a new cluster without hosts that is funded
 // by mining multiple blocks if 'funding' is set.
 func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.PrivateKey, logger *zap.Logger) (*TestCluster, error) {
+	return newTestClusterCustom(dir, dbName, funding, wk, testBusCfg(), testWorkerCfg(), testApCfg(), logger)
+}
+
+// newTestClusterCustom creates a customisable cluster.
+func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey, busCfg node.BusConfig, workerCfg node.WorkerConfig, apCfg node.AutopilotConfig, logger *zap.Logger) (*TestCluster, error) {
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
-	var dialector gorm.Dialector
 	uri, user, password, _ := stores.DBConfigFromEnv()
 	if uri != "" {
 		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
@@ -155,7 +159,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 		if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error; err != nil {
 			return nil, err
 		}
-		dialector = stores.NewMySQLConnection(user, password, uri, dbName)
+		busCfg.DBDialector = stores.NewMySQLConnection(user, password, uri, dbName)
 	}
 
 	// Prepare individual dirs.
@@ -189,18 +193,11 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 	workerClient := worker.NewClient(workerAddr, workerPassword)
 
 	// Create miner.
-	miner := node.NewMiner(busClient)
+	busCfg.Miner = node.NewMiner(busClient)
 
 	// Create bus.
 	var shutdownFns []func(context.Context) error
-	b, bStopFn, err := node.NewBus(node.BusConfig{
-		DBDialector:     dialector,
-		Bootstrap:       false,
-		GatewayAddr:     "127.0.0.1:0",
-		Miner:           miner,
-		Network:         testNetwork(),
-		PersistInterval: testPersistInterval,
-	}, busDir, wk, logger)
+	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -212,14 +209,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 	shutdownFns = append(shutdownFns, busServer.Shutdown)
 
 	// Create worker.
-	w, wStopFn, err := node.NewWorker(node.WorkerConfig{
-		ID:                      "worker",
-		BusFlushInterval:        testBusFlushInterval,
-		SessionReconnectTimeout: 10 * time.Second,
-		SessionTTL:              2 * time.Minute,
-		UploadSectorTimeout:     100 * time.Millisecond,
-		UploadMaxOverdrive:      5,
-	}, busClient, wk, logger)
+	w, wStopFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -243,15 +233,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 	}
 
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := node.NewAutopilot(node.AutopilotConfig{
-		AccountsRefillInterval:   time.Second,
-		Heartbeat:                time.Second,
-		MigrationHealthCutoff:    0.99,
-		ScannerInterval:          time.Second,
-		ScannerBatchSize:         10,
-		ScannerNumThreads:        1,
-		ScannerMinRecentFailures: 5,
-	}, autopilotStore, busClient, []autopilot.Worker{workerClient}, logger)
+	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, autopilotStore, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +248,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 		dir:    dir,
 		dbName: dbName,
 		logger: logger,
-		miner:  miner,
+		miner:  busCfg.Miner,
 		wk:     wk,
 
 		Autopilot: autopilotClient,
@@ -707,4 +689,36 @@ func testNetwork() *consensus.Network {
 	n.HardforkFoundation.FailsafeAddress = types.GeneratePrivateKey().PublicKey().StandardAddress()
 
 	return n
+}
+
+func testBusCfg() node.BusConfig {
+	return node.BusConfig{
+		Bootstrap:       false,
+		GatewayAddr:     "127.0.0.1:0",
+		Network:         testNetwork(),
+		PersistInterval: testPersistInterval,
+	}
+}
+
+func testWorkerCfg() node.WorkerConfig {
+	return node.WorkerConfig{
+		ID:                      "worker",
+		BusFlushInterval:        testBusFlushInterval,
+		SessionReconnectTimeout: 10 * time.Second,
+		SessionTTL:              2 * time.Minute,
+		UploadSectorTimeout:     100 * time.Millisecond,
+		UploadMaxOverdrive:      5,
+	}
+}
+
+func testApCfg() node.AutopilotConfig {
+	return node.AutopilotConfig{
+		AccountsRefillInterval:   time.Second,
+		Heartbeat:                time.Second,
+		MigrationHealthCutoff:    0.99,
+		ScannerInterval:          time.Second,
+		ScannerBatchSize:         10,
+		ScannerNumThreads:        1,
+		ScannerMinRecentFailures: 5,
+	}
 }

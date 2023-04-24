@@ -107,7 +107,7 @@ type HostAddress struct {
 type Host struct {
 	KnownSince       time.Time          `json:"knownSince"`
 	LastAnnouncement time.Time          `json:"lastAnnouncement"`
-	PublicKey        types.PublicKey    `json:"public_key"`
+	PublicKey        types.PublicKey    `json:"publicKey"`
 	NetAddress       string             `json:"netAddress"`
 	PriceTable       HostPriceTable     `json:"priceTable"`
 	Settings         rhpv2.HostSettings `json:"settings"`

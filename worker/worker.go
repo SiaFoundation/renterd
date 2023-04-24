@@ -519,6 +519,49 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
+func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, bh uint64) (contracts []api.Contract, errs HostErrorSet) {
+	// create requests channel
+	reqs := make(chan api.ContractMetadata)
+
+	// create worker function
+	var mu sync.Mutex
+	worker := func() {
+		for metadata := range reqs {
+			rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+			mu.Lock()
+			if err != nil {
+				errs = append(errs, &HostError{HostKey: metadata.HostKey, Err: err})
+			} else {
+				contracts = append(contracts, api.Contract{
+					ContractMetadata: metadata,
+					Revision:         rev,
+				})
+			}
+			mu.Unlock()
+		}
+	}
+
+	// launch all workers
+	var wg sync.WaitGroup
+	for t := 0; t < 10 && t < len(metadatas); t++ {
+		wg.Add(1)
+		go func() {
+			worker()
+			wg.Done()
+		}()
+	}
+
+	// launch all requests
+	for _, metadata := range metadatas {
+		reqs <- metadata
+	}
+	close(reqs)
+
+	// wait until they're done
+	wg.Wait()
+	return
+}
+
 func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
@@ -809,7 +852,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
-		w.logger.Errorf("migration cancelled, err: ", api.ErrConsensusNotSynced)
+		w.logger.Errorf("migration cancelled, err: %v", api.ErrConsensusNotSynced)
 		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
 	}
@@ -1020,7 +1063,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
-		w.logger.Errorf("upload cancelled, err: ", api.ErrConsensusNotSynced)
+		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
 		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
 	}
@@ -1129,6 +1172,10 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
+	if len(busContracts) == 0 {
+		jc.Encode(api.ContractsResponse{Contracts: nil})
+		return
+	}
 
 	var hosttimeout time.Duration
 	if jc.DecodeForm("hosttimeout", (*api.ParamDuration)(&hosttimeout)) != nil {
@@ -1145,20 +1192,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, gp)
 
-	// fetch all contracts
-	var contracts []api.Contract
-	var errs HostErrorSet
-	for _, contract := range busContracts {
-		rev, err := w.FetchRevision(ctx, hosttimeout, contract, cs.BlockHeight, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
-		if err != nil {
-			errs = append(errs, &HostError{HostKey: contract.HostKey, Err: err})
-			continue
-		}
-		contracts = append(contracts, api.Contract{
-			ContractMetadata: contract,
-			Revision:         rev,
-		})
-	}
+	contracts, errs := w.fetchActiveContracts(ctx, busContracts, hosttimeout, cs.BlockHeight)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()

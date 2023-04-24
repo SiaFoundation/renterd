@@ -37,8 +37,9 @@ const (
 )
 
 var (
-	ErrHostNotFound   = errors.New("host doesn't exist in hostdb")
-	ErrNegativeOffset = errors.New("offset can not be negative")
+	ErrHostNotFound        = errors.New("host doesn't exist in hostdb")
+	ErrNegativeOffset      = errors.New("offset can not be negative")
+	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
 
 type (
@@ -526,6 +527,11 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
+	// sanity check 'maxDowntime'
+	if maxDowntime < 0 {
+		return 0, ErrNegativeMaxDowntime
+	}
+
 	// fetch all hosts outside of the transaction
 	var hosts []dbHost
 	if err := ss.db.
@@ -782,15 +788,15 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			// this mostly to keep things simple, host scans should be performed
 			// frequently enough for this not to be a problem
 			if isPriceTableUpdate && interaction.Success {
-				var hpt hostdb.HostPriceTable
-				if err := json.Unmarshal(interaction.Result, &hpt); err != nil {
+				var ptr hostdb.PriceTableUpdateResult
+				if err := json.Unmarshal(interaction.Result, &ptr); err != nil {
 					return err
 				}
 
-				host.PriceTable = convertHostPriceTable(hpt.HostPriceTable)
+				host.PriceTable = convertHostPriceTable(ptr.PriceTable.HostPriceTable)
 				host.PriceTableExpiry = sql.NullTime{
-					Time:  hpt.Expiry,
-					Valid: hpt.Expiry != time.Time{},
+					Time:  ptr.PriceTable.Expiry,
+					Valid: ptr.PriceTable.Expiry != time.Time{},
 				}
 			}
 
@@ -887,6 +893,13 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		}
 	}
 	ss.persistTimer = time.AfterFunc(10*time.Second, func() {
+		ss.mu.Lock()
+		if ss.closed {
+			ss.mu.Unlock()
+			return
+		}
+		ss.mu.Unlock()
+
 		ss.persistMu.Lock()
 		defer ss.persistMu.Unlock()
 		if err := ss.applyUpdates(true); err != nil {

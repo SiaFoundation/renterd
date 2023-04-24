@@ -43,6 +43,7 @@ type (
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
+		closed       bool
 
 		knownContracts map[types.FileContractID]struct{}
 	}
@@ -267,7 +268,16 @@ func (s *SQLStore) Close() error {
 	if err != nil {
 		return err
 	}
-	return db.Close()
+
+	err = db.Close()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {

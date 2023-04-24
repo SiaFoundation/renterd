@@ -166,6 +166,9 @@ func (ap *Autopilot) Config() api.AutopilotConfig {
 
 // SetConfig updates the autopilot's configuration.
 func (ap *Autopilot) SetConfig(c api.AutopilotConfig) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
 	return ap.store.SetConfig(c)
 }
 

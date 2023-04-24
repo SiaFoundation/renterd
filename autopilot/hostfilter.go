@@ -34,8 +34,8 @@ var (
 	errHostRedundantIP           = errors.New("host has redundant IP")
 	errHostPriceGouging          = errors.New("host is price gouging")
 	errHostNotAcceptingContracts = errors.New("host is not accepting contracts")
+	errHostNotCompletingScan     = errors.New("host is not completing scan")
 	errHostNotAnnounced          = errors.New("host is not announced")
-	errHostNotScanned            = errors.New("host has not been scanned")
 
 	errContractOutOfCollateral   = errors.New("contract is out of collateral")
 	errContractOutOfFunds        = errors.New("contract is out of funds")
@@ -52,7 +52,7 @@ type unusableHostResult struct {
 	gouging               uint64
 	notacceptingcontracts uint64
 	notannounced          uint64
-	notscanned            uint64
+	notcompletingscan     uint64
 	unknown               uint64
 
 	// gougingBreakdown is mostly ignored, we overload the unusableHostResult
@@ -82,8 +82,8 @@ func newUnusableHostResult(errs []error, gougingBreakdown api.HostGougingBreakdo
 			u.notacceptingcontracts++
 		} else if errors.Is(err, errHostNotAnnounced) {
 			u.notannounced++
-		} else if errors.Is(err, errHostNotScanned) {
-			u.notscanned++
+		} else if errors.Is(err, errHostNotCompletingScan) {
+			u.notcompletingscan++
 		} else {
 			u.unknown++
 		}
@@ -121,8 +121,8 @@ func (u unusableHostResult) reasons() []string {
 	if u.notannounced > 0 {
 		reasons = append(reasons, errHostNotAnnounced.Error())
 	}
-	if u.notscanned > 0 {
-		reasons = append(reasons, errHostNotScanned.Error())
+	if u.notcompletingscan > 0 {
+		reasons = append(reasons, errHostNotCompletingScan.Error())
 	}
 	if u.unknown > 0 {
 		reasons = append(reasons, "unknown")
@@ -138,7 +138,7 @@ func (u *unusableHostResult) merge(other unusableHostResult) {
 	u.gouging += other.gouging
 	u.notacceptingcontracts += other.notacceptingcontracts
 	u.notannounced += other.notannounced
-	u.notscanned += other.notscanned
+	u.notcompletingscan += other.notcompletingscan
 	u.unknown += other.unknown
 
 	// scoreBreakdown is not merged
@@ -154,8 +154,8 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 		"redundantip", u.redundantip,
 		"gouging", u.gouging,
 		"notacceptingcontracts", u.notacceptingcontracts,
+		"notcompletingscan", u.notcompletingscan,
 		"notannounced", u.notannounced,
-		"notscanned", u.notscanned,
 		"unknown", u.unknown,
 	}
 	for i := 0; i < len(values); i += 2 {
@@ -181,7 +181,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 	if !h.IsAnnounced() {
 		errs = append(errs, errHostNotAnnounced)
 	} else if !h.Scanned {
-		errs = append(errs, errHostNotScanned)
+		errs = append(errs, errHostNotCompletingScan)
 	} else {
 		// online check
 		if !h.IsOnline() {
