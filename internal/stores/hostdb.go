@@ -893,6 +893,13 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		}
 	}
 	ss.persistTimer = time.AfterFunc(10*time.Second, func() {
+		ss.mu.Lock()
+		if ss.closed {
+			ss.mu.Unlock()
+			return
+		}
+		ss.mu.Unlock()
+
 		ss.persistMu.Lock()
 		defer ss.persistMu.Unlock()
 		if err := ss.applyUpdates(true); err != nil {

@@ -18,8 +18,14 @@ func TestHostPruning(t *testing.T) {
 
 	ctx := context.Background()
 
+	// update the min scan interval to ensure the scanner scans all hosts on
+	// every iteration of the autopilot loop, this ensures we try and remove
+	// offline hosts in every autopilot loop
+	apCfg := testApCfg()
+	apCfg.ScannerInterval = 0
+
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	cluster, err := newTestClusterCustom(t.TempDir(), t.Name(), true, types.GeneratePrivateKey(), testBusCfg(), testWorkerCfg(), apCfg, newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +59,7 @@ func TestHostPruning(t *testing.T) {
 	// create a helper function that waits for an autopilot loop to finish
 	waitForAutopilotLoop := func() {
 		var nTriggered int
-		err := Retry(50, 100*time.Millisecond, func() error {
+		err := Retry(10, 500*time.Millisecond, func() error {
 			triggered, err := a.Trigger()
 			if err != nil {
 				t.Fatal(err)
