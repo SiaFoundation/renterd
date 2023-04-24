@@ -1070,6 +1070,11 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 // NOTE: this function archives the contracts without setting a renewed ID
 func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
 	for _, contract := range contracts {
+		// sanity check the host is populated
+		if contract.Host.ID == 0 {
+			return fmt.Errorf("host not populated for contract %v", contract.FCID)
+		}
+
 		// create a copy in the archive
 		if err := tx.Create(&dbArchivedContract{
 			Host:   publicKey(contract.Host.PublicKey),
