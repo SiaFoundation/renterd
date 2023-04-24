@@ -642,7 +642,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		// fetch price table on the fly
 		host.PriceTable, err = c.priceTable(ctx, w, host)
 		if err != nil {
-			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host, err)
+			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host.PublicKey, err)
 			continue
 		}
 
