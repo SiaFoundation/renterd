@@ -397,6 +397,9 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 	offset, length := ss.SectorRegion()
 	launchWorker := func(r req) {
 		hostIndex := workerForShard(r.shardIndex)
+		if hostIndex == -1 {
+			return
+		}
 		go worker(hostIndex, req{
 			offset:     offset,
 			length:     length,
