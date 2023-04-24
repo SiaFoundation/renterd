@@ -55,13 +55,13 @@ var (
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
 	DefaultGougingSettings = GougingSettings{
-		MinMaxCollateral:      types.Siacoins(10),                   // at least up to 10 SC per contract
-		MaxRPCPrice:           types.Siacoins(1).Div64(1000),        // 1mS per RPC
-		MaxContractPrice:      types.Siacoins(15),                   // 15 SC per contract
-		MaxDownloadPrice:      types.Siacoins(3000),                 // 3000 SC per 1 TiB
-		MaxUploadPrice:        types.Siacoins(3000),                 // 3000 SC per 1 TiB
-		MaxStoragePrice:       types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
-		HostBlockHeightLeeway: 6,                                    // 6 blocks
+		MinMaxCollateral:      types.Siacoins(10),                                  // at least up to 10 SC per contract
+		MaxRPCPrice:           types.Siacoins(1).Div64(1000),                       // 1mS per RPC
+		MaxContractPrice:      types.Siacoins(15),                                  // 15 SC per contract
+		MaxDownloadPrice:      types.Siacoins(3000),                                // 3000 SC per 1 TiB
+		MaxUploadPrice:        types.Siacoins(3000),                                // 3000 SC per 1 TiB
+		MaxStoragePrice:       types.Siacoins(3000).Div64(1 << 40).Div64(144 * 30), // 3000 SC per TiB per month
+		HostBlockHeightLeeway: 6,                                                   // 6 blocks
 	}
 )
 

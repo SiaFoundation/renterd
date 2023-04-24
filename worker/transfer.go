@@ -58,18 +58,18 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	type req struct {
 		finishedCtx context.Context
 		finishedFn  context.CancelFunc
-		hostIndex   int
 		shardIndex  int
 	}
 	type resp struct {
-		req  req
-		root types.Hash256
-		err  error
+		hostIndex int
+		req       req
+		root      types.Hash256
+		err       error
 	}
 	respChan := make(chan resp, 2*len(contracts)) // every host can send up to 2 responses
-	worker := func(r req) {
+	worker := func(r req, hostIndex int) {
 		doneChan := make(chan struct{})
-		contract := contracts[r.hostIndex]
+		contract := contracts[hostIndex]
 
 		// Trace the upload.
 		ctx, span := tracing.Tracer.Start(r.finishedCtx, "upload-request")
@@ -81,7 +81,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 
 			lockID, err := locker.AcquireContract(ctx, contract.ID, lockingPriorityUpload, time.Minute)
 			if err != nil {
-				respChan <- resp{r, types.Hash256{}, err}
+				respChan <- resp{hostIndex, r, types.Hash256{}, err}
 				span.SetStatus(codes.Error, "acquiring the contract failed")
 				span.RecordError(err)
 				return
@@ -94,7 +94,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 					span.SetStatus(codes.Error, "uploading the sector failed")
 					span.RecordError(err)
 				}
-				res = resp{r, root, err}
+				res = resp{hostIndex, r, root, err}
 				return nil // only return the error in the response
 			}); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Errorf("withHostV2 failed when uploading sector, err: %v", err)
@@ -113,8 +113,9 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			case <-timer.C:
 				span.SetAttributes(attribute.Bool("slow", true))
 				respChan <- resp{
-					req: r,
-					err: errUploadSectorTimeout}
+					hostIndex: hostIndex,
+					req:       r,
+					err:       errUploadSectorTimeout}
 			case <-doneChan:
 				if !timer.Stop() {
 					<-timer.C
@@ -160,7 +161,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		if hostIndex == -1 {
 			return false
 		}
-		go worker(req{r.finishedCtx, r.finishedFn, hostIndex, r.shardIndex})
+		go worker(r, hostIndex)
 		inflight++
 		return true
 	}
@@ -168,7 +169,11 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	// spawn workers and send initial requests
 	for i := range shards {
 		finishedCtx, finishedFn := context.WithCancel(ctx)
-		if !handleRequest(req{finishedCtx, finishedFn, -1, i}) {
+		if !handleRequest(req{
+			finishedCtx: finishedCtx,
+			finishedFn:  finishedFn,
+			shardIndex:  i,
+		}) {
 			panic("failed to launch worker for initial shard")
 		}
 	}
@@ -177,37 +182,35 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	var errs HostErrorSet
 	sectors := make([]object.Sector, len(shards))
 	rem := len(shards)
-	var toOverdrive []req
-	var slowRequests []req
+	var toLaunch []req
+	var slowResponses []resp
 	for inflight > 0 {
 		resp := <-respChan
 		if !errors.Is(resp.err, errUploadSectorTimeout) {
 			inflight--
 		}
 
-		// Decide whether to reuse the host or not. We only do that if the
-		// worker finished executing and failed due to the request being
-		// finished already.
-		if resp.err != nil && !errors.Is(resp.err, errUploadSectorTimeout) {
-			// Remember the error and reuse the host if the request
-			// was already finished.
-			errs = append(errs, &HostError{contracts[resp.req.hostIndex].HostKey, resp.err})
-			if isReqFinished(resp.req) {
-				hostUsed[resp.req.hostIndex] = false
-			}
-		}
-
 		if errors.Is(resp.err, errUploadSectorTimeout) {
 			// for each slow host we eventually launch an overdrive worker
-			toOverdrive = append(toOverdrive, resp.req)
-			slowRequests = append(slowRequests, resp.req)
+			toLaunch = append(toLaunch, resp.req)
+			slowResponses = append(slowResponses, resp)
 		} else if resp.err != nil {
-			// host failed, replace it.
-			handleRequest(resp.req)
+			// host failed.
+			errs = append(errs, &HostError{contracts[resp.hostIndex].HostKey, resp.err})
+			if isReqFinished(resp.req) {
+				// if the request was finished, we can reuse the host since it
+				// probably failed due to the other host being faster.
+				hostUsed[resp.hostIndex] = false
+			} else if !handleRequest(resp.req) {
+				// if the request wasn't finished we need to replace it. If
+				// replacing it failed since no worker is available, we add the
+				// request to the front of the overdrive slice.
+				toLaunch = append([]req{resp.req}, toLaunch...)
+			}
 		} else if sectors[resp.req.shardIndex].Root == (types.Hash256{}) {
 			// host succeeded.
 			sectors[resp.req.shardIndex] = object.Sector{
-				Host: contracts[resp.req.hostIndex].HostKey,
+				Host: contracts[resp.hostIndex].HostKey,
 				Root: resp.root,
 			}
 			rem--
@@ -215,14 +218,17 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			if rem == 0 {
 				break // done
 			}
+		} else {
+			// host succeeded but with a duplicate piece. Reuse the host.
+			hostUsed[resp.hostIndex] = false
 		}
 
 		// Launch overdrive workers as needed.
-		for inflight-rem < maxOverdrive && len(toOverdrive) > 0 {
-			if !handleRequest(toOverdrive[0]) {
+		for inflight-rem < maxOverdrive && len(toLaunch) > 0 {
+			if !handleRequest(toLaunch[0]) {
 				break
 			}
-			toOverdrive = toOverdrive[1:]
+			toLaunch = toLaunch[1:]
 		}
 	}
 
@@ -237,13 +243,13 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 	// collect slow host indices
 	var slowHosts []int
 	usedHosts := make(map[int]struct{})
-	for _, sr := range slowRequests {
-		_, found := usedHosts[sr.hostIndex]
+	for _, resp := range slowResponses {
+		_, found := usedHosts[resp.hostIndex]
 		if found {
 			continue
 		}
-		usedHosts[sr.hostIndex] = struct{}{}
-		slowHosts = append(slowHosts, sr.hostIndex)
+		usedHosts[resp.hostIndex] = struct{}{}
+		slowHosts = append(slowHosts, resp.hostIndex)
 	}
 	return sectors, slowHosts, nil
 }

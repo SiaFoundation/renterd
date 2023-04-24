@@ -189,7 +189,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		}
 
 		// redundant IP check
-		if !cfg.Hosts.IgnoreRedundantIPs && f.isRedundantIP(h) {
+		if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(h) {
 			errs = append(errs, errHostRedundantIP)
 		}
 
