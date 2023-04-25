@@ -202,12 +202,17 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		gougingBreakdown = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
 		if gougingBreakdown.Gouging() {
 			errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown.Reasons()))
-		}
-
-		// perform scoring checks
-		scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy(), gougingBreakdown.Gouging())
-		if scoreBreakdown.Score() < minScore {
-			errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
+		} else {
+			// perform scoring checks
+			//
+			// NOTE: only perform these scoring checks if we know the host is
+			// not gouging, this because the core package does not have overflow
+			// checks in its cost calculations needed to calculate the period
+			// cost
+			scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy())
+			if scoreBreakdown.Score() < minScore {
+				errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
+			}
 		}
 	}
 
