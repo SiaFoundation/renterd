@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -579,7 +580,7 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 		) AS i
 	) AS m
 	GROUP BY name
-	LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, "/", len(path)+1, path+"%", limit, offset)
+	LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, "/", utf8.RuneCountInString(path)+1, path+"%", limit, offset)
 
 	// apply prefix
 	if prefix != "" {

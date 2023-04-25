@@ -275,10 +275,10 @@ func TestUploadDownloadBasic(t *testing.T) {
 	file2 := make([]byte, rhpv2.SectorSize/12)
 	frand.Read(file1)
 	frand.Read(file2)
-	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "foo/file1"); err != nil {
+	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "fileś/file1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.UploadObject(context.Background(), bytes.NewReader(file2), "foo/file2"); err != nil {
+	if err := w.UploadObject(context.Background(), bytes.NewReader(file2), "fileś/file2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -292,7 +292,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// fetch entries with "file" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "foo/", "file", 0, -1)
+	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", "file", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,8 +300,8 @@ func TestUploadDownloadBasic(t *testing.T) {
 		t.Fatal("expected two entry to be returned", len(entries))
 	}
 
-	// fetch entries with "foo" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "foo/", "foo", 0, -1)
+	// fetch entries with "fileś" prefix
+	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", "foo", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
