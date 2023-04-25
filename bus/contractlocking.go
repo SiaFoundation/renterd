@@ -59,6 +59,7 @@ type contractLock struct {
 }
 
 type lockCandidate struct {
+	lockID   uint64
 	wake     chan struct{}
 	priority int
 	timedOut <-chan struct{}
@@ -131,6 +132,7 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 	// Someone is holding the lock. Add ourselves to the queue.
 	wakeChan := make(chan struct{})
 	heap.Push(lock.queue, &lockCandidate{
+		lockID:   ourLockID,
 		wake:     wakeChan,
 		priority: priority,
 		timedOut: ctx.Done(),
@@ -145,11 +147,9 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
 
-	if lock.heldByID != 0 {
-		lock.heldByID = 0 // fix the assertion
-		panic("lock should be released after being woken up")
+	if lock.heldByID != ourLockID {
+		panic("lock should be acquired by us after being woken up")
 	}
-	lock.heldByID = ourLockID
 	lock.setTimer(l, ourLockID, id, d)
 	return ourLockID, nil
 }
@@ -196,6 +196,7 @@ func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 				return false // timed out already
 			}
 		}() {
+			lock.heldByID = next.lockID // acquire lock for woken up thread
 			return nil
 		}
 	}
