@@ -398,7 +398,6 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 					continue // host was already used
 				}
 				shardInfos[shardIndex].usedHosts[contracts[hostIndex].HostKey] = struct{}{}
-				inflight++
 				shardInfos[shardIndex].inflight++
 				return hostIndex, shardIndex
 			}
@@ -426,6 +425,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 		if !launchWorker() {
 			panic("should be able to launch minShards workers")
 		}
+		inflight++
 	}
 
 	// collect responses
@@ -473,6 +473,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			if !launchWorker() {
 				break
 			}
+			inflight++
 		}
 	}
 	if rem > 0 {
