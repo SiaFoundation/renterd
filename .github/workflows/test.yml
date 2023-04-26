@@ -45,9 +45,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: n8maninger/action-golang-test@v1
         env:
-          RENTER_DB_URI: 127.0.0.1:3800 
-          RENTER_DB_USER: root
-          RENTER_DB_PASSWORD: test
+          RENTERD_DB_URI: 127.0.0.1:3800
+          RENTERD_DB_USER: root
+          RENTERD_DB_PASSWORD: test
         with:
           package: "./internal/testing/..."
           args: "-race;-tags='testing';-timeout=900s"
