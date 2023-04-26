@@ -34,6 +34,10 @@ const (
 	// messages.
 	defaultWithdrawalExpiryBlocks = 6
 
+	// idleMuxKeepaliveDuration is the amouunt of time we keep a mux around
+	// before closing it when it is not being used.
+	idleMuxKeepaliveDuration = time.Minute
+
 	// responseLeeway is the amount of leeway given to the maxLen when we read
 	// the response in the ReadSector RPC
 	responseLeeway = 1 << 12 // 4 KiB
@@ -55,9 +59,10 @@ var (
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
-	mu       sync.Mutex
-	refCount uint64
-	t        *rhpv3.Transport
+	mu         sync.Mutex
+	refCount   uint64
+	t          *rhpv3.Transport
+	closeTimer *time.Timer
 }
 
 // Close decrements the refcounter and closes the transport if the refcounter
@@ -69,11 +74,20 @@ func (t *transportV3) Close() error {
 	// Decrement refcounter.
 	t.refCount--
 
-	// Close the transport if the refcounter is zero.
+	// If the refcounter reached 0, prepare a timer to close the transport after
+	// some idle time.
 	if t.refCount == 0 {
-		err := t.t.Close()
-		t.t = nil
-		return err
+		t.closeTimer = time.AfterFunc(idleMuxKeepaliveDuration, func() {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			// Check if the refcounter is still 0. Due to unfortunate timing it
+			// might have increased right after the timer fired.
+			if t.t != nil && t.refCount == 0 {
+				t.t.Close()
+				t.t = nil
+			}
+		})
+		return nil
 	}
 	return nil
 }
@@ -131,6 +145,13 @@ func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, h
 
 	// Increment the refcounter upon success.
 	t.refCount++
+
+	// Stop and drain the close timer if it's running.
+	t.closeTimer.Stop()
+	select {
+	case <-t.closeTimer.C:
+	default:
+	}
 	return t, nil
 }
 
