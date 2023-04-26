@@ -56,7 +56,7 @@ var (
 // FetchRevision fetches the latest revision of a contract and uses an account
 // as the primary payment method. If the account balance is insufficient, it
 // falls back to using the contract as a payment method.
-func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contract api.ContractMetadata, bh uint64, lockPriority int, lockDuration time.Duration) (types.FileContractRevision, error) {
+func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contract api.ContractMetadata, bh uint64, lockPriority int) (types.FileContractRevision, error) {
 	timeoutCtx := func() (context.Context, context.CancelFunc) {
 		if timeout > 0 {
 			return context.WithTimeout(ctx, timeout)
@@ -74,16 +74,10 @@ func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contr
 		return rev, nil
 	}
 
-	// Adjust the lockDuration if FetchRevision is intended to time out before
-	// the full lock duration anyway.
-	if timeout != 0 && timeout < lockDuration {
-		lockDuration = timeout
-	}
-
 	// Fall back to using the contract to pay for the revision.
 	ctx, cancel = timeoutCtx()
 	defer cancel()
-	contractLock, err := w.AcquireContract(ctx, contract.ID, lockPriority, lockDuration)
+	contractLock, err := w.AcquireContract(ctx, contract.ID, lockPriority)
 	if err != nil {
 		return types.FileContractRevision{}, err
 	}

@@ -7,7 +7,6 @@ import (
 	"io"
 	"sync"
 	"testing"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -84,7 +83,7 @@ func (r *mockReleaser) Release(ctx context.Context) error {
 	return nil
 }
 
-func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lock contractReleaser, err error) {
+func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (lock contractReleaser, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.acquired++
