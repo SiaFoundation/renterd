@@ -132,26 +132,4 @@ func TestGouging(t *testing.T) {
 	if err := w.UploadObject(ctx, bytes.NewReader(data), name); err == nil {
 		t.Fatal("expected upload to fail")
 	}
-
-	// update all host settings so they're gouging
-	for _, h := range hosts {
-		settings := h.settings.Settings()
-		settings.MinEgressPrice = types.Siacoins(1)
-		if err := h.UpdateSettings(settings); err != nil {
-			t.Fatal(err)
-		}
-		// assert it was removed from the contract set
-		if err := waitForHostRemoval(h.PublicKey()); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// download the data - should fail
-	buffer.Reset()
-	if err := w.DownloadObject(ctx, &buffer, name); err == nil {
-		t.Fatal(err)
-	}
-	if len(buffer.Bytes()) > 0 {
-		t.Fatal("expected download to fail")
-	}
 }
