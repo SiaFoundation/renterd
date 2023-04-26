@@ -53,6 +53,113 @@ var (
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 )
 
+// transportV3 is a reference-counted wrapper for rhpv3.Transport.
+type transportV3 struct {
+	mu       sync.Mutex
+	refCount uint64
+	t        *rhpv3.Transport
+}
+
+// Close decrements the refcounter and closes the transport if the refcounter
+// reaches 0.
+func (t *transportV3) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Decrement refcounter.
+	t.refCount--
+
+	// Close the transport if the refcounter is zero.
+	if t.refCount == 0 {
+		err := t.t.Close()
+		t.t = nil
+		return err
+	}
+	return nil
+}
+
+// DialStream dials a new stream on the transport.
+func (t *transportV3) DialStream() (*rhpv3.Stream, error) {
+	t.mu.Lock()
+	transport := t.t
+	t.mu.Unlock()
+	if transport == nil {
+		return nil, errors.New("transport closed")
+	}
+	return transport.DialStream(), nil
+}
+
+// transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
+type transportPoolV3 struct {
+	mu   sync.Mutex
+	pool map[string]*transportV3
+}
+
+func newTransportPoolV3() *transportPoolV3 {
+	return &transportPoolV3{
+		pool: make(map[string]*transportV3),
+	}
+}
+
+func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*transportV3, error) {
+	// Get or create a transport for the given siamux address.
+	p.mu.Lock()
+	t, found := p.pool[siamuxAddr]
+	if !found {
+		t = &transportV3{}
+		p.pool[siamuxAddr] = t
+	}
+
+	// Lock the transport and increment its refcounter.
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Unlock the pool now that the transport is locked.
+	p.mu.Unlock()
+
+	// Init the transport if necessary.
+	if t.t == nil {
+		conn, err := dial(ctx, siamuxAddr, hostKey)
+		if err != nil {
+			return nil, err
+		}
+		t.t, err = rhpv3.NewRenterTransport(conn, hostKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Increment the refcounter upon success.
+	t.refCount++
+	return t, nil
+}
+
+func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(*transportV3) error) (err error) {
+	t, err := p.newTransport(ctx, siamuxAddr, hostKey)
+	if err != nil {
+		return err
+	}
+	var once sync.Once
+	onceClose := func() { t.Close() }
+
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			once.Do(onceClose)
+		}
+	}()
+	defer func() {
+		close(done)
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+	}()
+	defer once.Do(onceClose)
+	return fn(t)
+}
+
 // FetchRevision fetches the latest revision of a contract and uses an account
 // as the primary payment method. If the account balance is insufficient, it
 // falls back to using the contract as a payment method.
