@@ -73,18 +73,26 @@ type mockContractLocker struct {
 	released int
 }
 
-func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.acquired++
+type noOpLocker struct{}
+
+func (l *noOpLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	return 0, nil
 }
 
-func (l *mockContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+func (l *noOpLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+	return nil
+}
+
+func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lock *contractLock, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.released++
-	return nil
+	l.acquired++
+	return &contractLock{
+		lockID: 0,
+		fcid:   fcid,
+		d:      d,
+		locker: &noOpLocker{},
+	}, nil
 }
 
 type mockStoreProvider struct {

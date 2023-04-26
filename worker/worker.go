@@ -197,6 +197,10 @@ type AccountStore interface {
 }
 
 type contractLocker interface {
+	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (_ *contractLock, err error)
+}
+
+type ContractLocker interface {
 	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
 	ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error)
 }
@@ -204,7 +208,7 @@ type contractLocker interface {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	AccountStore
-	contractLocker
+	ContractLocker
 
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
@@ -403,15 +407,15 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 
 func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
+	contractLock, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration)
+	if err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
-	} else {
-		defer func() {
-			if err := w.ReleaseContract(ctx, contractID, lockID); err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
-			}
-		}()
 	}
+	defer func() {
+		if err := contractLock.Release(ctx); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
+		}
+	}()
 
 	// fetch contract revision
 	rev, err := w.FetchRevisionWithContract(ctx, hk, siamuxAddr, contractID)
@@ -1135,7 +1139,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 		// upload the slab
 		start := time.Now()
-		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
+		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, w, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
 		}
@@ -1316,25 +1320,14 @@ func (w *worker) flushInteractions() {
 	w.interactionsFlushTimer = nil
 }
 
-// tracedContractLocker is a helper type that wraps a contractLocker and adds tracing to its methods.
-type tracedContractLocker struct {
-	l contractLocker
+type contractLock struct {
+	lockID uint64
+	fcid   types.FileContractID
+	d      time.Duration
+	locker ContractLocker
 }
 
-func (l *tracedContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
-	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
-	defer span.End()
-	lockID, err = l.l.AcquireContract(ctx, fcid, priority, d)
-	if err != nil {
-		span.SetStatus(codes.Error, "failed to acquire contract")
-		span.RecordError(err)
-	}
-	span.SetAttributes(attribute.Stringer("contract", fcid))
-	span.SetAttributes(attribute.Int("priority", priority))
-	return
-}
-
-func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+func (cl *contractLock) Release(ctx context.Context) error {
 	_, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
 	defer span.End()
 
@@ -1346,21 +1339,29 @@ func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.F
 	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
 
 	// Release the contract.
-	err = l.l.ReleaseContract(timeoutCtx, fcid, lockID)
+	err := cl.locker.ReleaseContract(timeoutCtx, cl.fcid, cl.lockID)
 	if err != nil {
 		span.SetStatus(codes.Error, "failed to release contract")
 		span.RecordError(err)
 	}
+	span.SetAttributes(attribute.Stringer("contract", cl.fcid))
+	return err
+}
+
+func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (_ *contractLock, err error) {
+	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
+	defer span.End()
+	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, d)
+	if err != nil {
+		span.SetStatus(codes.Error, "failed to acquire contract")
+		span.RecordError(err)
+	}
 	span.SetAttributes(attribute.Stringer("contract", fcid))
-	return
-}
-
-func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
-	return (&tracedContractLocker{w.bus}).AcquireContract(ctx, fcid, priority, d)
-}
-
-func (w *worker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
-	return (&tracedContractLocker{w.bus}).ReleaseContract(ctx, fcid, lockID)
+	span.SetAttributes(attribute.Int("priority", priority))
+	return &contractLock{
+		lockID: lockID,
+		d:      d,
+	}, nil
 }
 
 func isErrDuplicateTransactionSet(err error) bool {

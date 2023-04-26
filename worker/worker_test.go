@@ -24,19 +24,19 @@ func (l *contextCheckingLocker) ReleaseContract(ctx context.Context, fcid types.
 	return nil
 }
 
-// TestReleaseContract is a test to verify that calling `ReleaseContract` on a
-// tracedContractLocker with an already cancelled context will not fail.
+// TestReleaseContract is a test to verify that calling `Release` on a
+// contractLock with an already cancelled context will not fail.
 func TestReleaseContract(t *testing.T) {
 	t.Parallel()
 
-	l := &tracedContractLocker{
-		l: &contextCheckingLocker{},
+	l := &contractLock{
+		locker: &contextCheckingLocker{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := l.ReleaseContract(ctx, types.FileContractID{}, 0); err != nil {
+	if err := l.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -395,6 +395,15 @@ func (c *Client) AcquireContract(ctx context.Context, fcid types.FileContractID,
 	return
 }
 
+// ContractLockKeepalive extends the duration on an already acquired lock.
+func (c *Client) ContractLockKeepalive(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/keepalive", fcid), api.ContractKeepaliveRequest{
+		Duration: api.ParamDuration(d),
+		LockID:   lockID,
+	}, nil)
+	return
+}
+
 // ReleaseContract releases a contract that was previously acquired using AcquireContract.
 func (c *Client) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/release", fcid), api.ContractReleaseRequest{
