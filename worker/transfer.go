@@ -601,11 +601,9 @@ func migrateSlab(ctx context.Context, sp storeProvider, s *object.Slab, dlContra
 		return nil
 	}
 
-	// perform some sanity checks
+	// perform some sanity check
 	if len(s.Shards)-len(shardIndices) < int(s.MinShards) {
 		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
-	} else if len(shardIndices) > len(ulContracts) {
-		return errors.New("not enough hosts to migrate shard")
 	}
 
 	// download + reconstruct slab
