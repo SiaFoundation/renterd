@@ -7,7 +7,6 @@ import (
 	"io"
 	"sync"
 	"testing"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -73,18 +72,24 @@ type mockContractLocker struct {
 	released int
 }
 
-func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+type mockReleaser struct {
+	l *mockContractLocker
+}
+
+func (r *mockReleaser) Release(ctx context.Context) error {
+	r.l.mu.Lock()
+	defer r.l.mu.Unlock()
+	r.l.released++
+	return nil
+}
+
+func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (lock contractReleaser, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.acquired++
-	return 0, nil
-}
-
-func (l *mockContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.released++
-	return nil
+	return &mockReleaser{
+		l: l,
+	}, nil
 }
 
 type mockStoreProvider struct {

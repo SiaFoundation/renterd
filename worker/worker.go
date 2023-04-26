@@ -44,12 +44,6 @@ const (
 	lockingPrioritySyncing                = 20
 	lockingPriorityUpload                 = 1 // lowest
 
-	lockingDurationActiveContractRevision = time.Minute
-	lockingDurationRenew                  = time.Minute
-	lockingDurationPriceTable             = 30 * time.Second
-	lockingDurationFunding                = 30 * time.Second
-	lockingDurationSyncing                = 30 * time.Second
-
 	queryStringParamContractSet = "contractset"
 	queryStringParamMinShards   = "minshards"
 	queryStringParamTotalShards = "totalshards"
@@ -196,15 +190,24 @@ type AccountStore interface {
 	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 }
 
+type contractReleaser interface {
+	Release(context.Context) error
+}
+
 type contractLocker interface {
+	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error)
+}
+
+type ContractLocker interface {
 	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
+	KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error)
 	ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error)
 }
 
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	AccountStore
-	contractLocker
+	ContractLocker
 
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
@@ -285,10 +288,11 @@ type worker struct {
 
 	contractSpendingRecorder *contractSpendingRecorder
 
-	downloadSectorTimeout time.Duration
-	uploadSectorTimeout   time.Duration
-	downloadMaxOverdrive  int
-	uploadMaxOverdrive    int
+	contractLockingDuration time.Duration
+	downloadSectorTimeout   time.Duration
+	uploadSectorTimeout     time.Duration
+	downloadMaxOverdrive    int
+	uploadMaxOverdrive      int
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
@@ -375,17 +379,17 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, lockDuration time.Duration, fn func(revision types.FileContractRevision) error) error {
+func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	if lockID, err := w.AcquireContract(ctx, contractID, lockPriority, lockDuration); err != nil {
+	contractLock, err := w.AcquireContract(ctx, contractID, lockPriority)
+	if err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
-	} else {
-		defer func() {
-			if err := w.ReleaseContract(ctx, contractID, lockID); err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
-			}
-		}()
 	}
+	defer func() {
+		if err := contractLock.Release(ctx); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
+		}
+	}()
 
 	// fetch contract revision
 	rev, err := w.FetchRevisionWithContract(ctx, hk, siamuxAddr, contractID)
@@ -502,7 +506,7 @@ func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.Contr
 	var mu sync.Mutex
 	worker := func() {
 		for metadata := range reqs {
-			rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision, lockingDurationActiveContractRevision)
+			rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision)
 			mu.Lock()
 			if err != nil {
 				errs = append(errs, &HostError{HostKey: metadata.HostKey, Err: err})
@@ -729,7 +733,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevisionV3(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, lockingDurationFunding, func(revision types.FileContractRevision) (err error) {
+	jc.Check("couldn't fund account", w.withRevisionV3(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision types.FileContractRevision) (err error) {
 		err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
@@ -807,7 +811,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, up.GougingParams)
 
 	// sync the account
-	jc.Check("couldn't sync account", w.withRevisionV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, lockingDurationSyncing, func(revision types.FileContractRevision) error {
+	jc.Check("couldn't sync account", w.withRevisionV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision types.FileContractRevision) error {
 		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
 	}))
 }
@@ -1109,7 +1113,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 		// upload the slab
 		start := time.Now()
-		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, &tracedContractLocker{w.bus}, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
+		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, w, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
 		for _, h := range slowHosts {
 			slow[contracts[h].HostKey]++
 		}
@@ -1201,19 +1205,20 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive int, l *zap.Logger) *worker {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive int, l *zap.Logger) *worker {
 	w := &worker{
-		id:                    id,
-		bus:                   b,
-		pool:                  newSessionPool(sessionLockTimeout, sessionReconectTimeout, sessionTTL),
-		masterKey:             masterKey,
-		busFlushInterval:      busFlushInterval,
-		downloadSectorTimeout: downloadSectorTimeout,
-		uploadSectorTimeout:   uploadSectorTimeout,
-		downloadMaxOverdrive:  maxDownloadOverdrive,
-		uploadMaxOverdrive:    maxUploadOverdrive,
-		logger:                l.Sugar().Named("worker").Named(id),
-		transportPoolV3:       newTransportPoolV3(),
+		contractLockingDuration: contractLockingDuration,
+		id:                      id,
+		bus:                     b,
+		pool:                    newSessionPool(sessionLockTimeout, sessionReconectTimeout, sessionTTL),
+		masterKey:               masterKey,
+		busFlushInterval:        busFlushInterval,
+		downloadSectorTimeout:   downloadSectorTimeout,
+		uploadSectorTimeout:     uploadSectorTimeout,
+		downloadMaxOverdrive:    maxDownloadOverdrive,
+		uploadMaxOverdrive:      maxUploadOverdrive,
+		logger:                  l.Sugar().Named("worker").Named(id),
+		transportPoolV3:         newTransportPoolV3(),
 	}
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
@@ -1291,27 +1296,36 @@ func (w *worker) flushInteractions() {
 	w.interactionsFlushTimer = nil
 }
 
-// tracedContractLocker is a helper type that wraps a contractLocker and adds tracing to its methods.
-type tracedContractLocker struct {
-	l contractLocker
+type contractLock struct {
+	lockID uint64
+	fcid   types.FileContractID
+	d      time.Duration
+	locker ContractLocker
+	logger *zap.SugaredLogger
+
+	ctx      context.Context
+	stopChan chan struct{}
 }
 
-func (l *tracedContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
-	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
-	defer span.End()
-	lockID, err = l.l.AcquireContract(ctx, fcid, priority, d)
-	if err != nil {
-		span.SetStatus(codes.Error, "failed to acquire contract")
-		span.RecordError(err)
+func newContractLock(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
+	return &contractLock{
+		lockID: lockID,
+		fcid:   fcid,
+		d:      d,
+		locker: locker,
+		logger: logger,
+
+		ctx:      ctx,
+		stopChan: make(chan struct{}),
 	}
-	span.SetAttributes(attribute.Stringer("contract", fcid))
-	span.SetAttributes(attribute.Int("priority", priority))
-	return
 }
 
-func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+func (cl *contractLock) Release(ctx context.Context) error {
 	_, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
 	defer span.End()
+
+	// Stop background loop.
+	close(cl.stopChan)
 
 	// Create a new context with the span that times out after a certain amount
 	// of time.  That's because the context passed to this method might be
@@ -1321,21 +1335,58 @@ func (l *tracedContractLocker) ReleaseContract(ctx context.Context, fcid types.F
 	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
 
 	// Release the contract.
-	err = l.l.ReleaseContract(timeoutCtx, fcid, lockID)
+	err := cl.locker.ReleaseContract(timeoutCtx, cl.fcid, cl.lockID)
 	if err != nil {
 		span.SetStatus(codes.Error, "failed to release contract")
 		span.RecordError(err)
 	}
+	span.SetAttributes(attribute.Stringer("contract", cl.fcid))
+	return err
+}
+
+func (cl *contractLock) keepaliveLoop() {
+	// Create ticker for half the duration of the lock.
+	t := time.NewTicker(cl.d / 2)
+
+	// Cleanup
+	defer func() {
+		t.Stop()
+		select {
+		case <-t.C:
+		default:
+		}
+	}()
+
+	// Loop until stopped.
+	for {
+		select {
+		case <-cl.ctx.Done():
+			return // interrupted
+		case <-cl.stopChan:
+			return // released
+		case <-t.C:
+		}
+		if err := cl.locker.KeepaliveContract(cl.ctx, cl.fcid, cl.lockID, cl.d); err != nil {
+			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err), "contract", cl.fcid, "lockID", cl.lockID)
+			return
+		}
+	}
+}
+
+func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error) {
+	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
+	defer span.End()
 	span.SetAttributes(attribute.Stringer("contract", fcid))
-	return
-}
-
-func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
-	return (&tracedContractLocker{w.bus}).AcquireContract(ctx, fcid, priority, d)
-}
-
-func (w *worker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
-	return (&tracedContractLocker{w.bus}).ReleaseContract(ctx, fcid, lockID)
+	span.SetAttributes(attribute.Int("priority", priority))
+	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
+	if err != nil {
+		span.SetStatus(codes.Error, "failed to acquire contract")
+		span.RecordError(err)
+		return nil, err
+	}
+	cl := newContractLock(ctx, fcid, lockID, w.contractLockingDuration, w.bus, w.logger)
+	go cl.keepaliveLoop()
+	return cl, nil
 }
 
 func isErrDuplicateTransactionSet(err error) bool {

@@ -156,6 +156,8 @@ func main() {
 		apiPassword string
 		node.WorkerConfig
 	}
+	workerCfg.ContractLockTimeout = 30 * time.Second
+
 	var autopilotCfg struct {
 		enabled bool
 		node.AutopilotConfig
