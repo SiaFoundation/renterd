@@ -376,13 +376,9 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// shut down the autopilot to prevent it from reinstating the contract set
-	if err := cluster.cleanups[len(cluster.cleanups)-2](context.Background()); err != nil {
+	if err := cluster.ShutdownAutopilot(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.cleanups[len(cluster.cleanups)-1](context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	cluster.cleanups = cluster.cleanups[:len(cluster.cleanups)-2]
 
 	// clear the contract set
 	if err := cluster.Bus.SetContractSet(context.Background(), cfg.Contracts.Set, nil); err != nil {
@@ -1018,6 +1014,11 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// shut down the autopilot to prevent it from doing contract maintenance if any kind
+	if err := cluster.ShutdownAutopilot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
 	// get wallet address.
 	renterAddress, err := cluster.Bus.WalletAddress(context.Background())
 	if err != nil {
@@ -1067,6 +1068,9 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	up, err := cluster.Bus.UploadParams(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if up.ContractSet != "test" {
+		t.Fatal("unexpected contractset", up.ContractSet)
 	}
 	csc, err := cluster.Bus.Contracts(context.Background(), up.ContractSet)
 	if err != nil {

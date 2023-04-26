@@ -92,6 +92,21 @@ type TestCluster struct {
 	wg     sync.WaitGroup
 }
 
+func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) error {
+	stopFn1 := tc.cleanups[len(tc.cleanups)-2]
+	if err := stopFn1(ctx); err != nil {
+		return err
+	}
+
+	stopFn2 := tc.cleanups[len(tc.cleanups)-1]
+	if err := stopFn2(ctx); err != nil {
+		return err
+	}
+
+	tc.cleanups = tc.cleanups[:len(tc.cleanups)-2]
+	return nil
+}
+
 // randomPassword creates a random 32 byte password encoded as a string.
 func randomPassword() string {
 	return hex.EncodeToString(frand.Bytes(32))
