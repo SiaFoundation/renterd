@@ -368,6 +368,50 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatal("unexpected")
 		}
 	}
+
+	// fetch the config
+	cfg, err := cluster.Autopilot.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// shut down the autopilot to prevent it from reinstating the contract set
+	if err := cluster.cleanups[len(cluster.cleanups)-2](context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.cleanups[len(cluster.cleanups)-1](context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cluster.cleanups = cluster.cleanups[:len(cluster.cleanups)-2]
+
+	// clear the contract set
+	if err := cluster.Bus.SetContractSet(context.Background(), cfg.Contracts.Set, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// check that contract set was cleared
+	csc, err := cluster.Bus.Contracts(context.Background(), cfg.Contracts.Set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(csc) != 0 {
+		t.Fatalf("expected no contracts, got %v", len(csc))
+	}
+
+	// download the data again
+	for _, data := range [][]byte{small, large} {
+		name := fmt.Sprintf("data_%v", len(data))
+
+		var buffer bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
+			t.Fatal(err)
+		}
+
+		// assert it matches
+		if !bytes.Equal(data, buffer.Bytes()) {
+			t.Fatal("unexpected")
+		}
+	}
 }
 
 // TestUploadDownloadSpending is an integration test that verifies the upload
