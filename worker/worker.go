@@ -196,8 +196,12 @@ type AccountStore interface {
 	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 }
 
+type contractReleaser interface {
+	Release(context.Context) error
+}
+
 type contractLocker interface {
-	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (_ *contractLock, err error)
+	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (_ contractReleaser, err error)
 }
 
 type ContractLocker interface {
@@ -1383,7 +1387,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (_ *contractLock, err error) {
+func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (_ contractReleaser, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
 	defer span.End()
 	span.SetAttributes(attribute.Stringer("contract", fcid))

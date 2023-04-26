@@ -101,7 +101,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 
 			// NOTE: we release before sending the response to ensure the context isn't cancelled
 			if err := contractLock.Release(ctx); err != nil {
-				logger.Errorf("failed to release lock %v on contract %v, err: %v", contractLock.lockID, contract.ID, err)
+				logger.Errorf("failed to release lock on contract %v, err: %v", contract.ID, err)
 			}
 			respChan <- res
 		}(r)
