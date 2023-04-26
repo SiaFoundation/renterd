@@ -1063,6 +1063,19 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Check the bus returns the desired upload params and contract set contracts.
+	up, err := cluster.Bus.UploadParams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	csc, err := cluster.Bus.Contracts(context.Background(), up.ContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(csc) != 3 {
+		t.Fatal("expected 3 contracts", len(csc))
+	}
+
 	// Upload a file.
 	data := frand.Bytes(5*rhpv2.SectorSize + 1)
 	err = cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo")
