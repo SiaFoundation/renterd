@@ -202,6 +202,7 @@ type contractLocker interface {
 
 type ContractLocker interface {
 	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
+	KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error)
 	ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error)
 }
 
@@ -1325,6 +1326,10 @@ type contractLock struct {
 	fcid   types.FileContractID
 	d      time.Duration
 	locker ContractLocker
+	logger *zap.SugaredLogger
+
+	ctx      context.Context
+	stopChan chan struct{}
 }
 
 func (cl *contractLock) Release(ctx context.Context) error {
@@ -1345,23 +1350,62 @@ func (cl *contractLock) Release(ctx context.Context) error {
 		span.RecordError(err)
 	}
 	span.SetAttributes(attribute.Stringer("contract", cl.fcid))
+	close(cl.stopChan)
 	return err
+}
+
+func (cl *contractLock) keepaliveLoop() {
+	// Create ticker for half the duration of the lock.
+	t := time.NewTicker(cl.d / 2)
+
+	// Cleanup
+	defer func() {
+		t.Stop()
+		select {
+		case <-t.C:
+		default:
+		}
+	}()
+
+	// Loop until stopped.
+	for {
+		select {
+		case <-cl.ctx.Done():
+			return // interrupted
+		case <-cl.stopChan:
+			return // released
+		case <-t.C:
+		}
+		if err := cl.locker.KeepaliveContract(cl.ctx, cl.fcid, cl.lockID, cl.d); err != nil {
+			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err), "contract", cl.fcid, "lockID", cl.lockID)
+			return
+		}
+	}
 }
 
 func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (_ *contractLock, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
 	defer span.End()
+	span.SetAttributes(attribute.Stringer("contract", fcid))
+	span.SetAttributes(attribute.Int("priority", priority))
 	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, d)
 	if err != nil {
 		span.SetStatus(codes.Error, "failed to acquire contract")
 		span.RecordError(err)
+		return nil, err
 	}
-	span.SetAttributes(attribute.Stringer("contract", fcid))
-	span.SetAttributes(attribute.Int("priority", priority))
-	return &contractLock{
+	cl := &contractLock{
 		lockID: lockID,
+		fcid:   fcid,
 		d:      d,
-	}, nil
+		locker: w.bus,
+		logger: w.logger,
+
+		ctx:      ctx,
+		stopChan: make(chan struct{}),
+	}
+	go cl.keepaliveLoop()
+	return cl, nil
 }
 
 func isErrDuplicateTransactionSet(err error) bool {

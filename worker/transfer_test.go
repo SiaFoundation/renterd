@@ -83,6 +83,10 @@ func (l *noOpLocker) ReleaseContract(ctx context.Context, fcid types.FileContrac
 	return nil
 }
 
+func (l *noOpLocker) KeepaliveContract(ctx context.Context, _ types.FileContractID, _ uint64, _ time.Duration) error {
+	return nil
+}
+
 func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lock *contractLock, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

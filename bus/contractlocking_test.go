@@ -111,6 +111,45 @@ func TestContractAcquire(t *testing.T) {
 	verify(fcid, lockID)
 }
 
+// TestContractKeepalive verifies that calling KeepAlive will extend the
+// duration of a lock.
+func TestContractKeepalive(t *testing.T) {
+	t.Parallel()
+
+	// Create a contractLocks object.
+	locks := newContractLocks()
+
+	// Acquire a contract.
+	fcid := types.FileContractID{1}
+	lockID, err := locks.Acquire(context.Background(), 0, fcid, 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Call keepalive and extend the duration to a time that will not pass
+	// anytime soon.
+	err = locks.KeepAlive(fcid, lockID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Let more time than the initial duration pass.
+	time.Sleep(time.Second)
+
+	// Try to acquire again. This should block.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = locks.Acquire(context.Background(), 0, fcid, 500*time.Millisecond)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("contract was acquired")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
 // TestContractRelease is a unit test for contractLocks.Release.
 func TestContractRelease(t *testing.T) {
 	locks := newContractLocks()
