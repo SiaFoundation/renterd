@@ -1336,6 +1336,19 @@ type contractLock struct {
 	stopChan chan struct{}
 }
 
+func newContractLock(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
+	return &contractLock{
+		lockID: lockID,
+		fcid:   fcid,
+		d:      d,
+		locker: locker,
+		logger: logger,
+
+		ctx:      ctx,
+		stopChan: make(chan struct{}),
+	}
+}
+
 func (cl *contractLock) Release(ctx context.Context) error {
 	_, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
 	defer span.End()
@@ -1398,16 +1411,7 @@ func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID,
 		span.RecordError(err)
 		return nil, err
 	}
-	cl := &contractLock{
-		lockID: lockID,
-		fcid:   fcid,
-		d:      d,
-		locker: w.bus,
-		logger: w.logger,
-
-		ctx:      ctx,
-		stopChan: make(chan struct{}),
-	}
+	cl := newContractLock(ctx, fcid, lockID, d, w.bus, w.logger)
 	go cl.keepaliveLoop()
 	return cl, nil
 }

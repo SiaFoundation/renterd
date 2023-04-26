@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.uber.org/zap"
 )
 
 type contextCheckingLocker struct {
@@ -33,9 +34,7 @@ func (l *contextCheckingLocker) ReleaseContract(ctx context.Context, fcid types.
 func TestReleaseContract(t *testing.T) {
 	t.Parallel()
 
-	l := &contractLock{
-		locker: &contextCheckingLocker{},
-	}
+	l := newContractLock(context.Background(), types.FileContractID{}, 0, 0, &contextCheckingLocker{}, zap.NewNop().Sugar())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
