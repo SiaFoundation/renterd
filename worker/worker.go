@@ -871,13 +871,20 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach contract spending recorder to the context.
 	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
-	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
+	// fetch all active contracts
+	dlContracts, err := w.bus.ActiveContracts(ctx)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
+	// fetch all contract set contracts
+	ulContracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -888,7 +895,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 			continue
 		}
 
-		for _, c := range contracts {
+		for _, c := range ulContracts {
 			if c.HostKey == ss.Host {
 				usedContracts[ss.Host] = c.ID
 				break
