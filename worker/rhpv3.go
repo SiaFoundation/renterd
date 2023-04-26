@@ -98,7 +98,7 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.Pub
 	}
 	err = acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
-		return cost, w.transportPoolV3.withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+		return cost, w.transportPoolV3.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
 			rev, err = RPCLatestRevision(t, contractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				// Fetch pt.
 				pt, err := w.priceTables.fetch(ctx, hostKey, nil)
@@ -130,7 +130,7 @@ func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.Pu
 	if err != nil {
 		return types.FileContractRevision{}, err
 	}
-	err = w.transportPoolV3.withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err = w.transportPoolV3.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
 		rev, err = RPCLatestRevision(t, contractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Fetch pt.
 			pt, err := w.priceTables.fetch(ctx, hostKey, revision)
@@ -185,7 +185,7 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 	}
 
 	return account.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+		return amount, w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *transportV3) (err error) {
 			rk := w.deriveRenterKey(hk)
 			cost := amount.Add(pt.FundAccountCost)
 			payment, ok := rhpv3.PayByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
@@ -216,7 +216,7 @@ func (w *worker) syncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 
 	return account.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
-		err := w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) error {
+		err := w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *transportV3) error {
 			payment := w.preparePayment(hk, pt.AccountBalanceCost, pt.HostBlockHeight)
 			balance, err = RPCAccountBalance(t, &payment, account.id, pt.UID)
 			return err
@@ -435,7 +435,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 	}()
 
 	return r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *rhpv3.Transport) error {
+		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
 			cost, err := readSectorCost(r.pt)
 			if err != nil {
 				return err
@@ -686,9 +686,12 @@ func processPayment(s *rhpv3.Stream, payment rhpv3.PaymentMethod) error {
 type PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error)
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
-func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rhpv3.HostPriceTable, err error) {
+func RPCPriceTable(t *transportV3, paymentFunc PriceTablePaymentFunc) (pt rhpv3.HostPriceTable, err error) {
 	defer wrapErr(&err, "PriceTable")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return rhpv3.HostPriceTable{}, err
+	}
 	defer s.Close()
 
 	s.SetDeadline(time.Now().Add(15 * time.Second))
@@ -713,9 +716,12 @@ func RPCPriceTable(t *rhpv3.Transport, paymentFunc PriceTablePaymentFunc) (pt rh
 }
 
 // RPCAccountBalance calls the AccountBalance RPC.
-func RPCAccountBalance(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
+func RPCAccountBalance(t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
 	defer wrapErr(&err, "AccountBalance")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return types.ZeroCurrency, err
+	}
 	defer s.Close()
 
 	req := rhpv3.RPCAccountBalanceRequest{
@@ -735,9 +741,12 @@ func RPCAccountBalance(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account 
 }
 
 // RPCFundAccount calls the FundAccount RPC.
-func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (err error) {
+func RPCFundAccount(t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (err error) {
 	defer wrapErr(&err, "FundAccount")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return err
+	}
 	defer s.Close()
 
 	req := rhpv3.RPCFundAccountRequest{
@@ -760,9 +769,12 @@ func RPCFundAccount(t *rhpv3.Transport, payment rhpv3.PaymentMethod, account rhp
 // RPCLatestRevision calls the LatestRevision RPC. The paymentFunc allows for
 // fetching a pricetable using the fetched revision to pay for it. If
 // paymentFunc returns 'nil' as payment, the host is not paid.
-func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
+func RPCLatestRevision(t *transportV3, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return types.FileContractRevision{}, err
+	}
 	defer s.Close()
 	req := rhpv3.RPCLatestRevisionRequest{
 		ContractID: contractID,
@@ -783,9 +795,12 @@ func RPCLatestRevision(t *rhpv3.Transport, contractID types.FileContractID, paym
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
+func RPCReadSector(t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return types.ZeroCurrency, types.ZeroCurrency, err
+	}
 	defer s.Close()
 
 	var buf bytes.Buffer
@@ -847,9 +862,12 @@ func RPCReadSector(t *rhpv3.Transport, w io.Writer, pt rhpv3.HostPriceTable, pay
 
 // RPCReadRegistry calls the ExecuteProgram RPC with an MDM program that reads
 // the specified registry value.
-func RPCReadRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.RegistryKey) (rv rhpv3.RegistryValue, err error) {
+func RPCReadRegistry(t *transportV3, payment rhpv3.PaymentMethod, key rhpv3.RegistryKey) (rv rhpv3.RegistryValue, err error) {
 	defer wrapErr(&err, "ReadRegistry")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return rhpv3.RegistryValue{}, err
+	}
 	defer s.Close()
 
 	req := &rhpv3.RPCExecuteProgramRequest{
@@ -895,7 +913,7 @@ func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.Cons
 	var rev rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var renewErr error
-	err = w.transportPoolV3.withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err = w.transportPoolV3.withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *transportV3) (err error) {
 		_, err = RPCLatestRevision(t, rrr.ContractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
 			rev, txnSet, renewErr = w.RPCRenew(ctx, rrr, cs, t, revision, renterKey)
@@ -909,9 +927,12 @@ func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.Cons
 	return rev, txnSet, renewErr
 }
 
-func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, t *rhpv3.Transport, rev *types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, t *transportV3, rev *types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RPCRenew")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
 	defer s.Close()
 
 	// Try to get a valid pricetable.
@@ -1082,9 +1103,12 @@ func initialRevision(formationTxn types.Transaction, hostPubKey, renterPubKey ty
 
 // RPCUpdateRegistry calls the ExecuteProgram RPC with an MDM program that
 // updates the specified registry value.
-func RPCUpdateRegistry(t *rhpv3.Transport, payment rhpv3.PaymentMethod, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
+func RPCUpdateRegistry(t *transportV3, payment rhpv3.PaymentMethod, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
 	defer wrapErr(&err, "UpdateRegistry")
-	s := t.DialStream()
+	s, err := t.DialStream()
+	if err != nil {
+		return err
+	}
 	defer s.Close()
 
 	var data bytes.Buffer
