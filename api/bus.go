@@ -107,6 +107,11 @@ type ContractAcquireRequest struct {
 	Priority int           `json:"priority"`
 }
 
+type ContractKeepaliveRequest struct {
+	Duration ParamDuration `json:"duration"`
+	LockID   uint64        `json:"lockID"`
+}
+
 // ContractAcquireRequest is the request type for the /contract/:id/release
 // endpoint.
 type ContractReleaseRequest struct {

@@ -154,6 +154,25 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 	return ourLockID, nil
 }
 
+// KeepAlive refreshes the timer on a contract lock for a given contract if the
+// lockID matches the one on the lock.
+func (l *contractLocks) KeepAlive(id types.FileContractID, lockID uint64, d time.Duration) error {
+	lock := l.lockForContractID(id, false)
+	if lock == nil {
+		return errors.New("lock not found")
+	}
+	lock.mu.Lock()
+	defer lock.mu.Unlock()
+	if lock.heldByID != lockID {
+		return errors.New("lockID doesn't match")
+	}
+	if !lock.wakeupTimer.Stop() {
+		return errors.New("timer has fired already")
+	}
+	lock.setTimer(l, lockID, id, d)
+	return nil
+}
+
 // Release releases the contract lock for a given contract and lock id.
 func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
 	if lockID == 0 {
