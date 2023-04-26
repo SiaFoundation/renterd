@@ -98,7 +98,7 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.Pub
 	}
 	err = acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
-		return cost, withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+		return cost, w.transportPoolV3.withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 			rev, err = RPCLatestRevision(t, contractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				// Fetch pt.
 				pt, err := w.priceTables.fetch(ctx, hostKey, nil)
@@ -130,7 +130,7 @@ func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.Pu
 	if err != nil {
 		return types.FileContractRevision{}, err
 	}
-	err = withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err = w.transportPoolV3.withTransportV3(ctx, hostKey, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 		rev, err = RPCLatestRevision(t, contractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Fetch pt.
 			pt, err := w.priceTables.fetch(ctx, hostKey, revision)
@@ -185,7 +185,7 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 	}
 
 	return account.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+		return amount, w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 			rk := w.deriveRenterKey(hk)
 			cost := amount.Add(pt.FundAccountCost)
 			payment, ok := rhpv3.PayByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
@@ -216,7 +216,7 @@ func (w *worker) syncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 
 	return account.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
-		err := withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) error {
+		err := w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) error {
 			payment := w.preparePayment(hk, pt.AccountBalanceCost, pt.HostBlockHeight)
 			balance, err = RPCAccountBalance(t, &payment, account.id, pt.UID)
 			return err
@@ -257,12 +257,13 @@ type (
 	}
 
 	hostV3 struct {
-		acc        *account
-		bh         uint64
-		fcid       types.FileContractID
-		pt         rhpv3.HostPriceTable
-		siamuxAddr string
-		sk         types.PrivateKey
+		acc           *account
+		bh            uint64
+		fcid          types.FileContractID
+		pt            rhpv3.HostPriceTable
+		siamuxAddr    string
+		sk            types.PrivateKey
+		transportPool *transportPoolV3
 	}
 )
 
@@ -288,12 +289,13 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 	}
 
 	return fn(&hostV3{
-		acc:        acc,
-		bh:         pt.HostBlockHeight,
-		fcid:       contractID,
-		pt:         pt.HostPriceTable,
-		siamuxAddr: siamuxAddr,
-		sk:         w.accounts.deriveAccountKey(hostKey),
+		acc:           acc,
+		bh:            pt.HostBlockHeight,
+		fcid:          contractID,
+		pt:            pt.HostPriceTable,
+		siamuxAddr:    siamuxAddr,
+		sk:            w.accounts.deriveAccountKey(hostKey),
+		transportPool: w.transportPoolV3,
 	})
 }
 
@@ -433,7 +435,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 	}()
 
 	return r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *rhpv3.Transport) error {
+		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *rhpv3.Transport) error {
 			cost, err := readSectorCost(r.pt)
 			if err != nil {
 				return err
@@ -893,7 +895,7 @@ func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.Cons
 	var rev rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var renewErr error
-	err = withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err = w.transportPoolV3.withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		_, err = RPCLatestRevision(t, rrr.ContractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
 			rev, txnSet, renewErr = w.RPCRenew(ctx, rrr, cs, t, revision, renterKey)

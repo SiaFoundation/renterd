@@ -290,7 +290,8 @@ type worker struct {
 	downloadMaxOverdrive  int
 	uploadMaxOverdrive    int
 
-	logger *zap.SugaredLogger
+	transportPoolV3 *transportPoolV3
+	logger          *zap.SugaredLogger
 }
 
 func (w *worker) recordPriceTableUpdate(hostKey types.PublicKey, pt hostdb.HostPriceTable, err error) {
@@ -364,17 +365,86 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(*rhpv3.Transport) error) (err error) {
-	conn, err := dial(ctx, siamuxAddr, hostKey)
+type transportV3 struct {
+	mu       sync.Mutex
+	refCount uint64
+	t        *rhpv3.Transport
+}
+
+func (t *transportV3) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Decrement refcounter.
+	t.refCount--
+
+	// Close the transport if the refcounter is zero.
+	if t.refCount == 0 {
+		err := t.t.Close()
+		t.t = nil
+		return err
+	}
+	return nil
+}
+
+type transportPoolV3 struct {
+	mu   sync.Mutex
+	pool map[string]*transportV3
+}
+
+func newTransportPoolV3() *transportPoolV3 {
+	return &transportPoolV3{
+		pool: make(map[string]*transportV3),
+	}
+}
+
+func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*transportV3, error) {
+	// Get or create a transport for the given siamux address.
+	p.mu.Lock()
+	t, found := p.pool[siamuxAddr]
+	if !found {
+		t = &transportV3{}
+		p.pool[siamuxAddr] = t
+	}
+
+	// Lock the transport and increment its refcounter.
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Unlock the pool now that the transport is locked.
+	p.mu.Unlock()
+
+	// Init the transport if necessary.
+	if t.t == nil {
+		conn, err := dial(ctx, siamuxAddr, hostKey)
+		if err != nil {
+			return nil, err
+		}
+		t.t, err = rhpv3.NewRenterTransport(conn, hostKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Increment the refcounter upon success.
+	t.refCount++
+	return t, nil
+}
+
+func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(*rhpv3.Transport) error) (err error) {
+	t, err := p.newTransport(ctx, siamuxAddr, hostKey)
 	if err != nil {
 		return err
 	}
+	var once sync.Once
+	onceClose := func() { t.Close() }
+
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			conn.Close()
+			once.Do(onceClose)
 		}
 	}()
 	defer func() {
@@ -383,12 +453,8 @@ func withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr st
 			err = ctx.Err()
 		}
 	}()
-	t, err := rhpv3.NewRenterTransport(conn, hostKey)
-	if err != nil {
-		return err
-	}
-	defer t.Close()
-	return fn(t)
+	defer once.Do(onceClose)
+	return fn(t.t)
 }
 
 func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStore) error) (err error) {
@@ -501,7 +567,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	// fetch the host pricetable
 	if err == nil {
-		err = withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
+		err = w.transportPoolV3.withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
 			priceTable, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 			return err
 		})
@@ -568,7 +634,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
-		err = withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+		err = w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
 			pt, err := RPCPriceTable(t, paymentFn)
 			if err != nil {
 				return err
@@ -602,7 +668,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	}
 
 	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
@@ -787,7 +853,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 		return
 	}
 	var value rhpv3.RegistryValue
-	err := withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		value, err = RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
@@ -806,7 +872,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
-	err := withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
@@ -1239,6 +1305,7 @@ func New(masterKey [32]byte, id string, b Bus, sessionLockTimeout, sessionRecone
 		downloadMaxOverdrive:  maxDownloadOverdrive,
 		uploadMaxOverdrive:    maxUploadOverdrive,
 		logger:                l.Sugar().Named("worker").Named(id),
+		transportPoolV3:       newTransportPoolV3(),
 	}
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
