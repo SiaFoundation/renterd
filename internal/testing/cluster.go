@@ -20,7 +20,7 @@ import (
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
-	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/renterd/stores"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"

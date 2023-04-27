@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
