@@ -2,7 +2,10 @@ package stores
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"go.sia.tech/renterd/api"
 )
 
 // TestSQLSettingStore tests the bus.SettingStore methods on the SQLSettingStore.
@@ -48,5 +51,16 @@ func TestSQLSettingStore(t *testing.T) {
 		t.Fatal(err)
 	} else if value != "barbaz" {
 		t.Fatalf("unexpected value, %s != 'barbaz'", value)
+	}
+
+	// delete the setting
+	if err := ss.DeleteSetting(ctx, "foo"); err != nil {
+		t.Fatal(err)
+	} else if _, err := ss.Setting(ctx, "foo"); !errors.Is(err, api.ErrSettingNotFound) {
+		t.Fatal("should fail with gorm.ErrRecordNotFound", err)
+	} else if keys, err := ss.Settings(ctx); err != nil {
+		t.Fatal(err)
+	} else if len(keys) != 0 {
+		t.Fatalf("unexpected number of settings, %v != 0", len(keys))
 	}
 }
