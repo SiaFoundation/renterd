@@ -51,6 +51,10 @@ var (
 	// errBalanceMaxExceeded occurs when a deposit would push the account's
 	// balance over the maximum allowed ephemeral account balance.
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
+
+	// errTransportClosed is returned when using a transportV3 which was already
+	// closed.
+	errTransportClosed = errors.New("transport closed")
 )
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
@@ -84,7 +88,7 @@ func (t *transportV3) DialStream() (*rhpv3.Stream, error) {
 	transport := t.t
 	t.mu.Unlock()
 	if transport == nil {
-		return nil, errors.New("transport closed")
+		return nil, errTransportClosed
 	}
 	return transport.DialStream(), nil
 }
@@ -143,17 +147,12 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 	onceClose := func() { t.Close() }
 
 	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		select {
 		case <-done:
 		case <-ctx.Done():
 			once.Do(onceClose)
-		}
-	}()
-	defer func() {
-		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
 		}
 	}()
 	defer once.Do(onceClose)
