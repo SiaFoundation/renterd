@@ -398,6 +398,12 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
+		// set the host's block height to ours to disable the height check in
+		// the gouging checks, in certain edge cases the renter might unsync and
+		// would therefor label all hosts as unusable and go on to create a
+		// whole new set of contracts with new hosts
+		host.PriceTable.HostBlockHeight = state.cs.BlockHeight
+
 		// decide whether the host is still good
 		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, contract.FileSize())
 		if !usable {
