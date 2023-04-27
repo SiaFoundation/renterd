@@ -14,8 +14,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
