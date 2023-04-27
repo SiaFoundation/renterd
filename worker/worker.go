@@ -294,7 +294,8 @@ type worker struct {
 	downloadMaxOverdrive    int
 	uploadMaxOverdrive      int
 
-	logger *zap.SugaredLogger
+	transportPoolV3 *transportPoolV3
+	logger          *zap.SugaredLogger
 }
 
 func (w *worker) recordPriceTableUpdate(hostKey types.PublicKey, pt hostdb.HostPriceTable, err error) {
@@ -361,33 +362,6 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 		}
 	}()
 	t, err := rhpv2.NewRenterTransport(conn, hostKey)
-	if err != nil {
-		return err
-	}
-	defer t.Close()
-	return fn(t)
-}
-
-func withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(*rhpv3.Transport) error) (err error) {
-	conn, err := dial(ctx, siamuxAddr, hostKey)
-	if err != nil {
-		return err
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			conn.Close()
-		}
-	}()
-	defer func() {
-		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-	}()
-	t, err := rhpv3.NewRenterTransport(conn, hostKey)
 	if err != nil {
 		return err
 	}
@@ -505,7 +479,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	// fetch the host pricetable
 	if err == nil {
-		err = withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *rhpv3.Transport) (err error) {
+		err = w.transportPoolV3.withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *transportV3) (err error) {
 			priceTable, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 			return err
 		})
@@ -572,7 +546,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
-		err = withTransportV3(ctx, hk, siamuxAddr, func(t *rhpv3.Transport) (err error) {
+		err = w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *transportV3) (err error) {
 			pt, err := RPCPriceTable(t, paymentFn)
 			if err != nil {
 				return err
@@ -606,7 +580,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	}
 
 	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *transportV3) (err error) {
 		pt, err = RPCPriceTable(t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
@@ -791,7 +765,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 		return
 	}
 	var value rhpv3.RegistryValue
-	err := withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(t *transportV3) (err error) {
 		value, err = RPCReadRegistry(t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
@@ -810,7 +784,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	rc := pt.UpdateRegistryCost() // TODO: handle refund
 	cost, _ := rc.Total()
 	payment := w.preparePayment(rrur.HostKey, cost, pt.HostBlockHeight)
-	err := withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(t *rhpv3.Transport) (err error) {
+	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(t *transportV3) (err error) {
 		return RPCUpdateRegistry(t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
@@ -1244,6 +1218,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 		downloadMaxOverdrive:    maxDownloadOverdrive,
 		uploadMaxOverdrive:      maxUploadOverdrive,
 		logger:                  l.Sugar().Named("worker").Named(id),
+		transportPoolV3:         newTransportPoolV3(),
 	}
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
