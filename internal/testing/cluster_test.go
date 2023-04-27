@@ -236,6 +236,54 @@ func TestNewTestCluster(t *testing.T) {
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
 // uploaded and download correctly.
+func TestUploadDownloadBasicTmp(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		t.Log("Shutting down cluster...")
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(3); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload data
+	data := make([]byte, rhpv2.SectorSize)
+	frand.Read(data)
+	if err := cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), t.Name()); err != nil {
+		t.Fatal(err)
+	}
+
+	// download data
+	var buffer bytes.Buffer
+	if err := cluster.Worker.DownloadObject(context.Background(), &buffer, t.Name()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it matches
+	if !bytes.Equal(data, buffer.Bytes()) {
+		t.Fatal("unexpected")
+	}
+}
+
+// TestUploadDownloadBasic is an integration test that verifies objects can be
+// uploaded and download correctly.
 func TestUploadDownloadBasic(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()

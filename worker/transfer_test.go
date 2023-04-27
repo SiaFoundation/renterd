@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -66,6 +67,42 @@ func newMockHost() *mockHost {
 	}
 }
 
+type mockUploader struct {
+	locker    contractLocker
+	contracts []api.ContractMetadata
+	idx       int
+}
+
+func (u *mockUploader) total() int                    { return len(u.contracts) }
+func (u *mockUploader) finish(uploadID)               {}
+func (u *mockUploader) update([]api.ContractMetadata) {}
+func (u *mockUploader) schedule(context.Context, uploadID, int, int, map[types.PublicKey]struct{}) (api.ContractMetadata, chan error, chan error, error) {
+	signal := make(chan error, 1)
+	done := make(chan error, 1)
+	close(signal)
+
+	release, _ := u.locker.AcquireContract(context.Background(), types.FileContractID{}, 0)
+	go func() {
+		err := <-done
+		if err != nil {
+			fmt.Println(err)
+		}
+		release.Release(context.Background())
+	}()
+
+	if u.idx >= len(u.contracts) {
+		return api.ContractMetadata{}, nil, nil, errors.New("no uploader available")
+	}
+
+	contract := u.contracts[u.idx]
+	u.idx++
+	return contract, signal, done, nil
+}
+
+func newMockUploader(locker contractLocker, contracts []api.ContractMetadata) *mockUploader {
+	return &mockUploader{locker: locker, contracts: contracts}
+}
+
 type mockContractLocker struct {
 	mu       sync.Mutex
 	acquired int
@@ -122,8 +159,8 @@ func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.Fi
 	return f(h)
 }
 
+// TODO PJ: fix this test
 func TestMultipleObjects(t *testing.T) {
-	mockLocker := &mockContractLocker{}
 	// generate object data
 	data := [][]byte{
 		frand.Bytes(111),
@@ -153,10 +190,14 @@ func TestMultipleObjects(t *testing.T) {
 		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.HostKey()})
 	}
 
+	// Prepare uploader.
+	mockLocker := &mockContractLocker{}
+	ul := newMockUploader(mockLocker, contracts)
+
 	// upload
 	var slabs []object.Slab
 	for {
-		s, _, _, err := uploadSlab(context.Background(), sp, r, 3, 10, contracts, mockLocker, 0, 0, zap.NewNop().Sugar())
+		s, _, err := uploadSlab(context.Background(), sp, ul, r, 3, 10, 0, 0, zap.NewNop().Sugar())
 		if err == io.EOF {
 			break
 		} else if err != nil {

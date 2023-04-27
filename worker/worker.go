@@ -33,7 +33,6 @@ import (
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
-	"lukechampine.com/frand"
 )
 
 const (
@@ -275,6 +274,7 @@ type worker struct {
 	id        string
 	bus       Bus
 	pool      *sessionPool
+	uploader  *uploaderPool
 	masterKey [32]byte
 
 	accounts    *accounts
@@ -850,13 +850,15 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach contract spending recorder to the context.
 	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
+	// update contracts
 	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
+	w.uploader.update(contracts)
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w, w.uploader, &slab, contracts, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1086,37 +1088,23 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	w.pool.setCurrentHeight(up.CurrentHeight)
 	usedContracts := make(map[types.PublicKey]types.FileContractID)
 
-	// fetch contracts
+	// update contracts
 	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-
-	// randomize order of contracts so we don't always upload to the same hosts
-	frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
-
-	// keep track of slow hosts so we can avoid them in consecutive slab uploads
-	slow := make(map[types.PublicKey]int)
+	w.uploader.update(contracts)
 
 	cr := o.Key.Encrypt(jc.Request.Body)
 	var objectSize int
 	for {
 		var s object.Slab
 		var length int
-		var slowHosts []int
-
 		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
-		// move slow hosts to the back of the array
-		sort.SliceStable(contracts, func(i, j int) bool {
-			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
-		})
 
 		// upload the slab
 		start := time.Now()
-		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, w, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
-		for _, h := range slowHosts {
-			slow[contracts[h].HostKey]++
-		}
+		s, length, err = uploadSlab(ctx, w, w.uploader, lr, uint8(rs.MinShards), uint8(rs.TotalShards), w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
 		if err == io.EOF {
 			break
 		} else if jc.Check(fmt.Sprintf("uploading slab failed after %v", time.Since(start)), err); err != nil {
@@ -1223,6 +1211,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
+	w.initUploaderPool()
 	return w
 }
 
