@@ -746,6 +746,12 @@ func TestParallelUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// wait for accounts to be funded
+	_, err = cluster.WaitForAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	upload := func() error {
 		t.Helper()
 		// prepare some data - make sure it's more than one sector
