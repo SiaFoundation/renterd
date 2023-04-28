@@ -36,6 +36,11 @@ type stubMetricReporter struct{}
 
 func (stubMetricReporter) Report(any) (_ error) { return }
 
+type stubDataMonitor struct{}
+
+func (stubDataMonitor) ReadBytes(n int)  {}
+func (stubDataMonitor) WriteBytes(n int) {}
+
 // A Host is an ephemeral host that can be used for testing.
 type Host struct {
 	dir     string
@@ -277,7 +282,7 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, rhp2Listener.Addr().String(), db, cm, tp, wallet, log.Named("settings"))
+	settings, err := settings.NewConfigManager(dir, privKey, rhp2Listener.Addr().String(), db, cm, tp, wallet, log.Named("settings"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
@@ -285,13 +290,13 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 	registry := registry.NewManager(privKey, db)
 	accounts := accounts.NewManager(db, settings)
 
-	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, tp, wallet, contracts, settings, storage, stubMetricReporter{}, log.Named("rhpv2"))
+	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, tp, wallet, contracts, settings, storage, stubDataMonitor{}, stubMetricReporter{}, log.Named("rhpv2"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv2 session handler: %w", err)
 	}
 	go rhpv2.Serve()
 
-	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, tp, wallet, accounts, contracts, registry, storage, settings, stubMetricReporter{}, log.Named("rhpv3"))
+	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, tp, wallet, accounts, contracts, registry, storage, settings, stubDataMonitor{}, stubMetricReporter{}, log.Named("rhpv3"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv3 session handler: %w", err)
 	}
