@@ -24,11 +24,26 @@ func (dbSetting) TableName() string { return "settings" }
 
 // DeleteSetting implements the bus.SettingStore interface.
 func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
+	// Delete from cache.
+	s.settingsMu.Lock()
+	delete(s.settings, key)
+	s.settingsMu.Unlock()
+
+	// Delete from database.
 	return s.db.Where(&dbSetting{Key: key}).Delete(&dbSetting{}).Error
 }
 
 // Setting implements the bus.SettingStore interface.
 func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
+	// Check cache first.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	value, ok := s.settings[key]
+	if ok {
+		return value, nil
+	}
+
+	// Check database.
 	var entry dbSetting
 	err := s.db.Where(&dbSetting{Key: key}).
 		Take(&entry).Error
@@ -37,7 +52,7 @@ func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	} else if err != nil {
 		return "", err
 	}
-
+	s.settings[key] = entry.Value
 	return entry.Value, nil
 }
 
@@ -50,11 +65,22 @@ func (s *SQLStore) Settings(ctx context.Context) ([]string, error) {
 
 // UpdateSetting implements the bus.SettingStore interface.
 func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
-	return s.db.Clauses(clause.OnConflict{
+	// Update db first.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+
+	err := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
 	}).Create(&dbSetting{
 		Key:   key,
 		Value: value,
 	}).Error
+	if err != nil {
+		return err
+	}
+
+	// Update cache second.
+	s.settings[key] = value
+	return nil
 }
