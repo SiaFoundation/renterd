@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/tracing"
+	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
 

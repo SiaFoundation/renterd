@@ -17,8 +17,8 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 )
@@ -603,6 +603,22 @@ func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	})
 }
 
+func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.ContractKeepaliveRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	err := b.contractLocks.KeepAlive(id, req.LockID, time.Duration(req.Duration))
+	if jc.Check("failed to extend lock duration", err) != nil {
+		return
+	}
+}
+
 func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
@@ -1143,6 +1159,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,

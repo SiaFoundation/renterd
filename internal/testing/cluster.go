@@ -20,7 +20,7 @@ import (
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
-	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/renterd/stores"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"
@@ -745,6 +745,7 @@ func testBusCfg() node.BusConfig {
 
 func testWorkerCfg() node.WorkerConfig {
 	return node.WorkerConfig{
+		ContractLockTimeout:     500 * time.Millisecond,
 		ID:                      "worker",
 		BusFlushInterval:        testBusFlushInterval,
 		SessionReconnectTimeout: 10 * time.Second,

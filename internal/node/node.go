@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/stores"
+	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/siad/modules"
@@ -33,6 +33,7 @@ import (
 type WorkerConfig struct {
 	ID                      string
 	BusFlushInterval        time.Duration
+	ContractLockTimeout     time.Duration
 	SessionLockTimeout      time.Duration
 	SessionReconnectTimeout time.Duration
 	SessionTTL              time.Duration
@@ -283,7 +284,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
-	w := worker.New(workerKey, cfg.ID, b, cfg.SessionLockTimeout, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, l)
+	w := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.SessionLockTimeout, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, l)
 	return w.Handler(), w.Shutdown, nil
 }
 

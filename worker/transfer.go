@@ -14,8 +14,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/tracing"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -78,7 +78,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 		go func(r req) {
 			defer close(doneChan)
 
-			lockID, err := locker.AcquireContract(ctx, contract.ID, lockingPriorityUpload, time.Minute)
+			contractLock, err := locker.AcquireContract(ctx, contract.ID, lockingPriorityUpload)
 			if err != nil {
 				respChan <- resp{hostIndex, r, types.Hash256{}, err}
 				span.SetStatus(codes.Error, "acquiring the contract failed")
@@ -100,8 +100,8 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			}
 
 			// NOTE: we release before sending the response to ensure the context isn't cancelled
-			if err := locker.ReleaseContract(ctx, contract.ID, lockID); err != nil {
-				logger.Errorf("failed to release lock %v on contract %v, err: %v", lockID, contract.ID, err)
+			if err := contractLock.Release(ctx); err != nil {
+				logger.Errorf("failed to release lock on contract %v, err: %v", contract.ID, err)
 			}
 			respChan <- res
 		}(r)

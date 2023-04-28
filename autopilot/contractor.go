@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/tracing"
+	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
@@ -400,6 +400,12 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toIgnore = append(toIgnore, fcid)
 			continue
 		}
+
+		// set the host's block height to ours to disable the height check in
+		// the gouging checks, in certain edge cases the renter might unsync and
+		// would therefor label all hosts as unusable and go on to create a
+		// whole new set of contracts with new hosts
+		host.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
 		// decide whether the host is still good
 		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, contract.FileSize())
