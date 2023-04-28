@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/internal/tracing"
+	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
