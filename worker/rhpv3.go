@@ -557,12 +557,12 @@ func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
 	rc = rc.Add(pt.ReadSectorCost(rhpv2.SectorSize))
 	cost, _ := rc.Total()
 
-	// overestimate the cost by 10%
-	cost, overflow := cost.Mul64WithOverflow(11)
+	// overestimate the cost by 5%
+	cost, overflow := cost.Mul64WithOverflow(21)
 	if overflow {
 		return types.ZeroCurrency, errors.New("overflow occurred while adding leeway to read sector cost")
 	}
-	return cost.Div64(10), nil
+	return cost.Div64(20), nil
 }
 
 // priceTableValidityLeeway is the number of time before the actual expiry of a
@@ -763,6 +763,27 @@ func processPayment(s *rhpv3.Stream, payment rhpv3.PaymentMethod) error {
 // create a payment for that table and return it. It can also be used to perform
 // gouging checks before paying for the table.
 type PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error)
+
+// Renew renews a contract with a host. To avoid an edge case where the contract
+// is drained and can therefore not be used to pay for the revision, we simply
+// don't pay for it.
+func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	var rev rhpv2.ContractRevision
+	var txnSet []types.Transaction
+	var renewErr error
+	err = w.transportPoolV3.withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *transportV3) (err error) {
+		_, err = RPCLatestRevision(t, rrr.ContractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			// Renew contract.
+			rev, txnSet, renewErr = w.RPCRenew(ctx, rrr, cs, t, revision, renterKey)
+			return rhpv3.HostPriceTable{}, nil, nil
+		})
+		return err
+	})
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	return rev, txnSet, renewErr
+}
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
 func RPCPriceTable(t *transportV3, paymentFunc PriceTablePaymentFunc) (pt rhpv3.HostPriceTable, err error) {
@@ -985,25 +1006,67 @@ func RPCReadRegistry(t *transportV3, payment rhpv3.PaymentMethod, key rhpv3.Regi
 	}, nil
 }
 
-// Renew renews a contract with a host. To avoid an edge case where the contract
-// is drained and can therefore not be used to pay for the revision, we simply
-// don't pay for it.
-func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
-	var rev rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	var renewErr error
-	err = w.transportPoolV3.withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(t *transportV3) (err error) {
-		_, err = RPCLatestRevision(t, rrr.ContractID, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-			// Renew contract.
-			rev, txnSet, renewErr = w.RPCRenew(ctx, rrr, cs, t, revision, renterKey)
-			return rhpv3.HostPriceTable{}, nil, nil
-		})
-		return err
-	})
+func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, collateral types.Currency, sector *[rhpv2.SectorSize]byte) (cost, refund types.Currency, err error) {
+	defer wrapErr(&err, "AppendSector")
+	s, err := t.DialStream()
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, err
+		return types.ZeroCurrency, types.ZeroCurrency, err
 	}
-	return rev, txnSet, renewErr
+	defer s.Close()
+
+	req := rhpv3.RPCExecuteProgramRequest{
+		FileContractID: types.FileContractID{},
+		Program: []rhpv3.Instruction{&rhpv3.InstrAppendSector{
+			SectorDataOffset: 0,
+			ProofRequired:    true,
+		}},
+		ProgramData: (*sector)[:],
+	}
+
+	var cancellationToken types.Specifier
+	var executeResp rhpv3.RPCExecuteProgramResponse
+	if err = s.WriteRequest(rhpv3.RPCExecuteProgramID, &pt.UID); err != nil {
+		return
+	} else if err = processPayment(s, payment); err != nil {
+		return
+	} else if err = s.WriteResponse(&req); err != nil {
+		return
+	} else if err = s.ReadResponse(&cancellationToken, 16); err != nil {
+		return
+	} else if err = s.ReadResponse(&executeResp, 4096); err != nil {
+		return
+	}
+
+	// check response error
+	if err = executeResp.Error; err != nil {
+		refund = executeResp.FailureRefund
+		return
+	}
+	cost = executeResp.TotalCost
+
+	// TODO: verify proof
+
+	// finalize the program with a new revision.
+	newRevision := *rev
+	newValid, newMissed := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
+	newRevision.RevisionNumber++
+	newRevision.FileMerkleRoot = executeResp.NewMerkleRoot
+
+	finalizeReq := rhpv3.RPCFinalizeProgramRequest{
+		Signature:         renterKey.SignHash(hashRevision(newRevision)),
+		ValidProofValues:  newValid,
+		MissedProofValues: newMissed,
+		RevisionNumber:    newRevision.RevisionNumber,
+	}
+
+	var finalizeResp rhpv3.RPCFinalizeProgramResponse
+	if err = s.WriteResponse(&finalizeReq); err != nil {
+		return
+	} else if err = s.ReadResponse(&finalizeResp, 64); err != nil {
+		return
+	}
+
+	return
 }
 
 func (w *worker) RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, cs api.ConsensusState, t *transportV3, rev *types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
