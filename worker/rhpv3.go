@@ -553,37 +553,16 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
 func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
-	cost, overflow := pt.InitBaseCost.AddWithOverflow(pt.ReadBaseCost)
-	if overflow {
-		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, base cost overflow")
-	}
+	rc := pt.BaseCost()
+	rc = rc.Add(pt.ReadSectorCost(rhpv2.SectorSize))
+	cost, _ := rc.Total()
 
-	ulbw, overflow := pt.UploadBandwidthCost.Mul64WithOverflow(1 << 12) // 4KiB
-	if overflow {
-		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, upload bandwidth overflow")
-	}
-
-	dlbw, overflow := pt.DownloadBandwidthCost.Mul64WithOverflow(1 << 22) // 4MiB
-	if overflow {
-		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, download bandwidth overflow")
-	}
-
-	bw, overflow := ulbw.AddWithOverflow(dlbw)
-	if overflow {
-		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost, bandwidth overflow")
-	}
-
-	cost, overflow = cost.AddWithOverflow(bw)
-	if overflow {
-		return types.ZeroCurrency, errors.New("overflow occurred while calculating read sector cost")
-	}
-
-	// overestimate the cost by ~10%
-	cost, overflow = cost.Mul64WithOverflow(10)
+	// overestimate the cost by 10%
+	cost, overflow := cost.Mul64WithOverflow(11)
 	if overflow {
 		return types.ZeroCurrency, errors.New("overflow occurred while adding leeway to read sector cost")
 	}
-	return cost.Div64(9), nil
+	return cost.Div64(10), nil
 }
 
 // priceTableValidityLeeway is the number of time before the actual expiry of a
