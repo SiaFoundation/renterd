@@ -134,6 +134,9 @@ func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 	}
 
 	// check sector access price
+	if hs.DownloadBandwidthPrice.IsZero() {
+		hs.DownloadBandwidthPrice = types.NewCurrency64(1)
+	}
 	maxSectorAccessPrice := hs.DownloadBandwidthPrice.Mul64(maxSectorAccessPriceVsBandwidth)
 	if hs.SectorAccessPrice.Cmp(maxSectorAccessPrice) > 0 {
 		return fmt.Errorf("sector access price too high, %v > %v", hs.SectorAccessPrice, maxSectorAccessPrice)
