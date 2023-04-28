@@ -70,13 +70,13 @@ func newMockHost() *mockHost {
 type mockUploader struct {
 	locker    contractLocker
 	contracts []api.ContractMetadata
-	idx       int
+	idx       map[uploadID]int
 }
 
 func (u *mockUploader) total() int                    { return len(u.contracts) }
 func (u *mockUploader) finish(uploadID)               {}
 func (u *mockUploader) update([]api.ContractMetadata) {}
-func (u *mockUploader) schedule(context.Context, uploadID, int, int, map[types.PublicKey]struct{}) (api.ContractMetadata, chan error, chan error, error) {
+func (u *mockUploader) schedule(_ context.Context, id uploadID, _ int, _ int, _ map[types.PublicKey]struct{}) (api.ContractMetadata, chan error, chan error, error) {
 	signal := make(chan error, 1)
 	done := make(chan error, 1)
 	close(signal)
@@ -90,17 +90,21 @@ func (u *mockUploader) schedule(context.Context, uploadID, int, int, map[types.P
 		release.Release(context.Background())
 	}()
 
-	if u.idx >= len(u.contracts) {
+	if u.idx[id] >= len(u.contracts) {
 		return api.ContractMetadata{}, nil, nil, errors.New("no uploader available")
 	}
 
-	contract := u.contracts[u.idx]
-	u.idx++
+	contract := u.contracts[u.idx[id]]
+	u.idx[id]++
 	return contract, signal, done, nil
 }
 
 func newMockUploader(locker contractLocker, contracts []api.ContractMetadata) *mockUploader {
-	return &mockUploader{locker: locker, contracts: contracts}
+	return &mockUploader{
+		locker:    locker,
+		contracts: contracts,
+		idx:       make(map[uploadID]int),
+	}
 }
 
 type mockContractLocker struct {
