@@ -183,7 +183,7 @@ func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contr
 	// Fall back to using the contract to pay for the revision.
 	ctx, cancel = timeoutCtx()
 	defer cancel()
-	contractLock, err := w.AcquireContract(ctx, contract.ID, lockPriority)
+	contractLock, err := w.acquireContract(ctx, contract.ID, lockPriority)
 	if err != nil {
 		return types.FileContractRevision{}, err
 	}

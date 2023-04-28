@@ -190,12 +190,12 @@ type AccountStore interface {
 	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 }
 
-type contractReleaser interface {
+type revisionUnlocker interface {
 	Release(context.Context) error
 }
 
-type contractLocker interface {
-	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error)
+type revisionLocker interface {
+	withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error
 }
 
 type ContractLocker interface {
@@ -381,7 +381,7 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 
 func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	contractLock, err := w.AcquireContract(ctx, contractID, lockPriority)
+	contractLock, err := w.acquireContract(ctx, contractID, lockPriority)
 	if err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	}
@@ -1373,7 +1373,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error) {
+func (w *worker) acquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
 	defer span.End()
 	span.SetAttributes(attribute.Stringer("contract", fcid))
