@@ -32,7 +32,7 @@ func (h *mockHost) HostKey() types.PublicKey {
 	return h.publicKey
 }
 
-func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
+func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error) {
 	root := rhpv2.SectorRoot(sector)
 	h.sectors[root] = append([]byte(nil), sector[:]...)
 	return root, nil
@@ -93,12 +93,12 @@ func (l *mockContractLocker) AcquireContract(ctx context.Context, fcid types.Fil
 }
 
 type mockStoreProvider struct {
-	hosts map[types.PublicKey]sectorStore
+	hosts map[types.PublicKey]sectorStoreV3
 }
 
-func newMockStoreProvider(hosts []sectorStore) *mockStoreProvider {
+func newMockStoreProvider(hosts []sectorStoreV3) *mockStoreProvider {
 	sp := &mockStoreProvider{
-		hosts: make(map[types.PublicKey]sectorStore),
+		hosts: make(map[types.PublicKey]sectorStoreV3),
 	}
 	for _, h := range hosts {
 		sp.hosts[h.HostKey()] = h
@@ -106,7 +106,7 @@ func newMockStoreProvider(hosts []sectorStore) *mockStoreProvider {
 	return sp
 }
 
-func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(sectorStore) error) (err error) {
+func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(sectorStoreV2) error) (err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
@@ -114,7 +114,7 @@ func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.Fi
 	return f(h)
 }
 
-func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, f func(sectorStore) error) (err error) {
+func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, f func(sectorStoreV3) error) (err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
@@ -143,7 +143,7 @@ func TestMultipleObjects(t *testing.T) {
 	r := io.MultiReader(rs...)
 
 	// Prepare hosts.
-	var hosts []sectorStore
+	var hosts []sectorStoreV3
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, newMockHost())
 	}

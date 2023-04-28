@@ -32,17 +32,21 @@ var (
 )
 
 // A sectorStore stores contract data.
-type sectorStore interface {
+type sectorStoreV2 interface {
 	Contract() types.FileContractID
 	HostKey() types.PublicKey
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
-	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
 	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }
 
+type sectorStoreV3 interface {
+	sectorStoreV2
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
+	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
+}
+
 type storeProvider interface {
-	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStore) error) (err error)
-	withHostV3(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStore) error) (err error)
+	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStoreV2) error) (err error)
+	withHostV3(context.Context, types.FileContractID, types.PublicKey, string, func(sectorStoreV3) error) (err error)
 }
 
 func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, contracts []api.ContractMetadata, locker contractLocker, uploadSectorTimeout time.Duration, maxOverdrive int, logger *zap.SugaredLogger) ([]object.Sector, []int, error) {
@@ -87,8 +91,8 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 			}
 
 			var res resp
-			if err := sp.withHostV2(ctx, contract.ID, contract.HostKey, contract.HostIP, func(ss sectorStore) error {
-				root, err := ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]))
+			if err := sp.withHostV3(ctx, contract.ID, contract.HostKey, contract.HostIP, func(ss sectorStoreV3) error {
+				root, err := ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), nil)
 				if err != nil {
 					span.SetStatus(codes.Error, "uploading the sector failed")
 					span.RecordError(err)
@@ -334,7 +338,7 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 			contract := contracts[hostIndex]
 			shard := &ss.Shards[r.shardIndex]
 
-			if err := sp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss sectorStore) error {
+			if err := sp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss sectorStoreV3) error {
 				buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 				err := ss.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
@@ -531,7 +535,7 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.S
 	return slabs
 }
 
-func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) error {
+func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStoreV2) error {
 	rootsBysectorStore := make(map[types.PublicKey][]types.Hash256)
 	for _, s := range slabs {
 		for _, sector := range s.Shards {
@@ -541,7 +545,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []sectorStore) 
 
 	errChan := make(chan *HostError)
 	for _, h := range hosts {
-		go func(h sectorStore) {
+		go func(h sectorStoreV2) {
 			// NOTE: if host is not storing any sectors, the map lookup will return
 			// nil, making this a no-op
 			err := h.DeleteSectors(ctx, rootsBysectorStore[h.HostKey()])

@@ -377,7 +377,7 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(sectorStore) error) (err error) {
+func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(sectorStoreV3) error) (err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
@@ -575,7 +575,6 @@ func (r *hostV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byt
 		})
 		return
 	})
-	return
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
