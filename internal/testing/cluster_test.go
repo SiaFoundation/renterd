@@ -257,6 +257,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}()
 
+	b := cluster.Bus
 	w := cluster.Worker
 	rs := testRedundancySettings
 
@@ -369,24 +370,18 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}
 
-	// fetch the config
-	cfg, err := cluster.Autopilot.Config()
+	// update the bus setting and specify a non-existing contract set
+	err = b.UpdateSetting(context.Background(), api.SettingContractSet, api.ContractSetSettings{Set: t.Name()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.SetContractSet(context.Background(), t.Name(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// shut down the autopilot to prevent it from reinstating the contract set
-	if err := cluster.ShutdownAutopilot(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	// clear the contract set
-	if err := cluster.Bus.SetContractSet(context.Background(), cfg.Contracts.Set, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	// check that contract set was cleared
-	csc, err := cluster.Bus.Contracts(context.Background(), cfg.Contracts.Set)
+	// assert there are no contracts in the set
+	csc, err := b.Contracts(context.Background(), t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

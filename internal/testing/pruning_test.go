@@ -109,11 +109,11 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// shut down the worker manually, this will flush any interactions
-	err = cluster.cleanups[2](context.Background())
+	err = cluster.workerShutdownFns[1](context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	cluster.cleanups = append(cluster.cleanups[:2], cluster.cleanups[3:]...)
+	cluster.workerShutdownFns = cluster.workerShutdownFns[:1]
 
 	// record 9 failed interactions, right before the pruning threshold, and
 	// wait for the autopilot loop to finish at least once
