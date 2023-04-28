@@ -35,7 +35,7 @@ var (
 type sectorStore interface {
 	Contract() types.FileContractID
 	HostKey() types.PublicKey
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error)
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
 	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
 	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }

@@ -514,10 +514,6 @@ func (r *hostV3) HostKey() types.PublicKey {
 	return r.acc.host
 }
 
-func (*hostV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
-	panic("not implemented")
-}
-
 func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 	panic("not implemented")
 }
@@ -551,6 +547,37 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 	})
 }
 
+// UploadSector uploads a sector to the host.
+func (r *hostV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (_ types.Hash256, err error) {
+	// return errGougingHost if gouging checks fail
+	if breakdown := GougingCheckerFromContext(ctx).Check(nil, &r.pt); breakdown.Gouging() {
+		return types.Hash256{}, fmt.Errorf("failed to upload sector, %w: %v", errGougingHost, breakdown.Reasons())
+	}
+	// return errBalanceInsufficient if balance insufficient
+	defer func() {
+		if isBalanceInsufficient(err) {
+			err = fmt.Errorf("%w %v, err: %v", errInsufficientBalance, r.HostKey(), err)
+		}
+	}()
+
+	return rhpv2.SectorRoot(sector), r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
+			cost, collateral, err := uploadSectorCost(r.pt, rev.EndHeight())
+			if err != nil {
+				return err
+			}
+
+			var refund types.Currency
+			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.sk)
+			cost, refund, err = RPCAppendSector(t, r.sk, r.pt, rev, &payment, collateral, sector)
+			amount = cost.Sub(refund)
+			return err
+		})
+		return
+	})
+	return
+}
+
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
 func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
 	rc := pt.BaseCost()
@@ -563,6 +590,21 @@ func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
 		return types.ZeroCurrency, errors.New("overflow occurred while adding leeway to read sector cost")
 	}
 	return cost.Div64(20), nil
+}
+
+// uploadSectorCost returns an overestimate for the cost of uploading a sector
+// to a host
+func uploadSectorCost(pt rhpv3.HostPriceTable, endHeight uint64) (cost, collateral types.Currency, _ error) {
+	rc := pt.BaseCost()
+	rc = rc.Add(pt.AppendSectorCost(endHeight - pt.HostBlockHeight))
+	cost, collateral = rc.Total()
+
+	// overestimate the cost by 5%
+	cost, overflow := cost.Mul64WithOverflow(21)
+	if overflow {
+		return types.ZeroCurrency, types.ZeroCurrency, errors.New("overflow occurred while adding leeway to read sector cost")
+	}
+	return cost.Div64(20), collateral, nil
 }
 
 // priceTableValidityLeeway is the number of time before the actual expiry of a
