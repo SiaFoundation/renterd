@@ -362,7 +362,8 @@ type (
 		fcid          types.FileContractID
 		pt            rhpv3.HostPriceTable
 		siamuxAddr    string
-		sk            types.PrivateKey
+		renterKey     types.PrivateKey
+		accountKey    types.PrivateKey
 		transportPool *transportPoolV3
 	}
 )
@@ -394,7 +395,8 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 		fcid:          contractID,
 		pt:            pt.HostPriceTable,
 		siamuxAddr:    siamuxAddr,
-		sk:            w.accounts.deriveAccountKey(hostKey),
+		renterKey:     w.deriveRenterKey(hostKey),
+		accountKey:    w.accounts.deriveAccountKey(hostKey),
 		transportPool: w.transportPoolV3,
 	})
 }
@@ -538,7 +540,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 			}
 
 			var refund types.Currency
-			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.sk)
+			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.accountKey)
 			cost, refund, err = RPCReadSector(t, w, r.pt, &payment, offset, length, root, true)
 			amount = cost.Sub(refund)
 			return err
@@ -568,8 +570,8 @@ func (r *hostV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byt
 			}
 
 			var refund types.Currency
-			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.sk)
-			cost, refund, err = RPCAppendSector(t, r.sk, r.pt, rev, &payment, collateral, sector)
+			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.accountKey)
+			cost, refund, err = RPCAppendSector(t, r.renterKey, r.pt, rev, &payment, collateral, sector)
 			amount = cost.Sub(refund)
 			return err
 		})
@@ -1056,7 +1058,7 @@ func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPr
 	defer s.Close()
 
 	req := rhpv3.RPCExecuteProgramRequest{
-		FileContractID: types.FileContractID{},
+		FileContractID: rev.ParentID,
 		Program: []rhpv3.Instruction{&rhpv3.InstrAppendSector{
 			SectorDataOffset: 0,
 			ProofRequired:    true,
@@ -1090,6 +1092,7 @@ func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPr
 	// finalize the program with a new revision.
 	newRevision := *rev
 	newValid, newMissed := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
+	newRevision.Filesize += rhpv2.SectorSize
 	newRevision.RevisionNumber++
 	newRevision.FileMerkleRoot = executeResp.NewMerkleRoot
 
