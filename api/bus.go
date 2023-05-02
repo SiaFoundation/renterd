@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"math/big"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -55,13 +56,16 @@ var (
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
 	DefaultGougingSettings = GougingSettings{
-		MinMaxCollateral:      types.Siacoins(10),                                  // at least up to 10 SC per contract
-		MaxRPCPrice:           types.Siacoins(1).Div64(1000),                       // 1mS per RPC
-		MaxContractPrice:      types.Siacoins(15),                                  // 15 SC per contract
-		MaxDownloadPrice:      types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxUploadPrice:        types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxStoragePrice:       types.Siacoins(3000).Div64(1 << 40).Div64(144 * 30), // 3000 SC per TiB per month
-		HostBlockHeightLeeway: 6,                                                   // 6 blocks
+		MinMaxCollateral:              types.Siacoins(10),                                  // at least up to 10 SC per contract
+		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                       // 1mS per RPC
+		MaxContractPrice:              types.Siacoins(15),                                  // 15 SC per contract
+		MaxDownloadPrice:              types.Siacoins(3000),                                // 3000 SC per 1 TiB
+		MaxUploadPrice:                types.Siacoins(3000),                                // 3000 SC per 1 TiB
+		MaxStoragePrice:               types.Siacoins(3000).Div64(1 << 40).Div64(144 * 30), // 3000 SC per TiB per month
+		HostBlockHeightLeeway:         6,                                                   // 6 blocks
+		MinPriceTableValidity:         5 * time.Minute,                                     // 5 minutes
+		MinAccountExpiry:              24 * time.Hour,                                      // 1 day
+		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
 	}
 )
 
@@ -315,6 +319,18 @@ type GougingSettings struct {
 	// HostBlockHeightLeeway is the amount of blocks of leeway given to the host
 	// block height in the host's price table
 	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
+
+	// MinPriceTableValidity is the minimum accepted value for `Validity` in the
+	// host's price settings.
+	MinPriceTableValidity time.Duration `json:"minPriceTableValidity"`
+
+	// MinAccountExpiry is the minimum accepted value for `AccountExpiry` in the
+	// host's price settings.
+	MinAccountExpiry time.Duration `json:"minAccountExpiry"`
+
+	// MinMaxEphemeralAccountBalance is the minimum accepted value for
+	// `MaxEphemeralAccountBalance` in the host's price settings.
+	MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
 }
 
 type SearchHostsRequest struct {

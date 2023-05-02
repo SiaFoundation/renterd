@@ -10,6 +10,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -19,7 +20,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
 	if err != nil {
 		t.Fatal(err)
 	}
