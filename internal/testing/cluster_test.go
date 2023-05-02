@@ -911,11 +911,28 @@ func TestEphemeralAccountSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acc := accounts[0]
-	if acc.RequiresSync {
+	if len(accounts) != 1 || accounts[0].RequiresSync {
 		t.Fatal("account shouldn't require a sync")
 	}
+
+	// Shut down the autopilot to prevent it from manipulating the account.
+	if err := cluster.ShutdownAutopilot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch the account balance before setting the balance
+	accounts, err = cluster.Bus.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatal("unexpected number of accounts")
+	}
+	acc := accounts[0]
 	balanceBefore := acc.Balance
+	if len(balanceBefore.Bits()) == 0 {
+		t.Fatal("unexpected account balance", balanceBefore)
+	}
 
 	// Set requiresSync flag on bus and balance to 0.
 	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, new(big.Int)); err != nil {
