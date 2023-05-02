@@ -59,9 +59,8 @@ func TestHostPruning(t *testing.T) {
 	// create a helper function that waits for an autopilot loop to finish
 	waitForAutopilotLoop := func() {
 		var nTriggered int
-		err := Retry(10, 500*time.Millisecond, func() error {
-			triggered, err := a.Trigger()
-			if err != nil {
+		if err := Retry(10, 500*time.Millisecond, func() error {
+			if triggered, err := a.Trigger(true); err != nil {
 				t.Fatal(err)
 			} else if triggered {
 				nTriggered++
@@ -70,8 +69,7 @@ func TestHostPruning(t *testing.T) {
 				}
 			}
 			return errors.New("autopilot loop has not finished")
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}

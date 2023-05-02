@@ -106,7 +106,7 @@ type Autopilot struct {
 	startStopMu sync.Mutex
 	running     bool
 	ticker      *time.Ticker
-	triggerChan chan struct{}
+	triggerChan chan bool
 	stopChan    chan struct{}
 }
 
@@ -148,12 +148,6 @@ func (wp *workerPool) withWorker(workerFunc func(Worker)) {
 	workerFunc(wp.workers[frand.Intn(len(wp.workers))])
 }
 
-func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
-	wp.mu.RLock()
-	defer wp.mu.RUnlock()
-	workerFunc(wp.workers)
-}
-
 // Actions returns the autopilot actions that have occurred since the given time.
 func (ap *Autopilot) Actions(since time.Time, max int) []api.Action {
 	panic("unimplemented")
@@ -180,7 +174,7 @@ func (ap *Autopilot) Run() error {
 	}
 	ap.running = true
 	ap.stopChan = make(chan struct{})
-	ap.triggerChan = make(chan struct{})
+	ap.triggerChan = make(chan bool)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
 	ap.wg.Add(1)
@@ -200,6 +194,7 @@ func (ap *Autopilot) Run() error {
 		return nil
 	}
 
+	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
 	for {
 		ap.logger.Info("autopilot iteration starting")
@@ -238,7 +233,7 @@ func (ap *Autopilot) Run() error {
 
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ctx, w)
+			ap.s.tryPerformHostScan(ctx, w, forceScan)
 
 			// do not continue if we are not synced
 			if !ap.isSynced() {
@@ -280,10 +275,11 @@ func (ap *Autopilot) Run() error {
 		select {
 		case <-ap.stopChan:
 			return nil
-		case <-ap.triggerChan:
+		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
 		case <-ap.ticker.C:
+			forceScan = false
 		}
 	}
 }
@@ -303,12 +299,12 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 	return nil
 }
 
-func (ap *Autopilot) Trigger() bool {
+func (ap *Autopilot) Trigger(forceScan bool) bool {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 
 	select {
-	case ap.triggerChan <- struct{}{}:
+	case ap.triggerChan <- forceScan:
 		return true
 	default:
 		return false
@@ -414,7 +410,7 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	if jc.Check("failed to set config", ap.SetConfig(c)) != nil {
 		return
 	}
-	ap.Trigger() // trigger the autopilot loop
+	ap.Trigger(false) // trigger the autopilot loop
 }
 
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
@@ -424,8 +420,12 @@ func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
-	jc.Encode(api.AutopilotTriggeredPOST{
-		Triggered: ap.Trigger(),
+	var req api.AutopilotTriggerRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	jc.Encode(api.AutopilotTriggerResponse{
+		Triggered: ap.Trigger(req.ForceScan),
 	})
 }
 
