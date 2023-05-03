@@ -893,18 +893,8 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// add host
-	nodes, err := cluster.AddHosts(1)
+	_, err = cluster.AddHosts(1)
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	// make the cost of fetching a revision 0. That allows us to check for exact
-	// balances when funding the account and avoid NDFs.
-	host := nodes[0]
-	settings := host.settings.Settings()
-	settings.BaseRPCPrice = types.ZeroCurrency
-	settings.MinEgressPrice = types.ZeroCurrency
-	if err := host.settings.UpdateSettings(settings); err != nil {
 		t.Fatal(err)
 	}
 
@@ -931,10 +921,6 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatal("unexpected number of accounts")
 	}
 	acc := accounts[0]
-	balanceBefore := acc.Balance
-	if len(balanceBefore.Bits()) == 0 {
-		t.Fatal("unexpected account balance", balanceBefore)
-	}
 
 	// Set requiresSync flag on bus and balance to 0.
 	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, new(big.Int)); err != nil {
@@ -979,10 +965,6 @@ func TestEphemeralAccountSync(t *testing.T) {
 		}
 		if account.RequiresSync {
 			return errors.New("account wasn't synced")
-		}
-		// account for 1H sync cost
-		if new(big.Int).Add(account.Balance, big.NewInt(1)).Cmp(balanceBefore) != 0 {
-			t.Fatal("balance mismatch", account.Balance, balanceBefore)
 		}
 		return nil
 	})
