@@ -825,6 +825,25 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	switch key {
+	case api.SettingGouging:
+		if gs, ok := value.(api.GougingSettings); !ok {
+			jc.Error(fmt.Errorf("couldn't update gouging settings, invalid request body"), http.StatusBadRequest)
+			return
+		} else if err := gs.Validate(); err != nil {
+			jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
+			return
+		}
+	case api.SettingRedundancy:
+		if rs, ok := value.(api.RedundancySettings); !ok {
+			jc.Error(fmt.Errorf("couldn't update redundancy settings, invalid request body"), http.StatusBadRequest)
+			return
+		} else if err := rs.Validate(); err != nil {
+			jc.Error(fmt.Errorf("couldn't update redundancy settings, error: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
 	js, err := json.Marshal(value)
 	if err != nil {
 		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
@@ -1107,6 +1126,56 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 				panic("failed to marshal default settings") // should never happen
 			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
 				return nil, err
+			}
+		}
+	}
+
+	// Check redundancy settings for validity
+	var rs api.RedundancySettings
+	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
+		return nil, err
+	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
+		return nil, err
+	} else if err := rs.Validate(); err != nil {
+		l.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
+		bytes, _ := json.Marshal(api.DefaultRedundancySettings)
+		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
+			return nil, err
+		}
+	}
+
+	// Check gouging settings for validity
+	var gs api.GougingSettings
+	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
+		return nil, err
+	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
+		return nil, err
+	} else if err := gs.Validate(); err != nil {
+		// compat apply default EA gouging settings
+		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
+		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
+		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
+		if err := gs.Validate(); err == nil {
+			l.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
+			bytes, _ := json.Marshal(gs)
+			if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
+				return nil, err
+			}
+		} else {
+			// compate apply default host block leeway settings
+			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
+			if err := gs.Validate(); err == nil {
+				l.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
+				bytes, _ := json.Marshal(gs)
+				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
+					return nil, err
+				}
+			} else {
+				l.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
+				bytes, _ := json.Marshal(api.DefaultGougingSettings)
+				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

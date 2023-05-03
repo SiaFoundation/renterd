@@ -333,6 +333,23 @@ type GougingSettings struct {
 	MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
 }
 
+// Validate returns an error if the gouging settings are not considered valid.
+func (gs GougingSettings) Validate() error {
+	if gs.HostBlockHeightLeeway < 3 {
+		return errors.New("HostBlockHeightLeeway must be at least 3 blocks")
+	}
+	if gs.MinAccountExpiry < time.Hour {
+		return errors.New("MinAccountExpiry must be at least 1 hour")
+	}
+	if gs.MinMaxEphemeralAccountBalance.Cmp(types.Siacoins(1)) < 0 {
+		return errors.New("MinMaxEphemeralAccountBalance must be at least 1 SC")
+	}
+	if gs.MinPriceTableValidity < time.Minute {
+		return errors.New("MinPriceTableValidity must be at least 1 minute")
+	}
+	return nil
+}
+
 type SearchHostsRequest struct {
 	Offset          int               `json:"offset"`
 	Limit           int               `json:"limit"`
