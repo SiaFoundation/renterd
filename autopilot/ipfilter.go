@@ -14,7 +14,7 @@ import (
 const (
 	// number of unique bits the host IP must have to prevent it from being filtered
 	ipv4FilterRange = 24
-	ipv6FilterRange = 54
+	ipv6FilterRange = 32
 
 	// resolverLookupTimeout is the timeout we apply when resolving a host's IP address
 	resolverLookupTimeout = 5 * time.Second
