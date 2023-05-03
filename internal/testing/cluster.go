@@ -705,9 +705,11 @@ func testWorkerCfg() node.WorkerConfig {
 		ContractLockTimeout:     5 * time.Second,
 		ID:                      "worker",
 		BusFlushInterval:        testBusFlushInterval,
+		SessionLockTimeout:      30 * time.Second,
 		SessionReconnectTimeout: 10 * time.Second,
 		SessionTTL:              2 * time.Minute,
-		UploadSectorTimeout:     100 * time.Millisecond,
+		DownloadSectorTimeout:   500 * time.Millisecond,
+		UploadSectorTimeout:     500 * time.Millisecond,
 		UploadMaxOverdrive:      5,
 	}
 }
