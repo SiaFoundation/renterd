@@ -885,7 +885,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	cluster, err := newTestCluster(dir, zap.NewNop())
+	cluster, err := newTestCluster(dir, newTestLoggerCustom(zapcore.DebugLevel))
 	if err != nil {
 		t.Fatal(err)
 	}
