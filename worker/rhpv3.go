@@ -196,6 +196,7 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.Pub
 	if err != nil {
 		return types.FileContractRevision{}, err
 	}
+	fmt.Println("DEBUG PJ: FetchRevisionWithAccount", hostKey.String())
 	err = acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
 		return cost, w.transportPoolV3.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
@@ -210,6 +211,7 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.Pub
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
 				}
 				cost = pt.LatestRevisionCost
+				fmt.Println("DEBUG PJ: FetchRevisionWithAccount cost", cost)
 				payment := rhpv3.PayByEphemeralAccount(acc.id, cost, bh+defaultWithdrawalExpiryBlocks, w.accounts.deriveAccountKey(hostKey))
 				return pt.HostPriceTable, &payment, nil
 			})
