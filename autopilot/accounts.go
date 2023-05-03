@@ -72,7 +72,7 @@ func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig)
 		return
 	}
 
-	contracts, err := a.b.Contracts(ctx, cfg.Contracts.Set)
+	contracts, err := a.b.ActiveContracts(ctx)
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch contract set for refill: %v", err))
 		return

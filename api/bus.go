@@ -263,12 +263,6 @@ type AccountsAddBalanceRequest struct {
 	Amount  *big.Int        `json:"amount"`
 }
 
-// DownloadParams contains the metadata needed by a worker to download an object.
-type DownloadParams struct {
-	ContractSet string
-	GougingParams
-}
-
 // UploadParams contains the metadata needed by a worker to upload an object.
 type UploadParams struct {
 	CurrentHeight uint64

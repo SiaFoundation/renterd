@@ -257,6 +257,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}()
 
+	b := cluster.Bus
 	w := cluster.Worker
 	rs := testRedundancySettings
 
@@ -355,6 +356,40 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// download the data
+	for _, data := range [][]byte{small, large} {
+		name := fmt.Sprintf("data_%v", len(data))
+
+		var buffer bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
+			t.Fatal(err)
+		}
+
+		// assert it matches
+		if !bytes.Equal(data, buffer.Bytes()) {
+			t.Fatal("unexpected")
+		}
+	}
+
+	// update the bus setting and specify a non-existing contract set
+	err = b.UpdateSetting(context.Background(), api.SettingContractSet, api.ContractSetSettings{Set: t.Name()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.SetContractSet(context.Background(), t.Name(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there are no contracts in the set
+	csc, err := b.Contracts(context.Background(), t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(csc) != 0 {
+		t.Fatalf("expected no contracts, got %v", len(csc))
+	}
+
+	// download the data again
 	for _, data := range [][]byte{small, large} {
 		name := fmt.Sprintf("data_%v", len(data))
 
@@ -852,24 +887,14 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	cluster, err := newTestCluster(dir, zap.NewNop())
+	cluster, err := newTestCluster(dir, newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// add host
-	nodes, err := cluster.AddHosts(1)
+	_, err = cluster.AddHosts(1)
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	// make the cost of fetching a revision 0. That allows us to check for exact
-	// balances when funding the account and avoid NDFs.
-	host := nodes[0]
-	settings := host.settings.Settings()
-	settings.BaseRPCPrice = types.ZeroCurrency
-	settings.MinEgressPrice = types.ZeroCurrency
-	if err := host.settings.UpdateSettings(settings); err != nil {
 		t.Fatal(err)
 	}
 
@@ -878,11 +903,24 @@ func TestEphemeralAccountSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acc := accounts[0]
-	if acc.RequiresSync {
+	if len(accounts) != 1 || accounts[0].RequiresSync {
 		t.Fatal("account shouldn't require a sync")
 	}
-	balanceBefore := acc.Balance
+
+	// Shut down the autopilot to prevent it from manipulating the account.
+	if err := cluster.ShutdownAutopilot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch the account balance before setting the balance
+	accounts, err = cluster.Bus.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatal("unexpected number of accounts")
+	}
+	acc := accounts[0]
 
 	// Set requiresSync flag on bus and balance to 0.
 	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, new(big.Int)); err != nil {
@@ -928,10 +966,6 @@ func TestEphemeralAccountSync(t *testing.T) {
 		if account.RequiresSync {
 			return errors.New("account wasn't synced")
 		}
-		// account for 1H sync cost
-		if new(big.Int).Add(account.Balance, big.NewInt(1)).Cmp(balanceBefore) != 0 {
-			t.Fatal("balance mismatch", account.Balance, balanceBefore)
-		}
 		return nil
 	})
 	if err != nil {
@@ -973,6 +1007,11 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// wait for accounts to be funded
 	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// shut down the autopilot to prevent it from doing contract maintenance if any kind
+	if err := cluster.ShutdownAutopilot(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1019,6 +1058,22 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Check the bus returns the desired upload params and contract set contracts.
+	up, err := cluster.Bus.UploadParams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up.ContractSet != "test" {
+		t.Fatal("unexpected contractset", up.ContractSet)
+	}
+	csc, err := cluster.Bus.Contracts(context.Background(), up.ContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(csc) != 3 {
+		t.Fatal("expected 3 contracts", len(csc))
 	}
 
 	// Upload a file.

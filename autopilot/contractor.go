@@ -101,6 +101,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	state := c.ap.state
 
 	// no maintenance if no hosts are requested
+	//
+	// NOTE: this is an important check because we assume Contracts.Amount is
+	// not zero in several places
 	if state.cfg.Contracts.Amount == 0 {
 		c.logger.Warn("contracts is set to zero, skipping contract maintenance")
 		return nil

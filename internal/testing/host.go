@@ -79,7 +79,7 @@ var defaultHostSettings = settings.Settings{
 	MinIngressPrice: types.Siacoins(100).Div64(1e12),
 	WindowSize:      5,
 
-	PriceTableValidity: 30 * time.Second,
+	PriceTableValidity: 10 * time.Second,
 
 	AccountExpiry:      30 * 24 * time.Hour, // 1 month
 	MaxAccountBalance:  types.Siacoins(10),

@@ -146,12 +146,13 @@ func TestGouging(t *testing.T) {
 		}
 	}
 
+	// make sure the price table expires so the worker is forced to fetch it
+	// again, this is necessary for the host to be considered price gouging
+	time.Sleep(defaultHostSettings.PriceTableValidity)
+
 	// download the data - should fail
 	buffer.Reset()
 	if err := w.DownloadObject(ctx, &buffer, name); err == nil {
-		t.Fatal(err)
-	}
-	if len(buffer.Bytes()) > 0 {
 		t.Fatal("expected download to fail")
 	}
 }
