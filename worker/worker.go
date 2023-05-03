@@ -219,7 +219,6 @@ type Bus interface {
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 
-	DownloadParams(ctx context.Context) (api.DownloadParams, error)
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
@@ -850,13 +849,20 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach contract spending recorder to the context.
 	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
-	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
+	// fetch all active contracts
+	dlContracts, err := w.bus.ActiveContracts(ctx)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
+	// fetch all contract set contracts
+	ulContracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -867,7 +873,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 			continue
 		}
 
-		for _, c := range contracts {
+		for _, c := range ulContracts {
 			if c.HostKey == ss.Host {
 				usedContracts[ss.Host] = c.ID
 				break
@@ -915,21 +921,13 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	dp, err := w.bus.DownloadParams(ctx)
+	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
 		return
 	}
 
-	// allow overriding contract set
-	var contractset string
-	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
-		return
-	} else if contractset != "" {
-		dp.ContractSet = contractset
-	}
-
 	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, dp.GougingParams)
+	ctx = WithGougingChecker(ctx, gp)
 
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
@@ -963,7 +961,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	performance := make(map[types.PublicKey]int64)
 
 	// fetch contracts
-	set, err := w.bus.Contracts(ctx, dp.ContractSet)
+	contracts, err := w.bus.ActiveContracts(ctx)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -971,7 +969,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	// build contract map
 	availableContracts := make(map[types.PublicKey]api.ContractMetadata)
-	for _, contract := range set {
+	for _, contract := range contracts {
 		availableContracts[contract.HostKey] = contract
 	}
 

@@ -147,11 +147,15 @@ func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads
 	}, nil
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker) {
+func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bool) bool {
 	s.mu.Lock()
-	if s.scanning || !s.isScanRequired() || s.ap.isStopped() {
+	if s.ap.isStopped() {
 		s.mu.Unlock()
-		return
+		return false
+	}
+	if !force && (s.scanning || !s.isScanRequired()) {
+		s.mu.Unlock()
+		return false
 	}
 
 	s.logger.Info("host scan started")
@@ -186,6 +190,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker) {
 		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 	}(s.ap.state.cfg)
+	return true
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -276,6 +281,12 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 	}
 
 	return respChan
+}
+
+func (s *scanner) isScanning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scanning
 }
 
 func (s *scanner) isScanRequired() bool {

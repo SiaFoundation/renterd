@@ -859,26 +859,6 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	jc.Encode(ancestors)
 }
 
-func (b *bus) paramsHandlerDownloadGET(jc jape.Context) {
-	gp, err := b.gougingParams(jc.Request.Context())
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-
-	var css api.ContractSetSettings
-	if csss, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet); err != nil {
-		jc.Error(fmt.Errorf("could not fetch contract set setting, err: %v", err), http.StatusInternalServerError)
-		return
-	} else if err := json.Unmarshal([]byte(csss), &css); err != nil {
-		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", csss, err)
-	}
-
-	jc.Encode(api.DownloadParams{
-		ContractSet:   css.Set,
-		GougingParams: gp,
-	})
-}
-
 func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
@@ -1201,9 +1181,8 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
-		"GET    /params/download": b.paramsHandlerDownloadGET,
-		"GET    /params/upload":   b.paramsHandlerUploadGET,
-		"GET    /params/gouging":  b.paramsHandlerGougingGET,
+		"GET    /params/upload":  b.paramsHandlerUploadGET,
+		"GET    /params/gouging": b.paramsHandlerGougingGET,
 	}))
 }
 
