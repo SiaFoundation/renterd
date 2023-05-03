@@ -291,8 +291,8 @@ type worker struct {
 	contractLockingDuration time.Duration
 	downloadSectorTimeout   time.Duration
 	uploadSectorTimeout     time.Duration
-	downloadMaxOverdrive    int
-	uploadMaxOverdrive      int
+	downloadMaxOverdrive    uint64
+	uploadMaxOverdrive      uint64
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
@@ -1205,7 +1205,29 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive int, l *zap.Logger) *worker {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive uint64, l *zap.Logger) (*worker, error) {
+	if contractLockingDuration == 0 {
+		return nil, errors.New("contract lock duration must be positive")
+	}
+	if sessionLockTimeout == 0 {
+		return nil, errors.New("session lock timeout must be positive")
+	}
+	if sessionReconectTimeout == 0 {
+		return nil, errors.New("session reconnect timeout must be positive")
+	}
+	if sessionTTL == 0 {
+		return nil, errors.New("session TTL must be positive")
+	}
+	if busFlushInterval == 0 {
+		return nil, errors.New("bus flush interval must be positive")
+	}
+	if downloadSectorTimeout == 0 {
+		return nil, errors.New("download sector timeout must be positive")
+	}
+	if uploadSectorTimeout == 0 {
+		return nil, errors.New("upload sector timeout must be positive")
+	}
+
 	w := &worker{
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
@@ -1223,7 +1245,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
-	return w
+	return w, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.
