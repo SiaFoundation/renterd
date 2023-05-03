@@ -289,7 +289,7 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
 
-	registry := registry.NewManager(privKey, db)
+	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
 	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, tp, wallet, contracts, settings, storage, stubDataMonitor{}, stubMetricReporter{}, log.Named("rhpv2"))

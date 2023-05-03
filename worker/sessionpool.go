@@ -9,7 +9,6 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/tracing"
 )
 
 func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, currentHeight uint64) (types.Hash256, error) {
@@ -86,68 +85,6 @@ func (ss *sharedSession) Contract() types.FileContractID {
 
 func (ss *sharedSession) HostKey() types.PublicKey {
 	return ss.hostKey
-}
-
-func (ss *sharedSession) Revision(ctx context.Context) (rhpv2.ContractRevision, error) {
-	s, err := ss.pool.acquire(ctx, ss)
-	if err != nil {
-		return rhpv2.ContractRevision{}, err
-	}
-	defer ss.pool.release(s)
-	return s.Revision(), nil
-}
-
-func (ss *sharedSession) RenewContract(ctx context.Context, prepareFn func(rev types.FileContractRevision, host rhpv2.HostSettings) ([]types.Transaction, types.Currency, func(), error)) (rhpv2.ContractRevision, []types.Transaction, error) {
-	s, err := ss.pool.acquire(ctx, ss)
-	if err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-	defer ss.pool.release(s)
-
-	if breakdown := GougingCheckerFromContext(ctx).Check(&s.settings, nil); breakdown.Gouging() {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed reneww contract, gouging check failed: %v", breakdown.Reasons())
-	}
-
-	renterTxnSet, finalPayment, discard, err := prepareFn(s.Revision().Revision, s.Settings())
-	if err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-	rev, txnSet, err := s.RenewContract(ctx, renterTxnSet, finalPayment)
-	if err != nil {
-		discard()
-		return rhpv2.ContractRevision{}, nil, err
-	}
-	return rev, txnSet, nil
-}
-
-func (ss *sharedSession) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte) (types.Hash256, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "sharedSession.UploadSector")
-	defer span.End()
-	currentHeight := ss.pool.currentHeight()
-	if currentHeight == 0 {
-		panic("cannot upload without knowing current height") // developer error
-	}
-	s, err := ss.pool.acquire(ctx, ss)
-	if err != nil {
-		return types.Hash256{}, err
-	}
-	defer ss.pool.release(s)
-	if breakdown := GougingCheckerFromContext(ctx).Check(&s.settings, nil); breakdown.Gouging() {
-		return types.Hash256{}, fmt.Errorf("failed to upload sector, gouging check failed: %v", breakdown.Reasons())
-	}
-	return s.appendSector(ctx, sector, currentHeight)
-}
-
-func (ss *sharedSession) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
-	s, err := ss.pool.acquire(ctx, ss)
-	if err != nil {
-		return err
-	}
-	defer ss.pool.release(s)
-	if breakdown := GougingCheckerFromContext(ctx).Check(&s.settings, nil); breakdown.Gouging() {
-		return fmt.Errorf("failed to download sector, gouging check failed: %v", breakdown.Reasons())
-	}
-	return s.readSector(ctx, w, root, offset, length)
 }
 
 func (ss *sharedSession) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
