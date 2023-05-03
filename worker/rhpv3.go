@@ -1061,7 +1061,7 @@ func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPr
 		// For the first upload to a contract we don't get a proof. So we just
 		// assert that the new contract root matches the root of the sector.
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
-			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errors.New("merkle root doesn't match the sector root upon first upload to contract")
+			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
 	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.
