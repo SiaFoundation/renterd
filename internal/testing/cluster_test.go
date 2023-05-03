@@ -544,17 +544,13 @@ func TestUploadDownloadSpending(t *testing.T) {
 			t.Fatal("no active contracts found")
 		}
 
-		nUploaded := 0
 		for _, c := range cms {
 			if !c.Spending.Uploads.IsZero() {
-				nUploaded++
+				t.Fatal("upload spending should be zero")
 			}
 			if !c.Spending.Downloads.IsZero() {
 				t.Fatal("download spending should be zero")
 			}
-		}
-		if nUploaded < rs.TotalShards {
-			return fmt.Errorf("not enough contracts have upload spending, %v<%v", nUploaded, rs.TotalShards)
 		}
 		return nil
 	})
@@ -743,6 +739,12 @@ func TestParallelUpload(t *testing.T) {
 
 	// add hosts
 	if _, err := cluster.AddHostsBlocking(int(rs.TotalShards)); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	_, err = cluster.WaitForAccounts()
+	if err != nil {
 		t.Fatal(err)
 	}
 

@@ -702,7 +702,7 @@ func testBusCfg() node.BusConfig {
 
 func testWorkerCfg() node.WorkerConfig {
 	return node.WorkerConfig{
-		ContractLockTimeout:     500 * time.Millisecond,
+		ContractLockTimeout:     5 * time.Second,
 		ID:                      "worker",
 		BusFlushInterval:        testBusFlushInterval,
 		SessionReconnectTimeout: 10 * time.Second,

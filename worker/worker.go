@@ -190,12 +190,12 @@ type AccountStore interface {
 	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 }
 
-type contractReleaser interface {
+type revisionUnlocker interface {
 	Release(context.Context) error
 }
 
-type contractLocker interface {
-	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error)
+type revisionLocker interface {
+	withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error
 }
 
 type ContractLocker interface {
@@ -369,19 +369,19 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStore) error) (err error) {
+func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStoreV2) error) (err error) {
 	return w.withHostsV2(ctx, []api.ContractMetadata{{
 		ID:      contractID,
 		HostKey: hostKey,
 		HostIP:  hostIP,
-	}}, func(ss []sectorStore) error {
+	}}, func(ss []sectorStoreV2) error {
 		return fn(ss[0])
 	})
 }
 
 func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	contractLock, err := w.AcquireContract(ctx, contractID, lockPriority)
+	contractLock, err := w.acquireContract(ctx, contractID, lockPriority)
 	if err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	}
@@ -399,7 +399,7 @@ func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContra
 	return fn(rev)
 }
 
-func (w *worker) unlockHosts(hosts []sectorStore) {
+func (w *worker) unlockHosts(hosts []sectorStoreV2) {
 	// apply a pessimistic timeout, ensuring unlocking the contract or force
 	// closing the session does not deadlock and keep this goroutine around
 	// forever. Use a background context as the parent to avoid timing out
@@ -418,8 +418,8 @@ func (w *worker) unlockHosts(hosts []sectorStore) {
 	wg.Wait()
 }
 
-func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
-	var hosts []sectorStore
+func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStoreV2) error) (err error) {
+	var hosts []sectorStoreV2
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
@@ -1373,7 +1373,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error) {
+func (w *worker) acquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
 	defer span.End()
 	span.SetAttributes(attribute.Stringer("contract", fcid))

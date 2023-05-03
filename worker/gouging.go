@@ -455,6 +455,10 @@ func sectorReadCostRHPv3(pt rhpv3.HostPriceTable) (types.Currency, bool) {
 	if overflow {
 		return types.ZeroCurrency, true
 	}
+	base, overflow = base.AddWithOverflow(pt.InitBaseCost)
+	if overflow {
+		return types.ZeroCurrency, true
+	}
 	// bandwidth
 	ingress, overflow := pt.UploadBandwidthCost.Mul64WithOverflow(32)
 	if overflow {
@@ -483,6 +487,10 @@ func sectorUploadCostPerMonthRHPv3(pt rhpv3.HostPriceTable) (types.Currency, boo
 		return types.ZeroCurrency, true
 	}
 	writeCost, overflow = writeCost.AddWithOverflow(pt.WriteBaseCost)
+	if overflow {
+		return types.ZeroCurrency, true
+	}
+	writeCost, overflow = writeCost.AddWithOverflow(pt.InitBaseCost)
 	if overflow {
 		return types.ZeroCurrency, true
 	}
