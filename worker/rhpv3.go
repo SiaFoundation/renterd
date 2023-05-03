@@ -562,7 +562,8 @@ func (r *hostV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byt
 		}
 	}()
 
-	return rhpv2.SectorRoot(sector), r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+	var sectorRoot types.Hash256
+	return sectorRoot, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
 			cost, collateral, err := uploadSectorCost(r.pt, rev.EndHeight())
 			if err != nil {
@@ -571,7 +572,7 @@ func (r *hostV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byt
 
 			var refund types.Currency
 			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, r.bh+defaultWithdrawalExpiryBlocks, r.accountKey)
-			cost, refund, err = RPCAppendSector(t, r.renterKey, r.pt, rev, &payment, collateral, sector)
+			sectorRoot, cost, refund, err = RPCAppendSector(t, r.renterKey, r.pt, rev, &payment, collateral, sector)
 			amount = cost.Sub(refund)
 			return err
 		})
@@ -1049,11 +1050,11 @@ func RPCReadRegistry(t *transportV3, payment rhpv3.PaymentMethod, key rhpv3.Regi
 	}, nil
 }
 
-func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, collateral types.Currency, sector *[rhpv2.SectorSize]byte) (cost, refund types.Currency, err error) {
+func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, collateral types.Currency, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 	s, err := t.DialStream()
 	if err != nil {
-		return types.ZeroCurrency, types.ZeroCurrency, err
+		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, err
 	}
 	defer s.Close()
 
@@ -1087,7 +1088,24 @@ func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPr
 	}
 	cost = executeResp.TotalCost
 
-	// TODO: verify proof
+	sectorRoot = rhpv2.SectorRoot(sector)
+	if rev.Filesize == 0 {
+		// For the first upload to a contract we don't get a proof. So we just
+		// assert that the new contract root matches the root of the sector.
+		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
+			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errors.New("merkle root doesn't match the sector root upon first upload to contract")
+		}
+	} else {
+		// Otherwise we make sure the proof was transmitted and verify it.
+		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}}          // TODO: change once rhpv3 support is available
+		expectedProofSize := rhpv2.DiffProofSize(rev.Filesize/rhpv2.LeafSize, actions) // TODO: change once DiffProofSize is implemented in core.
+		//		if uint64(len(executeResp.Proof)) != expectedProofSize {
+		if len(executeResp.Proof) == 0 {
+			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("proof size doesn't match the expected size: %v != %v", len(executeResp.Proof), expectedProofSize)
+		} else if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.LeafSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
+			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errors.New("proof verification failed")
+		}
+	}
 
 	// finalize the program with a new revision.
 	newRevision := *rev
@@ -1109,7 +1127,6 @@ func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPr
 	} else if err = s.ReadResponse(&finalizeResp, 64); err != nil {
 		return
 	}
-
 	return
 }
 
