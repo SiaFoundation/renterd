@@ -404,7 +404,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	// Fall back to using the contract to pay for the revision.
 	ctx, cancel = timeoutCtx()
 	defer cancel()
-	contractLock, err := w.acquireContract(ctx, contractID, lockPriority)
+	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
 	if err != nil {
 		return err
 	}
@@ -1390,7 +1390,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) acquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
+func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
 	defer span.End()
 	span.SetAttributes(attribute.Stringer("contract", fcid))
