@@ -139,6 +139,11 @@ func collateralScore(cfg api.AutopilotConfig, hostCostPerPeriod types.Currency, 
 		expectedCollateral = expectedCollateralMax
 	}
 
+	// avoid division by zero
+	if expectedCollateral.IsZero() {
+		expectedCollateral = types.NewCurrency64(1)
+	}
+
 	// determine a cutoff at 20% of the budgeted per-host funds.
 	// Meaning that an 'ok' host puts in 1/5 of what the renter puts into a
 	// contract. Beyond that the score increases linearly and below that

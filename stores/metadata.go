@@ -775,6 +775,13 @@ func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
 }
 
 func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error {
+	// sanity check the shards don't contain an empty root
+	for _, s := range s.Shards {
+		if s.Root == (types.Hash256{}) {
+			return errors.New("shard root can never be the empty root")
+		}
+	}
+
 	// extract the slab key
 	key, err := s.Key.MarshalText()
 	if err != nil {
