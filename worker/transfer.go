@@ -299,11 +299,6 @@ func parallelDownloadSlab(ctx context.Context, sp storeProvider, ss object.SlabS
 	if availableShards < int(ss.MinShards) {
 		return nil, nil, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, ss.MinShards)
 	}
-	for i, s := range ss.Shards {
-		if s.Root == (types.Hash256{}) {
-			panic(fmt.Sprintf("shard %v contains empty root", i))
-		}
-	}
 
 	// declare types for a download request and response
 	type req struct {
