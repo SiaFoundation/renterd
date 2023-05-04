@@ -12,8 +12,8 @@ import (
 
 // A Sector uniquely identifies a sector stored on a particular host.
 type Sector struct {
-	Host types.PublicKey
-	Root types.Hash256
+	Host types.PublicKey `json:"host"`
+	Root types.Hash256   `json:"root"`
 }
 
 // A Slab is raw data that has been erasure-encoded into sector-sized shards,
@@ -21,9 +21,9 @@ type Sector struct {
 // be used for each Slab, and should not be the same key used for the parent
 // Object.
 type Slab struct {
-	Key       EncryptionKey
-	MinShards uint8
-	Shards    []Sector
+	Key       EncryptionKey `json:"key"`
+	MinShards uint8         `json:"minShards"`
+	Shards    []Sector      `json:"shards"`
 }
 
 // Length returns the length of the raw data stored in s.
@@ -85,9 +85,9 @@ func (s Slab) Reconstruct(shards [][]byte) error {
 // necessarily be aligned to a leaf or chunk boundary. Use the SectorRegion
 // method to compute the chunk-aligned offset and length.
 type SlabSlice struct {
-	Slab
-	Offset uint32
-	Length uint32
+	Slab   `json:"slab"`
+	Offset uint32 `json:"offset"`
+	Length uint32 `json:"length"`
 }
 
 // SectorRegion returns the offset and length of the sector region that must be

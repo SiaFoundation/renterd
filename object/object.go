@@ -13,7 +13,7 @@ import (
 
 // A EncryptionKey can encrypt and decrypt messages.
 type EncryptionKey struct {
-	entropy *[32]byte
+	entropy *[32]byte `json:"-"`
 }
 
 // String implements fmt.Stringer.
@@ -62,8 +62,8 @@ func GenerateEncryptionKey() EncryptionKey {
 
 // An Object is a unit of data that has been stored on a host.
 type Object struct {
-	Key   EncryptionKey
-	Slabs []SlabSlice
+	Key   EncryptionKey `json:"key"`
+	Slabs []SlabSlice   `json:"slabs"`
 }
 
 // Size returns the total size of the object.
