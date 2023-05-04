@@ -159,38 +159,6 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 	return fn(t)
 }
 
-// FetchRevision fetches the latest revision of a contract and uses an account
-// as the primary payment method. If the account balance is insufficient, it
-// falls back to using the contract as a payment method.
-func (w *worker) FetchRevision(ctx context.Context, timeout time.Duration, contract api.ContractMetadata, bh uint64, lockPriority int) (types.FileContractRevision, error) {
-	timeoutCtx := func() (context.Context, context.CancelFunc) {
-		if timeout > 0 {
-			return context.WithTimeout(ctx, timeout)
-		}
-		return ctx, func() {}
-	}
-
-	// Try to fetch the revision with an account first.
-	ctx, cancel := timeoutCtx()
-	defer cancel()
-	rev, err := w.FetchRevisionWithAccount(ctx, contract.HostKey, contract.SiamuxAddr, bh, contract.ID)
-	if err != nil && !isBalanceInsufficient(err) {
-		return types.FileContractRevision{}, err
-	} else if err == nil {
-		return rev, nil
-	}
-
-	// Fall back to using the contract to pay for the revision.
-	ctx, cancel = timeoutCtx()
-	defer cancel()
-	contractLock, err := w.acquireContract(ctx, contract.ID, lockPriority)
-	if err != nil {
-		return types.FileContractRevision{}, err
-	}
-	defer contractLock.Release(ctx)
-	return w.FetchRevisionWithContract(ctx, contract.HostKey, contract.SiamuxAddr, contract.ID)
-}
-
 func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
@@ -1092,7 +1060,7 @@ func RPCAppendSector(t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPr
 		// For the first upload to a contract we don't get a proof. So we just
 		// assert that the new contract root matches the root of the sector.
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
-			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errors.New("merkle root doesn't match the sector root upon first upload to contract")
+			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
 	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.

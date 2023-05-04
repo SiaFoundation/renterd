@@ -85,7 +85,7 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 				hostIndex: hostIndex,
 				req:       r,
 			}
-			err := locker.withRevisionV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev types.FileContractRevision) error {
+			err := locker.withRevision(ctx, defaultRevisionFetchTimeout, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev types.FileContractRevision) error {
 				return sp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss sectorStoreV3) error {
 					res.root, res.err = ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), &rev)
 					if res.err != nil {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -71,7 +72,7 @@ type mockRevisionLocker struct {
 	calls int
 }
 
-func (l *mockRevisionLocker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
+func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
 	l.mu.Lock()
 	l.calls++
 	l.mu.Unlock()

@@ -37,6 +37,8 @@ import (
 )
 
 const (
+	defaultRevisionFetchTimeout = 30 * time.Second
+
 	lockingPriorityActiveContractRevision = 100 // highest
 	lockingPriorityRenew                  = 80
 	lockingPriorityPriceTable             = 60
@@ -195,7 +197,7 @@ type revisionUnlocker interface {
 }
 
 type revisionLocker interface {
-	withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error
+	withRevision(ctx context.Context, timeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error
 }
 
 type ContractLocker interface {
@@ -378,20 +380,39 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
-	// acquire contract lock
-	contractLock, err := w.acquireContract(ctx, contractID, lockPriority)
-	if err != nil {
-		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
-	}
-	defer func() {
-		if err := contractLock.Release(ctx); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to release contract, err: %v", err), "hk", hk, "fcid", contractID)
+func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
+	timeoutCtx := func() (context.Context, context.CancelFunc) {
+		if fetchTimeout > 0 {
+			return context.WithTimeout(ctx, fetchTimeout)
 		}
-	}()
+		return ctx, func() {}
+	}
+	cs, err := w.bus.ConsensusState(ctx)
+	if err != nil {
+		return err
+	}
 
-	// fetch contract revision
-	rev, err := w.FetchRevisionWithContract(ctx, hk, siamuxAddr, contractID)
+	// Lock the revision for the duration of the operation.
+	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
+	if err != nil {
+		return err
+	}
+	defer contractLock.Release(ctx)
+
+	// Try to fetch the revision with an account first.
+	ctx, cancel := timeoutCtx()
+	defer cancel()
+	rev, err := w.FetchRevisionWithAccount(ctx, hk, siamuxAddr, cs.BlockHeight, contractID)
+	if err != nil && !isBalanceInsufficient(err) {
+		return err
+	} else if err == nil {
+		return fn(rev)
+	}
+
+	// Fall back to using the contract to pay for the revision.
+	ctx, cancel = timeoutCtx()
+	defer cancel()
+	rev, err = w.FetchRevisionWithContract(ctx, hk, siamuxAddr, contractID)
 	if err != nil {
 		return err
 	}
@@ -497,22 +518,26 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, bh uint64) (contracts []api.Contract, errs HostErrorSet) {
+func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
 	// create requests channel
 	reqs := make(chan api.ContractMetadata)
 
 	// create worker function
 	var mu sync.Mutex
 	worker := func() {
-		for metadata := range reqs {
-			rev, err := w.FetchRevision(ctx, timeout, metadata, bh, lockingPriorityActiveContractRevision)
+		for md := range reqs {
+			var revision types.FileContractRevision
+			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, func(rev types.FileContractRevision) error {
+				revision = rev
+				return nil
+			})
 			mu.Lock()
 			if err != nil {
-				errs = append(errs, &HostError{HostKey: metadata.HostKey, Err: err})
+				errs = append(errs, &HostError{HostKey: md.HostKey, Err: err})
 			} else {
 				contracts = append(contracts, api.Contract{
-					ContractMetadata: metadata,
-					Revision:         rev,
+					ContractMetadata: md,
+					Revision:         revision,
 				})
 			}
 			mu.Unlock()
@@ -732,7 +757,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevisionV3(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision types.FileContractRevision) (err error) {
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision types.FileContractRevision) (err error) {
 		err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
@@ -810,7 +835,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, up.GougingParams)
 
 	// sync the account
-	jc.Check("couldn't sync account", w.withRevisionV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision types.FileContractRevision) error {
+	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision types.FileContractRevision) error {
 		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
 	}))
 }
@@ -1166,17 +1191,13 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	cs, err := w.bus.ConsensusState(ctx)
-	if jc.Check("could not get consensus state", err) != nil {
-		return
-	}
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 	ctx = WithGougingChecker(ctx, gp)
 
-	contracts, errs := w.fetchActiveContracts(ctx, busContracts, hosttimeout, cs.BlockHeight)
+	contracts, errs := w.fetchActiveContracts(ctx, busContracts, hosttimeout)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()
@@ -1393,7 +1414,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) acquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
+func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
 	defer span.End()
 	span.SetAttributes(attribute.Stringer("contract", fcid))
