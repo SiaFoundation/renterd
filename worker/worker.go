@@ -190,12 +190,12 @@ type AccountStore interface {
 	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 }
 
-type contractReleaser interface {
+type revisionUnlocker interface {
 	Release(context.Context) error
 }
 
-type contractLocker interface {
-	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error)
+type revisionLocker interface {
+	withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error
 }
 
 type ContractLocker interface {
@@ -219,7 +219,6 @@ type Bus interface {
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 
-	DownloadParams(ctx context.Context) (api.DownloadParams, error)
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
@@ -291,8 +290,8 @@ type worker struct {
 	contractLockingDuration time.Duration
 	downloadSectorTimeout   time.Duration
 	uploadSectorTimeout     time.Duration
-	downloadMaxOverdrive    int
-	uploadMaxOverdrive      int
+	downloadMaxOverdrive    uint64
+	uploadMaxOverdrive      uint64
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
@@ -369,19 +368,19 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStore) error) (err error) {
+func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStoreV2) error) (err error) {
 	return w.withHostsV2(ctx, []api.ContractMetadata{{
 		ID:      contractID,
 		HostKey: hostKey,
 		HostIP:  hostIP,
-	}}, func(ss []sectorStore) error {
+	}}, func(ss []sectorStoreV2) error {
 		return fn(ss[0])
 	})
 }
 
 func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
 	// acquire contract lock
-	contractLock, err := w.AcquireContract(ctx, contractID, lockPriority)
+	contractLock, err := w.acquireContract(ctx, contractID, lockPriority)
 	if err != nil {
 		return fmt.Errorf("%v: %w", "failed to acquire contract for funding EA", err)
 	}
@@ -399,7 +398,7 @@ func (w *worker) withRevisionV3(ctx context.Context, contractID types.FileContra
 	return fn(rev)
 }
 
-func (w *worker) unlockHosts(hosts []sectorStore) {
+func (w *worker) unlockHosts(hosts []sectorStoreV2) {
 	// apply a pessimistic timeout, ensuring unlocking the contract or force
 	// closing the session does not deadlock and keep this goroutine around
 	// forever. Use a background context as the parent to avoid timing out
@@ -418,8 +417,8 @@ func (w *worker) unlockHosts(hosts []sectorStore) {
 	wg.Wait()
 }
 
-func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStore) error) (err error) {
-	var hosts []sectorStore
+func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStoreV2) error) (err error) {
+	var hosts []sectorStoreV2
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
@@ -850,13 +849,20 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach contract spending recorder to the context.
 	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
-	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
+	// fetch all active contracts
+	dlContracts, err := w.bus.ActiveContracts(ctx)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
+	// fetch all contract set contracts
+	ulContracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -867,7 +873,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 			continue
 		}
 
-		for _, c := range contracts {
+		for _, c := range ulContracts {
 			if c.HostKey == ss.Host {
 				usedContracts[ss.Host] = c.ID
 				break
@@ -915,21 +921,13 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	dp, err := w.bus.DownloadParams(ctx)
+	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
 		return
 	}
 
-	// allow overriding contract set
-	var contractset string
-	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
-		return
-	} else if contractset != "" {
-		dp.ContractSet = contractset
-	}
-
 	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, dp.GougingParams)
+	ctx = WithGougingChecker(ctx, gp)
 
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
@@ -963,7 +961,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	performance := make(map[types.PublicKey]int64)
 
 	// fetch contracts
-	set, err := w.bus.Contracts(ctx, dp.ContractSet)
+	contracts, err := w.bus.ActiveContracts(ctx)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -971,7 +969,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	// build contract map
 	availableContracts := make(map[types.PublicKey]api.ContractMetadata)
-	for _, contract := range set {
+	for _, contract := range contracts {
 		availableContracts[contract.HostKey] = contract
 	}
 
@@ -1205,7 +1203,29 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive int, l *zap.Logger) *worker {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive uint64, l *zap.Logger) (*worker, error) {
+	if contractLockingDuration == 0 {
+		return nil, errors.New("contract lock duration must be positive")
+	}
+	if sessionLockTimeout == 0 {
+		return nil, errors.New("session lock timeout must be positive")
+	}
+	if sessionReconectTimeout == 0 {
+		return nil, errors.New("session reconnect timeout must be positive")
+	}
+	if sessionTTL == 0 {
+		return nil, errors.New("session TTL must be positive")
+	}
+	if busFlushInterval == 0 {
+		return nil, errors.New("bus flush interval must be positive")
+	}
+	if downloadSectorTimeout == 0 {
+		return nil, errors.New("download sector timeout must be positive")
+	}
+	if uploadSectorTimeout == 0 {
+		return nil, errors.New("upload sector timeout must be positive")
+	}
+
 	w := &worker{
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
@@ -1223,7 +1243,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
-	return w
+	return w, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.
@@ -1373,7 +1393,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ contractReleaser, err error) {
+func (w *worker) acquireContract(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
 	defer span.End()
 	span.SetAttributes(attribute.Stringer("contract", fcid))

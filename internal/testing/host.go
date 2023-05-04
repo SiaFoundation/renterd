@@ -79,7 +79,7 @@ var defaultHostSettings = settings.Settings{
 	MinIngressPrice: types.Siacoins(100).Div64(1e12),
 	WindowSize:      5,
 
-	PriceTableValidity: 30 * time.Second,
+	PriceTableValidity: 10 * time.Second,
 
 	AccountExpiry:      30 * 24 * time.Hour, // 1 month
 	MaxAccountBalance:  types.Siacoins(10),
@@ -289,7 +289,7 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
 
-	registry := registry.NewManager(privKey, db)
+	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
 	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, tp, wallet, contracts, settings, storage, stubDataMonitor{}, stubMetricReporter{}, log.Named("rhpv2"))

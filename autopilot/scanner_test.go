@@ -77,12 +77,6 @@ func (w *mockWorker) RHPPriceTable(ctx context.Context, hostKey types.PublicKey,
 	return hostdb.HostPriceTable{}, nil
 }
 
-func (s *scanner) isScanning() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.scanning
-}
-
 func TestScanner(t *testing.T) {
 	// prepare 100 hosts
 	hosts := newTestHosts(100)
@@ -93,7 +87,7 @@ func TestScanner(t *testing.T) {
 	s := newTestScanner(b, w)
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background(), w)
+	s.tryPerformHostScan(context.Background(), w, false)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -121,7 +115,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.tryPerformHostScan(context.Background(), w)
+	s.tryPerformHostScan(context.Background(), w, false)
 	if s.isScanning() {
 		t.Fatal("unexpected")
 	}
@@ -130,7 +124,7 @@ func TestScanner(t *testing.T) {
 	s.scanningLastStart = time.Time{}
 
 	// assert it started a host scan
-	s.tryPerformHostScan(context.Background(), w)
+	s.tryPerformHostScan(context.Background(), w, false)
 	if !s.isScanning() {
 		t.Fatal("unexpected")
 	}
