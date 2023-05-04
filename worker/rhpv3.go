@@ -94,6 +94,14 @@ func (t *transportV3) DialStream(ctx context.Context) (*rhpv3.Stream, error) {
 	// Close the stream when the context is closed to unblock any reads or
 	// writes.
 	stream := transport.DialStream()
+
+	// Apply a sane timeout to the stream.
+	if err := stream.SetDeadline(time.Now().Add(5 * time.Minute)); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+
+	// Make sure the stream is closed when the context is closed.
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -806,7 +814,6 @@ func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePa
 	}
 	defer s.Close()
 
-	s.SetDeadline(time.Now().Add(15 * time.Second))
 	const maxPriceTableSize = 16 * 1024
 	var ptr rhpv3.RPCUpdatePriceTableResponse
 	if err := s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
@@ -865,7 +872,6 @@ func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMe
 		Account: account,
 	}
 	var resp rhpv3.RPCFundAccountResponse
-	s.SetDeadline(time.Now().Add(15 * time.Second))
 	if err := s.WriteRequest(rhpv3.RPCFundAccountID, &settingsID); err != nil {
 		return err
 	} else if err := s.WriteResponse(&req); err != nil {
