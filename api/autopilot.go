@@ -36,7 +36,15 @@ type (
 		Contracts ContractsConfig `json:"contracts"`
 	}
 
-	AutopilotTriggeredPOST struct {
+	// AutopilotTriggerRequest is the request object used by the /debug/trigger
+	// endpoint
+	AutopilotTriggerRequest struct {
+		ForceScan bool `json:"forceScan"`
+	}
+
+	// AutopilotTriggerResponse is the response returned by the /debug/trigger
+	// endpoint, indicating whether an autopilot loop was triggered.
+	AutopilotTriggerResponse struct {
 		Triggered bool `json:"triggered"`
 	}
 

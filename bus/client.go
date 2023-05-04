@@ -531,12 +531,6 @@ func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, usedContracts
 	return
 }
 
-// DownloadParams returns parameters used for downloading slabs.
-func (c *Client) DownloadParams(ctx context.Context) (dp api.DownloadParams, err error) {
-	err = c.c.WithContext(ctx).GET("/params/download", &dp)
-	return
-}
-
 // UploadParams returns parameters used for uploading slabs.
 func (c *Client) UploadParams(ctx context.Context) (up api.UploadParams, err error) {
 	err = c.c.WithContext(ctx).GET("/params/upload", &up)

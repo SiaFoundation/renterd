@@ -191,8 +191,7 @@ func (w *worker) FetchRevisionWithAccount(ctx context.Context, hostKey types.Pub
 }
 
 // FetchRevisionWithContract fetches the latest revision of a contract and uses
-// a contract to pay for it. If no pricetable is provided, a new one is
-// requested.
+// a contract to pay for it.
 func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {

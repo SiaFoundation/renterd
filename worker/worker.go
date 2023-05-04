@@ -219,7 +219,6 @@ type Bus interface {
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 
-	DownloadParams(ctx context.Context) (api.DownloadParams, error)
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
@@ -291,8 +290,8 @@ type worker struct {
 	contractLockingDuration time.Duration
 	downloadSectorTimeout   time.Duration
 	uploadSectorTimeout     time.Duration
-	downloadMaxOverdrive    int
-	uploadMaxOverdrive      int
+	downloadMaxOverdrive    uint64
+	uploadMaxOverdrive      uint64
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
@@ -871,13 +870,20 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach contract spending recorder to the context.
 	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
-	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
+	// fetch all active contracts
+	dlContracts, err := w.bus.ActiveContracts(ctx)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
+	// fetch all contract set contracts
+	ulContracts, err := w.bus.Contracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	w.pool.setCurrentHeight(up.CurrentHeight)
-	err = migrateSlab(ctx, w, &slab, contracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -888,7 +894,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 			continue
 		}
 
-		for _, c := range contracts {
+		for _, c := range ulContracts {
 			if c.HostKey == ss.Host {
 				usedContracts[ss.Host] = c.ID
 				break
@@ -936,21 +942,13 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	dp, err := w.bus.DownloadParams(ctx)
+	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
 		return
 	}
 
-	// allow overriding contract set
-	var contractset string
-	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
-		return
-	} else if contractset != "" {
-		dp.ContractSet = contractset
-	}
-
 	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, dp.GougingParams)
+	ctx = WithGougingChecker(ctx, gp)
 
 	// NOTE: ideally we would use http.ServeContent in this handler, but that
 	// has performance issues. If we implemented io.ReadSeeker in the most
@@ -984,7 +982,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	performance := make(map[types.PublicKey]int64)
 
 	// fetch contracts
-	set, err := w.bus.Contracts(ctx, dp.ContractSet)
+	contracts, err := w.bus.ActiveContracts(ctx)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -992,7 +990,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	// build contract map
 	availableContracts := make(map[types.PublicKey]api.ContractMetadata)
-	for _, contract := range set {
+	for _, contract := range contracts {
 		availableContracts[contract.HostKey] = contract
 	}
 
@@ -1222,7 +1220,29 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive int, l *zap.Logger) *worker {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive uint64, l *zap.Logger) (*worker, error) {
+	if contractLockingDuration == 0 {
+		return nil, errors.New("contract lock duration must be positive")
+	}
+	if sessionLockTimeout == 0 {
+		return nil, errors.New("session lock timeout must be positive")
+	}
+	if sessionReconectTimeout == 0 {
+		return nil, errors.New("session reconnect timeout must be positive")
+	}
+	if sessionTTL == 0 {
+		return nil, errors.New("session TTL must be positive")
+	}
+	if busFlushInterval == 0 {
+		return nil, errors.New("bus flush interval must be positive")
+	}
+	if downloadSectorTimeout == 0 {
+		return nil, errors.New("download sector timeout must be positive")
+	}
+	if uploadSectorTimeout == 0 {
+		return nil, errors.New("upload sector timeout must be positive")
+	}
+
 	w := &worker{
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
@@ -1240,7 +1260,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
-	return w
+	return w, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.

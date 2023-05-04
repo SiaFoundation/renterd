@@ -82,7 +82,9 @@ type TestCluster struct {
 	Bus       *bus.Client
 	Worker    *worker.Client
 
-	cleanups []func(context.Context) error
+	workerShutdownFns    []func(context.Context) error
+	busShutdownFns       []func(context.Context) error
+	autopilotShutdownFns []func(context.Context) error
 
 	miner  *node.Miner
 	dbName string
@@ -90,6 +92,36 @@ type TestCluster struct {
 	logger *zap.Logger
 	wk     types.PrivateKey
 	wg     sync.WaitGroup
+}
+
+func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) error {
+	for _, fn := range tc.autopilotShutdownFns {
+		if err := fn(ctx); err != nil {
+			return err
+		}
+	}
+	tc.autopilotShutdownFns = nil
+	return nil
+}
+
+func (tc *TestCluster) ShutdownWorker(ctx context.Context) error {
+	for _, fn := range tc.workerShutdownFns {
+		if err := fn(ctx); err != nil {
+			return err
+		}
+	}
+	tc.workerShutdownFns = nil
+	return nil
+}
+
+func (tc *TestCluster) ShutdownBus(ctx context.Context) error {
+	for _, fn := range tc.busShutdownFns {
+		if err := fn(ctx); err != nil {
+			return err
+		}
+	}
+	tc.busShutdownFns = nil
+	return nil
 }
 
 // randomPassword creates a random 32 byte password encoded as a string.
@@ -196,7 +228,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	busCfg.Miner = node.NewMiner(busClient)
 
 	// Create bus.
-	var shutdownFns []func(context.Context) error
 	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
 	if err != nil {
 		return nil, err
@@ -205,8 +236,10 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	busServer := http.Server{
 		Handler: busAuth(b),
 	}
-	shutdownFns = append(shutdownFns, bStopFn)
-	shutdownFns = append(shutdownFns, busServer.Shutdown)
+
+	var busShutdownFns []func(context.Context) error
+	busShutdownFns = append(busShutdownFns, busServer.Shutdown)
+	busShutdownFns = append(busShutdownFns, bStopFn)
 
 	// Create worker.
 	w, wStopFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
@@ -217,8 +250,10 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	workerServer := http.Server{
 		Handler: workerAuth(w),
 	}
-	shutdownFns = append(shutdownFns, wStopFn)
-	shutdownFns = append(shutdownFns, workerServer.Shutdown)
+
+	var workerShutdownFns []func(context.Context) error
+	workerShutdownFns = append(workerShutdownFns, workerServer.Shutdown)
+	workerShutdownFns = append(workerShutdownFns, wStopFn)
 
 	// Create autopilot store.
 	autopilotStore, err := stores.NewJSONAutopilotStore(autopilotDir)
@@ -241,8 +276,10 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	autopilotServer := http.Server{
 		Handler: autopilotAuth(ap),
 	}
-	shutdownFns = append(shutdownFns, aStopFn)
-	shutdownFns = append(shutdownFns, autopilotServer.Shutdown)
+
+	var autopilotShutdownFns []func(context.Context) error
+	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
+	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
 
 	cluster := &TestCluster{
 		dir:    dir,
@@ -255,7 +292,9 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		Bus:       busClient,
 		Worker:    workerClient,
 
-		cleanups: shutdownFns,
+		workerShutdownFns:    workerShutdownFns,
+		busShutdownFns:       busShutdownFns,
+		autopilotShutdownFns: autopilotShutdownFns,
 	}
 
 	// Spin up the servers.
@@ -590,12 +629,16 @@ func (c *TestCluster) AddHostsBlocking(n int) ([]*Host, error) {
 	return hosts, nil
 }
 
-// Shutdown shuts down a TestCluster. Cleanups are performed in reverse order.
+// Shutdown shuts down a TestCluster.
 func (c *TestCluster) Shutdown(ctx context.Context) error {
-	for i := len(c.cleanups) - 1; i >= 0; i-- {
-		if err := c.cleanups[i](ctx); err != nil {
-			return err
-		}
+	if err := c.ShutdownAutopilot(ctx); err != nil {
+		return err
+	}
+	if err := c.ShutdownWorker(ctx); err != nil {
+		return err
+	}
+	if err := c.ShutdownBus(ctx); err != nil {
+		return err
 	}
 	for _, h := range c.hosts {
 		if err := h.Close(); err != nil {
@@ -705,9 +748,11 @@ func testWorkerCfg() node.WorkerConfig {
 		ContractLockTimeout:     5 * time.Second,
 		ID:                      "worker",
 		BusFlushInterval:        testBusFlushInterval,
+		SessionLockTimeout:      30 * time.Second,
 		SessionReconnectTimeout: 10 * time.Second,
 		SessionTTL:              2 * time.Minute,
-		UploadSectorTimeout:     100 * time.Millisecond,
+		DownloadSectorTimeout:   500 * time.Millisecond,
+		UploadSectorTimeout:     500 * time.Millisecond,
 		UploadMaxOverdrive:      5,
 	}
 }
