@@ -839,15 +839,15 @@ func TestParallelDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// upload the data
-	data := frand.Bytes(rhpv2.SectorSize)
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
-		t.Fatal(err)
-	}
-
 	// Wait for accounts to be funded.
 	_, err = cluster.WaitForAccounts()
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// upload the data
+	data := frand.Bytes(rhpv2.SectorSize)
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
 		t.Fatal(err)
 	}
 
