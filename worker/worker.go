@@ -37,6 +37,8 @@ import (
 )
 
 const (
+	defaultRevisionFetchTimeout = 30 * time.Second
+
 	lockingPriorityActiveContractRevision = 100 // highest
 	lockingPriorityRenew                  = 80
 	lockingPriorityPriceTable             = 60
@@ -390,6 +392,13 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 		return err
 	}
 
+	// Lock the revision for the duration of the operation.
+	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
+	if err != nil {
+		return err
+	}
+	defer contractLock.Release(ctx)
+
 	// Try to fetch the revision with an account first.
 	ctx, cancel := timeoutCtx()
 	defer cancel()
@@ -403,11 +412,6 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	// Fall back to using the contract to pay for the revision.
 	ctx, cancel = timeoutCtx()
 	defer cancel()
-	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
-	if err != nil {
-		return err
-	}
-	defer contractLock.Release(ctx)
 	rev, err = w.FetchRevisionWithContract(ctx, hk, siamuxAddr, contractID)
 	if err != nil {
 		return err
@@ -753,7 +757,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, 30*time.Second, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision types.FileContractRevision) (err error) {
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision types.FileContractRevision) (err error) {
 		err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
@@ -831,7 +835,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, up.GougingParams)
 
 	// sync the account
-	jc.Check("couldn't sync account", w.withRevision(ctx, 30*time.Second, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision types.FileContractRevision) error {
+	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision types.FileContractRevision) error {
 		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
 	}))
 }
