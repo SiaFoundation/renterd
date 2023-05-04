@@ -1133,7 +1133,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
 		return nil, err
 	} else if err := gs.Validate(); err != nil {
-		// compat apply default EA gouging settings
+		// compat: apply default EA gouging settings
 		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
 		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
 		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
