@@ -81,24 +81,23 @@ func parallelUploadSlab(ctx context.Context, sp storeProvider, shards [][]byte, 
 
 		go func(r req) {
 			defer close(doneChan)
-			res := resp{
-				hostIndex: hostIndex,
-				req:       r,
-			}
-			err := locker.withRevisionV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev types.FileContractRevision) error {
+			var root types.Hash256
+			var err error
+			err = locker.withRevisionV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev types.FileContractRevision) error {
 				return sp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss sectorStoreV3) error {
-					res.root, res.err = ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), &rev)
-					if res.err != nil {
-						span.SetStatus(codes.Error, "uploading the sector failed")
-						span.RecordError(res.err)
-					}
-					return nil // only return the error in the response
+					root, err = ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), &rev)
+					return err
 				})
 			})
 			if err != nil && !errors.Is(err, context.Canceled) {
-				logger.Errorf("withHostV2 failed when uploading sector, err: %v", err)
+				logger.Errorf("withHostV3 failed when uploading sector, err: %v", err)
 			}
-			respChan <- res
+			respChan <- resp{
+				err:       err,
+				hostIndex: hostIndex,
+				req:       r,
+				root:      root,
+			}
 		}(r)
 
 		if uploadSectorTimeout > 0 {
