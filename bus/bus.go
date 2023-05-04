@@ -1144,7 +1144,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms
 				return nil, err
 			}
 		} else {
-			// compate apply default host block leeway settings
+			// compat: apply default host block leeway settings
 			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
 			if err := gs.Validate(); err == nil {
 				l.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
