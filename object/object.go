@@ -13,7 +13,7 @@ import (
 
 // A EncryptionKey can encrypt and decrypt messages.
 type EncryptionKey struct {
-	entropy *[32]byte
+	entropy *[32]byte `json:"-"`
 }
 
 // String implements fmt.Stringer.
