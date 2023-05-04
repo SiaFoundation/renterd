@@ -29,7 +29,8 @@ type accounts struct {
 	refillInterval time.Duration
 
 	mu                sync.Mutex
-	fundingContracts  []api.ContractMetadata
+	setContracts      map[types.FileContractID]struct{}
+	activeContracts   []api.ContractMetadata
 	inProgressRefills map[types.Hash256]struct{}
 }
 
@@ -72,15 +73,25 @@ func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig)
 		return
 	}
 
-	contracts, err := a.b.ActiveContracts(ctx)
+	acs, err := a.b.ActiveContracts(ctx)
 	if err != nil {
-		a.logger.Errorw(fmt.Sprintf("failed to fetch contract set for refill: %v", err))
+		a.logger.Errorw(fmt.Sprintf("failed to fetch active contracts: %v", err))
+		return
+	}
+
+	csc, err := a.b.Contracts(ctx, cfg.Contracts.Set)
+	if err != nil {
+		a.logger.Errorw(fmt.Sprintf("failed to fetch contracts in set %s: %v", cfg.Contracts.Set, err))
 		return
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.fundingContracts = append(a.fundingContracts[:0], contracts...)
+	a.setContracts = make(map[types.FileContractID]struct{}, len(csc))
+	for _, c := range csc {
+		a.setContracts[c.ID] = struct{}{}
+	}
+	a.activeContracts = append(a.activeContracts[:0], acs...)
 }
 
 func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
@@ -116,102 +127,136 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		return
 	}
 
-	// Map hosts to contracts to use for funding.
-	a.mu.Lock()
-	contractForHost := make(map[types.PublicKey]api.ContractMetadata, len(a.fundingContracts))
-	for _, c := range a.fundingContracts {
-		contractForHost[c.HostKey] = c
-	}
-	a.mu.Unlock()
-
-	// Fund an account for every contract we have.
-	for _, contract := range contractForHost {
-		// Only launch a refill goroutine if no refill is in progress.
-		if !a.markRefillInProgress(workerID, contract.HostKey) {
-			continue // refill already in progress
+	for hk, contracts := range a.contractsToRefill() {
+		// skip if refill is in progress
+		if !a.markRefillInProgress(workerID, hk) {
+			continue
 		}
-		go func(contract api.ContractMetadata) (err error) {
-			// Remove from in-progress refills once done.
-			defer a.markRefillDone(workerID, contract.HostKey)
 
-			// Limit the time a refill can take.
+		// launch a goroutine to refill the account
+		go func(hk types.PublicKey, contracts []api.ContractMetadata) error {
+			defer a.markRefillDone(workerID, hk)
+
+			// decide whether one of the potentially multiple contrats is in the
+			// contract set, we only want to log errors if that is the case
+			// because we expect refills to fail often for contracts that are
+			// not in the set
+			var hasContractSetContract bool
+			for _, contract := range contracts {
+				if a.isContractSetContract(contract.ID) {
+					hasContractSetContract = true
+					break
+				}
+			}
+
+			// make sure we don't hang
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
 			defer cancel()
 
-			// Add tracing.
+			// add tracing
 			ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 			defer span.End()
-			span.SetAttributes(attribute.Stringer("host", contract.HostKey))
 			defer func() {
 				if err != nil {
 					span.RecordError(err)
 					span.SetStatus(codes.Error, "failed to refill account")
 				}
 			}()
+			span.SetAttributes(attribute.Stringer("host", hk))
 
-			// Fetch the account id.
-			accountID, err := w.Account(ctx, contract.HostKey)
+			// fetch the account
+			accountID, err := w.Account(ctx, hk)
 			if err != nil {
 				return err
 			}
-
-			// Fetch the account.
-			account, err := a.b.Account(ctx, accountID, contract.HostKey)
+			account, err := a.b.Account(ctx, accountID, hk)
 			if err != nil {
 				return err
 			}
-
-			// Add more tracing info.
 			span.SetAttributes(attribute.Stringer("account", account.ID))
 			span.SetAttributes(attribute.Stringer("balance", account.Balance))
 
-			// Check if a host is potentially cheating before refilling.
+			// check if a host is potentially cheating before refilling.
 			// We only check against the max drift if the account's drift is
 			// negative because we don't care if we have more money than
 			// expected.
 			if account.Drift.Cmp(maxNegDrift) < 0 {
 				a.logger.Error("not refilling account since host is potentially cheating",
 					"account", account.ID,
-					"host", contract.HostKey,
+					"host", hk,
 					"balance", account.Balance,
 					"drift", account.Drift)
 				return fmt.Errorf("drift on account is too large - not funding")
 			}
 
-			// Check if a resync is needed.
+			// check if a resync is needed
 			if account.RequiresSync {
-				err := w.RHPSync(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr)
-				if err != nil {
-					a.logger.Errorw(fmt.Sprintf("failed to sync account's balance: %s", err),
+				var syncErr error
+				for _, contract := range contracts {
+					syncErr = w.RHPSync(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr)
+					if syncErr == nil {
+						break
+					}
+				}
+				if syncErr != nil && hasContractSetContract {
+					a.logger.Errorw(fmt.Sprintf("failed to sync account's balance: %s", syncErr),
 						"account", account.ID,
-						"host", contract.HostKey)
-					return err
+						"host", hk,
+					)
+					return syncErr
 				}
-				// Re-fetch account after sync.
-				account, err = a.b.Account(ctx, accountID, contract.HostKey)
+				account, err = a.b.Account(ctx, accountID, hk)
 				if err != nil {
 					return err
 				}
 			}
 
-			// Check if refill is needed and perform it if necessary.
+			// check if refill is needed
 			if account.Balance.Cmp(minBalance) >= 0 {
-				return nil // nothing to do
+				return nil
 			}
 
-			if err := w.RHPFund(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr, maxBalance); err != nil {
-				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
+			// fund the account
+			var fundErr error
+			for _, contract := range contracts {
+				fundErr = w.RHPFund(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr, maxBalance)
+				if fundErr == nil {
+					break
+				}
+			}
+			if fundErr == nil {
+				a.logger.Infow("Successfully funded account",
 					"account", account.ID,
-					"host", contract.HostKey,
+					"host", hk,
+					"balance", maxBalance,
+				)
+			} else if hasContractSetContract {
+				a.logger.Errorw(fmt.Sprintf("failed to fund account: %s", fundErr),
+					"account", account.ID,
+					"host", hk,
 					"balance", account.Balance,
 					"expected", maxBalance)
-				return err
+				return fundErr
 			}
-			a.logger.Infow("Successfully funded account",
-				"account", account.ID,
-				"host", contract.HostKey,
-				"balance", maxBalance)
 			return nil
-		}(contract)
+		}(hk, contracts)
 	}
+}
+
+func (a *accounts) contractsToRefill() map[types.PublicKey][]api.ContractMetadata {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	contracts := make(map[types.PublicKey][]api.ContractMetadata)
+	for _, contract := range a.activeContracts {
+		contracts[contract.HostKey] = append(contracts[contract.HostKey], contract)
+	}
+	return contracts
+}
+
+func (a *accounts) isContractSetContract(id types.FileContractID) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, exists := a.setContracts[id]
+	return exists
 }
