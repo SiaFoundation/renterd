@@ -877,10 +877,11 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	}
 
 	// print warning if no candidate hosts were found
-	if len(selectedHosts) == 0 {
-		c.logger.Warnf("no candidate hosts found")
-	} else if len(selectedHosts) < wanted {
-		msg := fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selectedHosts), wanted)
+	if len(selectedHosts) < wanted {
+		msg := "no candidate hosts found"
+		if len(selectedHosts) > 0 {
+			msg = fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selectedHosts), wanted)
+		}
 		if len(candidates) >= wanted {
 			c.logger.Warnw(msg, results.keysAndValues()...)
 		} else {

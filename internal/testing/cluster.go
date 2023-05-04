@@ -70,6 +70,10 @@ var (
 		MaxStoragePrice:  types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
 
 		HostBlockHeightLeeway: 240, // amount of leeway given to host block height
+
+		MinPriceTableValidity:         10 * time.Second,  // minimum value for price table validity
+		MinAccountExpiry:              time.Hour,         // minimum value for account expiry
+		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
 	}
 )
 
