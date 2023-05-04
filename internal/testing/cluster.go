@@ -71,8 +71,8 @@ var (
 
 		HostBlockHeightLeeway: 240, // amount of leeway given to host block height
 
-		MinPriceTableValidity:         30 * time.Second,  // minimum value for price table validity
-		MinAccountExpiry:              5 * time.Minute,   // minimum value for account expiry
+		MinPriceTableValidity:         10 * time.Second,  // minimum value for price table validity
+		MinAccountExpiry:              time.Hour,         // minimum value for account expiry
 		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
 	}
 )

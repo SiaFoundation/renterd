@@ -338,8 +338,8 @@ func (gs GougingSettings) Validate() error {
 	if gs.MinMaxEphemeralAccountBalance.Cmp(types.Siacoins(1)) < 0 {
 		return errors.New("MinMaxEphemeralAccountBalance must be at least 1 SC")
 	}
-	if gs.MinPriceTableValidity < time.Minute {
-		return errors.New("MinPriceTableValidity must be at least 1 minute")
+	if gs.MinPriceTableValidity < 10*time.Second {
+		return errors.New("MinPriceTableValidity must be at least 10 seconds")
 	}
 	return nil
 }

@@ -825,17 +825,25 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	data, err := json.Marshal(value)
+	if err != nil {
+		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
+		return
+	}
+
 	switch key {
 	case api.SettingGouging:
-		if gs, ok := value.(api.GougingSettings); !ok {
-			jc.Error(fmt.Errorf("couldn't update gouging settings, invalid request body"), http.StatusBadRequest)
+		var gs api.GougingSettings
+		if err := json.Unmarshal(data, &gs); err != nil {
+			jc.Error(fmt.Errorf("couldn't update gouging settings, invalid request body, %t", value), http.StatusBadRequest)
 			return
 		} else if err := gs.Validate(); err != nil {
 			jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
 	case api.SettingRedundancy:
-		if rs, ok := value.(api.RedundancySettings); !ok {
+		var rs api.RedundancySettings
+		if err := json.Unmarshal(data, &rs); err != nil {
 			jc.Error(fmt.Errorf("couldn't update redundancy settings, invalid request body"), http.StatusBadRequest)
 			return
 		} else if err := rs.Validate(); err != nil {
@@ -844,13 +852,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	js, err := json.Marshal(value)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(js)))
+	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data)))
 }
 
 func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
