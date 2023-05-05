@@ -436,7 +436,9 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 
 	amt, err := amtFn()
 	if err != nil && isBalanceInsufficient(err) {
-		err2 := a.bus.ScheduleSync(ctx, a.id, a.host)
+		scheduleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err2 := a.bus.ScheduleSync(scheduleCtx, a.id, a.host)
 		if err2 != nil {
 			err = fmt.Errorf("%w; failed to set requiresSync flag on bus, error: %v", err, err2)
 		}
