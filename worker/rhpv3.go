@@ -102,14 +102,9 @@ func (t *transportV3) DialStream(ctx context.Context) (*rhpv3.Stream, error) {
 	}
 
 	// Make sure the stream is closed when the context is closed.
-	done := make(chan struct{})
-	defer close(done)
 	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			_ = stream.Close()
-		}
+		<-ctx.Done()
+		_ = stream.Close()
 	}()
 	return stream, nil
 }
