@@ -69,9 +69,8 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 		err       error
 	}
 	respChan := make(chan resp, 2*len(contracts)) // every host can send up to 2 responses
-	worker := func(r req, hostIndex int) {
+	worker := func(r req, hostIndex int, contract api.ContractMetadata) {
 		doneChan := make(chan struct{})
-		contract := contracts[hostIndex]
 
 		// Trace the upload.
 		ctx, span := tracing.Tracer.Start(r.finishedCtx, "upload-request")
@@ -153,7 +152,7 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 		if hostIndex == -1 {
 			return false
 		}
-		go worker(r, hostIndex)
+		go worker(r, hostIndex, contracts[hostIndex])
 		inflight++
 		return true
 	}
