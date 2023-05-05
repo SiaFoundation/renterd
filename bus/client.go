@@ -280,7 +280,7 @@ func (c *Client) RecordInteractions(ctx context.Context, interactions []hostdb.I
 	return
 }
 
-// RecordContractSpending records contract spending metrics for contrats.
+// RecordContractSpending records contract spending metrics for contracts.
 func (c *Client) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) (err error) {
 	err = c.c.WithContext(ctx).POST("/contracts/spending", records, nil)
 	return

@@ -26,16 +26,16 @@ at all, reducing bloat and simplifying the build process.
 
 ## Current Status
 
-All of the key low-level APIs have been implemented and are ready for use.
-However, `renterd` currently does not ship with a UI or autopilot functionality,
-and it lacks backwards-compatibility with `siad` renter metadata. This means
-that, while `renterd` is already capable of serving as the backbone for new Sia
-applications, most users should continue to use `siad`.
+`renterd` is officially in beta and most of the features known from `siad` have
+been implemented and are ready for use. This includes autopilot functionality.
+It also comes bundled with a new and improved web UI. However, it lacks
+backwards-compatibility with `siad` renter metadata. This means that, while
+`renterd` is already capable of serving as the backbone for new Sia
+applications, there is currently no way to migrate files uploaded through `siad`
+to `renterd`.
 
-Going forward, our immediate priority is to implement autopilot functionality,
-which will make `renterd` viable as a standalone renter. In tandem, we'll be
-designing and integrating the embedded web UI. At this point, `renterd` will
-become the recommended renter for new users. However, we also want to make it
+Going forward, our immediate priority is continuously improving `renterd` to
+become more stable, scalable and performant. However, we also want to make it
 painless for existing `siad` users to switch to `renterd`. So before shipping
 v1.0, we'll implement compatibility code that will allow you to access all of
 your `siad` files with `renterd`.

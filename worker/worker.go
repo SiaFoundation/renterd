@@ -370,12 +370,12 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(sectorStoreV2) error) (err error) {
+func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(hostV2) error) (err error) {
 	return w.withHostsV2(ctx, []api.ContractMetadata{{
 		ID:      contractID,
 		HostKey: hostKey,
 		HostIP:  hostIP,
-	}}, func(ss []sectorStoreV2) error {
+	}}, func(ss []hostV2) error {
 		return fn(ss[0])
 	})
 }
@@ -419,7 +419,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	return fn(rev)
 }
 
-func (w *worker) unlockHosts(hosts []sectorStoreV2) {
+func (w *worker) unlockHosts(hosts []hostV2) {
 	// apply a pessimistic timeout, ensuring unlocking the contract or force
 	// closing the session does not deadlock and keep this goroutine around
 	// forever. Use a background context as the parent to avoid timing out
@@ -438,8 +438,8 @@ func (w *worker) unlockHosts(hosts []sectorStoreV2) {
 	wg.Wait()
 }
 
-func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]sectorStoreV2) error) (err error) {
-	var hosts []sectorStoreV2
+func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]hostV2) error) (err error) {
+	var hosts []hostV2
 	for _, c := range contracts {
 		hosts = append(hosts, w.pool.session(c.HostKey, c.HostIP, c.ID, w.deriveRenterKey(c.HostKey)))
 	}
