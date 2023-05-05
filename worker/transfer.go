@@ -88,7 +88,7 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 				})
 			})
 			if err != nil && !errors.Is(err, context.Canceled) {
-				logger.Errorf("withHostV3 failed when uploading sector, err: %v", err)
+				logger.Errorf("%v: withHostV3 failed when uploading sector, err: %v", contract.HostKey[:4], err)
 			}
 			respChan <- resp{
 				err:       err,
