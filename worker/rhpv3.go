@@ -161,6 +161,16 @@ func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, h
 		if err != nil {
 			return nil, err
 		}
+
+		doneChan := make(chan struct{})
+		defer close(doneChan)
+		go func() {
+			select {
+			case <-doneChan:
+			case <-ctx.Done():
+				_ = conn.Close()
+			}
+		}()
 		t.t, err = rhpv3.NewRenterTransport(conn, hostKey)
 		if err != nil {
 			return nil, err
