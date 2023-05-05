@@ -438,7 +438,7 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	if err != nil && isBalanceInsufficient(err) {
 		err2 := a.bus.ScheduleSync(ctx, a.id, a.host)
 		if err2 != nil {
-			err = fmt.Errorf("failed to set requiresSync flag on bus: %w", err)
+			err = fmt.Errorf("%w; failed to set requiresSync flag on bus, error: %v", err, err2)
 		}
 		return err
 	}
@@ -1032,11 +1032,12 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	}
 	defer s.Close()
 
+	var proofRequired bool
 	req := rhpv3.RPCExecuteProgramRequest{
 		FileContractID: rev.ParentID,
 		Program: []rhpv3.Instruction{&rhpv3.InstrAppendSector{
 			SectorDataOffset: 0,
-			ProofRequired:    true,
+			ProofRequired:    proofRequired,
 		}},
 		ProgramData: (*sector)[:],
 	}
@@ -1069,19 +1070,16 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
 			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
-	} else {
+	} else if proofRequired {
 		// Otherwise we make sure the proof was transmitted and verify it.
-		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}}          // TODO: change once rhpv3 support is available
-		expectedProofSize := rhpv2.DiffProofSize(rev.Filesize/rhpv2.LeafSize, actions) // TODO: change once DiffProofSize is implemented in core.
-		//		if uint64(len(executeResp.Proof)) != expectedProofSize {
-		if len(executeResp.Proof) == 0 {
-			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("proof size doesn't match the expected size: %v != %v", len(executeResp.Proof), expectedProofSize)
-		} else if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.LeafSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
+		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}} // TODO: change once rhpv3 support is available
+		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.LeafSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
 			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errors.New("proof verification failed")
 		}
 	}
 
 	// finalize the program with a new revision.
+	collateral = executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
 	newRevision := *rev
 	newValid, newMissed := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
 	newRevision.Filesize += rhpv2.SectorSize
