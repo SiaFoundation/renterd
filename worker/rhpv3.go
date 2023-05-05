@@ -64,6 +64,17 @@ type transportV3 struct {
 	t        *rhpv3.Transport
 }
 
+type streamV3 struct {
+	cancel context.CancelFunc
+	*rhpv3.Stream
+}
+
+// Close closes the stream and cancels the goroutine launched by DialStream.
+func (s *streamV3) Close() error {
+	s.cancel()
+	return s.Stream.Close()
+}
+
 // Close decrements the refcounter and closes the transport if the refcounter
 // reaches 0.
 func (t *transportV3) Close() error {
@@ -83,7 +94,7 @@ func (t *transportV3) Close() error {
 }
 
 // DialStream dials a new stream on the transport.
-func (t *transportV3) DialStream(ctx context.Context) (*rhpv3.Stream, error) {
+func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
 	transport := t.t
 	t.mu.Unlock()
@@ -102,16 +113,18 @@ func (t *transportV3) DialStream(ctx context.Context) (*rhpv3.Stream, error) {
 	}
 
 	// Make sure the stream is closed when the context is closed.
-	done := make(chan struct{})
-	defer close(done)
+	doneCtx, doneFn := context.WithCancel(ctx)
 	go func() {
 		select {
-		case <-done:
+		case <-doneCtx.Done():
 		case <-ctx.Done():
 			_ = stream.Close()
 		}
 	}()
-	return stream, nil
+	return &streamV3{
+		Stream: stream,
+		cancel: doneFn,
+	}, nil
 }
 
 // transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
@@ -148,6 +161,16 @@ func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, h
 		if err != nil {
 			return nil, err
 		}
+
+		doneChan := make(chan struct{})
+		defer close(doneChan)
+		go func() {
+			select {
+			case <-doneChan:
+			case <-ctx.Done():
+				_ = conn.Close()
+			}
+		}()
 		t.t, err = rhpv3.NewRenterTransport(conn, hostKey)
 		if err != nil {
 			return nil, err
@@ -754,7 +777,7 @@ func (w *worker) preparePriceTableAccountPayment(hk types.PublicKey, bh uint64) 
 	}
 }
 
-func processPayment(s *rhpv3.Stream, payment rhpv3.PaymentMethod) error {
+func processPayment(s *streamV3, payment rhpv3.PaymentMethod) error {
 	var paymentType types.Specifier
 	switch payment.(type) {
 	case *rhpv3.PayByContractRequest:
@@ -1033,12 +1056,11 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	}
 	defer s.Close()
 
-	var proofRequired bool
 	req := rhpv3.RPCExecuteProgramRequest{
 		FileContractID: rev.ParentID,
 		Program: []rhpv3.Instruction{&rhpv3.InstrAppendSector{
 			SectorDataOffset: 0,
-			ProofRequired:    proofRequired,
+			ProofRequired:    true,
 		}},
 		ProgramData: (*sector)[:],
 	}
@@ -1085,10 +1107,10 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
 			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
-	} else if proofRequired {
+	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.
 		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}} // TODO: change once rhpv3 support is available
-		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.LeafSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
+		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.SectorSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
 			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errors.New("proof verification failed")
 		}
 	}
