@@ -332,7 +332,7 @@ type (
 		host types.PublicKey
 	}
 
-	hostV3 struct {
+	host struct {
 		acc           *account
 		bh            uint64
 		fcid          types.FileContractID
@@ -354,7 +354,7 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(sectorStoreV3) error) (err error) {
+func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(hostV3) error) (err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return err
@@ -365,7 +365,7 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 		return err
 	}
 
-	return fn(&hostV3{
+	return fn(&host{
 		acc:           acc,
 		bh:            pt.HostBlockHeight,
 		fcid:          contractID,
@@ -484,19 +484,19 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	return pk
 }
 
-func (r *hostV3) Contract() types.FileContractID {
+func (r *host) Contract() types.FileContractID {
 	return r.fcid
 }
 
-func (r *hostV3) HostKey() types.PublicKey {
+func (r *host) HostKey() types.PublicKey {
 	return r.acc.host
 }
 
-func (*hostV3) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
+func (*host) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
 	panic("not implemented")
 }
 
-func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
 	// return errGougingHost if gouging checks fail
 	if breakdown := GougingCheckerFromContext(ctx).Check(nil, &r.pt); breakdown.Gouging() {
 		return fmt.Errorf("failed to download sector, %w: %v", errGougingHost, breakdown.Reasons())
@@ -526,7 +526,7 @@ func (r *hostV3) DownloadSector(ctx context.Context, w io.Writer, root types.Has
 }
 
 // UploadSector uploads a sector to the host.
-func (r *hostV3) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (_ types.Hash256, err error) {
+func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (_ types.Hash256, err error) {
 	// return errGougingHost if gouging checks fail
 	if breakdown := GougingCheckerFromContext(ctx).Check(nil, &r.pt); breakdown.Gouging() {
 		return types.Hash256{}, fmt.Errorf("failed to upload sector, %w: %v", errGougingHost, breakdown.Reasons())
