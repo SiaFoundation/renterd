@@ -79,12 +79,12 @@ func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, 
 	return fn(types.FileContractRevision{})
 }
 
-type mockStoreProvider struct {
+type mockHostProvider struct {
 	hosts map[types.PublicKey]hostV3
 }
 
-func newMockStoreProvider(hosts []hostV3) *mockStoreProvider {
-	sp := &mockStoreProvider{
+func newMockHostProvider(hosts []hostV3) *mockHostProvider {
+	sp := &mockHostProvider{
 		hosts: make(map[types.PublicKey]hostV3),
 	}
 	for _, h := range hosts {
@@ -93,7 +93,7 @@ func newMockStoreProvider(hosts []hostV3) *mockStoreProvider {
 	return sp
 }
 
-func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(hostV2) error) (err error) {
+func (sp *mockHostProvider) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(hostV2) error) (err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
@@ -101,7 +101,7 @@ func (sp *mockStoreProvider) withHostV2(ctx context.Context, contractID types.Fi
 	return f(h)
 }
 
-func (sp *mockStoreProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, f func(hostV3) error) (err error) {
+func (sp *mockHostProvider) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, f func(hostV3) error) (err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
@@ -134,7 +134,7 @@ func TestMultipleObjects(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, newMockHost())
 	}
-	sp := newMockStoreProvider(hosts)
+	sp := newMockHostProvider(hosts)
 	var contracts []api.ContractMetadata
 	for _, h := range hosts {
 		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.HostKey()})
