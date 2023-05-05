@@ -1344,11 +1344,12 @@ type contractLock struct {
 	locker ContractLocker
 	logger *zap.SugaredLogger
 
-	ctx      context.Context
-	stopChan chan struct{}
+	stopCtx       context.Context
+	stopCtxCancel context.CancelFunc
 }
 
-func newContractLock(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
+func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &contractLock{
 		lockID: lockID,
 		fcid:   fcid,
@@ -1356,8 +1357,8 @@ func newContractLock(ctx context.Context, fcid types.FileContractID, lockID uint
 		locker: locker,
 		logger: logger,
 
-		ctx:      ctx,
-		stopChan: make(chan struct{}),
+		stopCtx:       ctx,
+		stopCtxCancel: cancel,
 	}
 }
 
@@ -1366,7 +1367,7 @@ func (cl *contractLock) Release(ctx context.Context) error {
 	defer span.End()
 
 	// Stop background loop.
-	close(cl.stopChan)
+	cl.stopCtxCancel()
 
 	// Create a new context with the span that times out after a certain amount
 	// of time.  That's because the context passed to this method might be
@@ -1401,13 +1402,11 @@ func (cl *contractLock) keepaliveLoop() {
 	// Loop until stopped.
 	for {
 		select {
-		case <-cl.ctx.Done():
-			return // interrupted
-		case <-cl.stopChan:
+		case <-cl.stopCtx.Done():
 			return // released
 		case <-t.C:
 		}
-		if err := cl.locker.KeepaliveContract(cl.ctx, cl.fcid, cl.lockID, cl.d); err != nil {
+		if err := cl.locker.KeepaliveContract(cl.stopCtx, cl.fcid, cl.lockID, cl.d); err != nil {
 			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err), "contract", cl.fcid, "lockID", cl.lockID)
 			return
 		}
@@ -1425,7 +1424,7 @@ func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID,
 		span.RecordError(err)
 		return nil, err
 	}
-	cl := newContractLock(ctx, fcid, lockID, w.contractLockingDuration, w.bus, w.logger)
+	cl := newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger)
 	go cl.keepaliveLoop()
 	return cl, nil
 }

@@ -34,7 +34,7 @@ func (l *contextCheckingLocker) ReleaseContract(ctx context.Context, fcid types.
 func TestReleaseContract(t *testing.T) {
 	t.Parallel()
 
-	l := newContractLock(context.Background(), types.FileContractID{}, 0, 0, &contextCheckingLocker{}, zap.NewNop().Sugar())
+	l := newContractLock(types.FileContractID{}, 0, 0, &contextCheckingLocker{}, zap.NewNop().Sugar())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
