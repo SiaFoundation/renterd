@@ -137,8 +137,8 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		go func(hk types.PublicKey, contracts []api.ContractMetadata) error {
 			defer a.markRefillDone(workerID, hk)
 
-			// decide whether one of the potentially multiple contrats is in the
-			// contract set, we only want to log errors if that is the case
+			// decide whether one of the potentially multiple contracts is in
+			// the contract set, we only want to log errors if that is the case
 			// because we expect refills to fail often for contracts that are
 			// not in the set
 			var hasContractSetContract bool
