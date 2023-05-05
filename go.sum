@@ -374,6 +374,8 @@ go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca h1:aZMg2AKevn7jKx+wlusWQf
 go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca/go.mod h1:h/1afFwpxzff6/gG5i1XdAgPK7dEY6FaibhK7N5F86Y=
 go.sia.tech/web/renterd v0.13.0 h1:wG02yiwrS5PPCELHlPMqZ5sMO0+11V6T73941mJrfqY=
 go.sia.tech/web/renterd v0.13.0/go.mod h1:jr4PVQW1KU8JpAzmJRfFecDeJ5SPIRrKM3OKZ+FvGvE=
+go.sia.tech/web/renterd v0.14.0 h1:74WDPNYXk71d8uT86rkQAa7AlDp8+VDRsQ2oyhwPplg=
+go.sia.tech/web/renterd v0.14.0/go.mod h1:jr4PVQW1KU8JpAzmJRfFecDeJ5SPIRrKM3OKZ+FvGvE=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/atomic v1.10.0 h1:9qC72Qh0+3MqyJbAn8YU5xVq1frD8bn3JtD2oXtafVQ=
 go.uber.org/atomic v1.10.0/go.mod h1:LUxbIzbOniOlMKjJjyPfpl4v+PKK2cNJn91OQbhoJI0=
