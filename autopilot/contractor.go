@@ -378,6 +378,15 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		hk := contract.HostKey()
 		fcid := contract.ID
 
+		// check if contract is ready to be archived.
+		if state.cs.BlockHeight > contract.EndHeight() {
+			toArchive[fcid] = errContractExpired.Error()
+			continue
+		} else if contract.Revision.RevisionNumber == math.MaxUint64 {
+			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+			continue
+		}
+
 		// fetch host from hostdb
 		host, err := c.ap.bus.Host(ctx, hk)
 		if err != nil {
@@ -422,7 +431,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, archive, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
+		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
 		if !usable {
 			c.logger.Infow(
 				"unusable contract",
@@ -433,9 +442,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"renew", renew,
 			)
 		}
-		if archive {
-			toArchive[fcid] = errStr(joinErrors(reasons))
-		} else if renew {
+		if renew {
 			renewIndices[fcid] = len(toRenew)
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
