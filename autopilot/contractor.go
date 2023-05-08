@@ -206,10 +206,15 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// run renewals
-	renewed, err := c.runContractRenewals(ctx, w, &remaining, address, toRenew)
+	maxRenewals := int(state.cfg.Contracts.Amount) - len(active) + len(toRenew) + len(toIgnore) + len(toArchive)
+	if maxRenewals > int(state.cfg.Contracts.Amount) {
+		maxRenewals = int(state.cfg.Contracts.Amount)
+	}
+	renewed, ignoredRenewals, err := c.runContractRenewals(ctx, w, &remaining, address, toRenew, maxRenewals)
 	if err != nil {
 		c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
 	}
+	toIgnore = append(toIgnore, ignoredRenewals...)
 
 	// run contract refreshes
 	refreshed, err := c.runContractRefreshes(ctx, w, &remaining, address, toRefresh)
@@ -456,26 +461,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 	}
 
-	// apply active contract limit
-	numContractsTooMany := len(contracts) - len(toIgnore) - len(toArchive) - int(state.cfg.Contracts.Amount)
-	if numContractsTooMany > 0 {
-		// sort by contract size
-		sort.Slice(contractIds, func(i, j int) bool {
-			return contractSizes[contractIds[i]] < contractSizes[contractIds[j]]
-		})
-
-		// remove superfluous contract from renewal list and add to ignore list
-		prev := len(toIgnore)
-		for _, id := range contractIds[:numContractsTooMany] {
-			if index, exists := renewIndices[id]; exists {
-				toRenew[index] = toRenew[len(toRenew)-1]
-				toRenew = toRenew[:len(toRenew)-1]
-			}
-			toIgnore = append(toIgnore, contractMap[id].ID)
-		}
-		c.logger.Debugf("%d contracts too many, added %d smallest contracts to the ignore list", numContractsTooMany, len(toIgnore)-prev)
-	}
-
 	return toArchive, toIgnore, toRefresh, toRenew, nil
 }
 
@@ -565,7 +550,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	return formed, nil
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo) ([]api.ContractMetadata, error) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, maxRenewals int) ([]api.ContractMetadata, []types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
 	defer span.End()
 
@@ -574,6 +559,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 	c.logger.Debugw(
 		"run contracts renewals",
 		"torenew", len(toRenew),
+		"maxRenewals", maxRenewals,
 		"budget", budget,
 	)
 	defer func() {
@@ -583,8 +569,20 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 			"budget", budget,
 		)
 	}()
+	// start renewing from the largest contract to lose the least amount of data
+	// in case we have more contracts than we need.
+	sort.Slice(toRenew, func(i, j int) bool {
+		return toRenew[i].contract.Revision.Filesize > toRenew[j].contract.Revision.Filesize
+	})
 
+	var nRenewed int
+	var ignored []types.FileContractID
 	for _, ci := range toRenew {
+		// limit the number of contracts to renew
+		if nRenewed >= maxRenewals {
+			ignored = append(ignored, ci.contract.ID)
+			continue
+		}
 		// TODO: keep track of consecutive failures and break at some point
 
 		// break if the autopilot is stopped
@@ -601,7 +599,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 		}
 	}
 
-	return renewed, nil
+	return renewed, ignored, nil
 }
 
 func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) ([]api.ContractMetadata, error) {
