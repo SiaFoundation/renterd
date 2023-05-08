@@ -206,7 +206,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// run renewals
-	maxRenewals := int(state.cfg.Contracts.Amount) - len(active) - len(toIgnore) - len(toArchive)
+	maxRenewals := int(state.cfg.Contracts.Amount) - len(active) + len(toIgnore) + len(toArchive)
 	renewed, ignoredRenewals, err := c.runContractRenewals(ctx, w, &remaining, address, toRenew, maxRenewals)
 	if err != nil {
 		c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
