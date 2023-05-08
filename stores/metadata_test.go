@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
+	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
@@ -28,6 +29,79 @@ func generateMultisigUC(m, n uint64, salt string) types.UnlockConditions {
 		uc.PublicKeys[i].Key = frand.Bytes(32)
 	}
 	return uc
+}
+
+func TestObjectBasic(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create 2 hosts
+	hks, err := db.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2 := hks[0], hks[1]
+
+	// create 2 contracts
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1, fcid2 := fcids[0], fcids[1]
+
+	// create an object
+	want := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hk1,
+							Root: types.Hash256{1},
+						},
+					},
+				},
+				Offset: 10,
+				Length: 100,
+			},
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 2,
+					Shards: []object.Sector{
+						{
+							Host: hk2,
+							Root: types.Hash256{2},
+						},
+					},
+				},
+				Offset: 20,
+				Length: 200,
+			},
+		},
+	}
+
+	// add the object
+	if err := db.UpdateObject(context.Background(), t.Name(), want, map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the object
+	got, err := db.Object(context.Background(), t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal("object mismatch", cmp.Diff(got, want))
+	}
 }
 
 // TestSQLContractStore tests SQLContractStore functionality.
@@ -780,7 +854,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it using get and verify every field.
-	obj, err := db.object(ctx, objID)
+	obj, err := db.dbObject(ctx, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1655,7 +1729,7 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := db.object(ctx, "foo"); err != nil {
+	if obj, err := db.dbObject(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
@@ -1847,4 +1921,16 @@ func TestObjectsStats(t *testing.T) {
 	if info.NumObjects != 2 {
 		t.Fatal("wrong number of objects", info.NumObjects, 2)
 	}
+}
+
+// dbObject retrieves a dbObject from the store.
+func (s *SQLStore) dbObject(ctx context.Context, key string) (dbObject, error) {
+	var obj dbObject
+	tx := s.db.Where(&dbObject{ObjectID: key}).
+		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
+		Take(&obj)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return dbObject{}, api.ErrObjectNotFound
+	}
+	return obj, nil
 }

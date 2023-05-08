@@ -130,6 +130,29 @@ type (
 		DBSector   dbSector
 		DBSectorID uint `gorm:"index"`
 	}
+
+	// rawObject is used for hydration and is made up of one or many raw sectors.
+	rawObject []rawObjectSector
+
+	// rawObjectRow contains all necessary information to reconstruct the object.
+	rawObjectSector struct {
+		// object
+		ObjectKey []byte
+
+		// slice
+		SliceOffset uint32
+		SliceLength uint32
+
+		// slab
+		SlabID        uint
+		SlabKey       []byte
+		SlabMinShards uint8
+
+		// sector
+		SectorID   uint
+		SectorRoot []byte
+		SectorHost publicKey
+	}
 )
 
 // TableName implements the gorm.Tabler interface.
@@ -241,28 +264,77 @@ func (o dbObject) metadata() api.ObjectMetadata {
 	}
 }
 
-// convert turns a dbObject into a object.Object.
-func (o dbObject) convert() (object.Object, error) {
-	var objKey object.EncryptionKey
-	if err := objKey.UnmarshalText(o.Key); err != nil {
+func (raw rawObject) convert() (obj object.Object, _ error) {
+	if len(raw) == 0 {
+		return object.Object{}, errors.New("no slabs found")
+	}
+
+	// unmarshal key
+	if err := obj.Key.UnmarshalText(raw[0].ObjectKey); err != nil {
 		return object.Object{}, err
 	}
-	obj := object.Object{
-		Key:   objKey,
-		Slabs: make([]object.SlabSlice, len(o.Slabs)),
-	}
-	for i, sl := range o.Slabs {
-		slab, err := sl.Slab.convert()
-		if err != nil {
-			return object.Object{}, err
+
+	// create a helper function to add a slab and update the state
+	slabs := make([]object.SlabSlice, 0, len(raw))
+	curr := raw[0].SlabID
+	var start int
+	addSlab := func(end int, id uint) error {
+		if slab, err := raw[start:end].toSlabSlice(); err != nil {
+			return err
+		} else {
+			slabs = append(slabs, slab)
+			curr = id
+			start = end
 		}
-		obj.Slabs[i] = object.SlabSlice{
-			Slab:   slab,
-			Offset: sl.Offset,
-			Length: sl.Length,
+		return nil
+	}
+
+	// hydrate all slabs
+	for j, sector := range raw {
+		if sector.SlabID != curr {
+			if err := addSlab(j, sector.SlabID); err != nil {
+				return object.Object{}, err
+			}
 		}
 	}
+	if err := addSlab(len(raw), 0); err != nil {
+		return object.Object{}, err
+	}
+
+	// hydrate all fields
+	obj.Slabs = slabs
 	return obj, nil
+}
+
+func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
+	if len(raw) == 0 {
+		return object.SlabSlice{}, errors.New("no sectors found")
+	}
+
+	// unmarshal key
+	if err := slice.Slab.Key.UnmarshalText(raw[0].SlabKey); err != nil {
+		return object.SlabSlice{}, err
+	}
+
+	// hydrate all sectors
+	slabID := raw[0].SlabID
+	sectors := make([]object.Sector, 0, len(raw))
+	for _, sector := range raw {
+		if sector.SlabID != slabID {
+			return object.SlabSlice{}, errors.New("sectors from different slabs") // developer error
+		}
+		sectors = append(sectors, object.Sector{
+			Host: types.PublicKey(sector.SectorHost),
+			Root: *(*types.Hash256)(sector.SectorRoot),
+		})
+	}
+
+	// hydrate all fields
+	slice.Slab.Shards = sectors
+	slice.Slab.MinShards = raw[0].SlabMinShards
+	slice.Offset = raw[0].SliceOffset
+	slice.Length = raw[0].SliceLength
+	return slice, nil
 }
 
 // ObjectsStats returns some info related to the objects stored in the store. To
@@ -955,16 +1027,28 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-// object retrieves an object from the store.
-func (s *SQLStore) object(ctx context.Context, key string) (dbObject, error) {
-	var obj dbObject
-	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
-		Take(&obj)
+// object retrieves a raw object from the store.
+func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
+	var rows rawObject
+	tx := s.db.
+		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Model(&dbObject{}).
+		Table("objects o").
+		Joins("INNER JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("INNER JOIN slabs sla ON sli.id = sla.`db_slice_id`").
+		Joins("INNER JOIN shards sha ON sla.id = sha.`db_slab_id`").
+		Joins("INNER JOIN sectors sec ON sha.`db_sector_id` = sec.id").
+		Where("o.object_id = ?", key).
+		Order("o.id ASC").
+		Order("sla.id ASC").
+		Order("sli.offset ASC").
+		Order("sha.db_sector_id ASC").
+		Scan(&rows)
+
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return dbObject{}, api.ErrObjectNotFound
+		return nil, api.ErrObjectNotFound
 	}
-	return obj, nil
+	return rows, nil
 }
 
 // contract retrieves a contract from the store.
