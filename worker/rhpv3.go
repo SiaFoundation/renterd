@@ -52,6 +52,11 @@ var (
 	// balance over the maximum allowed ephemeral account balance.
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 
+	// errMaxRevisionReached occurs when trying to revise a contract that has
+	// already reached the highest possible revision number. Usually happens
+	// when trying to use a renewed contract.
+	errMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
+
 	// errTransportClosed is returned when using a transportV3 which was already
 	// closed.
 	errTransportClosed = errors.New("transport closed")
@@ -1055,6 +1060,12 @@ func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentM
 
 func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
+
+	// sanity check revision first
+	if rev.RevisionNumber == math.MaxUint64 {
+		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errMaxRevisionReached
+	}
+
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, err
