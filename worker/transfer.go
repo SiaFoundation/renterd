@@ -93,7 +93,7 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 				aborted = true
 			default:
 			}
-			if err != nil && !aborted {
+			if err != nil && !isBalanceInsufficient(err) && !aborted {
 				logger.Errorf("%x: withHostV3 failed when uploading sector, err: %v", contract.HostKey[:4], err)
 			}
 			respChan <- resp{
@@ -332,7 +332,7 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 			contract := contracts[hostIndex]
 			shard := &ss.Shards[r.shardIndex]
 
-			if err := hp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss hostV3) error {
+			err := hp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss hostV3) error {
 				buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 				err := ss.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
@@ -341,7 +341,14 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 				}
 				respChan <- resp{hostIndex, r, buf.Bytes(), time.Since(start), err}
 				return nil // only return the error in the response
-			}); err != nil && !errors.Is(err, context.Canceled) {
+			})
+			var aborted bool
+			select {
+			case <-ctx.Done():
+				aborted = true
+			default:
+			}
+			if err != nil && !errors.Is(err, context.Canceled) && !isBalanceInsufficient(err) && !aborted {
 				logger.Errorf("withHostV3 failed when downloading sector, err: %v", err)
 			}
 		}(r)
