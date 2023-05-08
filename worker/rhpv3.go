@@ -52,6 +52,11 @@ var (
 	// balance over the maximum allowed ephemeral account balance.
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
 
+	// errMaxRevisionReached occurs when trying to revise a contract that has
+	// already reached the highest possible revision number. Usually happens
+	// when trying to use a renewed contract.
+	errMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
+
 	// errTransportClosed is returned when using a transportV3 which was already
 	// closed.
 	errTransportClosed = errors.New("transport closed")
@@ -241,9 +246,9 @@ func (w *worker) FetchRevisionWithContract(ctx context.Context, hostKey types.Pu
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch revision, %w: %v", errGougingHost, breakdown.Reasons())
 			}
 			// Pay for the revision.
-			payment, ok := rhpv3.PayByContract(revision, pt.LatestRevisionCost, acc.id, w.deriveRenterKey(hostKey))
-			if !ok {
-				return rhpv3.HostPriceTable{}, nil, errors.New("insufficient funds")
+			payment, err := payByContract(revision, pt.LatestRevisionCost, acc.id, w.deriveRenterKey(hostKey))
+			if err != nil {
+				return rhpv3.HostPriceTable{}, nil, err
 			}
 			return pt.HostPriceTable, &payment, nil
 		})
@@ -287,9 +292,9 @@ func (w *worker) fundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr
 		return amount, w.transportPoolV3.withTransportV3(ctx, hk, siamuxAddr, func(t *transportV3) (err error) {
 			rk := w.deriveRenterKey(hk)
 			cost := amount.Add(pt.FundAccountCost)
-			payment, ok := rhpv3.PayByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
-			if !ok {
-				return errors.New("insufficient funds")
+			payment, err := payByContract(revision, cost, rhpv3.Account{}, rk) // no account needed for funding
+			if err != nil {
+				return err
 			}
 			if err := RPCFundAccount(ctx, t, &payment, account.id, pt.UID); err != nil {
 				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
@@ -758,9 +763,9 @@ func (w *worker) preparePriceTableContractPayment(hk types.PublicKey, revision *
 
 		refundAccount := rhpv3.Account(w.accounts.deriveAccountKey(hk).PublicKey())
 		rk := w.deriveRenterKey(hk)
-		payment, ok := rhpv3.PayByContract(revision, pt.UpdatePriceTableCost, refundAccount, rk)
-		if !ok {
-			return nil, errors.New("insufficient funds")
+		payment, err := payByContract(revision, pt.UpdatePriceTableCost, refundAccount, rk)
+		if err != nil {
+			return nil, err
 		}
 		return &payment, nil
 	}
@@ -1055,6 +1060,12 @@ func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentM
 
 func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
+
+	// sanity check revision first
+	if rev.RevisionNumber == math.MaxUint64 {
+		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errMaxRevisionReached
+	}
+
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, err
@@ -1359,4 +1370,15 @@ func RPCUpdateRegistry(ctx context.Context, t *transportV3, payment rhpv3.Paymen
 		return errors.New("invalid output length")
 	}
 	return nil
+}
+
+func payByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct rhpv3.Account, sk types.PrivateKey) (rhpv3.PayByContractRequest, error) {
+	if rev.RevisionNumber == math.MaxUint64 {
+		return rhpv3.PayByContractRequest{}, errMaxRevisionReached
+	}
+	payment, ok := rhpv3.PayByContract(rev, amount, refundAcct, sk)
+	if !ok {
+		return rhpv3.PayByContractRequest{}, ErrInsufficientFunds
+	}
+	return payment, nil
 }
