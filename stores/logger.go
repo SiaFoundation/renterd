@@ -29,7 +29,7 @@ func NewSQLLogger(l *zap.Logger, config *LoggerConfig) logger.Interface {
 		config = &LoggerConfig{
 			IgnoreRecordNotFoundError: true,
 			LogLevel:                  logger.Warn,
-			SlowThreshold:             200 * time.Millisecond,
+			SlowThreshold:             500 * time.Millisecond,
 		}
 	}
 	return &gormLogger{
