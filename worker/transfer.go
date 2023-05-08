@@ -26,7 +26,6 @@ const (
 
 var (
 	errGougingHost           = errors.New("host is gouging")
-	errInsufficientBalance   = errors.New("account balance is insufficient")
 	errDownloadSectorTimeout = errors.New("download sector timed out")
 	errUploadSectorTimeout   = errors.New("upload sector timed out")
 )

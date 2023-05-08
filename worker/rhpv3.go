@@ -335,6 +335,11 @@ func isBalanceInsufficient(err error) bool {
 	if err == nil {
 		return false
 	}
+	// compare error first
+	if errors.Is(err, errBalanceSufficient) {
+		return true
+	}
+	// then compare the string in case the error was returned by a host
 	return strings.Contains(err.Error(), errBalanceInsufficient.Error())
 }
 
@@ -529,7 +534,7 @@ func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
 		if isBalanceInsufficient(err) {
-			err = fmt.Errorf("%w %v, err: %v", errInsufficientBalance, r.HostKey(), err)
+			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, r.HostKey(), err)
 		}
 	}()
 
@@ -559,7 +564,7 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
 		if isBalanceInsufficient(err) {
-			err = fmt.Errorf("%w %v, err: %v", errInsufficientBalance, r.HostKey(), err)
+			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, r.HostKey(), err)
 		}
 	}()
 
