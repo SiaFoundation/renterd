@@ -1095,3 +1095,64 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		}
 	}
 }
+
+func TestContractArchival(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// add host.
+	if _, err := cluster.AddHostsBlocking(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// check that we have 1 contract
+	contracts, err := cluster.Bus.ActiveContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	}
+
+	// remove the host
+	if err := cluster.RemoveHost(cluster.hosts[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	// mine until the contract is archived
+	endHeight := contracts[0].WindowEnd
+	cs, err := cluster.Bus.ConsensusState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.MineBlocks(int(endHeight - cs.BlockHeight + 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	// check that we have 0 contracts
+	err = Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.ActiveContracts(context.Background())
+		if err != nil {
+			return err
+		}
+		if len(contracts) != 0 {
+			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

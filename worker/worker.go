@@ -534,10 +534,13 @@ func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.Contr
 			mu.Lock()
 			if err != nil {
 				errs = append(errs, &HostError{HostKey: md.HostKey, Err: err})
+				contracts = append(contracts, api.Contract{
+					ContractMetadata: md,
+				})
 			} else {
 				contracts = append(contracts, api.Contract{
 					ContractMetadata: md,
-					Revision:         revision,
+					Revision:         &revision,
 				})
 			}
 			mu.Unlock()

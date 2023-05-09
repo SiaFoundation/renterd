@@ -9,7 +9,7 @@ type (
 	// A Contract wraps the contract metadata with the latest contract revision.
 	Contract struct {
 		ContractMetadata
-		Revision types.FileContractRevision `json:"revision"`
+		Revision *types.FileContractRevision `json:"revision"`
 	}
 
 	// ContractMetadata contains all metadata for a contract.
@@ -70,24 +70,38 @@ func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
-func (c Contract) EndHeight() uint64 { return c.Revision.EndHeight() }
+func (c Contract) EndHeight() uint64 { return c.WindowEnd }
 
 // FileSize returns the current Size of the contract.
-func (c Contract) FileSize() uint64 { return c.Revision.Filesize }
+func (c Contract) FileSize() uint64 {
+	if c.Revision == nil {
+		return 0
+	}
+	return c.Revision.Filesize
+}
 
 // HostKey returns the public key of the host.
 func (c Contract) HostKey() (pk types.PublicKey) {
+	if c.Revision == nil {
+		return
+	}
 	copy(pk[:], c.Revision.UnlockConditions.PublicKeys[1].Key)
 	return
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.
 func (c Contract) RenterFunds() types.Currency {
+	if c.Revision == nil {
+		return types.ZeroCurrency
+	}
 	return c.Revision.ValidRenterPayout()
 }
 
 // RemainingCollateral returns the remaining collateral in the contract.
 func (c Contract) RemainingCollateral(s rhpv2.HostSettings) types.Currency {
+	if c.Revision == nil {
+		return types.ZeroCurrency
+	}
 	if c.Revision.MissedHostPayout().Cmp(s.ContractPrice) < 0 {
 		return types.ZeroCurrency
 	}
