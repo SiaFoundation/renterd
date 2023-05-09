@@ -9,7 +9,7 @@ type (
 	// A Contract wraps the contract metadata with the latest contract revision.
 	Contract struct {
 		ContractMetadata
-		Revision types.FileContractRevision `json:"revision"`
+		Revision *types.FileContractRevision `json:"revision"`
 	}
 
 	// ContractMetadata contains all metadata for a contract.
@@ -70,15 +70,11 @@ func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
-func (c Contract) EndHeight() uint64 { return c.Revision.EndHeight() }
+func (c Contract) EndHeight() uint64 { return c.WindowStart }
 
 // FileSize returns the current Size of the contract.
-func (c Contract) FileSize() uint64 { return c.Revision.Filesize }
-
-// HostKey returns the public key of the host.
-func (c Contract) HostKey() (pk types.PublicKey) {
-	copy(pk[:], c.Revision.UnlockConditions.PublicKeys[1].Key)
-	return
+func (c Contract) FileSize() uint64 {
+	return c.Revision.Filesize
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.

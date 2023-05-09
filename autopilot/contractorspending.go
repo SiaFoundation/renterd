@@ -45,7 +45,7 @@ func (c *contractor) contractSpending(ctx context.Context, contract api.Contract
 	return total, nil
 }
 
-func (c *contractor) currentPeriodSpending(contracts []api.ContractMetadata) (types.Currency, error) {
+func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Currency, error) {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
@@ -56,7 +56,7 @@ func (c *contractor) currentPeriodSpending(contracts []api.ContractMetadata) (ty
 	c.mu.Lock()
 	for _, contract := range contracts {
 		if contract.WindowStart <= c.currPeriod {
-			filtered = append(filtered, contract)
+			filtered = append(filtered, contract.ContractMetadata)
 		}
 	}
 	c.mu.Unlock()
@@ -69,7 +69,7 @@ func (c *contractor) currentPeriodSpending(contracts []api.ContractMetadata) (ty
 	return totalAllocated, nil
 }
 
-func (c *contractor) remainingFunds(contracts []api.ContractMetadata) (types.Currency, error) {
+func (c *contractor) remainingFunds(contracts []api.Contract) (types.Currency, error) {
 	cfg := c.ap.state.cfg
 
 	// find out how much we spent in the current period

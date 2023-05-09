@@ -246,7 +246,7 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 		renew = false
 		refresh = true
 	}
-	if shouldRenew, secondHalf := isUpForRenewal(cfg, c.Revision, bh); shouldRenew {
+	if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
 		if secondHalf {
 			reasons = append(reasons, errContractUpForRenewal) // only unusable if in second half of renew window
 		}
