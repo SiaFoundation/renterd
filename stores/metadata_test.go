@@ -1397,7 +1397,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 	fcid1, fcid2, fcid3 := fcids[0], fcids[1], fcids[2]
 
-	// archive the third and fourth the first two contracts as good contracts
+	// select the first two contracts as good contracts
 	goodContracts := []types.FileContractID{fcid1, fcid2}
 	if err := db.SetContractSet(context.Background(), "autopilot", goodContracts); err != nil {
 		t.Fatal(err)
@@ -1658,8 +1658,9 @@ func TestPutSlab(t *testing.T) {
 		}
 	}
 
-	// archive contract with host 2
-	if err := db.ArchiveContract(ctx, fcid2, t.Name()); err != nil {
+	// select contracts h1 and h3 as good contracts (h2 is bad)
+	goodContracts := []types.FileContractID{fcid1, fcid3}
+	if err := db.SetContractSet(ctx, "autopilot", goodContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1702,16 +1703,15 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal("sector 1 was uploaded to unexpected host", hks[0])
 	}
 
-	// assert the second sector however is now on the third host, since we
-	// archived the second host it will no longer appear in the sector contracts
-	if cids := contractIds(updated.Shards[1].DBSector.Contracts); len(cids) != 1 {
-		t.Fatalf("sector 2 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
-	} else if types.FileContractID(cids[0]) != fcid3 {
-		t.Fatal("sector 2 was uploaded to unexpected contract", cids[0])
+	// assert the second sector however is uploaded to two hosts, assert it's h2 and h3
+	if cids := contractIds(updated.Shards[1].DBSector.Contracts); len(cids) != 2 {
+		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
+	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
+		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
 	} else if hks := hostKeys(updated.Shards[1].DBSector.Hosts); len(hks) != 2 {
-		t.Fatalf("sector 2 was uploaded to unexpected amount of hosts, %v!=2", len(hks))
+		t.Fatalf("sector 1 was uploaded to unexpected amount of hosts, %v!=2", len(hks))
 	} else if hks[0] != hk2 || hks[1] != hk3 {
-		t.Fatal("sector 2 was uploaded to unexpected hosts", hks[0], hks[1])
+		t.Fatal("sector 1 was uploaded to unexpected hosts", hks[0], hks[1])
 	}
 
 	// assert there's still only one entry in the dbslab table

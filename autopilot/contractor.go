@@ -391,7 +391,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	// return variables
 	toArchive = make(map[types.FileContractID]string)
 
-	// check every contract
+	// check all contracts
 	for _, contract := range contracts {
 		// convenience variables
 		hk := contract.HostKey()
