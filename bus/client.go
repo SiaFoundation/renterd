@@ -286,8 +286,8 @@ func (c *Client) RecordContractSpending(ctx context.Context, records []api.Contr
 	return
 }
 
-// ActiveContracts returns all active contracts in the metadata store.
-func (c *Client) ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
+// Contracts returns all contracts in the metadata store.
+func (c *Client) Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/active", &contracts)
 	return
 }
@@ -298,8 +298,9 @@ func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileC
 	return
 }
 
-// Contracts returns the contracts for the given set from the metadata store.
-func (c *Client) Contracts(ctx context.Context, set string) (contracts []api.ContractMetadata, err error) {
+// ContractSetContracts returns the contracts for the given set from the
+// metadata store.
+func (c *Client) ContractSetContracts(ctx context.Context, set string) (contracts []api.ContractMetadata, err error) {
 	if set == "" {
 		return nil, errors.New("set cannot be empty")
 	}
@@ -346,7 +347,7 @@ func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.Contract
 	return
 }
 
-// AncestorContracts returns any ancestors of a given active contract.
+// AncestorContracts returns any ancestors of a given contract.
 func (c *Client) AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))

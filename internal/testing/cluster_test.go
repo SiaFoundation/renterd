@@ -121,7 +121,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Wait for the contract to be renewed.
 	err = Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := cluster.Bus.ActiveContracts(context.Background())
+		contracts, err := cluster.Bus.Contracts(context.Background())
 		if err != nil {
 			return err
 		}
@@ -159,7 +159,7 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Fetch renewed contract and make sure we caught the proof and revision.
-		contracts, err := cluster.Bus.ActiveContracts(context.Background())
+		contracts, err := cluster.Bus.Contracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +381,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// assert there are no contracts in the set
-	csc, err := b.Contracts(context.Background(), t.Name())
+	csc, err := b.ContractSetContracts(context.Background(), t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,12 +443,12 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// check that the funding was recorded
 	err = Retry(100, testBusFlushInterval, func() error {
-		cms, err := cluster.Bus.ActiveContracts(context.Background())
+		cms, err := cluster.Bus.Contracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(cms) == 0 {
-			t.Fatal("no active contracts found")
+			t.Fatal("no contracts found")
 		}
 
 		nFunded := 0
@@ -547,12 +547,12 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// wait for the contract to be renewed
 	err = Retry(100, 100*time.Millisecond, func() error {
-		cms, err := cluster.Bus.ActiveContracts(context.Background())
+		cms, err := cluster.Bus.Contracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(cms) == 0 {
-			t.Fatal("no active contracts found")
+			t.Fatal("no contracts found")
 		}
 
 		for _, cm := range cms {
@@ -571,12 +571,12 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// check that the spending was recorded
 	err = Retry(100, testBusFlushInterval, func() error {
-		cms, err := cluster.Bus.ActiveContracts(context.Background())
+		cms, err := cluster.Bus.Contracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(cms) == 0 {
-			t.Fatal("no active contracts found")
+			t.Fatal("no contracts found")
 		}
 
 		for _, c := range cms {
@@ -1020,7 +1020,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ac, err := cluster.Worker.ActiveContracts(context.Background(), time.Minute)
+	ac, err := cluster.Worker.Contracts(context.Background(), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1068,7 +1068,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	if up.ContractSet != "test" {
 		t.Fatal("unexpected contractset", up.ContractSet)
 	}
-	csc, err := cluster.Bus.Contracts(context.Background(), up.ContractSet)
+	csc, err := cluster.Bus.ContractSetContracts(context.Background(), up.ContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}

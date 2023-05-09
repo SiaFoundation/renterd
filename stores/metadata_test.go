@@ -31,6 +31,8 @@ func generateMultisigUC(m, n uint64, salt string) types.UnlockConditions {
 	return uc
 }
 
+// TestObjectBasic tests the hydration of raw objects works when we fetch
+// objects from the metadata store.
 func TestObjectBasic(t *testing.T) {
 	db, _, _, err := newTestSQLStore()
 	if err != nil {
@@ -180,7 +182,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := cs.ActiveContracts(ctx)
+	contracts, err := cs.Contracts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +224,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
 	}
-	contracts, err = cs.ActiveContracts(ctx)
+	contracts, err = cs.Contracts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,12 +239,12 @@ func TestSQLContractStore(t *testing.T) {
 	if err := cs.SetContractSet(ctx, "foo", []types.FileContractID{contracts[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	if contracts, err := cs.Contracts(ctx, "foo"); err != nil {
+	if contracts, err := cs.ContractSetContracts(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := cs.Contracts(ctx, "bar"); !errors.Is(err, api.ErrContractSetNotFound) {
+	if _, err := cs.ContractSetContracts(ctx, "bar"); !errors.Is(err, api.ErrContractSetNotFound) {
 		t.Fatal(err)
 	}
 
@@ -273,7 +275,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = cs.ActiveContracts(ctx)
+	contracts, err = cs.Contracts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +484,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// make sure the contract set was updated.
-	setContracts, err := cs.Contracts(context.Background(), "test")
+	setContracts, err := cs.ContractSetContracts(context.Background(), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,12 +667,12 @@ func TestArchiveContracts(t *testing.T) {
 	}
 
 	// assert the first one is still active
-	active, err := cs.ActiveContracts(context.Background())
+	active, err := cs.Contracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(active) != 1 || active[0].ID != fcids[0] {
-		t.Fatal("wrong active contracts", active)
+		t.Fatal("wrong contracts", active)
 	}
 
 	// assert the two others were archived
@@ -1395,7 +1397,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 	fcid1, fcid2, fcid3 := fcids[0], fcids[1], fcids[2]
 
-	// select the first two contracts as good contracts
+	// archive the third and fourth the first two contracts as good contracts
 	goodContracts := []types.FileContractID{fcid1, fcid2}
 	if err := db.SetContractSet(context.Background(), "autopilot", goodContracts); err != nil {
 		t.Fatal(err)
@@ -1656,9 +1658,8 @@ func TestPutSlab(t *testing.T) {
 		}
 	}
 
-	// select contracts h1 and h3 as good contracts (h2 is bad)
-	goodContracts := []types.FileContractID{fcid1, fcid3}
-	if err := db.SetContractSet(ctx, "autopilot", goodContracts); err != nil {
+	// archive contract with host 2
+	if err := db.ArchiveContract(ctx, fcid2, t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1701,15 +1702,16 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal("sector 1 was uploaded to unexpected host", hks[0])
 	}
 
-	// assert the second sector however is uploaded to two hosts, assert it's h2 and h3
-	if cids := contractIds(updated.Shards[1].DBSector.Contracts); len(cids) != 2 {
-		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
-	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
-		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
+	// assert the second sector however is now on the third host, since we
+	// archived the second host it will no longer appear in the sector contracts
+	if cids := contractIds(updated.Shards[1].DBSector.Contracts); len(cids) != 1 {
+		t.Fatalf("sector 2 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
+	} else if types.FileContractID(cids[0]) != fcid3 {
+		t.Fatal("sector 2 was uploaded to unexpected contract", cids[0])
 	} else if hks := hostKeys(updated.Shards[1].DBSector.Hosts); len(hks) != 2 {
-		t.Fatalf("sector 1 was uploaded to unexpected amount of hosts, %v!=2", len(hks))
+		t.Fatalf("sector 2 was uploaded to unexpected amount of hosts, %v!=2", len(hks))
 	} else if hks[0] != hk2 || hks[1] != hk3 {
-		t.Fatal("sector 1 was uploaded to unexpected hosts", hks[0], hks[1])
+		t.Fatal("sector 2 was uploaded to unexpected hosts", hks[0], hks[1])
 	}
 
 	// assert there's still only one entry in the dbslab table

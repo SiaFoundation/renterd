@@ -34,8 +34,8 @@ const (
 
 	// leewayPctRequiredContracts is the leeway we apply on the amount of
 	// contracts the config dictates we should have, we'll only form new
-	// contracts if the number of active contracts dips below 87.5% of the
-	// required contracts
+	// contracts if the number of contracts dips below 87.5% of the required
+	// contracts
 	leewayPctRequiredContracts = 0.875
 
 	// maxInitialContractFundingDivisor and minInitialContractFundingDivisor
@@ -128,32 +128,32 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// fetch current contract set
-	currentSet, err := c.ap.bus.Contracts(ctx, state.cfg.Contracts.Set)
+	currentSet, err := c.ap.bus.ContractSetContracts(ctx, state.cfg.Contracts.Set)
 	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
 		return err
 	}
 	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
 	// fetch used hosts.
-	allActiveContracts, err := c.ap.bus.ActiveContracts(ctx)
+	contracts, err := c.ap.bus.Contracts(ctx)
 	if err != nil {
 		return err
 	}
 	usedHosts := make(map[types.PublicKey]struct{})
-	for _, contract := range allActiveContracts {
+	for _, contract := range contracts {
 		usedHosts[contract.HostKey] = struct{}{}
 	}
 
-	// fetch all active contracts from the worker
+	// fetch all contracts from the worker
 	start := time.Now()
-	resp, err := w.ActiveContracts(ctx, timeoutHostRevision)
+	resp, err := w.Contracts(ctx, timeoutHostRevision)
 	if err != nil {
 		return err
 	}
 	if resp.Error != "" {
 		c.logger.Error(resp.Error)
 	}
-	c.logger.Debugf("fetched %d active contracts, took %v", len(resp.Contracts), time.Since(start))
+	c.logger.Debugf("fetched %d contracts, took %v", len(resp.Contracts), time.Since(start))
 	active := resp.Contracts
 
 	// fetch all hosts
@@ -200,7 +200,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// calculate remaining funds
-	remaining, err := c.remainingFunds(allActiveContracts)
+	remaining, err := c.remainingFunds(contracts)
 	if err != nil {
 		return err
 	}
@@ -391,7 +391,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	// return variables
 	toArchive = make(map[types.FileContractID]string)
 
-	// check every active contract
+	// check every contract
 	for _, contract := range contracts {
 		// convenience variables
 		hk := contract.HostKey()

@@ -28,10 +28,10 @@ type accounts struct {
 
 	refillInterval time.Duration
 
-	mu                sync.Mutex
-	setContracts      map[types.FileContractID]struct{}
-	activeContracts   []api.ContractMetadata
-	inProgressRefills map[types.Hash256]struct{}
+	mu                   sync.Mutex
+	contracts            []api.ContractMetadata
+	contractSetContracts map[types.FileContractID]struct{}
+	inProgressRefills    map[types.Hash256]struct{}
 }
 
 func newAccounts(l *zap.SugaredLogger, b Bus, workers *workerPool, interval time.Duration) *accounts {
@@ -73,13 +73,13 @@ func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig)
 		return
 	}
 
-	acs, err := a.b.ActiveContracts(ctx)
+	acs, err := a.b.Contracts(ctx)
 	if err != nil {
-		a.logger.Errorw(fmt.Sprintf("failed to fetch active contracts: %v", err))
+		a.logger.Errorw(fmt.Sprintf("failed to fetch contracts: %v", err))
 		return
 	}
 
-	csc, err := a.b.Contracts(ctx, cfg.Contracts.Set)
+	csc, err := a.b.ContractSetContracts(ctx, cfg.Contracts.Set)
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch contracts in set %s: %v", cfg.Contracts.Set, err))
 		return
@@ -87,11 +87,11 @@ func (a *accounts) UpdateContracts(ctx context.Context, cfg api.AutopilotConfig)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.setContracts = make(map[types.FileContractID]struct{}, len(csc))
+	a.contracts = append(a.contracts[:0], acs...)
+	a.contractSetContracts = make(map[types.FileContractID]struct{}, len(csc))
 	for _, c := range csc {
-		a.setContracts[c.ID] = struct{}{}
+		a.contractSetContracts[c.ID] = struct{}{}
 	}
-	a.activeContracts = append(a.activeContracts[:0], acs...)
 }
 
 func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
@@ -248,7 +248,7 @@ func (a *accounts) contractsToRefill() map[types.PublicKey][]api.ContractMetadat
 	defer a.mu.Unlock()
 
 	contracts := make(map[types.PublicKey][]api.ContractMetadata)
-	for _, contract := range a.activeContracts {
+	for _, contract := range a.contracts {
 		contracts[contract.HostKey] = append(contracts[contract.HostKey], contract)
 	}
 	return contracts
@@ -257,6 +257,6 @@ func (a *accounts) contractsToRefill() map[types.PublicKey][]api.ContractMetadat
 func (a *accounts) isContractSetContract(id types.FileContractID) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, exists := a.setContracts[id]
+	_, exists := a.contractSetContracts[id]
 	return exists
 }

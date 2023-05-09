@@ -50,12 +50,12 @@ type Bus interface {
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
 	// contracts
-	ActiveContracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
+	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
 	AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
-	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
@@ -77,7 +77,7 @@ type Bus interface {
 
 type Worker interface {
 	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
-	ActiveContracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
+	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
 	MigrateSlab(ctx context.Context, s object.Slab) error
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
