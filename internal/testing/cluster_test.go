@@ -110,8 +110,9 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contract.EndHeight() != currentPeriod+cfg.Contracts.Period+cfg.Contracts.RenewWindow {
-		t.Fatal("wrong endHeight")
+	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+	if contract.EndHeight() != expectedEndHeight || contract.Revision.EndHeight() != expectedEndHeight {
+		t.Fatal("wrong endHeight", contract.EndHeight(), contract.Revision.EndHeight())
 	}
 
 	// Mine blocks until contracts start renewing.

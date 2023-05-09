@@ -70,7 +70,7 @@ func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
-func (c Contract) EndHeight() uint64 { return c.WindowEnd }
+func (c Contract) EndHeight() uint64 { return c.WindowStart }
 
 // FileSize returns the current Size of the contract.
 func (c Contract) FileSize() uint64 {
