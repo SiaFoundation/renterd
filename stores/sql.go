@@ -108,34 +108,9 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
+	// Perform migrations.
 	if migrate {
-		// Create the tables.
-		tables := []interface{}{
-			// bus.MetadataStore tables
-			&dbArchivedContract{},
-			&dbContract{},
-			&dbContractSet{},
-			&dbObject{},
-			&dbSector{},
-			&dbShard{},
-			&dbSlab{},
-			&dbSlice{},
-
-			// bus.HostDB tables
-			&dbAnnouncement{},
-			&dbConsensusInfo{},
-			&dbHost{},
-			&dbInteraction{},
-			&dbAllowlistEntry{},
-			&dbBlocklistEntry{},
-
-			// bus.SettingStore tables
-			&dbSetting{},
-
-			// bus.EphemeralAccountStore tables
-			&dbAccount{},
-		}
-		if err := db.AutoMigrate(tables...); err != nil {
+		if err := performMigrations(db); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
 	}
@@ -228,6 +203,44 @@ func isSQLite(db *gorm.DB) bool {
 	default:
 		panic(fmt.Sprintf("unknown dialector: %t", db.Dialector))
 	}
+}
+
+func performMigrations(db *gorm.DB) error {
+	// Perform manual migrations.
+	if err := db.Migrator().DropTable("host_sectors"); err != nil {
+		return err
+	}
+
+	// Perform auto migrations.
+	tables := []interface{}{
+		// bus.MetadataStore tables
+		&dbArchivedContract{},
+		&dbContract{},
+		&dbContractSet{},
+		&dbObject{},
+		&dbSector{},
+		&dbShard{},
+		&dbSlab{},
+		&dbSlice{},
+
+		// bus.HostDB tables
+		&dbAnnouncement{},
+		&dbConsensusInfo{},
+		&dbHost{},
+		&dbInteraction{},
+		&dbAllowlistEntry{},
+		&dbBlocklistEntry{},
+
+		// bus.SettingStore tables
+		&dbSetting{},
+
+		// bus.EphemeralAccountStore tables
+		&dbAccount{},
+	}
+	if err := db.AutoMigrate(tables...); err != nil {
+		return nil
+	}
+	return nil
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {
