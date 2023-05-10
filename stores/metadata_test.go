@@ -1854,6 +1854,15 @@ func TestObjectsStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Fetch stats on clean database.
+	info, err := cs.ObjectsStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(info, api.ObjectsStats{}) {
+		t.Fatal("unexpected stats", info)
+	}
+
 	// Create a few objects of different size.
 	var objectsSize uint64
 	var sectorsSize uint64
@@ -1907,7 +1916,7 @@ func TestObjectsStats(t *testing.T) {
 	}
 
 	// Check sizes.
-	info, err := cs.ObjectsStats(context.Background())
+	info, err = cs.ObjectsStats(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
