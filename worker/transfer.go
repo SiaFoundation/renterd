@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -92,7 +93,7 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 				aborted = true
 			default:
 			}
-			if err != nil && !isBalanceInsufficient(err) && !aborted {
+			if err != nil && !isBalanceInsufficient(err) && !aborted && !errors.Is(err, os.ErrDeadlineExceeded) {
 				logger.Errorf("%x: withHostV3 failed when uploading sector, err: %v", contract.HostKey[:4], err)
 			}
 			respChan <- resp{
@@ -347,7 +348,7 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 				aborted = true
 			default:
 			}
-			if err != nil && !errors.Is(err, context.Canceled) && !isBalanceInsufficient(err) && !aborted {
+			if err != nil && !errors.Is(err, context.Canceled) && !isBalanceInsufficient(err) && !aborted && !errors.Is(err, os.ErrDeadlineExceeded) {
 				logger.Errorf("withHostV3 failed when downloading sector, err: %v", err)
 			}
 		}(r)
