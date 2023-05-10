@@ -288,7 +288,7 @@ func (c *Client) RecordContractSpending(ctx context.Context, records []api.Contr
 
 // Contracts returns all contracts in the metadata store.
 func (c *Client) Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).GET("/contracts/active", &contracts)
+	err = c.c.WithContext(ctx).GET("/contracts", &contracts)
 	return
 }
 

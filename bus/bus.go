@@ -539,7 +539,7 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
+func (b *bus) contractsHandlerGET(jc jape.Context) {
 	cs, err := b.ms.Contracts(jc.Request.Context())
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
@@ -1218,7 +1218,7 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
-		"GET    /contracts/active":       b.contractsActiveHandlerGET,
+		"GET    /contracts":              b.contractsHandlerGET,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

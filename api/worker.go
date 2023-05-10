@@ -28,7 +28,7 @@ type AccountsUnlockHandlerRequest struct {
 	LockID uint64 `json:"lockID"`
 }
 
-// ContractsResponse is the response type for the /rhp/contracts/active endpoint.
+// ContractsResponse is the response type for the /rhp/contracts endpoint.
 type ContractsResponse struct {
 	Contracts []Contract `json:"contracts"`
 	Error     string     `json:"error,omitempty"`
