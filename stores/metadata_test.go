@@ -1622,7 +1622,6 @@ func TestPutSlab(t *testing.T) {
 			Where(&dbSlab{Key: key}).
 			Preload("Shards.DBSector").
 			Preload("Shards.DBSector.Contracts").
-			Preload("Shards.DBSector.Hosts").
 			Take(&slab).
 			Error; err != nil {
 			t.Fatal(err)
@@ -1638,14 +1637,6 @@ func TestPutSlab(t *testing.T) {
 		return
 	}
 
-	// helper to extract the hostkey from a list of hosts
-	hostKeys := func(hosts []dbHost) (ids []types.PublicKey) {
-		for _, h := range hosts {
-			ids = append(ids, types.PublicKey(h.PublicKey))
-		}
-		return
-	}
-
 	// fetch inserted slab
 	inserted := fetchSlab()
 
@@ -1653,7 +1644,7 @@ func TestPutSlab(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if cids := contractIds(inserted.Shards[i].DBSector.Contracts); len(cids) != 1 {
 			t.Fatalf("sector %d was uploaded to unexpected amount of contracts, %v!=1", i+1, len(cids))
-		} else if hks := hostKeys(inserted.Shards[i].DBSector.Hosts); len(hks) != 1 {
+		} else if inserted.Shards[i].DBSector.LatestHost != publicKey(hks[i]) {
 			t.Fatalf("sector %d was uploaded to unexpected amount of hosts, %v!=1", i+1, len(hks))
 		}
 	}
@@ -1697,8 +1688,8 @@ func TestPutSlab(t *testing.T) {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
-	} else if hks := hostKeys(updated.Shards[0].DBSector.Hosts); len(hks) != 1 {
-		t.Fatalf("sector 1 was uploaded to unexpected amount of hosts, %v!=1", len(hks))
+	} else if updated.Shards[0].DBSector.LatestHost != publicKey(hks[0]) {
+		t.Fatal("host key was invalid", updated.Shards[0].DBSector.LatestHost, publicKey(hks[0]))
 	} else if hks[0] != hk1 {
 		t.Fatal("sector 1 was uploaded to unexpected host", hks[0])
 	}
@@ -1708,10 +1699,8 @@ func TestPutSlab(t *testing.T) {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
-	} else if hks := hostKeys(updated.Shards[1].DBSector.Hosts); len(hks) != 2 {
-		t.Fatalf("sector 1 was uploaded to unexpected amount of hosts, %v!=2", len(hks))
-	} else if hks[0] != hk2 || hks[1] != hk3 {
-		t.Fatal("sector 1 was uploaded to unexpected hosts", hks[0], hks[1])
+	} else if updated.Shards[0].DBSector.LatestHost != publicKey(hks[0]) {
+		t.Fatal("host key was invalid", updated.Shards[0].DBSector.LatestHost, publicKey(hks[0]))
 	}
 
 	// assert there's still only one entry in the dbslab table

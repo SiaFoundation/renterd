@@ -108,57 +108,11 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
+	// Perform migrations.
 	if migrate {
-		// Create the tables.
-		tables := []interface{}{
-			// bus.MetadataStore tables
-			&dbArchivedContract{},
-			&dbContract{},
-			&dbContractSet{},
-			&dbObject{},
-			&dbSector{},
-			&dbShard{},
-			&dbSlab{},
-			&dbSlice{},
-
-			// bus.HostDB tables
-			&dbAnnouncement{},
-			&dbConsensusInfo{},
-			&dbHost{},
-			&dbInteraction{},
-			&dbAllowlistEntry{},
-			&dbBlocklistEntry{},
-
-			// bus.SettingStore tables
-			&dbSetting{},
-
-			// bus.EphemeralAccountStore tables
-			&dbAccount{},
-		}
-		if err := db.AutoMigrate(tables...); err != nil {
+		if err := performMigrations(db); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
-	}
-
-	// Ensure the join table has an index on `db_host_id`.
-	switch conn.(type) {
-	case *sqlite.Dialector:
-		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-	case *mysql.Dialector:
-		var found int
-		err := db.Raw("SELECT COUNT(1) IndexIsThere FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema=DATABASE() AND table_name='host_blocklist_entry_hosts' AND index_name='idx_host_blocklist_entry_hosts'").Scan(&found).Error
-		if err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-		if found == 0 {
-			if err := db.Exec("CREATE INDEX idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
-				return nil, modules.ConsensusChangeID{}, err
-			}
-		}
-	default:
-		panic("unknown dialector")
 	}
 
 	// Get latest consensus change ID or init db.
