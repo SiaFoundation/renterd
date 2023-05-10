@@ -38,7 +38,7 @@ func TestBlocklist(t *testing.T) {
 	// wait until we have 3 contracts in the set
 	var contracts []api.ContractMetadata
 	if err := Retry(5, time.Second, func() (err error) {
-		contracts, err = b.Contracts(ctx, "autopilot")
+		contracts, err = b.ContractSetContracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
 		} else if len(contracts) != 3 {
@@ -61,7 +61,7 @@ func TestBlocklist(t *testing.T) {
 
 	// assert h3 is no longer in the contract set
 	if err := Retry(5, time.Second, func() error {
-		contracts, err := b.Contracts(ctx, "autopilot")
+		contracts, err := b.ContractSetContracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
 		} else if len(contracts) != 2 {
@@ -89,7 +89,7 @@ func TestBlocklist(t *testing.T) {
 
 	// assert h1 is no longer in the contract set
 	if err := Retry(5, time.Second, func() error {
-		contracts, err := b.Contracts(ctx, "autopilot")
+		contracts, err := b.ContractSetContracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
 		} else if len(contracts) != 1 {
@@ -115,7 +115,7 @@ func TestBlocklist(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := Retry(5, time.Second, func() error {
-		contracts, err := b.Contracts(ctx, "autopilot")
+		contracts, err := b.ContractSetContracts(ctx, "autopilot")
 		if err != nil {
 			t.Fatal(err)
 		} else if len(contracts) != 3 {

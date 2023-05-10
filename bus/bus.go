@@ -78,13 +78,13 @@ type (
 	MetadataStore interface {
 		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
 		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-		Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
+		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
@@ -539,8 +539,8 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsActiveHandlerGET(jc jape.Context) {
-	cs, err := b.ms.ActiveContracts(jc.Request.Context())
+func (b *bus) contractsHandlerGET(jc jape.Context) {
+	cs, err := b.ms.Contracts(jc.Request.Context())
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
@@ -556,7 +556,7 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {
-	cs, err := b.ms.Contracts(jc.Request.Context(), jc.PathParam("set"))
+	cs, err := b.ms.ContractSetContracts(jc.Request.Context(), jc.PathParam("set"))
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}
@@ -1218,7 +1218,7 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
-		"GET    /contracts/active":       b.contractsActiveHandlerGET,
+		"GET    /contracts":              b.contractsHandlerGET,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,

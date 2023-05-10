@@ -51,7 +51,7 @@ func TestGouging(t *testing.T) {
 	waitForContractSet := func() error {
 		t.Helper()
 		return Retry(30, time.Second, func() error {
-			if contracts, err := b.Contracts(ctx, cfg.Set); err != nil {
+			if contracts, err := b.ContractSetContracts(ctx, cfg.Set); err != nil {
 				t.Fatal(err)
 			} else if len(contracts) != int(cfg.Amount) {
 				return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), int(cfg.Amount))
@@ -63,7 +63,7 @@ func TestGouging(t *testing.T) {
 	// helper that waits untail a certain host is removed from the contract set
 	waitForHostRemoval := func(hk types.PublicKey) error {
 		return Retry(30, time.Second, func() error {
-			if contracts, err := b.Contracts(ctx, cfg.Set); err != nil {
+			if contracts, err := b.ContractSetContracts(ctx, cfg.Set); err != nil {
 				t.Fatal(err)
 			} else {
 				for _, c := range contracts {
@@ -108,7 +108,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// fetch current contract set
-	contracts, err := b.Contracts(ctx, cfg.Set)
+	contracts, err := b.ContractSetContracts(ctx, cfg.Set)
 	if err != nil {
 		t.Fatal(err)
 	}

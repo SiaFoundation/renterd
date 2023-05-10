@@ -214,8 +214,8 @@ type Bus interface {
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
-	ActiveContracts(ctx context.Context) ([]api.ContractMetadata, error)
-	Contracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
+	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
@@ -518,7 +518,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) fetchActiveContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
+func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
 	// create requests channel
 	reqs := make(chan api.ContractMetadata)
 
@@ -877,14 +877,14 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach contract spending recorder to the context.
 	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
-	// fetch all active contracts
-	dlContracts, err := w.bus.ActiveContracts(ctx)
+	// fetch all contracts
+	dlContracts, err := w.bus.Contracts(ctx)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	// fetch all contract set contracts
-	ulContracts, err := w.bus.Contracts(ctx, up.ContractSet)
+	ulContracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -950,7 +950,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("couldn't fetch download parameters from bus", err) != nil {
+	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
 		return
 	}
 
@@ -988,8 +988,8 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// keep track of recent timings per host so we can favour faster hosts
 	performance := make(map[types.PublicKey]int64)
 
-	// fetch contracts
-	contracts, err := w.bus.ActiveContracts(ctx)
+	// fetch all contracts
+	contracts, err := w.bus.Contracts(ctx)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -1113,7 +1113,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	usedContracts := make(map[types.PublicKey]types.FileContractID)
 
 	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, up.ContractSet)
+	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -1178,9 +1178,9 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path")))
 }
 
-func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
+func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
-	busContracts, err := w.bus.ActiveContracts(ctx)
+	busContracts, err := w.bus.Contracts(ctx)
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
@@ -1200,7 +1200,7 @@ func (w *worker) rhpActiveContractsHandlerGET(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, gp)
 
-	contracts, errs := w.fetchActiveContracts(ctx, busContracts, hosttimeout)
+	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()
@@ -1276,15 +1276,15 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"GET    /rhp/contracts/active": w.rhpActiveContractsHandlerGET,
-		"POST   /rhp/scan":             w.rhpScanHandler,
-		"POST   /rhp/form":             w.rhpFormHandler,
-		"POST   /rhp/renew":            w.rhpRenewHandler,
-		"POST   /rhp/fund":             w.rhpFundHandler,
-		"POST   /rhp/sync":             w.rhpSyncHandler,
-		"POST   /rhp/pricetable":       w.rhpPriceTableHandler,
-		"POST   /rhp/registry/read":    w.rhpRegistryReadHandler,
-		"POST   /rhp/registry/update":  w.rhpRegistryUpdateHandler,
+		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
+		"POST   /rhp/scan":            w.rhpScanHandler,
+		"POST   /rhp/form":            w.rhpFormHandler,
+		"POST   /rhp/renew":           w.rhpRenewHandler,
+		"POST   /rhp/fund":            w.rhpFundHandler,
+		"POST   /rhp/sync":            w.rhpSyncHandler,
+		"POST   /rhp/pricetable":      w.rhpPriceTableHandler,
+		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
 
 		"POST   /slab/migrate": w.slabMigrateHandler,
 

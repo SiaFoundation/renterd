@@ -505,8 +505,8 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 		return nil, err
 	}
 
-	// fetch active contracts
-	resp, err := c.Worker.ActiveContracts(context.Background(), time.Minute)
+	// fetch all contracts
+	resp, err := c.Worker.Contracts(context.Background(), time.Minute)
 	if err != nil {
 		return nil, err
 	}
@@ -683,11 +683,11 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) er
 	})
 }
 
-// waitForHostContracts will fetch the active contracts from the bus and wait
-// until we have a contract with every host in the given hosts map
+// waitForHostContracts will fetch the contracts from the bus and wait until we
+// have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) error {
 	return Retry(30, time.Second, func() error {
-		contracts, err := c.Bus.ActiveContracts(context.Background())
+		contracts, err := c.Bus.Contracts(context.Background())
 		if err != nil {
 			return err
 		}
