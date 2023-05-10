@@ -352,15 +352,19 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
 		if err != nil {
 			return err
 		}
+
 		// Size of objects.
-		err = tx.
-			Model(&dbSlice{}).
-			Select("SUM(length)").
-			Scan(&resp.TotalObjectsSize).
-			Error
-		if err != nil {
-			return err
+		if resp.NumObjects > 0 {
+			err = tx.
+				Model(&dbSlice{}).
+				Select("SUM(length)").
+				Scan(&resp.TotalObjectsSize).
+				Error
+			if err != nil {
+				return err
+			}
 		}
+
 		// Size of sectors
 		var sectorSizes struct {
 			SectorsSize  uint64
