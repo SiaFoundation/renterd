@@ -1,8 +1,6 @@
 package stores
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"sync"
@@ -115,27 +113,6 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		}
 	}
 
-	// Ensure the join table has an index on `db_host_id`.
-	switch conn.(type) {
-	case *sqlite.Dialector:
-		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-	case *mysql.Dialector:
-		var found int
-		err := db.Raw("SELECT COUNT(1) IndexIsThere FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema=DATABASE() AND table_name='host_blocklist_entry_hosts' AND index_name='idx_host_blocklist_entry_hosts'").Scan(&found).Error
-		if err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-		if found == 0 {
-			if err := db.Exec("CREATE INDEX idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
-				return nil, modules.ConsensusChangeID{}, err
-			}
-		}
-	default:
-		panic("unknown dialector")
-	}
-
 	// Get latest consensus change ID or init db.
 	var ci dbConsensusInfo
 	if err := db.
@@ -203,110 +180,4 @@ func isSQLite(db *gorm.DB) bool {
 	default:
 		panic(fmt.Sprintf("unknown dialector: %t", db.Dialector))
 	}
-}
-
-func performMigrations(db *gorm.DB) error {
-	// Perform manual migrations.
-	if err := db.Migrator().DropTable("host_sectors"); err != nil {
-		return err
-	}
-
-	// Perform auto migrations.
-	tables := []interface{}{
-		// bus.MetadataStore tables
-		&dbArchivedContract{},
-		&dbContract{},
-		&dbContractSet{},
-		&dbObject{},
-		&dbSector{},
-		&dbShard{},
-		&dbSlab{},
-		&dbSlice{},
-
-		// bus.HostDB tables
-		&dbAnnouncement{},
-		&dbConsensusInfo{},
-		&dbHost{},
-		&dbInteraction{},
-		&dbAllowlistEntry{},
-		&dbBlocklistEntry{},
-
-		// bus.SettingStore tables
-		&dbSetting{},
-
-		// bus.EphemeralAccountStore tables
-		&dbAccount{},
-	}
-	if err := db.AutoMigrate(tables...); err != nil {
-		return nil
-	}
-	return nil
-}
-
-func (ss *SQLStore) updateHasAllowlist(err *error) {
-	if *err != nil {
-		return
-	}
-
-	cnt, cErr := tableCount(ss.db, &dbAllowlistEntry{})
-	if cErr != nil {
-		*err = cErr
-		return
-	}
-
-	ss.mu.Lock()
-	ss.hasAllowlist = cnt > 0
-	ss.mu.Unlock()
-}
-
-func (ss *SQLStore) updateHasBlocklist(err *error) {
-	if *err != nil {
-		return
-	}
-
-	cnt, cErr := tableCount(ss.db, &dbBlocklistEntry{})
-	if cErr != nil {
-		*err = cErr
-		return
-	}
-
-	ss.mu.Lock()
-	ss.hasBlocklist = cnt > 0
-	ss.mu.Unlock()
-}
-
-func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
-	err = db.Model(model).Count(&cnt).Error
-	return
-}
-
-// Close closes the underlying database connection of the store.
-func (s *SQLStore) Close() error {
-	db, err := s.db.DB()
-	if err != nil {
-		return err
-	}
-
-	err = db.Close()
-	if err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	s.closed = true
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
-	var err error
-	for i := 0; i < 5; i++ {
-		err = s.db.Transaction(fc, opts...)
-		if err == nil {
-			return nil
-		}
-		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, 5, err))
-		time.Sleep(200 * time.Millisecond)
-	}
-	return fmt.Errorf("retryTransaction failed: %w", err)
 }
