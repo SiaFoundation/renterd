@@ -393,6 +393,11 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 	// check all contracts
 	for _, contract := range contracts {
+		// break if autopilot is stopped
+		if c.ap.isStopped() {
+			break
+		}
+
 		// convenience variables
 		fcid := contract.ID
 

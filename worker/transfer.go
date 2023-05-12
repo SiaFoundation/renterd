@@ -81,9 +81,9 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 			defer close(doneChan)
 			var root types.Hash256
 			var err error
-			err = locker.withRevision(ctx, defaultRevisionFetchTimeout, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev types.FileContractRevision) error {
+			err = locker.withRevision(ctx, defaultRevisionFetchTimeout, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev *types.FileContractRevision) error {
 				return hp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss hostV3) error {
-					root, err = ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), &rev)
+					root, err = ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), rev)
 					return err
 				})
 			})

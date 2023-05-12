@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"mime"
 	"net"
@@ -18,8 +17,6 @@ import (
 	"time"
 
 	"github.com/gotd/contrib/http_range"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -33,7 +30,6 @@ import (
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
-	"lukechampine.com/frand"
 )
 
 const (
@@ -197,7 +193,8 @@ type revisionUnlocker interface {
 }
 
 type revisionLocker interface {
-	withRevision(ctx context.Context, timeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error
+	lockRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64) (*types.FileContractRevision, revisionUnlocker, error)
+	withRevision(ctx context.Context, timeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision *types.FileContractRevision) error) error
 }
 
 type ContractLocker interface {
@@ -277,6 +274,8 @@ type worker struct {
 	bus       Bus
 	pool      *sessionPool
 	masterKey [32]byte
+
+	uploader *uploader
 
 	accounts    *accounts
 	priceTables *priceTables
@@ -370,17 +369,39 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(hostV2) error) (err error) {
-	return w.withHostsV2(ctx, []api.ContractMetadata{{
-		ID:      contractID,
-		HostKey: hostKey,
-		HostIP:  hostIP,
-	}}, func(ss []hostV2) error {
-		return fn(ss[0])
-	})
+func (w *worker) lockRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64) (*types.FileContractRevision, revisionUnlocker, error) {
+	// helper function that returns a context with a timeout
+	timeoutCtx := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(ctx, defaultRevisionFetchTimeout)
+	}
+
+	// lock the revision for the duration of the operation.
+	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// try to fetch the revision with an account first.
+	ctx, cancel := timeoutCtx()
+	defer cancel()
+	rev, err := w.FetchRevisionWithAccount(ctx, hk, siamuxAddr, blockHeight, contractID)
+	if err != nil && !isBalanceInsufficient(err) {
+		return nil, nil, err
+	} else if err == nil {
+		return rev, contractLock, nil
+	}
+
+	// fall back to using the contract to pay for the revision.
+	ctx, cancel = timeoutCtx()
+	defer cancel()
+	rev, err = w.FetchRevisionWithContract(ctx, hk, siamuxAddr, contractID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return rev, contractLock, nil
 }
 
-func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
+func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision *types.FileContractRevision) error) error {
 	timeoutCtx := func() (context.Context, context.CancelFunc) {
 		if fetchTimeout > 0 {
 			return context.WithTimeout(ctx, fetchTimeout)
@@ -436,6 +457,16 @@ func (w *worker) unlockHosts(hosts []hostV2) {
 		}(h.(*sharedSession))
 	}
 	wg.Wait()
+}
+
+func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(hostV2) error) (err error) {
+	return w.withHostsV2(ctx, []api.ContractMetadata{{
+		ID:      contractID,
+		HostKey: hostKey,
+		HostIP:  hostIP,
+	}}, func(ss []hostV2) error {
+		return fn(ss[0])
+	})
 }
 
 func (w *worker) withHostsV2(ctx context.Context, contracts []api.ContractMetadata, fn func([]hostV2) error) (err error) {
@@ -526,8 +557,8 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	var mu sync.Mutex
 	worker := func() {
 		for md := range reqs {
-			var revision types.FileContractRevision
-			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, func(rev types.FileContractRevision) error {
+			var revision *types.FileContractRevision
+			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, func(rev *types.FileContractRevision) error {
 				revision = rev
 				return nil
 			})
@@ -540,7 +571,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 			} else {
 				contracts = append(contracts, api.Contract{
 					ContractMetadata: md,
-					Revision:         &revision,
+					Revision:         revision,
 				})
 			}
 			mu.Unlock()
@@ -760,18 +791,18 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision types.FileContractRevision) (err error) {
-		err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision *types.FileContractRevision) (err error) {
+		err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, revision)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
-			err = w.syncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &revision)
+			err = w.syncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, revision)
 			if err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 				return
 			}
 
 			// try funding the account again
-			err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
+			err = w.fundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, revision)
 			if errors.Is(err, errBalanceSufficient) {
 				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
 				return nil
@@ -838,8 +869,8 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, up.GougingParams)
 
 	// sync the account
-	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision types.FileContractRevision) error {
-		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
+	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision *types.FileContractRevision) error {
+		return w.syncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, revision)
 	}))
 }
 
@@ -889,7 +920,6 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	w.pool.setCurrentHeight(up.CurrentHeight)
 	err = migrateSlab(ctx, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
@@ -1106,70 +1136,20 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// attach contract spending recorder to the context.
 	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
 
-	o := object.Object{
-		Key: object.GenerateEncryptionKey(),
-	}
-	w.pool.setCurrentHeight(up.CurrentHeight)
-	usedContracts := make(map[types.PublicKey]types.FileContractID)
-
 	// fetch contracts
 	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
-	// randomize order of contracts so we don't always upload to the same hosts
-	frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
-
-	// keep track of slow hosts so we can avoid them in consecutive slab uploads
-	slow := make(map[types.PublicKey]int)
-
-	cr := o.Key.Encrypt(jc.Request.Body)
-	var objectSize int
-	for {
-		var s object.Slab
-		var length int
-		var slowHosts []int
-
-		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
-		// move slow hosts to the back of the array
-		sort.SliceStable(contracts, func(i, j int) bool {
-			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
-		})
-
-		// upload the slab
-		start := time.Now()
-		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, w, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
-		for _, h := range slowHosts {
-			slow[contracts[h].HostKey]++
-		}
-		if err == io.EOF {
-			break
-		} else if jc.Check(fmt.Sprintf("uploading slab failed after %v", time.Since(start)), err); err != nil {
-			w.logger.Errorf("couldn't upload object '%v' slab %d, err: %v", path, len(o.Slabs), err)
-			return
-		}
-
-		objectSize += length
-		o.Slabs = append(o.Slabs, object.SlabSlice{
-			Slab:   s,
-			Offset: 0,
-			Length: uint32(length),
-		})
-
-		for _, ss := range s.Shards {
-			if _, ok := usedContracts[ss.Host]; !ok {
-				for _, c := range contracts {
-					if c.HostKey == ss.Host {
-						usedContracts[ss.Host] = c.ID
-						break
-					}
-				}
-			}
-		}
+	// upload the object
+	object, usedContracts, err := w.uploader.upload(ctx, jc.Request.Body, contracts, rs, up.CurrentHeight)
+	if jc.Check("couldn't upload object", err) != nil {
+		return
 	}
 
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, o, usedContracts)) != nil {
+	// add the object to the bus
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, object, usedContracts)) != nil {
 		return
 	}
 }
@@ -1267,6 +1247,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
+	w.initUploader()
 	return w, nil
 }
 
@@ -1305,6 +1286,9 @@ func (w *worker) Shutdown(_ context.Context) error {
 
 	// Stop contract spending recorder.
 	w.contractSpendingRecorder.Stop()
+
+	// Stop the uploader.
+	w.uploader.Stop()
 	return nil
 }
 
@@ -1366,9 +1350,6 @@ func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, 
 }
 
 func (cl *contractLock) Release(ctx context.Context) error {
-	_, span := tracing.Tracer.Start(ctx, "tracedContractLocker.ReleaseContract")
-	defer span.End()
-
 	// Stop background loop.
 	cl.stopCtxCancel()
 
@@ -1377,16 +1358,9 @@ func (cl *contractLock) Release(ctx context.Context) error {
 	// cancelled but we still want to release the contract.
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
 
 	// Release the contract.
-	err := cl.locker.ReleaseContract(timeoutCtx, cl.fcid, cl.lockID)
-	if err != nil {
-		span.SetStatus(codes.Error, "failed to release contract")
-		span.RecordError(err)
-	}
-	span.SetAttributes(attribute.Stringer("contract", cl.fcid))
-	return err
+	return cl.locker.ReleaseContract(timeoutCtx, cl.fcid, cl.lockID)
 }
 
 func (cl *contractLock) keepaliveLoop() {
@@ -1417,14 +1391,8 @@ func (cl *contractLock) keepaliveLoop() {
 }
 
 func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
-	ctx, span := tracing.Tracer.Start(ctx, "tracedContractLocker.AcquireContract")
-	defer span.End()
-	span.SetAttributes(attribute.Stringer("contract", fcid))
-	span.SetAttributes(attribute.Int("priority", priority))
 	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
 	if err != nil {
-		span.SetStatus(codes.Error, "failed to acquire contract")
-		span.RecordError(err)
 		return nil, err
 	}
 	cl := newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger)

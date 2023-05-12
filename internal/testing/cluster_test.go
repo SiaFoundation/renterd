@@ -235,6 +235,80 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
+// TestUploadV2
+func TestUploadV2(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	w := cluster.Worker
+
+	// add 3 hosts
+	if _, err := cluster.AddHostsBlocking(3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload small file
+	data := make([]byte, rhpv2.SectorSize*2)
+	frand.Read(data)
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.UploadObjectV2(context.Background(), bytes.NewReader(data), "v2"); err != nil {
+		t.Fatal(err)
+	}
+
+	var buffer bytes.Buffer
+	if err := w.DownloadObject(context.Background(), &buffer, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, buffer.Bytes()) {
+		t.Fatal("unexpected")
+	}
+	buffer.Reset()
+	if err := w.DownloadObject(context.Background(), &buffer, "v2"); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, buffer.Bytes()) {
+		t.Fatal("unexpected")
+	}
+
+	// if err := w.UploadObjectV2(context.Background(), bytes.NewReader(file2), "fileś/file2"); err != nil {
+	// 	t.Fatal(err)
+	// }
+
+	// // prepare two files, a small one and a large one
+	// small := make([]byte, rhpv2.SectorSize/12)
+	// large := make([]byte, rhpv2.SectorSize*3)
+
+	// // download the data again
+	// for _, data := range [][]byte{small, large} {
+	// 	name := fmt.Sprintf("data_%v", len(data))
+
+	// 	var buffer bytes.Buffer
+	// 	if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
+	// 		t.Fatal(err)
+	// 	}
+
+	// 	// assert it matches
+	// 	if !bytes.Equal(data, buffer.Bytes()) {
+	// 		t.Fatal("unexpected")
+	// 	}
+	// }
+}
+
 // TestUploadDownloadBasic is an integration test that verifies objects can be
 // uploaded and download correctly.
 func TestUploadDownloadBasic(t *testing.T) {
@@ -277,10 +351,10 @@ func TestUploadDownloadBasic(t *testing.T) {
 	file2 := make([]byte, rhpv2.SectorSize/12)
 	frand.Read(file1)
 	frand.Read(file2)
-	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "fileś/file1"); err != nil {
+	if err := w.UploadObjectV2(context.Background(), bytes.NewReader(file1), "fileś/file1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.UploadObject(context.Background(), bytes.NewReader(file2), "fileś/file2"); err != nil {
+	if err := w.UploadObjectV2(context.Background(), bytes.NewReader(file2), "fileś/file2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -331,7 +405,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 
 		name := fmt.Sprintf("data_%v", len(data))
-		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+		if err := w.UploadObjectV2(context.Background(), bytes.NewReader(data), name); err != nil {
 			t.Fatal(err)
 		}
 	}

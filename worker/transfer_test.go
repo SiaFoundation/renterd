@@ -72,11 +72,15 @@ type mockRevisionLocker struct {
 	calls int
 }
 
-func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
+func (l *mockRevisionLocker) lockRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64) (*types.FileContractRevision, revisionUnlocker, error) {
+	return nil, nil, nil
+}
+
+func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision *types.FileContractRevision) error) error {
 	l.mu.Lock()
 	l.calls++
 	l.mu.Unlock()
-	return fn(types.FileContractRevision{})
+	return fn(&types.FileContractRevision{})
 }
 
 type mockHostProvider struct {

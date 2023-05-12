@@ -895,8 +895,8 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:   css.Set,
 		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
+		ContractSet:   css.Set,
 		GougingParams: gp,
 	})
 }
