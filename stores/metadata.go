@@ -101,7 +101,7 @@ type (
 		Model
 		DBSliceID uint `gorm:"index"`
 
-		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
+		Key         []byte `gorm:"NOT NULL;size:68"` // json string
 		MinShards   uint8
 		TotalShards uint8
 		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too

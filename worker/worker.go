@@ -1174,18 +1174,17 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (w *worker) objectsHandlerFooPUT(jc jape.Context) {
+func (w *worker) objectsHandlerPackedPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
 
 	// fetch the request.
-	body := io.Reader(jc.Request.Body)
-	var req []api.PackedObjectInfo
-	dec := json.NewDecoder(body)
+	req := []api.PackedObjectInfo{}
+	dec := json.NewDecoder(jc.Request.Body)
 	if jc.Check("failed to decode object infos", dec.Decode(&req)) != nil {
 		return
 	}
-	body = io.MultiReader(dec.Buffered(), body)
+	requestBody := io.MultiReader(dec.Buffered(), jc.Request.Body)
 
 	// fetch the upload parameters
 	up, err := w.bus.UploadParams(ctx)
@@ -1241,8 +1240,15 @@ func (w *worker) objectsHandlerFooPUT(jc jape.Context) {
 	// keep track of slow hosts so we can avoid them in consecutive slab uploads
 	slow := make(map[types.PublicKey]int)
 
-	key := object.GenerateEncryptionKey()
-	cr := key.Encrypt(body)
+	// generate a unique key for each object.
+	keys := make([]object.EncryptionKey, len(req))
+	var crs []io.Reader
+	for i, r := range req {
+		keys[i] = object.GenerateEncryptionKey()
+		crs = append(crs, keys[i].Encrypt(io.LimitReader(requestBody, int64(r.Length))))
+	}
+	cr := io.MultiReader(crs...)
+
 	var objectSize int
 	var slabs []object.Slab
 	for {
@@ -1297,10 +1303,11 @@ func (w *worker) objectsHandlerFooPUT(jc jape.Context) {
 	}
 
 	// Split uploaded slabs into multiple objects and add them to the bus.
+	// TODO: f/u with new endpoint to atomically add a batch of objects.
 	splitObjects := object.SplitSlabs(slabs, lengths)
 	for i, slabs := range splitObjects {
 		if jc.Check("couldn't add object %d/%d: %v", w.bus.AddObject(ctx, req[i].Path, object.Object{
-			Key:   key,
+			Key:   keys[i],
 			Slabs: slabs,
 		}, usedContracts)) != nil {
 			return
@@ -1422,7 +1429,7 @@ func (w *worker) Handler() http.Handler {
 
 		"POST   /slab/migrate": w.slabMigrateHandler,
 
-		"PUT    /objects":       w.objectsHandlerFooPUT,
+		"PUT    /objects":       w.objectsHandlerPackedPUT,
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,

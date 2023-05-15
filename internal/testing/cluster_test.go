@@ -1198,18 +1198,27 @@ func TestPackedUpload(t *testing.T) {
 	// upload 10 files packed together.
 	var objectsData [][]byte
 	var md []api.PackedObjectInfo
-	var r io.Reader
+	var readers []io.Reader
 	for i := 0; i < 10; i++ {
-		objectsData = append(objectsData, frand.Bytes(i))
+		objectsData = append(objectsData, frand.Bytes(i+1))
 		md = append(md, api.PackedObjectInfo{
-			Length: uint64(i),
-			Path:   fmt.Sprintf("/file%v", i),
+			Length: uint64(len(objectsData)),
+			Path:   fmt.Sprintf("file%v", i),
 		})
-		r = io.MultiReader(r, bytes.NewReader(objectsData[i]))
+		readers = append(readers, bytes.NewReader(objectsData[i]))
 	}
-	if err := w.UploadPackedObjects(context.Background(), r, md); err != nil {
+	if err := w.UploadPackedObjects(context.Background(), io.MultiReader(readers...), md); err != nil {
 		t.Fatal(err)
 	}
 
 	// download each file and compare.
+	for i := 0; i < 10; i++ {
+		var buf bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buf, fmt.Sprintf("/file%v", i)); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(buf.Bytes(), objectsData[i]) {
+			t.Fatal("data mismatch", buf.Bytes(), objectsData[i])
+		}
+	}
 }
