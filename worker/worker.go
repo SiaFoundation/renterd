@@ -1174,6 +1174,140 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (w *worker) objectsHandlerFooPUT(jc jape.Context) {
+	jc.Custom((*[]byte)(nil), nil)
+	ctx := jc.Request.Context()
+
+	// fetch the request.
+	body := io.Reader(jc.Request.Body)
+	var req []api.PackedObjectInfo
+	dec := json.NewDecoder(body)
+	if jc.Check("failed to decode object infos", dec.Decode(&req)) != nil {
+		return
+	}
+	body = io.MultiReader(dec.Buffered(), body)
+
+	// fetch the upload parameters
+	up, err := w.bus.UploadParams(ctx)
+	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
+		return
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
+		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
+		return
+	}
+
+	// allow overriding the redundancy settings
+	rs := up.RedundancySettings
+	if jc.DecodeForm(queryStringParamMinShards, &rs.MinShards) != nil {
+		return
+	}
+	if jc.DecodeForm(queryStringParamTotalShards, &rs.TotalShards) != nil {
+		return
+	}
+	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
+		return
+	}
+
+	// allow overriding contract set
+	var contractset string
+	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, up.GougingParams)
+
+	// attach contract spending recorder to the context.
+	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
+
+	w.pool.setCurrentHeight(up.CurrentHeight)
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
+
+	// fetch contracts
+	contracts, err := w.bus.Contracts(ctx)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
+	// randomize order of contracts so we don't always upload to the same hosts
+	frand.Shuffle(len(contracts), func(i, j int) { contracts[i], contracts[j] = contracts[j], contracts[i] })
+
+	// keep track of slow hosts so we can avoid them in consecutive slab uploads
+	slow := make(map[types.PublicKey]int)
+
+	key := object.GenerateEncryptionKey()
+	cr := key.Encrypt(body)
+	var objectSize int
+	var slabs []object.Slab
+	for {
+		var s object.Slab
+		var length int
+		var slowHosts []int
+
+		lr := io.LimitReader(cr, int64(rs.MinShards)*rhpv2.SectorSize)
+		// move slow hosts to the back of the array
+		sort.SliceStable(contracts, func(i, j int) bool {
+			return slow[contracts[i].HostKey] < slow[contracts[j].HostKey]
+		})
+
+		// upload the slab
+		start := time.Now()
+		s, length, slowHosts, err = uploadSlab(ctx, w, lr, uint8(rs.MinShards), uint8(rs.TotalShards), contracts, w, w.uploadSectorTimeout, w.uploadMaxOverdrive, w.logger)
+		for _, h := range slowHosts {
+			slow[contracts[h].HostKey]++
+		}
+		if err == io.EOF {
+			break
+		} else if jc.Check(fmt.Sprintf("uploading slab failed after %v", time.Since(start)), err); err != nil {
+			w.logger.Errorf("couldn't upload data, err: %v", err)
+			return
+		}
+
+		objectSize += length
+		slabs = append(slabs, s)
+
+		for _, ss := range s.Shards {
+			if _, ok := usedContracts[ss.Host]; !ok {
+				for _, c := range contracts {
+					if c.HostKey == ss.Host {
+						usedContracts[ss.Host] = c.ID
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Make sure the amount of data that was uploaded matches the request.
+	var expectedObjectSize int
+	var lengths []int
+	for _, r := range req {
+		expectedObjectSize += int(r.Length)
+		lengths = append(lengths, int(r.Length))
+	}
+	if expectedObjectSize != objectSize {
+		jc.Error(fmt.Errorf("expected object size %v, got %v", expectedObjectSize, objectSize), http.StatusBadRequest)
+		return
+	}
+
+	// Split uploaded slabs into multiple objects and add them to the bus.
+	splitObjects := object.SplitSlabs(slabs, lengths)
+	for i, slabs := range splitObjects {
+		if jc.Check("couldn't add object %d/%d: %v", w.bus.AddObject(ctx, req[i].Path, object.Object{
+			Key:   key,
+			Slabs: slabs,
+		}, usedContracts)) != nil {
+			return
+		}
+	}
+}
+
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path")))
 }
@@ -1288,6 +1422,7 @@ func (w *worker) Handler() http.Handler {
 
 		"POST   /slab/migrate": w.slabMigrateHandler,
 
+		"PUT    /objects":       w.objectsHandlerFooPUT,
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,

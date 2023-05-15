@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"os"
@@ -1156,4 +1157,59 @@ func TestContractArchival(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestPackedUpload tests uploading multiple objects that will be packed
+// together.
+func TestPackedUpload(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload 10 files packed together.
+	var objectsData [][]byte
+	var md []api.PackedObjectInfo
+	var r io.Reader
+	for i := 0; i < 10; i++ {
+		objectsData = append(objectsData, frand.Bytes(i))
+		md = append(md, api.PackedObjectInfo{
+			Length: uint64(i),
+			Path:   fmt.Sprintf("/file%v", i),
+		})
+		r = io.MultiReader(r, bytes.NewReader(objectsData[i]))
+	}
+	if err := w.UploadPackedObjects(context.Background(), r, md); err != nil {
+		t.Fatal(err)
+	}
+
+	// download each file and compare.
 }

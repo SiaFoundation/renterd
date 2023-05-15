@@ -28,6 +28,11 @@ type AccountsUnlockHandlerRequest struct {
 	LockID uint64 `json:"lockID"`
 }
 
+type PackedObjectInfo struct {
+	Path   string `json:"path"`
+	Length uint64 `json:"length"`
+}
+
 // ContractsResponse is the response type for the /rhp/contracts endpoint.
 type ContractsResponse struct {
 	Contracts []Contract `json:"contracts"`

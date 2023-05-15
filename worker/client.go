@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -149,6 +150,42 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 		panic(err)
 	}
 	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "PUT", u.String(), r)
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		err, _ := io.ReadAll(resp.Body)
+		return errors.New(string(err))
+	}
+	return
+}
+
+// UploadObject uploads the data in r, creating an object at the given path.
+func (c *Client) UploadPackedObjects(ctx context.Context, r io.Reader, objectsMetadata []api.PackedObjectInfo, opts ...APIUploadOption) (err error) {
+	c.c.Custom("PUT", "/objects", []byte{}, nil)
+
+	values := make(url.Values)
+	for _, opt := range opts {
+		opt(values)
+	}
+	u, err := url.Parse(fmt.Sprintf("%v/objects", c.c.BaseURL))
+	if err != nil {
+		panic(err)
+	}
+	u.RawQuery = values.Encode()
+	md, err := json.Marshal(objectsMetadata)
+	if err != nil {
+		panic(err)
+	}
+	r = io.MultiReader(bytes.NewReader(md), r)
 	req, err := http.NewRequestWithContext(ctx, "PUT", u.String(), r)
 	if err != nil {
 		panic(err)

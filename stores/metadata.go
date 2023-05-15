@@ -1152,7 +1152,7 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 
 			ContractCommon: contract.ContractCommon,
 		}).Error; err != nil {
-			return err
+			return fmt.Errorf("failed to archive contract %v: %w", contract.FCID, err)
 		}
 
 		// remove the contract
