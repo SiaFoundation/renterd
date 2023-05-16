@@ -17,11 +17,35 @@ var zeroCurrency = currency(types.ZeroCurrency)
 type (
 	currency       types.Currency
 	fileContractID types.FileContractID
+	hash256        types.Hash256
 	publicKey      types.PublicKey
 	hostSettings   rhpv2.HostSettings
 	hostPriceTable rhpv3.HostPriceTable
 	balance        big.Int
 )
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (hash256) GormDataType() string {
+	return "bytes"
+}
+
+// Scan scan value into address, implements sql.Scanner interface.
+func (h *hash256) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal hash256 value:", value))
+	}
+	if len(bytes) < len(hash256{}) {
+		return fmt.Errorf("failed to unmarshal hash256 value due to insufficient bytes %v < %v: %v", len(bytes), len(fileContractID{}), value)
+	}
+	*h = *(*hash256)(bytes)
+	return nil
+}
+
+// Value returns an addr value, implements driver.Valuer interface.
+func (h hash256) Value() (driver.Value, error) {
+	return h[:], nil
+}
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (fileContractID) GormDataType() string {

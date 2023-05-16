@@ -111,7 +111,7 @@ type (
 		Model
 		CCID    []byte
 		Height  uint64
-		BlockID types.BlockID
+		BlockID hash256
 	}
 
 	// dbAnnouncement is a table used for storing all announcements. It
@@ -886,10 +886,6 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
 	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
 		return nil
-	}
-
-	if true {
-		panic("update with wallet fields")
 	}
 
 	// Fetch allowlist

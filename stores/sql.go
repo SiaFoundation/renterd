@@ -183,7 +183,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		walletAddress: walletAddress,
 		chainIndex: types.ChainIndex{
 			Height: ci.Height,
-			ID:     ci.BlockID,
+			ID:     types.BlockID(ci.BlockID),
 		},
 	}
 
