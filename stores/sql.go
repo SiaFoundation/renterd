@@ -264,7 +264,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	ss.processConsensusChangeHostDB(cc)
 	ss.processConsensusChangeWallet(cc)
 
-	// Update consus fields.
+	// Update consensus fields.
 	ss.ccid = cc.ID
 	ss.chainIndex = types.ChainIndex{
 		Height: uint64(cc.BlockHeight),

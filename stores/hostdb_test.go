@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
+	stypes "go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -138,7 +139,9 @@ func TestSQLHostDB(t *testing.T) {
 	// Apply a consensus change.
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}
 	hdb.ProcessConsensusChange(modules.ConsensusChange{
-		ID: ccid2,
+		ID:            ccid2,
+		AppliedBlocks: []stypes.Block{{}},
+		AppliedDiffs:  []modules.ConsensusChangeDiffs{{}},
 	})
 
 	// Connect to the same DB again.

@@ -1038,9 +1038,9 @@ func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.Cha
 			ID: consensusInfoID,
 		},
 	}).Updates(map[string]interface{}{
-		"CCID":       newCCID[:],
-		"height":     newTip.Height,
-		"newBlockID": newTip.ID,
+		"CCID":     newCCID[:],
+		"height":   newTip.Height,
+		"block_id": hash256(newTip.ID),
 	}).Error
 }
 
