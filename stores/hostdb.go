@@ -1016,9 +1016,9 @@ func applyUnappliedOutputAdditions(tx *gorm.DB, additions []dbSiacoinElement) er
 	return tx.Create(&additions).Error
 }
 
-func applyUnappliedOutputRemovals(tx *gorm.DB, removals []types.Hash256) error {
-	return tx.Delete(&dbSiacoinElement{}).
-		Where("ID", removals).
+func applyUnappliedOutputRemovals(tx *gorm.DB, removals []hash256) error {
+	return tx.Where("ID in (?)", removals).
+		Delete(&dbSiacoinElement{}).
 		Error
 }
 
@@ -1026,9 +1026,9 @@ func applyUnappliedTxnAdditions(tx *gorm.DB, additions []dbTransaction) error {
 	return tx.Create(&additions).Error
 }
 
-func applyUnappliedTxnRemovals(tx *gorm.DB, removals []types.TransactionID) error {
-	return tx.Delete(&dbTransaction{}).
-		Where("ID", removals).
+func applyUnappliedTxnRemovals(tx *gorm.DB, removals []hash256) error {
+	return tx.Where("ID in (?)", removals).
+		Delete(&dbTransaction{}).
 		Error
 }
 

@@ -195,7 +195,7 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 
 func (b *bus) walletBalanceHandler(jc jape.Context) {
 	balance, err := b.w.Balance()
-	if jc.Check("couldn't fetch wallet balance", err) == nil {
+	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
 	jc.Encode(balance)

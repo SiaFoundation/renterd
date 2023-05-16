@@ -39,9 +39,9 @@ type (
 		unappliedRevisions       map[types.FileContractID]revisionUpdate
 		unappliedProofs          map[types.FileContractID]uint64
 		unappliedOutputAdditions []dbSiacoinElement
-		unappliedOutputRemovals  []types.Hash256
+		unappliedOutputRemovals  []hash256
 		unappliedTxnAdditions    []dbTransaction
-		unappliedTxnRemovals     []types.TransactionID
+		unappliedTxnRemovals     []hash256
 
 		// SettingsDB related fields.
 		settingsMu sync.Mutex

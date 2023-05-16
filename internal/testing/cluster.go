@@ -336,6 +336,13 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
 				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
 			}
+			balance, err := cluster.Bus.WalletBalance(context.Background())
+			if err != nil {
+				return err
+			}
+			if balance.IsZero() {
+				return errors.New("wallet not funded")
+			}
 			return nil
 		})
 		if err != nil {

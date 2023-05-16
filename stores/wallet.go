@@ -108,7 +108,7 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 			})
 		} else {
 			// remove reverted outputs
-			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, types.Hash256(diff.ID))
+			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, hash256(diff.ID))
 			for i := range s.unappliedOutputAdditions {
 				if s.unappliedOutputAdditions[i].ID == hash256(diff.ID) {
 					s.unappliedOutputAdditions[i] = s.unappliedOutputAdditions[len(s.unappliedOutputAdditions)-1]
@@ -135,7 +135,7 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 			})
 		} else {
 			// remove reverted outputs
-			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, types.Hash256(diff.ID))
+			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, hash256(diff.ID))
 			for i := range s.unappliedOutputAdditions {
 				if s.unappliedOutputAdditions[i].ID == hash256(diff.ID) {
 					s.unappliedOutputAdditions[i] = s.unappliedOutputAdditions[len(s.unappliedOutputAdditions)-1]
@@ -152,7 +152,7 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 			convertToCore(stxn, &txn)
 			if transactionIsRelevant(txn, s.walletAddress) {
 				// remove reverted txns
-				s.unappliedTxnRemovals = append(s.unappliedTxnRemovals, txn.ID())
+				s.unappliedTxnRemovals = append(s.unappliedTxnRemovals, hash256(txn.ID()))
 				for i := range s.unappliedTxnAdditions {
 					if s.unappliedTxnAdditions[i].ID == hash256(txn.ID()) {
 						s.unappliedTxnAdditions[i] = s.unappliedTxnAdditions[len(s.unappliedTxnAdditions)-1]
