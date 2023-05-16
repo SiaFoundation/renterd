@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -43,6 +44,14 @@ type (
 		// SettingsDB related fields.
 		settingsMu sync.Mutex
 		settings   map[string]string
+
+		// WalletDB related fields.
+		unappliedOutputAdditions []wallet.SiacoinElement
+		unappliedOutputRemovals  []types.Hash256
+		unappliedTxnAdditions    []wallet.Transaction
+		unappliedTxnRemovals     []types.TransactionID
+		walletAddress            types.Address
+		walletTip                types.ChainIndex
 
 		mu           sync.Mutex
 		hasAllowlist bool
@@ -170,6 +179,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:      make(map[types.FileContractID]uint64),
 	}
+
 	return ss, ccid, nil
 }
 
@@ -237,6 +247,45 @@ func (s *SQLStore) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 	return nil
+}
+
+// ProcessConsensusChange implements consensus.Subscriber.
+func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
+	ss.persistMu.Lock()
+	defer ss.persistMu.Unlock()
+
+	ss.processConsensusChangeHostDB(cc)
+	ss.processConsensusChangeWallet(cc)
+
+	ss.unappliedCCID = cc.ID
+
+	// Try to apply the updates.
+	if err := ss.applyUpdates(false); err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+	}
+
+	// Force a persist if no block has been received for some time.
+	if ss.persistTimer != nil {
+		ss.persistTimer.Stop()
+		select {
+		case <-ss.persistTimer.C:
+		default:
+		}
+	}
+	ss.persistTimer = time.AfterFunc(10*time.Second, func() {
+		ss.mu.Lock()
+		if ss.closed {
+			ss.mu.Unlock()
+			return
+		}
+		ss.mu.Unlock()
+
+		ss.persistMu.Lock()
+		defer ss.persistMu.Unlock()
+		if err := ss.applyUpdates(true); err != nil {
+			ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+		}
+	})
 }
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
