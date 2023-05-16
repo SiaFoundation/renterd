@@ -36,6 +36,11 @@ func performMigrations(db *gorm.DB) error {
 		&dbAllowlistEntry{},
 		&dbBlocklistEntry{},
 
+		// wallet tables
+		&dbWalletInfo{},
+		&dbSiacoinElement{},
+		&dbTransaction{},
+
 		// bus.SettingStore tables
 		&dbSetting{},
 

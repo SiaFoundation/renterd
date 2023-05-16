@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -37,7 +36,6 @@ type (
 		persistTimer           *time.Timer
 		unappliedAnnouncements []announcement
 		unappliedHostKeys      map[types.PublicKey]struct{}
-		unappliedCCID          modules.ConsensusChangeID
 		unappliedRevisions     map[types.FileContractID]revisionUpdate
 		unappliedProofs        map[types.FileContractID]uint64
 
@@ -46,12 +44,15 @@ type (
 		settings   map[string]string
 
 		// WalletDB related fields.
-		unappliedOutputAdditions []wallet.SiacoinElement
+		unappliedOutputAdditions []dbSiacoinElement
 		unappliedOutputRemovals  []types.Hash256
-		unappliedTxnAdditions    []wallet.Transaction
+		unappliedTxnAdditions    []dbTransaction
 		unappliedTxnRemovals     []types.TransactionID
 		walletAddress            types.Address
-		walletTip                types.ChainIndex
+
+		// Consensus related fields.
+		ccid       modules.ConsensusChangeID
+		chainIndex types.ChainIndex
 
 		mu           sync.Mutex
 		hasAllowlist bool
@@ -108,7 +109,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
 		DisableNestedTransaction: true,   // disable nesting transactions
 		Logger:                   logger, // custom logger
@@ -178,6 +179,12 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		unappliedHostKeys:    make(map[types.PublicKey]struct{}),
 		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:      make(map[types.FileContractID]uint64),
+
+		walletAddress: walletAddress,
+		chainIndex: types.ChainIndex{
+			Height: ci.Height,
+			ID:     ci.BlockID,
+		},
 	}
 
 	return ss, ccid, nil
@@ -257,7 +264,12 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	ss.processConsensusChangeHostDB(cc)
 	ss.processConsensusChangeWallet(cc)
 
-	ss.unappliedCCID = cc.ID
+	// Update consus fields.
+	ss.ccid = cc.ID
+	ss.chainIndex = types.ChainIndex{
+		Height: uint64(cc.BlockHeight),
+		ID:     types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID()),
+	}
 
 	// Try to apply the updates.
 	if err := ss.applyUpdates(false); err != nil {

@@ -109,7 +109,9 @@ type (
 
 	dbConsensusInfo struct {
 		Model
-		CCID []byte
+		CCID    []byte
+		Height  uint64
+		BlockID types.BlockID
 	}
 
 	// dbAnnouncement is a table used for storing all announcements. It
@@ -931,7 +933,27 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 				return fmt.Errorf("%w; failed to update proof height", err)
 			}
 		}
-		return updateCCID(tx, ss.unappliedCCID)
+		if len(ss.unappliedOutputRemovals) > 0 {
+			if err := applyUnappliedOutputRemovals(tx, ss.unappliedOutputRemovals); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied output removals", err)
+			}
+		}
+		if len(ss.unappliedOutputAdditions) > 0 {
+			if err := applyUnappliedOutputAdditions(tx, ss.unappliedOutputAdditions); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied output additions", err)
+			}
+		}
+		if len(ss.unappliedTxnRemovals) > 0 {
+			if err := applyUnappliedTxnRemovals(tx, ss.unappliedTxnRemovals); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied txn removals", err)
+			}
+		}
+		if len(ss.unappliedTxnAdditions) > 0 {
+			if err := applyUnappliedTxnAdditions(tx, ss.unappliedTxnAdditions); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied txn additions", err)
+			}
+		}
+		return updateCCID(tx, ss.ccid, ss.chainIndex)
 	})
 
 	ss.unappliedProofs = make(map[types.FileContractID]uint64)
@@ -939,6 +961,10 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
 	ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
 	ss.lastAnnouncementSave = time.Now()
+	ss.unappliedOutputAdditions = nil
+	ss.unappliedOutputRemovals = nil
+	ss.unappliedTxnAdditions = nil
+	ss.unappliedTxnRemovals = nil
 	return
 }
 
@@ -990,12 +1016,36 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 	return
 }
 
-func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
+func applyUnappliedOutputAdditions(tx *gorm.DB, additions []dbSiacoinElement) error {
+	return tx.Create(&additions).Error
+}
+
+func applyUnappliedOutputRemovals(tx *gorm.DB, removals []types.Hash256) error {
+	return tx.Delete(&dbSiacoinElement{}).
+		Where("ID", removals).
+		Error
+}
+
+func applyUnappliedTxnAdditions(tx *gorm.DB, additions []dbTransaction) error {
+	return tx.Create(&additions).Error
+}
+
+func applyUnappliedTxnRemovals(tx *gorm.DB, removals []types.TransactionID) error {
+	return tx.Delete(&dbTransaction{}).
+		Where("ID", removals).
+		Error
+}
+
+func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {
 	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
 		Model: Model{
 			ID: consensusInfoID,
 		},
-	}).Update("CCID", newCCID[:]).Error
+	}).Updates(map[string]interface{}{
+		"CCID":       newCCID[:],
+		"height":     newTip.Height,
+		"newBlockID": newTip.ID,
+	}).Error
 }
 
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {

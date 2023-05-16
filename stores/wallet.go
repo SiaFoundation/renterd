@@ -15,7 +15,6 @@ type (
 		addr        types.Address
 		blockHeight uint64
 		blockID     types.BlockID
-		ccid        []byte
 	}
 
 	dbSiacoinElement struct {
@@ -39,7 +38,7 @@ type (
 // Balance implements wallet.SingleAddressStore.
 func (s *SQLStore) Balance() (types.Currency, error) {
 	var elems []dbSiacoinElement
-	if err := s.db.Find(&elems).Where("maturity_height < ?", s.walletTip.Height).Error; err != nil {
+	if err := s.db.Find(&elems).Where("maturity_height < ?", s.chainIndex.Height).Error; err != nil {
 		return types.ZeroCurrency, err
 	}
 	var balance types.Currency
@@ -107,9 +106,11 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 		}
 		if diff.Direction == modules.DiffApply {
 			// add new outputs
-			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, wallet.SiacoinElement{
-				SiacoinOutput: sco,
-				ID:            types.Hash256(diff.ID),
+			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, dbSiacoinElement{
+				Address:        sco.Address,
+				Value:          currency(sco.Value),
+				ID:             types.Hash256(diff.ID),
+				MaturityHeight: 0, // TODO: set correctly
 			})
 		} else {
 			// remove reverted outputs
@@ -174,20 +175,18 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				}
 
 				// add confirmed txns
-				s.unappliedTxnAdditions = append(s.unappliedTxnAdditions, wallet.Transaction{
+				s.unappliedTxnAdditions = append(s.unappliedTxnAdditions, dbTransaction{
 					Raw:       txn,
-					Index:     s.walletTip,
-					Inflow:    inflow,
-					Outflow:   outflow,
+					Height:    uint64(cc.InitialHeight()) + uint64(i) + 1,
+					BlockID:   types.BlockID(block.ID()),
+					Inflow:    currency(inflow),
+					Outflow:   currency(outflow),
 					ID:        txn.ID(),
-					Timestamp: time.Unix(int64(block.Timestamp), 0),
+					Timestamp: int64(block.Timestamp),
 				})
 			}
 		}
 	}
-
-	s.walletTip.Height = uint64(cc.InitialHeight()) + uint64(len(cc.AppliedBlocks)) - uint64(len(cc.RevertedBlocks))
-	s.walletTip.ID = types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID())
 }
 
 func transactionIsRelevant(txn types.Transaction, addr types.Address) bool {
