@@ -29,26 +29,26 @@ type (
 		db     *gorm.DB
 		logger glogger.Interface
 
-		// HostDB related fields.
-		lastAnnouncementSave   time.Time
-		persistInterval        time.Duration
-		persistMu              sync.Mutex
-		persistTimer           *time.Timer
-		unappliedAnnouncements []announcement
-		unappliedHostKeys      map[types.PublicKey]struct{}
-		unappliedRevisions     map[types.FileContractID]revisionUpdate
-		unappliedProofs        map[types.FileContractID]uint64
+		// Persistence buffer - related fields.
+		lastSave                 time.Time
+		persistInterval          time.Duration
+		persistMu                sync.Mutex
+		persistTimer             *time.Timer
+		unappliedAnnouncements   []announcement
+		unappliedHostKeys        map[types.PublicKey]struct{}
+		unappliedRevisions       map[types.FileContractID]revisionUpdate
+		unappliedProofs          map[types.FileContractID]uint64
+		unappliedOutputAdditions []dbSiacoinElement
+		unappliedOutputRemovals  []types.Hash256
+		unappliedTxnAdditions    []dbTransaction
+		unappliedTxnRemovals     []types.TransactionID
 
 		// SettingsDB related fields.
 		settingsMu sync.Mutex
 		settings   map[string]string
 
 		// WalletDB related fields.
-		unappliedOutputAdditions []dbSiacoinElement
-		unappliedOutputRemovals  []types.Hash256
-		unappliedTxnAdditions    []dbTransaction
-		unappliedTxnRemovals     []types.TransactionID
-		walletAddress            types.Address
+		walletAddress types.Address
 
 		// Consensus related fields.
 		ccid       modules.ConsensusChangeID
@@ -168,17 +168,17 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	}
 
 	ss := &SQLStore{
-		db:                   db,
-		logger:               logger,
-		knownContracts:       isOurContract,
-		lastAnnouncementSave: time.Now(),
-		persistInterval:      persistInterval,
-		hasAllowlist:         allowlistCnt > 0,
-		hasBlocklist:         blocklistCnt > 0,
-		settings:             make(map[string]string),
-		unappliedHostKeys:    make(map[types.PublicKey]struct{}),
-		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:      make(map[types.FileContractID]uint64),
+		db:                 db,
+		logger:             logger,
+		knownContracts:     isOurContract,
+		lastSave:           time.Now(),
+		persistInterval:    persistInterval,
+		hasAllowlist:       allowlistCnt > 0,
+		hasBlocklist:       blocklistCnt > 0,
+		settings:           make(map[string]string),
+		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
+		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:    make(map[types.FileContractID]uint64),
 
 		walletAddress: walletAddress,
 		chainIndex: types.ChainIndex{

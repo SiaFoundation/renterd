@@ -881,7 +881,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 // applyUpdates applies all unapplied updates to the database.
 func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	// Check if we need to apply changes
-	persistIntervalPassed := time.Since(ss.lastAnnouncementSave) > ss.persistInterval
+	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
 	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
@@ -960,7 +960,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
 	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
 	ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
-	ss.lastAnnouncementSave = time.Now()
+	ss.lastSave = time.Now()
 	ss.unappliedOutputAdditions = nil
 	ss.unappliedOutputRemovals = nil
 	ss.unappliedTxnAdditions = nil

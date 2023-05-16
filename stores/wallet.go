@@ -11,12 +11,6 @@ import (
 )
 
 type (
-	dbWalletInfo struct {
-		addr        types.Address
-		blockHeight uint64
-		blockID     types.BlockID
-	}
-
 	dbSiacoinElement struct {
 		Value          currency      `json:"value"`
 		Address        types.Address `json:"address"`
@@ -110,7 +104,34 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				Address:        sco.Address,
 				Value:          currency(sco.Value),
 				ID:             types.Hash256(diff.ID),
-				MaturityHeight: 0, // TODO: set correctly
+				MaturityHeight: uint64(cc.BlockHeight), // immediately spendable
+			})
+		} else {
+			// remove reverted outputs
+			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, types.Hash256(diff.ID))
+			for i := range s.unappliedOutputAdditions {
+				if s.unappliedOutputAdditions[i].ID == types.Hash256(diff.ID) {
+					s.unappliedOutputAdditions[i] = s.unappliedOutputAdditions[len(s.unappliedOutputAdditions)-1]
+					s.unappliedOutputAdditions = s.unappliedOutputAdditions[:len(s.unappliedOutputAdditions)-1]
+					break
+				}
+			}
+		}
+	}
+
+	for _, diff := range cc.DelayedSiacoinOutputDiffs {
+		var sco types.SiacoinOutput
+		convertToCore(diff.SiacoinOutput, &sco)
+		if sco.Address != s.walletAddress {
+			continue
+		}
+		if diff.Direction == modules.DiffApply {
+			// add new outputs
+			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, dbSiacoinElement{
+				Address:        sco.Address,
+				Value:          currency(sco.Value),
+				ID:             types.Hash256(diff.ID),
+				MaturityHeight: uint64(diff.MaturityHeight),
 			})
 		} else {
 			// remove reverted outputs

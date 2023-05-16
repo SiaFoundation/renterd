@@ -143,7 +143,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second, nil)
+	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second, types.Address{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1190,7 +1190,7 @@ func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 		hostKey:      publicKey(hk),
 		announcement: hostdb.Announcement{NetAddress: na},
 	}}...)
-	s.lastAnnouncementSave = time.Now().Add(s.persistInterval * -2)
+	s.lastSave = time.Now().Add(s.persistInterval * -2)
 	return s.applyUpdates(false)
 }
 
