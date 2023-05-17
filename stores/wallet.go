@@ -39,8 +39,12 @@ func (dbTransaction) TableName() string { return "transactions" }
 
 // Balance implements wallet.SingleAddressStore.
 func (s *SQLStore) Balance() (types.Currency, error) {
+	s.persistMu.Lock()
+	height := s.chainIndex.Height
+	s.persistMu.Unlock()
+
 	var elems []dbSiacoinElement
-	if err := s.db.Find(&elems).Where("maturity_height < ?", s.chainIndex.Height).Error; err != nil {
+	if err := s.db.Find(&elems).Where("maturity_height < ?", height).Error; err != nil {
 		return types.ZeroCurrency, err
 	}
 	var balance types.Currency
