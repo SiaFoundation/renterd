@@ -927,7 +927,12 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 }
 
 func applyUnappliedOutputAdditions(tx *gorm.DB, additions []dbSiacoinElement) error {
-	return tx.Create(&additions).Error
+	return tx.Clauses(clause.OnConflict{
+		// OutputID might already exist since it appears in the regular and the
+		// delayed diff.
+		Columns:   []clause.Column{{Name: "output_id"}},
+		UpdateAll: true,
+	}).Create(&additions).Error
 }
 
 func applyUnappliedOutputRemovals(tx *gorm.DB, removals []hash256) error {
