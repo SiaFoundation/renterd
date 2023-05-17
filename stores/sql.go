@@ -300,6 +300,92 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	})
 }
 
+// applyUpdates applies all unapplied updates to the database.
+func (ss *SQLStore) applyUpdates(force bool) (err error) {
+	// Check if we need to apply changes
+	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval
+	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
+	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
+	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
+		return nil
+	}
+
+	// Fetch allowlist
+	var allowlist []dbAllowlistEntry
+	if err := ss.db.
+		Model(&dbAllowlistEntry{}).
+		Find(&allowlist).
+		Error; err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
+	}
+
+	// Fetch blocklist
+	var blocklist []dbBlocklistEntry
+	if err := ss.db.
+		Model(&dbBlocklistEntry{}).
+		Find(&blocklist).
+		Error; err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
+	}
+
+	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
+		if len(ss.unappliedAnnouncements) > 0 {
+			if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
+				return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
+			}
+		}
+		if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
+			for host := range ss.unappliedHostKeys {
+				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
+					ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
+				}
+			}
+		}
+		for fcid, rev := range ss.unappliedRevisions {
+			if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
+				return fmt.Errorf("%w; failed to update revision number and height", err)
+			}
+		}
+		for fcid, proofHeight := range ss.unappliedProofs {
+			if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
+				return fmt.Errorf("%w; failed to update proof height", err)
+			}
+		}
+		if len(ss.unappliedOutputRemovals) > 0 {
+			if err := applyUnappliedOutputRemovals(tx, ss.unappliedOutputRemovals); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied output removals", err)
+			}
+		}
+		if len(ss.unappliedOutputAdditions) > 0 {
+			if err := applyUnappliedOutputAdditions(tx, ss.unappliedOutputAdditions); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied output additions", err)
+			}
+		}
+		if len(ss.unappliedTxnRemovals) > 0 {
+			if err := applyUnappliedTxnRemovals(tx, ss.unappliedTxnRemovals); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied txn removals", err)
+			}
+		}
+		if len(ss.unappliedTxnAdditions) > 0 {
+			if err := applyUnappliedTxnAdditions(tx, ss.unappliedTxnAdditions); err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied txn additions", err)
+			}
+		}
+		return updateCCID(tx, ss.ccid, ss.chainIndex)
+	})
+
+	ss.unappliedProofs = make(map[types.FileContractID]uint64)
+	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
+	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
+	ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
+	ss.lastSave = time.Now()
+	ss.unappliedOutputAdditions = nil
+	ss.unappliedOutputRemovals = nil
+	ss.unappliedTxnAdditions = nil
+	ss.unappliedTxnRemovals = nil
+	return
+}
+
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	var err error
 	for i := 0; i < 5; i++ {

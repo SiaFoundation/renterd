@@ -12,22 +12,30 @@ import (
 
 type (
 	dbSiacoinElement struct {
-		Value          currency `json:"value"`
-		Address        hash256  `json:"address"`
-		ID             hash256
-		MaturityHeight uint64
+		Model
+		Value          currency
+		Address        hash256 `gorm:"size:32"`
+		OutputID       hash256 `gorm:"unique;index;size:32"`
+		MaturityHeight uint64  `gorm:"index"`
 	}
 
 	dbTransaction struct {
-		Raw       types.Transaction `gorm:"serializer:json"`
-		Height    uint64
-		BlockID   hash256
-		ID        hash256 `gorm:"index;unique"`
-		Inflow    currency
-		Outflow   currency
-		Timestamp int64
+		Model
+		Raw           types.Transaction `gorm:"serializer:json"`
+		Height        uint64
+		BlockID       hash256 `gorm:"size:32"`
+		TransactionID hash256 `gorm:"unique;index;size:32"`
+		Inflow        currency
+		Outflow       currency
+		Timestamp     int64
 	}
 )
+
+// TableName implements the gorm.Tabler interface.
+func (dbSiacoinElement) TableName() string { return "siacoin_elements" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbTransaction) TableName() string { return "transactions" }
 
 // Balance implements wallet.SingleAddressStore.
 func (s *SQLStore) Balance() (types.Currency, error) {
@@ -51,7 +59,7 @@ func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 	utxo := make([]wallet.SiacoinElement, len(elems))
 	for i := range elems {
 		utxo[i] = wallet.SiacoinElement{
-			ID:             types.Hash256(elems[i].ID),
+			ID:             types.Hash256(elems[i].OutputID),
 			MaturityHeight: elems[i].MaturityHeight,
 			SiacoinOutput: types.SiacoinOutput{
 				Address: types.Address(elems[i].Address),
@@ -81,7 +89,7 @@ func (s *SQLStore) Transactions(since time.Time, max int) ([]wallet.Transaction,
 				Height: dbTxns[i].Height,
 				ID:     types.BlockID(dbTxns[i].BlockID),
 			},
-			ID:        types.TransactionID(dbTxns[i].ID),
+			ID:        types.TransactionID(dbTxns[i].TransactionID),
 			Inflow:    types.Currency(dbTxns[i].Inflow),
 			Outflow:   types.Currency(dbTxns[i].Outflow),
 			Timestamp: time.Unix(dbTxns[i].Timestamp, 0),
@@ -103,14 +111,14 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, dbSiacoinElement{
 				Address:        hash256(sco.Address),
 				Value:          currency(sco.Value),
-				ID:             hash256(diff.ID),
+				OutputID:       hash256(diff.ID),
 				MaturityHeight: uint64(cc.BlockHeight), // immediately spendable
 			})
 		} else {
 			// remove reverted outputs
 			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, hash256(diff.ID))
 			for i := range s.unappliedOutputAdditions {
-				if s.unappliedOutputAdditions[i].ID == hash256(diff.ID) {
+				if s.unappliedOutputAdditions[i].OutputID == hash256(diff.ID) {
 					s.unappliedOutputAdditions[i] = s.unappliedOutputAdditions[len(s.unappliedOutputAdditions)-1]
 					s.unappliedOutputAdditions = s.unappliedOutputAdditions[:len(s.unappliedOutputAdditions)-1]
 					break
@@ -130,14 +138,14 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, dbSiacoinElement{
 				Address:        hash256(sco.Address),
 				Value:          currency(sco.Value),
-				ID:             hash256(diff.ID),
+				OutputID:       hash256(diff.ID),
 				MaturityHeight: uint64(diff.MaturityHeight),
 			})
 		} else {
 			// remove reverted outputs
 			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, hash256(diff.ID))
 			for i := range s.unappliedOutputAdditions {
-				if s.unappliedOutputAdditions[i].ID == hash256(diff.ID) {
+				if s.unappliedOutputAdditions[i].OutputID == hash256(diff.ID) {
 					s.unappliedOutputAdditions[i] = s.unappliedOutputAdditions[len(s.unappliedOutputAdditions)-1]
 					s.unappliedOutputAdditions = s.unappliedOutputAdditions[:len(s.unappliedOutputAdditions)-1]
 					break
@@ -154,7 +162,7 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				// remove reverted txns
 				s.unappliedTxnRemovals = append(s.unappliedTxnRemovals, hash256(txn.ID()))
 				for i := range s.unappliedTxnAdditions {
-					if s.unappliedTxnAdditions[i].ID == hash256(txn.ID()) {
+					if s.unappliedTxnAdditions[i].TransactionID == hash256(txn.ID()) {
 						s.unappliedTxnAdditions[i] = s.unappliedTxnAdditions[len(s.unappliedTxnAdditions)-1]
 						s.unappliedTxnAdditions = s.unappliedTxnAdditions[:len(s.unappliedTxnAdditions)-1]
 						break
@@ -197,13 +205,13 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 
 				// add confirmed txns
 				s.unappliedTxnAdditions = append(s.unappliedTxnAdditions, dbTransaction{
-					Raw:       txn,
-					Height:    uint64(cc.InitialHeight()) + uint64(i) + 1,
-					BlockID:   hash256(block.ID()),
-					Inflow:    currency(inflow),
-					Outflow:   currency(outflow),
-					ID:        hash256(txn.ID()),
-					Timestamp: int64(block.Timestamp),
+					Raw:           txn,
+					Height:        uint64(cc.InitialHeight()) + uint64(i) + 1,
+					BlockID:       hash256(block.ID()),
+					Inflow:        currency(inflow),
+					Outflow:       currency(outflow),
+					TransactionID: hash256(txn.ID()),
+					Timestamp:     int64(block.Timestamp),
 				})
 			}
 		}
