@@ -51,29 +51,35 @@ type (
 
 var _ GougingChecker = gougingChecker{}
 
-func GougingCheckerFromContext(ctx context.Context) GougingChecker {
-	gc, ok := ctx.Value(keyGougingChecker).(GougingChecker)
+func GougingCheckerFromContext(ctx context.Context) (GougingChecker, error) {
+	gc, ok := ctx.Value(keyGougingChecker).(func() (GougingChecker, error))
 	if !ok {
 		panic("no gouging checker attached to the context") // developer error
 	}
-	return gc
+	return gc()
 }
 
-func WithGougingChecker(ctx context.Context, gp api.GougingParams) context.Context {
-	return context.WithValue(ctx, keyGougingChecker, gougingChecker{
-		consensusState: gp.ConsensusState,
-		settings:       gp.GougingSettings,
-		redundancy:     gp.RedundancySettings,
-		txFee:          gp.TransactionFee,
+func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingParams) context.Context {
+	return context.WithValue(ctx, keyGougingChecker, func() (gougingChecker, error) {
+		consensusState, err := cs.ConsensusState(ctx)
+		if err != nil {
+			return gougingChecker{}, fmt.Errorf("failed to get consensus state: %w", err)
+		}
+		return gougingChecker{
+			consensusState: consensusState,
+			settings:       gp.GougingSettings,
+			redundancy:     gp.RedundancySettings,
+			txFee:          gp.TransactionFee,
 
-		// NOTE:
-		//
-		// period and renew window are nil here and that's fine, gouging
-		// checkers in the workers don't have easy access to these settings and
-		// thus ignore them when perform gouging checks, the autopilot however
-		// does have those and will pass them when performing gouging checks
-		period:      nil,
-		renewWindow: nil,
+			// NOTE:
+			//
+			// period and renew window are nil here and that's fine, gouging
+			// checkers in the workers don't have easy access to these settings and
+			// thus ignore them when perform gouging checks, the autopilot however
+			// does have those and will pass them when performing gouging checks
+			period:      nil,
+			renewWindow: nil,
+		}, nil
 	})
 }
 
