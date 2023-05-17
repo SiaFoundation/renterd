@@ -406,19 +406,6 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 		return err
 	}
 
-	pt, err := w.priceTables.fetch(ctx, hostKey, nil)
-	if err != nil {
-		return err
-	}
-
-	gc, err := GougingCheckerFromContext(ctx)
-	if err != nil {
-		return err
-	}
-	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
-		return fmt.Errorf("host price table gouging detected: %v", breakdown)
-	}
-
 	return fn(&host{
 		acc:                      acc,
 		bus:                      w.bus,
@@ -576,7 +563,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
 	var pt hostdb.HostPriceTable
-	err = w.withHostV3(ctx, revision.ParentID, hk, siamuxAddr, func(h hostV3) error {
+	err = w.withHostV3(ctx, types.FileContractID{}, hk, siamuxAddr, func(h hostV3) error {
 		hpt, err := h.(*host).FetchPriceTable(ctx, revision)
 		if err != nil {
 			return err

@@ -60,7 +60,7 @@ func GougingCheckerFromContext(ctx context.Context) (GougingChecker, error) {
 }
 
 func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingParams) context.Context {
-	return context.WithValue(ctx, keyGougingChecker, func() (gougingChecker, error) {
+	return context.WithValue(ctx, keyGougingChecker, func() (GougingChecker, error) {
 		consensusState, err := cs.ConsensusState(ctx)
 		if err != nil {
 			return gougingChecker{}, fmt.Errorf("failed to get consensus state: %w", err)
