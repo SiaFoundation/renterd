@@ -133,7 +133,9 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 		if sco.Address != s.walletAddress {
 			continue
 		}
-		if diff.Direction == modules.DiffApply {
+		// if a delayed output is reverted, it has matured and will therefore be
+		// added to the spendable outputs.
+		if diff.Direction == modules.DiffRevert {
 			// add new outputs
 			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, dbSiacoinElement{
 				Address:        hash256(sco.Address),
