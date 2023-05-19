@@ -926,31 +926,6 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 	return
 }
 
-func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbSiacoinElement) error {
-	return tx.Clauses(clause.OnConflict{
-		// OutputID might already exist since it appears in the regular and the
-		// delayed diff.
-		Columns:   []clause.Column{{Name: "output_id"}},
-		UpdateAll: true,
-	}).Create(&sco).Error
-}
-
-func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
-	return tx.Where("output_id", oid).
-		Delete(&dbSiacoinElement{}).
-		Error
-}
-
-func applyUnappliedTxnAdditions(tx *gorm.DB, txn dbTransaction) error {
-	return tx.Create(&txn).Error
-}
-
-func applyUnappliedTxnRemovals(tx *gorm.DB, txnID hash256) error {
-	return tx.Where("transaction_id", txnID).
-		Delete(&dbTransaction{}).
-		Error
-}
-
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {
 	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
 		Model: Model{

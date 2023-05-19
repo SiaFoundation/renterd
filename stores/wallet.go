@@ -8,6 +8,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/modules"
+	"gorm.io/gorm"
 )
 
 type (
@@ -302,4 +303,24 @@ func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
 	if d.Err() != nil {
 		panic(d.Err())
 	}
+}
+
+func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbSiacoinElement) error {
+	return tx.Create(&sco).Error
+}
+
+func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
+	return tx.Where("output_id", oid).
+		Delete(&dbSiacoinElement{}).
+		Error
+}
+
+func applyUnappliedTxnAdditions(tx *gorm.DB, txn dbTransaction) error {
+	return tx.Create(&txn).Error
+}
+
+func applyUnappliedTxnRemovals(tx *gorm.DB, txnID hash256) error {
+	return tx.Where("transaction_id", txnID).
+		Delete(&dbTransaction{}).
+		Error
 }
