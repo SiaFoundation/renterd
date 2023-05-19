@@ -258,32 +258,6 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 	return sectors, slowHosts, nil
 }
 
-func uploadSlab(ctx context.Context, hp hostProvider, r io.Reader, m, n uint8, contracts []api.ContractMetadata, locker revisionLocker, uploadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) (object.Slab, int, []int, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
-	defer span.End()
-
-	buf := make([]byte, int(m)*rhpv2.SectorSize)
-	shards := make([][]byte, n)
-	length, err := io.ReadFull(r, buf)
-	if err != nil && err != io.ErrUnexpectedEOF {
-		return object.Slab{}, 0, nil, err
-	}
-	s := object.Slab{
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: m,
-	}
-	s.Encode(buf, shards)
-	s.Encrypt(shards)
-
-	sectors, slowHosts, err := parallelUploadSlab(ctx, hp, shards, contracts, locker, uploadSectorTimeout, maxOverdrive, logger)
-	if err != nil {
-		return object.Slab{}, 0, nil, err
-	}
-
-	s.Shards = sectors
-	return s, length, slowHosts, nil
-}
-
 func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
 	// prepopulate the timings with a value for all hosts to ensure unused hosts aren't necessarily favoured in consecutive downloads
 	timings := make([]int64, len(contracts))

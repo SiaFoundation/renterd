@@ -22,6 +22,8 @@ import (
 
 // TODO: add priority queues
 
+const defaultAvgUpdateInterval = 10 * time.Second
+
 var errNoQueue = errors.New("no queue")
 
 type (
@@ -47,10 +49,11 @@ type (
 		hk         types.PublicKey
 		siamuxAddr string
 
-		queueMu      sync.Mutex
-		queueChan    chan *uploadJob
-		queueUploads map[uploadID]struct{}
-		queue        []*uploadJob
+		queueMu         sync.Mutex
+		queueChan       chan struct{}
+		queueChanClosed bool
+		queueUploads    map[uploadID]struct{}
+		queue           []*uploadJob
 
 		statsSpeed        *average
 		statsEstimateDiff *average
@@ -111,18 +114,18 @@ func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 		siamuxAddr: c.SiamuxAddr,
 
 		queue:        make([]*uploadJob, 0),
-		queueChan:    make(chan *uploadJob, 1e2),
+		queueChan:    make(chan struct{}),
 		queueUploads: make(map[uploadID]struct{}),
 
-		statsSpeed:        newAverage(),
-		statsEstimateDiff: newAverage(),
+		statsSpeed:        newAverage(defaultAvgUpdateInterval),
+		statsEstimateDiff: newAverage(defaultAvgUpdateInterval),
 		stopChan:          make(chan struct{}),
 	}
 }
 
-func newAverage() *average {
+func newAverage(updateInterval time.Duration) *average {
 	return &average{
-		updateInterval: 10 * time.Second, // TODO (?) make configurable
+		updateInterval: updateInterval,
 		pts:            [1e3]float64{},
 	}
 }
@@ -133,7 +136,7 @@ func (w *worker) initUploader() {
 	}
 
 	w.uploader = &uploader{
-		statsOverdrive: newAverage(),
+		statsOverdrive: newAverage(defaultAvgUpdateInterval),
 		statsStopChan:  make(chan struct{}),
 
 		w:    w,
@@ -232,6 +235,7 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return false, err
 			}
+			span.AddEvent("shards read")
 
 			// encode and encrypt the shards
 			shards := make([][]byte, rs.TotalShards)
@@ -293,7 +297,7 @@ func (u *uploader) uploadSectors(ctx context.Context, id uploadID, shards [][]by
 		job.requestSpan.SetAttributes(attribute.Bool("overdrive", overdrive))
 
 		// schedule the job
-		if err := u.schedule(job); err != nil {
+		if err := u.enqueue(job); err != nil {
 			job.requestSpan.RecordError(err)
 			return err
 		}
@@ -428,12 +432,12 @@ func (u *uploader) uploadSectors(ctx context.Context, id uploadID, shards [][]by
 	return state.sectors, nil
 }
 
-func (u *uploader) schedule(j *uploadJob) error {
+func (u *uploader) enqueue(j *uploadJob) error {
 	queue := u.queue(j.id)
 	if queue == nil {
 		return errNoQueue
 	}
-	queue.enqueue(j)
+	queue.push(j)
 	return nil
 }
 
@@ -520,39 +524,50 @@ func (q *uploadQueue) processJobs() {
 		}
 	}
 
+outer:
 	for {
-		var job *uploadJob
 		select {
-		case job = <-q.queueChan:
-			if job.isDone() {
-				continue
-			}
 		case <-time.After(3 * time.Second):
 			unlockRevision()
 			continue
+		case <-q.queueChan:
 		case <-q.stopChan:
 			return
 		}
 
-		// clear revision if it's been unlocked
-		if time.Since(revLockedSince) > time.Minute {
-			unlockRevision()
-		}
-
-		// acquire a revision lock if we don't have one
-		if rev == nil {
-			var err error
-			rev, revUnlock, err = q.rl.lockRevision(job.requestCtx, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.u.blockHeight())
-			if err != nil {
-				job.fail(err)
-				continue
+		for {
+			select {
+			case <-q.stopChan:
+				return
+			default:
 			}
-			revLockedSince = time.Now()
-		}
 
-		// execute the job
-		if err := job.execute(q.hp, rev); err != nil {
-			unlockRevision()
+			// fetch job
+			job := q.pop()
+			if job == nil {
+				continue outer
+			}
+
+			// clear revision if it's been unlocked
+			if time.Since(revLockedSince) > time.Minute {
+				unlockRevision()
+			}
+
+			// acquire a revision lock if we don't have one
+			if rev == nil {
+				var err error
+				rev, revUnlock, err = q.rl.lockRevision(job.requestCtx, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.u.blockHeight())
+				if err != nil {
+					job.fail(err)
+					continue outer
+				}
+				revLockedSince = time.Now()
+			}
+
+			// execute the job
+			if err := job.execute(q.hp, rev); err != nil {
+				unlockRevision()
+			}
 		}
 	}
 }
@@ -572,7 +587,7 @@ func (q *uploadQueue) estimate() float64 {
 	return float64(data) * 0.000008 / speed
 }
 
-func (q *uploadQueue) enqueue(j *uploadJob) {
+func (q *uploadQueue) push(j *uploadJob) {
 	// decorate job
 	j.requestSpan.SetAttributes(attribute.Stringer("hk", q.hk))
 	j.estimate = time.Duration(q.estimate()) * time.Second
@@ -581,8 +596,27 @@ func (q *uploadQueue) enqueue(j *uploadJob) {
 	// enqueue the job
 	q.queueMu.Lock()
 	defer q.queueMu.Unlock()
-	q.queueChan <- j
+	q.queue = append(q.queue, j)
 	q.queueUploads[j.id] = struct{}{}
+
+	// notify the queue
+	if len(q.queue) == 1 && !q.queueChanClosed {
+		close(q.queueChan)
+		q.queueChanClosed = true
+	}
+}
+
+func (q *uploadQueue) pop() *uploadJob {
+	q.queueMu.Lock()
+	defer q.queueMu.Unlock()
+	if len(q.queue) == 0 {
+		q.queueChan = make(chan struct{})
+		q.queueChanClosed = false
+		return nil
+	}
+	j := q.queue[0]
+	q.queue = q.queue[1:]
+	return j
 }
 
 func (j *uploadJob) execute(hp hostProvider, rev *types.FileContractRevision) (err error) {
