@@ -116,6 +116,7 @@ func (s *SQLStore) Transactions(since time.Time, max int) ([]wallet.Transaction,
 
 // ProcessConsensusChange implements chain.Subscriber.
 func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
+	// Add/Remove siacoin outputs.
 	for _, diff := range cc.SiacoinOutputDiffs {
 		var sco types.SiacoinOutput
 		convertToCore(diff.SiacoinOutput, &sco)
@@ -143,35 +144,29 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 		}
 	}
 
-	for _, diff := range cc.DelayedSiacoinOutputDiffs {
-		var sco types.SiacoinOutput
-		convertToCore(diff.SiacoinOutput, &sco)
-		if sco.Address != s.walletAddress {
-			continue
-		}
-		// if a delayed output is reverted, it has matured and will therefore be
-		// added to the spendable outputs.
-		if diff.Direction == modules.DiffRevert {
-			// add new outputs
-			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
+	// Create a 'fake' transaction for every matured siacoin output.
+	for _, diff := range cc.AppliedDiffs {
+		for _, dsco := range diff.DelayedSiacoinOutputDiffs {
+			// if a delayed output is reverted in an applied diff, the
+			// output has matured -- add a payout transaction.
+			if dsco.Direction != modules.DiffRevert {
+				continue
+			} else if types.Address(dsco.SiacoinOutput.UnlockHash) != s.walletAddress {
+				continue
+			}
+			var sco types.SiacoinOutput
+			convertToCore(dsco.SiacoinOutput, &sco)
+			s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
 				addition: true,
-				oid:      hash256(diff.ID),
-				sco: dbSiacoinElement{
-					Address:        hash256(sco.Address),
-					Value:          currency(sco.Value),
-					OutputID:       hash256(diff.ID),
-					MaturityHeight: uint64(cc.BlockHeight), // immediately spendable
+				txnID:    hash256(dsco.ID), // use output id as txn id
+				txn: dbTransaction{
+					Inflow: currency(sco.Value),
 				},
-			})
-		} else {
-			// remove reverted outputs
-			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
-				addition: false,
-				oid:      hash256(diff.ID),
 			})
 		}
 	}
 
+	// Revert transactions from reverted blocks.
 	for _, block := range cc.RevertedBlocks {
 		for _, stxn := range block.Transactions {
 			var txn types.Transaction
@@ -181,6 +176,18 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
 					addition: false,
 					txnID:    hash256(txn.ID()),
+				})
+			}
+		}
+	}
+
+	// Revert 'fake' transactions.
+	for _, diff := range cc.RevertedDiffs {
+		for _, dsco := range diff.DelayedSiacoinOutputDiffs {
+			if dsco.Direction == modules.DiffApply {
+				s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
+					addition: false,
+					txnID:    hash256(dsco.ID),
 				})
 			}
 		}
