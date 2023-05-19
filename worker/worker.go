@@ -435,7 +435,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 
 	var rev types.FileContractRevision
 	err = w.withHostV3(ctx, contractID, hk, siamuxAddr, func(h hostV3) error {
-		rev, err = h.(*host).FetchRevision(ctx, fetchTimeout, cs.BlockHeight)
+		rev, err = h.FetchRevision(ctx, fetchTimeout, cs.BlockHeight)
 		return err
 	})
 	if err != nil {
@@ -564,7 +564,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 
 	var pt hostdb.HostPriceTable
 	err = w.withHostV3(ctx, types.FileContractID{}, hk, siamuxAddr, func(h hostV3) error {
-		hpt, err := h.(*host).FetchPriceTable(ctx, revision)
+		hpt, err := h.FetchPriceTable(ctx, revision)
 		if err != nil {
 			return err
 		}
@@ -1413,7 +1413,7 @@ func isErrDuplicateTransactionSet(err error) bool {
 
 func (w *worker) FundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, revision *types.FileContractRevision) error {
 	return w.withHostV3(ctx, revision.ParentID, hk, siamuxAddr, func(h hostV3) error {
-		return h.(*host).FundAccount(ctx, balance, revision)
+		return h.FundAccount(ctx, balance, revision)
 	})
 }
 
@@ -1424,7 +1424,7 @@ func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Co
 	var renewed rhpv2.ContractRevision
 	var txns []types.Transaction
 	err = w.withHostV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, func(h hostV3) error {
-		renewed, txns, err = h.(*host).Renew(ctx, rrr)
+		renewed, txns, err = h.Renew(ctx, rrr)
 		return err
 	})
 	return renewed, txns, err
@@ -1432,6 +1432,6 @@ func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Co
 
 func (w *worker) SyncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) error {
 	return w.withHostV3(ctx, revision.ParentID, hk, siamuxAddr, func(h hostV3) error {
-		return h.(*host).SyncAccount(ctx, revision)
+		return h.SyncAccount(ctx, revision)
 	})
 }
