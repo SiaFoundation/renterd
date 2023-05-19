@@ -30,18 +30,16 @@ type (
 		logger glogger.Interface
 
 		// Persistence buffer - related fields.
-		lastSave                 time.Time
-		persistInterval          time.Duration
-		persistMu                sync.Mutex
-		persistTimer             *time.Timer
-		unappliedAnnouncements   []announcement
-		unappliedHostKeys        map[types.PublicKey]struct{}
-		unappliedRevisions       map[types.FileContractID]revisionUpdate
-		unappliedProofs          map[types.FileContractID]uint64
-		unappliedOutputAdditions []dbSiacoinElement
-		unappliedOutputRemovals  []hash256
-		unappliedTxnAdditions    []dbTransaction
-		unappliedTxnRemovals     []hash256
+		lastSave               time.Time
+		persistInterval        time.Duration
+		persistMu              sync.Mutex
+		persistTimer           *time.Timer
+		unappliedAnnouncements []announcement
+		unappliedHostKeys      map[types.PublicKey]struct{}
+		unappliedRevisions     map[types.FileContractID]revisionUpdate
+		unappliedProofs        map[types.FileContractID]uint64
+		unappliedOutputChanges []outputChange
+		unappliedTxnChanges    []txnChange
 
 		// SettingsDB related fields.
 		settingsMu sync.Mutex
@@ -306,9 +304,8 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval                           // enough time has passed since last persist
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit                // enough announcements have accumulated
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0     // enough revisions/proofs have accumulated
-	unappliedOutputs := len(ss.unappliedOutputAdditions) > 0 || len(ss.unappliedOutputRemovals) > 0 // enough outputs have accumulated
-	unappliedTxns := len(ss.unappliedTxnAdditions) > 0 || len(ss.unappliedTxnRemovals) > 0          // enough txns have accumulated
-	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputs && !unappliedTxns {
+	unappliedOutputsOrTxns := len(ss.unappliedOutputChanges) > 0 || len(ss.unappliedTxnChanges) > 0 // enough outputs/txns have accumualted
+	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputsOrTxns {
 		return nil
 	}
 
@@ -353,24 +350,24 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 				return fmt.Errorf("%w; failed to update proof height", err)
 			}
 		}
-		if len(ss.unappliedOutputRemovals) > 0 {
-			if err := applyUnappliedOutputRemovals(tx, ss.unappliedOutputRemovals); err != nil {
-				return fmt.Errorf("%w; failed to apply unapplied output removals", err)
+		for _, oc := range ss.unappliedOutputChanges {
+			if oc.addition {
+				err = applyUnappliedOutputAdditions(tx, oc.sco)
+			} else {
+				err = applyUnappliedOutputRemovals(tx, oc.oid)
+			}
+			if err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied output change", err)
 			}
 		}
-		if len(ss.unappliedOutputAdditions) > 0 {
-			if err := applyUnappliedOutputAdditions(tx, ss.unappliedOutputAdditions); err != nil {
-				return fmt.Errorf("%w; failed to apply unapplied output additions", err)
+		for _, tc := range ss.unappliedTxnChanges {
+			if tc.addition {
+				err = applyUnappliedTxnAdditions(tx, tc.txn)
+			} else {
+				err = applyUnappliedTxnRemovals(tx, tc.txnID)
 			}
-		}
-		if len(ss.unappliedTxnRemovals) > 0 {
-			if err := applyUnappliedTxnRemovals(tx, ss.unappliedTxnRemovals); err != nil {
-				return fmt.Errorf("%w; failed to apply unapplied txn removals", err)
-			}
-		}
-		if len(ss.unappliedTxnAdditions) > 0 {
-			if err := applyUnappliedTxnAdditions(tx, ss.unappliedTxnAdditions); err != nil {
-				return fmt.Errorf("%w; failed to apply unapplied txn additions", err)
+			if err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
 			}
 		}
 		return updateCCID(tx, ss.ccid, ss.chainIndex)
@@ -381,10 +378,8 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
 	ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
 	ss.lastSave = time.Now()
-	ss.unappliedOutputAdditions = nil
-	ss.unappliedOutputRemovals = nil
-	ss.unappliedTxnAdditions = nil
-	ss.unappliedTxnRemovals = nil
+	ss.unappliedOutputChanges = nil
+	ss.unappliedTxnChanges = nil
 	return
 }
 

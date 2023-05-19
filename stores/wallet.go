@@ -29,6 +29,18 @@ type (
 		Outflow       currency
 		Timestamp     int64
 	}
+
+	outputChange struct {
+		addition bool
+		oid      hash256
+		sco      dbSiacoinElement
+	}
+
+	txnChange struct {
+		addition bool
+		txnID    hash256
+		txn      dbTransaction
+	}
 )
 
 // TableName implements the gorm.Tabler interface.
@@ -112,22 +124,22 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 		}
 		if diff.Direction == modules.DiffApply {
 			// add new outputs
-			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, dbSiacoinElement{
-				Address:        hash256(sco.Address),
-				Value:          currency(sco.Value),
-				OutputID:       hash256(diff.ID),
-				MaturityHeight: uint64(cc.BlockHeight), // immediately spendable
+			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
+				addition: true,
+				oid:      hash256(diff.ID),
+				sco: dbSiacoinElement{
+					Address:        hash256(sco.Address),
+					Value:          currency(sco.Value),
+					OutputID:       hash256(diff.ID),
+					MaturityHeight: uint64(cc.BlockHeight), // immediately spendable
+				},
 			})
 		} else {
 			// remove reverted outputs
-			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, hash256(diff.ID))
-			for i := range s.unappliedOutputAdditions {
-				if s.unappliedOutputAdditions[i].OutputID == hash256(diff.ID) {
-					s.unappliedOutputAdditions[i] = s.unappliedOutputAdditions[len(s.unappliedOutputAdditions)-1]
-					s.unappliedOutputAdditions = s.unappliedOutputAdditions[:len(s.unappliedOutputAdditions)-1]
-					break
-				}
-			}
+			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
+				addition: false,
+				oid:      hash256(diff.ID),
+			})
 		}
 	}
 
@@ -141,22 +153,22 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 		// added to the spendable outputs.
 		if diff.Direction == modules.DiffRevert {
 			// add new outputs
-			s.unappliedOutputAdditions = append(s.unappliedOutputAdditions, dbSiacoinElement{
-				Address:        hash256(sco.Address),
-				Value:          currency(sco.Value),
-				OutputID:       hash256(diff.ID),
-				MaturityHeight: uint64(diff.MaturityHeight),
+			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
+				addition: true,
+				oid:      hash256(diff.ID),
+				sco: dbSiacoinElement{
+					Address:        hash256(sco.Address),
+					Value:          currency(sco.Value),
+					OutputID:       hash256(diff.ID),
+					MaturityHeight: uint64(cc.BlockHeight), // immediately spendable
+				},
 			})
 		} else {
 			// remove reverted outputs
-			s.unappliedOutputRemovals = append(s.unappliedOutputRemovals, hash256(diff.ID))
-			for i := range s.unappliedOutputAdditions {
-				if s.unappliedOutputAdditions[i].OutputID == hash256(diff.ID) {
-					s.unappliedOutputAdditions[i] = s.unappliedOutputAdditions[len(s.unappliedOutputAdditions)-1]
-					s.unappliedOutputAdditions = s.unappliedOutputAdditions[:len(s.unappliedOutputAdditions)-1]
-					break
-				}
-			}
+			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
+				addition: false,
+				oid:      hash256(diff.ID),
+			})
 		}
 	}
 
@@ -166,14 +178,10 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 			convertToCore(stxn, &txn)
 			if transactionIsRelevant(txn, s.walletAddress) {
 				// remove reverted txns
-				s.unappliedTxnRemovals = append(s.unappliedTxnRemovals, hash256(txn.ID()))
-				for i := range s.unappliedTxnAdditions {
-					if s.unappliedTxnAdditions[i].TransactionID == hash256(txn.ID()) {
-						s.unappliedTxnAdditions[i] = s.unappliedTxnAdditions[len(s.unappliedTxnAdditions)-1]
-						s.unappliedTxnAdditions = s.unappliedTxnAdditions[:len(s.unappliedTxnAdditions)-1]
-						break
-					}
-				}
+				s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
+					addition: false,
+					txnID:    hash256(txn.ID()),
+				})
 			}
 		}
 	}
@@ -210,14 +218,18 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				}
 
 				// add confirmed txns
-				s.unappliedTxnAdditions = append(s.unappliedTxnAdditions, dbTransaction{
-					Raw:           txn,
-					Height:        uint64(cc.InitialHeight()) + uint64(i) + 1,
-					BlockID:       hash256(block.ID()),
-					Inflow:        currency(inflow),
-					Outflow:       currency(outflow),
-					TransactionID: hash256(txn.ID()),
-					Timestamp:     int64(block.Timestamp),
+				s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
+					addition: true,
+					txnID:    hash256(txn.ID()),
+					txn: dbTransaction{
+						Raw:           txn,
+						Height:        uint64(cc.InitialHeight()) + uint64(i) + 1,
+						BlockID:       hash256(block.ID()),
+						Inflow:        currency(inflow),
+						Outflow:       currency(outflow),
+						TransactionID: hash256(txn.ID()),
+						Timestamp:     int64(block.Timestamp),
+					},
 				})
 			}
 		}

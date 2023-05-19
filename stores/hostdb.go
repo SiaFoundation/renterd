@@ -926,27 +926,27 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 	return
 }
 
-func applyUnappliedOutputAdditions(tx *gorm.DB, additions []dbSiacoinElement) error {
+func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbSiacoinElement) error {
 	return tx.Clauses(clause.OnConflict{
 		// OutputID might already exist since it appears in the regular and the
 		// delayed diff.
 		Columns:   []clause.Column{{Name: "output_id"}},
 		UpdateAll: true,
-	}).Create(&additions).Error
+	}).Create(&sco).Error
 }
 
-func applyUnappliedOutputRemovals(tx *gorm.DB, removals []hash256) error {
-	return tx.Where("output_id in (?)", removals).
+func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
+	return tx.Where("output_id", oid).
 		Delete(&dbSiacoinElement{}).
 		Error
 }
 
-func applyUnappliedTxnAdditions(tx *gorm.DB, additions []dbTransaction) error {
-	return tx.Create(&additions).Error
+func applyUnappliedTxnAdditions(tx *gorm.DB, txn dbTransaction) error {
+	return tx.Create(&txn).Error
 }
 
-func applyUnappliedTxnRemovals(tx *gorm.DB, removals []hash256) error {
-	return tx.Where("transaction_id in (?)", removals).
+func applyUnappliedTxnRemovals(tx *gorm.DB, txnID hash256) error {
+	return tx.Where("transaction_id", txnID).
 		Delete(&dbTransaction{}).
 		Error
 }
