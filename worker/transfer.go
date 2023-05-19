@@ -15,6 +15,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
@@ -39,8 +40,14 @@ type hostV2 interface {
 
 type hostV3 interface {
 	hostV2
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
+
 	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
+	FetchPriceTable(ctx context.Context, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
+	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (*types.FileContractRevision, error)
+	FundAccount(ctx context.Context, balance types.Currency, revision *types.FileContractRevision) error
+	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
+	SyncAccount(ctx context.Context, revision *types.FileContractRevision) error
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
 }
 
 type hostProvider interface {

@@ -13,6 +13,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -55,6 +56,22 @@ func (h *mockHost) DeleteSectors(_ context.Context, roots []types.Hash256) error
 		delete(h.sectors, root)
 	}
 	return nil
+}
+
+func (h *mockHost) FetchPriceTable(ctx context.Context, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+	panic("not implemented")
+}
+func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (_ *types.FileContractRevision, _ error) {
+	panic("not implemented")
+}
+func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, revision *types.FileContractRevision) error {
+	panic("not implemented")
+}
+func (h *mockHost) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+	panic("not implemented")
+}
+func (h *mockHost) SyncAccount(ctx context.Context, revision *types.FileContractRevision) error {
+	panic("not implemented")
 }
 
 func newMockHost() *mockHost {
