@@ -303,10 +303,12 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 // applyUpdates applies all unapplied updates to the database.
 func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	// Check if we need to apply changes
-	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval
-	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
-	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
-	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
+	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval                           // enough time has passed since last persist
+	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit                // enough announcements have accumulated
+	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0     // enough revisions/proofs have accumulated
+	unappliedOutputs := len(ss.unappliedOutputAdditions) > 0 || len(ss.unappliedOutputRemovals) > 0 // enough outputs have accumulated
+	unappliedTxns := len(ss.unappliedTxnAdditions) > 0 || len(ss.unappliedTxnRemovals) > 0          // enough txns have accumulated
+	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputs && !unappliedTxns {
 		return nil
 	}
 
