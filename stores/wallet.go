@@ -16,7 +16,7 @@ type (
 		Model
 		Value          currency
 		Address        hash256 `gorm:"size:32"`
-		OutputID       hash256 `gorm:"unique;index;size:32"`
+		OutputID       hash256 `gorm:"unique;index;NOT NULL;size:32"`
 		MaturityHeight uint64  `gorm:"index"`
 	}
 
@@ -25,7 +25,7 @@ type (
 		Raw           types.Transaction `gorm:"serializer:json"`
 		Height        uint64
 		BlockID       hash256 `gorm:"size:32"`
-		TransactionID hash256 `gorm:"unique;index;size:32"`
+		TransactionID hash256 `gorm:"unique;index;NOT NULL;size:32"`
 		Inflow        currency
 		Outflow       currency
 		Timestamp     int64
@@ -161,7 +161,8 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				addition: true,
 				txnID:    hash256(dsco.ID), // use output id as txn id
 				txn: dbTransaction{
-					Inflow: currency(sco.Value),
+					Inflow:        currency(sco.Value),
+					TransactionID: hash256(dsco.ID),
 				},
 			})
 		}
