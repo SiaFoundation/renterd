@@ -161,8 +161,10 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				addition: true,
 				txnID:    hash256(dsco.ID), // use output id as txn id
 				txn: dbTransaction{
-					Inflow:        currency(sco.Value),
-					TransactionID: hash256(dsco.ID),
+					Height:        uint64(dsco.MaturityHeight),
+					Inflow:        currency(sco.Value),                                                         // transaction inflow is value of matured output
+					TransactionID: hash256(dsco.ID),                                                            // use output as txn id
+					Timestamp:     int64(cc.AppliedBlocks[dsco.MaturityHeight-cc.InitialHeight()-1].Timestamp), // use timestamp of block that caused output to mature
 				},
 			})
 		}
