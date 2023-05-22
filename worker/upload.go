@@ -177,8 +177,7 @@ func (u *uploader) newUpload(exclude map[types.FileContractID]struct{}, totalSha
 		}
 	}
 	if totalShards > remaining {
-		err := errors.New("not enough contracts to meet redundancy")
-		return uploadID{}, err
+		return uploadID{}, errors.New("not enough contracts to meet redundancy")
 	}
 
 	// generate upload id and keep track of the exclude list
@@ -553,6 +552,11 @@ func (q *uploadQueue) processJobs() {
 			}
 		}
 
+		// skip if job is done
+		if job.done() {
+			continue
+		}
+
 		// execute it
 		_ = q.withRevision(job.requestCtx, func(rev types.FileContractRevision) error {
 			return job.execute(q.hp, rev)
@@ -598,12 +602,11 @@ func (q *uploadQueue) pop() *uploadJob {
 		j := q.queue[0]
 		q.queue = q.queue[1:]
 		return j
-	} else {
-		// recreate the channel
-		q.queueChan = make(chan struct{})
-		q.queueChanClose = new(sync.Once)
 	}
 
+	// recreate the channel
+	q.queueChan = make(chan struct{})
+	q.queueChanClose = new(sync.Once)
 	return nil
 }
 
@@ -683,7 +686,7 @@ func (j *uploadJob) fail(err error) {
 	j.requestSpan.End()
 }
 
-func (j *uploadJob) isDone() bool {
+func (j *uploadJob) done() bool {
 	select {
 	case <-j.requestCtx.Done():
 		return true
