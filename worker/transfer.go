@@ -50,7 +50,7 @@ type hostV3 interface {
 
 type hostProvider interface {
 	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(hostV2) error) (err error)
-	withHostV3(context.Context, types.FileContractID, types.PublicKey, string, func(hostV3) error) (err error)
+	newHostV3(context.Context, types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
 }
 
 func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
@@ -108,16 +108,21 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 			contract := contracts[hostIndex]
 			shard := &ss.Shards[r.shardIndex]
 
-			err := hp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss hostV3) error {
-				buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
-				err := ss.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
+			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
+			err := func() error {
+				h, err := hp.newHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
+				if err != nil {
+					return err
+				}
+				err = h.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")
 					span.RecordError(err)
 				}
-				respChan <- resp{hostIndex, r, buf.Bytes(), time.Since(start), err}
-				return nil // only return the error in the response
-			})
+				return err
+			}()
+			respChan <- resp{hostIndex, r, buf.Bytes(), time.Since(start), err}
+
 			var aborted bool
 			select {
 			case <-ctx.Done():

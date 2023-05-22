@@ -657,14 +657,16 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 		}
 	}()
 
-	// upload sector
-	var root types.Hash256
-	if err = hp.withHostV3(j.requestCtx, j.queue.fcid, j.queue.hk, j.queue.siamuxAddr, func(h hostV3) error {
-		span.AddEvent("hostready")
-		root, err = h.UploadSector(j.requestCtx, j.sector, rev)
-		span.AddEvent("uploaded")
-		return err
-	}); err != nil {
+	// create a host
+	h, err := hp.newHostV3(j.requestCtx, j.queue.fcid, j.queue.hk, j.queue.siamuxAddr)
+	if err != nil {
+		j.fail(err)
+		return
+	}
+
+	// upload the sector
+	root, err := h.UploadSector(j.requestCtx, j.sector, rev)
+	if err != nil {
 		j.fail(err)
 	} else {
 		j.succeed(root)
