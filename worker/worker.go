@@ -400,13 +400,13 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	return err
 }
 
-func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string, fn func(hostV3) error) (err error) {
+func (w *worker) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return fn(&host{
+	return &host{
 		acc:                      acc,
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
@@ -417,7 +417,7 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 		accountKey:               w.accounts.deriveAccountKey(hostKey),
 		transportPool:            w.transportPoolV3,
 		priceTables:              w.priceTables,
-	})
+	}, nil
 }
 
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
@@ -433,11 +433,11 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	}
 	defer contractLock.Release(ctx)
 
-	var rev types.FileContractRevision
-	err = w.withHostV3(ctx, contractID, hk, siamuxAddr, func(h hostV3) error {
-		rev, err = h.FetchRevision(ctx, fetchTimeout, cs.BlockHeight)
+	h, err := w.newHostV3(ctx, contractID, hk, siamuxAddr)
+	if err != nil {
 		return err
-	})
+	}
+	rev, err := h.FetchRevision(ctx, fetchTimeout, cs.BlockHeight)
 	if err != nil {
 		return err
 	}
@@ -562,16 +562,15 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
-	var pt hostdb.HostPriceTable
-	err = w.withHostV3(ctx, types.FileContractID{}, hk, siamuxAddr, func(h hostV3) error {
-		hpt, err := h.FetchPriceTable(ctx, revision)
-		if err != nil {
-			return err
-		}
-		pt = hpt
-		return nil
-	})
-	return pt, err
+	h, err := w.newHostV3(ctx, types.FileContractID{}, hk, siamuxAddr)
+	if err != nil {
+		return hostdb.HostPriceTable{}, err
+	}
+	hpt, err = h.FetchPriceTable(ctx, revision)
+	if err != nil {
+		return hostdb.HostPriceTable{}, err
+	}
+	return hpt, nil
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
@@ -1412,26 +1411,28 @@ func isErrDuplicateTransactionSet(err error) bool {
 }
 
 func (w *worker) FundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, revision *types.FileContractRevision) error {
-	return w.withHostV3(ctx, revision.ParentID, hk, siamuxAddr, func(h hostV3) error {
-		return h.FundAccount(ctx, balance, revision)
-	})
+	h, err := w.newHostV3(ctx, revision.ParentID, hk, siamuxAddr)
+	if err != nil {
+		return err
+	}
+	return h.FundAccount(ctx, balance, revision)
 }
 
 // Renew renews a contract with a host. To avoid an edge case where the contract
 // is drained and can therefore not be used to pay for the revision, we simply
 // don't pay for it.
-func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
-	var renewed rhpv2.ContractRevision
-	var txns []types.Transaction
-	err = w.withHostV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, func(h hostV3) error {
-		renewed, txns, err = h.Renew(ctx, rrr)
-		return err
-	})
-	return renewed, txns, err
+func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest) (rhpv2.ContractRevision, []types.Transaction, error) {
+	h, err := w.newHostV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
+	return h.Renew(ctx, rrr)
 }
 
 func (w *worker) SyncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) error {
-	return w.withHostV3(ctx, revision.ParentID, hk, siamuxAddr, func(h hostV3) error {
-		return h.SyncAccount(ctx, revision)
-	})
+	h, err := w.newHostV3(ctx, revision.ParentID, hk, siamuxAddr)
+	if err != nil {
+		return err
+	}
+	return h.SyncAccount(ctx, revision)
 }
