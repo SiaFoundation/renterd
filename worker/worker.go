@@ -424,7 +424,11 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	if err != nil {
 		return err
 	}
-	defer contractLock.Release(ctx)
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = contractLock.Release(releaseCtx)
+		cancel()
+	}()
 
 	h, err := w.newHostV3(ctx, contractID, hk, siamuxAddr)
 	if err != nil {
@@ -1288,14 +1292,8 @@ func (cl *contractLock) Release(ctx context.Context) error {
 	// Stop background loop.
 	cl.stopCtxCancel()
 
-	// Create a new context with the span that times out after a certain amount
-	// of time.  That's because the context passed to this method might be
-	// cancelled but we still want to release the contract.
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	// Release the contract.
-	return cl.locker.ReleaseContract(timeoutCtx, cl.fcid, cl.lockID)
+	return cl.locker.ReleaseContract(ctx, cl.fcid, cl.lockID)
 }
 
 func (cl *contractLock) keepaliveLoop() {

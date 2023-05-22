@@ -647,9 +647,9 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 	go func() {
 		select {
 		case <-time.After(j.sectorTimeout):
-			span.AddEvent("overdrive")
 			select {
 			case j.overdriveChan <- j.sectorIndex:
+				span.AddEvent("overdrive")
 			default:
 			}
 		case <-j.requestCtx.Done():
