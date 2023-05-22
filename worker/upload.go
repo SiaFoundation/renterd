@@ -27,6 +27,10 @@ const defaultAvgUpdateInterval = 10 * time.Second
 var errNoQueue = errors.New("no queue")
 
 type (
+	migrator interface {
+		uploadSectors(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, used map[types.FileContractID]struct{}, blockHeight uint64) ([]object.Sector, error)
+	}
+
 	uploadID [8]byte
 
 	uploader struct {
@@ -35,9 +39,10 @@ type (
 		statsOverdrive *average
 		statsStopChan  chan struct{}
 
-		poolMu sync.Mutex
-		pool   []*uploadQueue
-		bh     uint64
+		poolMu  sync.Mutex
+		pool    []*uploadQueue
+		exclude map[uploadID]map[types.FileContractID]struct{}
+		bh      uint64
 	}
 
 	uploadQueue struct {
@@ -49,11 +54,11 @@ type (
 		hk         types.PublicKey
 		siamuxAddr string
 
-		queueMu         sync.Mutex
-		queueChan       chan struct{}
-		queueChanClosed bool
-		queueUploads    map[uploadID]struct{}
-		queue           []*uploadJob
+		queueMu        sync.Mutex
+		queueChan      chan struct{}
+		queueChanClose *sync.Once
+		queueUploads   map[uploadID]struct{}
+		queue          []*uploadJob
 
 		statsSpeed        *average
 		statsEstimateDiff *average
@@ -139,8 +144,9 @@ func (w *worker) initUploader() {
 		statsOverdrive: newAverage(defaultAvgUpdateInterval),
 		statsStopChan:  make(chan struct{}),
 
-		w:    w,
-		pool: make([]*uploadQueue, 0),
+		w:       w,
+		pool:    make([]*uploadQueue, 0),
+		exclude: make(map[uploadID]map[types.FileContractID]struct{}),
 	}
 }
 
@@ -159,21 +165,40 @@ func (u *uploader) blockHeight() uint64 {
 	return u.bh
 }
 
-func (u *uploader) newUpload() uploadID {
+func (u *uploader) newUpload(exclude map[types.FileContractID]struct{}, totalShards uint64) (uploadID, error) {
+	u.poolMu.Lock()
+	defer u.poolMu.Unlock()
+
+	// sanity check redundancy
+	var remaining uint64
+	for _, q := range u.pool {
+		if _, exclude := exclude[q.fcid]; !exclude {
+			remaining++
+		}
+	}
+	if totalShards > remaining {
+		err := errors.New("not enough contracts to meet redundancy")
+		return uploadID{}, err
+	}
+
+	// generate upload id and keep track of the exclude list
 	var id uploadID
 	frand.Read(id[:])
-	return id
+	u.exclude[id] = exclude
+	return id, nil
 }
 
 func (u *uploader) finishUpload(id uploadID) {
 	u.poolMu.Lock()
 	defer u.poolMu.Unlock()
+
+	delete(u.exclude, id)
 	for _, q := range u.pool {
 		q.finish(id)
 	}
 }
 
-func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, rs api.RedundancySettings, bh uint64) (o object.Object, used map[types.PublicKey]types.FileContractID, err error) {
+func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, rs api.RedundancySettings, blockHeight uint64) (o object.Object, used map[types.PublicKey]types.FileContractID, err error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "uploader.upload")
 	defer func() {
@@ -182,16 +207,6 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 		}
 		span.End()
 	}()
-
-	// sanity check redundancy
-	if rs.TotalShards > len(contracts) {
-		err := errors.New("not enough contracts to meet redundancy")
-		span.RecordError(err)
-		return object.Object{}, nil, err
-	}
-
-	// refresh contracts
-	u.updatePool(contracts, bh)
 
 	// keep track of used hosts
 	used = make(map[types.PublicKey]types.FileContractID)
@@ -215,11 +230,6 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 			// create span
 			ctx, span := tracing.Tracer.Start(ctx, "uploader.slab")
 			defer span.End()
-
-			// initialize upload
-			id := u.newUpload()
-			defer u.finishUpload(id)
-			span.SetAttributes(attribute.Stringer("id", id))
 
 			// create slab
 			slab := object.Slab{
@@ -245,7 +255,7 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 			span.AddEvent("shards encrypted")
 
 			// upload the shards
-			slab.Shards, err = u.uploadSectors(ctx, id, shards)
+			slab.Shards, err = u.uploadSectors(ctx, shards, contracts, nil, blockHeight)
 			if err != nil {
 				return false, err
 			}
@@ -276,9 +286,21 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 	return o, used, nil
 }
 
-func (u *uploader) uploadSectors(ctx context.Context, id uploadID, shards [][]byte) ([]object.Sector, error) {
+func (u *uploader) uploadSectors(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, used map[types.FileContractID]struct{}, blockHeight uint64) ([]object.Sector, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "uploader.uploadSectors")
 	defer span.End()
+
+	// refresh contracts
+	u.updatePool(contracts, blockHeight)
+
+	// initialize upload
+	id, err := u.newUpload(used, uint64(len(shards)))
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	defer u.finishUpload(id)
+	span.SetAttributes(attribute.Stringer("id", id))
 
 	// prepare state
 	state := &uploadState{
@@ -455,6 +477,9 @@ func (u *uploader) queue(id uploadID) *uploadQueue {
 
 	// return the first unused queue
 	for _, q := range u.pool {
+		if _, exclude := u.exclude[id][q.fcid]; exclude {
+			continue
+		}
 		if !q.used(id) {
 			return q
 		}
@@ -511,64 +536,27 @@ func (q *uploadQueue) used(id uploadID) bool {
 	return used
 }
 
+func (q *uploadQueue) withRevision(ctx context.Context, fn func(rev types.FileContractRevision) error) error {
+	return q.rl.withRevision(ctx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.u.blockHeight(), fn)
+}
+
 func (q *uploadQueue) processJobs() {
-	var rev *types.FileContractRevision
-	var revLockedSince time.Time
-	var revUnlock revisionUnlocker
-	unlockRevision := func() {
-		if rev != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			revUnlock.Release(ctx)
-			cancel()
-			rev = nil
-		}
-	}
-
-outer:
 	for {
-		select {
-		case <-time.After(3 * time.Second):
-			unlockRevision()
-			continue
-		case <-q.queueChan:
-		case <-q.stopChan:
-			return
-		}
-
-		for {
+		// pop a job
+		job := q.pop()
+		if job == nil {
 			select {
+			case <-q.queueChan:
+				job = q.pop()
 			case <-q.stopChan:
 				return
-			default:
-			}
-
-			// fetch job
-			job := q.pop()
-			if job == nil {
-				continue outer
-			}
-
-			// clear revision if it's been unlocked
-			if time.Since(revLockedSince) > time.Minute {
-				unlockRevision()
-			}
-
-			// acquire a revision lock if we don't have one
-			if rev == nil {
-				var err error
-				rev, revUnlock, err = q.rl.lockRevision(job.requestCtx, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.u.blockHeight())
-				if err != nil {
-					job.fail(err)
-					continue outer
-				}
-				revLockedSince = time.Now()
-			}
-
-			// execute the job
-			if err := job.execute(q.hp, rev); err != nil {
-				unlockRevision()
 			}
 		}
+
+		// execute it
+		_ = q.withRevision(job.requestCtx, func(rev types.FileContractRevision) error {
+			return job.execute(q.hp, rev)
+		})
 	}
 }
 
@@ -593,33 +581,33 @@ func (q *uploadQueue) push(j *uploadJob) {
 	j.estimate = time.Duration(q.estimate()) * time.Second
 	j.queue = q
 
-	// enqueue the job
 	q.queueMu.Lock()
 	defer q.queueMu.Unlock()
+
+	// enqueue the job
 	q.queue = append(q.queue, j)
 	q.queueUploads[j.id] = struct{}{}
-
-	// notify the queue
-	if len(q.queue) == 1 && !q.queueChanClosed {
-		close(q.queueChan)
-		q.queueChanClosed = true
-	}
+	q.queueChanClose.Do(func() { close(q.queueChan) })
 }
 
 func (q *uploadQueue) pop() *uploadJob {
 	q.queueMu.Lock()
 	defer q.queueMu.Unlock()
-	if len(q.queue) == 0 {
+
+	if len(q.queue) > 0 {
+		j := q.queue[0]
+		q.queue = q.queue[1:]
+		return j
+	} else {
+		// recreate the channel
 		q.queueChan = make(chan struct{})
-		q.queueChanClosed = false
-		return nil
+		q.queueChanClose = new(sync.Once)
 	}
-	j := q.queue[0]
-	q.queue = q.queue[1:]
-	return j
+
+	return nil
 }
 
-func (j *uploadJob) execute(hp hostProvider, rev *types.FileContractRevision) (err error) {
+func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (err error) {
 	j.requestSpan.AddEvent("execute")
 
 	// track performance

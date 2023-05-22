@@ -34,7 +34,7 @@ func (h *mockHost) HostKey() types.PublicKey {
 	return h.publicKey
 }
 
-func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error) {
+func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error) {
 	root := rhpv2.SectorRoot(sector)
 	h.sectors[root] = append([]byte(nil), sector[:]...)
 	return root, nil
@@ -58,19 +58,19 @@ func (h *mockHost) DeleteSectors(_ context.Context, roots []types.Hash256) error
 	return nil
 }
 
-func (h *mockHost) FetchPriceTable(ctx context.Context, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	panic("not implemented")
 }
-func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (_ *types.FileContractRevision, _ error) {
+func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (_ types.FileContractRevision, _ error) {
 	panic("not implemented")
 }
-func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, revision *types.FileContractRevision) error {
+func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
 	panic("not implemented")
 }
 func (h *mockHost) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	panic("not implemented")
 }
-func (h *mockHost) SyncAccount(ctx context.Context, revision *types.FileContractRevision) error {
+func (h *mockHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	panic("not implemented")
 }
 

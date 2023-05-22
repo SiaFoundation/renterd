@@ -198,8 +198,7 @@ type (
 	}
 
 	revisionLocker interface {
-		lockRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64) (*types.FileContractRevision, revisionUnlocker, error)
-		withRevision(ctx context.Context, timeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision *types.FileContractRevision) error) error
+		withRevision(ctx context.Context, timeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error
 	}
 )
 
@@ -419,36 +418,7 @@ func (w *worker) withHostV3(ctx context.Context, contractID types.FileContractID
 	})
 }
 
-func (w *worker) lockRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64) (*types.FileContractRevision, revisionUnlocker, error) {
-	cs, err := w.bus.ConsensusState(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// lock the revision for the duration of the operation.
-	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var rev *types.FileContractRevision
-	err = w.withHostV3(ctx, contractID, hk, siamuxAddr, func(h hostV3) error {
-		rev, err = h.FetchRevision(ctx, defaultRevisionFetchTimeout, cs.BlockHeight)
-		return err
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return rev, contractLock, nil
-}
-
-func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision *types.FileContractRevision) error) error {
-	cs, err := w.bus.ConsensusState(ctx)
-	if err != nil {
-		return err
-	}
-
+func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
 	// lock the revision for the duration of the operation.
 	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
 	if err != nil {
@@ -456,9 +426,9 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	}
 	defer contractLock.Release(ctx)
 
-	var rev *types.FileContractRevision
+	var rev types.FileContractRevision
 	err = w.withHostV3(ctx, contractID, hk, siamuxAddr, func(h hostV3) error {
-		rev, err = h.FetchRevision(ctx, fetchTimeout, cs.BlockHeight)
+		rev, err = h.FetchRevision(ctx, fetchTimeout, blockHeight)
 		return err
 	})
 	if err != nil {
@@ -532,7 +502,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
+func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, blockHeight uint64) (contracts []api.Contract, errs HostErrorSet) {
 	// create requests channel
 	reqs := make(chan api.ContractMetadata)
 
@@ -540,8 +510,8 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	var mu sync.Mutex
 	worker := func() {
 		for md := range reqs {
-			var revision *types.FileContractRevision
-			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, func(rev *types.FileContractRevision) error {
+			var revision types.FileContractRevision
+			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, blockHeight, func(rev types.FileContractRevision) error {
 				revision = rev
 				return nil
 			})
@@ -554,7 +524,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 			} else {
 				contracts = append(contracts, api.Contract{
 					ContractMetadata: md,
-					Revision:         revision,
+					Revision:         &revision,
 				})
 			}
 			mu.Unlock()
@@ -582,12 +552,12 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	return
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
 	var pt hostdb.HostPriceTable
 	err = w.withHostV3(ctx, types.FileContractID{}, hk, siamuxAddr, func(h hostV3) error {
-		hpt, err := h.FetchPriceTable(ctx, revision)
+		hpt, err := h.FetchPriceTable(ctx, rev)
 		if err != nil {
 			return err
 		}
@@ -743,18 +713,18 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision *types.FileContractRevision) (err error) {
-		err = w.FundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, revision)
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
+		err = w.FundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &rev)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
-			err = w.SyncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, revision)
+			err = w.SyncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &rev)
 			if err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 				return
 			}
 
 			// try funding the account again
-			err = w.FundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, revision)
+			err = w.FundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &rev)
 			if errors.Is(err, errBalanceSufficient) {
 				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
 				return nil
@@ -822,8 +792,8 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// sync the account
-	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision *types.FileContractRevision) error {
-		return w.SyncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, revision)
+	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(rev types.FileContractRevision) error {
+		return w.SyncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &rev)
 	}))
 }
 
@@ -873,7 +843,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w.uploader, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1133,7 +1103,7 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
-	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout)
+	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout, gp.ConsensusState.BlockHeight)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()
@@ -1371,9 +1341,9 @@ func isErrDuplicateTransactionSet(err error) bool {
 	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
 }
 
-func (w *worker) FundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, revision *types.FileContractRevision) error {
-	return w.withHostV3(ctx, revision.ParentID, hk, siamuxAddr, func(h hostV3) error {
-		return h.FundAccount(ctx, balance, revision)
+func (w *worker) FundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, rev *types.FileContractRevision) error {
+	return w.withHostV3(ctx, rev.ParentID, hk, siamuxAddr, func(h hostV3) error {
+		return h.FundAccount(ctx, balance, rev)
 	})
 }
 
@@ -1390,8 +1360,8 @@ func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Co
 	return renewed, txns, err
 }
 
-func (w *worker) SyncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) error {
-	return w.withHostV3(ctx, revision.ParentID, hk, siamuxAddr, func(h hostV3) error {
-		return h.SyncAccount(ctx, revision)
+func (w *worker) SyncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) error {
+	return w.withHostV3(ctx, rev.ParentID, hk, siamuxAddr, func(h hostV3) error {
+		return h.SyncAccount(ctx, rev)
 	})
 }
