@@ -40,7 +40,8 @@ type (
 
 	ContractSpendingRecord struct {
 		ContractSpending
-		ContractID types.FileContractID `json:"contractID"`
+		ContractID     types.FileContractID `json:"contractID"`
+		RevisionNumber uint64               `json:"revisionNumber"`
 	}
 
 	// An ArchivedContract contains all information about a contract with a host
