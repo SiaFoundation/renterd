@@ -42,23 +42,19 @@ type (
 		poolMu  sync.Mutex
 		pool    []*uploadQueue
 		exclude map[uploadID]map[types.FileContractID]struct{}
-		bh      uint64
 	}
 
 	uploadQueue struct {
-		u  *uploader
-		hp hostProvider
-		rl revisionLocker
-
 		fcid       types.FileContractID
 		hk         types.PublicKey
 		siamuxAddr string
 
-		queueMu        sync.Mutex
-		queueChan      chan struct{}
-		queueChanClose *sync.Once
-		queueUploads   map[uploadID]struct{}
-		queue          []*uploadJob
+		queueMu          sync.Mutex
+		queueBlockHeight uint64
+		queueChan        chan struct{}
+		queueChanClose   *sync.Once
+		queueUploads     map[uploadID]struct{}
+		queue            []*uploadJob
 
 		statsSpeed        *average
 		statsEstimateDiff *average
@@ -66,8 +62,7 @@ type (
 	}
 
 	uploadJob struct {
-		requestCtx  context.Context
-		requestSpan trace.Span
+		requestCtx context.Context
 
 		overdriveChan chan int
 		responseChan  chan uploadResponse
@@ -88,10 +83,10 @@ type (
 
 	uploadState struct {
 		mu           sync.Mutex
-		infl         uint64
-		rem          uint64
 		maxOverdrive uint64
+		numInflight  uint64
 		numOverdrive uint64
+		numRemaining uint64
 
 		pending     []int
 		overdriving map[int]struct{}
@@ -110,10 +105,6 @@ type (
 
 func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 	return &uploadQueue{
-		u:  u,
-		hp: u.w,
-		rl: u.w,
-
 		fcid:       c.ID,
 		hk:         c.HostKey,
 		siamuxAddr: c.SiamuxAddr,
@@ -157,12 +148,6 @@ func (u *uploader) Stop() {
 		close(q.stopChan)
 	}
 	close(u.statsStopChan)
-}
-
-func (u *uploader) blockHeight() uint64 {
-	u.poolMu.Lock()
-	defer u.poolMu.Unlock()
-	return u.bh
 }
 
 func (u *uploader) newUpload(exclude map[types.FileContractID]struct{}, totalShards uint64) (uploadID, error) {
@@ -307,22 +292,25 @@ func (u *uploader) uploadSectors(ctx context.Context, shards [][]byte, contracts
 		pending:      make([]int, 0, len(shards)),
 		overdriving:  make(map[int]struct{}, len(shards)),
 		sectors:      make([]object.Sector, len(shards)),
-		rem:          uint64(len(shards)),
+		numRemaining: uint64(len(shards)),
 	}
 
 	// prepare launch function
 	launch := func(job *uploadJob, overdrive bool) error {
 		// set the job's span
 		_, jobSpan := tracing.Tracer.Start(ctx, "uploader.uploadJob")
-		job.requestSpan = jobSpan
-		job.requestSpan.SetAttributes(attribute.Bool("overdrive", overdrive))
+		jobSpan.SetAttributes(attribute.Bool("overdrive", overdrive))
+		job.requestCtx = trace.ContextWithSpan(job.requestCtx, jobSpan)
 
 		// schedule the job
 		if err := u.enqueue(job); err != nil {
-			job.requestSpan.RecordError(err)
+			jobSpan.RecordError(err)
+			jobSpan.End()
 			return err
 		}
-		state.launched(overdrive)
+
+		// keep state
+		state.launch(overdrive)
 		return nil
 	}
 
@@ -490,9 +478,6 @@ func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
 	u.poolMu.Lock()
 	defer u.poolMu.Unlock()
 
-	// update blockheight
-	u.bh = bh
-
 	// build map
 	c2m := make(map[types.FileContractID]api.ContractMetadata)
 	for _, c := range contracts {
@@ -502,6 +487,7 @@ func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
 	// recreate the pool
 	var i int
 	for _, q := range u.pool {
+		q.updateBlockHeight(bh)
 		if _, keep := c2m[q.fcid]; !keep {
 			continue
 		}
@@ -518,28 +504,11 @@ func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
 	for _, contract := range c2m {
 		queue := u.newQueue(contract)
 		u.pool = append(u.pool, queue)
-		go queue.processJobs()
+		go processQueue(u.w, u.w, queue)
 	}
 }
 
-func (q *uploadQueue) finish(id uploadID) {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
-	delete(q.queueUploads, id)
-}
-
-func (q *uploadQueue) used(id uploadID) bool {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
-	_, used := q.queueUploads[id]
-	return used
-}
-
-func (q *uploadQueue) withRevision(ctx context.Context, fn func(rev types.FileContractRevision) error) error {
-	return q.rl.withRevision(ctx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.u.blockHeight(), fn)
-}
-
-func (q *uploadQueue) processJobs() {
+func processQueue(hp hostProvider, rl revisionLocker, q *uploadQueue) {
 	for {
 		// pop a job
 		job := q.pop()
@@ -558,10 +527,29 @@ func (q *uploadQueue) processJobs() {
 		}
 
 		// execute it
-		_ = q.withRevision(job.requestCtx, func(rev types.FileContractRevision) error {
-			return job.execute(q.hp, rev)
+		_ = rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.blockHeight(), func(rev types.FileContractRevision) error {
+			return job.execute(hp, rev)
 		})
 	}
+}
+
+func (q *uploadQueue) finish(id uploadID) {
+	q.queueMu.Lock()
+	defer q.queueMu.Unlock()
+	delete(q.queueUploads, id)
+}
+
+func (q *uploadQueue) used(id uploadID) bool {
+	q.queueMu.Lock()
+	defer q.queueMu.Unlock()
+	_, used := q.queueUploads[id]
+	return used
+}
+
+func (q *uploadQueue) blockHeight() uint64 {
+	q.queueMu.Lock()
+	defer q.queueMu.Unlock()
+	return q.queueBlockHeight
 }
 
 func (q *uploadQueue) estimate() float64 {
@@ -581,7 +569,8 @@ func (q *uploadQueue) estimate() float64 {
 
 func (q *uploadQueue) push(j *uploadJob) {
 	// decorate job
-	j.requestSpan.SetAttributes(attribute.Stringer("hk", q.hk))
+	span := trace.SpanFromContext(j.requestCtx)
+	span.SetAttributes(attribute.Stringer("hk", q.hk))
 	j.estimate = time.Duration(q.estimate()) * time.Second
 	j.queue = q
 
@@ -592,6 +581,12 @@ func (q *uploadQueue) push(j *uploadJob) {
 	q.queue = append(q.queue, j)
 	q.queueUploads[j.id] = struct{}{}
 	q.queueChanClose.Do(func() { close(q.queueChan) })
+}
+
+func (q *uploadQueue) updateBlockHeight(bh uint64) {
+	q.queueMu.Lock()
+	defer q.queueMu.Unlock()
+	q.queueBlockHeight = bh
 }
 
 func (q *uploadQueue) pop() *uploadJob {
@@ -611,7 +606,9 @@ func (q *uploadQueue) pop() *uploadJob {
 }
 
 func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (err error) {
-	j.requestSpan.AddEvent("execute")
+	// fetch span from context
+	span := trace.SpanFromContext(j.requestCtx)
+	span.AddEvent("execute")
 
 	// track performance
 	start := time.Now()
@@ -619,8 +616,8 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 		elapsed := time.Since(start)
 
 		// update span
-		j.requestSpan.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-		j.requestSpan.RecordError(err)
+		span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
+		span.RecordError(err)
 
 		// update stats
 		if err == nil {
@@ -638,7 +635,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 	go func() {
 		select {
 		case <-time.After(j.sectorTimeout):
-			j.requestSpan.AddEvent("overdrive")
+			span.AddEvent("overdrive")
 			select {
 			case j.overdriveChan <- j.sectorIndex:
 			default:
@@ -651,9 +648,9 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 	// upload sector
 	var root types.Hash256
 	if err = hp.withHostV3(j.requestCtx, j.queue.fcid, j.queue.hk, j.queue.siamuxAddr, func(h hostV3) error {
-		j.requestSpan.AddEvent("hostready")
+		span.AddEvent("hostready")
 		root, err = h.UploadSector(j.requestCtx, j.sector, rev)
-		j.requestSpan.AddEvent("uploaded")
+		span.AddEvent("uploaded")
 		return err
 	}); err != nil {
 		j.fail(err)
@@ -665,6 +662,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 }
 
 func (j *uploadJob) succeed(root types.Hash256) {
+	defer j.end()
 	select {
 	case j.responseChan <- uploadResponse{
 		job:  j,
@@ -672,10 +670,10 @@ func (j *uploadJob) succeed(root types.Hash256) {
 	}:
 	case <-time.After(time.Second):
 	}
-	j.requestSpan.End()
 }
 
 func (j *uploadJob) fail(err error) {
+	defer j.end()
 	select {
 	case j.responseChan <- uploadResponse{
 		job: j,
@@ -683,22 +681,26 @@ func (j *uploadJob) fail(err error) {
 	}:
 	case <-time.After(time.Second):
 	}
-	j.requestSpan.End()
 }
 
 func (j *uploadJob) done() bool {
 	select {
 	case <-j.requestCtx.Done():
+		j.end()
 		return true
 	default:
 		return false
 	}
 }
 
-func (s *uploadState) launched(overdrive bool) {
+func (j *uploadJob) end() {
+	trace.SpanFromContext(j.requestCtx).End()
+}
+
+func (s *uploadState) launch(overdrive bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.infl++
+	s.numInflight++
 	if overdrive {
 		s.numOverdrive++
 	}
@@ -707,7 +709,7 @@ func (s *uploadState) launched(overdrive bool) {
 func (s *uploadState) received() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.infl--
+	s.numInflight--
 }
 
 func (s *uploadState) complete(index int, hk types.PublicKey, root types.Hash256) bool {
@@ -717,20 +719,20 @@ func (s *uploadState) complete(index int, hk types.PublicKey, root types.Hash256
 		Host: hk,
 		Root: root,
 	}
-	s.rem--
-	return s.rem == 0
+	s.numRemaining--
+	return s.numRemaining == 0
 }
 
 func (s *uploadState) inflight() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.infl
+	return s.numInflight
 }
 
 func (s *uploadState) remaining() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.rem
+	return s.numRemaining
 }
 
 func (s *uploadState) schedule(index int) {
@@ -742,7 +744,7 @@ func (s *uploadState) schedule(index int) {
 func (s *uploadState) canOverdrive(index int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.infl-s.rem < s.maxOverdrive {
+	if s.numInflight-s.numRemaining < s.maxOverdrive {
 		return true
 	}
 
