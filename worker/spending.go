@@ -17,7 +17,7 @@ const keyContractSpendingRecorder contextKey = "ContractSpendingRecorder"
 type (
 	// A ContractSpendingRecorder records the spending of a contract.
 	ContractSpendingRecorder interface {
-		Record(fcid types.FileContractID, cs api.ContractSpending)
+		Record(fcid types.FileContractID, revisionNumber uint64, cs api.ContractSpending)
 	}
 
 	contractSpendingRecorder struct {
@@ -26,17 +26,17 @@ type (
 		logger        *zap.SugaredLogger
 
 		mu                          sync.Mutex
-		contractSpendings           map[types.FileContractID]api.ContractSpending
+		contractSpendings           map[types.FileContractID]api.ContractSpendingRecord
 		contractSpendingsFlushTimer *time.Timer
 	}
 )
 
-func recordContractSpending(ctx context.Context, fcid types.FileContractID, cs api.ContractSpending, err *error) {
+func recordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber uint64, cs api.ContractSpending, err *error) {
 	if err != nil && *err != nil {
 		return
 	}
 	if sr, ok := ctx.Value(keyContractSpendingRecorder).(ContractSpendingRecorder); ok {
-		sr.Record(fcid, cs)
+		sr.Record(fcid, revisionNumber, cs)
 		return
 	}
 }
@@ -53,19 +53,27 @@ func (w *worker) initContractSpendingRecorder() {
 	}
 	w.contractSpendingRecorder = &contractSpendingRecorder{
 		bus:               w.bus,
-		contractSpendings: make(map[types.FileContractID]api.ContractSpending),
+		contractSpendings: make(map[types.FileContractID]api.ContractSpendingRecord),
 		flushInterval:     w.busFlushInterval,
 		logger:            w.logger,
 	}
 }
 
 // Record sends contract spending records to the bus.
-func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, cs api.ContractSpending) {
+func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, revisionNumber uint64, cs api.ContractSpending) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
-	// Add spending to buffer.
-	sr.contractSpendings[fcid] = sr.contractSpendings[fcid].Add(cs)
+	// Update buffer.
+	csr, found := sr.contractSpendings[fcid]
+	if !found {
+		csr = api.ContractSpendingRecord{
+			ContractID: fcid,
+		}
+	}
+	csr.ContractSpending = csr.ContractSpending.Add(cs)
+	csr.RevisionNumber = revisionNumber
+	sr.contractSpendings[fcid] = csr
 
 	// If a thread was scheduled to flush the buffer we are done.
 	if sr.contractSpendingsFlushTimer != nil {
@@ -84,16 +92,13 @@ func (sr *contractSpendingRecorder) flush() {
 		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushContractSpending")
 		defer span.End()
 		records := make([]api.ContractSpendingRecord, 0, len(sr.contractSpendings))
-		for fcid, cs := range sr.contractSpendings {
-			records = append(records, api.ContractSpendingRecord{
-				ContractID:       fcid,
-				ContractSpending: cs,
-			})
+		for _, cs := range sr.contractSpendings {
+			records = append(records, cs)
 		}
 		if err := sr.bus.RecordContractSpending(ctx, records); err != nil {
 			sr.logger.Errorw(fmt.Sprintf("failed to record contract spending: %v", err))
 		} else {
-			sr.contractSpendings = make(map[types.FileContractID]api.ContractSpending)
+			sr.contractSpendings = make(map[types.FileContractID]api.ContractSpendingRecord)
 		}
 	}
 	sr.contractSpendingsFlushTimer = nil
