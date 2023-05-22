@@ -307,7 +307,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
 				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
 			}
-			h.contractSpendingRecorder.Record(rev.ParentID, api.ContractSpending{FundAccount: cost})
+			h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, api.ContractSpending{FundAccount: cost})
 			return nil
 		})
 	})
