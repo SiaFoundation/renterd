@@ -456,6 +456,9 @@ func TestUploadDownloadSpending(t *testing.T) {
 		for _, c := range cms {
 			if !c.Spending.FundAccount.IsZero() {
 				nFunded++
+				if c.RevisionNumber == 0 {
+					t.Fatal("contract was used for funding but revision wasn't incremented")
+				}
 			}
 		}
 		if nFunded < rs.TotalShards {

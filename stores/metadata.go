@@ -679,9 +679,16 @@ func (s *SQLStore) Object(ctx context.Context, key string) (object.Object, error
 }
 
 func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
+	if len(records) == 0 {
+		return nil // nothing to do
+	}
 	squashedRecords := make(map[types.FileContractID]api.ContractSpending)
+	latestRevision := make(map[types.FileContractID]uint64)
 	for _, r := range records {
 		squashedRecords[r.ContractID] = squashedRecords[r.ContractID].Add(r.ContractSpending)
+		if r.RevisionNumber > latestRevision[r.ContractID] {
+			latestRevision[r.ContractID] = r.RevisionNumber
+		}
 	}
 	for fcid, newSpending := range squashedRecords {
 		err := s.retryTransaction(func(tx *gorm.DB) error {
@@ -704,6 +711,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			if !newSpending.FundAccount.IsZero() {
 				updates["fund_account_spending"] = currency(types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount))
 			}
+			updates["revision_number"] = latestRevision[fcid]
 			return tx.Model(&contract).Updates(updates).Error
 		})
 		if err != nil {
