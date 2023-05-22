@@ -683,7 +683,11 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// renew the contract
-	renewed, txnSet, err := w.Renew(ctx, rrr)
+	h, err := w.newHostV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
+	if jc.Check("failed to create host for renewal", err) != nil {
+		return
+	}
+	renewed, txnSet, err := h.Renew(ctx, rrr)
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
 	}
@@ -718,19 +722,25 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
+	// create host
+
 	// fund the account
 	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(revision types.FileContractRevision) (err error) {
-		err = w.FundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
+		h, err := w.newHostV3(ctx, revision.ParentID, rfr.HostKey, rfr.SiamuxAddr)
+		if err != nil {
+			return err
+		}
+		err = h.FundAccount(ctx, rfr.Balance, &revision)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
-			err = w.SyncAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, &revision)
+			err = h.SyncAccount(ctx, &revision)
 			if err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 				return
 			}
 
 			// try funding the account again
-			err = w.FundAccount(ctx, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance, &revision)
+			err = h.FundAccount(ctx, rfr.Balance, &revision)
 			if errors.Is(err, errBalanceSufficient) {
 				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
 				return nil
@@ -798,8 +808,12 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// sync the account
+	h, err := w.newHostV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
+	if jc.Check("failed to create host for renewal", err) != nil {
+		return
+	}
 	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(revision types.FileContractRevision) error {
-		return w.SyncAccount(ctx, rsr.HostKey, rsr.SiamuxAddr, &revision)
+		return h.SyncAccount(ctx, &revision)
 	}))
 }
 
@@ -1408,31 +1422,4 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 
 func isErrDuplicateTransactionSet(err error) bool {
 	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
-}
-
-func (w *worker) FundAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, balance types.Currency, revision *types.FileContractRevision) error {
-	h, err := w.newHostV3(ctx, revision.ParentID, hk, siamuxAddr)
-	if err != nil {
-		return err
-	}
-	return h.FundAccount(ctx, balance, revision)
-}
-
-// Renew renews a contract with a host. To avoid an edge case where the contract
-// is drained and can therefore not be used to pay for the revision, we simply
-// don't pay for it.
-func (w *worker) Renew(ctx context.Context, rrr api.RHPRenewRequest) (rhpv2.ContractRevision, []types.Transaction, error) {
-	h, err := w.newHostV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
-	if err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-	return h.Renew(ctx, rrr)
-}
-
-func (w *worker) SyncAccount(ctx context.Context, hk types.PublicKey, siamuxAddr string, revision *types.FileContractRevision) error {
-	h, err := w.newHostV3(ctx, revision.ParentID, hk, siamuxAddr)
-	if err != nil {
-		return err
-	}
-	return h.SyncAccount(ctx, revision)
 }
