@@ -31,12 +31,12 @@ type (
 	}
 )
 
-func recordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber uint64, cs api.ContractSpending, err *error) {
+func recordContractSpending(ctx context.Context, rev *types.FileContractRevision, cs api.ContractSpending, err *error) {
 	if err != nil && *err != nil {
 		return
 	}
 	if sr, ok := ctx.Value(keyContractSpendingRecorder).(ContractSpendingRecorder); ok {
-		sr.Record(fcid, revisionNumber, cs)
+		sr.Record(rev.ParentID, rev.RevisionNumber, cs)
 		return
 	}
 }
@@ -72,7 +72,9 @@ func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, revisionNu
 		}
 	}
 	csr.ContractSpending = csr.ContractSpending.Add(cs)
-	csr.RevisionNumber = revisionNumber
+	if revisionNumber > csr.RevisionNumber {
+		csr.RevisionNumber = revisionNumber
+	}
 	sr.contractSpendings[fcid] = csr
 
 	// If a thread was scheduled to flush the buffer we are done.

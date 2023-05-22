@@ -287,7 +287,7 @@ func (s *Session) HostKey() types.PublicKey { return s.revision.HostKey() }
 func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCReadRequestSection, price types.Currency) (err error) {
 	defer wrapErr(&err, "Read")
 	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCReadID, &err)()
-	defer recordContractSpending(ctx, s.revision.ID(), s.revision.Revision.RevisionNumber+1, api.ContractSpending{Downloads: price}, &err)
+	defer recordContractSpending(ctx, &s.revision.Revision, api.ContractSpending{Downloads: price}, &err)
 
 	empty := true
 	for _, s := range sections {
@@ -619,7 +619,7 @@ func (s *Session) Unlock(ctx context.Context) (err error) {
 func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, price, collateral types.Currency) (err error) {
 	defer wrapErr(&err, "Write")
 	defer recordRPC(ctx, s.transport, s.revision, rhpv2.RPCWriteID, &err)()
-	defer recordContractSpending(ctx, s.revision.ID(), s.revision.Revision.RevisionNumber+1, api.ContractSpending{Uploads: price}, &err)
+	defer recordContractSpending(ctx, &s.revision.Revision, api.ContractSpending{Uploads: price}, &err)
 
 	if !s.isRevisable() {
 		return ErrContractFinalized
