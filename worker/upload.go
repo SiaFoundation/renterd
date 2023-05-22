@@ -28,7 +28,7 @@ var errNoQueue = errors.New("no queue")
 
 type (
 	migrator interface {
-		uploadSectors(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, used map[types.FileContractID]struct{}, blockHeight uint64) ([]object.Sector, error)
+		uploadShards(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, used map[types.FileContractID]struct{}, blockHeight uint64) ([]object.Sector, error)
 	}
 
 	uploadID [8]byte
@@ -39,9 +39,9 @@ type (
 		statsOverdrive *average
 		statsStopChan  chan struct{}
 
-		poolMu  sync.Mutex
-		pool    []*uploadQueue
-		exclude map[uploadID]map[types.FileContractID]struct{}
+		mu        sync.Mutex
+		contracts []*uploadQueue
+		exclude   map[uploadID]map[types.FileContractID]struct{}
 	}
 
 	uploadQueue struct {
@@ -49,12 +49,11 @@ type (
 		hk         types.PublicKey
 		siamuxAddr string
 
-		queueMu          sync.Mutex
-		queueBlockHeight uint64
-		queueChan        chan struct{}
-		queueChanClose   *sync.Once
-		queueUploads     map[uploadID]struct{}
-		queue            []*uploadJob
+		mu           sync.Mutex
+		bh           uint64
+		queueChan    chan struct{}
+		queueUploads map[uploadID]struct{}
+		queue        []*uploadJob
 
 		statsSpeed        *average
 		statsEstimateDiff *average
@@ -110,7 +109,7 @@ func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 		siamuxAddr: c.SiamuxAddr,
 
 		queue:        make([]*uploadJob, 0),
-		queueChan:    make(chan struct{}),
+		queueChan:    make(chan struct{}, 1),
 		queueUploads: make(map[uploadID]struct{}),
 
 		statsSpeed:        newAverage(defaultAvgUpdateInterval),
@@ -135,28 +134,28 @@ func (w *worker) initUploader() {
 		statsOverdrive: newAverage(defaultAvgUpdateInterval),
 		statsStopChan:  make(chan struct{}),
 
-		w:       w,
-		pool:    make([]*uploadQueue, 0),
-		exclude: make(map[uploadID]map[types.FileContractID]struct{}),
+		w:         w,
+		contracts: make([]*uploadQueue, 0),
+		exclude:   make(map[uploadID]map[types.FileContractID]struct{}),
 	}
 }
 
 func (u *uploader) Stop() {
-	u.poolMu.Lock()
-	defer u.poolMu.Unlock()
-	for _, q := range u.pool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, q := range u.contracts {
 		close(q.stopChan)
 	}
 	close(u.statsStopChan)
 }
 
 func (u *uploader) newUpload(exclude map[types.FileContractID]struct{}, totalShards uint64) (uploadID, error) {
-	u.poolMu.Lock()
-	defer u.poolMu.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	// sanity check redundancy
 	var remaining uint64
-	for _, q := range u.pool {
+	for _, q := range u.contracts {
 		if _, exclude := exclude[q.fcid]; !exclude {
 			remaining++
 		}
@@ -173,11 +172,11 @@ func (u *uploader) newUpload(exclude map[types.FileContractID]struct{}, totalSha
 }
 
 func (u *uploader) finishUpload(id uploadID) {
-	u.poolMu.Lock()
-	defer u.poolMu.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	delete(u.exclude, id)
-	for _, q := range u.pool {
+	for _, q := range u.contracts {
 		q.finish(id)
 	}
 }
@@ -239,7 +238,7 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 			span.AddEvent("shards encrypted")
 
 			// upload the shards
-			slab.Shards, err = u.uploadSectors(ctx, shards, contracts, nil, blockHeight)
+			slab.Shards, err = u.uploadShards(ctx, shards, contracts, nil, blockHeight)
 			if err != nil {
 				return false, err
 			}
@@ -270,8 +269,8 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 	return o, used, nil
 }
 
-func (u *uploader) uploadSectors(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, used map[types.FileContractID]struct{}, blockHeight uint64) ([]object.Sector, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "uploader.uploadSectors")
+func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, used map[types.FileContractID]struct{}, blockHeight uint64) ([]object.Sector, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "uploader.uploadShards")
 	defer span.End()
 
 	// refresh contracts
@@ -451,19 +450,19 @@ func (u *uploader) enqueue(j *uploadJob) error {
 }
 
 func (u *uploader) queue(id uploadID) *uploadQueue {
-	u.poolMu.Lock()
-	defer u.poolMu.Unlock()
-	if len(u.pool) == 0 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if len(u.contracts) == 0 {
 		return nil
 	}
 
 	// sort the pool by estimate
-	sort.Slice(u.pool, func(i, j int) bool {
-		return u.pool[i].estimate() < u.pool[j].estimate()
+	sort.Slice(u.contracts, func(i, j int) bool {
+		return u.contracts[i].estimate() < u.contracts[j].estimate()
 	})
 
 	// return the first unused queue
-	for _, q := range u.pool {
+	for _, q := range u.contracts {
 		if _, exclude := u.exclude[id][q.fcid]; exclude {
 			continue
 		}
@@ -475,8 +474,8 @@ func (u *uploader) queue(id uploadID) *uploadQueue {
 }
 
 func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
-	u.poolMu.Lock()
-	defer u.poolMu.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	// build map
 	c2m := make(map[types.FileContractID]api.ContractMetadata)
@@ -486,75 +485,87 @@ func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
 
 	// recreate the pool
 	var i int
-	for _, q := range u.pool {
+	for _, q := range u.contracts {
 		q.updateBlockHeight(bh)
 		if _, keep := c2m[q.fcid]; !keep {
 			continue
 		}
 		delete(c2m, q.fcid)
-		u.pool[i] = q
+		u.contracts[i] = q
 		i++
 	}
-	for j := i; j < len(u.pool); j++ {
-		u.pool[j] = nil
+	for j := i; j < len(u.contracts); j++ {
+		u.contracts[j] = nil
 	}
-	u.pool = u.pool[:i]
+	u.contracts = u.contracts[:i]
 
 	// add missing uploaders
 	for _, contract := range c2m {
 		queue := u.newQueue(contract)
-		u.pool = append(u.pool, queue)
+		u.contracts = append(u.contracts, queue)
 		go processQueue(u.w, u.w, queue)
 	}
 }
 
 func processQueue(hp hostProvider, rl revisionLocker, q *uploadQueue) {
+outer:
 	for {
-		// pop a job
-		job := q.pop()
-		if job == nil {
+		// wait for work
+		select {
+		case <-q.queueChan:
+		case <-q.stopChan:
+			return
+		}
+
+		for {
+			// check if we are stopped
 			select {
-			case <-q.queueChan:
-				job = q.pop()
 			case <-q.stopChan:
 				return
+			default:
 			}
-		}
 
-		// skip if job is done
-		if job.done() {
-			continue
-		}
+			// pop the next job
+			job := q.pop()
+			if job == nil {
+				continue outer
+			}
 
-		// execute it
-		_ = rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.blockHeight(), func(rev types.FileContractRevision) error {
-			return job.execute(hp, rev)
-		})
+			// skip if job is done
+			if job.done() {
+				continue
+			}
+
+			// execute it
+			_ = rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.blockHeight(), func(rev types.FileContractRevision) error {
+				return job.execute(hp, rev)
+			})
+		}
 	}
 }
 
 func (q *uploadQueue) finish(id uploadID) {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	delete(q.queueUploads, id)
 }
 
 func (q *uploadQueue) used(id uploadID) bool {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	_, used := q.queueUploads[id]
 	return used
 }
 
 func (q *uploadQueue) blockHeight() uint64 {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
-	return q.queueBlockHeight
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.bh
 }
 
 func (q *uploadQueue) estimate() float64 {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 
 	// fetch average speed
 	speed := q.statsSpeed.average()
@@ -574,34 +585,35 @@ func (q *uploadQueue) push(j *uploadJob) {
 	j.estimate = time.Duration(q.estimate()) * time.Second
 	j.queue = q
 
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 
 	// enqueue the job
 	q.queue = append(q.queue, j)
 	q.queueUploads[j.id] = struct{}{}
-	q.queueChanClose.Do(func() { close(q.queueChan) })
+
+	// signal there's work
+	select {
+	case q.queueChan <- struct{}{}:
+	default:
+	}
 }
 
 func (q *uploadQueue) updateBlockHeight(bh uint64) {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
-	q.queueBlockHeight = bh
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.bh = bh
 }
 
 func (q *uploadQueue) pop() *uploadJob {
-	q.queueMu.Lock()
-	defer q.queueMu.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 
 	if len(q.queue) > 0 {
 		j := q.queue[0]
 		q.queue = q.queue[1:]
 		return j
 	}
-
-	// recreate the channel
-	q.queueChan = make(chan struct{})
-	q.queueChanClose = new(sync.Once)
 	return nil
 }
 
