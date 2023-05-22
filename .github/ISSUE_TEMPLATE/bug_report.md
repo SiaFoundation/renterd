@@ -41,7 +41,7 @@ curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/redundancy
 **Contract Set Contracts**
 
 ```bash
-curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/contracts/set/autopilot | wc -l
+curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/contracts/set/autopilot | grep '"id"' | wc -l
 ```
 
 ### Renterd Logs
