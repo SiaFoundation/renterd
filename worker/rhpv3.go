@@ -560,11 +560,20 @@ func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 }
 
 // UploadSector uploads a sector to the host.
-func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (_ types.Hash256, err error) {
+func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (root types.Hash256, err error) {
+	// fetch price table
 	pt, err := r.priceTable(ctx, nil)
 	if err != nil {
 		return types.Hash256{}, err
 	}
+
+	// prepare payment
+	expectedCost, _, _, err := uploadSectorCost(pt, rev.EndHeight())
+	if err != nil {
+		return types.Hash256{}, err
+	}
+	payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
+
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
 		if isBalanceInsufficient(err) {
@@ -572,16 +581,10 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		}
 	}()
 
-	var sectorRoot types.Hash256
-	return sectorRoot, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+	return root, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
 			var refund, cost types.Currency
-			expectedCost, _, _, err := uploadSectorCost(pt, rev.EndHeight())
-			if err != nil {
-				return err
-			}
-			payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
-			sectorRoot, cost, refund, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
+			root, cost, refund, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
 			amount = cost.Sub(refund)
 			return err
 		})

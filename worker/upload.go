@@ -49,11 +49,12 @@ type (
 		hk         types.PublicKey
 		siamuxAddr string
 
-		mu           sync.Mutex
-		bh           uint64
-		queueChan    chan struct{}
-		queueUploads map[uploadID]struct{}
-		queue        []*uploadJob
+		mu                  sync.Mutex
+		bh                  uint64
+		consecutiveFailures uint64
+		queueChan           chan struct{}
+		queueUploads        map[uploadID]struct{}
+		queue               []*uploadJob
 
 		statsSpeed        *average
 		statsEstimateDiff *average
@@ -63,6 +64,7 @@ type (
 	uploadJob struct {
 		requestCtx context.Context
 
+		overdrive     bool
 		overdriveChan chan int
 		responseChan  chan uploadResponse
 
@@ -90,6 +92,12 @@ type (
 		pending     []int
 		overdriving map[int]struct{}
 		sectors     []object.Sector
+	}
+
+	uploadStats struct {
+		overdrivePct  float64
+		queuesHealthy uint64
+		queuesTotal   uint64
 	}
 
 	average struct {
@@ -137,6 +145,24 @@ func (w *worker) initUploader() {
 		w:         w,
 		contracts: make([]*uploadQueue, 0),
 		exclude:   make(map[uploadID]map[types.FileContractID]struct{}),
+	}
+}
+
+func (u *uploader) Stats() uploadStats {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	var healthy uint64
+	for _, q := range u.contracts {
+		if q.consecutiveFailures == 0 {
+			healthy++
+		}
+	}
+
+	return uploadStats{
+		overdrivePct:  u.statsOverdrive.average(),
+		queuesHealthy: healthy,
+		queuesTotal:   uint64(len(u.contracts)),
 	}
 }
 
@@ -293,10 +319,10 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	}
 
 	// prepare launch function
-	launch := func(job *uploadJob, overdrive bool) error {
+	launch := func(job *uploadJob) error {
 		// set the job's span
 		_, jobSpan := tracing.Tracer.Start(ctx, "uploader.uploadJob")
-		jobSpan.SetAttributes(attribute.Bool("overdrive", overdrive))
+		jobSpan.SetAttributes(attribute.Bool("overdrive", job.overdrive))
 		job.requestCtx = trace.ContextWithSpan(job.requestCtx, jobSpan)
 
 		// schedule the job
@@ -307,7 +333,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		}
 
 		// keep state
-		state.launch(overdrive, job.sectorIndex)
+		state.launch(job)
 		return nil
 	}
 
@@ -333,6 +359,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 			case i := <-overdriveChan:
 				if state.canOverdrive(i) {
 					_ = launch(&uploadJob{
+						overdrive:     true,
 						overdriveChan: overdriveChan,
 						responseChan:  responseChan,
 						requestCtx:    ctx,
@@ -340,7 +367,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 						sectorIndex:   i,
 						sectorTimeout: u.w.uploadSectorTimeout,
 						id:            id,
-					}, true)
+					})
 				}
 				resetTimeout()
 			}
@@ -350,6 +377,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	// launch all shards
 	for i, shard := range shards {
 		if err := launch(&uploadJob{
+			overdrive:     false,
 			overdriveChan: overdriveChan,
 			responseChan:  responseChan,
 			requestCtx:    ctx,
@@ -357,7 +385,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 			sectorIndex:   i,
 			sectorTimeout: u.w.uploadSectorTimeout,
 			id:            id,
-		}, false); err != nil {
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -371,13 +399,14 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 			nxt := state.nextOverdrive()
 			if nxt != -1 && state.canOverdrive(nxt) {
 				_ = launch(&uploadJob{
+					overdrive:     true,
 					overdriveChan: overdriveChan,
 					responseChan:  responseChan,
 					requestCtx:    ctx,
 					sectorIndex:   nxt,
 					sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
 					id:            id,
-				}, true)
+				})
 			}
 			resetTimeout()
 			continue
@@ -391,7 +420,9 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		hk := resp.job.queue.hk
 		if resp.err != nil {
 			errs = append(errs, &HostError{hk, resp.err})
-			if err := launch(resp.job, false); err != nil {
+			if err := launch(resp.job); err != nil && resp.job.overdrive {
+				break // download failed, not enough hosts
+			} else if err != nil {
 				u.w.logger.Debugf("failed to re-launch job: %v, host %v failed with err %v", err, resp.job.queue.hk, resp.err)
 				state.schedule(resp.job.sectorIndex)
 			}
@@ -409,13 +440,14 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 			}
 
 			if err := launch(&uploadJob{
+				overdrive:     true,
 				overdriveChan: overdriveChan,
 				responseChan:  responseChan,
 				requestCtx:    ctx,
 				sectorIndex:   nxt,
 				sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
 				id:            id,
-			}, true); err != nil {
+			}); err != nil {
 				break
 			}
 		}
@@ -601,6 +633,16 @@ func (q *uploadQueue) push(j *uploadJob) {
 	}
 }
 
+func (q *uploadQueue) track(err error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if err == nil {
+		q.consecutiveFailures = 0
+	} else {
+		q.consecutiveFailures++
+	}
+}
+
 func (q *uploadQueue) updateBlockHeight(bh uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -641,6 +683,9 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 		} else {
 			j.queue.statsSpeed.track(math.SmallestNonzeroFloat64)
 		}
+
+		// update queue
+		j.queue.track(err)
 	}()
 
 	// schedule overdrive
@@ -713,12 +758,12 @@ func (j *uploadJob) end() {
 	trace.SpanFromContext(j.requestCtx).End()
 }
 
-func (s *uploadState) launch(overdrive bool, sectorIndex int) {
+func (s *uploadState) launch(job *uploadJob) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.numInflight++
-	if overdrive {
-		s.overdriving[sectorIndex] = struct{}{}
+	if job.overdrive {
+		s.overdriving[job.sectorIndex] = struct{}{}
 		s.numOverdrive++
 	}
 }

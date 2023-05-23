@@ -884,6 +884,15 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 }
 
+func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
+	stats := w.uploader.Stats()
+	jc.Encode(api.UploadStatsResponse{
+		OverdrivePct:        stats.overdrivePct,
+		UploadQueuesHealthy: stats.queuesHealthy,
+		UploadQueuesTotal:   stats.queuesTotal,
+	})
+}
+
 func (w *worker) objectsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 	jc.Custom(nil, []api.ObjectMetadata{})
@@ -1207,6 +1216,8 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
 
 		"POST   /slab/migrate": w.slabMigrateHandler,
+
+		"GET    /stats/uploads": w.uploadsStatshandlerGET,
 
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
