@@ -185,9 +185,7 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "uploader.upload")
 	defer func() {
-		if err != nil {
-			span.RecordError(err)
-		}
+		span.RecordError(err)
 		span.End()
 	}()
 
@@ -731,11 +729,11 @@ func (s *uploadState) received() {
 	s.numInflight--
 }
 
-func (s *uploadState) complete(index int, hk types.PublicKey, root types.Hash256) bool {
+func (s *uploadState) complete(sectorIndex int, hk types.PublicKey, root types.Hash256) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sectors[index].Root == (types.Hash256{}) {
-		s.sectors[index] = object.Sector{
+	if s.sectors[sectorIndex].Root == (types.Hash256{}) {
+		s.sectors[sectorIndex] = object.Sector{
 			Host: hk,
 			Root: root,
 		}
@@ -756,27 +754,28 @@ func (s *uploadState) remaining() uint64 {
 	return s.numRemaining
 }
 
-func (s *uploadState) schedule(index int) {
+func (s *uploadState) schedule(sectorIndex int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pending = append(s.pending, index)
+	s.pending = append([]int{sectorIndex}, s.pending...) // prepend so it's next up
 }
 
-func (s *uploadState) canOverdrive(index int) bool {
+func (s *uploadState) canOverdrive(sectorIndex int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.numInflight-s.numRemaining < s.maxOverdrive {
 		return true
 	}
 
-	// schedule overdrive for later
-	for _, p := range s.pending {
-		if p == index {
-			return false // already pending, no need to add it
+	// if the sector is already scheduled, don't schedule it again
+	for _, pending := range s.pending {
+		if sectorIndex == pending {
+			return false
 		}
 	}
 
-	s.pending = append(s.pending, index)
+	// schedule overdrive for later
+	s.pending = append(s.pending, sectorIndex)
 	return false
 }
 
@@ -793,7 +792,7 @@ func (s *uploadState) nextOverdrive() int {
 		}
 	}
 
-	// try overdriving a sector that we have not overdrived before
+	// try overdriving a new sector
 	for index, sector := range s.sectors {
 		_, ongoing := s.overdriving[index]
 		if sector.Root == (types.Hash256{}) && !ongoing {
@@ -801,7 +800,7 @@ func (s *uploadState) nextOverdrive() int {
 		}
 	}
 
-	// randomly overdrive a sector we overdrived before, but is not finished yet
+	// randomly overdrive a sector we overdrived before
 	for index := range s.overdriving {
 		if s.sectors[index].Root == (types.Hash256{}) {
 			return index
