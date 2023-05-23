@@ -729,11 +729,13 @@ func (s *uploadState) received() {
 func (s *uploadState) complete(index int, hk types.PublicKey, root types.Hash256) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sectors[index] = object.Sector{
-		Host: hk,
-		Root: root,
+	if s.sectors[index].Root == (types.Hash256{}) {
+		s.sectors[index] = object.Sector{
+			Host: hk,
+			Root: root,
+		}
+		s.numRemaining--
 	}
-	s.numRemaining--
 	return s.numRemaining == 0
 }
 
