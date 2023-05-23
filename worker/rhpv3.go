@@ -323,7 +323,10 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
-			payment := preparePayment(h.accountKey, pt.AccountBalanceCost, pt.HostBlockHeight)
+			payment, err := payByContract(revision, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			if err != nil {
+				return err
+			}
 			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
 			return err
 		})
