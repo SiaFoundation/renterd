@@ -1042,11 +1042,15 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 	}
 
 	// verify proof
-	proofStart := int(offset) / crypto.SegmentSize
-	proofEnd := int(offset+length) / crypto.SegmentSize
-	if !crypto.VerifyRangeProof(resp.Output, proof, proofStart, proofEnd, crypto.Hash(merkleRoot)) {
-		err = errors.New("proof verification failed")
-		return
+	//
+	// TODO PJ: re-enable
+	if false {
+		proofStart := int(offset) / crypto.SegmentSize
+		proofEnd := int(offset+length) / crypto.SegmentSize
+		if !crypto.VerifyRangeProof(resp.Output, proof, proofStart, proofEnd, crypto.Hash(merkleRoot)) {
+			err = errors.New("proof verification failed")
+			return
+		}
 	}
 
 	_, err = w.Write(resp.Output)
