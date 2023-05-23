@@ -568,7 +568,7 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	}
 
 	// prepare payment
-	expectedCost, _, _, err := uploadSectorCost(pt, rev.EndHeight())
+	expectedCost, _, _, err := uploadSectorCost(pt, rev.WindowEnd)
 	if err != nil {
 		return types.Hash256{}, err
 	}
@@ -608,9 +608,9 @@ func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
 
 // uploadSectorCost returns an overestimate for the cost of uploading a sector
 // to a host
-func uploadSectorCost(pt rhpv3.HostPriceTable, endHeight uint64) (cost, collateral, storage types.Currency, _ error) {
+func uploadSectorCost(pt rhpv3.HostPriceTable, windowEnd uint64) (cost, collateral, storage types.Currency, _ error) {
 	rc := pt.BaseCost()
-	rc = rc.Add(pt.AppendSectorCost(endHeight - pt.HostBlockHeight))
+	rc = rc.Add(pt.AppendSectorCost(windowEnd - pt.HostBlockHeight))
 	cost, collateral = rc.Total()
 
 	// overestimate the cost by 5%
@@ -1149,7 +1149,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 
 	// check additional collateral
 	collateral := executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
-	_, expectedCollateral, expectedRefund, err := uploadSectorCost(pt, rev.EndHeight())
+	_, expectedCollateral, expectedRefund, err := uploadSectorCost(pt, rev.WindowEnd)
 	if err != nil {
 		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, err
 	}

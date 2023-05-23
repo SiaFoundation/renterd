@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,18 +25,47 @@ type gormLogger struct {
 	l *zap.SugaredLogger
 }
 
-func NewSQLLogger(l *zap.Logger, config *LoggerConfig) logger.Interface {
-	if config == nil {
-		config = &LoggerConfig{
-			IgnoreRecordNotFoundError: true,
-			LogLevel:                  logger.Warn,
-			SlowThreshold:             500 * time.Millisecond,
-		}
-	}
+func NewSQLLogger(l *zap.Logger, config LoggerConfig) logger.Interface {
 	return &gormLogger{
-		LoggerConfig: *config,
+		LoggerConfig: config,
 		l:            l.Sugar(),
 	}
+}
+
+// ParseLoggerConfig parses the given variables into a logger config.
+func ParseLoggerConfig(logLevel, ignoreRecordNotFoundError, slowThreshold string) (config LoggerConfig, err error) {
+	// try parse log level
+	if logLevel != "" {
+		switch strings.ToLower(logLevel) {
+		case "silent":
+			config.LogLevel = logger.Silent
+		case "error":
+			config.LogLevel = logger.Error
+		case "warn":
+			config.LogLevel = logger.Warn
+		case "info":
+			config.LogLevel = logger.Info
+		default:
+			return LoggerConfig{}, errors.New("invalid log level, options are: silent, error, warn, info")
+		}
+	}
+
+	// try parse ignore record not found error
+	if ignoreRecordNotFoundError != "" {
+		config.IgnoreRecordNotFoundError, err = strconv.ParseBool(ignoreRecordNotFoundError)
+		if err != nil {
+			return LoggerConfig{}, err
+		}
+	}
+
+	// try parse slow threshold
+	if slowThreshold != "" {
+		config.SlowThreshold, err = time.ParseDuration(slowThreshold)
+		if err != nil {
+			return LoggerConfig{}, err
+		}
+	}
+	return
 }
 
 func (l *gormLogger) LogMode(level logger.LogLevel) logger.Interface {

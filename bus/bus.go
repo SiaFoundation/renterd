@@ -50,7 +50,7 @@ type (
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
 		Address() types.Address
-		Balance() types.Currency
+		Balance() (types.Currency, error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error)
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
 		ReleaseInputs(txn types.Transaction)
@@ -194,7 +194,11 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 }
 
 func (b *bus) walletBalanceHandler(jc jape.Context) {
-	jc.Encode(b.w.Balance())
+	balance, err := b.w.Balance()
+	if jc.Check("couldn't fetch wallet balance", err) != nil {
+		return
+	}
+	jc.Encode(balance)
 }
 
 func (b *bus) walletAddressHandler(jc jape.Context) {

@@ -17,7 +17,7 @@ type mockStore struct {
 	utxos []wallet.SiacoinElement
 }
 
-func (s *mockStore) Balance() types.Currency                                  { return types.ZeroCurrency }
+func (s *mockStore) Balance() (types.Currency, error)                         { return types.ZeroCurrency, nil }
 func (s *mockStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) { return s.utxos, nil }
 func (s *mockStore) Transactions(since time.Time, max int) ([]wallet.Transaction, error) {
 	return nil, nil

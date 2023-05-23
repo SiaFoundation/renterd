@@ -109,7 +109,9 @@ type (
 
 	dbConsensusInfo struct {
 		Model
-		CCID []byte
+		CCID    []byte
+		Height  uint64
+		BlockID hash256
 	}
 
 	// dbAnnouncement is a table used for storing all announcements. It
@@ -835,11 +837,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 	})
 }
 
-// ProcessConsensusChange implements consensus.Subscriber.
-func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	ss.persistMu.Lock()
-	defer ss.persistMu.Unlock()
-
+func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 	height := uint64(cc.InitialHeight())
 	for range cc.RevertedBlocks {
 		height--
@@ -878,96 +876,6 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 
 	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
-	ss.unappliedCCID = cc.ID
-
-	if err := ss.applyUpdates(false); err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
-	}
-
-	// Force a persist if no block has been received for some time.
-	if ss.persistTimer != nil {
-		ss.persistTimer.Stop()
-		select {
-		case <-ss.persistTimer.C:
-		default:
-		}
-	}
-	ss.persistTimer = time.AfterFunc(10*time.Second, func() {
-		ss.mu.Lock()
-		if ss.closed {
-			ss.mu.Unlock()
-			return
-		}
-		ss.mu.Unlock()
-
-		ss.persistMu.Lock()
-		defer ss.persistMu.Unlock()
-		if err := ss.applyUpdates(true); err != nil {
-			ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
-		}
-	})
-}
-
-// applyUpdates applies all unapplied updates to the database.
-func (ss *SQLStore) applyUpdates(force bool) (err error) {
-	// Check if we need to apply changes
-	persistIntervalPassed := time.Since(ss.lastAnnouncementSave) > ss.persistInterval
-	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit
-	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0
-	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs {
-		return nil
-	}
-
-	// Fetch allowlist
-	var allowlist []dbAllowlistEntry
-	if err := ss.db.
-		Model(&dbAllowlistEntry{}).
-		Find(&allowlist).
-		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
-	}
-
-	// Fetch blocklist
-	var blocklist []dbBlocklistEntry
-	if err := ss.db.
-		Model(&dbBlocklistEntry{}).
-		Find(&blocklist).
-		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
-	}
-
-	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
-		if len(ss.unappliedAnnouncements) > 0 {
-			if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
-				return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
-			}
-		}
-		if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
-			for host := range ss.unappliedHostKeys {
-				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
-					ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
-				}
-			}
-		}
-		for fcid, rev := range ss.unappliedRevisions {
-			if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
-				return fmt.Errorf("%w; failed to update revision number and height", err)
-			}
-		}
-		for fcid, proofHeight := range ss.unappliedProofs {
-			if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
-				return fmt.Errorf("%w; failed to update proof height", err)
-			}
-		}
-		return updateCCID(tx, ss.unappliedCCID)
-	})
-
-	ss.unappliedProofs = make(map[types.FileContractID]uint64)
-	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
-	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
-	ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
-	ss.lastAnnouncementSave = time.Now()
-	return
 }
 
 // excludeBlocked can be used as a scope for a db transaction to exclude blocked
@@ -1018,12 +926,16 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 	return
 }
 
-func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID) error {
+func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {
 	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
 		Model: Model{
 			ID: consensusInfoID,
 		},
-	}).Update("CCID", newCCID[:]).Error
+	}).Updates(map[string]interface{}{
+		"CCID":     newCCID[:],
+		"height":   newTip.Height,
+		"block_id": hash256(newTip.ID),
+	}).Error
 }
 
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {

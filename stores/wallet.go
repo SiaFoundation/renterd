@@ -2,66 +2,249 @@ package stores
 
 import (
 	"bytes"
-	"encoding/json"
-	"log"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/modules"
+	"gorm.io/gorm"
 )
 
-// EphemeralWalletStore implements wallet.SingleAddressStore in memory.
-type EphemeralWalletStore struct {
-	tip     types.ChainIndex
-	ccid    modules.ConsensusChangeID
-	addr    types.Address
-	scElems []wallet.SiacoinElement
-	txns    []wallet.Transaction
-	mu      sync.Mutex
-}
+type (
+	dbSiacoinElement struct {
+		Model
+		Value          currency
+		Address        hash256 `gorm:"size:32"`
+		OutputID       hash256 `gorm:"unique;index;NOT NULL;size:32"`
+		MaturityHeight uint64  `gorm:"index"`
+	}
+
+	dbTransaction struct {
+		Model
+		Raw           types.Transaction `gorm:"serializer:json"`
+		Height        uint64
+		BlockID       hash256 `gorm:"size:32"`
+		TransactionID hash256 `gorm:"unique;index;NOT NULL;size:32"`
+		Inflow        currency
+		Outflow       currency
+		Timestamp     int64
+	}
+
+	outputChange struct {
+		addition bool
+		oid      hash256
+		sco      dbSiacoinElement
+	}
+
+	txnChange struct {
+		addition bool
+		txnID    hash256
+		txn      dbTransaction
+	}
+)
+
+// TableName implements the gorm.Tabler interface.
+func (dbSiacoinElement) TableName() string { return "siacoin_elements" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbTransaction) TableName() string { return "transactions" }
 
 // Balance implements wallet.SingleAddressStore.
-func (s *EphemeralWalletStore) Balance() (sc types.Currency) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, sce := range s.scElems {
-		if sce.MaturityHeight < s.tip.Height {
-			sc = sc.Add(sce.Value)
-		}
+func (s *SQLStore) Balance() (types.Currency, error) {
+	s.persistMu.Lock()
+	height := s.chainIndex.Height
+	s.persistMu.Unlock()
+
+	var elems []dbSiacoinElement
+	if err := s.db.Find(&elems).Where("maturity_height < ?", height).Error; err != nil {
+		return types.ZeroCurrency, err
 	}
-	return
+	var balance types.Currency
+	for _, sce := range elems {
+		balance = balance.Add(types.Currency(sce.Value))
+	}
+	return balance, nil
 }
 
 // UnspentSiacoinElements implements wallet.SingleAddressStore.
-func (s *EphemeralWalletStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var elems []wallet.SiacoinElement
-	for _, sce := range s.scElems {
-		_ = sce // V2: sce.MerkleProof = append([]types.Hash256(nil), sce.MerkleProof...)
-		elems = append(elems, sce)
+func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
+	var elems []dbSiacoinElement
+	if err := s.db.Find(&elems).Error; err != nil {
+		return nil, err
 	}
-	return elems, nil
+	utxo := make([]wallet.SiacoinElement, len(elems))
+	for i := range elems {
+		utxo[i] = wallet.SiacoinElement{
+			ID:             types.Hash256(elems[i].OutputID),
+			MaturityHeight: elems[i].MaturityHeight,
+			SiacoinOutput: types.SiacoinOutput{
+				Address: types.Address(elems[i].Address),
+				Value:   types.Currency(elems[i].Value),
+			},
+		}
+	}
+	return utxo, nil
 }
 
 // Transactions implements wallet.SingleAddressStore.
-func (s *EphemeralWalletStore) Transactions(since time.Time, max int) ([]wallet.Transaction, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var txns []wallet.Transaction
-	for _, txn := range s.txns {
-		if len(txns) == max {
-			break
-		} else if txn.Timestamp.After(since) {
-			txns = append(txns, txn)
+func (s *SQLStore) Transactions(since time.Time, max int) ([]wallet.Transaction, error) {
+	var dbTxns []dbTransaction
+	err := s.db.Find(&dbTxns).
+		Where("timestamp > ?", since.UnixNano()).
+		Limit(max).
+		Error
+	if err != nil {
+		return nil, err
+	}
+
+	txns := make([]wallet.Transaction, len(dbTxns))
+	for i := range dbTxns {
+		txns[i] = wallet.Transaction{
+			Raw: dbTxns[i].Raw,
+			Index: types.ChainIndex{
+				Height: dbTxns[i].Height,
+				ID:     types.BlockID(dbTxns[i].BlockID),
+			},
+			ID:        types.TransactionID(dbTxns[i].TransactionID),
+			Inflow:    types.Currency(dbTxns[i].Inflow),
+			Outflow:   types.Currency(dbTxns[i].Outflow),
+			Timestamp: time.Unix(dbTxns[i].Timestamp, 0),
 		}
 	}
 	return txns, nil
+}
+
+// ProcessConsensusChange implements chain.Subscriber.
+func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
+	// Add/Remove siacoin outputs.
+	for _, diff := range cc.SiacoinOutputDiffs {
+		var sco types.SiacoinOutput
+		convertToCore(diff.SiacoinOutput, &sco)
+		if sco.Address != s.walletAddress {
+			continue
+		}
+		if diff.Direction == modules.DiffApply {
+			// add new outputs
+			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
+				addition: true,
+				oid:      hash256(diff.ID),
+				sco: dbSiacoinElement{
+					Address:        hash256(sco.Address),
+					Value:          currency(sco.Value),
+					OutputID:       hash256(diff.ID),
+					MaturityHeight: uint64(cc.BlockHeight), // immediately spendable
+				},
+			})
+		} else {
+			// remove reverted outputs
+			s.unappliedOutputChanges = append(s.unappliedOutputChanges, outputChange{
+				addition: false,
+				oid:      hash256(diff.ID),
+			})
+		}
+	}
+
+	// Create a 'fake' transaction for every matured siacoin output.
+	for _, diff := range cc.AppliedDiffs {
+		for _, dsco := range diff.DelayedSiacoinOutputDiffs {
+			// if a delayed output is reverted in an applied diff, the
+			// output has matured -- add a payout transaction.
+			if dsco.Direction != modules.DiffRevert {
+				continue
+			} else if types.Address(dsco.SiacoinOutput.UnlockHash) != s.walletAddress {
+				continue
+			}
+			var sco types.SiacoinOutput
+			convertToCore(dsco.SiacoinOutput, &sco)
+			s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
+				addition: true,
+				txnID:    hash256(dsco.ID), // use output id as txn id
+				txn: dbTransaction{
+					Height:        uint64(dsco.MaturityHeight),
+					Inflow:        currency(sco.Value),                                                         // transaction inflow is value of matured output
+					TransactionID: hash256(dsco.ID),                                                            // use output as txn id
+					Timestamp:     int64(cc.AppliedBlocks[dsco.MaturityHeight-cc.InitialHeight()-1].Timestamp), // use timestamp of block that caused output to mature
+				},
+			})
+		}
+	}
+
+	// Revert transactions from reverted blocks.
+	for _, block := range cc.RevertedBlocks {
+		for _, stxn := range block.Transactions {
+			var txn types.Transaction
+			convertToCore(stxn, &txn)
+			if transactionIsRelevant(txn, s.walletAddress) {
+				// remove reverted txns
+				s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
+					addition: false,
+					txnID:    hash256(txn.ID()),
+				})
+			}
+		}
+	}
+
+	// Revert 'fake' transactions.
+	for _, diff := range cc.RevertedDiffs {
+		for _, dsco := range diff.DelayedSiacoinOutputDiffs {
+			if dsco.Direction == modules.DiffApply {
+				s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
+					addition: false,
+					txnID:    hash256(dsco.ID),
+				})
+			}
+		}
+	}
+
+	spentOutputs := make(map[types.SiacoinOutputID]types.SiacoinOutput)
+	for i, block := range cc.AppliedBlocks {
+		appliedDiff := cc.AppliedDiffs[i]
+		for _, diff := range appliedDiff.SiacoinOutputDiffs {
+			if diff.Direction == modules.DiffRevert {
+				var so types.SiacoinOutput
+				convertToCore(diff.SiacoinOutput, &so)
+				spentOutputs[types.SiacoinOutputID(diff.ID)] = so
+			}
+		}
+
+		for _, stxn := range block.Transactions {
+			var txn types.Transaction
+			convertToCore(stxn, &txn)
+			if transactionIsRelevant(txn, s.walletAddress) {
+				var inflow, outflow types.Currency
+				for _, out := range txn.SiacoinOutputs {
+					if out.Address == s.walletAddress {
+						inflow = inflow.Add(out.Value)
+					}
+				}
+				for _, in := range txn.SiacoinInputs {
+					if in.UnlockConditions.UnlockHash() == s.walletAddress {
+						so, ok := spentOutputs[in.ParentID]
+						if !ok {
+							panic("spent output not found")
+						}
+						outflow = outflow.Add(so.Value)
+					}
+				}
+
+				// add confirmed txns
+				s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
+					addition: true,
+					txnID:    hash256(txn.ID()),
+					txn: dbTransaction{
+						Raw:           txn,
+						Height:        uint64(cc.InitialHeight()) + uint64(i) + 1,
+						BlockID:       hash256(block.ID()),
+						Inflow:        currency(inflow),
+						Outflow:       currency(outflow),
+						TransactionID: hash256(txn.ID()),
+						Timestamp:     int64(block.Timestamp),
+					},
+				})
+			}
+		}
+	}
 }
 
 func transactionIsRelevant(txn types.Transaction, addr types.Address) bool {
@@ -125,182 +308,22 @@ func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
 	}
 }
 
-// ProcessConsensusChange implements modules.ConsensusSetSubscriber.
-func (s *EphemeralWalletStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, diff := range cc.SiacoinOutputDiffs {
-		var sco types.SiacoinOutput
-		convertToCore(diff.SiacoinOutput, &sco)
-		if sco.Address != s.addr {
-			continue
-		}
-		if diff.Direction == modules.DiffApply {
-			// add
-			s.scElems = append(s.scElems, wallet.SiacoinElement{
-				SiacoinOutput: sco,
-				ID:            types.Hash256(diff.ID),
-			})
-		} else {
-			// remove
-			for i := range s.scElems {
-				if s.scElems[i].ID == types.Hash256(diff.ID) {
-					s.scElems[i] = s.scElems[len(s.scElems)-1]
-					s.scElems = s.scElems[:len(s.scElems)-1]
-					break
-				}
-			}
-		}
-	}
-
-	for _, block := range cc.RevertedBlocks {
-		for _, stxn := range block.Transactions {
-			var txn types.Transaction
-			convertToCore(stxn, &txn)
-			if transactionIsRelevant(txn, s.addr) {
-				s.txns = s.txns[:len(s.txns)-1]
-			}
-		}
-	}
-
-	spentOutputs := make(map[types.SiacoinOutputID]types.SiacoinOutput)
-	for i, block := range cc.AppliedBlocks {
-		appliedDiff := cc.AppliedDiffs[i]
-		for _, diff := range appliedDiff.SiacoinOutputDiffs {
-			if diff.Direction == modules.DiffRevert {
-				var so types.SiacoinOutput
-				convertToCore(diff.SiacoinOutput, &so)
-				spentOutputs[types.SiacoinOutputID(diff.ID)] = so
-			}
-		}
-
-		for _, stxn := range block.Transactions {
-			var txn types.Transaction
-			convertToCore(stxn, &txn)
-			if transactionIsRelevant(txn, s.addr) {
-				var inflow, outflow types.Currency
-				for _, out := range txn.SiacoinOutputs {
-					if out.Address == s.addr {
-						inflow = inflow.Add(out.Value)
-					}
-				}
-				for _, in := range txn.SiacoinInputs {
-					if in.UnlockConditions.UnlockHash() == s.addr {
-						so, ok := spentOutputs[in.ParentID]
-						if !ok {
-							panic("spent output not found")
-						}
-						outflow = outflow.Add(so.Value)
-					}
-				}
-
-				s.txns = append(s.txns, wallet.Transaction{
-					Raw:       txn,
-					Index:     s.tip,
-					Inflow:    inflow,
-					Outflow:   outflow,
-					ID:        txn.ID(),
-					Timestamp: time.Unix(int64(block.Timestamp), 0),
-				})
-			}
-		}
-	}
-
-	s.tip.Height = uint64(cc.InitialHeight()) + uint64(len(cc.AppliedBlocks)) - uint64(len(cc.RevertedBlocks))
-	s.tip.ID = types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID())
-	s.ccid = cc.ID
+func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbSiacoinElement) error {
+	return tx.Create(&sco).Error
 }
 
-// NewEphemeralWalletStore returns a new EphemeralWalletStore.
-func NewEphemeralWalletStore(addr types.Address) *EphemeralWalletStore {
-	return &EphemeralWalletStore{
-		addr: addr,
-	}
+func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
+	return tx.Where("output_id", oid).
+		Delete(&dbSiacoinElement{}).
+		Error
 }
 
-// JSONWalletStore implements wallet.SingleAddressStore in memory, backed by a JSON file.
-type JSONWalletStore struct {
-	*EphemeralWalletStore
-	dir      string
-	lastSave time.Time
+func applyUnappliedTxnAdditions(tx *gorm.DB, txn dbTransaction) error {
+	return tx.Create(&txn).Error
 }
 
-type jsonWalletPersistData struct {
-	Tip             types.ChainIndex
-	CCID            modules.ConsensusChangeID
-	SiacoinElements []wallet.SiacoinElement
-	Transactions    []wallet.Transaction
-}
-
-func (s *JSONWalletStore) save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	js, _ := json.MarshalIndent(jsonWalletPersistData{
-		Tip:             s.tip,
-		CCID:            s.ccid,
-		SiacoinElements: s.scElems,
-		Transactions:    s.txns,
-	}, "", "  ")
-
-	// atomic save
-	dst := filepath.Join(s.dir, "wallet.json")
-	f, err := os.OpenFile(dst+"_tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0660)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Write(js); err != nil {
-		return err
-	} else if err := f.Sync(); err != nil {
-		return err
-	} else if err := f.Close(); err != nil {
-		return err
-	} else if err := os.Rename(dst+"_tmp", dst); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *JSONWalletStore) load() (modules.ConsensusChangeID, error) {
-	var p jsonWalletPersistData
-	if js, err := os.ReadFile(filepath.Join(s.dir, "wallet.json")); os.IsNotExist(err) {
-		// set defaults
-		s.ccid = modules.ConsensusChangeBeginning
-		return s.ccid, nil
-	} else if err != nil {
-		return modules.ConsensusChangeID{}, err
-	} else if err := json.Unmarshal(js, &p); err != nil {
-		return modules.ConsensusChangeID{}, err
-	}
-	s.tip = p.Tip
-	s.ccid = p.CCID
-	s.scElems = p.SiacoinElements
-	s.txns = p.Transactions
-	return s.ccid, nil
-}
-
-// ProcessConsensusChange implements chain.Subscriber.
-func (s *JSONWalletStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	s.EphemeralWalletStore.ProcessConsensusChange(cc)
-	if time.Since(s.lastSave) > 2*time.Minute {
-		if err := s.save(); err != nil {
-			log.Fatalln("Couldn't save wallet state:", err)
-		}
-		s.lastSave = time.Now()
-	}
-}
-
-// NewJSONWalletStore returns a new JSONWalletStore.
-func NewJSONWalletStore(dir string, addr types.Address) (*JSONWalletStore, modules.ConsensusChangeID, error) {
-	s := &JSONWalletStore{
-		EphemeralWalletStore: NewEphemeralWalletStore(addr),
-		dir:                  dir,
-		lastSave:             time.Now(),
-	}
-	ccid, err := s.load()
-	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
-	}
-	return s, ccid, nil
+func applyUnappliedTxnRemovals(tx *gorm.DB, txnID hash256) error {
+	return tx.Where("transaction_id", txnID).
+		Delete(&dbTransaction{}).
+		Error
 }

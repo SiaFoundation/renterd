@@ -50,7 +50,8 @@ type BusConfig struct {
 	Miner           *Miner
 	PersistInterval time.Duration
 
-	DBDialector gorm.Dialector
+	DBLoggerConfig stores.LoggerConfig
+	DBDialector    gorm.Dialector
 }
 
 type AutopilotConfig struct {
@@ -227,19 +228,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		return nil, nil, err
 	}
 
-	walletDir := filepath.Join(dir, "wallet")
-	if err := os.MkdirAll(walletDir, 0700); err != nil {
-		return nil, nil, err
-	}
-	walletAddr := wallet.StandardAddress(seed.PublicKey())
-	ws, ccid, err := stores.NewJSONWalletStore(walletDir, walletAddr)
-	if err != nil {
-		return nil, nil, err
-	} else if err := cs.ConsensusSetSubscribe(ws, ccid, nil); err != nil {
-		return nil, nil, err
-	}
-	w := wallet.NewSingleAddressWallet(seed, ws)
-
 	// If no DB dialector was provided, use SQLite.
 	dbConn := cfg.DBDialector
 	if dbConn == nil {
@@ -250,13 +238,16 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
 
-	sqlLogger := stores.NewSQLLogger(l.Named("db"), nil)
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, sqlLogger)
+	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
+	walletAddr := wallet.StandardAddress(seed.PublicKey())
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, walletAddr, sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	} else if err := cs.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
 		return nil, nil, err
 	}
+
+	w := wallet.NewSingleAddressWallet(seed, sqlStore)
 
 	if m := cfg.Miner; m != nil {
 		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {
