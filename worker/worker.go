@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"mime"
 	"net"
@@ -887,7 +888,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploader.Stats()
 	jc.Encode(api.UploadStatsResponse{
-		OverdrivePct:        stats.overdrivePct,
+		OverdrivePct:        math.Floor(stats.overdrivePct*100*100) / 100,
 		UploadQueuesHealthy: stats.queuesHealthy,
 		UploadQueuesTotal:   stats.queuesTotal,
 	})

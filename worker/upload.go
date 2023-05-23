@@ -83,8 +83,9 @@ type (
 	}
 
 	uploadState struct {
-		mu           sync.Mutex
 		maxOverdrive uint64
+
+		mu           sync.Mutex
 		numInflight  uint64
 		numOverdrive uint64
 		numRemaining uint64
@@ -337,18 +338,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		return nil
 	}
 
-	// create a timer to trigger overdrive
-	timeout := time.NewTimer(u.w.uploadSectorTimeout)
-	resetTimeout := func() {
-		timeout.Stop()
-		select {
-		case <-timeout.C:
-		default:
-		}
-		timeout.Reset(u.w.uploadSectorTimeout)
-	}
-
-	// launch a goroutine that handles overdrive
+	// launch a goroutine that handles overdrive signals
 	overdriveChan := make(chan int)
 	responseChan := make(chan uploadResponse)
 	go func() {
@@ -371,7 +361,6 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 				} else {
 					state.schedule(i)
 				}
-				resetTimeout()
 			}
 		}
 	}()
@@ -397,29 +386,10 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	for state.inflight() > 0 {
 		var resp uploadResponse
 		select {
-		case <-timeout.C:
-			nxt := state.nextOverdrive()
-			if nxt != -1 && state.canOverdrive(nxt) {
-				_ = launch(&uploadJob{
-					overdrive:     true,
-					overdriveChan: overdriveChan,
-					responseChan:  responseChan,
-					requestCtx:    ctx,
-					sectorIndex:   nxt,
-					sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
-					id:            id,
-				})
-			} else if nxt != -1 {
-				state.schedule(nxt)
-			}
-
-			resetTimeout()
-			continue
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case resp = <-responseChan:
 			state.received()
-			resetTimeout()
 		}
 
 		hk := resp.job.queue.hk
