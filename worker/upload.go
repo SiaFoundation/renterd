@@ -309,7 +309,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		}
 
 		// keep state
-		state.launch(overdrive)
+		state.launch(overdrive, job.sectorIndex)
 		return nil
 	}
 
@@ -486,7 +486,6 @@ func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
 	// recreate the pool
 	var i int
 	for _, q := range u.contracts {
-		q.updateBlockHeight(bh)
 		if _, keep := c2m[q.fcid]; !keep {
 			continue
 		}
@@ -504,6 +503,11 @@ func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
 		queue := u.newQueue(contract)
 		u.contracts = append(u.contracts, queue)
 		go processQueue(u.w, u.w, queue)
+	}
+
+	// update queue blockheight
+	for _, q := range u.contracts {
+		q.updateBlockHeight(bh)
 	}
 }
 
@@ -711,11 +715,12 @@ func (j *uploadJob) end() {
 	trace.SpanFromContext(j.requestCtx).End()
 }
 
-func (s *uploadState) launch(overdrive bool) {
+func (s *uploadState) launch(overdrive bool, sectorIndex int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.numInflight++
 	if overdrive {
+		s.overdriving[sectorIndex] = struct{}{}
 		s.numOverdrive++
 	}
 }
@@ -765,6 +770,12 @@ func (s *uploadState) canOverdrive(index int) bool {
 	}
 
 	// schedule overdrive for later
+	for _, p := range s.pending {
+		if p == index {
+			return false // already pending, no need to add it
+		}
+	}
+
 	s.pending = append(s.pending, index)
 	return false
 }
@@ -786,7 +797,6 @@ func (s *uploadState) nextOverdrive() int {
 	for index, sector := range s.sectors {
 		_, ongoing := s.overdriving[index]
 		if sector.Root == (types.Hash256{}) && !ongoing {
-			s.overdriving[index] = struct{}{}
 			return index
 		}
 	}
