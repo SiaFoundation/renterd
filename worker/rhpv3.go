@@ -448,7 +448,7 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 
 	// return early if the account needs to sync
 	if account.RequiresSync {
-		return errors.New("account requires sync")
+		return fmt.Errorf("%w; account requires resync", errBalanceInsufficient)
 	}
 
 	// return early if our account is not funded
