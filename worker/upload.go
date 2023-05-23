@@ -439,18 +439,20 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		}
 
 		// launch an overdrive worker if possible
-		nxt := state.nextOverdrive()
-		if nxt != -1 && state.canOverdrive(nxt) {
-			if err := launch(&uploadJob{
-				overdrive:     true,
-				overdriveChan: overdriveChan,
-				responseChan:  responseChan,
-				requestCtx:    ctx,
-				sectorIndex:   nxt,
-				sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
-				id:            id,
-			}); err == nil {
-				continue
+		if state.remaining() < state.maxOverdrive {
+			nxt := state.nextOverdrive()
+			if nxt != -1 && state.canOverdrive(nxt) {
+				if err := launch(&uploadJob{
+					overdrive:     true,
+					overdriveChan: overdriveChan,
+					responseChan:  responseChan,
+					requestCtx:    ctx,
+					sectorIndex:   nxt,
+					sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
+					id:            id,
+				}); err == nil {
+					continue
+				}
 			}
 		}
 	}
@@ -464,7 +466,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	}
 
 	// track overdrive pct
-	overdrivePct := float64(state.numOverdrive+uint64(len(shards))) / float64(len(shards))
+	overdrivePct := float64(state.numOverdrive) / float64(len(shards))
 	u.statsOverdrive.track(overdrivePct)
 
 	state.mu.Lock()
