@@ -50,7 +50,8 @@ type BusConfig struct {
 	Miner           *Miner
 	PersistInterval time.Duration
 
-	DBDialector gorm.Dialector
+	DBLoggerConfig stores.LoggerConfig
+	DBDialector    gorm.Dialector
 }
 
 type AutopilotConfig struct {
@@ -237,7 +238,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
 
-	sqlLogger := stores.NewSQLLogger(l.Named("db"), nil)
+	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, walletAddr, sqlLogger)
 	if err != nil {

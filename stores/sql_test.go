@@ -40,7 +40,7 @@ func newTestLogger() logger.Interface {
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	)
-	return NewSQLLogger(l, &LoggerConfig{
+	return NewSQLLogger(l, LoggerConfig{
 		IgnoreRecordNotFoundError: false,
 		LogLevel:                  logger.Warn,
 		SlowThreshold:             100 * time.Millisecond,
