@@ -420,7 +420,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		hk := resp.job.queue.hk
 		if resp.err != nil {
 			errs = append(errs, &HostError{hk, resp.err})
-			if err := launch(resp.job); err != nil && resp.job.overdrive {
+			if err := launch(resp.job); err != nil && !resp.job.overdrive {
 				break // download failed, not enough hosts
 			} else if err != nil {
 				u.w.logger.Debugf("failed to re-launch job: %v, host %v failed with err %v", err, resp.job.queue.hk, resp.err)
