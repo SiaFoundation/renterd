@@ -96,6 +96,10 @@ func (cm chainManager) AcceptBlock(ctx context.Context, b types.Block) error {
 	return cm.cs.AcceptBlock(sb)
 }
 
+func (cm chainManager) LastBlockTime() time.Time {
+	return time.Unix(int64(cm.cs.CurrentBlock().Timestamp), 0)
+}
+
 func (cm chainManager) Synced(ctx context.Context) bool {
 	return cm.cs.Synced()
 }
