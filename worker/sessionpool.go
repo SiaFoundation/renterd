@@ -2,40 +2,12 @@ package worker
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"sync"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
-
-func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, currentHeight uint64) (types.Hash256, error) {
-	if currentHeight > uint64(s.Revision().Revision.WindowStart) {
-		return types.Hash256{}, fmt.Errorf("contract has expired")
-	}
-	storageDuration := uint64(s.Revision().Revision.WindowStart) - currentHeight
-	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
-	root, err := s.Append(ctx, sector, price, collateral)
-	if err != nil {
-		return types.Hash256{}, err
-	}
-	return root, nil
-}
-
-func (s *Session) readSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
-	sections := []rhpv2.RPCReadRequestSection{{
-		MerkleRoot: root,
-		Offset:     offset,
-		Length:     length,
-	}}
-	price := rhpv2.RPCReadCost(s.settings, sections)
-	if err := s.Read(ctx, w, sections, price); err != nil {
-		return err
-	}
-	return nil
-}
 
 func (s *Session) deleteSectors(ctx context.Context, roots []types.Hash256) error {
 	// download the full set of SectorRoots
@@ -155,12 +127,6 @@ func (sp *sessionPool) setCurrentHeight(height uint64) {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	sp.height = height
-}
-
-func (sp *sessionPool) currentHeight() uint64 {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	return sp.height
 }
 
 // session adds a RHPv2 session to the pool. The session is initiated lazily; no
