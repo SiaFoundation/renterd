@@ -15,7 +15,7 @@ func (s *Session) appendSector(ctx context.Context, sector *[rhpv2.SectorSize]by
 	if currentHeight > uint64(s.Revision().Revision.WindowStart) {
 		return types.Hash256{}, fmt.Errorf("contract has expired")
 	}
-	storageDuration := uint64(s.Revision().Revision.WindowStart) - currentHeight
+	storageDuration := uint64(s.Revision().Revision.WindowEnd) - currentHeight
 	price, collateral := rhpv2.RPCAppendCost(s.settings, storageDuration)
 	root, err := s.Append(ctx, sector, price, collateral)
 	if err != nil {
