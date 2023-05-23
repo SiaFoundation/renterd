@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,10 +137,19 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
 }
 
 // UploadObject uploads the data in r, creating an object at the given path.
-func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string) (err error) {
+func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...APIUploadOption) (err error) {
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), r)
+	values := make(url.Values)
+	for _, opt := range opts {
+		opt(values)
+	}
+	u, err := url.Parse(fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path))
+	if err != nil {
+		panic(err)
+	}
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "PUT", u.String(), r)
 	if err != nil {
 		panic(err)
 	}
@@ -215,6 +226,25 @@ func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp
 func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account rhpv3.Account, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
 	return
+}
+
+// An APIUploadOption overrides an option on the PUT /objects/*key endpoint.
+type APIUploadOption func(url.Values)
+
+// UploadWithRedundancy sets the min and total shards that should be used for an
+// upload
+func UploadWithRedundancy(minShards, totalShards int) APIUploadOption {
+	return func(v url.Values) {
+		v.Set(queryStringParamMinShards, strconv.Itoa(minShards))
+		v.Set(queryStringParamTotalShards, strconv.Itoa(totalShards))
+	}
+}
+
+// UploadWithContractSet sets the contract set that should be used for an upload
+func UploadWithContractSet(set string) APIUploadOption {
+	return func(v url.Values) {
+		v.Set(queryStringParamContractSet, set)
+	}
 }
 
 // NewClient returns a client that communicates with a renterd worker server

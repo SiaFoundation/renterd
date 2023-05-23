@@ -114,7 +114,6 @@ type (
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
-		Hosts     []dbHost     `gorm:"many2many:host_sectors;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbContractSector is a join table between dbContract and dbSector.
@@ -680,9 +679,16 @@ func (s *SQLStore) Object(ctx context.Context, key string) (object.Object, error
 }
 
 func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
+	if len(records) == 0 {
+		return nil // nothing to do
+	}
 	squashedRecords := make(map[types.FileContractID]api.ContractSpending)
+	latestRevision := make(map[types.FileContractID]uint64)
 	for _, r := range records {
 		squashedRecords[r.ContractID] = squashedRecords[r.ContractID].Add(r.ContractSpending)
+		if r.RevisionNumber > latestRevision[r.ContractID] {
+			latestRevision[r.ContractID] = r.RevisionNumber
+		}
 	}
 	for fcid, newSpending := range squashedRecords {
 		err := s.retryTransaction(func(tx *gorm.DB) error {
@@ -705,6 +711,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			if !newSpending.FundAccount.IsZero() {
 				updates["fund_account_spending"] = currency(types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount))
 			}
+			updates["revision_number"] = latestRevision[fcid]
 			return tx.Model(&contract).Updates(updates).Error
 		})
 		if err != nil {
@@ -815,27 +822,9 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 					return err
 				}
 
-				// Look for the host referenced by the shard.
-				hostFound := true
-				var host dbHost
-				err = tx.Model(&dbHost{}).
-					Where(&dbHost{PublicKey: publicKey(shard.Host)}).
-					Take(&host).Error
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					hostFound = false
-				} else if err != nil {
-					return err
-				}
-
 				// Add contract and host to join tables.
 				if contractFound {
 					err = tx.Model(&sector).Association("Contracts").Append(&contract)
-					if err != nil {
-						return err
-					}
-				}
-				if hostFound {
-					err = tx.Model(&sector).Association("Hosts").Append(&host)
 					if err != nil {
 						return err
 					}
@@ -959,14 +948,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 					Model(&sector).
 					Association("Contracts").
 					Append(contract); err != nil {
-					return err
-				}
-			}
-			if host := hosts[publicKey(shard.Host)]; host != nil {
-				if err := tx.
-					Model(&sector).
-					Association("Hosts").
-					Append(host); err != nil {
 					return err
 				}
 			}

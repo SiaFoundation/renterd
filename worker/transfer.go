@@ -15,6 +15,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
@@ -39,13 +40,18 @@ type hostV2 interface {
 
 type hostV3 interface {
 	hostV2
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
+	FetchPriceTable(ctx context.Context, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
+	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
+	FundAccount(ctx context.Context, balance types.Currency, revision *types.FileContractRevision) error
 	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
+	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
+	SyncAccount(ctx context.Context, revision *types.FileContractRevision) error
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
 }
 
 type hostProvider interface {
 	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(hostV2) error) (err error)
-	withHostV3(context.Context, types.FileContractID, types.PublicKey, string, func(hostV3) error) (err error)
+	newHostV3(context.Context, types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
 }
 
 func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, contracts []api.ContractMetadata, locker revisionLocker, uploadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([]object.Sector, []int, error) {
@@ -82,10 +88,12 @@ func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, c
 			var root types.Hash256
 			var err error
 			err = locker.withRevision(ctx, defaultRevisionFetchTimeout, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev types.FileContractRevision) error {
-				return hp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss hostV3) error {
-					root, err = ss.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), &rev)
+				h, err := hp.newHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
+				if err != nil {
 					return err
-				})
+				}
+				root, err = h.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), &rev)
+				return err
 			})
 			var aborted bool
 			select {
@@ -332,16 +340,21 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 			contract := contracts[hostIndex]
 			shard := &ss.Shards[r.shardIndex]
 
-			err := hp.withHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, func(ss hostV3) error {
-				buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
-				err := ss.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
+			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
+			err := func() error {
+				h, err := hp.newHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
+				if err != nil {
+					return err
+				}
+				err = h.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")
 					span.RecordError(err)
 				}
-				respChan <- resp{hostIndex, r, buf.Bytes(), time.Since(start), err}
-				return nil // only return the error in the response
-			})
+				return err
+			}()
+			respChan <- resp{hostIndex, r, buf.Bytes(), time.Since(start), err}
+
 			var aborted bool
 			select {
 			case <-ctx.Done():

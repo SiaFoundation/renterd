@@ -29,20 +29,28 @@ type (
 		db     *gorm.DB
 		logger glogger.Interface
 
-		// HostDB related fields.
-		lastAnnouncementSave   time.Time
+		// Persistence buffer - related fields.
+		lastSave               time.Time
 		persistInterval        time.Duration
 		persistMu              sync.Mutex
 		persistTimer           *time.Timer
 		unappliedAnnouncements []announcement
 		unappliedHostKeys      map[types.PublicKey]struct{}
-		unappliedCCID          modules.ConsensusChangeID
 		unappliedRevisions     map[types.FileContractID]revisionUpdate
 		unappliedProofs        map[types.FileContractID]uint64
+		unappliedOutputChanges []outputChange
+		unappliedTxnChanges    []txnChange
 
 		// SettingsDB related fields.
 		settingsMu sync.Mutex
 		settings   map[string]string
+
+		// WalletDB related fields.
+		walletAddress types.Address
+
+		// Consensus related fields.
+		ccid       modules.ConsensusChangeID
+		chainIndex types.ChainIndex
 
 		mu           sync.Mutex
 		hasAllowlist bool
@@ -99,7 +107,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
 		DisableNestedTransaction: true,   // disable nesting transactions
 		Logger:                   logger, // custom logger
@@ -108,57 +116,11 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
+	// Perform migrations.
 	if migrate {
-		// Create the tables.
-		tables := []interface{}{
-			// bus.MetadataStore tables
-			&dbArchivedContract{},
-			&dbContract{},
-			&dbContractSet{},
-			&dbObject{},
-			&dbSector{},
-			&dbShard{},
-			&dbSlab{},
-			&dbSlice{},
-
-			// bus.HostDB tables
-			&dbAnnouncement{},
-			&dbConsensusInfo{},
-			&dbHost{},
-			&dbInteraction{},
-			&dbAllowlistEntry{},
-			&dbBlocklistEntry{},
-
-			// bus.SettingStore tables
-			&dbSetting{},
-
-			// bus.EphemeralAccountStore tables
-			&dbAccount{},
-		}
-		if err := db.AutoMigrate(tables...); err != nil {
+		if err := performMigrations(db); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
-	}
-
-	// Ensure the join table has an index on `db_host_id`.
-	switch conn.(type) {
-	case *sqlite.Dialector:
-		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-	case *mysql.Dialector:
-		var found int
-		err := db.Raw("SELECT COUNT(1) IndexIsThere FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema=DATABASE() AND table_name='host_blocklist_entry_hosts' AND index_name='idx_host_blocklist_entry_hosts'").Scan(&found).Error
-		if err != nil {
-			return nil, modules.ConsensusChangeID{}, err
-		}
-		if found == 0 {
-			if err := db.Exec("CREATE INDEX idx_host_blocklist_entry_hosts ON host_blocklist_entry_hosts (db_host_id)").Error; err != nil {
-				return nil, modules.ConsensusChangeID{}, err
-			}
-		}
-	default:
-		panic("unknown dialector")
 	}
 
 	// Get latest consensus change ID or init db.
@@ -204,18 +166,25 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	}
 
 	ss := &SQLStore{
-		db:                   db,
-		logger:               logger,
-		knownContracts:       isOurContract,
-		lastAnnouncementSave: time.Now(),
-		persistInterval:      persistInterval,
-		hasAllowlist:         allowlistCnt > 0,
-		hasBlocklist:         blocklistCnt > 0,
-		settings:             make(map[string]string),
-		unappliedHostKeys:    make(map[types.PublicKey]struct{}),
-		unappliedRevisions:   make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:      make(map[types.FileContractID]uint64),
+		db:                 db,
+		logger:             logger,
+		knownContracts:     isOurContract,
+		lastSave:           time.Now(),
+		persistInterval:    persistInterval,
+		hasAllowlist:       allowlistCnt > 0,
+		hasBlocklist:       blocklistCnt > 0,
+		settings:           make(map[string]string),
+		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
+		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:    make(map[types.FileContractID]uint64),
+
+		walletAddress: walletAddress,
+		chainIndex: types.ChainIndex{
+			Height: ci.Height,
+			ID:     types.BlockID(ci.BlockID),
+		},
 	}
+
 	return ss, ccid, nil
 }
 
@@ -283,6 +252,135 @@ func (s *SQLStore) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 	return nil
+}
+
+// ProcessConsensusChange implements consensus.Subscriber.
+func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
+	ss.persistMu.Lock()
+	defer ss.persistMu.Unlock()
+
+	ss.processConsensusChangeHostDB(cc)
+	ss.processConsensusChangeWallet(cc)
+
+	// Update consensus fields.
+	ss.ccid = cc.ID
+	ss.chainIndex = types.ChainIndex{
+		Height: uint64(cc.BlockHeight),
+		ID:     types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID()),
+	}
+
+	// Try to apply the updates.
+	if err := ss.applyUpdates(false); err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+	}
+
+	// Force a persist if no block has been received for some time.
+	if ss.persistTimer != nil {
+		ss.persistTimer.Stop()
+		select {
+		case <-ss.persistTimer.C:
+		default:
+		}
+	}
+	ss.persistTimer = time.AfterFunc(10*time.Second, func() {
+		ss.mu.Lock()
+		if ss.closed {
+			ss.mu.Unlock()
+			return
+		}
+		ss.mu.Unlock()
+
+		ss.persistMu.Lock()
+		defer ss.persistMu.Unlock()
+		if err := ss.applyUpdates(true); err != nil {
+			ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+		}
+	})
+}
+
+// applyUpdates applies all unapplied updates to the database.
+func (ss *SQLStore) applyUpdates(force bool) (err error) {
+	// Check if we need to apply changes
+	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval                           // enough time has passed since last persist
+	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit                // enough announcements have accumulated
+	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0     // enough revisions/proofs have accumulated
+	unappliedOutputsOrTxns := len(ss.unappliedOutputChanges) > 0 || len(ss.unappliedTxnChanges) > 0 // enough outputs/txns have accumualted
+	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputsOrTxns {
+		return nil
+	}
+
+	// Fetch allowlist
+	var allowlist []dbAllowlistEntry
+	if err := ss.db.
+		Model(&dbAllowlistEntry{}).
+		Find(&allowlist).
+		Error; err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
+	}
+
+	// Fetch blocklist
+	var blocklist []dbBlocklistEntry
+	if err := ss.db.
+		Model(&dbBlocklistEntry{}).
+		Find(&blocklist).
+		Error; err != nil {
+		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
+	}
+
+	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
+		if len(ss.unappliedAnnouncements) > 0 {
+			if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
+				return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
+			}
+		}
+		if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
+			for host := range ss.unappliedHostKeys {
+				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
+					ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
+				}
+			}
+		}
+		for fcid, rev := range ss.unappliedRevisions {
+			if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
+				return fmt.Errorf("%w; failed to update revision number and height", err)
+			}
+		}
+		for fcid, proofHeight := range ss.unappliedProofs {
+			if err := updateProofHeight(tx, types.FileContractID(fcid), proofHeight); err != nil {
+				return fmt.Errorf("%w; failed to update proof height", err)
+			}
+		}
+		for _, oc := range ss.unappliedOutputChanges {
+			if oc.addition {
+				err = applyUnappliedOutputAdditions(tx, oc.sco)
+			} else {
+				err = applyUnappliedOutputRemovals(tx, oc.oid)
+			}
+			if err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied output change", err)
+			}
+		}
+		for _, tc := range ss.unappliedTxnChanges {
+			if tc.addition {
+				err = applyUnappliedTxnAdditions(tx, tc.txn)
+			} else {
+				err = applyUnappliedTxnRemovals(tx, tc.txnID)
+			}
+			if err != nil {
+				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
+			}
+		}
+		return updateCCID(tx, ss.ccid, ss.chainIndex)
+	})
+
+	ss.unappliedProofs = make(map[types.FileContractID]uint64)
+	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
+	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})
+	ss.unappliedAnnouncements = ss.unappliedAnnouncements[:0]
+	ss.lastSave = time.Now()
+	ss.unappliedOutputChanges = nil
+	ss.unappliedTxnChanges = nil
+	return
 }
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
