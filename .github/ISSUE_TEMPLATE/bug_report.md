@@ -34,8 +34,6 @@ curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/autopilot/config
 curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/redundancy
 
 curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/gouging
-
-curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/redundancy
 ```
 
 **Contract Set Contracts**
