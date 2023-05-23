@@ -443,6 +443,11 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	}
 	defer a.bus.UnlockAccount(ctx, a.id, lockID)
 
+	// return early if the account needs to sync
+	if account.RequiresSync {
+		return errors.New("account requires sync")
+	}
+
 	// return early if our account is not funded
 	if account.Balance.Cmp(big.NewInt(0)) <= 0 {
 		return errBalanceInsufficient
