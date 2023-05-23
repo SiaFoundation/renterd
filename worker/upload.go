@@ -407,7 +407,10 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 					sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
 					id:            id,
 				})
+			} else if nxt != -1 {
+				state.schedule(nxt)
 			}
+
 			resetTimeout()
 			continue
 		case <-ctx.Done():
@@ -435,21 +438,20 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 
 		for {
 			nxt := state.nextOverdrive()
-			if nxt == -1 {
-				break
+			if nxt != -1 && state.canOverdrive(nxt) {
+				if err := launch(&uploadJob{
+					overdrive:     true,
+					overdriveChan: overdriveChan,
+					responseChan:  responseChan,
+					requestCtx:    ctx,
+					sectorIndex:   nxt,
+					sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
+					id:            id,
+				}); err == nil {
+					continue
+				}
 			}
-
-			if err := launch(&uploadJob{
-				overdrive:     true,
-				overdriveChan: overdriveChan,
-				responseChan:  responseChan,
-				requestCtx:    ctx,
-				sectorIndex:   nxt,
-				sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
-				id:            id,
-			}); err != nil {
-				break
-			}
+			break
 		}
 	}
 
@@ -802,26 +804,20 @@ func (s *uploadState) remaining() uint64 {
 func (s *uploadState) schedule(sectorIndex int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pending = append([]int{sectorIndex}, s.pending...) // prepend so it's next up
+
+	// if the sector is already scheduled, don't schedule it again
+	for _, pending := range s.pending {
+		if sectorIndex == pending {
+			return
+		}
+	}
+	s.pending = append(s.pending, sectorIndex)
 }
 
 func (s *uploadState) canOverdrive(sectorIndex int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.numInflight-s.numRemaining < s.maxOverdrive {
-		return true
-	}
-
-	// if the sector is already scheduled, don't schedule it again
-	for _, pending := range s.pending {
-		if sectorIndex == pending {
-			return false
-		}
-	}
-
-	// schedule overdrive for later
-	s.pending = append(s.pending, sectorIndex)
-	return false
+	return s.numInflight-s.numRemaining < s.maxOverdrive
 }
 
 func (s *uploadState) nextOverdrive() int {
