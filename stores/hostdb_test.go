@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
+	stypes "go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -138,12 +139,14 @@ func TestSQLHostDB(t *testing.T) {
 	// Apply a consensus change.
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}
 	hdb.ProcessConsensusChange(modules.ConsensusChange{
-		ID: ccid2,
+		ID:            ccid2,
+		AppliedBlocks: []stypes.Block{{}},
+		AppliedDiffs:  []modules.ConsensusChangeDiffs{{}},
 	})
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second, nil)
+	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second, types.Address{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1190,7 +1193,7 @@ func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 		hostKey:      publicKey(hk),
 		announcement: hostdb.Announcement{NetAddress: na},
 	}}...)
-	s.lastAnnouncementSave = time.Now().Add(s.persistInterval * -2)
+	s.lastSave = time.Now().Add(s.persistInterval * -2)
 	return s.applyUpdates(false)
 }
 

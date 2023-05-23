@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -18,7 +19,8 @@ const testPersistInterval = time.Second
 func newTestSQLStore() (*SQLStore, string, modules.ConsensusChangeID, error) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	conn := NewEphemeralSQLiteConnection(dbName)
-	sqlStore, ccid, err := NewSQLStore(conn, true, time.Second, newTestLogger())
+	walletAddrs := types.Address(frand.Entropy256())
+	sqlStore, ccid, err := NewSQLStore(conn, true, time.Second, walletAddrs, newTestLogger())
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}

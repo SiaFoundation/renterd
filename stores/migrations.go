@@ -16,6 +16,16 @@ func (dbHostBlocklistEntryHost) TableName() string {
 func performMigrations(db *gorm.DB) error {
 	m := db.Migrator()
 
+	// Perform pre-auto migrations
+	//
+	// If the consensus info table is missing the height column, drop it to
+	// force a resync.
+	if m.HasTable(&dbConsensusInfo{}) && !m.HasColumn(&dbConsensusInfo{}, "height") {
+		if err := m.DropTable(&dbConsensusInfo{}); err != nil {
+			return err
+		}
+	}
+
 	// Perform auto migrations.
 	tables := []interface{}{
 		// bus.MetadataStore tables
@@ -35,6 +45,10 @@ func performMigrations(db *gorm.DB) error {
 		&dbInteraction{},
 		&dbAllowlistEntry{},
 		&dbBlocklistEntry{},
+
+		// wallet tables
+		&dbSiacoinElement{},
+		&dbTransaction{},
 
 		// bus.SettingStore tables
 		&dbSetting{},

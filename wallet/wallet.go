@@ -106,7 +106,7 @@ type Transaction struct {
 // A SingleAddressStore stores the state of a single-address wallet.
 // Implementations are assumed to be thread safe.
 type SingleAddressStore interface {
-	Balance() types.Currency
+	Balance() (types.Currency, error)
 	UnspentSiacoinElements() ([]SiacoinElement, error)
 	Transactions(since time.Time, max int) ([]Transaction, error)
 }
@@ -140,7 +140,7 @@ func (w *SingleAddressWallet) Address() types.Address {
 }
 
 // Balance returns the balance of the wallet.
-func (w *SingleAddressWallet) Balance() types.Currency {
+func (w *SingleAddressWallet) Balance() (types.Currency, error) {
 	return w.store.Balance()
 }
 
