@@ -435,24 +435,6 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		if state.complete(resp.job.sectorIndex, hk, resp.root) {
 			break
 		}
-
-		for {
-			nxt := state.nextOverdrive()
-			if nxt != -1 && state.canOverdrive(nxt) {
-				if err := launch(&uploadJob{
-					overdrive:     true,
-					overdriveChan: overdriveChan,
-					responseChan:  responseChan,
-					requestCtx:    ctx,
-					sectorIndex:   nxt,
-					sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
-					id:            id,
-				}); err == nil {
-					continue
-				}
-			}
-			break
-		}
 	}
 
 	// register the amount of overdrive sectors
