@@ -368,6 +368,8 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 						sectorTimeout: u.w.uploadSectorTimeout,
 						id:            id,
 					})
+				} else {
+					state.schedule(i)
 				}
 				resetTimeout()
 			}
@@ -434,6 +436,22 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 
 		if state.complete(resp.job.sectorIndex, hk, resp.root) {
 			break
+		}
+
+		// launch an overdrive worker if possible
+		nxt := state.nextOverdrive()
+		if nxt != -1 && state.canOverdrive(nxt) {
+			if err := launch(&uploadJob{
+				overdrive:     true,
+				overdriveChan: overdriveChan,
+				responseChan:  responseChan,
+				requestCtx:    ctx,
+				sectorIndex:   nxt,
+				sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
+				id:            id,
+			}); err == nil {
+				continue
+			}
 		}
 	}
 
