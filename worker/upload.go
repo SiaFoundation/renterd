@@ -81,7 +81,8 @@ type (
 	}
 
 	uploadState struct {
-		maxOverdrive uint64
+		maxOverdrive  uint64
+		sectorTimeout time.Duration
 
 		mu           sync.Mutex
 		numCompleted uint64
@@ -89,8 +90,9 @@ type (
 		numOverdrive uint64
 		numRemaining uint64
 
-		overdriving map[int]struct{}
-		sectors     []object.Sector
+		lastOverdrive time.Time
+		overdriving   map[int]struct{}
+		sectors       []object.Sector
 	}
 
 	uploadStats struct {
@@ -312,10 +314,12 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 
 	// prepare state
 	state := &uploadState{
-		maxOverdrive: u.w.uploadMaxOverdrive,
+		maxOverdrive:  u.w.uploadMaxOverdrive,
+		sectorTimeout: u.w.uploadSectorTimeout,
+
+		numRemaining: uint64(len(shards)),
 		overdriving:  make(map[int]struct{}, len(shards)),
 		sectors:      make([]object.Sector, len(shards)),
-		numRemaining: uint64(len(shards)),
 	}
 
 	// prepare launch function
@@ -398,16 +402,11 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	// register the amount of overdrive sectors
 	span.SetAttributes(attribute.Int("overdrive", int(state.numOverdrive)))
 
-	// if there are remaining sectors, fail with an error message
-	if state.remaining() > 0 {
-		return nil, fmt.Errorf("failed to upload slab: rem=%v, inflight=%v, errs=%w", state.remaining(), state.inflight(), errs)
-	}
-
 	// track stats
 	u.statsOverdrive.track(state.overdrivePct())
 	u.statsSpeed.track(mbps(state.downloaded(), time.Since(start).Seconds()))
 
-	return state.sectors, nil
+	return state.finish(errs)
 }
 
 func (u *uploader) enqueue(j *uploadJob) error {
@@ -669,6 +668,7 @@ func (s *uploadState) launch(job *uploadJob) {
 	defer s.mu.Unlock()
 	s.numInflight++
 	if job.overdrive {
+		s.lastOverdrive = time.Now()
 		s.overdriving[job.sectorIndex] = struct{}{}
 		s.numOverdrive++
 	}
@@ -699,12 +699,6 @@ func (s *uploadState) inflight() uint64 {
 	return s.numInflight
 }
 
-func (s *uploadState) remaining() uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.numRemaining
-}
-
 func (s *uploadState) downloaded() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -723,6 +717,11 @@ func (s *uploadState) overdrive() int {
 
 	// overdrive is not kicking in yet
 	if s.numRemaining >= s.maxOverdrive {
+		return -1
+	}
+
+	// overdrive is not due yet
+	if time.Since(s.lastOverdrive) < s.sectorTimeout {
 		return -1
 	}
 
@@ -753,6 +752,15 @@ func (s *uploadState) overdrive() int {
 	}
 
 	return -1
+}
+
+func (s *uploadState) finish(hes HostErrorSet) ([]object.Sector, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.numRemaining > 0 {
+		return nil, fmt.Errorf("failed to upload slab: remaining=%v, inflight=%v, errors=%w", s.numRemaining, s.numInflight, hes)
+	}
+	return s.sectors, nil
 }
 
 func (a *average) average() float64 {
