@@ -458,10 +458,16 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 		}
 		return err
 	}
-	if err != nil {
+	// if the amount is zero we just retur the error
+	if amt.IsZero() {
 		return err
 	}
-	return a.bus.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
+	// otherwise we try to withdraw the amount
+	errAdd := a.bus.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
+	if errAdd != nil {
+		err = fmt.Errorf("%w; failed to add balance to account, error: %v", err, errAdd)
+	}
+	return err
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is
@@ -575,14 +581,12 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	var sectorRoot types.Hash256
 	return sectorRoot, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
-			var refund, cost types.Currency
 			expectedCost, _, _, err := uploadSectorCost(pt, rev.WindowEnd)
 			if err != nil {
 				return err
 			}
 			payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
-			sectorRoot, cost, refund, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
-			amount = cost.Sub(refund)
+			sectorRoot, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
 			return err
 		})
 		return
@@ -1096,17 +1100,17 @@ func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentM
 	}, nil
 }
 
-func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost, refund types.Currency, err error) {
+func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 
 	// sanity check revision first
 	if rev.RevisionNumber == math.MaxUint64 {
-		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errMaxRevisionReached
+		return types.Hash256{}, types.ZeroCurrency, errMaxRevisionReached
 	}
 
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, err
+		return types.Hash256{}, types.ZeroCurrency, err
 	}
 	defer s.Close()
 
@@ -1133,25 +1137,48 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		return
 	}
 
+	// compute expected collateral and refund
+	expectedCost, expectedCollateral, expectedRefund, err := uploadSectorCost(pt, rev.WindowEnd)
+	if err != nil {
+		return types.Hash256{}, types.ZeroCurrency, err
+	}
+
+	// apply leeways.
+	// TODO: remove once most hosts use hostd. Then we can check for exact values.
+	expectedCollateral = expectedCollateral.Mul64(9).Div64(10)
+	expectedCost = expectedCost.Mul64(11).Div64(10)
+	expectedRefund = expectedRefund.Mul64(9).Div64(10)
+
+	// check if the cost, collateral and refund match our expectation.
+	if executeResp.TotalCost.Cmp(expectedCost) > 0 {
+		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("cost exceeds expectation: %v < %v", executeResp.TotalCost.String(), expectedCost.String())
+	}
+	if executeResp.FailureRefund.Cmp(expectedRefund) < 0 {
+		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
+	}
+	if executeResp.AdditionalCollateral.Cmp(expectedCollateral) < 0 {
+		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", executeResp.AdditionalCollateral.String(), expectedCollateral.String())
+	}
+
+	// set the cost and refund
+	cost = executeResp.TotalCost
+	defer func() {
+		if err != nil {
+			cost = types.ZeroCurrency
+			if executeResp.FailureRefund.Cmp(cost) < 0 {
+				cost = cost.Sub(executeResp.FailureRefund)
+			}
+		}
+	}()
+
 	// check response error
 	if err = executeResp.Error; err != nil {
-		refund = executeResp.FailureRefund
 		return
 	}
 	cost = executeResp.TotalCost
 
-	// check additional collateral
+	// include the refund in the collateral
 	collateral := executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
-	_, expectedCollateral, expectedRefund, err := uploadSectorCost(pt, rev.EndHeight())
-	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, err
-	}
-	if collateral.Cmp(expectedCollateral) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", collateral.String(), expectedCollateral.String())
-	}
-	if executeResp.FailureRefund.Cmp(expectedRefund) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
-	}
 
 	// check proof
 	sectorRoot = rhpv2.SectorRoot(sector)
@@ -1159,13 +1186,13 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		// For the first upload to a contract we don't get a proof. So we just
 		// assert that the new contract root matches the root of the sector.
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
-			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
+			return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
 	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.
 		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}} // TODO: change once rhpv3 support is available
 		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.SectorSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
-			return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, errors.New("proof verification failed")
+			return types.Hash256{}, types.ZeroCurrency, errors.New("proof verification failed")
 		}
 	}
 
