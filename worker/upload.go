@@ -37,6 +37,7 @@ type (
 		w *worker
 
 		statsOverdrive *average
+		statsSpeed     *average
 		statsStopChan  chan struct{}
 
 		mu        sync.Mutex
@@ -56,24 +57,21 @@ type (
 		queueUploads        map[uploadID]struct{}
 		queue               []*uploadJob
 
-		statsSpeed        *average
-		statsEstimateDiff *average
-		stopChan          chan struct{}
+		statsSpeed *average
+		stopChan   chan struct{}
 	}
 
 	uploadJob struct {
 		requestCtx context.Context
 
-		overdrive     bool
-		overdriveChan chan int
-		responseChan  chan uploadResponse
+		overdrive    bool
+		responseChan chan uploadResponse
 
-		id            uploadID
-		sector        *[rhpv2.SectorSize]byte
-		sectorIndex   int
-		sectorTimeout time.Duration
-		estimate      time.Duration
-		queue         *uploadQueue
+		id          uploadID
+		sector      *[rhpv2.SectorSize]byte
+		sectorIndex int
+		estimate    time.Duration
+		queue       *uploadQueue
 	}
 
 	uploadResponse struct {
@@ -86,19 +84,20 @@ type (
 		maxOverdrive uint64
 
 		mu           sync.Mutex
+		numCompleted uint64
 		numInflight  uint64
 		numOverdrive uint64
 		numRemaining uint64
 
-		pending     []int
 		overdriving map[int]struct{}
 		sectors     []object.Sector
 	}
 
 	uploadStats struct {
-		overdrivePct  float64
-		queuesHealthy uint64
-		queuesTotal   uint64
+		overdrivePct   float64
+		queuesHealthy  uint64
+		queuesSpeedAvg float64
+		queuesTotal    uint64
 	}
 
 	average struct {
@@ -121,9 +120,8 @@ func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 		queueChan:    make(chan struct{}, 1),
 		queueUploads: make(map[uploadID]struct{}),
 
-		statsSpeed:        newAverage(defaultAvgUpdateInterval),
-		statsEstimateDiff: newAverage(defaultAvgUpdateInterval),
-		stopChan:          make(chan struct{}),
+		statsSpeed: newAverage(defaultAvgUpdateInterval),
+		stopChan:   make(chan struct{}),
 	}
 }
 
@@ -141,6 +139,7 @@ func (w *worker) initUploader() {
 
 	w.uploader = &uploader{
 		statsOverdrive: newAverage(defaultAvgUpdateInterval),
+		statsSpeed:     newAverage(defaultAvgUpdateInterval),
 		statsStopChan:  make(chan struct{}),
 
 		w:         w,
@@ -161,9 +160,10 @@ func (u *uploader) Stats() uploadStats {
 	}
 
 	return uploadStats{
-		overdrivePct:  u.statsOverdrive.average(),
-		queuesHealthy: healthy,
-		queuesTotal:   uint64(len(u.contracts)),
+		overdrivePct:   u.statsOverdrive.average(),
+		queuesHealthy:  healthy,
+		queuesSpeedAvg: u.statsSpeed.average(),
+		queuesTotal:    uint64(len(u.contracts)),
 	}
 }
 
@@ -313,7 +313,6 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	// prepare state
 	state := &uploadState{
 		maxOverdrive: u.w.uploadMaxOverdrive,
-		pending:      make([]int, 0, len(shards)),
 		overdriving:  make(map[int]struct{}, len(shards)),
 		sectors:      make([]object.Sector, len(shards)),
 		numRemaining: uint64(len(shards)),
@@ -324,6 +323,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		// set the job's span
 		_, jobSpan := tracing.Tracer.Start(ctx, "uploader.uploadJob")
 		jobSpan.SetAttributes(attribute.Bool("overdrive", job.overdrive))
+		jobSpan.SetAttributes(attribute.Int("sector", job.sectorIndex))
 		job.requestCtx = trace.ContextWithSpan(job.requestCtx, jobSpan)
 
 		// schedule the job
@@ -338,44 +338,17 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		return nil
 	}
 
-	// launch a goroutine that handles overdrive signals
-	overdriveChan := make(chan int)
-	responseChan := make(chan uploadResponse)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case i := <-overdriveChan:
-				if state.canOverdrive(i) {
-					_ = launch(&uploadJob{
-						overdrive:     true,
-						overdriveChan: overdriveChan,
-						responseChan:  responseChan,
-						requestCtx:    ctx,
-						sector:        (*[rhpv2.SectorSize]byte)(shards[i]),
-						sectorIndex:   i,
-						sectorTimeout: u.w.uploadSectorTimeout,
-						id:            id,
-					})
-				} else {
-					state.schedule(i)
-				}
-			}
-		}
-	}()
-
 	// launch all shards
+	start := time.Now()
+	responseChan := make(chan uploadResponse)
 	for i, shard := range shards {
 		if err := launch(&uploadJob{
-			overdrive:     false,
-			overdriveChan: overdriveChan,
-			responseChan:  responseChan,
-			requestCtx:    ctx,
-			sector:        (*[rhpv2.SectorSize]byte)(shard),
-			sectorIndex:   i,
-			sectorTimeout: u.w.uploadSectorTimeout,
-			id:            id,
+			overdrive:    false,
+			responseChan: responseChan,
+			requestCtx:   ctx,
+			sector:       (*[rhpv2.SectorSize]byte)(shard),
+			sectorIndex:  i,
+			id:           id,
 		}); err != nil {
 			return nil, err
 		}
@@ -389,40 +362,35 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case resp = <-responseChan:
-			state.received()
 		}
 
-		hk := resp.job.queue.hk
+		// handle the response
+		if done := state.receive(resp); done {
+			break
+		}
+
+		// see if we need to relaunch the job
 		if resp.err != nil {
-			errs = append(errs, &HostError{hk, resp.err})
-			if err := launch(resp.job); err != nil && !resp.job.overdrive {
-				break // download failed, not enough hosts
-			} else if err != nil {
-				u.w.logger.Debugf("failed to re-launch job: %v, host %v failed with err %v", err, resp.job.queue.hk, resp.err)
-				state.schedule(resp.job.sectorIndex)
+			errs = append(errs, &HostError{resp.job.queue.hk, resp.err})
+			if !resp.job.overdrive {
+				if err := launch(resp.job); err != nil {
+					break // download failed, not enough hosts
+				}
 			}
 			continue
 		}
 
-		if state.complete(resp.job.sectorIndex, hk, resp.root) {
-			break
-		}
-
 		// launch an overdrive worker if possible
-		if state.remaining() < state.maxOverdrive {
-			nxt := state.nextOverdrive()
-			if nxt != -1 && state.canOverdrive(nxt) {
-				if err := launch(&uploadJob{
-					overdrive:     true,
-					overdriveChan: overdriveChan,
-					responseChan:  responseChan,
-					requestCtx:    ctx,
-					sectorIndex:   nxt,
-					sector:        (*[rhpv2.SectorSize]byte)(shards[nxt]),
-					id:            id,
-				}); err == nil {
-					continue
-				}
+		if sI := state.overdrive(); sI != -1 {
+			if err := launch(&uploadJob{
+				overdrive:    true,
+				responseChan: responseChan,
+				requestCtx:   ctx,
+				sectorIndex:  sI,
+				sector:       (*[rhpv2.SectorSize]byte)(shards[sI]),
+				id:           id,
+			}); err == nil {
+				continue
 			}
 		}
 	}
@@ -435,12 +403,10 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		return nil, fmt.Errorf("failed to upload slab: rem=%v, inflight=%v, errs=%w", state.remaining(), state.inflight(), errs)
 	}
 
-	// track overdrive pct
-	overdrivePct := float64(state.numOverdrive) / float64(len(shards))
-	u.statsOverdrive.track(overdrivePct)
+	// track stats
+	u.statsOverdrive.track(state.overdrivePct())
+	u.statsSpeed.track(mbps(state.downloaded(), time.Since(start).Seconds()))
 
-	state.mu.Lock()
-	defer state.mu.Unlock()
 	return state.sectors, nil
 }
 
@@ -607,13 +573,15 @@ func (q *uploadQueue) push(j *uploadJob) {
 	}
 }
 
-func (q *uploadQueue) track(err error) {
+func (q *uploadQueue) track(err error, d time.Duration) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if err == nil {
-		q.consecutiveFailures = 0
-	} else {
+	if err != nil {
 		q.consecutiveFailures++
+		q.statsSpeed.track(math.SmallestNonzeroFloat64)
+	} else {
+		q.consecutiveFailures = 0
+		q.statsSpeed.track(mbps(rhpv2.SectorSize, d.Seconds()))
 	}
 }
 
@@ -640,44 +608,6 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 	span := trace.SpanFromContext(j.requestCtx)
 	span.AddEvent("execute")
 
-	// track performance
-	start := time.Now()
-	defer func() {
-		elapsed := time.Since(start)
-
-		// update span
-		span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-		span.RecordError(err)
-
-		// update stats
-		if err == nil {
-			speed := mbps(rhpv2.SectorSize, elapsed.Seconds())
-			j.queue.statsSpeed.track(speed)
-			j.queue.statsEstimateDiff.track(float64((elapsed - j.estimate).Milliseconds()))
-		} else {
-			j.queue.statsSpeed.track(math.SmallestNonzeroFloat64)
-		}
-
-		// update queue
-		j.queue.track(err)
-	}()
-
-	// schedule overdrive
-	doneChan := make(chan struct{})
-	defer close(doneChan)
-	go func() {
-		select {
-		case <-time.After(j.sectorTimeout):
-			select {
-			case j.overdriveChan <- j.sectorIndex:
-				span.AddEvent("overdrive")
-			default:
-			}
-		case <-j.requestCtx.Done():
-		case <-doneChan:
-		}
-	}()
-
 	// create a host
 	h, err := hp.newHostV3(j.requestCtx, j.queue.fcid, j.queue.hk, j.queue.siamuxAddr)
 	if err != nil {
@@ -686,6 +616,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 	}
 
 	// upload the sector
+	start := time.Now()
 	root, err := h.UploadSector(j.requestCtx, j.sector, rev)
 	if err != nil {
 		j.fail(err)
@@ -693,11 +624,18 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 		j.succeed(root)
 	}
 
+	// update span
+	elapsed := time.Since(start)
+	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
+	span.RecordError(err)
+	span.End()
+
+	// update queue
+	j.queue.track(err, elapsed)
 	return
 }
 
 func (j *uploadJob) succeed(root types.Hash256) {
-	defer j.end()
 	select {
 	case j.responseChan <- uploadResponse{
 		job:  j,
@@ -708,7 +646,6 @@ func (j *uploadJob) succeed(root types.Hash256) {
 }
 
 func (j *uploadJob) fail(err error) {
-	defer j.end()
 	select {
 	case j.responseChan <- uploadResponse{
 		job: j,
@@ -721,15 +658,10 @@ func (j *uploadJob) fail(err error) {
 func (j *uploadJob) done() bool {
 	select {
 	case <-j.requestCtx.Done():
-		j.end()
 		return true
 	default:
 		return false
 	}
-}
-
-func (j *uploadJob) end() {
-	trace.SpanFromContext(j.requestCtx).End()
 }
 
 func (s *uploadState) launch(job *uploadJob) {
@@ -742,22 +674,22 @@ func (s *uploadState) launch(job *uploadJob) {
 	}
 }
 
-func (s *uploadState) received() {
+func (s *uploadState) receive(resp uploadResponse) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.numInflight--
-}
 
-func (s *uploadState) complete(sectorIndex int, hk types.PublicKey, root types.Hash256) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.sectors[sectorIndex].Root == (types.Hash256{}) {
-		s.sectors[sectorIndex] = object.Sector{
-			Host: hk,
-			Root: root,
+	if resp.err == nil {
+		if s.sectors[resp.job.sectorIndex].Root == (types.Hash256{}) {
+			s.sectors[resp.job.sectorIndex] = object.Sector{
+				Host: resp.job.queue.hk,
+				Root: resp.root,
+			}
+			s.numRemaining--
 		}
-		s.numRemaining--
+		s.numCompleted++
 	}
+
 	return s.numRemaining == 0
 }
 
@@ -773,52 +705,53 @@ func (s *uploadState) remaining() uint64 {
 	return s.numRemaining
 }
 
-func (s *uploadState) schedule(sectorIndex int) {
+func (s *uploadState) downloaded() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// if the sector is already scheduled, don't schedule it again
-	for _, pending := range s.pending {
-		if sectorIndex == pending {
-			return
-		}
-	}
-	s.pending = append(s.pending, sectorIndex)
+	return int64(s.numCompleted) * rhpv2.SectorSize
 }
 
-func (s *uploadState) canOverdrive(sectorIndex int) bool {
+func (s *uploadState) overdrivePct() float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.numInflight-s.numRemaining < s.maxOverdrive
+	return float64(s.numOverdrive) / float64(len(s.sectors))
 }
 
-func (s *uploadState) nextOverdrive() int {
+func (s *uploadState) overdrive() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// try pending overdrives first
-	for len(s.pending) > 0 {
-		index := s.pending[0]
-		s.pending = s.pending[1:]
-		if s.sectors[index].Root == (types.Hash256{}) {
-			return index
+	// overdrive is not kicking in yet
+	if s.numRemaining >= s.maxOverdrive {
+		return -1
+	}
+
+	// overdrive is maxed out
+	if s.numInflight-s.numRemaining >= s.maxOverdrive {
+		return -1
+	}
+
+	// create a map of remaining sectors
+	remaining := make(map[int]struct{})
+	for sI, sector := range s.sectors {
+		if sector.Root == (types.Hash256{}) {
+			remaining[sI] = struct{}{}
 		}
 	}
 
-	// try overdriving a new sector
-	for index, sector := range s.sectors {
-		_, ongoing := s.overdriving[index]
-		if sector.Root == (types.Hash256{}) && !ongoing {
-			return index
+	// loop remaining sectors and return one that we're not overdriving yet
+	for sI := range remaining {
+		_, overdriving := s.overdriving[sI]
+		if !overdriving {
+			return sI
 		}
 	}
 
 	// randomly overdrive a sector we overdrived before
-	for index := range s.overdriving {
-		if s.sectors[index].Root == (types.Hash256{}) {
-			return index
-		}
+	for sI := range remaining {
+		return sI
 	}
+
 	return -1
 }
 
