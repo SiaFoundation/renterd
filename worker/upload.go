@@ -90,7 +90,7 @@ type (
 		mu           sync.Mutex
 		numCompleted uint64
 		numInflight  uint64
-		numOverdrive uint64
+		numLaunched  uint64
 		numRemaining uint64
 
 		lastOverdrive time.Time
@@ -410,7 +410,8 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	}
 
 	// register the amount of overdrive sectors
-	span.SetAttributes(attribute.Int("overdrive", int(state.numOverdrive)))
+
+	span.SetAttributes(attribute.Int("overdrive", int(state.numLaunched)-len(state.sectors)))
 
 	// track stats
 	u.statsOverdrive.track(state.overdrivePct())
@@ -677,10 +678,10 @@ func (s *uploadState) launch(job *uploadJob) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.numInflight++
+	s.numLaunched++
 	if job.overdrive {
 		s.lastOverdrive = time.Now()
 		s.overdriving[job.sectorIndex] = struct{}{}
-		s.numOverdrive++
 	}
 }
 
@@ -718,7 +719,13 @@ func (s *uploadState) downloaded() int64 {
 func (s *uploadState) overdrivePct() float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return float64(s.numOverdrive) / float64(len(s.sectors))
+
+	numOverdrive := int(s.numLaunched) - len(s.sectors)
+	if numOverdrive <= 0 {
+		return 0
+	}
+
+	return float64(numOverdrive) / float64(len(s.sectors))
 }
 
 func (s *uploadState) overdrive() int {

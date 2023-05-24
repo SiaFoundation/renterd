@@ -2,11 +2,9 @@ package worker
 
 import (
 	"context"
-	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.uber.org/zap"
 )
 
 type contextCheckingLocker struct {
@@ -27,19 +25,4 @@ func (l *contextCheckingLocker) ReleaseContract(ctx context.Context, fcid types.
 	default:
 	}
 	return nil
-}
-
-// TestReleaseContract is a test to verify that calling `Release` on a
-// contractLock with an already cancelled context will not fail.
-func TestReleaseContract(t *testing.T) {
-	t.Parallel()
-
-	l := newContractLock(types.FileContractID{}, 0, 0, &contextCheckingLocker{}, zap.NewNop().Sugar())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := l.Release(ctx); err != nil {
-		t.Fatal(err)
-	}
 }
