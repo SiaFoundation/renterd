@@ -37,6 +37,7 @@ type (
 		w *worker
 
 		statsOverdrive *average
+		statsSpeed     *average
 		statsStopChan  chan struct{}
 
 		mu        sync.Mutex
@@ -86,6 +87,7 @@ type (
 		maxOverdrive uint64
 
 		mu           sync.Mutex
+		numCompleted uint64
 		numInflight  uint64
 		numOverdrive uint64
 		numRemaining uint64
@@ -96,9 +98,10 @@ type (
 	}
 
 	uploadStats struct {
-		overdrivePct  float64
-		queuesHealthy uint64
-		queuesTotal   uint64
+		overdrivePct   float64
+		queuesHealthy  uint64
+		queuesSpeedAvg float64
+		queuesTotal    uint64
 	}
 
 	average struct {
@@ -141,6 +144,7 @@ func (w *worker) initUploader() {
 
 	w.uploader = &uploader{
 		statsOverdrive: newAverage(defaultAvgUpdateInterval),
+		statsSpeed:     newAverage(defaultAvgUpdateInterval),
 		statsStopChan:  make(chan struct{}),
 
 		w:         w,
@@ -161,9 +165,10 @@ func (u *uploader) Stats() uploadStats {
 	}
 
 	return uploadStats{
-		overdrivePct:  u.statsOverdrive.average(),
-		queuesHealthy: healthy,
-		queuesTotal:   uint64(len(u.contracts)),
+		overdrivePct:   u.statsOverdrive.average(),
+		queuesHealthy:  healthy,
+		queuesSpeedAvg: u.statsSpeed.average(),
+		queuesTotal:    uint64(len(u.contracts)),
 	}
 }
 
@@ -366,6 +371,7 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	}()
 
 	// launch all shards
+	start := time.Now()
 	for i, shard := range shards {
 		if err := launch(&uploadJob{
 			overdrive:     false,
@@ -435,12 +441,10 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		return nil, fmt.Errorf("failed to upload slab: rem=%v, inflight=%v, errs=%w", state.remaining(), state.inflight(), errs)
 	}
 
-	// track overdrive pct
-	overdrivePct := float64(state.numOverdrive) / float64(len(shards))
-	u.statsOverdrive.track(overdrivePct)
+	// track stats
+	u.statsOverdrive.track(state.overdrivePct())
+	u.statsSpeed.track(mbps(state.downloaded(), time.Since(start).Seconds()))
 
-	state.mu.Lock()
-	defer state.mu.Unlock()
 	return state.sectors, nil
 }
 
@@ -758,6 +762,7 @@ func (s *uploadState) complete(sectorIndex int, hk types.PublicKey, root types.H
 		}
 		s.numRemaining--
 	}
+	s.numCompleted++
 	return s.numRemaining == 0
 }
 
@@ -771,6 +776,18 @@ func (s *uploadState) remaining() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.numRemaining
+}
+
+func (s *uploadState) downloaded() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return int64(s.numCompleted) * rhpv2.SectorSize
+}
+
+func (s *uploadState) overdrivePct() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return float64(s.numOverdrive) / float64(len(s.sectors))
 }
 
 func (s *uploadState) schedule(sectorIndex int) {

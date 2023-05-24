@@ -888,9 +888,10 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploader.Stats()
 	jc.Encode(api.UploadStatsResponse{
-		OverdrivePct:        math.Floor(stats.overdrivePct*100*100) / 100,
-		UploadQueuesHealthy: stats.queuesHealthy,
-		UploadQueuesTotal:   stats.queuesTotal,
+		OverdrivePct:   math.Floor(stats.overdrivePct*100*100) / 100,
+		QueuesHealthy:  stats.queuesHealthy,
+		QueuesSpeedAvg: stats.queuesSpeedAvg,
+		QueuesTotal:    stats.queuesTotal,
 	})
 }
 
