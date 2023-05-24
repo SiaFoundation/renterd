@@ -1148,24 +1148,38 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		return
 	}
 
-	// check response error
-	if err = executeResp.Error; err != nil {
-		refund = executeResp.FailureRefund
-		return
-	}
-	cost = executeResp.TotalCost
-
-	// check additional collateral
-	collateral := executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
+	// compute expected collateral and refund
 	_, expectedCollateral, expectedRefund, err := uploadSectorCost(pt, rev.WindowEnd)
 	if err != nil {
 		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, err
 	}
+
+	// check if the host provides enough refund. If not, we abort and return our
+	// expected refund to track the drift.
+	// TODO: remove the leeway once most hosts use hostd
+	expectedRefund = expectedRefund.Mul64(9).Div64(10)
+	if executeResp.FailureRefund.Cmp(expectedRefund) < 0 {
+		refund = expectedRefund
+		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
+	}
+
+	// if an error happens, we expect to receive the refund
+	defer func() {
+		if err != nil {
+			refund = executeResp.FailureRefund
+		}
+	}()
+
+	// check response error
+	if err = executeResp.Error; err != nil {
+		return
+	}
+	cost = executeResp.TotalCost
+
+	// check if the host provides enough collateral.
+	collateral := executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
 	if collateral.Cmp(expectedCollateral) < 0 {
 		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", collateral.String(), expectedCollateral.String())
-	}
-	if executeResp.FailureRefund.Cmp(expectedRefund) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
 	}
 
 	// check proof
