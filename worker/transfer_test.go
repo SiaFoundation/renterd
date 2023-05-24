@@ -89,15 +89,11 @@ type mockRevisionLocker struct {
 	calls int
 }
 
-func (l *mockRevisionLocker) lockRevision(ctx context.Context, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64) (*types.FileContractRevision, revisionUnlocker, error) {
-	return nil, nil, nil
-}
-
-func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision *types.FileContractRevision) error) error {
+func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
 	l.mu.Lock()
 	l.calls++
 	l.mu.Unlock()
-	return fn(&types.FileContractRevision{})
+	return fn(types.FileContractRevision{})
 }
 
 type mockHostProvider struct {
@@ -132,6 +128,7 @@ func (sp *mockHostProvider) newHostV3(ctx context.Context, contractID types.File
 
 func TestMultipleObjects(t *testing.T) {
 	mockLocker := &mockRevisionLocker{}
+
 	// generate object data
 	data := [][]byte{
 		frand.Bytes(111),
@@ -144,36 +141,54 @@ func TestMultipleObjects(t *testing.T) {
 	for i := range keys {
 		keys[i] = object.GenerateEncryptionKey()
 	}
-	rs := make([]io.Reader, len(data))
-	for i := range rs {
-		rs[i] = keys[i].Encrypt(bytes.NewReader(data[i]))
+	rr := make([]io.Reader, len(data))
+	for i := range rr {
+		rr[i] = keys[i].Encrypt(bytes.NewReader(data[i]))
 	}
-	// TODO PJ: fix this
-	// r := io.MultiReader(rs...)
+	r := io.MultiReader(rr...)
 
-	// Prepare hosts.
+	// prepare hosts
 	var hosts []hostV3
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, newMockHost())
 	}
-	sp := newMockHostProvider(hosts)
+	hp := newMockHostProvider(hosts)
 	var contracts []api.ContractMetadata
 	for _, h := range hosts {
 		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.HostKey()})
 	}
 
+	// prepare uploader
+	uploader := newUploader(hp, mockLocker, 0, 0)
+
 	// upload
 	var slabs []object.Slab
-	// TODO PJ: fix this
-	// for {
-	// 	s, _, _, err := uploadSlab(context.Background(), sp, r, 3, 10, contracts, mockLocker, 0, 0, zap.NewNop().Sugar())
-	// 	if err == io.EOF {
-	// 		break
-	// 	} else if err != nil {
-	// 		t.Fatal(err)
-	// 	}
-	// 	slabs = append(slabs, s)
-	// }
+	for {
+		// read slab data
+		rs := api.RedundancySettings{MinShards: 3, TotalShards: 10}
+		buf := make([]byte, int(rs.MinShards)*rhpv2.SectorSize)
+		shards := make([][]byte, rs.TotalShards)
+		_, err := io.ReadFull(r, buf)
+		if err == io.EOF {
+			break
+		} else if err != nil && err != io.ErrUnexpectedEOF {
+			t.Fatal(err)
+		}
+
+		s := object.Slab{
+			Key:       object.GenerateEncryptionKey(),
+			MinShards: uint8(rs.MinShards),
+		}
+		s.Encode(buf, shards)
+		s.Encrypt(shards)
+
+		s.Shards, err = uploader.uploadShards(context.Background(), shards, contracts, make(map[types.FileContractID]struct{}), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		slabs = append(slabs, s)
+	}
 
 	// construct objects
 	os := make([]object.Object, len(data))
@@ -196,7 +211,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0, 0, zap.NewNop().Sugar()); err != nil {
+			if _, err := downloadSlab(context.Background(), hp, dst, s, contracts, 0, 0, zap.NewNop().Sugar()); err != nil {
 				t.Error(err)
 				return
 			}

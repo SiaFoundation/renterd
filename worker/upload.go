@@ -34,11 +34,14 @@ type (
 	uploadID [8]byte
 
 	uploader struct {
-		w *worker
+		hp hostProvider
+		rl revisionLocker
+
+		sectorTimeout time.Duration
+		maxOverdrive  uint64
 
 		statsOverdrive *average
 		statsSpeed     *average
-		statsStopChan  chan struct{}
 
 		mu        sync.Mutex
 		contracts []*uploadQueue
@@ -139,12 +142,20 @@ func (w *worker) initUploader() {
 		panic("uploader already initialized") // developer error
 	}
 
-	w.uploader = &uploader{
+	w.uploader = newUploader(w, w, w.uploadMaxOverdrive, w.uploadSectorTimeout)
+}
+
+func newUploader(hp hostProvider, rl revisionLocker, maxOverdrive uint64, sectorTimeout time.Duration) *uploader {
+	return &uploader{
+		hp: hp,
+		rl: rl,
+
+		maxOverdrive:  maxOverdrive,
+		sectorTimeout: sectorTimeout,
+
 		statsOverdrive: newAverage(defaultAvgUpdateInterval),
 		statsSpeed:     newAverage(defaultAvgUpdateInterval),
-		statsStopChan:  make(chan struct{}),
 
-		w:         w,
 		contracts: make([]*uploadQueue, 0),
 		exclude:   make(map[uploadID]map[types.FileContractID]struct{}),
 	}
@@ -175,7 +186,6 @@ func (u *uploader) Stop() {
 	for _, q := range u.contracts {
 		close(q.stopChan)
 	}
-	close(u.statsStopChan)
 }
 
 func (u *uploader) newUpload(exclude map[types.FileContractID]struct{}, totalShards uint64) (uploadID, error) {
@@ -255,9 +265,9 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, contracts []api.Cont
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return false, err
 			}
-			span.AddEvent("shards read")
 
 			// encode and encrypt the shards
+			span.AddEvent("shards read")
 			shards := make([][]byte, rs.TotalShards)
 			slab.Encode(buf, shards)
 			span.AddEvent("shards encoded")
@@ -314,8 +324,8 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 
 	// prepare state
 	state := &uploadState{
-		maxOverdrive:  u.w.uploadMaxOverdrive,
-		sectorTimeout: u.w.uploadSectorTimeout,
+		maxOverdrive:  u.maxOverdrive,
+		sectorTimeout: u.sectorTimeout,
 
 		numRemaining: uint64(len(shards)),
 		overdriving:  make(map[int]struct{}, len(shards)),
@@ -471,7 +481,7 @@ func (u *uploader) updatePool(contracts []api.ContractMetadata, bh uint64) {
 	for _, contract := range c2m {
 		queue := u.newQueue(contract)
 		u.contracts = append(u.contracts, queue)
-		go processQueue(u.w, u.w, queue)
+		go processQueue(u.hp, u.rl, queue)
 	}
 
 	// update queue blockheight
