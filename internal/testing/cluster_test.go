@@ -153,6 +153,9 @@ func TestNewTestCluster(t *testing.T) {
 	if err := cluster.Sync(); err != nil {
 		t.Fatal(err)
 	}
+	if cs.LastBlockTime.IsZero() {
+		t.Fatal("last block time not set")
+	}
 
 	// Now wait for the revision and proof to be caught by the hostdb.
 	err = Retry(20, time.Second, func() error {

@@ -79,8 +79,9 @@ type AccountHandlerPOST struct {
 
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
-	BlockHeight uint64
-	Synced      bool
+	BlockHeight   uint64    `json:"blockHeight"`
+	LastBlockTime time.Time `json:"lastBlockTime"`
+	Synced        bool      `json:"synced"`
 }
 
 // ConsensusNetwork holds the name of the network.

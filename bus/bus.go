@@ -27,6 +27,7 @@ type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
 		AcceptBlock(context.Context, types.Block) error
+		LastBlockTime() time.Time
 		Synced(ctx context.Context) bool
 		TipState(ctx context.Context) consensus.State
 	}
@@ -166,8 +167,9 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
 	jc.Encode(api.ConsensusState{
-		BlockHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
-		Synced:      b.cm.Synced(jc.Request.Context()),
+		BlockHeight:   b.cm.TipState(jc.Request.Context()).Index.Height,
+		LastBlockTime: b.cm.LastBlockTime(),
+		Synced:        b.cm.Synced(jc.Request.Context()),
 	})
 }
 
