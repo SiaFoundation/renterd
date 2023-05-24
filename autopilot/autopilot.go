@@ -148,6 +148,12 @@ func (wp *workerPool) withWorker(workerFunc func(Worker)) {
 	workerFunc(wp.workers[frand.Intn(len(wp.workers))])
 }
 
+func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
+	wp.mu.RLock()
+	defer wp.mu.RUnlock()
+	workerFunc(wp.workers)
+}
+
 // Actions returns the autopilot actions that have occurred since the given time.
 func (ap *Autopilot) Actions(since time.Time, max int) []api.Action {
 	panic("unimplemented")
@@ -269,7 +275,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.tryPerformMigrations(ctx, w)
+			ap.m.tryPerformMigrations(ctx, ap.workers)
 		})
 
 		select {
