@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -705,7 +706,12 @@ func (s *uploadState) receive(resp uploadResponse) bool {
 		s.numCompleted++
 	}
 
-	fmt.Printf("DEBUG PJ: %+x receive resp for sector %d, err %v, remaining %v\n", resp.job.id, resp.job.sectorIndex, resp.err, len(s.remaining))
+	var r []string
+	for rem := range s.remaining {
+		r = append(r, fmt.Sprint(rem))
+	}
+	rstr := strings.Join(r, ",")
+	fmt.Printf("DEBUG PJ: %+x receive resp for sector %d, err %v, remaining %v (%v)\n", resp.job.id, resp.job.sectorIndex, resp.err, len(s.remaining), rstr)
 	return len(s.remaining) == 0
 }
 
