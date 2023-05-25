@@ -148,6 +148,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads
 }
 
 func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bool) bool {
+	return false
 	s.mu.Lock()
 	if s.ap.isStopped() {
 		s.mu.Unlock()
