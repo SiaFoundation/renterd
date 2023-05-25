@@ -353,9 +353,40 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		return nil
 	}
 
+	// create a timer to trigger overdrive
+	timeout := time.NewTimer(u.sectorTimeout)
+	resetTimeout := func() {
+		timeout.Stop()
+		select {
+		case <-timeout.C:
+		default:
+		}
+		timeout.Reset(u.sectorTimeout)
+	}
+
+	// launch a goroutine to trigger overdrive
+	responseChan := make(chan uploadResponse)
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeout.C:
+			if sI := state.overdrive(); sI != -1 {
+				_ = launch(&uploadJob{
+					overdrive:    true,
+					responseChan: responseChan,
+					requestCtx:   ctx,
+					sectorIndex:  sI,
+					sector:       (*[rhpv2.SectorSize]byte)(shards[sI]),
+					id:           id,
+				})
+			}
+			resetTimeout()
+		}
+	}()
+
 	// launch all shards
 	start := time.Now()
-	responseChan := make(chan uploadResponse)
 	for i, shard := range shards {
 		requestCtx, cancel := context.WithCancel(ctx)
 		state.remaining[i] = cancel
@@ -379,14 +410,16 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case resp = <-responseChan:
+			resetTimeout()
 		}
 
 		// handle the response
-		if done := state.receive(resp); done {
+		done := state.receive(resp)
+		if done {
 			break
 		}
 
-		// see if we need to relaunch the job
+		// handle the error
 		if resp.err != nil {
 			errs = append(errs, &HostError{resp.job.queue.hk, resp.err})
 			if !resp.job.overdrive {
@@ -394,26 +427,10 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 					break // download failed, not enough hosts
 				}
 			}
-			continue
-		}
-
-		// launch an overdrive worker if possible
-		if sI := state.overdrive(); sI != -1 {
-			if err := launch(&uploadJob{
-				overdrive:    true,
-				responseChan: responseChan,
-				requestCtx:   ctx,
-				sectorIndex:  sI,
-				sector:       (*[rhpv2.SectorSize]byte)(shards[sI]),
-				id:           id,
-			}); err == nil {
-				continue
-			}
 		}
 	}
 
 	// register the amount of overdrive sectors
-
 	span.SetAttributes(attribute.Int("overdrive", int(state.numLaunched)-len(state.sectors)))
 
 	// track stats
