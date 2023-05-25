@@ -756,6 +756,7 @@ func testBusCfg() node.BusConfig {
 
 func testWorkerCfg() node.WorkerConfig {
 	return node.WorkerConfig{
+		AllowPrivateIPs:         true,
 		ContractLockTimeout:     5 * time.Second,
 		ID:                      "worker",
 		BusFlushInterval:        testBusFlushInterval,
