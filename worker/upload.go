@@ -682,13 +682,13 @@ func (s *uploadState) launch(job *uploadJob) {
 	s.numInflight++
 	s.numLaunched++
 	if job.overdrive {
+		fmt.Printf("DEBUG PJ: %+x launched overdrive for sector %d, remaining %v\n", job.id, job.sectorIndex, len(s.remaining))
 		s.lastOverdrive = time.Now()
 		s.overdriving[job.sectorIndex]++
 	}
 }
 
 func (s *uploadState) receive(resp uploadResponse) bool {
-	fmt.Printf("DEBUG PJ: %+x receive resp for sector %d, err %v\n", resp.job.id, resp.job.sectorIndex, resp.err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.numInflight--
@@ -705,6 +705,7 @@ func (s *uploadState) receive(resp uploadResponse) bool {
 		s.numCompleted++
 	}
 
+	fmt.Printf("DEBUG PJ: %+x receive resp for sector %d, err %v, remaining %v\n", resp.job.id, resp.job.sectorIndex, resp.err, len(s.remaining))
 	return len(s.remaining) == 0
 }
 
