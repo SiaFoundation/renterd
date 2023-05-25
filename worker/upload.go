@@ -91,10 +91,10 @@ type (
 		numCompleted uint64
 		numInflight  uint64
 		numLaunched  uint64
-		numRemaining uint64
 
 		lastOverdrive time.Time
-		overdriving   map[int]struct{}
+		overdriving   map[int]int
+		remaining     map[int]context.CancelFunc
 		sectors       []object.Sector
 	}
 
@@ -327,9 +327,9 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 		maxOverdrive:  u.maxOverdrive,
 		sectorTimeout: u.sectorTimeout,
 
-		numRemaining: uint64(len(shards)),
-		overdriving:  make(map[int]struct{}, len(shards)),
-		sectors:      make([]object.Sector, len(shards)),
+		overdriving: make(map[int]int, len(shards)),
+		remaining:   make(map[int]context.CancelFunc, len(shards)),
+		sectors:     make([]object.Sector, len(shards)),
 	}
 
 	// prepare launch function
@@ -356,10 +356,12 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	start := time.Now()
 	responseChan := make(chan uploadResponse)
 	for i, shard := range shards {
+		requestCtx, cancel := context.WithCancel(ctx)
+		state.remaining[i] = cancel
 		if err := launch(&uploadJob{
 			overdrive:    false,
 			responseChan: responseChan,
-			requestCtx:   ctx,
+			requestCtx:   requestCtx,
 			sector:       (*[rhpv2.SectorSize]byte)(shard),
 			sectorIndex:  i,
 			id:           id,
@@ -681,11 +683,12 @@ func (s *uploadState) launch(job *uploadJob) {
 	s.numLaunched++
 	if job.overdrive {
 		s.lastOverdrive = time.Now()
-		s.overdriving[job.sectorIndex] = struct{}{}
+		s.overdriving[job.sectorIndex]++
 	}
 }
 
 func (s *uploadState) receive(resp uploadResponse) bool {
+	fmt.Printf("DEBUG PJ: %+x receive resp for sector %d, err %v\n", resp.job.id, resp.job.sectorIndex, resp.err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.numInflight--
@@ -696,12 +699,13 @@ func (s *uploadState) receive(resp uploadResponse) bool {
 				Host: resp.job.queue.hk,
 				Root: resp.root,
 			}
-			s.numRemaining--
+			s.remaining[resp.job.sectorIndex]()
+			delete(s.remaining, resp.job.sectorIndex)
 		}
 		s.numCompleted++
 	}
 
-	return s.numRemaining == 0
+	return len(s.remaining) == 0
 }
 
 func (s *uploadState) inflight() uint64 {
@@ -733,7 +737,7 @@ func (s *uploadState) overdrive() int {
 	defer s.mu.Unlock()
 
 	// overdrive is not kicking in yet
-	if s.numRemaining >= s.maxOverdrive {
+	if uint64(len(s.remaining)) >= s.maxOverdrive {
 		return -1
 	}
 
@@ -743,7 +747,7 @@ func (s *uploadState) overdrive() int {
 	}
 
 	// overdrive is maxed out
-	if s.numInflight-s.numRemaining >= s.maxOverdrive {
+	if s.numInflight-uint64(len(s.remaining)) >= s.maxOverdrive {
 		return -1
 	}
 
@@ -755,27 +759,30 @@ func (s *uploadState) overdrive() int {
 		}
 	}
 
-	// loop remaining sectors and return one that we're not overdriving yet
+	// loop remaining sectors and find a good candidate
+	currSI := -1
+	lowest := math.MaxInt
 	for sI := range remaining {
-		_, overdriving := s.overdriving[sI]
-		if !overdriving {
-			return sI
+		timesOverdriven := s.overdriving[sI]
+		if timesOverdriven < lowest {
+			lowest = int(timesOverdriven)
+			currSI = sI
 		}
 	}
 
-	// randomly overdrive a sector we overdrived before
-	for sI := range remaining {
-		return sI
-	}
-
-	return -1
+	return currSI
 }
 
 func (s *uploadState) finish(hes HostErrorSet) ([]object.Sector, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.numRemaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%v, inflight=%v, errors=%w", s.numRemaining, s.numInflight, hes)
+
+	remaining := len(s.remaining)
+	if remaining > 0 {
+		for _, cancel := range s.remaining {
+			cancel()
+		}
+		return nil, fmt.Errorf("failed to upload slab: remaining=%v, inflight=%v, errors=%w", remaining, s.numInflight, hes)
 	}
 	return s.sectors, nil
 }

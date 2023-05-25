@@ -323,7 +323,7 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
-			payment, err := payByContract(revision, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			payment, err := payByContract(revision, pt.AccountBalanceCost, rhpv3.Account{}, h.renterKey)
 			if err != nil {
 				return err
 			}
