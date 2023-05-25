@@ -367,21 +367,23 @@ func (u *uploader) uploadShards(ctx context.Context, shards [][]byte, contracts 
 	// launch a goroutine to trigger overdrive
 	responseChan := make(chan uploadResponse)
 	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timeout.C:
-			if sI := state.overdrive(); sI != -1 {
-				_ = launch(&uploadJob{
-					overdrive:    true,
-					responseChan: responseChan,
-					requestCtx:   ctx,
-					sectorIndex:  sI,
-					sector:       (*[rhpv2.SectorSize]byte)(shards[sI]),
-					id:           id,
-				})
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timeout.C:
+				if sI := state.overdrive(); sI != -1 {
+					_ = launch(&uploadJob{
+						overdrive:    true,
+						responseChan: responseChan,
+						requestCtx:   ctx,
+						sectorIndex:  sI,
+						sector:       (*[rhpv2.SectorSize]byte)(shards[sI]),
+						id:           id,
+					})
+				}
+				resetTimeout()
 			}
-			resetTimeout()
 		}
 	}()
 
