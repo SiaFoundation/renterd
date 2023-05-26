@@ -660,8 +660,6 @@ func (j *uploadJob) fail(err error) {
 		job: j,
 		err: err,
 	}:
-	case <-time.After(time.Second):
-		panic("nobody is listening") // developer error
 	}
 }
 
