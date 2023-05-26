@@ -44,16 +44,14 @@ func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
 	m.ap.wg.Add(1)
 	go func(cfg api.AutopilotConfig) {
 		defer m.ap.wg.Done()
-		wp.withWorkers(func(w []Worker) {
-			m.performMigrations(wp.workers, cfg)
-		})
+		m.performMigrations(wp, cfg)
 		m.mu.Lock()
 		m.running = false
 		m.mu.Unlock()
 	}(m.ap.state.cfg)
 }
 
-func (m *migrator) performMigrations(workers []Worker, cfg api.AutopilotConfig) {
+func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
@@ -84,26 +82,29 @@ func (m *migrator) performMigrations(workers []Worker, cfg api.AutopilotConfig) 
 		wg.Wait()
 	}()
 
-	for _, w := range workers {
-		wg.Add(1)
-		go func(w Worker) {
-			defer wg.Done()
+	p.withWorkers(func(workers []Worker) {
+		for _, w := range workers {
+			wg.Add(1)
+			go func(w Worker) {
+				defer wg.Done()
 
-			id, err := w.ID(ctx)
-			if err != nil {
-				m.logger.Errorf("failed to fetch worker id: %v", err)
-				return
-			}
-
-			for j := range jobs {
-				err := w.MigrateSlab(ctx, j.Slab)
+				id, err := w.ID(ctx)
 				if err != nil {
-					m.logger.Errorf("%v: failed to migrate slab %d/%d, err: %v", id, j.slabIdx+1, len(toMigrate), err)
+					m.logger.Errorf("failed to fetch worker id: %v", err)
+					return
 				}
-				m.logger.Debugf("%v: successfully migrated slab '%v' %d/%d", id, j.Key, j.slabIdx+1, len(toMigrate))
-			}
-		}(w)
-	}
+
+				for j := range jobs {
+					err := w.MigrateSlab(ctx, j.Slab)
+					if err != nil {
+						m.logger.Errorf("%v: failed to migrate slab %d/%d, err: %v", id, j.slabIdx+1, len(toMigrate), err)
+						continue
+					}
+					m.logger.Debugf("%v: successfully migrated slab '%v' %d/%d", id, j.Key, j.slabIdx+1, len(toMigrate))
+				}
+			}(w)
+		}
+	})
 
 	// push work to workers
 	for i, slab := range toMigrate {
