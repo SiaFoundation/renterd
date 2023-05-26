@@ -13,7 +13,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.12.0
 	go.opentelemetry.io/otel/sdk v1.12.0
 	go.opentelemetry.io/otel/trace v1.14.0
-	go.sia.tech/core v0.1.12-0.20230505175901-2550df586b88
+	go.sia.tech/core v0.1.12-0.20230525021639-f38630eccb9c
 	go.sia.tech/hostd v0.1.0-alpha.1.0.20230526131440-ac8e0c7f6e71
 	go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca

@@ -138,6 +138,7 @@ func main() {
 		apiPassword string
 		node.WorkerConfig
 	}
+	workerCfg.AllowPrivateIPs = false
 	workerCfg.ContractLockTimeout = 30 * time.Second
 
 	var autopilotCfg struct {
