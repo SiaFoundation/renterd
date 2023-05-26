@@ -48,6 +48,23 @@ const (
 	queryStringParamTotalShards = "totalshards"
 )
 
+var privateSubnets []*net.IPNet
+
+func init() {
+	for _, subnet := range []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"100.64.0.0/10",
+	} {
+		_, subnet, err := net.ParseCIDR(subnet)
+		if err != nil {
+			panic(fmt.Sprintf("failed to parse subnet: %v", err))
+		}
+		privateSubnets = append(privateSubnets, subnet)
+	}
+}
+
 // rangedResponseWriter is a wrapper around http.ResponseWriter. The difference
 // to the standard http.ResponseWriter is that it allows for overriding the
 // default status code that is sent upon the first call to Write with a custom
@@ -277,10 +294,11 @@ func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
-	id        string
-	bus       Bus
-	pool      *sessionPool
-	masterKey [32]byte
+	allowPrivateIPs bool
+	id              string
+	bus             Bus
+	pool            *sessionPool
+	masterKey       [32]byte
 
 	uploader *uploader
 
@@ -474,28 +492,9 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		w.recordScan(rsr.HostKey, priceTable, settings, err)
 	}()
 
-	// fetch the host settings
-	start := time.Now()
-	err = w.withTransportV2(ctx, rsr.HostKey, rsr.HostIP, func(t *rhpv2.Transport) (err error) {
-		if settings, err = RPCSettings(ctx, t); err == nil {
-			// NOTE: we overwrite the NetAddress with the host address here since we
-			// just used it to dial the host we know it's valid
-			settings.NetAddress = rsr.HostIP
-		}
-		return err
-	})
-	elapsed := time.Since(start)
-
-	// fetch the host pricetable
-	if err == nil {
-		err = w.transportPoolV3.withTransportV3(ctx, rsr.HostKey, settings.SiamuxAddr(), func(t *transportV3) (err error) {
-			priceTable, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
-			return err
-		})
-	}
-
-	// check error
+	// scan host
 	var errStr string
+	settings, priceTable, elapsed, err := w.scanHost(ctx, rsr.HostKey, rsr.HostIP)
 	if err != nil {
 		errStr = err.Error()
 	}
@@ -1157,7 +1156,7 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive uint64, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
@@ -1181,6 +1180,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	}
 
 	w := &worker{
+		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
 		bus:                     b,
@@ -1346,6 +1346,44 @@ func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID,
 	return cl, nil
 }
 
+func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+	// resolve hostIP. We don't want to scan hosts on private networks.
+	if !w.allowPrivateIPs {
+		addrs, err := (&net.Resolver{}).LookupAddr(ctx, hostIP)
+		if err != nil {
+			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+		}
+		for _, addr := range addrs {
+			if isPrivateIP(net.ParseIP(addr)) {
+				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, errors.New("host is on a private network")
+			}
+		}
+	}
+
+	// fetch the host settings
+	start := time.Now()
+	var settings rhpv2.HostSettings
+	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
+		if settings, err = RPCSettings(ctx, t); err == nil {
+			// NOTE: we overwrite the NetAddress with the host address here since we
+			// just used it to dial the host we know it's valid
+			settings.NetAddress = hostIP
+		}
+		return err
+	})
+	elapsed := time.Since(start)
+
+	// fetch the host pricetable
+	var pt rhpv3.HostPriceTable
+	if err == nil {
+		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(t *transportV3) (err error) {
+			pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+			return err
+		})
+	}
+	return settings, pt, elapsed, err
+}
+
 func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {
 	if *err == nil {
 		return
@@ -1363,4 +1401,17 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 
 func isErrDuplicateTransactionSet(err error) bool {
 	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
+}
+
+func isPrivateIP(addr net.IP) bool {
+	if addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() {
+		return true
+	}
+
+	for _, block := range privateSubnets {
+		if block.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }

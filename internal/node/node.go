@@ -32,6 +32,7 @@ import (
 
 type WorkerConfig struct {
 	ID                      string
+	AllowPrivateIPs         bool
 	BusFlushInterval        time.Duration
 	ContractLockTimeout     time.Duration
 	SessionLockTimeout      time.Duration
@@ -95,6 +96,10 @@ func (cm chainManager) AcceptBlock(ctx context.Context, b types.Block) error {
 	var sb stypes.Block
 	convertToSiad(b, &sb)
 	return cm.cs.AcceptBlock(sb)
+}
+
+func (cm chainManager) LastBlockTime() time.Time {
+	return time.Unix(int64(cm.cs.CurrentBlock().Timestamp), 0)
 }
 
 func (cm chainManager) Synced(ctx context.Context) bool {
@@ -275,7 +280,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
-	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.SessionLockTimeout, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, l)
+	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.SessionLockTimeout, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadSectorTimeout, cfg.UploadSectorTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.AllowPrivateIPs, l)
 	if err != nil {
 		return nil, nil, err
 	}
