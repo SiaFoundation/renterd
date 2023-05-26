@@ -1060,15 +1060,11 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 	}
 
 	// verify proof
-	//
-	// TODO PJ: re-enable
-	if false {
-		proofStart := int(offset) / crypto.SegmentSize
-		proofEnd := int(offset+length) / crypto.SegmentSize
-		if !crypto.VerifyRangeProof(resp.Output, proof, proofStart, proofEnd, crypto.Hash(merkleRoot)) {
-			err = errors.New("proof verification failed")
-			return
-		}
+	proofStart := int(offset) / crypto.SegmentSize
+	proofEnd := int(offset+length) / crypto.SegmentSize
+	if !crypto.VerifyRangeProof(resp.Output, proof, proofStart, proofEnd, crypto.Hash(merkleRoot)) {
+		err = errors.New("proof verification failed")
+		return
 	}
 
 	_, err = w.Write(resp.Output)
@@ -1212,7 +1208,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
 			return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
-	} else if false { // TODO PJ: re-enable
+	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.
 		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}} // TODO: change once rhpv3 support is available
 		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.SectorSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {

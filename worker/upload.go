@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -669,21 +668,27 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 
 func (j *uploadJob) succeed(root types.Hash256) {
 	select {
+	case <-j.requestCtx.Done():
+		return
 	case j.responseChan <- uploadResponse{
 		job:  j,
 		root: root,
 	}:
 	case <-time.After(time.Second):
+		panic("nobody is listening") // developer error
 	}
 }
 
 func (j *uploadJob) fail(err error) {
 	select {
+	case <-j.requestCtx.Done():
+		return
 	case j.responseChan <- uploadResponse{
 		job: j,
 		err: err,
 	}:
 	case <-time.After(time.Second):
+		panic("nobody is listening") // developer error
 	}
 }
 
@@ -702,7 +707,6 @@ func (s *uploadState) launch(job *uploadJob) {
 	s.numInflight++
 	s.numLaunched++
 	if job.overdrive {
-		fmt.Printf("DEBUG PJ: %+x launched overdrive for sector %d, remaining %v\n", job.id, job.sectorIndex, len(s.remaining))
 		s.lastOverdrive = time.Now()
 		s.overdriving[job.sectorIndex]++
 	}
@@ -725,12 +729,6 @@ func (s *uploadState) receive(resp uploadResponse) bool {
 		s.numCompleted++
 	}
 
-	var r []string
-	for rem := range s.remaining {
-		r = append(r, fmt.Sprint(rem))
-	}
-	rstr := strings.Join(r, ",")
-	fmt.Printf("DEBUG PJ: %+x receive resp for sector %d, err %v, remaining %v (%v)\n", resp.job.id, resp.job.sectorIndex, resp.err, len(s.remaining), rstr)
 	return len(s.remaining) == 0
 }
 
