@@ -420,7 +420,8 @@ func migrateSlab(ctx context.Context, m migrator, hp hostProvider, s *object.Sla
 
 	// reupload those shards. migrations are not time-sensitive, so we can use a
 	// max overdrive of 0.
-	uploaded, err := m.uploadShards(ctx, shards, ulContracts, usedMap, blockHeight)
+	rs := api.RedundancySettings{MinShards: int(s.MinShards), TotalShards: len(s.Shards)}
+	uploaded, err := m.uploadShards(ctx, rs, shards, ulContracts, usedMap, blockHeight)
 	if err != nil {
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}

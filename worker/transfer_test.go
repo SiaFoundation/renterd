@@ -182,7 +182,7 @@ func TestMultipleObjects(t *testing.T) {
 		s.Encode(buf, shards)
 		s.Encrypt(shards)
 
-		s.Shards, err = uploader.uploadShards(context.Background(), shards, contracts, make(map[types.FileContractID]struct{}), 0)
+		s.Shards, err = uploader.uploadShards(context.Background(), rs, shards, contracts, make(map[types.FileContractID]struct{}), 0)
 		if err != nil {
 			t.Fatal(err)
 		}
