@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/montanaflynn/stats"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -71,12 +72,13 @@ type (
 		id          uploadID
 		sector      *[rhpv2.SectorSize]byte
 		sectorIndex int
-		queue       *uploadQueue // set by the queue
+		queue       *uploadQueue
 	}
 
 	uploadResponse struct {
 		job  *uploadJob
 		root types.Hash256
+		hk   types.PublicKey
 		err  error
 	}
 
@@ -111,11 +113,9 @@ type (
 
 	average struct {
 		mu             sync.Mutex
-		avg            float64
-		pts            [1e3]float64
+		pts            [20]float64
 		cnt            uint64
 		updateInterval time.Duration
-		lastUpdate     time.Time
 	}
 )
 
@@ -137,7 +137,7 @@ func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 func newAverage(updateInterval time.Duration) *average {
 	return &average{
 		updateInterval: updateInterval,
-		pts:            [1e3]float64{},
+		pts:            [20]float64{},
 	}
 }
 
@@ -328,6 +328,7 @@ func (u *uploader) uploadShards(ctx context.Context, rs api.RedundancySettings, 
 		span.RecordError(err)
 		return nil, err
 	}
+	defer state.cleanup()
 	defer u.finishUpload(state.id)
 	span.SetAttributes(attribute.Stringer("id", state.id))
 
@@ -511,9 +512,27 @@ outer:
 			}
 
 			// execute it
-			_ = rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.blockHeight(), func(rev types.FileContractRevision) error {
-				return job.execute(hp, rev)
+			var root types.Hash256
+			start := time.Now()
+			err := rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.blockHeight(), func(rev types.FileContractRevision) error {
+				var err error
+				root, err = job.execute(hp, rev)
+				return err
 			})
+			var canceledOverdrive bool
+			select {
+			case <-job.requestCtx.Done():
+				canceledOverdrive = err != nil && job.overdrive
+			default:
+			}
+			if !canceledOverdrive {
+				q.track(err, time.Since(start))
+			}
+			if err != nil {
+				job.fail(err)
+			} else {
+				job.succeed(root)
+			}
 		}
 	}
 }
@@ -544,8 +563,8 @@ func (q *uploadQueue) estimate() float64 {
 	// fetch average speed
 	speed := q.statsSpeed.average()
 	if speed == 0 {
-		random := time.Duration(frand.Intn(30)+1) * time.Second
-		speed = mbps(rhpv2.SectorSize, random.Seconds())
+		speed = math.MaxFloat64
+		fmt.Println("HYPERDRIVE", q.hk)
 	}
 
 	data := (len(q.queue) + 1) * rhpv2.SectorSize
@@ -578,6 +597,7 @@ func (q *uploadQueue) track(err error, d time.Duration) {
 	if err != nil {
 		q.consecutiveFailures++
 		q.statsSpeed.track(math.SmallestNonzeroFloat64)
+		fmt.Println("TRACK ERROR", q.hk, err)
 	} else {
 		q.consecutiveFailures = 0
 		q.statsSpeed.track(mbps(rhpv2.SectorSize, d.Seconds()))
@@ -602,7 +622,7 @@ func (q *uploadQueue) pop() *uploadJob {
 	return nil
 }
 
-func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (err error) {
+func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
 	// fetch span from context
 	span := trace.SpanFromContext(j.requestCtx)
 	span.AddEvent("execute")
@@ -610,17 +630,14 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 	// create a host
 	h, err := hp.newHostV3(j.requestCtx, j.queue.fcid, j.queue.hk, j.queue.siamuxAddr)
 	if err != nil {
-		j.fail(err)
-		return
+		return types.Hash256{}, err
 	}
 
 	// upload the sector
 	start := time.Now()
 	root, err := h.UploadSector(j.requestCtx, j.sector, rev)
 	if err != nil {
-		j.fail(err)
-	} else {
-		j.succeed(root)
+		return types.Hash256{}, err
 	}
 
 	// update span
@@ -628,10 +645,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (er
 	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
 	span.RecordError(err)
 	span.End()
-
-	// update queue
-	j.queue.track(err, elapsed)
-	return
+	return root, nil
 }
 
 func (j *uploadJob) succeed(root types.Hash256) {
@@ -831,15 +845,20 @@ func (s *uploadState) overdrive(responseChan chan uploadResponse, shards [][]byt
 	})
 }
 
+func (s *uploadState) cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sCtx := range s.remaining {
+		sCtx.cancel()
+	}
+}
+
 func (s *uploadState) finish() ([]object.Sector, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	remaining := len(s.remaining)
 	if remaining > 0 {
-		for _, sCtx := range s.remaining {
-			sCtx.cancel()
-		}
 		return nil, fmt.Errorf("failed to upload slab: remaining=%v, inflight=%v, errors=%w", remaining, s.numInflight, s.errs)
 	}
 	return s.sectors, nil
@@ -848,8 +867,19 @@ func (s *uploadState) finish() ([]object.Sector, error) {
 func (a *average) average() float64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.update() // try update
-	return a.avg
+
+	// calculate sums
+	var data stats.Float64Data
+	for _, p := range a.pts {
+		if p > 0 {
+			data = append(data, p)
+		}
+	}
+	p90, err := data.Percentile(90)
+	if err != nil {
+		return 0
+	}
+	return p90
 }
 
 func (a *average) track(p float64) {
@@ -857,27 +887,6 @@ func (a *average) track(p float64) {
 	defer a.mu.Unlock()
 	a.pts[a.cnt%uint64(len(a.pts))] = p
 	a.cnt++
-}
-
-func (a *average) update() {
-	if a.avg > 0 && time.Since(a.lastUpdate) < a.updateInterval {
-		return
-	}
-
-	// calculate sums
-	var sum float64
-	var nonzero float64
-	for _, p := range a.pts {
-		sum += p
-		if p > 0 {
-			nonzero++
-		}
-	}
-	if nonzero == 0 {
-		nonzero = 1 // avoid division by zero
-	}
-	a.avg = sum / nonzero
-	a.lastUpdate = time.Now()
 }
 
 func (id uploadID) String() string {

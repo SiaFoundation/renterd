@@ -1311,7 +1311,7 @@ func (cl *contractLock) Release(ctx context.Context) error {
 
 func (cl *contractLock) keepaliveLoop() {
 	// Create ticker for half the duration of the lock.
-	t := time.NewTicker(cl.d / 2)
+	t := time.NewTicker(cl.d / 5)
 
 	// Cleanup
 	defer func() {
