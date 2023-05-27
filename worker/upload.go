@@ -643,7 +643,7 @@ func (j *uploadJob) succeed(root types.Hash256) {
 		job:  j,
 		root: root,
 	}:
-	default:
+	case <-time.After(30 * time.Second):
 		select {
 		case <-j.requestCtx.Done():
 		case <-time.After(time.Second):
