@@ -1357,6 +1357,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
 
 	// Add the parents to get the full txnSet.
 	txnSet = append(parents, txn)
