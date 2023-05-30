@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -1325,7 +1324,6 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		WholeTransaction: true,
 		Signatures:       []uint64{0, 1},
 	}
-	cf = wallet.ExplicitCoveredFields(txn)
 	if err := bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
@@ -1359,6 +1357,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
 
 	// Add the parents to get the full txnSet.
 	txnSet = append(parents, txn)
