@@ -892,6 +892,7 @@ func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 		QueuesHealthy:  stats.queuesHealthy,
 		QueuesSpeedAvg: stats.queuesSpeedAvg,
 		QueuesTotal:    stats.queuesTotal,
+		TopTenHosts:    stats.topTenHosts,
 	})
 }
 

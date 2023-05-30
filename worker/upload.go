@@ -56,7 +56,10 @@ type (
 		queuesHealthy  uint64
 		queuesSpeedAvg float64
 		queuesTotal    uint64
+		topTenHosts    hostStats
 	}
+
+	hostStats map[types.PublicKey]float64
 
 	uploadQueue struct {
 		fcid       types.FileContractID
@@ -213,8 +216,21 @@ func (u *uploader) Stats() uploadStats {
 
 	var healthy uint64
 	for _, q := range u.contracts {
+		q.statsSpeed.recompute()
 		if q.consecutiveFailures == 0 {
 			healthy++
+		}
+	}
+
+	// sort the contracts by their estimate
+	sort.Slice(u.contracts, func(i, j int) bool {
+		return u.contracts[i].estimate() < u.contracts[j].estimate()
+	})
+	hostStats := make(hostStats, 10)
+	for i, c := range u.contracts {
+		hostStats[c.hk] = c.estimate()
+		if i == 9 {
+			break
 		}
 	}
 
@@ -226,6 +242,7 @@ func (u *uploader) Stats() uploadStats {
 		queuesHealthy:  healthy,
 		queuesSpeedAvg: u.statsSpeed.average(),
 		queuesTotal:    uint64(len(u.contracts)),
+		topTenHosts:    hostStats,
 	}
 }
 
@@ -338,7 +355,7 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 			case <-ctx.Done():
 				err = errors.New("upload timed out")
 			case <-u.nextSlabTriggers[id]:
-				fmt.Printf("DEBUG PJ: upload %v slab read triggered\n", id)
+				fmt.Printf("DEBUG PJ:  %v | slab read triggered\n", id)
 			}
 
 			if err != nil {
@@ -349,7 +366,7 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 			buf := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(r, size), buf)
 			if err == io.EOF {
-				fmt.Printf("DEBUG PJ: upload %v slab reads done\n", id)
+				fmt.Printf("DEBUG PJ:  %v | slab reads done\n", id)
 				close(data)
 				return
 			} else if err != nil && err != io.ErrUnexpectedEOF {
@@ -385,7 +402,7 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 	id := u.newUpload()
 	defer u.finishUpload(id)
 
-	fmt.Printf("DEBUG PJ: upload %v started\n", id)
+	fmt.Printf("DEBUG PJ:  %v | started\n", id)
 
 	// create the object
 	o := object.NewObject()
@@ -424,16 +441,12 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 				s.Encode(buf, shards)
 				s.Encrypt(shards)
 
-				fmt.Printf("DEBUG PJ: upload %v slab %d started \n", id, index)
-
 				// upload the shards
-				s.Shards, err = u.uploadShards(ctx, id, shards)
+				s.Shards, err = u.uploadShards(ctx, id, shards, index)
 				if err != nil {
 					slabsChan <- slabResponse{err: err}
 					return
 				}
-
-				fmt.Printf("DEBUG PJ: upload %v slab %d finished \n", id, index)
 
 				// send the slab
 				slabsChan <- slabResponse{
@@ -450,18 +463,21 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 	}()
 
 	// collect the slabs
+	var responses []slabResponse
 	for res := range slabsChan {
 		fmt.Printf("DEBUG PJ: received slab res idx %v err %v\n", res.index, res.err)
 		if res.err != nil {
 			return object.Object{}, res.err
 		}
-		// TODO: remove this sanity check
-		if len(o.Slabs) != res.index {
-			panic("developer error?")
-		}
-		o.Slabs = append(o.Slabs, res.slab)
 	}
 
+	// sort the responses and append the slabs
+	sort.Slice(responses, func(i, j int) bool {
+		return responses[i].index < responses[j].index
+	})
+	for _, resp := range responses {
+		o.Slabs = append(o.Slabs, resp.slab)
+	}
 	return o, nil
 }
 
@@ -481,10 +497,10 @@ func (u *uploader) migrateShards(ctx context.Context, shards [][]byte, exclude m
 	u.mu.Unlock()
 
 	// upload the shards
-	return u.uploadShards(ctx, id, shards)
+	return u.uploadShards(ctx, id, shards, 0)
 }
 
-func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byte) ([]object.Sector, error) {
+func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byte, index int) ([]object.Sector, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "uploader.uploadShards")
 	defer span.End()
 
@@ -492,6 +508,9 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 	state, sectorChan, jobs := u.prepareUpload(ctx, id, shards)
 	span.SetAttributes(attribute.Stringer("id", state.shardID))
 	defer state.cleanup()
+
+	fmt.Printf("DEBUG PJ:  %v | %v | slab %d started \n", id, state.shardID, index)
+	defer fmt.Printf("DEBUG PJ:  %v | %v | slab %d finished \n", id, state.shardID, index)
 
 	// launch all jobs
 	for _, job := range jobs {
@@ -952,7 +971,7 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 	delete(s.remaining, resp.job.sectorIndex)
 
 	if len(s.remaining)%5 == 0 || len(s.remaining) < 5 {
-		fmt.Printf("DEBUG PJ: upload %v remaining slabs %d\n", s.uploadID, len(s.remaining))
+		fmt.Printf("DEBUG PJ: upload %v shard %v remaining sectors %d\n", s.uploadID, s.shardID, len(s.remaining))
 	}
 	return len(s.remaining) == 0
 }
@@ -1017,7 +1036,7 @@ func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byt
 		}
 	}
 	if lowestSI > -1 {
-		fmt.Printf("DEBUG PJ: upload %v launching overdrive for sector %d\n", s.uploadID, lowestSI)
+		fmt.Printf("DEBUG PJ: %v | %v | launching overdrive for sector %d\n", s.uploadID, s.shardID, lowestSI)
 		err := s.u.enqueue(&uploadJob{
 			requestCtx: s.remaining[lowestSI].ctx,
 
@@ -1029,7 +1048,7 @@ func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byt
 			uploadID:    s.uploadID,
 			shardID:     s.shardID,
 		})
-		fmt.Printf("DEBUG PJ: upload %v launched overdrive for sector %d err %v\n", s.uploadID, lowestSI, err)
+		fmt.Printf("DEBUG PJ: %v | %v | launched overdrive for sector %d err %v\n", s.uploadID, s.shardID, lowestSI, err)
 	}
 }
 
