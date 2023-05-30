@@ -448,18 +448,26 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 				// upload the shards
 				s.Shards, err = u.uploadShards(ctx, id, shards, index)
 				if err != nil {
-					slabsChan <- slabResponse{err: err}
+					select {
+					case slabsChan <- slabResponse{err: err}:
+					default:
+						fmt.Printf("DEBUG PJ: %v | failed to send slab response, err %v\n", id, err)
+					}
 					return
 				}
 
 				// send the slab
-				slabsChan <- slabResponse{
+				select {
+				case slabsChan <- slabResponse{
 					slab: object.SlabSlice{
 						Slab:   s,
 						Offset: 0,
 						Length: uint32(length),
 					},
 					index: index,
+				}:
+				default:
+					fmt.Printf("DEBUG PJ: %v | failed to send slab response\n", id)
 				}
 			}(data.data, data.length, slabIndex)
 			slabIndex++
@@ -472,6 +480,7 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 		if res.err != nil {
 			return object.Object{}, res.err
 		}
+		responses = append(responses, res)
 	}
 
 	// sort the responses and append the slabs
@@ -872,7 +881,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (ty
 		for {
 			select {
 			case <-time.After(time.Second * 30):
-				fmt.Printf("DEBUG PJ: %v | %v | still waiting on host %v to finish sector %d, already took %v\n", j.uploadID, j.shardID, j.queue.hk, j.sectorIndex, time.Since(start))
+				fmt.Printf("DEBUG PJ: %v | %v | still waiting on host %v to finish sector %d, already took %v job done %v\n", j.uploadID, j.shardID, j.queue.hk, j.sectorIndex, time.Since(start), j.done())
 				continue
 			case <-debugChan:
 				return
