@@ -895,7 +895,7 @@ func (j *uploadJob) succeed(root types.Hash256) {
 	case <-time.After(30 * time.Second):
 		select {
 		case <-j.requestCtx.Done():
-		case <-time.After(time.Second):
+		default:
 			panic("nobody is listening") // developer error
 		}
 	}
@@ -975,7 +975,7 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 	delete(s.remaining, resp.job.sectorIndex)
 
 	// trigger next slab read if we only have some outstanding sectors left
-	if !s.nextReadTriggered && len(s.remaining) < 10 {
+	if !s.nextReadTriggered && len(s.remaining) < int(s.u.maxOverdrive) {
 		s.nextReadTriggered = true
 		s.u.triggerNextSlab(s.uploadID)
 	}
