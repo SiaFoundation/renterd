@@ -653,35 +653,42 @@ func (u *uploader) queue(j *uploadJob) *uploadQueue {
 
 loop:
 	for {
-		u.mu.Lock()
-		// fetch uploads prior to this one
-		var history []uploadID
-		for _, id := range u.history[j.uploadID] {
-			if id == j.shardID {
-				break
-			}
-			history = append(history, id)
-		}
-
 		// return the first unused queue
-	search:
-		for _, q := range allowed {
-			for _, shardID := range history {
-				if _, ok := u.completed[j.uploadID][shardID][q.fcid]; !ok {
-					continue search
-				}
-			}
-			u.mu.Unlock()
-			return q
-		}
-		u.mu.Unlock()
+		if queue := func() *uploadQueue {
+			u.mu.Lock()
+			defer u.mu.Unlock()
 
-		fmt.Printf("DEBUG PJ: %v | %v no queue yet for sector %d, overdrive %v\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive)
+			// fetch uploads prior to this one
+			var history []uploadID
+			for _, id := range u.history[j.uploadID] {
+				if id == j.shardID {
+					break
+				}
+				history = append(history, id)
+			}
+
+			// return the first unused queue
+		search:
+			for _, q := range allowed {
+				for _, shardID := range history {
+					if _, ok := u.completed[j.uploadID][shardID][q.fcid]; !ok {
+						continue search
+					}
+				}
+				return q
+			}
+			fmt.Printf("DEBUG PJ: %v | %v no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history))
+			return nil
+		}(); queue != nil {
+			return queue
+		}
+
+		// otherwise keep waiting
 		select {
-		case <-j.requestCtx.Done():
-			break loop
 		case <-u.sectorCompletedTriggers[j.uploadID]:
 			continue loop
+		case <-j.requestCtx.Done():
+			break loop
 		}
 	}
 
