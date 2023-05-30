@@ -105,7 +105,7 @@ type (
 		queue       *uploadQueue
 	}
 
-	uploadData struct {
+	slabData struct {
 		data   []byte
 		length int
 		err    error
@@ -325,9 +325,9 @@ func (u *uploader) triggerCompletedSector(id uploadID) {
 	}
 }
 
-func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySettings, id uploadID) chan uploadData {
+func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySettings, id uploadID) chan slabData {
 	size := int64(rs.MinShards) * rhpv2.SectorSize
-	data := make(chan uploadData)
+	data := make(chan slabData)
 
 	go func() {
 		var err error
@@ -341,7 +341,7 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 			}
 
 			if err != nil {
-				data <- uploadData{err: err}
+				data <- slabData{err: err}
 				return
 			}
 
@@ -351,11 +351,11 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 				close(data)
 				return
 			} else if err != nil && err != io.ErrUnexpectedEOF {
-				data <- uploadData{err: errors.New("data read failed")}
+				data <- slabData{err: errors.New("data read failed")}
 				return
 			}
 
-			data <- uploadData{data: buf, length: length}
+			data <- slabData{data: buf, length: length}
 		}
 	}()
 
