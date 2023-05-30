@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ import (
 	mconsensus "go.sia.tech/siad/modules/consensus"
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
+	"go.sia.tech/siad/sync"
 	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -248,9 +250,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, walletAddr, sqlLogger)
 	if err != nil {
 		return nil, nil, err
-	} else if err := cs.ConsensusSetSubscribe(sqlStore, ccid, nil); err != nil {
-		return nil, nil, err
 	}
+
+	cancelSubscribe := make(chan struct{})
+	go func() {
+		if err := cs.ConsensusSetSubscribe(sqlStore, ccid, cancelSubscribe); err != nil && !errors.Is(err, sync.ErrStopped) {
+			l.Fatal(fmt.Sprintf("ConsensusSetSubscribe returned an error: %v", err))
+		}
+	}()
 
 	w := wallet.NewSingleAddressWallet(seed, sqlStore)
 
@@ -268,6 +275,10 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 	shutdownFn := func(ctx context.Context) error {
 		return joinErrors([]error{
+			func() error {
+				close(cancelSubscribe)
+				return nil
+			}(),
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
