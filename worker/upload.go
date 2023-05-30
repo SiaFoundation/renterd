@@ -91,11 +91,12 @@ type (
 		numInflight  uint64
 		numLaunched  uint64
 
-		lastOverdrive time.Time
-		overdriving   map[int]int
-		remaining     map[int]sectorCtx
-		sectors       []object.Sector
-		errs          HostErrorSet
+		nextReadTriggered bool
+		lastOverdrive     time.Time
+		overdriving       map[int]int
+		remaining         map[int]sectorCtx
+		sectors           []object.Sector
+		errs              HostErrorSet
 	}
 
 	uploadJob struct {
@@ -589,7 +590,6 @@ func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.Fil
 	_, exists := u.completed[uID][shardID]
 	if !exists {
 		u.completed[uID][shardID] = make(map[types.FileContractID]struct{})
-		u.triggerNextSlab(uID) // read next slab when first sector completes
 	}
 	u.completed[uID][shardID][fcid] = struct{}{}
 	u.triggerCompletedSector(uID)
@@ -973,6 +973,12 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 
 	// count the sector as complete and check if we're done
 	delete(s.remaining, resp.job.sectorIndex)
+
+	// trigger next slab read if we only have some outstanding sectors left
+	if !s.nextReadTriggered && len(s.remaining) < 10 {
+		s.nextReadTriggered = true
+		s.u.triggerNextSlab(s.uploadID)
+	}
 
 	if len(s.remaining)%5 == 0 || len(s.remaining) < 5 {
 		fmt.Printf("DEBUG PJ: %v | %v | remaining sectors %d\n", s.uploadID, s.shardID, len(s.remaining))
