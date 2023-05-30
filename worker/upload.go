@@ -338,6 +338,7 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 			case <-ctx.Done():
 				err = errors.New("upload timed out")
 			case <-u.nextSlabTriggers[id]:
+				fmt.Printf("DEBUG PJ: upload %v slab read triggered\n", id)
 			}
 
 			if err != nil {
@@ -430,6 +431,8 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 					slabsChan <- slabResponse{err: err}
 					return
 				}
+
+				fmt.Printf("DEBUG PJ: upload %v slab %d finished \n", id, index)
 
 				// send the slab
 				slabsChan <- slabResponse{
