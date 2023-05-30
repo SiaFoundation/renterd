@@ -383,6 +383,8 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 	id := u.newUpload()
 	defer u.finishUpload(id)
 
+	fmt.Printf("DEBUG PJ: upload %v started\n", id)
+
 	// create the object
 	o := object.NewObject()
 
@@ -419,6 +421,8 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 				shards := make([][]byte, rs.TotalShards)
 				s.Encode(buf, shards)
 				s.Encrypt(shards)
+
+				fmt.Printf("DEBUG PJ: upload %v slab %d started \n", id, index)
 
 				// upload the shards
 				s.Shards, err = u.uploadShards(ctx, id, shards)
@@ -645,6 +649,7 @@ loop:
 		}
 		u.mu.Unlock()
 
+		fmt.Printf("DEBUG PJ: upload %v blocking on queue, %d shards in history\n", j.uploadID, len(history))
 		select {
 		case <-j.requestCtx.Done():
 			break loop
@@ -768,7 +773,6 @@ func (q *uploadQueue) estimate() float64 {
 	speed := q.statsSpeed.average()
 	if speed == 0 {
 		speed = math.MaxFloat64
-		fmt.Println("HYPERDRIVE", q.hk)
 	}
 
 	data := (len(q.queue) + 1) * rhpv2.SectorSize
@@ -942,6 +946,10 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 
 	// count the sector as complete and check if we're done
 	delete(s.remaining, resp.job.sectorIndex)
+
+	if len(s.remaining)%5 == 0 || len(s.remaining) < 5 {
+		fmt.Printf("DEBUG PJ: upload %v remaining slabs %d\n", s.uploadID, len(s.remaining))
+	}
 	return len(s.remaining) == 0
 }
 
@@ -1005,7 +1013,7 @@ func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byt
 		}
 	}
 	if lowestSI > -1 {
-		_ = s.u.enqueue(&uploadJob{
+		if err := s.u.enqueue(&uploadJob{
 			requestCtx: s.remaining[lowestSI].ctx,
 
 			overdrive:    true,
@@ -1015,7 +1023,9 @@ func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byt
 			sector:      (*[rhpv2.SectorSize]byte)(shards[lowestSI]),
 			uploadID:    s.uploadID,
 			shardID:     s.shardID,
-		})
+		}); err == nil {
+			fmt.Printf("DEBUG PJ: upload %v launched overdrive for sector %d\n", s.uploadID, lowestSI)
+		}
 	}
 }
 
