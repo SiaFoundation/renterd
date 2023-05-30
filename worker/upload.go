@@ -56,10 +56,13 @@ type (
 		queuesHealthy  uint64
 		queuesSpeedAvg float64
 		queuesTotal    uint64
-		topTenHosts    hostStats
+		topTenHosts    []hostStats
 	}
 
-	hostStats map[types.PublicKey]float64
+	hostStats struct {
+		hk       types.PublicKey
+		estimate float64
+	}
 
 	uploadQueue struct {
 		fcid       types.FileContractID
@@ -226,9 +229,9 @@ func (u *uploader) Stats() uploadStats {
 	sort.Slice(u.contracts, func(i, j int) bool {
 		return u.contracts[i].estimate() < u.contracts[j].estimate()
 	})
-	hostStats := make(hostStats, 10)
+	topten := make([]hostStats, 0, 10)
 	for i, c := range u.contracts {
-		hostStats[c.hk] = c.estimate()
+		topten = append(topten, hostStats{c.hk, c.estimate()})
 		if i == 9 {
 			break
 		}
@@ -242,7 +245,7 @@ func (u *uploader) Stats() uploadStats {
 		queuesHealthy:  healthy,
 		queuesSpeedAvg: u.statsSpeed.average(),
 		queuesTotal:    uint64(len(u.contracts)),
-		topTenHosts:    hostStats,
+		topTenHosts:    topten,
 	}
 }
 

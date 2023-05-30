@@ -887,12 +887,18 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploader.Stats()
+
+	estimates := make([]api.HostEstimate, 0, 10)
+	for _, stat := range stats.topTenHosts {
+		estimates = append(estimates, api.HostEstimate{HK: stat.hk, Estimate: stat.estimate})
+	}
+
 	jc.Encode(api.UploadStatsResponse{
 		OverdrivePct:   math.Floor(stats.overdrivePct*100*100) / 100,
 		QueuesHealthy:  stats.queuesHealthy,
 		QueuesSpeedAvg: stats.queuesSpeedAvg,
 		QueuesTotal:    stats.queuesTotal,
-		TopTenHosts:    stats.topTenHosts,
+		TopTenHosts:    estimates,
 	})
 }
 
