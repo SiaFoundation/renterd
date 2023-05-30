@@ -676,7 +676,7 @@ loop:
 		}
 		u.mu.Unlock()
 
-		fmt.Printf("DEBUG PJ: %v | %v blocking on queue for sector %d, %d shards in history\n", j.uploadID, j.shardID, j.sectorIndex, len(history))
+		fmt.Printf("DEBUG PJ: %v | %v no queue yet for sector %d, overdrive %v\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive)
 		select {
 		case <-j.requestCtx.Done():
 			break loop
@@ -892,7 +892,7 @@ func (j *uploadJob) succeed(root types.Hash256) {
 		job:  j,
 		root: root,
 	}:
-	case <-time.After(30 * time.Second):
+	case <-time.After(5 * time.Minute):
 		select {
 		case <-j.requestCtx.Done():
 		default:
