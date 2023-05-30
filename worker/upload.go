@@ -349,6 +349,7 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 			buf := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(r, size), buf)
 			if err == io.EOF {
+				fmt.Printf("DEBUG PJ: upload %v slab reads done\n", id)
 				close(data)
 				return
 			} else if err != nil && err != io.ErrUnexpectedEOF {
