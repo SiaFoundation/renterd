@@ -595,10 +595,12 @@ func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.Fil
 	u.triggerCompletedSector(uID)
 
 	// if last sector is completed, we can remove the shard from the history
-	for i, prev := range u.history[uID] {
-		if prev == shardID {
-			u.history[uID] = append(u.history[uID][:i], u.history[uID][i+1:]...)
-			break
+	if last {
+		for i, prev := range u.history[uID] {
+			if prev == shardID {
+				u.history[uID] = append(u.history[uID][:i], u.history[uID][i+1:]...)
+				break
+			}
 		}
 	}
 }
