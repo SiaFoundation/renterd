@@ -1016,7 +1016,8 @@ func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byt
 		}
 	}
 	if lowestSI > -1 {
-		if err := s.u.enqueue(&uploadJob{
+		fmt.Printf("DEBUG PJ: upload %v launching overdrive for sector %d\n", s.uploadID, lowestSI)
+		err := s.u.enqueue(&uploadJob{
 			requestCtx: s.remaining[lowestSI].ctx,
 
 			overdrive:    true,
@@ -1026,9 +1027,8 @@ func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byt
 			sector:      (*[rhpv2.SectorSize]byte)(shards[lowestSI]),
 			uploadID:    s.uploadID,
 			shardID:     s.shardID,
-		}); err == nil {
-			fmt.Printf("DEBUG PJ: upload %v launched overdrive for sector %d\n", s.uploadID, lowestSI)
-		}
+		})
+		fmt.Printf("DEBUG PJ: upload %v launched overdrive for sector %d err %v\n", s.uploadID, lowestSI, err)
 	}
 }
 
