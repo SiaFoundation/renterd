@@ -1254,6 +1254,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		if err = s.ReadResponse(&ptResp, 4096); err != nil {
 			return rhpv2.ContractRevision{}, nil, err
 		}
+		pt = new(rhpv3.HostPriceTable)
 		if err = json.Unmarshal(ptResp.PriceTableJSON, pt); err != nil {
 			return rhpv2.ContractRevision{}, nil, err
 		}
