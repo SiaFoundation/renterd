@@ -355,7 +355,7 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 			case <-ctx.Done():
 				err = errors.New("upload timed out")
 			case <-u.nextSlabTriggers[id]:
-				fmt.Printf("DEBUG PJ:  %v | slab read triggered\n", id)
+				fmt.Printf("DEBUG PJ: %v | slab read triggered\n", id)
 			}
 
 			if err != nil {
@@ -366,7 +366,7 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 			buf := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(r, size), buf)
 			if err == io.EOF {
-				fmt.Printf("DEBUG PJ:  %v | slab reads done\n", id)
+				fmt.Printf("DEBUG PJ: %v | slab reads done\n", id)
 				close(data)
 				return
 			} else if err != nil && err != io.ErrUnexpectedEOF {
@@ -402,7 +402,7 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 	id := u.newUpload()
 	defer u.finishUpload(id)
 
-	fmt.Printf("DEBUG PJ:  %v | started\n", id)
+	fmt.Printf("DEBUG PJ: %v | started\n", id)
 
 	// create the object
 	o := object.NewObject()
@@ -465,7 +465,6 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 	// collect the slabs
 	var responses []slabResponse
 	for res := range slabsChan {
-		fmt.Printf("DEBUG PJ: received slab res idx %v err %v\n", res.index, res.err)
 		if res.err != nil {
 			return object.Object{}, res.err
 		}
@@ -509,8 +508,8 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 	span.SetAttributes(attribute.Stringer("id", state.shardID))
 	defer state.cleanup()
 
-	fmt.Printf("DEBUG PJ:  %v | %v | slab %d started \n", id, state.shardID, index)
-	defer fmt.Printf("DEBUG PJ:  %v | %v | slab %d finished \n", id, state.shardID, index)
+	fmt.Printf("DEBUG PJ: %v | %v | slab %d started \n", id, state.shardID, index)
+	defer fmt.Printf("DEBUG PJ: %v | %v | slab %d finished \n", id, state.shardID, index)
 
 	// launch all jobs
 	for _, job := range jobs {
@@ -672,7 +671,7 @@ loop:
 		}
 		u.mu.Unlock()
 
-		fmt.Printf("DEBUG PJ: upload %v blocking on queue, %d shards in history\n", j.uploadID, len(history))
+		fmt.Printf("DEBUG PJ: %v | %v blocking on queue for sector %d, %d shards in history\n", j.uploadID, j.shardID, j.sectorIndex, len(history))
 		select {
 		case <-j.requestCtx.Done():
 			break loop
@@ -971,7 +970,7 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 	delete(s.remaining, resp.job.sectorIndex)
 
 	if len(s.remaining)%5 == 0 || len(s.remaining) < 5 {
-		fmt.Printf("DEBUG PJ: upload %v shard %v remaining sectors %d\n", s.uploadID, s.shardID, len(s.remaining))
+		fmt.Printf("DEBUG PJ: %v | %v | remaining sectors %d\n", s.uploadID, s.shardID, len(s.remaining))
 	}
 	return len(s.remaining) == 0
 }
