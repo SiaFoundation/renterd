@@ -26,6 +26,14 @@ type Slab struct {
 	Shards    []Sector      `json:"shards"`
 }
 
+// NewSlab returns a new slab for the shards.
+func NewSlab(minShards uint8) Slab {
+	return Slab{
+		Key:       GenerateEncryptionKey(),
+		MinShards: minShards,
+	}
+}
+
 // Length returns the length of the raw data stored in s.
 func (s Slab) Length() int {
 	return rhpv2.SectorSize * int(s.MinShards)

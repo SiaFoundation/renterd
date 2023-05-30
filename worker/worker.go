@@ -854,13 +854,14 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	// fetch all contract set contracts
+	// update uploader contracts
 	ulContracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
+	w.uploader.update(ulContracts, up.CurrentHeight)
 
-	err = migrateSlab(ctx, w.uploader, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, up.CurrentHeight, w.logger)
+	err = migrateSlab(ctx, w.uploader, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1083,23 +1084,33 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// attach contract spending recorder to the context.
-	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
-
-	// fetch contracts
+	// update uploader contracts
 	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
+	w.uploader.update(contracts, up.CurrentHeight)
 
 	// upload the object
-	object, usedContracts, err := w.uploader.upload(ctx, jc.Request.Body, contracts, rs, up.CurrentHeight)
+	object, err := w.uploader.upload(ctx, jc.Request.Body, rs)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
 
-	// add the object to the bus
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, object, usedContracts)) != nil {
+	// build used contracts map
+	h2c := make(map[types.PublicKey]types.FileContractID)
+	for _, c := range contracts {
+		h2c[c.HostKey] = c.ID
+	}
+	used := make(map[types.PublicKey]types.FileContractID)
+	for _, s := range object.Slabs {
+		for _, ss := range s.Shards {
+			used[ss.Host] = h2c[ss.Host]
+		}
+	}
+
+	// persist the object
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, object, used)) != nil {
 		return
 	}
 }

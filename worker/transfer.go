@@ -351,7 +351,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []hostV2) error
 	return nil
 }
 
-func migrateSlab(ctx context.Context, m migrator, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, blockHeight uint64, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, u *uploader, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
@@ -418,10 +418,8 @@ func migrateSlab(ctx context.Context, m migrator, hp hostProvider, s *object.Sla
 	}
 	shards = shards[:len(shardIndices)]
 
-	// reupload those shards. migrations are not time-sensitive, so we can use a
-	// max overdrive of 0.
-	rs := api.RedundancySettings{MinShards: int(s.MinShards), TotalShards: len(s.Shards)}
-	uploaded, err := m.uploadShards(ctx, rs, shards, ulContracts, usedMap, blockHeight)
+	// migrate the shards
+	uploaded, err := u.migrateShards(ctx, shards, usedMap)
 	if err != nil {
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
