@@ -104,7 +104,19 @@ type (
 		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
 		TotalShards uint8
-		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+
+		Buffer dbSlabBuffer
+
+		Shards []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+	}
+
+	dbSlabBuffer struct {
+		Model
+		DBSlabID uint `gorm:"index;unique"`
+
+		Data        []byte
+		Complete    bool  `gorm:"index"`
+		LockedUntil int64 // unix timestamp
 	}
 
 	dbSector struct {
@@ -832,6 +844,15 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 					}
 				}
 			}
+
+			// TODO: check if incomplete slab
+
+			// TODO: fetch a buffer if possible
+
+			// 3 cases:
+			// 1. we have no buffer -> create one
+			// 2. we have a buffer with space -> add to it
+			// 3. we have a buffer without space -> fill it up, mark as done, create new one
 		}
 		return nil
 	})
