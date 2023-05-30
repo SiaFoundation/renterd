@@ -602,6 +602,7 @@ func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.Fil
 				break
 			}
 		}
+		fmt.Printf("DEBUG PJ: %v | %v | updating history %v\n", uID, shardID, u.history[uID])
 	}
 }
 
@@ -677,7 +678,7 @@ loop:
 				}
 				return q
 			}
-			fmt.Printf("DEBUG PJ: %v | %v no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history))
+			fmt.Printf("DEBUG PJ: %v | %v no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete (%v)\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history), history)
 			return nil
 		}(); queue != nil {
 			return queue
@@ -979,7 +980,9 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 		return false
 	}
 
-	defer s.u.registerCompletedSector(s.uploadID, s.shardID, resp.job.queue.fcid, completed)
+	defer func() {
+		s.u.registerCompletedSector(s.uploadID, s.shardID, resp.job.queue.fcid, completed)
+	}()
 
 	// redundant sectors can't complete the upload
 	s.numCompleted++
