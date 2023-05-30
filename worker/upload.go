@@ -864,7 +864,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (ty
 		for {
 			select {
 			case <-time.After(time.Second * 30):
-				fmt.Println("DEBUG PJ: %v | %v | still waiting on host %v to finish sector %d, already took %v", j.uploadID, j.shardID, j.queue.hk, j.sectorIndex, time.Since(start))
+				fmt.Printf("DEBUG PJ: %v | %v | still waiting on host %v to finish sector %d, already took %v\n", j.uploadID, j.shardID, j.queue.hk, j.sectorIndex, time.Since(start))
 				continue
 			case <-debugChan:
 				return
@@ -883,6 +883,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (ty
 	}
 
 	// upload the sector
+	start := time.Now()
 	root, err := h.UploadSector(j.requestCtx, j.sector, rev)
 	if err != nil {
 		return types.Hash256{}, err
