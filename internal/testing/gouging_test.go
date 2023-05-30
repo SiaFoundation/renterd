@@ -117,8 +117,8 @@ func TestGouging(t *testing.T) {
 	hk := contracts[0].HostKey
 	host := hostsMap[hk.String()]
 	settings := host.settings.Settings()
-	settings.MinIngressPrice = types.Siacoins(1)
-	settings.MinEgressPrice = types.Siacoins(1)
+	settings.IngressPrice = types.Siacoins(1)
+	settings.EgressPrice = types.Siacoins(1)
 	settings.ContractPrice = types.Siacoins(11)
 	if err := host.UpdateSettings(settings); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestGouging(t *testing.T) {
 	// update all host settings so they're gouging
 	for _, h := range hosts {
 		settings := h.settings.Settings()
-		settings.MinEgressPrice = types.Siacoins(1)
+		settings.EgressPrice = types.Siacoins(1)
 		if err := h.UpdateSettings(settings); err != nil {
 			t.Fatal(err)
 		}

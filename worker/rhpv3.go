@@ -322,7 +322,10 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
-			payment := preparePayment(h.accountKey, pt.AccountBalanceCost, pt.HostBlockHeight)
+			payment, err := payByContract(revision, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			if err != nil {
+				return err
+			}
 			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
 			return err
 		})
@@ -442,6 +445,11 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 		return err
 	}
 	defer a.bus.UnlockAccount(ctx, a.id, lockID)
+
+	// return early if the account needs to sync
+	if account.RequiresSync {
+		return fmt.Errorf("%w; account requires resync", errBalanceInsufficient)
+	}
 
 	// return early if our account is not funded
 	if account.Balance.Cmp(big.NewInt(0)) <= 0 {
