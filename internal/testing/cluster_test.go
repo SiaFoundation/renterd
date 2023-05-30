@@ -624,7 +624,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// balances when funding the account and avoid NDFs.
 	settings := host.settings.Settings()
 	settings.BaseRPCPrice = types.ZeroCurrency
-	settings.MinEgressPrice = types.ZeroCurrency
+	settings.EgressPrice = types.ZeroCurrency
 	if err := host.settings.UpdateSettings(settings); err != nil {
 		t.Fatal(err)
 	}

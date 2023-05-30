@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
@@ -31,7 +32,7 @@ func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
 	}
 }
 
-func (m *migrator) tryPerformMigrations(ctx context.Context, w Worker) {
+func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
 	m.mu.Lock()
 	if m.running || m.ap.isStopped() {
 		m.mu.Unlock()
@@ -43,14 +44,14 @@ func (m *migrator) tryPerformMigrations(ctx context.Context, w Worker) {
 	m.ap.wg.Add(1)
 	go func(cfg api.AutopilotConfig) {
 		defer m.ap.wg.Done()
-		m.performMigrations(w, cfg)
+		m.performMigrations(wp, cfg)
 		m.mu.Lock()
 		m.running = false
 		m.mu.Unlock()
 	}(m.ap.state.cfg)
 }
 
-func (m *migrator) performMigrations(w Worker, cfg api.AutopilotConfig) {
+func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
@@ -69,19 +70,48 @@ func (m *migrator) performMigrations(w Worker, cfg api.AutopilotConfig) {
 		return
 	}
 
-	// migrate the slabs one by one
-	//
-	// TODO: when we support parallel uploads we should parallelize this
-	for i, slab := range toMigrate {
-		if m.ap.isStopped() {
-			break
-		}
+	// prepare a channel to push work to the workers
+	type job struct {
+		object.Slab
+		slabIdx int
+	}
+	jobs := make(chan job)
+	var wg sync.WaitGroup
+	defer func() {
+		close(jobs)
+		wg.Wait()
+	}()
 
-		err := w.MigrateSlab(ctx, slab)
-		if err != nil {
-			m.logger.Errorf("failed to migrate slab %d/%d, err: %v", i+1, len(toMigrate), err)
-			continue
+	p.withWorkers(func(workers []Worker) {
+		for _, w := range workers {
+			wg.Add(1)
+			go func(w Worker) {
+				defer wg.Done()
+
+				id, err := w.ID(ctx)
+				if err != nil {
+					m.logger.Errorf("failed to fetch worker id: %v", err)
+					return
+				}
+
+				for j := range jobs {
+					err := w.MigrateSlab(ctx, j.Slab)
+					if err != nil {
+						m.logger.Errorf("%v: failed to migrate slab %d/%d, err: %v", id, j.slabIdx+1, len(toMigrate), err)
+						continue
+					}
+					m.logger.Debugf("%v: successfully migrated slab '%v' %d/%d", id, j.Key, j.slabIdx+1, len(toMigrate))
+				}
+			}(w)
 		}
-		m.logger.Debugf("successfully migrated slab '%v' %d/%d", slab.Key, i+1, len(toMigrate))
+	})
+
+	// push work to workers
+	for i, slab := range toMigrate {
+		select {
+		case <-m.ap.stopChan:
+			return
+		case jobs <- job{slab, i}:
+		}
 	}
 }

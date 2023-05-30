@@ -653,7 +653,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
 	if err != nil && !isErrDuplicateTransactionSet(err) {
-		w.logger.Warnf("failed to broadcast formation txn set: %v", err)
+		w.logger.Errorf("failed to broadcast formation txn set: %v", err)
 	}
 
 	jc.Encode(api.RHPFormResponse{
@@ -692,7 +692,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
 	if err != nil && !isErrDuplicateTransactionSet(err) {
-		w.logger.Warnf("failed to broadcast renewal txn set: %v", err)
+		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
 	}
 
 	// send the response
