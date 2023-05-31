@@ -701,7 +701,7 @@ loop:
 				}
 				return q
 			}
-			fmt.Printf("DEBUG PJ: %v | %v no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete (%v)\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history), history)
+			fmt.Printf("DEBUG PJ: %v | %v | no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete (%v)\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history), history)
 			return nil
 		}(); queue != nil {
 			return queue
@@ -893,41 +893,15 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (ty
 	span := trace.SpanFromContext(j.requestCtx)
 	span.AddEvent("execute")
 
-	hostv3chan := make(chan struct{})
-	go func(start time.Time) {
-		for {
-			select {
-			case <-time.After(time.Second * 30):
-				fmt.Printf("DEBUG PJ: %v | %v | newHostV3 %v already took %v to complete %d | job done %v\n", j.uploadID, j.shardID, j.queue.hk, time.Since(start), j.sectorIndex, j.done())
-				continue
-			case <-hostv3chan:
-				return
-			}
-		}
-	}(time.Now())
 	// create a host
 	h, err := hp.newHostV3(j.requestCtx, j.queue.fcid, j.queue.hk, j.queue.siamuxAddr)
-	close(hostv3chan)
 	if err != nil {
 		return types.Hash256{}, err
 	}
 
-	uploadSectorChan := make(chan struct{})
-	go func(start time.Time) {
-		for {
-			select {
-			case <-time.After(time.Second * 30):
-				fmt.Printf("DEBUG PJ: %v | %v | host %v already took %v to upload sector %d | job done %v\n", j.uploadID, j.shardID, j.queue.hk, time.Since(start), j.sectorIndex, j.done())
-				continue
-			case <-uploadSectorChan:
-				return
-			}
-		}
-	}(time.Now())
 	// upload the sector
 	start := time.Now()
 	root, err := h.UploadSector(j.requestCtx, j.sector, rev)
-	close(uploadSectorChan)
 	if err != nil {
 		return types.Hash256{}, err
 	}
@@ -941,27 +915,18 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (ty
 }
 
 func (j *uploadJob) succeed(root types.Hash256) {
-	// on success we try and send the response regardless of whether the ctx is
-	// closed (so we can keep track of overdrive), if nobody is listening we
-	// assert the ctx was cancelled
 	select {
+	case <-j.requestCtx.Done():
 	case j.responseChan <- sectorResponse{
 		job:  j,
 		root: root,
 	}:
-	case <-time.After(5 * time.Minute):
-		select {
-		case <-j.requestCtx.Done():
-		default:
-			if !j.overdrive {
-				panic("nobody is listening") // developer error
-			}
-		}
+	case <-time.After(time.Minute):
+		fmt.Println("DEBUG PJ: WARNING: nobody listening")
 	}
 }
 
 func (j *uploadJob) fail(err error) {
-	// on failure we try and send but if the ctx is done we don't care
 	select {
 	case <-j.requestCtx.Done():
 	case j.responseChan <- sectorResponse{
