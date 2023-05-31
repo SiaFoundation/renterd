@@ -667,7 +667,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
 	if err != nil && !isErrDuplicateTransactionSet(err) {
-		w.logger.Warnf("failed to broadcast formation txn set: %v", err)
+		w.logger.Errorf("failed to broadcast formation txn set: %v", err)
 	}
 
 	jc.Encode(api.RHPFormResponse{
@@ -706,7 +706,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
 	if err != nil && !isErrDuplicateTransactionSet(err) {
-		w.logger.Warnf("failed to broadcast renewal txn set: %v", err)
+		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
 	}
 
 	// send the response
@@ -1381,18 +1381,12 @@ func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID,
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
 	// resolve hostIP. We don't want to scan hosts on private networks.
 	if !w.allowPrivateIPs {
-		host, _, err := net.SplitHostPort(hostIP)
+		addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostIP)
 		if err != nil {
-			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-		}
-
-		addrs, err := (&net.Resolver{}).LookupAddr(ctx, host)
-		if err != nil {
-			fmt.Printf("DEBUG PJ: %v lookup failed with err %v\n", host, err)
 			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 		}
 		for _, addr := range addrs {
-			if isPrivateIP(net.ParseIP(addr)) {
+			if isPrivateIP(addr.IP) {
 				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, errors.New("host is on a private network")
 			}
 		}

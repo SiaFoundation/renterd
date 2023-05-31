@@ -20,7 +20,6 @@ import (
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -332,7 +331,6 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 			if err != nil {
 				return err
 			}
-
 			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
 			if isMaxBalanceExceeded(err) {
 				balance = types.Siacoins(1)
@@ -1313,6 +1311,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		if err = s.ReadResponse(&ptResp, 4096); err != nil {
 			return rhpv2.ContractRevision{}, nil, err
 		}
+		pt = new(rhpv3.HostPriceTable)
 		if err = json.Unmarshal(ptResp.PriceTableJSON, pt); err != nil {
 			return rhpv2.ContractRevision{}, nil, err
 		}
@@ -1391,7 +1390,6 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		WholeTransaction: true,
 		Signatures:       []uint64{0, 1},
 	}
-	cf = wallet.ExplicitCoveredFields(txn)
 	if err := bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
@@ -1425,6 +1423,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
 
 	// Add the parents to get the full txnSet.
 	txnSet = append(parents, txn)

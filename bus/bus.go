@@ -166,11 +166,7 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 }
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
-	jc.Encode(api.ConsensusState{
-		BlockHeight:   b.cm.TipState(jc.Request.Context()).Index.Height,
-		LastBlockTime: b.cm.LastBlockTime(),
-		Synced:        b.cm.Synced(jc.Request.Context()),
-	})
+	jc.Encode(b.consensusState(jc.Request.Context()))
 }
 
 func (b *bus) consensusNetworkHandler(jc jape.Context) {
@@ -907,6 +903,14 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	})
 }
 
+func (b *bus) consensusState(ctx context.Context) api.ConsensusState {
+	return api.ConsensusState{
+		BlockHeight:   b.cm.TipState(ctx).Index.Height,
+		LastBlockTime: b.cm.LastBlockTime(),
+		Synced:        b.cm.Synced(ctx),
+	}
+}
+
 func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
@@ -930,10 +934,7 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
-	cs := api.ConsensusState{
-		BlockHeight: b.cm.TipState(ctx).Index.Height,
-		Synced:      b.cm.Synced(ctx),
-	}
+	cs := b.consensusState(ctx)
 
 	return api.GougingParams{
 		ConsensusState:     cs,
