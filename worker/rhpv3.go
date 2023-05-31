@@ -242,7 +242,7 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
-			fmt.Printf("DEBUG PJ: fetchRevisionWithAccount %v | orig %d rev %d err %v\n", hostKey, orig.RevisionNumber, rev.RevisionNumber, err)
+			fmt.Printf("DEBUG PJ: fetchRevisionWithAccount %v | orig %d rev %d diff %d err %v\n", hostKey, orig.RevisionNumber, rev.RevisionNumber, rev.RevisionNumber-orig.RevisionNumber, err)
 			if err != nil {
 				return err
 			}
@@ -270,7 +270,7 @@ func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.Publ
 			}
 			return pt, &payment, nil
 		})
-		fmt.Printf("DEBUG PJ: fetchRevisionWithContract %v | orig %d rev %d err %v\n", hostKey, orig.RevisionNumber, rev.RevisionNumber, err)
+		fmt.Printf("DEBUG PJ: fetchRevisionWithContract %v | orig %d rev %d diff %d err %v\n", hostKey, orig.RevisionNumber, rev.RevisionNumber, rev.RevisionNumber-orig.RevisionNumber, err)
 		return err
 	})
 	return rev, err
@@ -630,7 +630,7 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		})
 		if err == nil {
 			bal, err := r.acc.Balance(ctx)
-			fmt.Printf("DEBUG PJ: host %v spent %v which is %v%% of his %v balance (err %v)", r.HostKey(), amount, amount.Div(bal).Mul64(100), bal, err)
+			fmt.Printf("DEBUG PJ: host %v spent %v which is %v%% of his %v balance (err %v)\n", r.HostKey(), amount, amount.Div(bal).Mul64(100), bal, err)
 		}
 		return
 	})
