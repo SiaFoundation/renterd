@@ -17,6 +17,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/crypto"
@@ -582,7 +583,7 @@ func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 }
 
 // UploadSector uploads a sector to the host.
-func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (root types.Hash256, err error) {
+func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (root types.Hash256, err error) {
 	// fetch price table
 	pt, err := r.priceTable(ctx, nil)
 	if err != nil {
@@ -594,7 +595,11 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	if err != nil {
 		return types.Hash256{}, err
 	}
-	payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
+	//payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
+	payment, ok := rhpv3.PayByContract(rev, expectedCost, r.acc.id, r.renterKey)
+	if !ok {
+		return types.Hash256{}, errors.New("failed to create payment")
+	}
 
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
@@ -603,13 +608,18 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		}
 	}()
 
-	return root, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
-			root, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, &rev, &payment, sector)
-			return err
-		})
-		return
+	//	return root, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+	//		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
+	//			root, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, &rev, &payment, sector)
+	//			return err
+	//		})
+	//		return
+	//	})
+	err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
+		root, _, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
+		return err
 	})
+	return
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
@@ -1236,6 +1246,22 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		return
 	}
 
+	// read one more time to receive a potential error in case finalising the
+	// contract fails after receiving the RPCFinalizeProgramResponse. This also
+	// guarantees that the program is finalised before we return.
+	// TODO: remove once most hosts use hostd.
+	errFinalise := s.ReadResponse(&finalizeResp, 64)
+	if errFinalise != nil &&
+		!errors.Is(errFinalise, io.EOF) &&
+		!errors.Is(errFinalise, mux.ErrClosedConn) &&
+		!errors.Is(errFinalise, mux.ErrClosedStream) &&
+		!errors.Is(errFinalise, mux.ErrPeerClosedStream) &&
+		!errors.Is(errFinalise, mux.ErrPeerClosedConn) {
+		err = errFinalise
+		return
+	}
+
+	// TODO: verify host sig
 	return
 }
 

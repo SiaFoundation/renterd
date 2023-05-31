@@ -516,7 +516,7 @@ outer:
 			start := time.Now()
 			err := rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.blockHeight(), func(rev types.FileContractRevision) error {
 				var err error
-				root, err = job.execute(hp, rev)
+				root, err = job.execute(hp, &rev)
 				return err
 			})
 			var canceledOverdrive bool
@@ -621,7 +621,7 @@ func (q *uploadQueue) pop() *uploadJob {
 	return nil
 }
 
-func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
+func (j *uploadJob) execute(hp hostProvider, rev *types.FileContractRevision) (types.Hash256, error) {
 	// fetch span from context
 	span := trace.SpanFromContext(j.requestCtx)
 	span.AddEvent("execute")
@@ -652,16 +652,11 @@ func (j *uploadJob) succeed(root types.Hash256) {
 	// closed (so we can keep track of overdrive), if nobody is listening we
 	// assert the ctx was cancelled
 	select {
+	case <-j.requestCtx.Done():
 	case j.responseChan <- uploadResponse{
 		job:  j,
 		root: root,
 	}:
-	case <-time.After(30 * time.Second):
-		select {
-		case <-j.requestCtx.Done():
-		case <-time.After(time.Second):
-			panic("nobody is listening") // developer error
-		}
 	}
 }
 
