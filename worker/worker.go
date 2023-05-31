@@ -1383,7 +1383,18 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	if !w.allowPrivateIPs {
 		addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostIP)
 		if err != nil {
-			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+			fmt.Println("DEBUG PJ: LookupIPAddr failed", hostIP, err)
+			host, _, err := net.SplitHostPort(hostIP)
+			if err != nil {
+				fmt.Println("DEBUG PJ: SplitHostPort failed", hostIP, err)
+				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+			}
+			addrs, err = (&net.Resolver{}).LookupIPAddr(ctx, host)
+			if err != nil {
+				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+			} else {
+				fmt.Println("DEBUG PJ: recovered by splitting host port", hostIP, host)
+			}
 		}
 		for _, addr := range addrs {
 			if isPrivateIP(addr.IP) {
