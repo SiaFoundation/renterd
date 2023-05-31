@@ -561,6 +561,7 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 		}
 	}()
 
+	var reason string
 	// collect responses
 	for state.inflight() > 0 {
 		var resp sectorResponse
@@ -584,6 +585,7 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 		if resp.err != nil && !resp.job.done() {
 			err := state.launch(resp.job)
 			if err != nil && !resp.job.overdrive {
+				reason = err.Error()
 				break // fail the download if we can't relaunch an original job
 			}
 		}
@@ -595,7 +597,7 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 	// track stats
 	u.statsOverdrive.track(state.overdrivePct())
 	u.statsSpeed.track(state.performance())
-	return state.finish()
+	return state.finish(reason)
 }
 
 func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.FileContractID, last bool) {
@@ -1129,13 +1131,13 @@ func (s *uploadState) cleanup() {
 	}
 }
 
-func (s *uploadState) finish() ([]object.Sector, error) {
+func (s *uploadState) finish(reason string) ([]object.Sector, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	remaining := len(s.remaining)
 	if remaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.numContracts(), s.errs)
+		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d reason=%s errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.numContracts(), reason, s.errs)
 	}
 	return s.sectors, nil
 }
