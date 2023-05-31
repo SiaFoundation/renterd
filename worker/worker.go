@@ -1387,8 +1387,8 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		}
 
 		addrs, err := (&net.Resolver{}).LookupAddr(ctx, host)
-		fmt.Println("DEBUG PJ: checking for private ips", host, hostIP, err)
 		if err != nil {
+			fmt.Printf("DEBUG PJ: %v lookup failed with err %v\n", host, err)
 			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 		}
 		for _, addr := range addrs {
