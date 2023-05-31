@@ -564,7 +564,6 @@ func (q *uploadQueue) estimate() float64 {
 	speed := q.statsSpeed.average()
 	if speed == 0 {
 		speed = math.MaxFloat64
-		fmt.Println("HYPERDRIVE", q.hk)
 	}
 
 	data := (len(q.queue) + 1) * rhpv2.SectorSize

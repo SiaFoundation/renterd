@@ -91,9 +91,9 @@ func (t *transportV3) Close() error {
 
 	// Close the transport if the refcounter is zero.
 	if t.refCount == 0 {
-		//	err := t.t.Close()
-		//	t.t = nil
-		//	return err
+		err := t.t.Close()
+		t.t = nil
+		return err
 	}
 	return nil
 }
