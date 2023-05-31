@@ -555,13 +555,14 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 			case <-ctx.Done():
 				return
 			case <-timeout.C:
-				state.overdrive(sectorChan, shards)
+				if job := state.overdrive(sectorChan, shards); job != nil {
+					_ = state.launch(job) // no need to handle the error
+				}
 				resetTimeout()
 			}
 		}
 	}()
 
-	var reason string
 	// collect responses
 	for state.inflight() > 0 {
 		var resp sectorResponse
@@ -585,7 +586,6 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 		if resp.err != nil && !resp.job.done() {
 			err := state.launch(resp.job)
 			if err != nil && !resp.job.overdrive {
-				reason = err.Error()
 				break // fail the download if we can't relaunch an original job
 			}
 		}
@@ -597,7 +597,7 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 	// track stats
 	u.statsOverdrive.track(state.overdrivePct())
 	u.statsSpeed.track(state.performance())
-	return state.finish(reason)
+	return state.finish()
 }
 
 func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.FileContractID, last bool) {
@@ -1044,23 +1044,23 @@ func (s *uploadState) overdrivePct() float64 {
 	return float64(numOverdrive) / float64(len(s.sectors))
 }
 
-func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byte) {
+func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byte) *uploadJob {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// overdrive is not kicking in yet
 	if uint64(len(s.remaining)) >= s.u.maxOverdrive {
-		return
+		return nil
 	}
 
 	// overdrive is not due yet
 	if time.Since(s.lastOverdrive) < s.u.overdriveTimeout {
-		return
+		return nil
 	}
 
 	// overdrive is maxed out
 	if s.numInflight-uint64(len(s.remaining)) >= s.u.maxOverdrive {
-		return
+		return nil
 	}
 
 	// overdrive the remaining sector with the least number of overdrives
@@ -1071,20 +1071,21 @@ func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byt
 			lowestSI = sI
 		}
 	}
-	if lowestSI > -1 {
-		fmt.Printf("DEBUG PJ: %v | %v | launching overdrive for sector %d\n", s.uploadID, s.shardID, lowestSI)
-		err := s.u.enqueue(&uploadJob{
-			requestCtx: s.remaining[lowestSI].ctx,
+	if lowestSI == -1 {
+		return nil
+	}
 
-			overdrive:    true,
-			responseChan: responseChan,
+	fmt.Printf("DEBUG PJ: %v | %v | launching overdrive for sector %d\n", s.uploadID, s.shardID, lowestSI)
+	return &uploadJob{
+		requestCtx: s.remaining[lowestSI].ctx,
 
-			sectorIndex: lowestSI,
-			sector:      (*[rhpv2.SectorSize]byte)(shards[lowestSI]),
-			uploadID:    s.uploadID,
-			shardID:     s.shardID,
-		})
-		fmt.Printf("DEBUG PJ: %v | %v | launched overdrive for sector %d err %v\n", s.uploadID, s.shardID, lowestSI, err)
+		overdrive:    true,
+		responseChan: responseChan,
+
+		sectorIndex: lowestSI,
+		sector:      (*[rhpv2.SectorSize]byte)(shards[lowestSI]),
+		uploadID:    s.uploadID,
+		shardID:     s.shardID,
 	}
 }
 
@@ -1096,13 +1097,13 @@ func (s *uploadState) cleanup() {
 	}
 }
 
-func (s *uploadState) finish(reason string) ([]object.Sector, error) {
+func (s *uploadState) finish() ([]object.Sector, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	remaining := len(s.remaining)
 	if remaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d reason=%s errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.numContracts(), reason, s.errs)
+		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.numContracts(), s.errs)
 	}
 	return s.sectors, nil
 }
