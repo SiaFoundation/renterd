@@ -602,8 +602,13 @@ func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.Fil
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
+	_, exists := u.completed[uID]
+	if !exists {
+		panic("completed map does not exist") // developer error
+	}
+
 	// register completed sector
-	_, exists := u.completed[uID][shardID]
+	_, exists = u.completed[uID][shardID]
 	if !exists {
 		u.completed[uID][shardID] = make(map[types.FileContractID]struct{})
 	}

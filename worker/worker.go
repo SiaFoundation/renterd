@@ -457,7 +457,20 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	if err != nil {
 		return err
 	}
-	return fn(rev)
+
+	before := rev.RevisionNumber
+
+	err = fn(rev)
+	if err != nil && !strings.Contains(err.Error(), "revision number was not incremented") {
+		after := rev.RevisionNumber
+		rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
+		if err != nil {
+			return err
+		}
+		host := rev.RevisionNumber
+		fmt.Printf("DEBUG PJ | %d -> %d -> %d (%v)\n", before, after, host, err)
+	}
+	return err
 }
 
 func (w *worker) unlockHost(host hostV2) {
