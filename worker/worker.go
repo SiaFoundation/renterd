@@ -1382,6 +1382,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	// resolve hostIP. We don't want to scan hosts on private networks.
 	if !w.allowPrivateIPs {
 		addrs, err := (&net.Resolver{}).LookupAddr(ctx, hostIP)
+		fmt.Println("DEBUG PJ: checking for private ips", hostIP, err)
 		if err != nil {
 			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 		}
