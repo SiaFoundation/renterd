@@ -574,10 +574,11 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 			break
 		}
 
-		// relaunch non-overdrive jobs and break on failure
-		if resp.err != nil && !resp.job.overdrive {
-			if err := state.launch(resp.job); err != nil {
-				break // download failed, not enough hosts
+		// relaunch the job if it failed
+		if resp.err != nil {
+			err := state.launch(resp.job)
+			if err != nil && !resp.job.overdrive {
+				break // fail the download if we can't relaunch an original job
 			}
 		}
 	}
