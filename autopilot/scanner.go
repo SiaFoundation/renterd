@@ -266,10 +266,13 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 		go func() {
 			for req := range reqs {
 				if s.ap.isStopped() {
-					break
+					return // shutdown
 				}
 
 				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
+				if err != nil {
+					return // abort
+				}
 				respChan <- scanResp{req.hostKey, scan.Settings, err}
 				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}
