@@ -360,7 +360,9 @@ func (u *uploader) uploadShards(ctx context.Context, rs api.RedundancySettings, 
 			case <-ctx.Done():
 				return
 			case <-timeout.C:
-				state.overdrive(responseChan, shards)
+				if job := state.overdrive(responseChan, shards); job != nil {
+					_ = state.launch(job) // ignore error
+				}
 				resetTimeout()
 			}
 		}
@@ -799,23 +801,23 @@ func (s *uploadState) overdrivePct() float64 {
 	return float64(numOverdrive) / float64(len(s.sectors))
 }
 
-func (s *uploadState) overdrive(responseChan chan uploadResponse, shards [][]byte) {
+func (s *uploadState) overdrive(responseChan chan uploadResponse, shards [][]byte) *uploadJob {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// overdrive is not kicking in yet
 	if uint64(len(s.remaining)) >= s.u.maxOverdrive {
-		return
+		return nil
 	}
 
 	// overdrive is not due yet
 	if time.Since(s.lastOverdrive) < s.u.sectorTimeout {
-		return
+		return nil
 	}
 
 	// overdrive is maxed out
 	if s.numInflight-uint64(len(s.remaining)) >= s.u.maxOverdrive {
-		return
+		return nil
 	}
 
 	// find a good overdrive candidate
@@ -829,11 +831,11 @@ func (s *uploadState) overdrive(responseChan chan uploadResponse, shards [][]byt
 		}
 	}
 	if currSI == -1 {
-		return
+		return nil
 	}
 
-	// enqueue the overdrive job
-	_ = s.u.enqueue(&uploadJob{
+	// return the overdrive job
+	return &uploadJob{
 		requestCtx: s.remaining[currSI].ctx,
 
 		overdrive:    true,
@@ -842,7 +844,7 @@ func (s *uploadState) overdrive(responseChan chan uploadResponse, shards [][]byt
 		sectorIndex: currSI,
 		sector:      (*[rhpv2.SectorSize]byte)(shards[currSI]),
 		id:          s.id,
-	})
+	}
 }
 
 func (s *uploadState) cleanup() {
