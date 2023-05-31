@@ -164,6 +164,12 @@ func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 	}
 }
 
+func (u *uploader) numContracts() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return len(u.contracts)
+}
+
 func (u *uploader) supportsRedundancy(n int, excluded map[types.FileContractID]struct{}) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -575,7 +581,7 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 		}
 
 		// relaunch the job if it failed
-		if resp.err != nil {
+		if resp.err != nil && !resp.job.done() {
 			err := state.launch(resp.job)
 			if err != nil && !resp.job.overdrive {
 				break // fail the download if we can't relaunch an original job
@@ -1124,7 +1130,7 @@ func (s *uploadState) finish() ([]object.Sector, error) {
 
 	remaining := len(s.remaining)
 	if remaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.errs)
+		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.numContracts(), s.errs)
 	}
 	return s.sectors, nil
 }
