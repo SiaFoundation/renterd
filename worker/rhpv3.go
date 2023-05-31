@@ -1150,6 +1150,12 @@ func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentM
 func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 
+	defer func() {
+		if err != nil && strings.Contains(err.Error(), "revision number was not incremented") {
+			err = fmt.Errorf("%w; rev number: %d", err, rev.RevisionNumber)
+		}
+	}()
+
 	// sanity check revision first
 	if rev.RevisionNumber == math.MaxUint64 {
 		return types.Hash256{}, types.ZeroCurrency, errMaxRevisionReached
