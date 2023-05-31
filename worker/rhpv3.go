@@ -231,7 +231,8 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 	err = h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
 		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
-			rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			var orig types.FileContractRevision
+			rev, orig, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				// Fetch pt.
 				pt, err := h.priceTable(ctx, rev)
 				if err != nil {
@@ -241,6 +242,7 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
+			fmt.Printf("DEBUG PJ: fetchRevisionWithAccount %v | orig %d rev %d err %v\n", hostKey, orig.RevisionNumber, rev.RevisionNumber, err)
 			if err != nil {
 				return err
 			}
@@ -254,7 +256,8 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 // a contract to pay for it.
 func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
-		rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+		var orig types.FileContractRevision
+		rev, orig, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Fetch pt.
 			pt, err := h.priceTable(ctx, rev)
 			if err != nil {
@@ -267,6 +270,7 @@ func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.Publ
 			}
 			return pt, &payment, nil
 		})
+		fmt.Printf("DEBUG PJ: fetchRevisionWithContract %v | orig %d rev %d err %v\n", hostKey, orig.RevisionNumber, rev.RevisionNumber, err)
 		return err
 	})
 	return rev, err
@@ -877,7 +881,7 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 	var txnSet []types.Transaction
 	var renewErr error
 	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
-		_, err = RPCLatestRevision(ctx, t, h.fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+		_, _, err = RPCLatestRevision(ctx, t, h.fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
 			revision, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *rev, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
@@ -1002,11 +1006,11 @@ func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMe
 // RPCLatestRevision calls the LatestRevision RPC. The paymentFunc allows for
 // fetching a pricetable using the fetched revision to pay for it. If
 // paymentFunc returns 'nil' as payment, the host is not paid.
-func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
+func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, _ types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return types.FileContractRevision{}, err
+		return types.FileContractRevision{}, types.FileContractRevision{}, err
 	}
 	defer s.Close()
 	req := rhpv3.RPCLatestRevisionRequest{
@@ -1014,17 +1018,21 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 	}
 	var resp rhpv3.RPCLatestRevisionResponse
 	if err := s.WriteRequest(rhpv3.RPCLatestRevisionID, &req); err != nil {
-		return types.FileContractRevision{}, err
+		return types.FileContractRevision{}, types.FileContractRevision{}, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
-		return types.FileContractRevision{}, err
-	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil || payment == nil {
-		return types.FileContractRevision{}, err
-	} else if err := s.WriteResponse(&pt.UID); err != nil {
-		return types.FileContractRevision{}, err
-	} else if err := processPayment(s, payment); err != nil {
-		return types.FileContractRevision{}, err
+		return types.FileContractRevision{}, types.FileContractRevision{}, err
 	}
-	return resp.Revision, nil
+
+	orig := resp.Revision
+
+	if pt, payment, err := paymentFunc(&resp.Revision); err != nil || payment == nil {
+		return types.FileContractRevision{}, orig, err
+	} else if err := s.WriteResponse(&pt.UID); err != nil {
+		return types.FileContractRevision{}, orig, err
+	} else if err := processPayment(s, payment); err != nil {
+		return types.FileContractRevision{}, orig, err
+	}
+	return resp.Revision, orig, nil
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
