@@ -45,7 +45,7 @@ type hostV3 interface {
 	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
 	SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
 }
 
 type hostProvider interface {

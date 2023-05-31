@@ -17,9 +17,9 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -92,9 +92,9 @@ func (t *transportV3) Close() error {
 
 	// Close the transport if the refcounter is zero.
 	if t.refCount == 0 {
-		//	err := t.t.Close()
-		//	t.t = nil
-		//	return err
+		err := t.t.Close()
+		t.t = nil
+		return err
 	}
 	return nil
 }
@@ -327,7 +327,6 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 			if err != nil {
 				return err
 			}
-
 			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
 			if isMaxBalanceExceeded(err) {
 				balance = types.Siacoins(1)
@@ -444,7 +443,8 @@ func (a *account) Balance(ctx context.Context) (types.Currency, error) {
 }
 
 // WithWithdrawal decreases the balance of an account by the amount returned by
-// amtFn if amtFn doesn't return an error.
+// amtFn. The amount is still withdrawn if amtFn returns an error since some
+// costs are non-refundable.
 func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Currency, error)) error {
 	account, lockID, err := a.bus.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
 	if err != nil {
@@ -462,21 +462,24 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 		return errBalanceInsufficient
 	}
 
+	// execute amtFn
 	amt, err := amtFn()
-	if err != nil && isBalanceInsufficient(err) {
+	if isBalanceInsufficient(err) {
+		// in case of an insufficient balance, we schedule a sync
 		scheduleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err2 := a.bus.ScheduleSync(scheduleCtx, a.id, a.host)
 		if err2 != nil {
 			err = fmt.Errorf("%w; failed to set requiresSync flag on bus, error: %v", err, err2)
 		}
-		return err
 	}
-	// if the amount is zero we just retur the error
+
+	// if the amount is zero, we are done
 	if amt.IsZero() {
 		return err
 	}
-	// otherwise we try to withdraw the amount
+
+	// if an amount was returned, we withdraw it.
 	errAdd := a.bus.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
 	if errAdd != nil {
 		err = fmt.Errorf("%w; failed to add balance to account, error: %v", err, errAdd)
@@ -580,7 +583,7 @@ func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 }
 
 // UploadSector uploads a sector to the host.
-func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (root types.Hash256, err error) {
+func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (root types.Hash256, err error) {
 	// fetch price table
 	pt, err := r.priceTable(ctx, nil)
 	if err != nil {
@@ -592,7 +595,11 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	if err != nil {
 		return types.Hash256{}, err
 	}
-	payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
+	//payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
+	payment, ok := rhpv3.PayByContract(rev, expectedCost, r.acc.id, r.renterKey)
+	if !ok {
+		return types.Hash256{}, errors.New("failed to create payment")
+	}
 
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
@@ -601,13 +608,18 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		}
 	}()
 
-	return root, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
-			root, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
-			return err
-		})
-		return
+	//	return root, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+	//		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
+	//			root, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, &rev, &payment, sector)
+	//			return err
+	//		})
+	//		return
+	//	})
+	err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
+		root, _, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
+		return err
 	})
+	return
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
@@ -1117,7 +1129,7 @@ func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentM
 	}, nil
 }
 
-func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
+func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 
 	// sanity check revision first
@@ -1168,7 +1180,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 
 	// check if the cost, collateral and refund match our expectation.
 	if executeResp.TotalCost.Cmp(expectedCost) > 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("cost exceeds expectation: %v < %v", executeResp.TotalCost.String(), expectedCost.String())
+		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("cost exceeds expectation: %v > %v", executeResp.TotalCost.String(), expectedCost.String())
 	}
 	if executeResp.FailureRefund.Cmp(expectedRefund) < 0 {
 		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
@@ -1196,9 +1208,6 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 
 	// include the refund in the collateral
 	collateral := executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
-	if collateral.Cmp(expectedCollateral) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", collateral.String(), expectedCollateral.String())
-	}
 
 	// check proof
 	sectorRoot = rhpv2.SectorRoot(sector)
@@ -1217,7 +1226,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	}
 
 	// finalize the program with a new revision.
-	newRevision := rev
+	newRevision := *rev
 	newValid, newMissed := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
 	newRevision.Filesize += rhpv2.SectorSize
 	newRevision.RevisionNumber++
@@ -1237,6 +1246,22 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		return
 	}
 
+	// read one more time to receive a potential error in case finalising the
+	// contract fails after receiving the RPCFinalizeProgramResponse. This also
+	// guarantees that the program is finalised before we return.
+	// TODO: remove once most hosts use hostd.
+	errFinalise := s.ReadResponse(&finalizeResp, 64)
+	if errFinalise != nil &&
+		!errors.Is(errFinalise, io.EOF) &&
+		!errors.Is(errFinalise, mux.ErrClosedConn) &&
+		!errors.Is(errFinalise, mux.ErrClosedStream) &&
+		!errors.Is(errFinalise, mux.ErrPeerClosedStream) &&
+		!errors.Is(errFinalise, mux.ErrPeerClosedConn) {
+		err = errFinalise
+		return
+	}
+
+	// TODO: verify host sig
 	return
 }
 
@@ -1264,6 +1289,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		if err = s.ReadResponse(&ptResp, 4096); err != nil {
 			return rhpv2.ContractRevision{}, nil, err
 		}
+		pt = new(rhpv3.HostPriceTable)
 		if err = json.Unmarshal(ptResp.PriceTableJSON, pt); err != nil {
 			return rhpv2.ContractRevision{}, nil, err
 		}
@@ -1342,7 +1368,6 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		WholeTransaction: true,
 		Signatures:       []uint64{0, 1},
 	}
-	cf = wallet.ExplicitCoveredFields(txn)
 	if err := bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
@@ -1376,6 +1401,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
+	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
 
 	// Add the parents to get the full txnSet.
 	txnSet = append(parents, txn)
