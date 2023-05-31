@@ -556,7 +556,7 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 				return
 			case <-timeout.C:
 				if job := state.overdrive(sectorChan, shards); job != nil {
-					_ = state.launch(job) // no need to handle the error
+					_ = state.launch(job) // ignore error
 				}
 				resetTimeout()
 			}
@@ -582,11 +582,10 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 			break
 		}
 
-		// relaunch the job if it failed
-		if resp.err != nil && !resp.job.done() {
-			err := state.launch(resp.job)
-			if err != nil && !resp.job.overdrive {
-				break // fail the download if we can't relaunch an original job
+		// relaunch regular jobs
+		if resp.err != nil && !resp.job.overdrive {
+			if err := state.launch(resp.job); err != nil {
+				break // fail the download
 			}
 		}
 	}
@@ -689,6 +688,12 @@ loop:
 					break
 				}
 				history = append(history, id)
+			}
+
+			// only apply the limitation if this upload has more than 2
+			// unfinished slabs preceding it
+			if len(history) < 3 {
+				return allowed[0]
 			}
 
 			// return the first unused queue
