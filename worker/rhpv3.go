@@ -605,6 +605,20 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		}
 	}()
 
+	debugChan := make(chan struct{})
+	defer close(debugChan)
+	go func(start time.Time) {
+		for {
+			select {
+			case <-time.After(time.Second * 30):
+				fmt.Printf("DEBUG PJ: host %v already took %v to append sector\n", r.HostKey(), time.Since(start))
+				continue
+			case <-debugChan:
+				return
+			}
+		}
+	}(time.Now())
+
 	return root, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
 			root, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)

@@ -875,33 +875,45 @@ func (q *uploadQueue) pop() *uploadJob {
 }
 
 func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
-	debugChan := make(chan struct{})
-	defer close(debugChan)
-	go func(start time.Time) {
-		for {
-			select {
-			case <-time.After(time.Second * 30):
-				fmt.Printf("DEBUG PJ: %v | %v | still waiting on host %v to finish sector %d, already took %v job done %v\n", j.uploadID, j.shardID, j.queue.hk, j.sectorIndex, time.Since(start), j.done())
-				continue
-			case <-debugChan:
-				return
-			}
-		}
-	}(time.Now())
-
 	// fetch span from context
 	span := trace.SpanFromContext(j.requestCtx)
 	span.AddEvent("execute")
 
+	hostv3chan := make(chan struct{})
+	go func(start time.Time) {
+		for {
+			select {
+			case <-time.After(time.Second * 30):
+				fmt.Printf("DEBUG PJ: %v | %v | newHostV3 %v already took %v to complete %d | job done %v\n", j.uploadID, j.shardID, j.queue.hk, time.Since(start), j.sectorIndex, j.done())
+				continue
+			case <-hostv3chan:
+				return
+			}
+		}
+	}(time.Now())
 	// create a host
 	h, err := hp.newHostV3(j.requestCtx, j.queue.fcid, j.queue.hk, j.queue.siamuxAddr)
+	close(hostv3chan)
 	if err != nil {
 		return types.Hash256{}, err
 	}
 
+	uploadSectorChan := make(chan struct{})
+	go func(start time.Time) {
+		for {
+			select {
+			case <-time.After(time.Second * 30):
+				fmt.Printf("DEBUG PJ: %v | %v | host %v already took %v to upload sector %d | job done %v\n", j.uploadID, j.shardID, j.queue.hk, time.Since(start), j.sectorIndex, j.done())
+				continue
+			case <-uploadSectorChan:
+				return
+			}
+		}
+	}(time.Now())
 	// upload the sector
 	start := time.Now()
 	root, err := h.UploadSector(j.requestCtx, j.sector, rev)
+	close(uploadSectorChan)
 	if err != nil {
 		return types.Hash256{}, err
 	}
@@ -1111,7 +1123,7 @@ func (s *uploadState) finish() ([]object.Sector, error) {
 
 	remaining := len(s.remaining)
 	if remaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%v, inflight=%v, errors=%w", remaining, s.numInflight, s.errs)
+		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.errs)
 	}
 	return s.sectors, nil
 }
