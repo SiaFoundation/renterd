@@ -461,7 +461,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	before := rev.RevisionNumber
 
 	err = fn(rev)
-	if err != nil && !strings.Contains(err.Error(), "revision number was not incremented") {
+	if err != nil && strings.Contains(err.Error(), "revision number was not incremented") {
 		after := rev.RevisionNumber
 		rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
 		if err != nil {
