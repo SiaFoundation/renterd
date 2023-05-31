@@ -926,8 +926,6 @@ func (j *uploadJob) succeed(root types.Hash256) {
 		job:  j,
 		root: root,
 	}:
-	case <-time.After(time.Minute):
-		fmt.Println("DEBUG PJ: WARNING: nobody listening")
 	}
 }
 
