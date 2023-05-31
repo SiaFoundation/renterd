@@ -503,6 +503,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	var priceTable rhpv3.HostPriceTable
 	defer func() {
 		w.recordScan(rsr.HostKey, priceTable, settings, err)
+		fmt.Printf("DEBUG PJ: scanned host %v err %v\n", rsr.HostKey, err)
 	}()
 
 	// scan host
