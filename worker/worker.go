@@ -1381,8 +1381,13 @@ func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID,
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
 	// resolve hostIP. We don't want to scan hosts on private networks.
 	if !w.allowPrivateIPs {
-		addrs, err := (&net.Resolver{}).LookupAddr(ctx, hostIP)
-		fmt.Println("DEBUG PJ: checking for private ips", hostIP, err)
+		host, _, err := net.SplitHostPort(hostIP)
+		if err != nil {
+			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+		}
+
+		addrs, err := (&net.Resolver{}).LookupAddr(ctx, host)
+		fmt.Println("DEBUG PJ: checking for private ips", host, hostIP, err)
 		if err != nil {
 			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 		}
