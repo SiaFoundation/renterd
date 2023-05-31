@@ -858,7 +858,7 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 	var txnSet []types.Transaction
 	var renewErr error
 	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
-		_, _, err = RPCLatestRevision(ctx, t, h.fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+		_, err = RPCLatestRevision(ctx, t, h.fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
 			revision, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *rev, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
