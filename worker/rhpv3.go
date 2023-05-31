@@ -610,8 +610,8 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	go func(start time.Time) {
 		for {
 			select {
-			case <-time.After(time.Second * 30):
-				fmt.Printf("DEBUG PJ: host %v already took %v to append sector\n", r.HostKey(), time.Since(start))
+			case <-time.After(2 * time.Minute):
+				fmt.Printf("DEBUG PJ: host %v has a pending withdrawal (%v)\n", r.HostKey(), time.Since(start))
 				continue
 			case <-debugChan:
 				return
@@ -624,6 +624,10 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 			root, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
 			return err
 		})
+		if err == nil {
+			bal, err := r.acc.Balance(ctx)
+			fmt.Printf("DEBUG PJ: host %v spent %v which is %v%% of his %v balance (err %v)", r.HostKey(), amount, amount.Div(bal).Mul64(100), bal, err)
+		}
 		return
 	})
 }
