@@ -236,9 +236,10 @@ func (u *uploader) Stats() uploadStats {
 
 	// fill in host stats
 	for i, q := range u.contracts {
+		q.statsSpeed.recompute()
 		stats.hostStats[i] = hostStats{
 			hk:       q.hk,
-			estimate: q.statsSpeed.recompute(),
+			estimate: q.estimate(),
 			speedAvg: q.statsSpeed.average(),
 		}
 		stats.queuesHealthy++
