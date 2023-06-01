@@ -46,6 +46,7 @@ type (
 		completed map[uploadID]map[uploadID]map[types.FileContractID]struct{}
 		excluded  map[uploadID]map[types.FileContractID]struct{}
 		history   map[uploadID][]uploadID
+		used      map[uploadID]map[uploadID]map[types.FileContractID]struct{}
 
 		nextSlabTriggers        map[uploadID]chan struct{}
 		sectorCompletedTriggers map[uploadID]chan struct{}
@@ -73,7 +74,6 @@ type (
 		bh                  uint64
 		consecutiveFailures uint64
 		queueChan           chan struct{}
-		queueUploads        map[uploadID]struct{}
 		queue               []*uploadJob
 
 		statsSpeed *dataPoints
@@ -155,9 +155,8 @@ func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 		hk:         c.HostKey,
 		siamuxAddr: c.SiamuxAddr,
 
-		queue:        make([]*uploadJob, 0),
-		queueChan:    make(chan struct{}, 1),
-		queueUploads: make(map[uploadID]struct{}),
+		queue:     make([]*uploadJob, 0),
+		queueChan: make(chan struct{}, 1),
 
 		statsSpeed: newDataPoints(),
 		stopChan:   make(chan struct{}),
@@ -214,6 +213,7 @@ func newUploader(hp hostProvider, rl revisionLocker, maxOverdrive uint64, sector
 		completed: make(map[uploadID]map[uploadID]map[types.FileContractID]struct{}),
 		excluded:  make(map[uploadID]map[types.FileContractID]struct{}),
 		history:   make(map[uploadID][]uploadID),
+		used:      make(map[uploadID]map[uploadID]map[types.FileContractID]struct{}),
 
 		nextSlabTriggers:        make(map[uploadID]chan struct{}),
 		sectorCompletedTriggers: make(map[uploadID]chan struct{}),
@@ -276,6 +276,7 @@ func (u *uploader) newUpload() uploadID {
 	u.nextSlabTriggers[id] = make(chan struct{}, 1)
 	u.nextSlabTriggers[id] <- struct{}{}
 	u.sectorCompletedTriggers[id] = make(chan struct{}, 1)
+	u.used[id] = make(map[uploadID]map[types.FileContractID]struct{})
 	return id
 }
 
@@ -287,6 +288,7 @@ func (u *uploader) finishUpload(id uploadID) {
 	delete(u.history, id)
 	delete(u.nextSlabTriggers, id)
 	delete(u.sectorCompletedTriggers, id)
+	delete(u.used, id)
 }
 
 func (u *uploader) prepareUpload(ctx context.Context, uID uploadID, shards [][]byte) (*uploadState, chan sectorResponse, []*uploadJob) {
@@ -599,17 +601,24 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 	return state.finish()
 }
 
+func (u *uploader) registerUsedQueue(uID, shardID uploadID, fcid types.FileContractID) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// register completed sector
+	_, exists := u.used[uID][shardID]
+	if !exists {
+		u.used[uID][shardID] = make(map[types.FileContractID]struct{})
+	}
+	u.used[uID][shardID][fcid] = struct{}{}
+}
+
 func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.FileContractID, last bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	_, exists := u.completed[uID]
-	if !exists {
-		panic("completed map does not exist") // developer error
-	}
-
 	// register completed sector
-	_, exists = u.completed[uID][shardID]
+	_, exists := u.completed[uID][shardID]
 	if !exists {
 		u.completed[uID][shardID] = make(map[types.FileContractID]struct{})
 	}
@@ -634,6 +643,7 @@ func (u *uploader) enqueue(j *uploadJob) error {
 		return errNoFreeQueue
 	}
 	queue.push(j)
+	u.registerUsedQueue(j.uploadID, j.shardID, j.queue.fcid)
 	return nil
 }
 
@@ -662,7 +672,7 @@ func (u *uploader) queue(j *uploadJob) *uploadQueue {
 			continue
 		}
 		// filter used queue
-		if q.used(j.shardID) {
+		if _, used := u.used[j.uploadID][j.shardID][q.fcid]; used {
 			continue
 		}
 		allowed = append(allowed, q)
@@ -821,13 +831,6 @@ func (q *uploadQueue) blockHeight() uint64 {
 	return q.bh
 }
 
-func (q *uploadQueue) used(id uploadID) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	_, used := q.queueUploads[id]
-	return used
-}
-
 func (q *uploadQueue) estimate() float64 {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -853,7 +856,6 @@ func (q *uploadQueue) push(j *uploadJob) {
 
 	// enqueue the job
 	q.queue = append(q.queue, j)
-	q.queueUploads[j.shardID] = struct{}{}
 
 	// signal there's work
 	select {
