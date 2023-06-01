@@ -142,12 +142,6 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 	return
 }
 
-// HostStats returns the host stats.
-func (c *Client) HostStats() (resp api.HostStatsResponse, err error) {
-	err = c.c.GET("/stats/hosts", &resp)
-	return
-}
-
 // UploadObject uploads the data in r, creating an object at the given path.
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...APIUploadOption) (err error) {
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)

@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -28,8 +29,9 @@ var (
 
 type (
 	uploadID [8]byte
+	shardID  [8]byte
 
-	uploader struct {
+	uploadManager struct {
 		hp hostProvider
 		rl revisionLocker
 
@@ -43,10 +45,9 @@ type (
 
 		mu        sync.Mutex
 		contracts []*uploadQueue
-		completed map[uploadID]map[uploadID]map[types.FileContractID]struct{}
 		excluded  map[uploadID]map[types.FileContractID]struct{}
-		history   map[uploadID][]uploadID
-		used      map[uploadID]map[uploadID]map[types.FileContractID]struct{}
+		history   map[uploadID][]shardID
+		used      map[uploadID]map[shardID]map[types.FileContractID]struct{}
 
 		nextSlabTriggers        map[uploadID]chan struct{}
 		sectorCompletedTriggers map[uploadID]chan struct{}
@@ -57,14 +58,12 @@ type (
 		queuesHealthy  uint64
 		queuesSpeedAvg float64
 		queuesTotal    uint64
-
-		hostStats []hostStats
+		queuesStats    map[types.PublicKey]queueStats
 	}
 
-	hostStats struct {
-		hk       types.PublicKey
+	queueStats struct {
 		estimate float64
-		speedAvg float64
+		speedP90 float64
 	}
 
 	uploadQueue struct {
@@ -83,9 +82,9 @@ type (
 	}
 
 	uploadState struct {
-		u        *uploader
-		shardID  uploadID
+		u        *uploadManager
 		uploadID uploadID
+		shardID  shardID
 		created  time.Time
 
 		mu           sync.Mutex
@@ -107,7 +106,7 @@ type (
 		overdrive    bool
 		responseChan chan sectorResponse
 
-		shardID     uploadID
+		shardID     shardID
 		uploadID    uploadID
 		sector      *[rhpv2.SectorSize]byte
 		sectorIndex int
@@ -141,7 +140,7 @@ type (
 		mu  sync.Mutex
 		pts [20]float64
 		cnt uint64
-		avg float64
+		p90 float64
 	}
 )
 
@@ -151,7 +150,7 @@ func newUploadID() uploadID {
 	return id
 }
 
-func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
+func (u *uploadManager) newQueue(c api.ContractMetadata) *uploadQueue {
 	return &uploadQueue{
 		fcid:       c.ID,
 		hk:         c.HostKey,
@@ -165,13 +164,13 @@ func (u *uploader) newQueue(c api.ContractMetadata) *uploadQueue {
 	}
 }
 
-func (u *uploader) numContracts() int {
+func (u *uploadManager) numContracts() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return len(u.contracts)
 }
 
-func (u *uploader) supportsRedundancy(n int, excluded map[types.FileContractID]struct{}) bool {
+func (u *uploadManager) hasSufficientContracts(needed int, excluded map[types.FileContractID]struct{}) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -181,7 +180,7 @@ func (u *uploader) supportsRedundancy(n int, excluded map[types.FileContractID]s
 			usable++
 		}
 	}
-	return usable >= n
+	return usable >= needed
 }
 
 func newDataPoints() *dataPoints {
@@ -191,15 +190,15 @@ func newDataPoints() *dataPoints {
 }
 
 func (w *worker) initUploader() {
-	if w.uploader != nil {
+	if w.uploadManager != nil {
 		panic("uploader already initialized") // developer error
 	}
 
-	w.uploader = newUploader(w, w, w.uploadMaxOverdrive, w.uploadSectorTimeout)
+	w.uploadManager = newUploadManager(w, w, w.uploadMaxOverdrive, w.uploadSectorTimeout)
 }
 
-func newUploader(hp hostProvider, rl revisionLocker, maxOverdrive uint64, sectorTimeout time.Duration) *uploader {
-	return &uploader{
+func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, sectorTimeout time.Duration) *uploadManager {
+	return &uploadManager{
 		hp: hp,
 		rl: rl,
 
@@ -212,48 +211,45 @@ func newUploader(hp hostProvider, rl revisionLocker, maxOverdrive uint64, sector
 		stopChan: make(chan struct{}),
 
 		contracts: make([]*uploadQueue, 0),
-		completed: make(map[uploadID]map[uploadID]map[types.FileContractID]struct{}),
 		excluded:  make(map[uploadID]map[types.FileContractID]struct{}),
-		history:   make(map[uploadID][]uploadID),
-		used:      make(map[uploadID]map[uploadID]map[types.FileContractID]struct{}),
+		history:   make(map[uploadID][]shardID),
+		used:      make(map[uploadID]map[shardID]map[types.FileContractID]struct{}),
 
 		nextSlabTriggers:        make(map[uploadID]chan struct{}),
 		sectorCompletedTriggers: make(map[uploadID]chan struct{}),
 	}
 }
 
-func (u *uploader) Stats() uploadStats {
+func (u *uploadManager) Stats() uploadStats {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+
+	fmt.Println("DEBUG PJ: fetching stats", len(u.contracts))
 
 	// prepare stats
 	stats := uploadStats{
 		overdrivePct:   u.statsOverdrive.recompute(),
 		queuesSpeedAvg: u.statsSpeed.recompute(),
 		queuesTotal:    uint64(len(u.contracts)),
-		hostStats:      make([]hostStats, len(u.contracts)),
+		queuesStats:    make(map[types.PublicKey]queueStats),
 	}
 
 	// fill in host stats
-	for i, q := range u.contracts {
+	for _, q := range u.contracts {
 		q.statsSpeed.recompute()
-		stats.hostStats[i] = hostStats{
-			hk:       q.hk,
+		stats.queuesStats[q.hk] = queueStats{
 			estimate: q.estimate(),
-			speedAvg: q.statsSpeed.average(),
+			speedP90: q.statsSpeed.percentileP90(),
 		}
-		stats.queuesHealthy++
+		if q.healthy() {
+			stats.queuesHealthy++
+		}
 	}
-
-	// sort the host stats by speed
-	sort.Slice(stats.hostStats, func(i, j int) bool {
-		return stats.hostStats[i].speedAvg > stats.hostStats[j].speedAvg
-	})
 
 	return stats
 }
 
-func (u *uploader) Stop() {
+func (u *uploadManager) Stop() {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	close(u.stopChan)
@@ -262,25 +258,23 @@ func (u *uploader) Stop() {
 	}
 }
 
-func (u *uploader) newUpload() uploadID {
+func (u *uploadManager) newUpload() uploadID {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	id := newUploadID()
-	u.completed[id] = make(map[uploadID]map[types.FileContractID]struct{})
 	u.excluded = make(map[uploadID]map[types.FileContractID]struct{})
-	u.history[id] = make([]uploadID, 0)
+	u.history[id] = make([]shardID, 0)
 	u.nextSlabTriggers[id] = make(chan struct{}, 1)
 	u.nextSlabTriggers[id] <- struct{}{}
 	u.sectorCompletedTriggers[id] = make(chan struct{}, 1)
-	u.used[id] = make(map[uploadID]map[types.FileContractID]struct{})
+	u.used[id] = make(map[shardID]map[types.FileContractID]struct{})
 	return id
 }
 
-func (u *uploader) finishUpload(id uploadID) {
+func (u *uploadManager) finishUpload(id uploadID) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	delete(u.completed, id)
 	delete(u.excluded, id)
 	delete(u.history, id)
 	delete(u.nextSlabTriggers, id)
@@ -288,12 +282,12 @@ func (u *uploader) finishUpload(id uploadID) {
 	delete(u.used, id)
 }
 
-func (u *uploader) prepareUpload(ctx context.Context, uID uploadID, shards [][]byte) (*uploadState, chan sectorResponse, []*uploadJob) {
+func (u *uploadManager) prepareUpload(ctx context.Context, uID uploadID, shards [][]byte) (*uploadState, chan sectorResponse, []*uploadJob) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	// prepare id
-	var id uploadID
+	var id shardID
 	frand.Read(id[:])
 
 	// append the id to the upload history
@@ -338,21 +332,21 @@ func (u *uploader) prepareUpload(ctx context.Context, uID uploadID, shards [][]b
 	return state, responseChan, jobs
 }
 
-func (u *uploader) triggerNextSlab(id uploadID) {
+func (u *uploadManager) triggerNextSlab(id uploadID) {
 	select {
 	case u.nextSlabTriggers[id] <- struct{}{}:
 	default:
 	}
 }
 
-func (u *uploader) triggerCompletedSector(id uploadID) {
+func (u *uploadManager) triggerCompletedSector(id uploadID) {
 	select {
 	case u.sectorCompletedTriggers[id] <- struct{}{}:
 	default:
 	}
 }
 
-func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySettings, id uploadID) chan slabData {
+func (u *uploadManager) read(ctx context.Context, r io.Reader, rs api.RedundancySettings, id uploadID) chan slabData {
 	size := int64(rs.MinShards) * rhpv2.SectorSize
 	data := make(chan slabData)
 
@@ -391,9 +385,9 @@ func (u *uploader) read(ctx context.Context, r io.Reader, rs api.RedundancySetti
 	return data
 }
 
-func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySettings) (_ object.Object, err error) {
+func (u *uploadManager) upload(ctx context.Context, r io.Reader, rs api.RedundancySettings) (_ object.Object, err error) {
 	// sanity check redundancy
-	if !u.supportsRedundancy(rs.TotalShards, nil) {
+	if !u.hasSufficientContracts(rs.TotalShards, nil) {
 		return object.Object{}, errNotEnoughHosts
 	}
 
@@ -499,9 +493,9 @@ func (u *uploader) upload(ctx context.Context, r io.Reader, rs api.RedundancySet
 	return o, nil
 }
 
-func (u *uploader) migrateShards(ctx context.Context, shards [][]byte, exclude map[types.FileContractID]struct{}) ([]object.Sector, error) {
+func (u *uploadManager) migrateShards(ctx context.Context, shards [][]byte, exclude map[types.FileContractID]struct{}) ([]object.Sector, error) {
 	// sanity check redundancy
-	if !u.supportsRedundancy(len(shards), exclude) {
+	if !u.hasSufficientContracts(len(shards), exclude) {
 		return nil, errNotEnoughHosts
 	}
 
@@ -518,7 +512,7 @@ func (u *uploader) migrateShards(ctx context.Context, shards [][]byte, exclude m
 	return u.uploadShards(ctx, id, shards, 0)
 }
 
-func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byte, index int) ([]object.Sector, error) {
+func (u *uploadManager) uploadShards(ctx context.Context, id uploadID, shards [][]byte, index int) ([]object.Sector, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "uploader.uploadShards")
 	defer span.End()
 
@@ -599,31 +593,26 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 	return state.finish()
 }
 
-func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.FileContractID, last bool) {
+func (u *uploadManager) registerCompletedSector(uID uploadID, sID shardID, fcid types.FileContractID, last bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	// register completed sector
-	_, exists := u.completed[uID][shardID]
-	if !exists {
-		u.completed[uID][shardID] = make(map[types.FileContractID]struct{})
-	}
-	u.completed[uID][shardID][fcid] = struct{}{}
 	u.triggerCompletedSector(uID)
 
 	// if last sector is completed, we can remove the shard from the history
 	if last {
 		for i, prev := range u.history[uID] {
-			if prev == shardID {
+			if prev == sID {
 				u.history[uID] = append(u.history[uID][:i], u.history[uID][i+1:]...)
 				break
 			}
 		}
-		fmt.Printf("DEBUG PJ: %v | %v | updating history %v\n", uID, shardID, u.history[uID])
+		fmt.Printf("DEBUG PJ: %v | %v | updating history %v\n", uID, sID, u.history[uID])
 	}
 }
 
-func (u *uploader) enqueue(j *uploadJob) error {
+func (u *uploadManager) enqueue(j *uploadJob) error {
 	queue := u.queue(j)
 	if queue == nil {
 		return errNoFreeQueue
@@ -643,7 +632,7 @@ func (u *uploader) enqueue(j *uploadJob) error {
 	return nil
 }
 
-func (u *uploader) queue(j *uploadJob) *uploadQueue {
+func (u *uploadManager) queue(j *uploadJob) *uploadQueue {
 	u.mu.Lock()
 	if len(u.contracts) == 0 {
 		u.mu.Unlock()
@@ -706,7 +695,7 @@ loop:
 	return nil
 }
 
-func (u *uploader) update(contracts []api.ContractMetadata, bh uint64) {
+func (u *uploadManager) update(contracts []api.ContractMetadata, bh uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -782,16 +771,18 @@ outer:
 				return err
 			})
 
-			// track the error, but only if the job is not a cancelled overdrive
-			canceledOverdrive := job.done() && job.overdrive && err != nil
-			if !canceledOverdrive {
-				q.track(err, time.Since(start))
-			}
-
+			// send the response
 			if err != nil {
 				job.fail(err)
 			} else {
 				job.succeed(root)
+			}
+
+			// track the error, ignore gracefully closed streams and canceled overdrives
+			isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
+			canceledOverdrive := job.done() && job.overdrive && err != nil
+			if !canceledOverdrive && !isErrClosedStream {
+				q.track(err, time.Since(start))
 			}
 		}
 	}
@@ -808,7 +799,7 @@ func (q *uploadQueue) estimate() float64 {
 	defer q.mu.Unlock()
 
 	// fetch average speed
-	speed := q.statsSpeed.average()
+	speed := q.statsSpeed.percentileP90()
 	if speed == 0 {
 		speed = math.MaxFloat64
 	}
@@ -835,6 +826,12 @@ func (q *uploadQueue) push(j *uploadJob) {
 	case q.queueChan <- struct{}{}:
 	default:
 	}
+}
+
+func (q *uploadQueue) healthy() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.consecutiveFailures == 0
 }
 
 func (q *uploadQueue) track(err error, d time.Duration) {
@@ -1004,9 +1001,9 @@ func (s *uploadState) inflight() uint64 {
 func (s *uploadState) performance() float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	downloaded := int64(s.numCompleted) * rhpv2.SectorSize
+	uploaded := int64(s.numCompleted) * rhpv2.SectorSize
 	elapsed := time.Since(s.created)
-	return mbps(downloaded, elapsed.Seconds())
+	return mbps(uploaded, elapsed.Seconds())
 }
 
 func (s *uploadState) overdriveCnt() int {
@@ -1091,14 +1088,10 @@ func (s *uploadState) finish() ([]object.Sector, error) {
 	return s.sectors, nil
 }
 
-func (id uploadID) String() string {
-	return fmt.Sprintf("%x", id[:])
-}
-
-func (a *dataPoints) average() float64 {
+func (a *dataPoints) percentileP90() float64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.avg
+	return a.p90
 }
 
 func (a *dataPoints) recompute() float64 {
@@ -1116,7 +1109,7 @@ func (a *dataPoints) recompute() float64 {
 	if err != nil {
 		return 0
 	}
-	a.avg = p90
+	a.p90 = p90
 	return p90
 }
 
@@ -1125,6 +1118,14 @@ func (a *dataPoints) track(p float64) {
 	defer a.mu.Unlock()
 	a.pts[a.cnt%uint64(len(a.pts))] = p
 	a.cnt++
+}
+
+func (uID uploadID) String() string {
+	return fmt.Sprintf("%x", uID[:])
+}
+
+func (sID shardID) String() string {
+	return fmt.Sprintf("%x", sID[:])
 }
 
 func mbps(b int64, s float64) float64 {

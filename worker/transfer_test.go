@@ -159,7 +159,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 
 	// prepare uploader
-	uploader := newUploader(hp, mockLocker, 0, 0)
+	uploader := newUploadManager(hp, mockLocker, 0, 0)
 	uploader.update(contracts, 0)
 	id := uploader.newUpload()
 	defer uploader.finishUpload(id)

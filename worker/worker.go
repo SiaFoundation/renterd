@@ -300,7 +300,7 @@ type worker struct {
 	pool            *sessionPool
 	masterKey       [32]byte
 
-	uploader *uploader
+	uploadManager *uploadManager
 
 	accounts    *accounts
 	priceTables *priceTables
@@ -860,9 +860,9 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	w.uploader.update(ulContracts, up.CurrentHeight)
+	w.uploadManager.update(ulContracts, up.CurrentHeight)
 
-	err = migrateSlab(ctx, w.uploader, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -887,27 +887,27 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 }
 
 func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
-	stats := w.uploader.Stats()
+	stats := w.uploadManager.Stats()
+
+	var qss []api.QueueStats
+	for hk, qs := range stats.queuesStats {
+		qss = append(qss, api.QueueStats{
+			HostKey:        hk,
+			UploadEstimate: qs.estimate,
+			UploadSpeedAvg: qs.speedP90,
+		})
+	}
+	sort.SliceStable(qss, func(i, j int) bool {
+		return qss[i].UploadSpeedAvg > qss[j].UploadSpeedAvg
+	})
+
 	jc.Encode(api.UploadStatsResponse{
 		OverdrivePct:   math.Floor(stats.overdrivePct*100*100) / 100,
 		QueuesHealthy:  stats.queuesHealthy,
 		QueuesSpeedAvg: stats.queuesSpeedAvg,
 		QueuesTotal:    stats.queuesTotal,
+		QueuesStats:    qss,
 	})
-}
-
-func (w *worker) hostStatshandlerGET(jc jape.Context) {
-	stats := w.uploader.Stats()
-
-	hs := make([]api.HostStats, len(stats.hostStats))
-	for i, s := range stats.hostStats {
-		hs[i] = api.HostStats{
-			HostKey:        s.hk,
-			UploadEstimate: s.estimate,
-			UploadSpeedAvg: s.speedAvg,
-		}
-	}
-	jc.Encode(hs)
 }
 
 func (w *worker) objectsHandlerGET(jc jape.Context) {
@@ -1104,10 +1104,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	w.uploader.update(contracts, up.CurrentHeight)
+	w.uploadManager.update(contracts, up.CurrentHeight)
 
 	// upload the object
-	object, err := w.uploader.upload(ctx, jc.Request.Body, rs)
+	object, err := w.uploadManager.upload(ctx, jc.Request.Body, rs)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -1246,7 +1246,6 @@ func (w *worker) Handler() http.Handler {
 		"POST   /slab/migrate": w.slabMigrateHandler,
 
 		"GET    /stats/uploads": w.uploadsStatshandlerGET,
-		"GET    /stats/hosts":   w.hostStatshandlerGET,
 
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
@@ -1267,7 +1266,7 @@ func (w *worker) Shutdown(_ context.Context) error {
 	w.contractSpendingRecorder.Stop()
 
 	// Stop the uploader.
-	w.uploader.Stop()
+	w.uploadManager.Stop()
 	return nil
 }
 

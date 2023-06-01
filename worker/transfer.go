@@ -351,7 +351,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []hostV2) error
 	return nil
 }
 
-func migrateSlab(ctx context.Context, u *uploader, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
