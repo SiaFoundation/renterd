@@ -888,19 +888,26 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploader.Stats()
-
-	estimates := make([]api.HostEstimate, 0, 10)
-	for _, stat := range stats.topTenHosts {
-		estimates = append(estimates, api.HostEstimate{HK: stat.hk, Estimate: stat.estimate})
-	}
-
 	jc.Encode(api.UploadStatsResponse{
 		OverdrivePct:   math.Floor(stats.overdrivePct*100*100) / 100,
 		QueuesHealthy:  stats.queuesHealthy,
 		QueuesSpeedAvg: stats.queuesSpeedAvg,
 		QueuesTotal:    stats.queuesTotal,
-		TopTenHosts:    estimates,
 	})
+}
+
+func (w *worker) hostStatshandlerGET(jc jape.Context) {
+	stats := w.uploader.Stats()
+
+	hs := make([]api.HostStats, len(stats.hostStats))
+	for i, s := range stats.hostStats {
+		hs[i] = api.HostStats{
+			HostKey:        s.hk,
+			UploadEstimate: s.estimate,
+			UploadSpeedAvg: s.speedAvg,
+		}
+	}
+	jc.Encode(hs)
 }
 
 func (w *worker) objectsHandlerGET(jc jape.Context) {
@@ -1239,6 +1246,7 @@ func (w *worker) Handler() http.Handler {
 		"POST   /slab/migrate": w.slabMigrateHandler,
 
 		"GET    /stats/uploads": w.uploadsStatshandlerGET,
+		"GET    /stats/hosts":   w.hostStatshandlerGET,
 
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
@@ -1329,7 +1337,7 @@ func (cl *contractLock) Release(ctx context.Context) error {
 }
 
 func (cl *contractLock) keepaliveLoop() {
-	// Create ticker for half the duration of the lock.
+	// Create ticker for 20% of the lock duration.
 	t := time.NewTicker(cl.d / 5)
 
 	// Cleanup
@@ -1374,14 +1382,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		}
 		addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
 		if err != nil {
-			host, _, err := net.SplitHostPort(hostIP)
-			if err != nil {
-				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-			}
-			addrs, err = (&net.Resolver{}).LookupIPAddr(ctx, host)
-			if err != nil {
-				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-			}
+			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 		}
 		for _, addr := range addrs {
 			if isPrivateIP(addr.IP) {

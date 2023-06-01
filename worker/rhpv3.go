@@ -328,11 +328,6 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 				return err
 			}
 			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
-			if isMaxBalanceExceeded(err) {
-				balance = types.Siacoins(1)
-				err = nil
-			}
-
 			return err
 		})
 		return balance, err
@@ -591,6 +586,9 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	}
 
 	// prepare payment
+	//
+	// TODO: change to account payments once we have the means to check for an
+	// insufficient balance error
 	expectedCost, _, _, err := uploadSectorCost(pt, rev.WindowEnd)
 	if err != nil {
 		return types.Hash256{}, err
@@ -602,17 +600,6 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	if !ok {
 		return types.Hash256{}, errors.New("failed to create payment")
 	}
-
-	// TODO: change to account payments once we have the means to check for an
-	// insufficient balance error
-	//payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
-
-	// return errBalanceInsufficient if balance insufficient
-	//	defer func() {
-	//		if isBalanceInsufficient(err) {
-	//			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, r.HostKey(), err)
-	//		}
-	//	}()
 
 	err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
 		root, _, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
@@ -1130,12 +1117,6 @@ func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentM
 
 func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
-
-	defer func() {
-		if err != nil && strings.Contains(err.Error(), "revision number was not incremented") {
-			err = fmt.Errorf("%w; rev number: %d", err, rev.RevisionNumber)
-		}
-	}()
 
 	// sanity check revision first
 	if rev.RevisionNumber == math.MaxUint64 {

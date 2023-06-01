@@ -57,12 +57,14 @@ type (
 		queuesHealthy  uint64
 		queuesSpeedAvg float64
 		queuesTotal    uint64
-		topTenHosts    []hostStats
+
+		hostStats []hostStats
 	}
 
 	hostStats struct {
 		hk       types.PublicKey
 		estimate float64
+		speedAvg float64
 	}
 
 	uploadQueue struct {
@@ -224,36 +226,30 @@ func (u *uploader) Stats() uploadStats {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	var healthy uint64
-	for _, q := range u.contracts {
-		q.statsSpeed.recompute()
-		if q.consecutiveFailures == 0 {
-			healthy++
-		}
-	}
-
-	// sort the contracts by their estimate
-	sort.Slice(u.contracts, func(i, j int) bool {
-		return u.contracts[i].estimate() < u.contracts[j].estimate()
-	})
-	topten := make([]hostStats, 0, 10)
-	for i, c := range u.contracts {
-		topten = append(topten, hostStats{c.hk, c.estimate()})
-		if i == 9 {
-			break
-		}
-	}
-
-	u.statsOverdrive.recompute()
-	u.statsSpeed.recompute()
-
-	return uploadStats{
-		overdrivePct:   u.statsOverdrive.average(),
-		queuesHealthy:  healthy,
-		queuesSpeedAvg: u.statsSpeed.average(),
+	// prepare stats
+	stats := uploadStats{
+		overdrivePct:   u.statsOverdrive.recompute(),
+		queuesSpeedAvg: u.statsSpeed.recompute(),
 		queuesTotal:    uint64(len(u.contracts)),
-		topTenHosts:    topten,
+		hostStats:      make([]hostStats, len(u.contracts)),
 	}
+
+	// fill in host stats
+	for i, q := range u.contracts {
+		stats.hostStats[i] = hostStats{
+			hk:       q.hk,
+			estimate: q.statsSpeed.recompute(),
+			speedAvg: q.statsSpeed.average(),
+		}
+		stats.queuesHealthy++
+	}
+
+	// sort the host stats by speed
+	sort.Slice(stats.hostStats, func(i, j int) bool {
+		return stats.hostStats[i].speedAvg > stats.hostStats[j].speedAvg
+	})
+
+	return stats
 }
 
 func (u *uploader) Stop() {
@@ -1123,7 +1119,7 @@ func (a *dataPoints) average() float64 {
 	return a.avg
 }
 
-func (a *dataPoints) recompute() {
+func (a *dataPoints) recompute() float64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1136,9 +1132,10 @@ func (a *dataPoints) recompute() {
 	}
 	p90, err := data.Percentile(90)
 	if err != nil {
-		return
+		return 0
 	}
 	a.avg = p90
+	return p90
 }
 
 func (a *dataPoints) track(p float64) {
