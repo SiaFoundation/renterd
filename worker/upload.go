@@ -319,16 +319,17 @@ func (u *uploader) prepareUpload(ctx context.Context, uID uploadID, shards [][]b
 	jobs := make([]*uploadJob, len(shards))
 	for sI, shard := range shards {
 		// create the sector's cancel func
-		ctx, cancel := context.WithCancel(ctx)
-		state.remaining[sI] = sectorCtx{ctx: ctx, cancel: cancel}
+		sCtx, cancel := context.WithCancel(ctx)
+		state.remaining[sI] = sectorCtx{ctx: sCtx, cancel: cancel}
 
 		// create the job's span
-		_, span := tracing.Tracer.Start(ctx, "uploader.uploadJob")
+		sCtx, span := tracing.Tracer.Start(sCtx, "uploader.uploadJob")
 		span.SetAttributes(attribute.Bool("overdrive", false))
 		span.SetAttributes(attribute.Int("sector", sI))
 
+		// create the job
 		jobs[sI] = &uploadJob{
-			requestCtx:   ctx,
+			requestCtx:   sCtx,
 			responseChan: responseChan,
 			shardID:      id,
 			uploadID:     uID,
@@ -601,18 +602,6 @@ func (u *uploader) uploadShards(ctx context.Context, id uploadID, shards [][]byt
 	return state.finish()
 }
 
-func (u *uploader) registerUsedQueue(uID, shardID uploadID, fcid types.FileContractID) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	// register completed sector
-	_, exists := u.used[uID][shardID]
-	if !exists {
-		u.used[uID][shardID] = make(map[types.FileContractID]struct{})
-	}
-	u.used[uID][shardID][fcid] = struct{}{}
-}
-
 func (u *uploader) registerCompletedSector(uID, shardID uploadID, fcid types.FileContractID, last bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -643,7 +632,17 @@ func (u *uploader) enqueue(j *uploadJob) error {
 		return errNoFreeQueue
 	}
 	queue.push(j)
-	u.registerUsedQueue(j.uploadID, j.shardID, j.queue.fcid)
+
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// register queue as used
+	_, exists := u.used[j.uploadID][j.shardID]
+	if !exists {
+		u.used[j.uploadID][j.shardID] = make(map[types.FileContractID]struct{})
+	}
+	u.used[j.uploadID][j.shardID][queue.fcid] = struct{}{}
+
 	return nil
 }
 
@@ -849,6 +848,7 @@ func (q *uploadQueue) push(j *uploadJob) {
 	// decorate job
 	span := trace.SpanFromContext(j.requestCtx)
 	span.SetAttributes(attribute.Stringer("hk", q.hk))
+	span.AddEvent("enqueued")
 	j.queue = q
 
 	q.mu.Lock()
