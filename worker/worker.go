@@ -906,7 +906,7 @@ func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 		UploadersHealthy:  stats.uploadersHealthy,
 		UploadersSpeedAvg: stats.uploadersSpeedAvg,
 		UploadersTotal:    stats.uploadersTotal,
-		UploaderStats:     uss,
+		UploadersStats:    uss,
 	})
 }
 

@@ -140,7 +140,7 @@ type UploadStatsResponse struct {
 	UploadersHealthy  uint64          `json:"uploadersHealthy"`
 	UploadersSpeedAvg float64         `json:"uploadersSpeedAvg"`
 	UploadersTotal    uint64          `json:"uploadersTotal"`
-	UploaderStats     []UploaderStats `json:"uploaderStats"`
+	UploadersStats    []UploaderStats `json:"uploadersStats"`
 }
 
 type UploaderStats struct {

@@ -199,7 +199,7 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 		u.statsSpeed.recompute()
 		stats.uploadersStats[u.hk] = uploaderStats{
 			estimate: u.estimate(),
-			speedP90: u.statsSpeed.percentileP90(),
+			speedP90: u.statsSpeed.percentileP90() * 0.000008, // convert bytes per ms to mbps
 		}
 		if u.healthy() {
 			stats.uploadersHealthy++
@@ -529,14 +529,12 @@ func (u *upload) registerCompletedSector(sID slabID, fcid types.FileContractID, 
 
 	// update ongoing uploads if the slab upload is done
 	if done {
-		fmt.Println("before", u.ongoing, sID)
 		for i, prev := range u.ongoing {
 			if prev == sID {
 				u.ongoing = append(u.ongoing[:i], u.ongoing[i+1:]...)
 				break
 			}
 		}
-		fmt.Println("after", u.ongoing, sID)
 		fmt.Printf("DEBUG PJ: %v | %v | updating history %v\n", u.id, sID, u.ongoing)
 	}
 }
@@ -670,7 +668,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) (
 
 	// track stats
 	mgr.statsOverdrive.track(slab.overdrivePct())
-	mgr.statsSpeed.track(slab.performance())
+	mgr.statsSpeed.track(float64(slab.bytesPerMS()))
 	return slab.finish()
 }
 
@@ -817,13 +815,13 @@ func (u *uploader) estimate() float64 {
 	defer u.mu.Unlock()
 
 	// fetch average speed
-	speed := u.statsSpeed.percentileP90()
-	if speed == 0 {
-		speed = math.MaxFloat64
+	bytesPerMS := int(u.statsSpeed.percentileP90())
+	if bytesPerMS == 0 {
+		bytesPerMS = math.MaxInt64
 	}
 
-	data := (len(u.queue) + 1) * rhpv2.SectorSize
-	return float64(data) * 0.000008 / speed
+	outstanding := (len(u.queue) + 1) * rhpv2.SectorSize
+	return float64(outstanding / bytesPerMS)
 }
 
 func (u *uploader) push(j *sectorJob) {
@@ -858,11 +856,11 @@ func (u *uploader) track(err error, d time.Duration) {
 	defer u.mu.Unlock()
 	if err != nil {
 		u.consecutiveFailures++
-		u.statsSpeed.track(math.SmallestNonzeroFloat64)
+		u.statsSpeed.track(1)
 		fmt.Println("TRACK ERROR", u.hk, err)
 	} else {
 		u.consecutiveFailures = 0
-		u.statsSpeed.track(mbps(rhpv2.SectorSize, d.Seconds()))
+		u.statsSpeed.track(float64(rhpv2.SectorSize / d.Milliseconds()))
 	}
 }
 
@@ -984,6 +982,7 @@ func (s *slabUpload) launch(job *sectorJob) error {
 	s.numInflight++
 	s.numLaunched++
 	if job.overdrive {
+		fmt.Printf("DEBUG PJ: %v | %v | launching overdrive for sector %d\n", s.u.id, s.sID, job.sectorIndex)
 		s.lastOverdrive = time.Now()
 		s.overdriving[job.sectorIndex]++
 	}
@@ -1040,7 +1039,6 @@ func (s *slabUpload) overdrive(responseChan chan sectorResponse, shards [][]byte
 		return nil
 	}
 
-	fmt.Printf("DEBUG PJ: %v | %v | launching overdrive for sector %d\n", s.u.id, s.sID, lowestSI)
 	return &sectorJob{
 		u:          s.u,
 		sID:        s.sID,
@@ -1060,12 +1058,12 @@ func (a *dataPoints) percentileP90() float64 {
 	return a.p90
 }
 
-func (s *slabUpload) performance() float64 {
+func (s *slabUpload) bytesPerMS() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	uploaded := int64(s.numCompleted) * rhpv2.SectorSize
-	elapsed := time.Since(s.created)
-	return mbps(uploaded, elapsed.Seconds())
+	bytes := int64(s.numCompleted) * rhpv2.SectorSize
+	ms := time.Since(s.created).Milliseconds()
+	return bytes / ms
 }
 
 func (s *slabUpload) receive(resp sectorResponse) (completed bool) {
@@ -1151,9 +1149,4 @@ func (uID uploadID) String() string {
 
 func (sID slabID) String() string {
 	return fmt.Sprintf("%x", sID[:])
-}
-
-func mbps(b int64, s float64) float64 {
-	bps := float64(b) / s
-	return bps * 0.000008
 }
