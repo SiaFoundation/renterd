@@ -681,41 +681,17 @@ func (u *uploader) queue(j *uploadJob) *uploadQueue {
 
 loop:
 	for {
-		// return the first unused queue
-		if queue := func() *uploadQueue {
-			u.mu.Lock()
-			defer u.mu.Unlock()
+		// grab upload history
+		u.mu.Lock()
+		history := u.history[j.uploadID]
+		u.mu.Unlock()
 
-			// fetch uploads prior to this one
-			var history []uploadID
-			for _, id := range u.history[j.uploadID] {
-				if id == j.shardID {
-					break
-				}
-				history = append(history, id)
-			}
-
-			// only apply the limitation if this upload has more than 2
-			// unfinished slabs preceding it
-			if len(history) < 3 {
-				return allowed[0]
-			}
-
-			// return the first unused queue
-		search:
-			for _, q := range allowed {
-				for _, shardID := range history {
-					if _, ok := u.completed[j.uploadID][shardID][q.fcid]; !ok {
-						continue search
-					}
-				}
-				return q
-			}
-			fmt.Printf("DEBUG PJ: %v | %v | no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete (%v)\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history), history)
-			return nil
-		}(); queue != nil {
-			return queue
+		// limit consecutive slab uploads
+		if len(history) < 3 {
+			return allowed[0]
 		}
+
+		fmt.Printf("DEBUG PJ: %v | %v | no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete (%v)\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history)-1, history)
 
 		// otherwise keep waiting
 		select {
@@ -983,6 +959,17 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 
 	defer func() {
 		s.u.registerCompletedSector(s.uploadID, s.shardID, resp.job.queue.fcid, completed)
+
+		// trigger next slab
+		if !s.nextReadTriggered {
+			if s.u.numContracts()-len(s.remaining)+int(s.u.maxOverdrive) > len(s.sectors) {
+				s.nextReadTriggered = true
+				s.u.triggerNextSlab(s.uploadID)
+			} else if completed {
+				s.nextReadTriggered = true
+				s.u.triggerNextSlab(s.uploadID)
+			}
+		}
 	}()
 
 	// redundant sectors can't complete the upload
@@ -1000,12 +987,6 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 
 	// count the sector as complete and check if we're done
 	delete(s.remaining, resp.job.sectorIndex)
-
-	// trigger next slab read if we only have some outstanding sectors left
-	if !s.nextReadTriggered && len(s.remaining) < int(s.u.maxOverdrive) {
-		s.nextReadTriggered = true
-		s.u.triggerNextSlab(s.uploadID)
-	}
 
 	if len(s.remaining)%5 == 0 || len(s.remaining) < 5 {
 		fmt.Printf("DEBUG PJ: %v | %v | remaining sectors %d\n", s.uploadID, s.shardID, len(s.remaining))
