@@ -890,7 +890,7 @@ func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploadManager.Stats()
 
 	var qss []api.QueueStats
-	for hk, qs := range stats.queuesStats {
+	for hk, qs := range stats.uploadersStats {
 		qss = append(qss, api.QueueStats{
 			HostKey:        hk,
 			UploadEstimate: qs.estimate,
@@ -903,9 +903,9 @@ func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 
 	jc.Encode(api.UploadStatsResponse{
 		OverdrivePct:   math.Floor(stats.overdrivePct*100*100) / 100,
-		QueuesHealthy:  stats.queuesHealthy,
-		QueuesSpeedAvg: stats.queuesSpeedAvg,
-		QueuesTotal:    stats.queuesTotal,
+		QueuesHealthy:  stats.uploadersHealthy,
+		QueuesSpeedAvg: stats.uploadersSpeedAvg,
+		QueuesTotal:    stats.uploadersTotal,
 		QueuesStats:    qss,
 	})
 }
@@ -1223,7 +1223,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
-	w.initUploader()
+	w.initUploadManager()
 	return w, nil
 }
 

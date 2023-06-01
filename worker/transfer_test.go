@@ -161,8 +161,11 @@ func TestMultipleObjects(t *testing.T) {
 	// prepare uploader
 	uploader := newUploadManager(hp, mockLocker, 0, 0)
 	uploader.update(contracts, 0)
-	id := uploader.newUpload()
-	defer uploader.finishUpload(id)
+	upload, err := uploader.newUpload(10, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer uploader.finishUpload(upload)
 
 	// upload
 	var slabs []object.Slab
@@ -185,7 +188,7 @@ func TestMultipleObjects(t *testing.T) {
 		s.Encode(buf, shards)
 		s.Encrypt(shards)
 
-		s.Shards, err = uploader.uploadShards(context.Background(), id, shards, 0)
+		s.Shards, err = upload.uploadShards(context.Background(), shards, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

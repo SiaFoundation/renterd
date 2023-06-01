@@ -29,44 +29,25 @@ var (
 
 type (
 	uploadID [8]byte
-	shardID  [8]byte
+	slabID   [8]byte
 
 	uploadManager struct {
 		hp hostProvider
 		rl revisionLocker
 
-		overdriveTimeout time.Duration
 		maxOverdrive     uint64
+		overdriveTimeout time.Duration
 
 		statsOverdrive *dataPoints
 		statsSpeed     *dataPoints
-
-		stopChan chan struct{}
+		stopChan       chan struct{}
 
 		mu        sync.Mutex
-		contracts []*uploadQueue
-		excluded  map[uploadID]map[types.FileContractID]struct{}
-		history   map[uploadID][]shardID
-		used      map[uploadID]map[shardID]map[types.FileContractID]struct{}
-
-		nextSlabTriggers        map[uploadID]chan struct{}
-		sectorCompletedTriggers map[uploadID]chan struct{}
+		uploaders []*uploader
+		uploads   map[uploadID]*upload
 	}
 
-	uploadStats struct {
-		overdrivePct   float64
-		queuesHealthy  uint64
-		queuesSpeedAvg float64
-		queuesTotal    uint64
-		queuesStats    map[types.PublicKey]queueStats
-	}
-
-	queueStats struct {
-		estimate float64
-		speedP90 float64
-	}
-
-	uploadQueue struct {
+	uploader struct {
 		fcid       types.FileContractID
 		hk         types.PublicKey
 		siamuxAddr string
@@ -75,17 +56,29 @@ type (
 		bh                  uint64
 		consecutiveFailures uint64
 		queueChan           chan struct{}
-		queue               []*uploadJob
+		queue               []*sectorJob
 
 		statsSpeed *dataPoints
 		stopChan   chan struct{}
 	}
 
-	uploadState struct {
-		u        *uploadManager
-		uploadID uploadID
-		shardID  shardID
-		created  time.Time
+	upload struct {
+		mgr *uploadManager
+		id  uploadID
+
+		excluded          map[types.FileContractID]struct{}
+		nextReadTrigger   chan struct{}
+		doneSectorTrigger chan struct{}
+
+		mu      sync.Mutex
+		ongoing []slabID
+		used    map[slabID]map[types.FileContractID]struct{}
+	}
+
+	slabUpload struct {
+		u       *upload
+		created time.Time
+		sID     slabID
 
 		mu           sync.Mutex
 		numCompleted uint64
@@ -98,19 +91,6 @@ type (
 		remaining         map[int]sectorCtx
 		sectors           []object.Sector
 		errs              HostErrorSet
-	}
-
-	uploadJob struct {
-		requestCtx context.Context
-
-		overdrive    bool
-		responseChan chan sectorResponse
-
-		shardID     shardID
-		uploadID    uploadID
-		sector      *[rhpv2.SectorSize]byte
-		sectorIndex int
-		queue       *uploadQueue
 	}
 
 	slabData struct {
@@ -130,10 +110,36 @@ type (
 		cancel context.CancelFunc
 	}
 
+	sectorJob struct {
+		u          *upload
+		sID        slabID
+		requestCtx context.Context
+
+		overdrive    bool
+		responseChan chan sectorResponse
+
+		sector      *[rhpv2.SectorSize]byte
+		sectorIndex int
+		queue       *uploader
+	}
+
 	sectorResponse struct {
-		job  *uploadJob
+		job  *sectorJob
 		root types.Hash256
 		err  error
+	}
+
+	uploadManagerStats struct {
+		overdrivePct      float64
+		uploadersHealthy  uint64
+		uploadersSpeedAvg float64
+		uploadersTotal    uint64
+		uploadersStats    map[types.PublicKey]uploaderStats
+	}
+
+	uploaderStats struct {
+		estimate float64
+		speedP90 float64
 	}
 
 	dataPoints struct {
@@ -144,57 +150,18 @@ type (
 	}
 )
 
-func newUploadID() uploadID {
-	var id uploadID
-	frand.Read(id[:])
-	return id
-}
-
-func (u *uploadManager) newQueue(c api.ContractMetadata) *uploadQueue {
-	return &uploadQueue{
-		fcid:       c.ID,
-		hk:         c.HostKey,
-		siamuxAddr: c.SiamuxAddr,
-
-		queue:     make([]*uploadJob, 0),
-		queueChan: make(chan struct{}, 1),
-
-		statsSpeed: newDataPoints(),
-		stopChan:   make(chan struct{}),
+func (w *worker) initUploadManager() {
+	if w.uploadManager != nil {
+		panic("uploader already initialized") // developer error
 	}
-}
 
-func (u *uploadManager) numContracts() int {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return len(u.contracts)
-}
-
-func (u *uploadManager) hasSufficientContracts(needed int, excluded map[types.FileContractID]struct{}) bool {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	var usable int
-	for _, q := range u.contracts {
-		if _, ok := excluded[q.fcid]; !ok {
-			usable++
-		}
-	}
-	return usable >= needed
+	w.uploadManager = newUploadManager(w, w, w.uploadMaxOverdrive, w.uploadSectorTimeout)
 }
 
 func newDataPoints() *dataPoints {
 	return &dataPoints{
 		pts: [20]float64{},
 	}
-}
-
-func (w *worker) initUploader() {
-	if w.uploadManager != nil {
-		panic("uploader already initialized") // developer error
-	}
-
-	w.uploadManager = newUploadManager(w, w, w.uploadMaxOverdrive, w.uploadSectorTimeout)
 }
 
 func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, sectorTimeout time.Duration) *uploadManager {
@@ -210,187 +177,161 @@ func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, s
 
 		stopChan: make(chan struct{}),
 
-		contracts: make([]*uploadQueue, 0),
-		excluded:  make(map[uploadID]map[types.FileContractID]struct{}),
-		history:   make(map[uploadID][]shardID),
-		used:      make(map[uploadID]map[shardID]map[types.FileContractID]struct{}),
-
-		nextSlabTriggers:        make(map[uploadID]chan struct{}),
-		sectorCompletedTriggers: make(map[uploadID]chan struct{}),
+		uploaders: make([]*uploader, 0),
+		uploads:   make(map[uploadID]*upload, 0),
 	}
 }
 
-func (u *uploadManager) Stats() uploadStats {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	fmt.Println("DEBUG PJ: fetching stats", len(u.contracts))
+func (mgr *uploadManager) Stats() uploadManagerStats {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
 
 	// prepare stats
-	stats := uploadStats{
-		overdrivePct:   u.statsOverdrive.recompute(),
-		queuesSpeedAvg: u.statsSpeed.recompute(),
-		queuesTotal:    uint64(len(u.contracts)),
-		queuesStats:    make(map[types.PublicKey]queueStats),
+	stats := uploadManagerStats{
+		overdrivePct:      mgr.statsOverdrive.recompute(),
+		uploadersSpeedAvg: mgr.statsSpeed.recompute(),
+		uploadersTotal:    uint64(len(mgr.uploaders)),
+		uploadersStats:    make(map[types.PublicKey]uploaderStats),
 	}
 
-	// fill in host stats
-	for _, q := range u.contracts {
-		q.statsSpeed.recompute()
-		stats.queuesStats[q.hk] = queueStats{
-			estimate: q.estimate(),
-			speedP90: q.statsSpeed.percentileP90(),
+	// fill in uploader stats
+	for _, u := range mgr.uploaders {
+		u.statsSpeed.recompute()
+		stats.uploadersStats[u.hk] = uploaderStats{
+			estimate: u.estimate(),
+			speedP90: u.statsSpeed.percentileP90(),
 		}
-		if q.healthy() {
-			stats.queuesHealthy++
+		if u.healthy() {
+			stats.uploadersHealthy++
 		}
 	}
 
 	return stats
 }
 
-func (u *uploadManager) Stop() {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	close(u.stopChan)
-	for _, q := range u.contracts {
-		close(q.stopChan)
+func (mgr *uploadManager) Stop() {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	close(mgr.stopChan)
+	for _, u := range mgr.uploaders {
+		close(u.stopChan)
 	}
 }
 
-func (u *uploadManager) newUpload() uploadID {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	id := newUploadID()
-	u.excluded = make(map[uploadID]map[types.FileContractID]struct{})
-	u.history[id] = make([]shardID, 0)
-	u.nextSlabTriggers[id] = make(chan struct{}, 1)
-	u.nextSlabTriggers[id] <- struct{}{}
-	u.sectorCompletedTriggers[id] = make(chan struct{}, 1)
-	u.used[id] = make(map[shardID]map[types.FileContractID]struct{})
-	return id
+func (mgr *uploadManager) finishUpload(u *upload) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	delete(mgr.uploads, u.id)
 }
 
-func (u *uploadManager) finishUpload(id uploadID) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	delete(u.excluded, id)
-	delete(u.history, id)
-	delete(u.nextSlabTriggers, id)
-	delete(u.sectorCompletedTriggers, id)
-	delete(u.used, id)
+func (mgr *uploadManager) migrateShards(ctx context.Context, shards [][]byte, excluded map[types.FileContractID]struct{}) ([]object.Sector, error) {
+	// initiate the upload
+	upload, err := mgr.newUpload(len(shards), excluded)
+	if err != nil {
+		return nil, err
+	}
+	defer mgr.finishUpload(upload)
+
+	// upload the shards
+	return upload.uploadShards(ctx, shards, 0)
 }
 
-func (u *uploadManager) prepareUpload(ctx context.Context, uID uploadID, shards [][]byte) (*uploadState, chan sectorResponse, []*uploadJob) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+func (mgr *uploadManager) newUpload(totalShards int, excluded map[types.FileContractID]struct{}) (*upload, error) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
 
-	// prepare id
-	var id shardID
+	// check if we have enough uploaders
+	var usable int
+	for _, u := range mgr.uploaders {
+		if _, exclude := excluded[u.fcid]; exclude {
+			continue
+		}
+		usable++
+	}
+	if usable < totalShards {
+		return nil, errNotEnoughHosts
+	}
+
+	// create id
+	var id uploadID
 	frand.Read(id[:])
 
-	// append the id to the upload history
-	u.history[uID] = append(u.history[uID], id)
+	// create upload
+	mgr.uploads[id] = &upload{
+		mgr: mgr,
+		id:  id,
 
-	// prepare state
-	state := &uploadState{
-		u:        u,
-		shardID:  id,
-		uploadID: uID,
-		created:  time.Now(),
+		excluded:          excluded,
+		nextReadTrigger:   make(chan struct{}, 1),
+		doneSectorTrigger: make(chan struct{}, 1),
 
-		overdriving: make(map[int]int, len(shards)),
-		remaining:   make(map[int]sectorCtx, len(shards)),
-		sectors:     make([]object.Sector, len(shards)),
+		ongoing: make([]slabID, 0),
+		used:    make(map[slabID]map[types.FileContractID]struct{}),
 	}
 
-	// prepare jobs
-	responseChan := make(chan sectorResponse)
-	jobs := make([]*uploadJob, len(shards))
-	for sI, shard := range shards {
-		// create the sector's cancel func
-		sCtx, cancel := context.WithCancel(ctx)
-		state.remaining[sI] = sectorCtx{ctx: sCtx, cancel: cancel}
+	mgr.uploads[id].triggerNextRead()
+	return mgr.uploads[id], nil
+}
 
-		// create the job's span
-		sCtx, span := tracing.Tracer.Start(sCtx, "uploader.uploadJob")
-		span.SetAttributes(attribute.Bool("overdrive", false))
-		span.SetAttributes(attribute.Int("sector", sI))
+func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
+	return &uploader{
+		fcid:       c.ID,
+		hk:         c.HostKey,
+		siamuxAddr: c.SiamuxAddr,
 
-		// create the job
-		jobs[sI] = &uploadJob{
-			requestCtx:   sCtx,
-			responseChan: responseChan,
-			shardID:      id,
-			uploadID:     uID,
-			sector:       (*[rhpv2.SectorSize]byte)(shard),
-			sectorIndex:  sI,
+		queue:     make([]*sectorJob, 0),
+		queueChan: make(chan struct{}, 1),
+
+		statsSpeed: newDataPoints(),
+		stopChan:   make(chan struct{}),
+	}
+}
+
+func (mgr *uploadManager) numUploaders() int {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	return len(mgr.uploaders)
+}
+
+func (mgr *uploadManager) update(contracts []api.ContractMetadata, bh uint64) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+
+	// build map
+	c2m := make(map[types.FileContractID]api.ContractMetadata)
+	for _, c := range contracts {
+		c2m[c.ID] = c
+	}
+
+	// recreate the pool
+	var i int
+	for _, q := range mgr.uploaders {
+		if _, keep := c2m[q.fcid]; !keep {
+			continue
 		}
+		delete(c2m, q.fcid)
+		mgr.uploaders[i] = q
+		i++
+	}
+	for j := i; j < len(mgr.uploaders); j++ {
+		mgr.uploaders[j] = nil
+	}
+	mgr.uploaders = mgr.uploaders[:i]
+
+	// add missing uploaders
+	for _, contract := range c2m {
+		uploader := mgr.newUploader(contract)
+		mgr.uploaders = append(mgr.uploaders, uploader)
+		uploader.start(mgr.hp, mgr.rl)
 	}
 
-	return state, responseChan, jobs
-}
-
-func (u *uploadManager) triggerNextSlab(id uploadID) {
-	select {
-	case u.nextSlabTriggers[id] <- struct{}{}:
-	default:
+	// update blockheight
+	for _, u := range mgr.uploaders {
+		u.updateBlockHeight(bh)
 	}
 }
 
-func (u *uploadManager) triggerCompletedSector(id uploadID) {
-	select {
-	case u.sectorCompletedTriggers[id] <- struct{}{}:
-	default:
-	}
-}
-
-func (u *uploadManager) read(ctx context.Context, r io.Reader, rs api.RedundancySettings, id uploadID) chan slabData {
-	size := int64(rs.MinShards) * rhpv2.SectorSize
-	data := make(chan slabData)
-
-	go func() {
-		var err error
-		for {
-			select {
-			case <-u.stopChan:
-				err = errors.New("upload stopped")
-			case <-ctx.Done():
-				err = errors.New("upload timed out")
-			case <-u.nextSlabTriggers[id]:
-				fmt.Printf("DEBUG PJ: %v | slab read triggered\n", id)
-			}
-
-			if err != nil {
-				data <- slabData{err: err}
-				return
-			}
-
-			buf := make([]byte, size)
-			length, err := io.ReadFull(io.LimitReader(r, size), buf)
-			if err == io.EOF {
-				fmt.Printf("DEBUG PJ: %v | slab reads done\n", id)
-				close(data)
-				return
-			} else if err != nil && err != io.ErrUnexpectedEOF {
-				data <- slabData{err: errors.New("data read failed")}
-				return
-			}
-
-			data <- slabData{data: buf, length: length}
-		}
-	}()
-
-	return data
-}
-
-func (u *uploadManager) upload(ctx context.Context, r io.Reader, rs api.RedundancySettings) (_ object.Object, err error) {
-	// sanity check redundancy
-	if !u.hasSufficientContracts(rs.TotalShards, nil) {
-		return object.Object{}, errNotEnoughHosts
-	}
-
+func (mgr *uploadManager) upload(ctx context.Context, r io.Reader, rs api.RedundancySettings) (_ object.Object, err error) {
 	// add cancel
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -402,19 +343,110 @@ func (u *uploadManager) upload(ctx context.Context, r io.Reader, rs api.Redundan
 		span.End()
 	}()
 
-	// create the id
-	id := u.newUpload()
-	defer u.finishUpload(id)
-
-	fmt.Printf("DEBUG PJ: %v | started\n", id)
-
 	// create the object
 	o := object.NewObject()
 
+	// create the cipher reader
+	cr := o.Encrypt(r)
+
+	// create the upload
+	u, err := mgr.newUpload(rs.TotalShards, nil)
+	if err != nil {
+		return object.Object{}, err
+	}
+	defer mgr.finishUpload(u)
+	fmt.Printf("DEBUG PJ: %v | started\n", u.id)
+
+	// launch the upload
+	slabsChan := u.start(ctx, cr, rs)
+
+	// collect the slabs
+	var responses []slabResponse
+	for res := range slabsChan {
+		if res.err != nil {
+			return object.Object{}, res.err
+		}
+		responses = append(responses, res)
+	}
+
+	// sort the slabs by index
+	sort.Slice(responses, func(i, j int) bool {
+		return responses[i].index < responses[j].index
+	})
+
+	// decorate the object with the slabs
+	for _, resp := range responses {
+		o.Slabs = append(o.Slabs, resp.slab)
+	}
+	return o, nil
+}
+
+func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUpload, []*sectorJob, chan sectorResponse) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// prepare slab id
+	var sID slabID
+	frand.Read(sID[:])
+	u.ongoing = append(u.ongoing, sID)
+
+	// prepare slab upload
+	slab := &slabUpload{
+		u:       u,
+		sID:     sID,
+		created: time.Now(),
+
+		overdriving: make(map[int]int, len(shards)),
+		remaining:   make(map[int]sectorCtx, len(shards)),
+		sectors:     make([]object.Sector, len(shards)),
+	}
+
+	// prepare jobs
+	responseChan := make(chan sectorResponse)
+	jobs := make([]*sectorJob, len(shards))
+	for sI, shard := range shards {
+		// create the sector's cancel func
+		sCtx, cancel := context.WithCancel(ctx)
+		slab.remaining[sI] = sectorCtx{ctx: sCtx, cancel: cancel}
+
+		// create the job's span
+		sCtx, span := tracing.Tracer.Start(sCtx, "uploader.uploadJob")
+		span.SetAttributes(attribute.Bool("overdrive", false))
+		span.SetAttributes(attribute.Int("sector", sI))
+
+		// create the job
+		jobs[sI] = &sectorJob{
+			u:            u,
+			sID:          sID,
+			requestCtx:   sCtx,
+			responseChan: responseChan,
+
+			sector:      (*[rhpv2.SectorSize]byte)(shard),
+			sectorIndex: sI,
+		}
+	}
+
+	return slab, jobs, responseChan
+}
+
+func (u *upload) canUseQueue(q *uploader, sID slabID) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	_, excluded := u.excluded[q.fcid]
+	if excluded {
+		return false
+	}
+
+	_, used := u.used[sID][q.fcid]
+	return !used
+}
+
+func (u *upload) start(ctx context.Context, r io.Reader, rs api.RedundancySettings) chan slabResponse {
 	// create the response channel
 	slabsChan := make(chan slabResponse)
 
-	// launch the upload
+	// launch a goroutine uploading the slabs
 	go func() {
 		var wg sync.WaitGroup
 		defer func() {
@@ -423,14 +455,14 @@ func (u *uploadManager) upload(ctx context.Context, r io.Reader, rs api.Redundan
 		}()
 
 		var slabIndex int
-		for data := range u.read(ctx, o.Encrypt(r), rs, id) {
-			if data.err != nil {
-				slabsChan <- slabResponse{err: data.err}
+		for res := range u.read(ctx, r, rs) {
+			if res.err != nil {
+				slabsChan <- slabResponse{err: res.err}
 				return
 			}
 
 			wg.Add(1)
-			go func(buf []byte, length, index int) {
+			go func(data []byte, length, index int) {
 				defer wg.Done()
 
 				// add tracing
@@ -442,16 +474,17 @@ func (u *uploadManager) upload(ctx context.Context, r io.Reader, rs api.Redundan
 
 				// create the shards
 				shards := make([][]byte, rs.TotalShards)
-				s.Encode(buf, shards)
+				s.Encode(data, shards)
 				s.Encrypt(shards)
 
 				// upload the shards
-				s.Shards, err = u.uploadShards(ctx, id, shards, index)
+				var err error
+				s.Shards, err = u.uploadShards(ctx, shards, index)
 				if err != nil {
 					select {
 					case slabsChan <- slabResponse{err: err}:
 					default:
-						fmt.Printf("DEBUG PJ: %v | failed to send slab response, err %v\n", id, err)
+						fmt.Printf("DEBUG PJ: %v | failed to send slab response, err %v\n", u.id, err)
 					}
 					return
 				}
@@ -467,79 +500,127 @@ func (u *uploadManager) upload(ctx context.Context, r io.Reader, rs api.Redundan
 					index: index,
 				}:
 				default:
-					fmt.Printf("DEBUG PJ: %v | failed to send slab response\n", id)
+					fmt.Printf("DEBUG PJ: %v | failed to send slab response\n", u.id)
 				}
-			}(data.data, data.length, slabIndex)
+			}(res.data, res.length, slabIndex)
 			slabIndex++
 		}
 	}()
-
-	// collect the slabs
-	var responses []slabResponse
-	for res := range slabsChan {
-		if res.err != nil {
-			return object.Object{}, res.err
-		}
-		responses = append(responses, res)
-	}
-
-	// sort the responses and append the slabs
-	sort.Slice(responses, func(i, j int) bool {
-		return responses[i].index < responses[j].index
-	})
-	for _, resp := range responses {
-		o.Slabs = append(o.Slabs, resp.slab)
-	}
-	return o, nil
+	return slabsChan
 }
 
-func (u *uploadManager) migrateShards(ctx context.Context, shards [][]byte, exclude map[types.FileContractID]struct{}) ([]object.Sector, error) {
-	// sanity check redundancy
-	if !u.hasSufficientContracts(len(shards), exclude) {
-		return nil, errNotEnoughHosts
-	}
-
-	// create the id
-	id := u.newUpload()
-	defer u.finishUpload(id)
-
-	// exclude the given contracts
+func (u *upload) registerUsedQueue(sID slabID, fcid types.FileContractID) {
 	u.mu.Lock()
-	u.excluded[id] = exclude
-	u.mu.Unlock()
+	defer u.mu.Unlock()
 
-	// upload the shards
-	return u.uploadShards(ctx, id, shards, 0)
+	_, exists := u.used[sID]
+	if !exists {
+		u.used[sID] = make(map[types.FileContractID]struct{})
+	}
+	u.used[sID][fcid] = struct{}{}
 }
 
-func (u *uploadManager) uploadShards(ctx context.Context, id uploadID, shards [][]byte, index int) ([]object.Sector, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "uploader.uploadShards")
+func (u *upload) registerCompletedSector(sID slabID, fcid types.FileContractID, done bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// register completed sector
+	u.triggerDoneSector()
+
+	// update ongoing uploads if the slab upload is done
+	if done {
+		fmt.Println("before", u.ongoing, sID)
+		for i, prev := range u.ongoing {
+			if prev == sID {
+				u.ongoing = append(u.ongoing[:i], u.ongoing[i+1:]...)
+				break
+			}
+		}
+		fmt.Println("after", u.ongoing, sID)
+		fmt.Printf("DEBUG PJ: %v | %v | updating history %v\n", u.id, sID, u.ongoing)
+	}
+}
+
+func (u *upload) read(ctx context.Context, r io.Reader, rs api.RedundancySettings) chan slabData {
+	size := int64(rs.MinShards) * rhpv2.SectorSize
+	data := make(chan slabData)
+
+	go func() {
+		for {
+			select {
+			case <-u.mgr.stopChan:
+				data <- slabData{err: errors.New("manager was stopped")}
+				return
+			case <-ctx.Done():
+				data <- slabData{err: errors.New("upload timed out")}
+				return
+			case <-u.nextReadTrigger:
+			}
+			fmt.Printf("DEBUG PJ: %v | slab read triggered\n", u.id)
+
+			buf := make([]byte, size)
+			length, err := io.ReadFull(io.LimitReader(r, size), buf)
+			if err == io.EOF {
+				fmt.Printf("DEBUG PJ: %v | slab reads done\n", u.id)
+				close(data)
+				return
+			} else if err != nil && err != io.ErrUnexpectedEOF {
+				data <- slabData{err: errors.New("data read failed")}
+				return
+			}
+
+			data <- slabData{data: buf, length: length}
+		}
+	}()
+
+	return data
+}
+
+func (u *upload) triggerDoneSector() {
+	select {
+	case u.doneSectorTrigger <- struct{}{}:
+	default:
+	}
+}
+
+func (u *upload) triggerNextRead() {
+	select {
+	case u.nextReadTrigger <- struct{}{}:
+	default:
+	}
+}
+
+func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) ([]object.Sector, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "uploadShards")
 	defer span.End()
 
-	// prepare the upload
-	state, sectorChan, jobs := u.prepareUpload(ctx, id, shards)
-	span.SetAttributes(attribute.Stringer("id", state.shardID))
-	defer state.cleanup()
+	// convenience variables
+	mgr := u.mgr
 
-	fmt.Printf("DEBUG PJ: %v | %v | slab %d started \n", id, state.shardID, index)
-	defer fmt.Printf("DEBUG PJ: %v | %v | slab %d finished \n", id, state.shardID, index)
+	// prepare the upload
+	slab, jobs, sectorChan := u.newSlabUpload(ctx, shards)
+	span.SetAttributes(attribute.Stringer("id", slab.sID))
+	defer slab.cleanup()
+
+	fmt.Printf("DEBUG PJ: %v | %v | slab %d started \n", slab.u.id, slab.sID, index)
+	defer fmt.Printf("DEBUG PJ: %v | %v | slab %d finished \n", slab.u.id, slab.sID, index)
 
 	// launch all jobs
 	for _, job := range jobs {
-		if err := state.launch(job); err != nil {
+		if err := slab.launch(job); err != nil {
 			return nil, err
 		}
 	}
 
 	// create a timer to trigger overdrive
-	timeout := time.NewTimer(u.overdriveTimeout)
+	timeout := time.NewTimer(mgr.overdriveTimeout)
 	resetTimeout := func() {
 		timeout.Stop()
 		select {
 		case <-timeout.C:
 		default:
 		}
-		timeout.Reset(u.overdriveTimeout)
+		timeout.Reset(mgr.overdriveTimeout)
 	}
 
 	// launch a goroutine to trigger overdrive
@@ -549,8 +630,8 @@ func (u *uploadManager) uploadShards(ctx context.Context, id uploadID, shards []
 			case <-ctx.Done():
 				return
 			case <-timeout.C:
-				if job := state.overdrive(sectorChan, shards); job != nil {
-					_ = state.launch(job) // ignore error
+				if job := slab.overdrive(sectorChan, shards); job != nil {
+					_ = slab.launch(job) // ignore error
 				}
 				resetTimeout()
 			}
@@ -558,10 +639,10 @@ func (u *uploadManager) uploadShards(ctx context.Context, id uploadID, shards []
 	}()
 
 	// collect responses
-	for state.inflight() > 0 {
+	for slab.inflight() > 0 {
 		var resp sectorResponse
 		select {
-		case <-u.stopChan:
+		case <-mgr.stopChan:
 			return nil, errors.New("upload stopped")
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -572,120 +653,93 @@ func (u *uploadManager) uploadShards(ctx context.Context, id uploadID, shards []
 		}
 
 		// handle the response
-		if done := state.receive(resp); done {
+		if done := slab.receive(resp); done {
 			break
 		}
 
 		// relaunch regular jobs
 		if resp.err != nil && !resp.job.overdrive {
-			if err := state.launch(resp.job); err != nil {
+			if err := slab.launch(resp.job); err != nil {
 				break // fail the download
 			}
 		}
 	}
 
 	// register the amount of overdrive sectors
-	span.SetAttributes(attribute.Int("overdrive", state.overdriveCnt()))
+	span.SetAttributes(attribute.Int("overdrive", slab.overdriveCnt()))
 
 	// track stats
-	u.statsOverdrive.track(state.overdrivePct())
-	u.statsSpeed.track(state.performance())
-	return state.finish()
+	mgr.statsOverdrive.track(slab.overdrivePct())
+	mgr.statsSpeed.track(slab.performance())
+	return slab.finish()
 }
 
-func (u *uploadManager) registerCompletedSector(uID uploadID, sID shardID, fcid types.FileContractID, last bool) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	// register completed sector
-	u.triggerCompletedSector(uID)
-
-	// if last sector is completed, we can remove the shard from the history
-	if last {
-		for i, prev := range u.history[uID] {
-			if prev == sID {
-				u.history[uID] = append(u.history[uID][:i], u.history[uID][i+1:]...)
-				break
-			}
-		}
-		fmt.Printf("DEBUG PJ: %v | %v | updating history %v\n", uID, sID, u.history[uID])
-	}
-}
-
-func (u *uploadManager) enqueue(j *uploadJob) error {
-	queue := u.queue(j)
+func (mgr *uploadManager) enqueue(j *sectorJob) error {
+	queue := mgr.queue(j)
 	if queue == nil {
 		return errNoFreeQueue
 	}
 	queue.push(j)
-
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	// register queue as used
-	_, exists := u.used[j.uploadID][j.shardID]
-	if !exists {
-		u.used[j.uploadID][j.shardID] = make(map[types.FileContractID]struct{})
-	}
-	u.used[j.uploadID][j.shardID][queue.fcid] = struct{}{}
-
 	return nil
 }
 
-func (u *uploadManager) queue(j *uploadJob) *uploadQueue {
-	u.mu.Lock()
-	if len(u.contracts) == 0 {
-		u.mu.Unlock()
+func (mgr *uploadManager) queue(j *sectorJob) *uploader {
+	mgr.mu.Lock()
+	if len(mgr.uploaders) == 0 {
+		mgr.mu.Unlock()
 		return nil
 	}
 
 	// recompute the stats first
-	for _, q := range u.contracts {
+	for _, q := range mgr.uploaders {
 		q.statsSpeed.recompute()
 	}
 
-	// sort the contracts by their estimate
-	sort.Slice(u.contracts, func(i, j int) bool {
-		return u.contracts[i].estimate() < u.contracts[j].estimate()
+	// sort the uploaders by their estimate
+	sort.Slice(mgr.uploaders, func(i, j int) bool {
+		return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
 	})
 
 	// filter queues
-	var allowed []*uploadQueue
-	for _, q := range u.contracts {
-		// filter excluded contracts
-		if _, excluded := u.excluded[j.uploadID][q.fcid]; excluded {
-			continue
+	var candidates []*uploader
+	for _, q := range mgr.uploaders {
+		if j.u.canUseQueue(q, j.sID) {
+			candidates = append(candidates, q)
 		}
-		// filter used queue
-		if _, used := u.used[j.uploadID][j.shardID][q.fcid]; used {
-			continue
-		}
-		allowed = append(allowed, q)
 	}
-	u.mu.Unlock()
-
+	mgr.mu.Unlock()
 	// return early if we have no queues left
-	if len(allowed) == 0 {
+	if len(candidates) == 0 {
 		return nil
 	}
 
 loop:
 	for {
-		// grab upload history
-		u.mu.Lock()
-		history := u.history[j.uploadID]
-		u.mu.Unlock()
+		// grab ongoing slab uploads
+		j.u.mu.Lock()
+		ongoing := j.u.ongoing
+		j.u.mu.Unlock()
 
-		// limit consecutive slab uploads
-		if len(history) < 3 {
-			return allowed[0]
+		// grab the slabs parents
+		var parents []slabID
+		for _, sID := range ongoing {
+			if sID == j.sID {
+				break
+			}
+			parents = append(parents, sID)
 		}
 
-		fmt.Printf("DEBUG PJ: %v | %v | no queue yet for sector %d, overdrive %v, allowed %d waiting on %d shards to complete (%v)\n", j.uploadID, j.shardID, j.sectorIndex, j.overdrive, len(allowed), len(history)-1, history)
+		// if this slab does not have more than 2 parents, we return the first
+		// (and thus best) candidate
+		if len(parents) < 3 {
+			return candidates[0]
+		}
 
-		// otherwise keep waiting
+		fmt.Printf("DEBUG PJ: %v | %v | no queue yet for sector %d, overdrive %v, candidates %d waiting on %d shards to complete (%v)\n", j.u.id, j.sID, j.sectorIndex, j.overdrive, len(candidates), len(parents), parents)
+
+		// otherwise we wait, allowing the parents to complete
 		select {
-		case <-u.sectorCompletedTriggers[j.uploadID]:
+		case <-j.u.doneSectorTrigger:
 			continue loop
 		case <-j.requestCtx.Done():
 			break loop
@@ -695,177 +749,142 @@ loop:
 	return nil
 }
 
-func (u *uploadManager) update(contracts []api.ContractMetadata, bh uint64) {
+func (u *uploader) start(hp hostProvider, rl revisionLocker) {
+	go func() {
+	outer:
+		for {
+			// wait for work
+			select {
+			case <-u.queueChan:
+			case <-u.stopChan:
+				return
+			}
+
+			for {
+				// check if we are stopped
+				select {
+				case <-u.stopChan:
+					return
+				default:
+				}
+
+				// pop the next job
+				job := u.pop()
+				if job == nil {
+					continue outer
+				}
+
+				// skip if job is done
+				if job.done() {
+					continue
+				}
+
+				// execute it
+				var root types.Hash256
+				start := time.Now()
+				err := rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, u.fcid, u.hk, u.siamuxAddr, lockingPriorityUpload, u.blockHeight(), func(rev types.FileContractRevision) error {
+					var err error
+					root, err = job.execute(hp, rev)
+					return err
+				})
+
+				// send the response
+				if err != nil {
+					job.fail(err)
+				} else {
+					job.succeed(root)
+				}
+
+				// track the error, ignore gracefully closed streams and canceled overdrives
+				isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
+				canceledOverdrive := job.done() && job.overdrive && err != nil
+				if !canceledOverdrive && !isErrClosedStream {
+					u.track(err, time.Since(start))
+				}
+			}
+		}
+	}()
+}
+
+func (u *uploader) blockHeight() uint64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.bh
+}
+
+func (u *uploader) estimate() float64 {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// build map
-	c2m := make(map[types.FileContractID]api.ContractMetadata)
-	for _, c := range contracts {
-		c2m[c.ID] = c
-	}
-
-	// recreate the pool
-	var i int
-	for _, q := range u.contracts {
-		if _, keep := c2m[q.fcid]; !keep {
-			continue
-		}
-		delete(c2m, q.fcid)
-		u.contracts[i] = q
-		i++
-	}
-	for j := i; j < len(u.contracts); j++ {
-		u.contracts[j] = nil
-	}
-	u.contracts = u.contracts[:i]
-
-	// add missing uploaders
-	for _, contract := range c2m {
-		queue := u.newQueue(contract)
-		u.contracts = append(u.contracts, queue)
-		go processQueue(u.hp, u.rl, queue)
-	}
-
-	// update queue blockheight
-	for _, q := range u.contracts {
-		q.updateBlockHeight(bh)
-	}
-}
-
-func processQueue(hp hostProvider, rl revisionLocker, q *uploadQueue) {
-outer:
-	for {
-		// wait for work
-		select {
-		case <-q.queueChan:
-		case <-q.stopChan:
-			return
-		}
-
-		for {
-			// check if we are stopped
-			select {
-			case <-q.stopChan:
-				return
-			default:
-			}
-
-			// pop the next job
-			job := q.pop()
-			if job == nil {
-				continue outer
-			}
-
-			// skip if job is done
-			if job.done() {
-				continue
-			}
-
-			// execute it
-			var root types.Hash256
-			start := time.Now()
-			err := rl.withRevision(job.requestCtx, defaultRevisionFetchTimeout, q.fcid, q.hk, q.siamuxAddr, lockingPriorityUpload, q.blockHeight(), func(rev types.FileContractRevision) error {
-				var err error
-				root, err = job.execute(hp, rev)
-				return err
-			})
-
-			// send the response
-			if err != nil {
-				job.fail(err)
-			} else {
-				job.succeed(root)
-			}
-
-			// track the error, ignore gracefully closed streams and canceled overdrives
-			isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
-			canceledOverdrive := job.done() && job.overdrive && err != nil
-			if !canceledOverdrive && !isErrClosedStream {
-				q.track(err, time.Since(start))
-			}
-		}
-	}
-}
-
-func (q *uploadQueue) blockHeight() uint64 {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.bh
-}
-
-func (q *uploadQueue) estimate() float64 {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	// fetch average speed
-	speed := q.statsSpeed.percentileP90()
+	speed := u.statsSpeed.percentileP90()
 	if speed == 0 {
 		speed = math.MaxFloat64
 	}
 
-	data := (len(q.queue) + 1) * rhpv2.SectorSize
+	data := (len(u.queue) + 1) * rhpv2.SectorSize
 	return float64(data) * 0.000008 / speed
 }
 
-func (q *uploadQueue) push(j *uploadJob) {
+func (u *uploader) push(j *sectorJob) {
 	// decorate job
 	span := trace.SpanFromContext(j.requestCtx)
-	span.SetAttributes(attribute.Stringer("hk", q.hk))
+	span.SetAttributes(attribute.Stringer("hk", u.hk))
 	span.AddEvent("enqueued")
-	j.queue = q
+	j.queue = u
+	j.u.registerUsedQueue(j.sID, u.fcid)
 
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	// enqueue the job
-	q.queue = append(q.queue, j)
+	u.queue = append(u.queue, j)
 
 	// signal there's work
 	select {
-	case q.queueChan <- struct{}{}:
+	case u.queueChan <- struct{}{}:
 	default:
 	}
 }
 
-func (q *uploadQueue) healthy() bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.consecutiveFailures == 0
+func (u *uploader) healthy() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.consecutiveFailures == 0
 }
 
-func (q *uploadQueue) track(err error, d time.Duration) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+func (u *uploader) track(err error, d time.Duration) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	if err != nil {
-		q.consecutiveFailures++
-		q.statsSpeed.track(math.SmallestNonzeroFloat64)
-		fmt.Println("TRACK ERROR", q.hk, err)
+		u.consecutiveFailures++
+		u.statsSpeed.track(math.SmallestNonzeroFloat64)
+		fmt.Println("TRACK ERROR", u.hk, err)
 	} else {
-		q.consecutiveFailures = 0
-		q.statsSpeed.track(mbps(rhpv2.SectorSize, d.Seconds()))
+		u.consecutiveFailures = 0
+		u.statsSpeed.track(mbps(rhpv2.SectorSize, d.Seconds()))
 	}
 }
 
-func (q *uploadQueue) updateBlockHeight(bh uint64) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.bh = bh
+func (u *uploader) updateBlockHeight(bh uint64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.bh = bh
 }
 
-func (q *uploadQueue) pop() *uploadJob {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+func (u *uploader) pop() *sectorJob {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
-	if len(q.queue) > 0 {
-		j := q.queue[0]
-		q.queue = q.queue[1:]
+	if len(u.queue) > 0 {
+		j := u.queue[0]
+		u.queue = u.queue[1:]
 		return j
 	}
 	return nil
 }
 
-func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
+func (j *sectorJob) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
 	// fetch span from context
 	span := trace.SpanFromContext(j.requestCtx)
 	span.AddEvent("execute")
@@ -891,7 +910,7 @@ func (j *uploadJob) execute(hp hostProvider, rev types.FileContractRevision) (ty
 	return root, nil
 }
 
-func (j *uploadJob) succeed(root types.Hash256) {
+func (j *sectorJob) succeed(root types.Hash256) {
 	select {
 	case <-j.requestCtx.Done():
 	case j.responseChan <- sectorResponse{
@@ -901,7 +920,7 @@ func (j *uploadJob) succeed(root types.Hash256) {
 	}
 }
 
-func (j *uploadJob) fail(err error) {
+func (j *sectorJob) fail(err error) {
 	select {
 	case <-j.requestCtx.Done():
 	case j.responseChan <- sectorResponse{
@@ -911,7 +930,7 @@ func (j *uploadJob) fail(err error) {
 	}
 }
 
-func (j *uploadJob) done() bool {
+func (j *sectorJob) done() bool {
 	select {
 	case <-j.requestCtx.Done():
 		return true
@@ -920,12 +939,40 @@ func (j *uploadJob) done() bool {
 	}
 }
 
-func (s *uploadState) launch(job *uploadJob) error {
+func (s *slabUpload) cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sCtx := range s.remaining {
+		sCtx.cancel()
+	}
+}
+
+func (s *slabUpload) finish() ([]object.Sector, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	remaining := len(s.remaining)
+	if remaining > 0 {
+		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.mgr.numUploaders(), s.errs)
+	}
+	return s.sectors, nil
+}
+
+func (s *slabUpload) inflight() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.numInflight
+}
+
+func (s *slabUpload) launch(job *sectorJob) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// convenience variables
+	mgr := s.u.mgr
+
 	// enqueue the job
-	err := s.u.enqueue(job)
+	err := mgr.enqueue(job)
 	if err != nil {
 		span := trace.SpanFromContext(job.requestCtx)
 		span.RecordError(err)
@@ -944,9 +991,89 @@ func (s *uploadState) launch(job *uploadJob) error {
 	return nil
 }
 
-func (s *uploadState) receive(resp sectorResponse) (completed bool) {
+func (s *slabUpload) overdriveCnt() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return int(s.numLaunched) - len(s.sectors)
+}
+
+func (s *slabUpload) overdrivePct() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	numOverdrive := int(s.numLaunched) - len(s.sectors)
+	if numOverdrive <= 0 {
+		return 0
+	}
+
+	return float64(numOverdrive) / float64(len(s.sectors))
+}
+
+func (s *slabUpload) overdrive(responseChan chan sectorResponse, shards [][]byte) *sectorJob {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// overdrive is not kicking in yet
+	if uint64(len(s.remaining)) >= s.u.mgr.maxOverdrive {
+		return nil
+	}
+
+	// overdrive is not due yet
+	if time.Since(s.lastOverdrive) < s.u.mgr.overdriveTimeout {
+		return nil
+	}
+
+	// overdrive is maxed out
+	if s.numInflight-uint64(len(s.remaining)) >= s.u.mgr.maxOverdrive {
+		return nil
+	}
+
+	// overdrive the remaining sector with the least number of overdrives
+	lowestSI := -1
+	s.overdriving[lowestSI] = math.MaxInt
+	for sI := range s.remaining {
+		if s.overdriving[sI] < s.overdriving[lowestSI] {
+			lowestSI = sI
+		}
+	}
+	if lowestSI == -1 {
+		return nil
+	}
+
+	fmt.Printf("DEBUG PJ: %v | %v | launching overdrive for sector %d\n", s.u.id, s.sID, lowestSI)
+	return &sectorJob{
+		u:          s.u,
+		sID:        s.sID,
+		requestCtx: s.remaining[lowestSI].ctx,
+
+		overdrive:    true,
+		responseChan: responseChan,
+
+		sectorIndex: lowestSI,
+		sector:      (*[rhpv2.SectorSize]byte)(shards[lowestSI]),
+	}
+}
+
+func (a *dataPoints) percentileP90() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.p90
+}
+
+func (s *slabUpload) performance() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	uploaded := int64(s.numCompleted) * rhpv2.SectorSize
+	elapsed := time.Since(s.created)
+	return mbps(uploaded, elapsed.Seconds())
+}
+
+func (s *slabUpload) receive(resp sectorResponse) (completed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// convenience variables
+	mgr := s.u.mgr
 
 	// failed jobs can't complete the upload
 	s.numInflight--
@@ -956,16 +1083,16 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 	}
 
 	defer func() {
-		s.u.registerCompletedSector(s.uploadID, s.shardID, resp.job.queue.fcid, completed)
+		s.u.registerCompletedSector(s.sID, resp.job.queue.fcid, completed)
 
 		// trigger next slab
 		if !s.nextReadTriggered {
-			if len(s.remaining) < int(s.u.maxOverdrive) {
+			if len(s.remaining) < int(mgr.maxOverdrive) {
 				s.nextReadTriggered = true
-				s.u.triggerNextSlab(s.uploadID)
+				s.u.triggerNextRead()
 			} else if completed {
 				s.nextReadTriggered = true
-				s.u.triggerNextSlab(s.uploadID)
+				s.u.triggerNextRead()
 			}
 		}
 	}()
@@ -987,111 +1114,9 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 	delete(s.remaining, resp.job.sectorIndex)
 
 	if len(s.remaining)%5 == 0 || len(s.remaining) < 5 {
-		fmt.Printf("DEBUG PJ: %v | %v | remaining sectors %d\n", s.uploadID, s.shardID, len(s.remaining))
+		fmt.Printf("DEBUG PJ: %v | %v | remaining sectors %d\n", s.u.id, s.sID, len(s.remaining))
 	}
 	return len(s.remaining) == 0
-}
-
-func (s *uploadState) inflight() uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.numInflight
-}
-
-func (s *uploadState) performance() float64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	uploaded := int64(s.numCompleted) * rhpv2.SectorSize
-	elapsed := time.Since(s.created)
-	return mbps(uploaded, elapsed.Seconds())
-}
-
-func (s *uploadState) overdriveCnt() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return int(s.numLaunched) - len(s.sectors)
-}
-
-func (s *uploadState) overdrivePct() float64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	numOverdrive := int(s.numLaunched) - len(s.sectors)
-	if numOverdrive <= 0 {
-		return 0
-	}
-
-	return float64(numOverdrive) / float64(len(s.sectors))
-}
-
-func (s *uploadState) overdrive(responseChan chan sectorResponse, shards [][]byte) *uploadJob {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// overdrive is not kicking in yet
-	if uint64(len(s.remaining)) >= s.u.maxOverdrive {
-		return nil
-	}
-
-	// overdrive is not due yet
-	if time.Since(s.lastOverdrive) < s.u.overdriveTimeout {
-		return nil
-	}
-
-	// overdrive is maxed out
-	if s.numInflight-uint64(len(s.remaining)) >= s.u.maxOverdrive {
-		return nil
-	}
-
-	// overdrive the remaining sector with the least number of overdrives
-	lowestSI := -1
-	s.overdriving[lowestSI] = math.MaxInt
-	for sI := range s.remaining {
-		if s.overdriving[sI] < s.overdriving[lowestSI] {
-			lowestSI = sI
-		}
-	}
-	if lowestSI == -1 {
-		return nil
-	}
-
-	fmt.Printf("DEBUG PJ: %v | %v | launching overdrive for sector %d\n", s.uploadID, s.shardID, lowestSI)
-	return &uploadJob{
-		requestCtx: s.remaining[lowestSI].ctx,
-
-		overdrive:    true,
-		responseChan: responseChan,
-
-		sectorIndex: lowestSI,
-		sector:      (*[rhpv2.SectorSize]byte)(shards[lowestSI]),
-		uploadID:    s.uploadID,
-		shardID:     s.shardID,
-	}
-}
-
-func (s *uploadState) cleanup() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, sCtx := range s.remaining {
-		sCtx.cancel()
-	}
-}
-
-func (s *uploadState) finish() ([]object.Sector, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	remaining := len(s.remaining)
-	if remaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.numContracts(), s.errs)
-	}
-	return s.sectors, nil
-}
-
-func (a *dataPoints) percentileP90() float64 {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.p90
 }
 
 func (a *dataPoints) recompute() float64 {
@@ -1124,7 +1149,7 @@ func (uID uploadID) String() string {
 	return fmt.Sprintf("%x", uID[:])
 }
 
-func (sID shardID) String() string {
+func (sID slabID) String() string {
 	return fmt.Sprintf("%x", sID[:])
 }
 
