@@ -889,24 +889,24 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploadManager.Stats()
 
-	var qss []api.QueueStats
-	for hk, qs := range stats.uploadersStats {
-		qss = append(qss, api.QueueStats{
+	var uss []api.UploaderStats
+	for hk, us := range stats.uploadersStats {
+		uss = append(uss, api.UploaderStats{
 			HostKey:        hk,
-			UploadEstimate: qs.estimate,
-			UploadSpeedAvg: qs.speedP90,
+			UploadEstimate: us.estimate,
+			UploadSpeedAvg: us.speedP90,
 		})
 	}
-	sort.SliceStable(qss, func(i, j int) bool {
-		return qss[i].UploadSpeedAvg > qss[j].UploadSpeedAvg
+	sort.SliceStable(uss, func(i, j int) bool {
+		return uss[i].UploadSpeedAvg > uss[j].UploadSpeedAvg
 	})
 
 	jc.Encode(api.UploadStatsResponse{
-		OverdrivePct:   math.Floor(stats.overdrivePct*100*100) / 100,
-		QueuesHealthy:  stats.uploadersHealthy,
-		QueuesSpeedAvg: stats.uploadersSpeedAvg,
-		QueuesTotal:    stats.uploadersTotal,
-		QueuesStats:    qss,
+		OverdrivePct:      math.Floor(stats.overdrivePct*100*100) / 100,
+		UploadersHealthy:  stats.uploadersHealthy,
+		UploadersSpeedAvg: stats.uploadersSpeedAvg,
+		UploadersTotal:    stats.uploadersTotal,
+		UploaderStats:     uss,
 	})
 }
 
