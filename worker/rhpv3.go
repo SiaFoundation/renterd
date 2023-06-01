@@ -595,22 +595,30 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	if err != nil {
 		return types.Hash256{}, err
 	}
-	payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
+	if rev.RevisionNumber == math.MaxUint64 {
+		return types.Hash256{}, errors.New("revision number has reached max")
+	}
+	payment, ok := rhpv3.PayByContract(&rev, expectedCost, r.acc.id, r.renterKey)
+	if !ok {
+		return types.Hash256{}, errors.New("failed to create payment")
+	}
+
+	// TODO: change to account payments once we have the means to check for an
+	// insufficient balance error
+	//payment := rhpv3.PayByEphemeralAccount(r.acc.id, expectedCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
 
 	// return errBalanceInsufficient if balance insufficient
-	defer func() {
-		if isBalanceInsufficient(err) {
-			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, r.HostKey(), err)
-		}
-	}()
+	//	defer func() {
+	//		if isBalanceInsufficient(err) {
+	//			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, r.HostKey(), err)
+	//		}
+	//	}()
 
-	return root, r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
-			root, amount, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
-			return err
-		})
-		return
+	err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
+		root, _, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
+		return err
 	})
+	return root, err
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
@@ -1217,14 +1225,17 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.
 		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}} // TODO: change once rhpv3 support is available
-		if false && !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.SectorSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
+		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.SectorSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
 			return types.Hash256{}, types.ZeroCurrency, errors.New("proof verification failed")
 		}
 	}
 
 	// finalize the program with a new revision.
 	newRevision := rev
-	newValid, newMissed := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
+	newValid, newMissed, err := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
+	if err != nil {
+		return types.Hash256{}, types.ZeroCurrency, err
+	}
 	newRevision.Filesize += rhpv2.SectorSize
 	newRevision.RevisionNumber++
 	newRevision.FileMerkleRoot = executeResp.NewMerkleRoot
