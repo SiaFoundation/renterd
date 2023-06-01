@@ -199,7 +199,7 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 		u.statsSpeed.recompute()
 		stats.uploadersStats[u.hk] = uploaderStats{
 			estimate: u.estimate(),
-			speedP90: u.statsSpeed.percentileP90() * 0.000008, // convert bytes per ms to mbps
+			speedP90: u.statsSpeed.percentileP90() * 0.008, // convert bytes per ms to mbps
 		}
 		if u.healthy() {
 			stats.uploadersHealthy++
