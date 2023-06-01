@@ -963,7 +963,7 @@ func (s *uploadState) receive(resp sectorResponse) (completed bool) {
 
 		// trigger next slab
 		if !s.nextReadTriggered {
-			if s.u.numContracts()-len(s.remaining)+int(s.u.maxOverdrive) > len(s.sectors) {
+			if len(s.remaining) < int(s.u.maxOverdrive) {
 				s.nextReadTriggered = true
 				s.u.triggerNextSlab(s.uploadID)
 			} else if completed {
