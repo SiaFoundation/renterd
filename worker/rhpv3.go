@@ -1209,7 +1209,10 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 
 	// finalize the program with a new revision.
 	newRevision := *rev
-	newValid, newMissed := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
+	newValid, newMissed, err := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
+	if err != nil {
+		return types.Hash256{}, types.ZeroCurrency, err
+	}
 	newRevision.Filesize += rhpv2.SectorSize
 	newRevision.RevisionNumber++
 	newRevision.FileMerkleRoot = executeResp.NewMerkleRoot
