@@ -414,8 +414,8 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 	upload := mgr.uploads[shard.uID]
 
 	// recompute the stats first
-	for _, q := range mgr.uploaders {
-		q.statsSpeed.recompute()
+	for _, uploader := range mgr.uploaders {
+		uploader.statsSpeed.recompute()
 	}
 
 	// sort the uploaders by their estimate
@@ -431,6 +431,7 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 		}
 	}
 	mgr.mu.Unlock()
+
 	// return early if we have no queues left
 	if len(candidates) == 0 {
 		return nil
@@ -485,8 +486,8 @@ func (u *upload) finishSlabUpload(upload *slabUpload) {
 
 	// cleanup contexts
 	upload.mu.Lock()
-	for _, sCtx := range upload.remaining {
-		sCtx.cancel()
+	for _, shard := range upload.remaining {
+		shard.cancel()
 	}
 	upload.mu.Unlock()
 }
@@ -1012,24 +1013,6 @@ func (s *slabUpload) launch(req *shardUpload) error {
 	return nil
 }
 
-func (s *slabUpload) overdriveCnt() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return int(s.numLaunched) - len(s.sectors)
-}
-
-func (s *slabUpload) overdrivePct() float64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	numOverdrive := int(s.numLaunched) - len(s.sectors)
-	if numOverdrive <= 0 {
-		return 0
-	}
-
-	return float64(numOverdrive) / float64(len(s.sectors))
-}
-
 func (s *slabUpload) overdrive(responseChan chan shardResp, shards [][]byte) *shardUpload {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1074,14 +1057,22 @@ func (s *slabUpload) overdrive(responseChan chan shardResp, shards [][]byte) *sh
 	}
 }
 
-func (s *slabUpload) shouldTriggerNextRead() bool {
+func (s *slabUpload) overdriveCnt() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.nextReadTriggered && len(s.remaining) <= int(s.mgr.maxOverdrive) {
-		s.nextReadTriggered = true
-		return true
+	return int(s.numLaunched) - len(s.sectors)
+}
+
+func (s *slabUpload) overdrivePct() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	numOverdrive := int(s.numLaunched) - len(s.sectors)
+	if numOverdrive <= 0 {
+		return 0
 	}
-	return false
+
+	return float64(numOverdrive) / float64(len(s.sectors))
 }
 
 func (s *slabUpload) receive(resp shardResp) (finished bool) {
@@ -1115,6 +1106,16 @@ func (s *slabUpload) receive(resp shardResp) (finished bool) {
 		fmt.Printf("DEBUG PJ: %v | %v | remaining sectors %d\n", s.uID, s.sID, len(s.remaining))
 	}
 	return len(s.remaining) == 0
+}
+
+func (s *slabUpload) shouldTriggerNextRead() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.nextReadTriggered && len(s.remaining) <= int(s.mgr.maxOverdrive) {
+		s.nextReadTriggered = true
+		return true
+	}
+	return false
 }
 
 func (a *dataPoints) percentileP90() float64 {
