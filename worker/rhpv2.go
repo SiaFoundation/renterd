@@ -147,25 +147,38 @@ func hashRevision(rev types.FileContractRevision) types.Hash256 {
 	return h.Sum()
 }
 
-func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral types.Currency) (valid, missed []types.Currency) {
+func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral types.Currency) (valid, missed []types.Currency, err error) {
 	// allocate new slices; don't want to risk accidentally sharing memory
 	rev.ValidProofOutputs = append([]types.SiacoinOutput(nil), rev.ValidProofOutputs...)
 	rev.MissedProofOutputs = append([]types.SiacoinOutput(nil), rev.MissedProofOutputs...)
 
 	// move valid payout from renter to host
-	rev.ValidProofOutputs[0].Value = rev.ValidProofOutputs[0].Value.Sub(cost)
-	rev.ValidProofOutputs[1].Value = rev.ValidProofOutputs[1].Value.Add(cost)
+	var underflow, overflow bool
+	rev.ValidProofOutputs[0].Value, underflow = rev.ValidProofOutputs[0].Value.SubWithUnderflow(cost)
+	rev.ValidProofOutputs[1].Value, overflow = rev.ValidProofOutputs[1].Value.AddWithOverflow(cost)
+	if underflow || overflow {
+		err = errors.New("insufficient funds to pay host")
+		return
+	}
 
 	// move missed payout from renter to void
-	rev.MissedProofOutputs[0].Value = rev.MissedProofOutputs[0].Value.Sub(cost)
-	rev.MissedProofOutputs[2].Value = rev.MissedProofOutputs[2].Value.Add(cost)
+	rev.MissedProofOutputs[0].Value, underflow = rev.MissedProofOutputs[0].Value.SubWithUnderflow(cost)
+	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(cost)
+	if underflow || overflow {
+		err = errors.New("insufficient funds to move missed payout to void")
+		return
+	}
 
 	// move collateral from host to void
-	rev.MissedProofOutputs[1].Value = rev.MissedProofOutputs[1].Value.Sub(collateral)
-	rev.MissedProofOutputs[2].Value = rev.MissedProofOutputs[2].Value.Add(collateral)
+	rev.MissedProofOutputs[1].Value, underflow = rev.MissedProofOutputs[1].Value.SubWithUnderflow(collateral)
+	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(collateral)
+	if underflow || overflow {
+		err = errors.New("insufficient collateral")
+		return
+	}
 
 	return []types.Currency{rev.ValidProofOutputs[0].Value, rev.ValidProofOutputs[1].Value},
-		[]types.Currency{rev.MissedProofOutputs[0].Value, rev.MissedProofOutputs[1].Value, rev.MissedProofOutputs[2].Value}
+		[]types.Currency{rev.MissedProofOutputs[0].Value, rev.MissedProofOutputs[1].Value, rev.MissedProofOutputs[2].Value}, nil
 }
 
 func recordRPC(ctx context.Context, t *rhpv2.Transport, c rhpv2.ContractRevision, id types.Specifier, err *error) func() {
@@ -306,7 +319,10 @@ func (s *Session) Read(ctx context.Context, w io.Writer, sections []rhpv2.RPCRea
 	// construct new revision
 	rev := s.revision.Revision
 	rev.RevisionNumber++
-	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
+	newValid, newMissed, err := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
+	if err != nil {
+		return err
+	}
 	revisionHash := hashRevision(rev)
 	renterSig := s.key.SignHash(revisionHash)
 
@@ -445,7 +461,10 @@ func (s *Session) RenewContract(ctx context.Context, txnSet []types.Transaction,
 
 	// construct the final revision of the old contract
 	finalOldRevision := s.revision.Revision
-	newValid, _ := updateRevisionOutputs(&finalOldRevision, finalPayment, types.ZeroCurrency)
+	newValid, _, err := updateRevisionOutputs(&finalOldRevision, finalPayment, types.ZeroCurrency)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, err
+	}
 	finalOldRevision.MissedProofOutputs = finalOldRevision.ValidProofOutputs
 	finalOldRevision.Filesize = 0
 	finalOldRevision.FileMerkleRoot = types.Hash256{}
@@ -554,7 +573,10 @@ func (s *Session) SectorRoots(ctx context.Context, offset, n uint64, price types
 	// construct new revision
 	rev := s.revision.Revision
 	rev.RevisionNumber++
-	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
+	newValid, newMissed, err := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
+	if err != nil {
+		return nil, err
+	}
 	revisionHash := hashRevision(rev)
 
 	req := &rhpv2.RPCSectorRootsRequest{
@@ -643,7 +665,10 @@ func (s *Session) Write(ctx context.Context, actions []rhpv2.RPCWriteAction, pri
 	}
 
 	// calculate new revision outputs
-	newValid, newMissed := updateRevisionOutputs(&rev, price, collateral)
+	newValid, newMissed, err := updateRevisionOutputs(&rev, price, collateral)
+	if err != nil {
+		return err
+	}
 
 	// compute appended roots in parallel with I/O
 	precompChan := make(chan struct{})
