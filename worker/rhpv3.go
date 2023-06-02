@@ -17,6 +17,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/crypto"
@@ -1228,6 +1229,21 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	if err = s.WriteResponse(&finalizeReq); err != nil {
 		return
 	} else if err = s.ReadResponse(&finalizeResp, 64); err != nil {
+		return
+	}
+
+	// read one more time to receive a potential error in case finalising the
+	// contract fails after receiving the RPCFinalizeProgramResponse. This also
+	// guarantees that the program is finalised before we return.
+	// TODO: remove once most hosts use hostd.
+	errFinalise := s.ReadResponse(&finalizeResp, 64)
+	if errFinalise != nil &&
+		!errors.Is(errFinalise, io.EOF) &&
+		!errors.Is(errFinalise, mux.ErrClosedConn) &&
+		!errors.Is(errFinalise, mux.ErrClosedStream) &&
+		!errors.Is(errFinalise, mux.ErrPeerClosedStream) &&
+		!errors.Is(errFinalise, mux.ErrPeerClosedConn) {
+		err = errFinalise
 		return
 	}
 	return
