@@ -111,7 +111,7 @@ type (
 	}
 
 	shardUpload struct {
-		u   *upload
+		uID uploadID
 		sID slabID
 		ctx context.Context
 
@@ -224,6 +224,11 @@ func (mgr *uploadManager) enqueue(s *shardUpload) error {
 		return errNoFreeUploader
 	}
 	uploader.push(s)
+
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	upload := mgr.uploads[s.uID]
+	upload.registerUsedQueue(s.sID, uploader.fcid)
 	return nil
 }
 
@@ -390,12 +395,15 @@ func (mgr *uploadManager) upload(ctx context.Context, r io.Reader, rs api.Redund
 	return o, nil
 }
 
-func (mgr *uploadManager) uploader(j *shardUpload) *uploader {
+func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 	mgr.mu.Lock()
 	if len(mgr.uploaders) == 0 {
 		mgr.mu.Unlock()
 		return nil
 	}
+
+	// grab the upload
+	upload := mgr.uploads[shard.uID]
 
 	// recompute the stats first
 	for _, q := range mgr.uploaders {
@@ -409,9 +417,9 @@ func (mgr *uploadManager) uploader(j *shardUpload) *uploader {
 
 	// filter queues
 	var candidates []*uploader
-	for _, u := range mgr.uploaders {
-		if j.u.canUseUploader(u, j.sID) {
-			candidates = append(candidates, u)
+	for _, uploader := range mgr.uploaders {
+		if upload.canUseUploader(uploader, shard.sID) {
+			candidates = append(candidates, uploader)
 		}
 	}
 	mgr.mu.Unlock()
@@ -423,14 +431,14 @@ func (mgr *uploadManager) uploader(j *shardUpload) *uploader {
 loop:
 	for {
 		// grab ongoing slab uploads
-		j.u.mu.Lock()
-		ongoing := j.u.ongoing
-		j.u.mu.Unlock()
+		upload.mu.Lock()
+		ongoing := upload.ongoing
+		upload.mu.Unlock()
 
 		// grab the slabs parents
 		var parents []slabID
 		for _, sID := range ongoing {
-			if sID == j.sID {
+			if sID == shard.sID {
 				break
 			}
 			parents = append(parents, sID)
@@ -442,13 +450,13 @@ loop:
 			return candidates[0]
 		}
 
-		fmt.Printf("DEBUG PJ: %v | %v | no queue yet for sector %d, overdrive %v, candidates %d waiting on %d shards to complete (%v)\n", j.u.id, j.sID, j.sectorIndex, j.overdrive, len(candidates), len(parents), parents)
+		fmt.Printf("DEBUG PJ: %v | %v | no queue yet for sector %d, overdrive %v, candidates %d waiting on %d shards to complete (%v)\n", shard.uID, shard.sID, shard.sectorIndex, shard.overdrive, len(candidates), len(parents), parents)
 
 		// otherwise we wait, allowing the parents to complete
 		select {
-		case <-j.u.doneSectorTrigger:
+		case <-upload.doneSectorTrigger:
 			continue loop
-		case <-j.ctx.Done():
+		case <-shard.ctx.Done():
 			break loop
 		}
 	}
@@ -491,7 +499,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUploa
 
 		// create the job
 		jobs[sI] = &shardUpload{
-			u:            u,
+			uID:          u.id,
 			sID:          sID,
 			ctx:          uCtx,
 			responseChan: responseChan,
@@ -830,7 +838,6 @@ func (u *uploader) push(req *shardUpload) {
 	span.SetAttributes(attribute.Stringer("hk", u.hk))
 	span.AddEvent("enqueued")
 	req.uploader = u
-	req.u.registerUsedQueue(req.sID, u.fcid)
 
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -1048,7 +1055,7 @@ func (s *slabUpload) overdrive(responseChan chan shardResp, shards [][]byte) *sh
 	}
 
 	return &shardUpload{
-		u:   s.u,
+		uID: s.u.id,
 		sID: s.sID,
 		ctx: s.remaining[lowestSI].ctx,
 
