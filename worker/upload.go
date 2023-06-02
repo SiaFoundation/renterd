@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	errNoFreeQueue    = errors.New("no free queue")
+	errNoFreeUploader = errors.New("no free uploader")
 	errNotEnoughHosts = errors.New("not enough hosts to support requested redundancy")
 )
 
@@ -218,12 +218,12 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) enqueue(j *shardUpload) error {
-	queue := mgr.uploader(j)
-	if queue == nil {
-		return errNoFreeQueue
+func (mgr *uploadManager) enqueue(s *shardUpload) error {
+	uploader := mgr.uploader(s)
+	if uploader == nil {
+		return errNoFreeUploader
 	}
-	queue.push(j)
+	uploader.push(s)
 	return nil
 }
 
@@ -409,9 +409,9 @@ func (mgr *uploadManager) uploader(j *shardUpload) *uploader {
 
 	// filter queues
 	var candidates []*uploader
-	for _, q := range mgr.uploaders {
-		if j.u.canUseQueue(q, j.sID) {
-			candidates = append(candidates, q)
+	for _, u := range mgr.uploaders {
+		if j.u.canUseUploader(u, j.sID) {
+			candidates = append(candidates, u)
 		}
 	}
 	mgr.mu.Unlock()
@@ -504,16 +504,16 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUploa
 	return slab, jobs, responseChan
 }
 
-func (u *upload) canUseQueue(q *uploader, sID slabID) bool {
+func (u *upload) canUseUploader(ul *uploader, sID slabID) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	_, excluded := u.excluded[q.fcid]
+	_, excluded := u.excluded[ul.fcid]
 	if excluded {
 		return false
 	}
 
-	_, used := u.used[sID][q.fcid]
+	_, used := u.used[sID][ul.fcid]
 	return !used
 }
 
@@ -671,16 +671,16 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) (
 	mgr := u.mgr
 
 	// prepare the upload
-	slab, reqs, sectorChan := u.newSlabUpload(ctx, shards)
+	slab, uploads, shardRespChan := u.newSlabUpload(ctx, shards)
 	span.SetAttributes(attribute.Stringer("id", slab.sID))
 	defer slab.cleanup()
 
 	fmt.Printf("DEBUG PJ: %v | %v | slab %d started \n", slab.u.id, slab.sID, index)
 	defer fmt.Printf("DEBUG PJ: %v | %v | slab %d finished \n", slab.u.id, slab.sID, index)
 
-	// launch all reqs
-	for _, req := range reqs {
-		if err := slab.launch(req); err != nil {
+	// launch all shard uploads
+	for _, upload := range uploads {
+		if err := slab.launch(upload); err != nil {
 			return nil, err
 		}
 	}
@@ -703,7 +703,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) (
 			case <-ctx.Done():
 				return
 			case <-timeout.C:
-				if req := slab.overdrive(sectorChan, shards); req != nil {
+				if req := slab.overdrive(shardRespChan, shards); req != nil {
 					_ = slab.launch(req) // ignore error
 				}
 				resetTimeout()
@@ -719,7 +719,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) (
 			return nil, errors.New("upload stopped")
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case resp = <-sectorChan:
+		case resp = <-shardRespChan:
 			if resp.err == nil {
 				resetTimeout()
 			}
@@ -959,7 +959,7 @@ func (s *slabUpload) finish() ([]object.Sector, error) {
 
 	remaining := len(s.remaining)
 	if remaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d contracts=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.mgr.numUploaders(), s.errs)
+		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, completed=%d launched=%d uploaders=%d errors=%w", remaining, s.numInflight, s.numCompleted, s.numLaunched, s.u.mgr.numUploaders(), s.errs)
 	}
 	return s.sectors, nil
 }
