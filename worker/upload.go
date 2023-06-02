@@ -150,9 +150,10 @@ type (
 	}
 
 	dataPoints struct {
+		stats.Float64Data
+
 		mu  sync.Mutex
-		pts [20]float64
-		cnt uint64
+		cnt int
 		p90 float64
 	}
 )
@@ -167,7 +168,7 @@ func (w *worker) initUploadManager() {
 
 func newDataPoints() *dataPoints {
 	return &dataPoints{
-		pts: [20]float64{},
+		Float64Data: make([]float64, 20),
 	}
 }
 
@@ -196,7 +197,7 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 	// prepare stats
 	stats := uploadManagerStats{
 		overdrivePct:      mgr.statsOverdrive.recompute(),
-		uploadersSpeedAvg: mgr.statsSpeed.recompute(),
+		uploadersSpeedAvg: mgr.statsSpeed.recompute() * 0.008, // convert bytes per ms to mbps,
 		uploadersTotal:    uint64(len(mgr.uploaders)),
 		uploadersStats:    make(map[types.PublicKey]uploaderStats),
 	}
@@ -1126,17 +1127,11 @@ func (a *dataPoints) recompute() float64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// calculate sums
-	var data stats.Float64Data
-	for _, p := range a.pts {
-		if p > 0 {
-			data = append(data, p)
-		}
-	}
-	p90, err := data.Percentile(90)
+	p90, err := a.Percentile(90)
 	if err != nil {
-		return 0
+		p90 = 0
 	}
+
 	a.p90 = p90
 	return p90
 }
@@ -1144,7 +1139,7 @@ func (a *dataPoints) recompute() float64 {
 func (a *dataPoints) track(p float64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.pts[a.cnt%uint64(len(a.pts))] = p
+	a.Float64Data[a.cnt%len(a.Float64Data)] = p
 	a.cnt++
 }
 
