@@ -411,7 +411,10 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 	}
 
 	// grab the upload
-	upload := mgr.uploads[shard.uID]
+	upload, exists := mgr.uploads[shard.uID]
+	if !exists {
+		return nil
+	}
 
 	// recompute the stats first
 	for _, uploader := range mgr.uploaders {
