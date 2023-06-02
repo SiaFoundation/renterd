@@ -123,7 +123,11 @@ type (
 
 		sector      *[rhpv2.SectorSize]byte
 		sectorIndex int
-		uploader    *uploader
+
+		// these fields are set by the uploader when the upload is scheduled
+		fcid       types.FileContractID
+		hk         types.PublicKey
+		siamuxAddr string
 	}
 
 	shardResp struct {
@@ -226,7 +230,7 @@ func (mgr *uploadManager) enqueue(s *shardUpload) error {
 	if uploader == nil {
 		return errNoFreeUploader
 	}
-	uploader.push(s)
+	uploader.schedule(s)
 
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -843,18 +847,20 @@ func (u *uploader) estimate() float64 {
 	return float64(outstanding / bytesPerMS)
 }
 
-func (u *uploader) push(req *shardUpload) {
+func (u *uploader) schedule(upload *shardUpload) {
 	// decorate req
-	span := trace.SpanFromContext(req.ctx)
+	span := trace.SpanFromContext(upload.ctx)
 	span.SetAttributes(attribute.Stringer("hk", u.hk))
 	span.AddEvent("enqueued")
-	req.uploader = u
+	upload.fcid = u.fcid
+	upload.hk = u.hk
+	upload.siamuxAddr = u.siamuxAddr
 
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	// enqueue the job
-	u.queue = append(u.queue, req)
+	u.queue = append(u.queue, upload)
 
 	// signal there's work
 	select {
@@ -900,20 +906,20 @@ func (u *uploader) pop() *shardUpload {
 	return nil
 }
 
-func (req *shardUpload) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
+func (upload *shardUpload) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
 	// fetch span from context
-	span := trace.SpanFromContext(req.ctx)
+	span := trace.SpanFromContext(upload.ctx)
 	span.AddEvent("execute")
 
 	// create a host
-	h, err := hp.newHostV3(req.ctx, req.uploader.fcid, req.uploader.hk, req.uploader.siamuxAddr)
+	h, err := hp.newHostV3(upload.ctx, upload.fcid, upload.hk, upload.siamuxAddr)
 	if err != nil {
 		return types.Hash256{}, err
 	}
 
 	// upload the sector
 	start := time.Now()
-	root, err := h.UploadSector(req.ctx, req.sector, rev)
+	root, err := h.UploadSector(upload.ctx, upload.sector, rev)
 	if err != nil {
 		return types.Hash256{}, err
 	}
@@ -926,29 +932,29 @@ func (req *shardUpload) execute(hp hostProvider, rev types.FileContractRevision)
 	return root, nil
 }
 
-func (req *shardUpload) succeed(root types.Hash256) {
+func (upload *shardUpload) succeed(root types.Hash256) {
 	select {
-	case <-req.ctx.Done():
-	case req.responseChan <- shardResp{
-		req:  req,
+	case <-upload.ctx.Done():
+	case upload.responseChan <- shardResp{
+		req:  upload,
 		root: root,
 	}:
 	}
 }
 
-func (req *shardUpload) fail(err error) {
+func (upload *shardUpload) fail(err error) {
 	select {
-	case <-req.ctx.Done():
-	case req.responseChan <- shardResp{
-		req: req,
+	case <-upload.ctx.Done():
+	case upload.responseChan <- shardResp{
+		req: upload,
 		err: err,
 	}:
 	}
 }
 
-func (req *shardUpload) done() bool {
+func (upload *shardUpload) done() bool {
 	select {
-	case <-req.ctx.Done():
+	case <-upload.ctx.Done():
 		return true
 	default:
 		return false
@@ -1084,7 +1090,7 @@ func (s *slabUpload) receive(resp shardResp) (finished bool) {
 	// failed reqs can't complete the upload
 	s.numInflight--
 	if resp.err != nil {
-		s.errs = append(s.errs, &HostError{resp.req.uploader.hk, resp.err})
+		s.errs = append(s.errs, &HostError{resp.req.hk, resp.err})
 		return false
 	}
 
@@ -1096,7 +1102,7 @@ func (s *slabUpload) receive(resp shardResp) (finished bool) {
 
 	// store the sector and call cancel on the sector ctx
 	s.sectors[resp.req.sectorIndex] = object.Sector{
-		Host: resp.req.uploader.hk,
+		Host: resp.req.hk,
 		Root: resp.root,
 	}
 	s.remaining[resp.req.sectorIndex].cancel()
