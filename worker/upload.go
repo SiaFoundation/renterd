@@ -56,7 +56,7 @@ type (
 		bh                  uint64
 		consecutiveFailures uint64
 		queueChan           chan struct{}
-		queue               []*uploadReq
+		queue               []*shardUpload
 
 		statsSpeed *dataPoints
 		stopChan   chan struct{}
@@ -88,7 +88,7 @@ type (
 		nextReadTriggered bool
 		lastOverdrive     time.Time
 		overdriving       map[int]int
-		remaining         map[int]uploadCtx
+		remaining         map[int]shardCtx
 		sectors           []object.Sector
 		errs              HostErrorSet
 	}
@@ -105,26 +105,26 @@ type (
 		err   error
 	}
 
-	uploadCtx struct {
+	shardCtx struct {
 		ctx    context.Context
 		cancel context.CancelFunc
 	}
 
-	uploadReq struct {
+	shardUpload struct {
 		u   *upload
 		sID slabID
 		ctx context.Context
 
 		overdrive    bool
-		responseChan chan uploadResp
+		responseChan chan shardResp
 
 		sector      *[rhpv2.SectorSize]byte
 		sectorIndex int
 		uploader    *uploader
 	}
 
-	uploadResp struct {
-		req  *uploadReq
+	shardResp struct {
+		req  *shardUpload
 		root types.Hash256
 		err  error
 	}
@@ -218,7 +218,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) enqueue(j *uploadReq) error {
+func (mgr *uploadManager) enqueue(j *shardUpload) error {
 	queue := mgr.uploader(j)
 	if queue == nil {
 		return errNoFreeQueue
@@ -288,7 +288,7 @@ func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
 		hk:         c.HostKey,
 		siamuxAddr: c.SiamuxAddr,
 
-		queue:     make([]*uploadReq, 0),
+		queue:     make([]*shardUpload, 0),
 		queueChan: make(chan struct{}, 1),
 
 		statsSpeed: newDataPoints(),
@@ -390,7 +390,7 @@ func (mgr *uploadManager) upload(ctx context.Context, r io.Reader, rs api.Redund
 	return o, nil
 }
 
-func (mgr *uploadManager) uploader(j *uploadReq) *uploader {
+func (mgr *uploadManager) uploader(j *shardUpload) *uploader {
 	mgr.mu.Lock()
 	if len(mgr.uploaders) == 0 {
 		mgr.mu.Unlock()
@@ -456,7 +456,7 @@ loop:
 	return nil
 }
 
-func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUpload, []*uploadReq, chan uploadResp) {
+func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUpload, []*shardUpload, chan shardResp) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -472,25 +472,25 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUploa
 		created: time.Now(),
 
 		overdriving: make(map[int]int, len(shards)),
-		remaining:   make(map[int]uploadCtx, len(shards)),
+		remaining:   make(map[int]shardCtx, len(shards)),
 		sectors:     make([]object.Sector, len(shards)),
 	}
 
 	// prepare requests
-	responseChan := make(chan uploadResp)
-	reqs := make([]*uploadReq, len(shards))
+	responseChan := make(chan shardResp)
+	jobs := make([]*shardUpload, len(shards))
 	for sI, shard := range shards {
 		// create the sector upload's cancel func
 		uCtx, cancel := context.WithCancel(ctx)
-		slab.remaining[sI] = uploadCtx{ctx: uCtx, cancel: cancel}
+		slab.remaining[sI] = shardCtx{ctx: uCtx, cancel: cancel}
 
-		// create the req's span
-		uCtx, span := tracing.Tracer.Start(uCtx, "upload.request")
+		// create the job's span
+		uCtx, span := tracing.Tracer.Start(uCtx, "uploadShard")
 		span.SetAttributes(attribute.Bool("overdrive", false))
 		span.SetAttributes(attribute.Int("sector", sI))
 
-		// create the req
-		reqs[sI] = &uploadReq{
+		// create the job
+		jobs[sI] = &shardUpload{
 			u:            u,
 			sID:          sID,
 			ctx:          uCtx,
@@ -501,7 +501,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUploa
 		}
 	}
 
-	return slab, reqs, responseChan
+	return slab, jobs, responseChan
 }
 
 func (u *upload) canUseQueue(q *uploader, sID slabID) bool {
@@ -713,7 +713,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) (
 
 	// collect responses
 	for slab.inflight() > 0 {
-		var resp uploadResp
+		var resp shardResp
 		select {
 		case <-mgr.stopChan:
 			return nil, errors.New("upload stopped")
@@ -824,7 +824,7 @@ func (u *uploader) estimate() float64 {
 	return float64(outstanding / bytesPerMS)
 }
 
-func (u *uploader) push(req *uploadReq) {
+func (u *uploader) push(req *shardUpload) {
 	// decorate req
 	span := trace.SpanFromContext(req.ctx)
 	span.SetAttributes(attribute.Stringer("hk", u.hk))
@@ -870,7 +870,7 @@ func (u *uploader) updateBlockHeight(bh uint64) {
 	u.bh = bh
 }
 
-func (u *uploader) pop() *uploadReq {
+func (u *uploader) pop() *shardUpload {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -882,7 +882,7 @@ func (u *uploader) pop() *uploadReq {
 	return nil
 }
 
-func (req *uploadReq) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
+func (req *shardUpload) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
 	// fetch span from context
 	span := trace.SpanFromContext(req.ctx)
 	span.AddEvent("execute")
@@ -908,27 +908,27 @@ func (req *uploadReq) execute(hp hostProvider, rev types.FileContractRevision) (
 	return root, nil
 }
 
-func (req *uploadReq) succeed(root types.Hash256) {
+func (req *shardUpload) succeed(root types.Hash256) {
 	select {
 	case <-req.ctx.Done():
-	case req.responseChan <- uploadResp{
+	case req.responseChan <- shardResp{
 		req:  req,
 		root: root,
 	}:
 	}
 }
 
-func (req *uploadReq) fail(err error) {
+func (req *shardUpload) fail(err error) {
 	select {
 	case <-req.ctx.Done():
-	case req.responseChan <- uploadResp{
+	case req.responseChan <- shardResp{
 		req: req,
 		err: err,
 	}:
 	}
 }
 
-func (req *uploadReq) done() bool {
+func (req *shardUpload) done() bool {
 	select {
 	case <-req.ctx.Done():
 		return true
@@ -970,7 +970,7 @@ func (s *slabUpload) inflight() uint64 {
 	return s.numInflight
 }
 
-func (s *slabUpload) launch(req *uploadReq) error {
+func (s *slabUpload) launch(req *shardUpload) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1016,7 +1016,7 @@ func (s *slabUpload) overdrivePct() float64 {
 	return float64(numOverdrive) / float64(len(s.sectors))
 }
 
-func (s *slabUpload) overdrive(responseChan chan uploadResp, shards [][]byte) *uploadReq {
+func (s *slabUpload) overdrive(responseChan chan shardResp, shards [][]byte) *shardUpload {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1047,7 +1047,7 @@ func (s *slabUpload) overdrive(responseChan chan uploadResp, shards [][]byte) *u
 		return nil
 	}
 
-	return &uploadReq{
+	return &shardUpload{
 		u:   s.u,
 		sID: s.sID,
 		ctx: s.remaining[lowestSI].ctx,
@@ -1060,7 +1060,7 @@ func (s *slabUpload) overdrive(responseChan chan uploadResp, shards [][]byte) *u
 	}
 }
 
-func (s *slabUpload) receive(resp uploadResp) (completed bool) {
+func (s *slabUpload) receive(resp shardResp) (completed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
