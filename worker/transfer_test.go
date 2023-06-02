@@ -165,7 +165,6 @@ func TestMultipleObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer uploader.finishUpload(upload)
 
 	// upload
 	var slabs []object.Slab

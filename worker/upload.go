@@ -44,7 +44,6 @@ type (
 
 		mu        sync.Mutex
 		uploaders []*uploader
-		uploads   map[uploadID]*upload
 	}
 
 	uploader struct {
@@ -79,7 +78,7 @@ type (
 	slabUpload struct {
 		mgr *uploadManager
 
-		uID     uploadID
+		upload  *upload
 		sID     slabID
 		started time.Time
 
@@ -114,9 +113,9 @@ type (
 	}
 
 	shardUpload struct {
-		uID uploadID
-		sID slabID
-		ctx context.Context
+		upload *upload
+		sID    slabID
+		ctx    context.Context
 
 		overdrive    bool
 		responseChan chan shardResp
@@ -186,7 +185,6 @@ func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, s
 		stopChan: make(chan struct{}),
 
 		uploaders: make([]*uploader, 0),
-		uploads:   make(map[uploadID]*upload, 0),
 	}
 }
 
@@ -235,15 +233,8 @@ func (mgr *uploadManager) enqueue(s *shardUpload) error {
 
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	upload := mgr.uploads[s.uID]
-	upload.registerUsedQueue(s.sID, uploader.fcid)
+	s.upload.registerUsedQueue(s.sID, uploader.fcid)
 	return nil
-}
-
-func (mgr *uploadManager) finishUpload(u *upload) {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-	delete(mgr.uploads, u.uID)
 }
 
 func (mgr *uploadManager) migrateShards(ctx context.Context, shards [][]byte, excluded map[types.FileContractID]struct{}) ([]object.Sector, error) {
@@ -252,7 +243,6 @@ func (mgr *uploadManager) migrateShards(ctx context.Context, shards [][]byte, ex
 	if err != nil {
 		return nil, err
 	}
-	defer mgr.finishUpload(upload)
 
 	// upload the shards
 	return upload.uploadShards(ctx, shards, 0)
@@ -279,7 +269,7 @@ func (mgr *uploadManager) newUpload(totalShards int, excluded map[types.FileCont
 	frand.Read(id[:])
 
 	// create upload
-	mgr.uploads[id] = &upload{
+	upload := &upload{
 		mgr: mgr,
 		uID: id,
 
@@ -290,9 +280,8 @@ func (mgr *uploadManager) newUpload(totalShards int, excluded map[types.FileCont
 		ongoing: make([]slabID, 0),
 		used:    make(map[slabID]map[types.FileContractID]struct{}),
 	}
-
-	mgr.uploads[id].triggerNextRead()
-	return mgr.uploads[id], nil
+	upload.triggerNextRead()
+	return upload, nil
 }
 
 func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
@@ -376,7 +365,6 @@ func (mgr *uploadManager) upload(ctx context.Context, r io.Reader, rs api.Redund
 	if err != nil {
 		return object.Object{}, err
 	}
-	defer mgr.finishUpload(u)
 
 	// launch the upload
 	slabsChan := u.start(ctx, cr, rs)
@@ -410,10 +398,7 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 	}
 
 	// grab the upload
-	upload, exists := mgr.uploads[shard.uID]
-	if !exists {
-		return nil
-	}
+	upload := shard.upload
 
 	// recompute the stats first
 	for _, uploader := range mgr.uploaders {
@@ -505,7 +490,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUploa
 	slab := &slabUpload{
 		mgr: u.mgr,
 
-		uID:     u.uID,
+		upload:  u,
 		sID:     sID,
 		started: time.Now(),
 
@@ -529,7 +514,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUploa
 
 		// create the shard upload
 		uploads[sI] = &shardUpload{
-			uID:          u.uID,
+			upload:       u,
 			sID:          sID,
 			ctx:          sCtx,
 			responseChan: responseChan,
@@ -1037,9 +1022,9 @@ func (s *slabUpload) overdrive(responseChan chan shardResp, shards [][]byte) *sh
 	}
 
 	return &shardUpload{
-		uID: s.uID,
-		sID: s.sID,
-		ctx: s.remaining[lowestSI].ctx,
+		upload: s.upload,
+		sID:    s.sID,
+		ctx:    s.remaining[lowestSI].ctx,
 
 		overdrive:    true,
 		responseChan: responseChan,
