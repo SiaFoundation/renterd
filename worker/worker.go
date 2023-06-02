@@ -315,7 +315,7 @@ type worker struct {
 
 	contractLockingDuration time.Duration
 	downloadSectorTimeout   time.Duration
-	uploadSectorTimeout     time.Duration
+	uploadOverdriveTimeout  time.Duration
 	downloadMaxOverdrive    uint64
 	uploadMaxOverdrive      uint64
 
@@ -862,7 +862,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 	w.uploadManager.update(ulContracts, up.CurrentHeight)
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadSectorTimeout, w.logger)
+	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadOverdriveTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1182,7 +1182,7 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadSectorTimeout time.Duration, maxDownloadOverdrive, maxUploadOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
@@ -1201,8 +1201,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	if downloadSectorTimeout == 0 {
 		return nil, errors.New("download sector timeout must be positive")
 	}
-	if uploadSectorTimeout == 0 {
-		return nil, errors.New("upload sector timeout must be positive")
+	if uploadOverdriveTimeout == 0 {
+		return nil, errors.New("upload overdrive timeout must be positive")
 	}
 
 	w := &worker{
@@ -1214,9 +1214,9 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 		masterKey:               masterKey,
 		busFlushInterval:        busFlushInterval,
 		downloadSectorTimeout:   downloadSectorTimeout,
-		uploadSectorTimeout:     uploadSectorTimeout,
-		downloadMaxOverdrive:    maxDownloadOverdrive,
-		uploadMaxOverdrive:      maxUploadOverdrive,
+		uploadOverdriveTimeout:  uploadOverdriveTimeout,
+		downloadMaxOverdrive:    downloadMaxOverdrive,
+		uploadMaxOverdrive:      uploadMaxOverdrive,
 		logger:                  l.Sugar().Named("worker").Named(id),
 		transportPoolV3:         newTransportPoolV3(),
 	}

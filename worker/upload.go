@@ -67,9 +67,9 @@ type (
 
 		uID uploadID
 
-		excluded          map[types.FileContractID]struct{}
-		nextReadTrigger   chan struct{}
-		doneSectorTrigger chan struct{}
+		excluded         map[types.FileContractID]struct{}
+		nextReadTrigger  chan struct{}
+		doneShardTrigger chan struct{}
 
 		mu      sync.Mutex
 		ongoing []slabID
@@ -162,7 +162,7 @@ func (w *worker) initUploadManager() {
 		panic("uploader already initialized") // developer error
 	}
 
-	w.uploadManager = newUploadManager(w, w, w.uploadMaxOverdrive, w.uploadSectorTimeout)
+	w.uploadManager = newUploadManager(w, w, w.uploadMaxOverdrive, w.uploadOverdriveTimeout)
 }
 
 func newDataPoints() *dataPoints {
@@ -282,9 +282,9 @@ func (mgr *uploadManager) newUpload(totalShards int, excluded map[types.FileCont
 		mgr: mgr,
 		uID: id,
 
-		excluded:          excluded,
-		nextReadTrigger:   make(chan struct{}, 1),
-		doneSectorTrigger: make(chan struct{}, 1),
+		excluded:         excluded,
+		nextReadTrigger:  make(chan struct{}, 1),
+		doneShardTrigger: make(chan struct{}, 1),
 
 		ongoing: make([]slabID, 0),
 		used:    make(map[slabID]map[types.FileContractID]struct{}),
@@ -461,7 +461,7 @@ loop:
 
 		// otherwise we wait, allowing the parents to complete
 		select {
-		case <-upload.doneSectorTrigger:
+		case <-upload.doneShardTrigger:
 			continue loop
 		case <-shard.ctx.Done():
 			break loop
@@ -666,9 +666,9 @@ func (u *upload) read(ctx context.Context, r io.Reader, rs api.RedundancySetting
 	return data
 }
 
-func (u *upload) triggerDoneSector() {
+func (u *upload) triggerDoneShard() {
 	select {
-	case u.doneSectorTrigger <- struct{}{}:
+	case u.doneShardTrigger <- struct{}{}:
 	default:
 	}
 }
@@ -745,7 +745,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) (
 
 		// handle the response
 		if resp.err == nil {
-			u.triggerDoneSector()
+			u.triggerDoneShard()
 			if slab.shouldTriggerNextRead() {
 				u.triggerNextRead()
 			}
