@@ -894,6 +894,7 @@ func (u *uploader) pop() *shardUpload {
 
 	if len(u.queue) > 0 {
 		j := u.queue[0]
+		u.queue[0] = nil
 		u.queue = u.queue[1:]
 		return j
 	}
