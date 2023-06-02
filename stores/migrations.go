@@ -57,7 +57,7 @@ func performMigrations(db *gorm.DB) error {
 		&dbAccount{},
 	}
 	if err := db.AutoMigrate(tables...); err != nil {
-		return nil
+		return err
 	}
 
 	// Perform post-auto migrations.

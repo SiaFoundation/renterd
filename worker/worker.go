@@ -233,6 +233,8 @@ type Bus interface {
 	AccountStore
 	ContractLocker
 
+	SyncerPeers(ctx context.Context) (resp []string, err error)
+
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
@@ -485,8 +487,17 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		defer cancel()
 	}
 
+	// only scan hosts if we are online
+	peers, err := w.bus.SyncerPeers(jc.Request.Context())
+	if jc.Check("failed to fetch peers from bus", err) != nil {
+		return
+	}
+	if len(peers) == 0 {
+		jc.Error(errors.New("not connected to the internet"), http.StatusServiceUnavailable)
+		return
+	}
+
 	// defer scan result
-	var err error
 	var settings rhpv2.HostSettings
 	var priceTable rhpv3.HostPriceTable
 	defer func() {

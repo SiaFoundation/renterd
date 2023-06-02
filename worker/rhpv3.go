@@ -1249,7 +1249,6 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		err = errFinalise
 		return
 	}
-
 	return
 }
 

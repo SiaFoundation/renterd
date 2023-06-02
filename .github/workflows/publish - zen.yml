@@ -60,7 +60,7 @@ jobs:
           go-version: 'stable'
       - name: Install dependencies
         run: |
-          sudo apt install -y gcc-aarch64-linux-gnu
+          sudo apt update && sudo apt install -y gcc-aarch64-linux-gnu
       - name: Build amd64
         env:
           CGO_ENABLED: 1
