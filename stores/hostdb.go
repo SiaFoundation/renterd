@@ -707,17 +707,25 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 	// transaction since we don't need it to be perfectly
 	// consistent.
 	var hosts []dbHost
-	if err := ss.db.Where("public_key IN ?", hks).
-		Find(&hosts).Error; err != nil {
-		return err
+	for i := 0; i < len(hks); i += maxSQLVars {
+		end := i + maxSQLVars
+		if end > len(hks) {
+			end = len(hks)
+		}
+		var batchHosts []dbHost
+		if err := ss.db.Where("public_key IN (?)", hks[i:end]).
+			Find(&batchHosts).Error; err != nil {
+			return err
+		}
+		hosts = append(hosts, batchHosts...)
 	}
 	hostMap := make(map[publicKey]dbHost)
 	for _, h := range hosts {
 		hostMap[h.PublicKey] = h
 	}
 
-	// Write the interactions and update to the hosts atmomically within a
-	// single transaction.
+	// Write the interactions and update to the hosts atomically within a single
+	// transaction.
 	return ss.retryTransaction(func(tx *gorm.DB) error {
 		// Apply all the interactions to the hosts.
 		dbInteractions := make([]dbInteraction, 0, len(interactions))

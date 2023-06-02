@@ -249,6 +249,25 @@ func TestRecordInteractions(t *testing.T) {
 			t.Fatal("wrong host")
 		}
 	}
+
+	// Create a huge batch of interactions and check that it doesn't cause a
+	// "too-many-variables" - error.
+	var hks []types.PublicKey
+	for i := 0; i < 2*maxSQLVars; i++ {
+		hk = types.GeneratePrivateKey().PublicKey()
+		err = hdb.addTestHost(hk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hks = append(hks, hk)
+	}
+	var largeInteractionsBatch []hostdb.Interaction
+	for _, hostKey := range hks {
+		largeInteractionsBatch = append(largeInteractionsBatch, createInteractions(hostKey, 1, 0)...)
+	}
+	if err := hdb.RecordInteractions(context.Background(), largeInteractionsBatch); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhpv2.HostSettings) error {
