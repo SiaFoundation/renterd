@@ -455,9 +455,9 @@ loop:
 			parents = append(parents, sID)
 		}
 
-		// if this slab does not have more than 2 parents, we return the first
+		// if this slab does not have more than 1 parent, we return the first
 		// (and thus best) candidate
-		if len(parents) < 3 {
+		if len(parents) < 2 {
 			return candidates[0]
 		}
 
