@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -97,7 +98,7 @@ type (
 
 	slabResponse struct {
 		slab  object.SlabSlice
-		index int
+		index uint64
 		err   error
 	}
 
@@ -185,7 +186,7 @@ func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contract
 	}
 
 	// upload the shards
-	return upload.uploadShards(ctx, shards, 0)
+	return upload.uploadShards(ctx, shards)
 }
 
 func (mgr *uploadManager) Stats() uploadManagerStats {
@@ -246,12 +247,16 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	}
 
 	// create the response channel
+	var wg sync.WaitGroup
 	respChan := make(chan slabResponse)
-	defer close(respChan)
+	defer func() {
+		wg.Wait()
+		close(respChan)
+	}()
 
 	// collect the responses
 	var responses []slabResponse
-	slabIndex := 0
+	var slabIndex uint64
 	numSlabs := -1
 
 	// prepare slab size
@@ -268,14 +273,19 @@ loop:
 			data := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(cr, size), data)
 			if err == io.EOF {
-				numSlabs = slabIndex
+				numSlabs = int(slabIndex)
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, err
 			}
 
-			go u.uploadSlab(ctx, rs, data, length, slabIndex, respChan)
-			slabIndex++
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				u.uploadSlab(ctx, rs, data, length, slabIndex, respChan)
+				atomic.AddUint64(&slabIndex, 1)
+			}()
+
 		case res := <-respChan:
 			if res.err != nil {
 				return object.Object{}, res.err
@@ -556,7 +566,7 @@ func (u *upload) canUseUploader(ul *uploader, sID slabID) bool {
 	return !used
 }
 
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabResponse) {
+func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length int, index uint64, respChan chan slabResponse) {
 	// cancel any shard uploads once the slab is done.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -581,7 +591,7 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	resp.slab.Slab.Encrypt(shards)
 
 	// upload the shards
-	resp.slab.Slab.Shards, resp.err = u.uploadShards(ctx, shards, index)
+	resp.slab.Slab.Shards, resp.err = u.uploadShards(ctx, shards)
 
 	// send the response
 	select {
@@ -601,7 +611,7 @@ func (u *upload) registerUsedUploader(sID slabID, fcid types.FileContractID) {
 	u.used[sID][fcid] = struct{}{}
 }
 
-func (u *upload) uploadShards(ctx context.Context, shards [][]byte, index int) ([]object.Sector, error) {
+func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Sector, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "uploadShards")
 	defer span.End()
 
@@ -758,13 +768,13 @@ func (u *uploader) estimate() float64 {
 	defer u.mu.Unlock()
 
 	// fetch average speed
-	bytesPerMS := int(u.statsSpeed.percentileP90())
+	bytesPerMS := u.statsSpeed.percentileP90()
 	if bytesPerMS == 0 {
-		return math.SmallestNonzeroFloat64
+		bytesPerMS = math.MaxFloat64
 	}
 
 	outstanding := (len(u.queue) + 1) * rhpv2.SectorSize
-	return float64(outstanding / bytesPerMS)
+	return float64(outstanding) / bytesPerMS
 }
 
 func (u *uploader) schedule(upload *shardUpload) {
