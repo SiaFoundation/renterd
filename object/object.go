@@ -66,6 +66,13 @@ type Object struct {
 	Slabs []SlabSlice   `json:"slabs"`
 }
 
+// NewObject returns a new Object with a random key.
+func NewObject() Object {
+	return Object{
+		Key: GenerateEncryptionKey(),
+	}
+}
+
 // Size returns the total size of the object.
 func (o Object) Size() int64 {
 	var n int64
@@ -73,6 +80,12 @@ func (o Object) Size() int64 {
 		n += int64(ss.Length)
 	}
 	return n
+}
+
+// Encrypt wraps the given reader with a reader that encrypts the stream using
+// the object's key.
+func (o Object) Encrypt(r io.Reader) cipher.StreamReader {
+	return o.Key.Encrypt(r)
 }
 
 // SplitSlabs splits a set of slabs into slices comprising objects with the

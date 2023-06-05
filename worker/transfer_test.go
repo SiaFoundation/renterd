@@ -34,7 +34,7 @@ func (h *mockHost) HostKey() types.PublicKey {
 	return h.publicKey
 }
 
-func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error) {
+func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error) {
 	root := rhpv2.SectorRoot(sector)
 	h.sectors[root] = append([]byte(nil), sector[:]...)
 	return root, nil
@@ -58,19 +58,19 @@ func (h *mockHost) DeleteSectors(_ context.Context, roots []types.Hash256) error
 	return nil
 }
 
-func (h *mockHost) FetchPriceTable(ctx context.Context, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	panic("not implemented")
 }
 func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (_ types.FileContractRevision, _ error) {
 	panic("not implemented")
 }
-func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, revision *types.FileContractRevision) error {
+func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
 	panic("not implemented")
 }
 func (h *mockHost) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	panic("not implemented")
 }
-func (h *mockHost) SyncAccount(ctx context.Context, revision *types.FileContractRevision) error {
+func (h *mockHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	panic("not implemented")
 }
 
@@ -89,7 +89,7 @@ type mockRevisionLocker struct {
 	calls int
 }
 
-func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(revision types.FileContractRevision) error) error {
+func (l *mockRevisionLocker) withRevision(ctx context.Context, _ time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
 	l.mu.Lock()
 	l.calls++
 	l.mu.Unlock()
@@ -128,6 +128,7 @@ func (sp *mockHostProvider) newHostV3(ctx context.Context, contractID types.File
 
 func TestMultipleObjects(t *testing.T) {
 	mockLocker := &mockRevisionLocker{}
+
 	// generate object data
 	data := [][]byte{
 		frand.Bytes(111),
@@ -140,32 +141,56 @@ func TestMultipleObjects(t *testing.T) {
 	for i := range keys {
 		keys[i] = object.GenerateEncryptionKey()
 	}
-	rs := make([]io.Reader, len(data))
-	for i := range rs {
-		rs[i] = keys[i].Encrypt(bytes.NewReader(data[i]))
+	rr := make([]io.Reader, len(data))
+	for i := range rr {
+		rr[i] = keys[i].Encrypt(bytes.NewReader(data[i]))
 	}
-	r := io.MultiReader(rs...)
+	r := io.MultiReader(rr...)
 
-	// Prepare hosts.
+	// prepare hosts
 	var hosts []hostV3
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, newMockHost())
 	}
-	sp := newMockHostProvider(hosts)
+	hp := newMockHostProvider(hosts)
 	var contracts []api.ContractMetadata
 	for _, h := range hosts {
 		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.HostKey()})
 	}
 
+	// prepare upload manager
+	mgr := newUploadManager(hp, mockLocker, 0, 0)
+	upload, err := mgr.newUpload(10, contracts, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// upload
 	var slabs []object.Slab
 	for {
-		s, _, _, err := uploadSlab(context.Background(), sp, r, 3, 10, contracts, mockLocker, 0, 0, zap.NewNop().Sugar())
+		// read slab data
+		rs := api.RedundancySettings{MinShards: 3, TotalShards: 10}
+		buf := make([]byte, int(rs.MinShards)*rhpv2.SectorSize)
+		shards := make([][]byte, rs.TotalShards)
+		_, err := io.ReadFull(r, buf)
 		if err == io.EOF {
 			break
-		} else if err != nil {
+		} else if err != nil && err != io.ErrUnexpectedEOF {
 			t.Fatal(err)
 		}
+
+		s := object.Slab{
+			Key:       object.GenerateEncryptionKey(),
+			MinShards: uint8(rs.MinShards),
+		}
+		s.Encode(buf, shards)
+		s.Encrypt(shards)
+
+		s.Shards, err = upload.uploadShards(context.Background(), shards)
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		slabs = append(slabs, s)
 	}
 
@@ -190,7 +215,7 @@ func TestMultipleObjects(t *testing.T) {
 		dst := o.Key.Decrypt(&buf, int64(offset))
 		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
 		for _, s := range ss {
-			if _, err := downloadSlab(context.Background(), sp, dst, s, contracts, 0, 0, zap.NewNop().Sugar()); err != nil {
+			if _, err := downloadSlab(context.Background(), hp, dst, s, contracts, 0, 0, zap.NewNop().Sugar()); err != nil {
 				t.Error(err)
 				return
 			}

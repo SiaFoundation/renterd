@@ -764,7 +764,7 @@ func testWorkerCfg() node.WorkerConfig {
 		SessionReconnectTimeout: 10 * time.Second,
 		SessionTTL:              2 * time.Minute,
 		DownloadSectorTimeout:   500 * time.Millisecond,
-		UploadSectorTimeout:     500 * time.Millisecond,
+		UploadOverdriveTimeout:  500 * time.Millisecond,
 		UploadMaxOverdrive:      5,
 	}
 }

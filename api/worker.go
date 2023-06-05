@@ -133,3 +133,17 @@ type RHPRegistryUpdateRequest struct {
 	RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
 	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
 }
+
+// UploadStatsResponse is the response type for the /stats/uploads endpoint.
+type UploadStatsResponse struct {
+	AvgUploadSpeedMBPS float64         `json:"avgUploadSpeedMBPS"`
+	HealthyUploaders   uint64          `json:"healthyUploaders"`
+	NumUploaders       uint64          `json:"numUploaders"`
+	OverdrivePct       float64         `json:"overdrivePct"`
+	UploadersStats     []UploaderStats `json:"uploadersStats"`
+}
+
+type UploaderStats struct {
+	HostKey            types.PublicKey `json:"hostKey"`
+	UploadSpeedP90MBPS float64         `json:"uploadSpeedP90MBPS"`
+}

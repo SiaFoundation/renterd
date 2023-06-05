@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
 const (
@@ -29,7 +28,6 @@ const (
 var (
 	errGougingHost           = errors.New("host is gouging")
 	errDownloadSectorTimeout = errors.New("download sector timed out")
-	errUploadSectorTimeout   = errors.New("upload sector timed out")
 )
 
 type hostV2 interface {
@@ -40,249 +38,19 @@ type hostV2 interface {
 
 type hostV3 interface {
 	hostV2
-	FetchPriceTable(ctx context.Context, revision *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
-	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
-	FundAccount(ctx context.Context, balance types.Currency, revision *types.FileContractRevision) error
+
 	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
+	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
+	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
+	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
-	SyncAccount(ctx context.Context, revision *types.FileContractRevision) error
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev *types.FileContractRevision) (types.Hash256, error)
+	SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
 }
 
 type hostProvider interface {
 	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(hostV2) error) (err error)
 	newHostV3(context.Context, types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
-}
-
-func parallelUploadSlab(ctx context.Context, hp hostProvider, shards [][]byte, contracts []api.ContractMetadata, locker revisionLocker, uploadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([]object.Sector, []int, error) {
-	// ensure the context is cancelled when the slab is uploaded
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	if len(contracts) < len(shards) {
-		return nil, nil, fmt.Errorf("not enough hosts to upload slab, %v<%v", len(contracts), len(shards))
-	}
-
-	type req struct {
-		finishedCtx context.Context
-		finishedFn  context.CancelFunc
-		shardIndex  int
-	}
-	type resp struct {
-		hostIndex int
-		req       req
-		root      types.Hash256
-		err       error
-	}
-	respChan := make(chan resp, 2*len(contracts)) // every host can send up to 2 responses
-	worker := func(r req, hostIndex int, contract api.ContractMetadata) {
-		doneChan := make(chan struct{})
-
-		// Trace the upload.
-		ctx, span := tracing.Tracer.Start(r.finishedCtx, "upload-request")
-		span.SetAttributes(attribute.Stringer("host", contract.HostKey))
-		span.SetAttributes(attribute.Stringer("contract", contract.ID))
-
-		go func(r req) {
-			defer close(doneChan)
-			var root types.Hash256
-			var err error
-			err = locker.withRevision(ctx, defaultRevisionFetchTimeout, contract.ID, contract.HostKey, contract.SiamuxAddr, lockingPriorityUpload, func(rev types.FileContractRevision) error {
-				h, err := hp.newHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
-				if err != nil {
-					return err
-				}
-				root, err = h.UploadSector(ctx, (*[rhpv2.SectorSize]byte)(shards[r.shardIndex]), &rev)
-				return err
-			})
-			var aborted bool
-			select {
-			case <-ctx.Done():
-				aborted = true
-			default:
-			}
-			if err != nil && !isBalanceInsufficient(err) && !aborted && !errors.Is(err, os.ErrDeadlineExceeded) {
-				logger.Errorf("%x: withHostV3 failed when uploading sector, err: %v", contract.HostKey[:4], err)
-			}
-			respChan <- resp{
-				err:       err,
-				hostIndex: hostIndex,
-				req:       r,
-				root:      root,
-			}
-		}(r)
-
-		if uploadSectorTimeout > 0 {
-			timer := time.NewTimer(uploadSectorTimeout)
-			select {
-			case <-timer.C:
-				span.SetAttributes(attribute.Bool("slow", true))
-				respChan <- resp{
-					hostIndex: hostIndex,
-					req:       r,
-					err:       errUploadSectorTimeout}
-			case <-doneChan:
-				if !timer.Stop() {
-					<-timer.C
-				}
-			}
-		}
-
-		<-doneChan
-		span.End()
-	}
-
-	// helper to track used hosts.
-	hostUsed := make([]bool, len(contracts))
-	nextHost := func() int {
-		for i := range hostUsed {
-			if !hostUsed[i] {
-				hostUsed[i] = true
-				return i
-			}
-		}
-		return -1
-	}
-
-	// helper to determine whether a request is finished.
-	isReqFinished := func(r req) bool {
-		select {
-		case <-r.finishedCtx.Done():
-			return true
-		default:
-			return false
-		}
-	}
-
-	// helper function for handling requests. Will return true if either a new
-	// worker was launched for the request or if the request was already
-	// finished.
-	var inflight uint64
-	handleRequest := func(r req) bool {
-		if isReqFinished(r) {
-			return true
-		}
-		hostIndex := nextHost()
-		if hostIndex == -1 {
-			return false
-		}
-		go worker(r, hostIndex, contracts[hostIndex])
-		inflight++
-		return true
-	}
-
-	// spawn workers and send initial requests
-	for i := range shards {
-		finishedCtx, finishedFn := context.WithCancel(ctx)
-		if !handleRequest(req{
-			finishedCtx: finishedCtx,
-			finishedFn:  finishedFn,
-			shardIndex:  i,
-		}) {
-			panic("failed to launch worker for initial shard")
-		}
-	}
-
-	// collect responses
-	var errs HostErrorSet
-	sectors := make([]object.Sector, len(shards))
-	rem := uint64(len(shards))
-	var toLaunch []req
-	var slowResponses []resp
-	for inflight > 0 {
-		resp := <-respChan
-		if !errors.Is(resp.err, errUploadSectorTimeout) {
-			inflight--
-		}
-
-		if errors.Is(resp.err, errUploadSectorTimeout) {
-			// for each slow host we eventually launch an overdrive worker
-			toLaunch = append(toLaunch, resp.req)
-			slowResponses = append(slowResponses, resp)
-		} else if resp.err != nil {
-			// host failed.
-			errs = append(errs, &HostError{contracts[resp.hostIndex].HostKey, resp.err})
-			if isReqFinished(resp.req) {
-				// if the request was finished, we can reuse the host since it
-				// probably failed due to the other host being faster.
-				hostUsed[resp.hostIndex] = false
-			} else if !handleRequest(resp.req) {
-				// if the request wasn't finished we need to replace it. If
-				// replacing it failed since no worker is available, we add the
-				// request to the front of the overdrive slice.
-				toLaunch = append([]req{resp.req}, toLaunch...)
-			}
-		} else if sectors[resp.req.shardIndex].Root == (types.Hash256{}) {
-			// host succeeded.
-			sectors[resp.req.shardIndex] = object.Sector{
-				Host: contracts[resp.hostIndex].HostKey,
-				Root: resp.root,
-			}
-			rem--
-			resp.req.finishedFn()
-			if rem == 0 {
-				break // done
-			}
-		} else {
-			// host succeeded but with a duplicate piece. Reuse the host.
-			hostUsed[resp.hostIndex] = false
-		}
-
-		// Launch overdrive workers as needed.
-		for inflight-rem < maxOverdrive && len(toLaunch) > 0 {
-			if !handleRequest(toLaunch[0]) {
-				break
-			}
-			toLaunch = toLaunch[1:]
-		}
-	}
-
-	// if rem is still greater 0, we failed to upload the slab.
-	if rem > 0 {
-		if errs == nil {
-			return nil, nil, fmt.Errorf("rem > 0 (%v) but errs is nil - this should not happen", rem)
-		}
-		return nil, nil, fmt.Errorf("failed to upload slab: rem=%v, inflight=%v, contracts=%v, errs=%w", rem, inflight, len(contracts), errs)
-	}
-
-	// collect slow host indices
-	var slowHosts []int
-	usedHosts := make(map[int]struct{})
-	for _, resp := range slowResponses {
-		_, found := usedHosts[resp.hostIndex]
-		if found {
-			continue
-		}
-		usedHosts[resp.hostIndex] = struct{}{}
-		slowHosts = append(slowHosts, resp.hostIndex)
-	}
-	return sectors, slowHosts, nil
-}
-
-func uploadSlab(ctx context.Context, hp hostProvider, r io.Reader, m, n uint8, contracts []api.ContractMetadata, locker revisionLocker, uploadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) (object.Slab, int, []int, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
-	defer span.End()
-
-	buf := make([]byte, int(m)*rhpv2.SectorSize)
-	shards := make([][]byte, n)
-	length, err := io.ReadFull(r, buf)
-	if err != nil && err != io.ErrUnexpectedEOF {
-		return object.Slab{}, 0, nil, err
-	}
-	s := object.Slab{
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: m,
-	}
-	s.Encode(buf, shards)
-	s.Encrypt(shards)
-
-	sectors, slowHosts, err := parallelUploadSlab(ctx, hp, shards, contracts, locker, uploadSectorTimeout, maxOverdrive, logger)
-	if err != nil {
-		return object.Slab{}, 0, nil, err
-	}
-
-	s.Shards = sectors
-	return s, length, slowHosts, nil
 }
 
 func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
@@ -583,35 +351,39 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []hostV2) error
 	return nil
 }
 
-func migrateSlab(ctx context.Context, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
-	hostsMap := make(map[types.PublicKey]struct{})
-	usedMap := make(map[types.PublicKey]struct{})
-
 	// make a map of good hosts
+	goodHosts := make(map[types.PublicKey]struct{})
 	for _, c := range ulContracts {
-		hostsMap[c.HostKey] = struct{}{}
+		goodHosts[c.HostKey] = struct{}{}
+	}
+
+	// make a map of host to contract id
+	h2c := make(map[types.PublicKey]types.FileContractID)
+	for _, c := range append(dlContracts, ulContracts...) {
+		h2c[c.HostKey] = c.ID
 	}
 
 	// collect indices of shards that need to be migrated
+	usedMap := make(map[types.FileContractID]struct{})
 	var shardIndices []int
 	for i, shard := range s.Shards {
 		// bad host
-		if _, exists := hostsMap[shard.Host]; !exists {
+		if _, exists := goodHosts[shard.Host]; !exists {
 			shardIndices = append(shardIndices, i)
 			continue
 		}
 
 		// reused host
-		_, exists := usedMap[shard.Host]
+		_, exists := usedMap[h2c[shard.Host]]
 		if exists {
 			shardIndices = append(shardIndices, i)
 			continue
 		}
-
-		usedMap[shard.Host] = struct{}{}
+		usedMap[h2c[shard.Host]] = struct{}{}
 	}
 
 	// if all shards are on good hosts, we're done
@@ -646,20 +418,16 @@ func migrateSlab(ctx context.Context, hp hostProvider, s *object.Slab, dlContrac
 	}
 	shards = shards[:len(shardIndices)]
 
-	// filter out the hosts we used already
-	filtered := ulContracts[:0]
-	for _, c := range ulContracts {
-		if _, used := usedMap[c.HostKey]; !used {
-			filtered = append(filtered, c)
+	// filter upload contracts to the ones we haven't used yet
+	var allowed []api.ContractMetadata
+	for c := range ulContracts {
+		if _, exists := usedMap[ulContracts[c].ID]; !exists {
+			allowed = append(allowed, ulContracts[c])
 		}
 	}
 
-	// randomize order of hosts to make sure we don't migrate to the same hosts all the time
-	frand.Shuffle(len(filtered), func(i, j int) { filtered[i], filtered[j] = filtered[j], filtered[i] })
-
-	// reupload those shards. migrations are not time-sensitive, so we can use a
-	// max overdrive of 0.
-	uploaded, _, err := parallelUploadSlab(ctx, hp, shards, filtered, locker, uploadSectorTimeout, 0, logger)
+	// migrate the shards
+	uploaded, err := u.Migrate(ctx, shards, allowed, bh)
 	if err != nil {
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
