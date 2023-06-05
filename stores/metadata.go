@@ -579,7 +579,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// fetch contracts
 		var dbContracts []dbContract
-		err := s.db.
+		err := tx.
 			Model(&dbContract{}).
 			Where("fcid IN (?)", fcids).
 			Find(&dbContracts).
@@ -590,7 +590,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 
 		// create contract set
 		var contractset dbContractSet
-		err = s.db.
+		err = tx.
 			Where(dbContractSet{Name: name}).
 			FirstOrCreate(&contractset).
 			Error
@@ -599,7 +599,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		}
 
 		// update contracts
-		return s.db.Model(&contractset).Association("Contracts").Replace(&dbContracts)
+		return tx.Model(&contractset).Association("Contracts").Replace(&dbContracts)
 	})
 }
 
