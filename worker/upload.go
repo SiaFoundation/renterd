@@ -8,7 +8,6 @@ import (
 	"math"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -98,7 +97,7 @@ type (
 
 	slabResponse struct {
 		slab  object.SlabSlice
-		index uint64
+		index int
 		err   error
 	}
 
@@ -247,16 +246,11 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	}
 
 	// create the response channel
-	var wg sync.WaitGroup
 	respChan := make(chan slabResponse)
-	defer func() {
-		wg.Wait()
-		close(respChan)
-	}()
 
 	// collect the responses
 	var responses []slabResponse
-	var slabIndex uint64
+	var slabIndex int
 	numSlabs := -1
 
 	// prepare slab size
@@ -273,25 +267,20 @@ loop:
 			data := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(cr, size), data)
 			if err == io.EOF {
-				numSlabs = int(slabIndex)
+				numSlabs = slabIndex
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, err
 			}
-
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				u.uploadSlab(ctx, rs, data, length, slabIndex, respChan)
-				atomic.AddUint64(&slabIndex, 1)
-			}()
-
+			go u.uploadSlab(ctx, rs, data, length, slabIndex, respChan)
+			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
 				return object.Object{}, res.err
 			}
 			responses = append(responses, res)
 			if len(responses) == numSlabs {
+				close(respChan)
 				break loop
 			}
 		}
@@ -566,7 +555,7 @@ func (u *upload) canUseUploader(ul *uploader, sID slabID) bool {
 	return !used
 }
 
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length int, index uint64, respChan chan slabResponse) {
+func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabResponse) {
 	// cancel any shard uploads once the slab is done.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
