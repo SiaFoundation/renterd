@@ -419,7 +419,7 @@ func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *obje
 	shards = shards[:len(shardIndices)]
 
 	// migrate the shards
-	uploaded, err := u.migrateShards(ctx, shards, usedMap)
+	uploaded, err := u.Migrate(ctx, shards, usedMap)
 	if err != nil {
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}

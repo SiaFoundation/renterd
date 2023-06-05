@@ -871,7 +871,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	w.uploadManager.update(ulContracts, up.CurrentHeight)
+	w.uploadManager.RefreshUploaders(ulContracts, up.CurrentHeight)
 
 	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadOverdriveTimeout, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
@@ -901,23 +901,22 @@ func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploadManager.Stats()
 
 	var uss []api.UploaderStats
-	for hk, us := range stats.uploadersStats {
+	for hk, us := range stats.uploadSpeedsP90MBPS {
 		uss = append(uss, api.UploaderStats{
-			HostKey:        hk,
-			UploadEstimate: us.estimate,
-			UploadSpeedAvg: us.speedP90,
+			HostKey:            hk,
+			UploadSpeedP90MBPS: us,
 		})
 	}
 	sort.SliceStable(uss, func(i, j int) bool {
-		return uss[i].UploadSpeedAvg > uss[j].UploadSpeedAvg
+		return uss[i].UploadSpeedP90MBPS > uss[j].UploadSpeedP90MBPS
 	})
 
 	jc.Encode(api.UploadStatsResponse{
-		OverdrivePct:      math.Floor(stats.overdrivePct*100*100) / 100,
-		UploadersHealthy:  stats.uploadersHealthy,
-		UploadersSpeedAvg: stats.uploadersSpeedAvg,
-		UploadersTotal:    stats.uploadersTotal,
-		UploadersStats:    uss,
+		AvgUploadSpeedMBPS: stats.avgUploadSpeedMBPS,
+		HealthyUploaders:   stats.healthyUploaders,
+		OverdrivePct:       math.Floor(stats.overdrivePct*100*100) / 100,
+		NumUploaders:       stats.numUploaders,
+		UploadersStats:     uss,
 	})
 }
 
@@ -1115,10 +1114,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	w.uploadManager.update(contracts, up.CurrentHeight)
+	w.uploadManager.RefreshUploaders(contracts, up.CurrentHeight)
 
 	// upload the object
-	object, err := w.uploadManager.upload(ctx, jc.Request.Body, rs)
+	object, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}

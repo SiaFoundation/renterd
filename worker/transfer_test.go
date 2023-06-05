@@ -158,10 +158,10 @@ func TestMultipleObjects(t *testing.T) {
 		contracts = append(contracts, api.ContractMetadata{ID: h.Contract(), HostKey: h.HostKey()})
 	}
 
-	// prepare uploader
-	uploader := newUploadManager(hp, mockLocker, 0, 0)
-	uploader.update(contracts, 0)
-	upload, err := uploader.newUpload(10, nil)
+	// prepare upload manager
+	mgr := newUploadManager(hp, mockLocker, 0, 0)
+	mgr.RefreshUploaders(contracts, 0)
+	upload, err := mgr.newUpload(10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
