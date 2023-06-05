@@ -866,14 +866,13 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	// update uploader contracts
+	// fetch upload contracts
 	ulContracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	w.uploadManager.RefreshUploaders(ulContracts, up.CurrentHeight)
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadOverdriveTimeout, w.logger)
+	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1114,10 +1113,9 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
-	w.uploadManager.RefreshUploaders(contracts, up.CurrentHeight)
 
 	// upload the object
-	object, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs)
+	object, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}

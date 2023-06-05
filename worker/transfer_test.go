@@ -160,8 +160,7 @@ func TestMultipleObjects(t *testing.T) {
 
 	// prepare upload manager
 	mgr := newUploadManager(hp, mockLocker, 0, 0)
-	mgr.RefreshUploaders(contracts, 0)
-	upload, err := mgr.newUpload(10, nil)
+	upload, err := mgr.newUpload(10, contracts, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

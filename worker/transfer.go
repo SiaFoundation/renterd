@@ -351,7 +351,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []hostV2) error
 	return nil
 }
 
-func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
@@ -418,8 +418,16 @@ func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *obje
 	}
 	shards = shards[:len(shardIndices)]
 
+	// filter upload contracts to the ones we haven't used yet
+	var allowed []api.ContractMetadata
+	for c := range ulContracts {
+		if _, exists := usedMap[ulContracts[c].ID]; !exists {
+			allowed = append(allowed, ulContracts[c])
+		}
+	}
+
 	// migrate the shards
-	uploaded, err := u.Migrate(ctx, shards, usedMap)
+	uploaded, err := u.Migrate(ctx, shards, allowed, bh)
 	if err != nil {
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}

@@ -24,7 +24,7 @@ import (
 
 var (
 	errNoFreeUploader     = errors.New("no free uploader")
-	errNotEnoughUploaders = errors.New("not enough uploaders to support requested redundancy")
+	errNotEnoughContracts = errors.New("not enough contracts to support requested redundancy")
 )
 
 type (
@@ -50,6 +50,7 @@ type (
 		fcid       types.FileContractID
 		hk         types.PublicKey
 		siamuxAddr string
+		endHeight  uint64
 
 		mu                  sync.Mutex
 		bh                  uint64
@@ -66,7 +67,7 @@ type (
 
 		uID uploadID
 
-		excluded         map[types.FileContractID]struct{}
+		allowed          map[types.FileContractID]struct{}
 		nextReadTrigger  chan struct{}
 		doneShardTrigger chan struct{}
 
@@ -176,53 +177,15 @@ func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, s
 	}
 }
 
-func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, excluded map[types.FileContractID]struct{}) ([]object.Sector, error) {
+func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, bh uint64) ([]object.Sector, error) {
 	// initiate the upload
-	upload, err := mgr.newUpload(len(shards), excluded)
+	upload, err := mgr.newUpload(len(shards), contracts, bh)
 	if err != nil {
 		return nil, err
 	}
 
 	// upload the shards
 	return upload.uploadShards(ctx, shards, 0)
-}
-
-func (mgr *uploadManager) RefreshUploaders(contracts []api.ContractMetadata, bh uint64) {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	// build map
-	c2m := make(map[types.FileContractID]api.ContractMetadata)
-	for _, c := range contracts {
-		c2m[c.ID] = c
-	}
-
-	// recreate the pool
-	var i int
-	for _, q := range mgr.uploaders {
-		if _, keep := c2m[q.fcid]; !keep {
-			continue
-		}
-		delete(c2m, q.fcid)
-		mgr.uploaders[i] = q
-		i++
-	}
-	for j := i; j < len(mgr.uploaders); j++ {
-		mgr.uploaders[j] = nil
-	}
-	mgr.uploaders = mgr.uploaders[:i]
-
-	// add missing uploaders
-	for _, contract := range c2m {
-		uploader := mgr.newUploader(contract)
-		mgr.uploaders = append(mgr.uploaders, uploader)
-		go uploader.start(mgr.hp, mgr.rl)
-	}
-
-	// update blockheight
-	for _, u := range mgr.uploaders {
-		u.updateBlockHeight(bh)
-	}
 }
 
 func (mgr *uploadManager) Stats() uploadManagerStats {
@@ -258,7 +221,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings) (_ object.Object, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64) (_ object.Object, err error) {
 	// add cancel
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -277,7 +240,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	cr := o.Encrypt(r)
 
 	// create the upload
-	u, err := mgr.newUpload(rs.TotalShards, nil)
+	u, err := mgr.newUpload(rs.TotalShards, contracts, bh)
 	if err != nil {
 		return object.Object{}, err
 	}
@@ -349,32 +312,34 @@ func (mgr *uploadManager) enqueue(s *shardUpload) error {
 	return nil
 }
 
-func (mgr *uploadManager) newUpload(totalShards int, excluded map[types.FileContractID]struct{}) (*upload, error) {
+func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMetadata, bh uint64) (*upload, error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
-	// check if we have enough uploaders
-	var usable int
-	for _, u := range mgr.uploaders {
-		if _, exclude := excluded[u.fcid]; exclude {
-			continue
-		}
-		usable++
-	}
-	if usable < totalShards {
-		return nil, errNotEnoughUploaders
+	// refresh the uploaders
+	mgr.refreshUploaders(contracts, bh)
+
+	// check if we have enough contracts
+	if len(contracts) < totalShards {
+		return nil, errNotEnoughContracts
 	}
 
 	// create id
 	var id uploadID
 	frand.Read(id[:])
 
+	// create allowed map
+	allowed := make(map[types.FileContractID]struct{})
+	for _, c := range contracts {
+		allowed[c.ID] = struct{}{}
+	}
+
 	// create upload
 	upload := &upload{
 		mgr: mgr,
 		uID: id,
 
-		excluded:         excluded,
+		allowed:          allowed,
 		nextReadTrigger:  make(chan struct{}, 1),
 		doneShardTrigger: make(chan struct{}, 1),
 
@@ -390,6 +355,7 @@ func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
 		fcid:       c.ID,
 		hk:         c.HostKey,
 		siamuxAddr: c.SiamuxAddr,
+		endHeight:  c.WindowEnd,
 
 		queue:           make([]*shardUpload, 0),
 		signalNewUpload: make(chan struct{}, 1),
@@ -403,6 +369,41 @@ func (mgr *uploadManager) numUploaders() int {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	return len(mgr.uploaders)
+}
+
+func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
+	// build map
+	c2m := make(map[types.FileContractID]api.ContractMetadata)
+	for _, c := range contracts {
+		c2m[c.ID] = c
+	}
+
+	// purge the expired uploaders
+	var i int
+	for _, uploader := range mgr.uploaders {
+		if bh > uploader.endHeight {
+			continue
+		}
+		delete(c2m, uploader.fcid)
+		mgr.uploaders[i] = uploader
+		i++
+	}
+	for j := i; j < len(mgr.uploaders); j++ {
+		mgr.uploaders[j] = nil
+	}
+	mgr.uploaders = mgr.uploaders[:i]
+
+	// add missing uploaders
+	for _, contract := range c2m {
+		uploader := mgr.newUploader(contract)
+		mgr.uploaders = append(mgr.uploaders, uploader)
+		go uploader.start(mgr.hp, mgr.rl)
+	}
+
+	// update blockheight
+	for _, u := range mgr.uploaders {
+		u.updateBlockHeight(bh)
+	}
 }
 
 func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
@@ -546,8 +547,8 @@ func (u *upload) canUseUploader(ul *uploader, sID slabID) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	_, excluded := u.excluded[ul.fcid]
-	if excluded {
+	_, allowed := u.allowed[ul.fcid]
+	if !allowed {
 		return false
 	}
 
