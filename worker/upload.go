@@ -222,7 +222,7 @@ func (mgr *uploadManager) Stop() {
 }
 
 func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64) (_ object.Object, err error) {
-	// add cancel
+	// cancel any background jobs when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -557,6 +557,10 @@ func (u *upload) canUseUploader(ul *uploader, sID slabID) bool {
 }
 
 func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabResponse) {
+	// cancel any shard uploads once the slab is done.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
 	defer span.End()
