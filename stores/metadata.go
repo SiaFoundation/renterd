@@ -576,29 +576,31 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		fcids[i] = fileContractID(fcid)
 	}
 
-	// fetch contracts
-	var dbContracts []dbContract
-	err := s.db.
-		Model(&dbContract{}).
-		Where("fcid IN (?)", fcids).
-		Find(&dbContracts).
-		Error
-	if err != nil {
-		return err
-	}
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		// fetch contracts
+		var dbContracts []dbContract
+		err := s.db.
+			Model(&dbContract{}).
+			Where("fcid IN (?)", fcids).
+			Find(&dbContracts).
+			Error
+		if err != nil {
+			return err
+		}
 
-	// create contract set
-	var contractset dbContractSet
-	err = s.db.
-		Where(dbContractSet{Name: name}).
-		FirstOrCreate(&contractset).
-		Error
-	if err != nil {
-		return err
-	}
+		// create contract set
+		var contractset dbContractSet
+		err = s.db.
+			Where(dbContractSet{Name: name}).
+			FirstOrCreate(&contractset).
+			Error
+		if err != nil {
+			return err
+		}
 
-	// update contracts
-	return s.db.Model(&contractset).Association("Contracts").Replace(&dbContracts)
+		// update contracts
+		return s.db.Model(&contractset).Association("Contracts").Replace(&dbContracts)
+	})
 }
 
 func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
@@ -853,65 +855,43 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 		return err
 	}
 
-	// extract host keys
-	hostkeys := make([]publicKey, 0, len(usedContracts))
-	for key := range usedContracts {
-		hostkeys = append(hostkeys, publicKey(key))
-	}
-
 	// extract file contract ids
 	fcids := make([]fileContractID, 0, len(usedContracts))
 	for _, fcid := range usedContracts {
 		fcids = append(fcids, fileContractID(fcid))
 	}
 
-	// find all hosts
-	var dbHosts []dbHost
-	if err := ss.db.
-		Model(&dbHost{}).
-		Where("public_key IN (?)", hostkeys).
-		Find(&dbHosts).
-		Error; err != nil {
-		return err
-	}
-
-	// find all contracts
-	var dbContracts []dbContract
-	if err := ss.db.
-		Model(&dbContract{}).
-		Where("fcid IN (?)", fcids).
-		Find(&dbContracts).
-		Error; err != nil {
-		return err
-	}
-
-	// make a hosts map
-	hosts := make(map[publicKey]*dbHost)
-	for i := range dbHosts {
-		hosts[dbHosts[i].PublicKey] = &dbHosts[i]
-	}
-
-	// make a contracts map
-	contracts := make(map[fileContractID]*dbContract)
-	for i := range dbContracts {
-		contracts[fileContractID(dbContracts[i].FCID)] = &dbContracts[i]
-	}
-
-	// find existing slab
-	var slab dbSlab
-	if err = ss.db.
-		Where(&dbSlab{Key: key}).
-		Assign(&dbSlab{TotalShards: uint8(len(slab.Shards))}).
-		Preload("Shards.DBSector").
-		Take(&slab).
-		Error; err == gorm.ErrRecordNotFound {
-		return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
-	} else if err != nil {
-		return err
-	}
-
 	// Update slab.
 	return ss.retryTransaction(func(tx *gorm.DB) (err error) {
+		// find all contracts
+		var dbContracts []dbContract
+		if err := tx.
+			Model(&dbContract{}).
+			Where("fcid IN (?)", fcids).
+			Find(&dbContracts).
+			Error; err != nil {
+			return err
+		}
+
+		// make a contracts map
+		contracts := make(map[fileContractID]*dbContract)
+		for i := range dbContracts {
+			contracts[fileContractID(dbContracts[i].FCID)] = &dbContracts[i]
+		}
+
+		// find existing slab
+		var slab dbSlab
+		if err = tx.
+			Where(&dbSlab{Key: key}).
+			Assign(&dbSlab{TotalShards: uint8(len(slab.Shards))}).
+			Preload("Shards.DBSector").
+			Take(&slab).
+			Error; err == gorm.ErrRecordNotFound {
+			return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
+		} else if err != nil {
+			return err
+		}
+
 		// build map out of current shards
 		shards := make(map[uint]struct{})
 		for _, shard := range slab.Shards {
