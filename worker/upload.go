@@ -289,7 +289,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	// collect the responses
 	var responses []slabResponse
 	slabIndex := 0
-	lastIndex := -1
+	numSlabs := -1
 
 	// prepare slab size
 	size := int64(rs.MinShards) * rhpv2.SectorSize
@@ -305,7 +305,7 @@ loop:
 			data := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(cr, size), data)
 			if err == io.EOF {
-				lastIndex = slabIndex - 1
+				numSlabs = slabIndex
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, err
@@ -318,7 +318,7 @@ loop:
 				return object.Object{}, res.err
 			}
 			responses = append(responses, res)
-			if res.index == lastIndex {
+			if len(responses) == numSlabs {
 				break loop
 			}
 		}
