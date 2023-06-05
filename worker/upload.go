@@ -139,10 +139,12 @@ type (
 
 	dataPoints struct {
 		stats.Float64Data
+		halfLife time.Duration
 
-		mu  sync.Mutex
-		cnt int
-		p90 float64
+		mu        sync.Mutex
+		cnt       int
+		p90       float64
+		lastDecay time.Time
 	}
 )
 
@@ -157,6 +159,8 @@ func (w *worker) initUploadManager() {
 func newDataPoints() *dataPoints {
 	return &dataPoints{
 		Float64Data: make([]float64, 20),
+		halfLife:    time.Minute,
+		lastDecay:   time.Now(),
 	}
 }
 
@@ -194,15 +198,14 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 
 	// prepare stats
 	stats := uploadManagerStats{
-		avgUploadSpeedMBPS:  mgr.statsSpeed.recompute() * 0.008, // convert bytes per ms to mbps,
-		overdrivePct:        mgr.statsOverdrive.recompute(),
+		avgUploadSpeedMBPS:  mgr.statsSpeed.percentileP90() * 0.008, // convert bytes per ms to mbps,
+		overdrivePct:        mgr.statsOverdrive.percentileP90(),
 		numUploaders:        uint64(len(mgr.uploaders)),
 		uploadSpeedsP90MBPS: make(map[types.PublicKey]float64),
 	}
 
 	// fill in uploader stats
 	for _, u := range mgr.uploaders {
-		u.statsSpeed.recompute()
 		stats.uploadSpeedsP90MBPS[u.hk] = u.statsSpeed.percentileP90() * 0.008 // convert bytes per ms to mbps
 		if u.healthy() {
 			stats.healthyUploaders++
@@ -414,11 +417,6 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 
 	// grab the upload
 	upload := shard.upload
-
-	// recompute the stats first
-	for _, uploader := range mgr.uploaders {
-		uploader.statsSpeed.recompute()
-	}
 
 	// sort the uploaders by their estimate
 	sort.Slice(mgr.uploaders, func(i, j int) bool {
@@ -1033,28 +1031,48 @@ func (s *slabUpload) tryTriggerNextRead() {
 	}
 }
 
-func (a *dataPoints) percentileP90() float64 {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.p90
-}
+func (a *dataPoints) tryDecay() {
+	// return early
+	if a.halfLife == 0 {
+		return
+	}
 
-func (a *dataPoints) recompute() float64 {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	// return if we're not due for a decay round
+	decayFreq := a.halfLife / 6
+	timePassed := time.Since(a.lastDecay)
+	if timePassed < decayFreq {
+		return
+	}
 
+	// calculate how much decay to apply
+	strength := float64(timePassed) / float64(a.halfLife)
+	decay := math.Pow(0.5, strength)
+	for i := range a.Float64Data {
+		a.Float64Data[i] *= decay
+	}
+
+	// recompute the p90
 	p90, err := a.Percentile(90)
 	if err != nil {
 		p90 = 0
 	}
-
 	a.p90 = p90
-	return p90
+
+	// update the last decay time
+	a.lastDecay = time.Now()
+}
+
+func (a *dataPoints) percentileP90() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tryDecay()
+	return a.p90
 }
 
 func (a *dataPoints) track(p float64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.tryDecay()
 	a.Float64Data[a.cnt%len(a.Float64Data)] = p
 	a.cnt++
 }
