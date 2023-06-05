@@ -760,7 +760,7 @@ func (u *uploader) estimate() float64 {
 	// fetch average speed
 	bytesPerMS := int(u.statsSpeed.percentileP90())
 	if bytesPerMS == 0 {
-		bytesPerMS = math.MaxInt64
+		return math.SmallestNonzeroFloat64
 	}
 
 	outstanding := (len(u.queue) + 1) * rhpv2.SectorSize
