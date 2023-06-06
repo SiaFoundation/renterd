@@ -43,9 +43,9 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrive *dataPoints
-		statsSpeed     *dataPoints
-		stopChan       chan struct{}
+		statsOverdrive       *dataPoints
+		statsSlabUploadSpeed *dataPoints
+		stopChan             chan struct{}
 
 		mu            sync.Mutex
 		uploaders     []*uploader
@@ -64,9 +64,9 @@ type (
 		signalNewUpload     chan struct{}
 		queue               []*shardUpload
 
-		statsEstimate *dataPoints
-		statsSpeed    *dataPoints // keep track of this separately for stats (no decay is applied)
-		stopChan      chan struct{}
+		statsSectorUploadEstimate *dataPoints
+		statsSectorUploadSpeed    *dataPoints // keep track of this separately for stats (no decay is applied)
+		stopChan                  chan struct{}
 	}
 
 	upload struct {
@@ -137,11 +137,11 @@ type (
 	}
 
 	uploadManagerStats struct {
-		avgUploadSpeedMBPS  float64
-		healthyUploaders    uint64
-		numUploaders        uint64
-		overdrivePct        float64
-		uploadSpeedsP90MBPS map[types.PublicKey]float64
+		avgSlabUploadSpeedMBPS float64
+		healthyUploaders       uint64
+		numUploaders           uint64
+		overdrivePct           float64
+		uploadSpeedsMBPS       map[types.PublicKey]float64
 	}
 
 	dataPoints struct {
@@ -179,8 +179,8 @@ func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, s
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: sectorTimeout,
 
-		statsOverdrive: newDataPoints(0),
-		statsSpeed:     newDataPoints(0),
+		statsOverdrive:       newDataPoints(0),
+		statsSlabUploadSpeed: newDataPoints(0),
 
 		stopChan: make(chan struct{}),
 
@@ -218,11 +218,11 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 
 	// prepare stats
 	return uploadManagerStats{
-		avgUploadSpeedMBPS:  mgr.statsSpeed.Average() * 0.008, // convert bytes per ms to mbps,
-		healthyUploaders:    uint64(numHealthy),
-		overdrivePct:        mgr.statsOverdrive.P90(),
-		numUploaders:        uint64(len(speeds)),
-		uploadSpeedsP90MBPS: speeds,
+		avgSlabUploadSpeedMBPS: mgr.statsSlabUploadSpeed.Average() * 0.008, // convert bytes per ms to mbps,
+		healthyUploaders:       uint64(numHealthy),
+		overdrivePct:           mgr.statsOverdrive.P90(),
+		numUploaders:           uint64(len(speeds)),
+		uploadSpeedsMBPS:       speeds,
 	}
 }
 
@@ -375,9 +375,9 @@ func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
 		queue:           make([]*shardUpload, 0),
 		signalNewUpload: make(chan struct{}, 1),
 
-		statsEstimate: newDataPoints(statsDecayHalfTime),
-		statsSpeed:    newDataPoints(0), // no decay for exposed stats
-		stopChan:      make(chan struct{}),
+		statsSectorUploadEstimate: newDataPoints(statsDecayHalfTime),
+		statsSectorUploadSpeed:    newDataPoints(0), // no decay for exposed stats
+		stopChan:                  make(chan struct{}),
 	}
 }
 
@@ -476,8 +476,8 @@ func (mgr *uploadManager) tryRecomputeStats() {
 	}
 
 	for _, u := range mgr.uploaders {
-		u.statsEstimate.Recompute()
-		u.statsSpeed.Recompute()
+		u.statsSectorUploadEstimate.Recompute()
+		u.statsSectorUploadSpeed.Recompute()
 	}
 	mgr.lastRecompute = time.Now()
 }
@@ -710,7 +710,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 
 	// track stats
 	mgr.statsOverdrive.Track(slab.overdrivePct())
-	mgr.statsSpeed.Track(float64(slab.uploadSpeed()))
+	mgr.statsSlabUploadSpeed.Track(float64(slab.uploadSpeed()))
 	return slab.finish()
 }
 
@@ -780,7 +780,7 @@ func (u *uploader) estimate() float64 {
 	defer u.mu.Unlock()
 
 	// fetch estimated duration per sector
-	estimateP90 := u.statsEstimate.P90()
+	estimateP90 := u.statsSectorUploadEstimate.P90()
 	if estimateP90 == 0 {
 		estimateP90 = 1
 	}
@@ -790,11 +790,11 @@ func (u *uploader) estimate() float64 {
 	return numSectors * estimateP90
 }
 
-func (u *uploader) stats() (healthy bool, p90MBPS float64) {
+func (u *uploader) stats() (healthy bool, mbps float64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	healthy = u.consecutiveFailures == 0
-	p90MBPS = u.statsSpeed.P90() * 0.008
+	mbps = u.statsSectorUploadSpeed.Average() * 0.008
 	return
 }
 
@@ -838,12 +838,12 @@ func (u *uploader) trackSectorUpload(err error, d time.Duration) {
 	defer u.mu.Unlock()
 	if err != nil {
 		u.consecutiveFailures++
-		u.statsEstimate.Track(float64(time.Hour.Milliseconds()))
+		u.statsSectorUploadEstimate.Track(float64(time.Hour.Milliseconds()))
 	} else {
 		ms := d.Milliseconds()
 		u.consecutiveFailures = 0
-		u.statsEstimate.Track(float64(ms))                 // duration in ms
-		u.statsSpeed.Track(float64(rhpv2.SectorSize / ms)) // bytes per ms
+		u.statsSectorUploadEstimate.Track(float64(ms))                 // duration in ms
+		u.statsSectorUploadSpeed.Track(float64(rhpv2.SectorSize / ms)) // bytes per ms
 	}
 }
 
