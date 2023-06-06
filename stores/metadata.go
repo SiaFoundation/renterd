@@ -105,8 +105,8 @@ type (
 		MinShards   uint8
 		TotalShards uint8
 
-		Slices []dbSlice `gorm:"constraint:OnDelete:SET NULL"`
-		Shards []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+		Slices []dbSlice  `gorm:"constraint:OnDelete:SET NULL"`
+		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
 	dbSlabBuffer struct {
@@ -124,6 +124,7 @@ type (
 	dbSector struct {
 		Model
 
+		DBSlabID   uint      `gorm:"index"`
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 
@@ -134,14 +135,6 @@ type (
 	dbContractSector struct {
 		DBContractID uint `gorm:"primaryKey"`
 		DBSectorID   uint `gorm:"primaryKey"`
-	}
-
-	// dbShard is a join table between dbSlab and dbSector.
-	dbShard struct {
-		ID         uint `gorm:"primaryKey"`
-		DBSlabID   uint `gorm:"index"`
-		DBSector   dbSector
-		DBSectorID uint `gorm:"index"`
 	}
 
 	// rawObject is used for hydration and is made up of one or many raw sectors.
@@ -185,9 +178,6 @@ func (dbObject) TableName() string { return "objects" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbShard) TableName() string { return "shards" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlab) TableName() string { return "slabs" }
@@ -259,12 +249,8 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 
 	// hydrate shards if possible
 	for i, shard := range s.Shards {
-		if shard.DBSector.ID == 0 {
-			continue // sector wasn't preloaded
-		}
-
-		slab.Shards[i].Host = types.PublicKey(shard.DBSector.LatestHost)
-		slab.Shards[i].Root = *(*types.Hash256)(shard.DBSector.Root)
+		slab.Shards[i].Host = types.PublicKey(shard.LatestHost)
+		slab.Shards[i].Root = *(*types.Hash256)(shard.Root)
 	}
 
 	return
@@ -752,11 +738,14 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 	// UpdateObject is ACID.
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
-		// slabs if it exists.
+		// slices if it exists.
 		err := deleteObject(tx, key)
 		if err != nil {
 			return err
 		}
+
+		// TODO: If deletion of the object led to slabs without slices pointing
+		// to them, delete them as well.
 
 		// Insert a new object.
 		objKey, err := o.Key.MarshalText()
@@ -810,19 +799,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 				var sector dbSector
 				err := tx.
 					Where(dbSector{Root: shard.Root[:]}).
-					Assign(dbSector{LatestHost: publicKey(shard.Host)}).
+					Assign(dbSector{
+						DBSlabID:   slab.ID,
+						LatestHost: publicKey(shard.Host),
+					}).
 					FirstOrCreate(&sector).
 					Error
-				if err != nil {
-					return err
-				}
-
-				// Add the slab-sector link to the sector to the
-				// shards table.
-				err = tx.Create(&dbShard{
-					DBSlabID:   slab.ID,
-					DBSectorID: sector.ID,
-				}).Error
 				if err != nil {
 					return err
 				}
@@ -1002,18 +984,12 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 		if err = tx.
 			Where(&dbSlab{Key: key}).
 			Assign(&dbSlab{TotalShards: uint8(len(slab.Shards))}).
-			Preload("Shards.DBSector").
+			Preload("Shards").
 			Take(&slab).
 			Error; err == gorm.ErrRecordNotFound {
 			return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
 		} else if err != nil {
 			return err
-		}
-
-		// build map out of current shards
-		shards := make(map[uint]struct{})
-		for _, shard := range slab.Shards {
-			shards[shard.DBSectorID] = struct{}{}
 		}
 
 		// loop updated shards
@@ -1022,22 +998,13 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 			var sector dbSector
 			if err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{LatestHost: publicKey(shard.Host)}).
+				Assign(dbSector{
+					DBSlabID:   slab.ID,
+					LatestHost: publicKey(shard.Host)},
+				).
 				FirstOrCreate(&sector).
 				Error; err != nil {
 				return err
-			}
-
-			// ensure the join table has an entry
-			_, exists := shards[sector.ID]
-			if !exists {
-				if err := tx.
-					Create(&dbShard{
-						DBSlabID:   slab.ID,
-						DBSectorID: sector.ID,
-					}).Error; err != nil {
-					return err
-				}
 			}
 
 			// ensure the associations are updated
@@ -1092,7 +1059,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Having("health >= 0 AND health <= ?", healthCutoff).
 		Order("health ASC").
 		Limit(limit).
-		Preload("Shards.DBSector").
+		Preload("Shards").
 		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, dbSlab := range dbBatch {
 				if slab, err := dbSlab.convert(); err == nil {

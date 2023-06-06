@@ -882,9 +882,9 @@ func TestSQLMetadataStore(t *testing.T) {
 		obj.Slabs[i].Model = Model{}
 		obj.Slabs[i].DBSlab.Model = Model{}
 		obj.Slabs[i].DBSlab.Shards[0].ID = 0
-		obj.Slabs[i].DBSlab.Shards[0].DBSector.Model = Model{}
-		obj.Slabs[i].DBSlab.Shards[0].DBSector.Contracts[0].Model = Model{}
-		obj.Slabs[i].DBSlab.Shards[0].DBSector.Contracts[0].Host.Model = Model{}
+		obj.Slabs[i].DBSlab.Shards[0].Model = Model{}
+		obj.Slabs[i].DBSlab.Shards[0].Contracts[0].Model = Model{}
+		obj.Slabs[i].DBSlab.Shards[0].Contracts[0].Host.Model = Model{}
 	}
 
 	expectedObj := dbObject{
@@ -899,33 +899,29 @@ func TestSQLMetadataStore(t *testing.T) {
 					Key:         obj1Slab0Key,
 					MinShards:   1,
 					TotalShards: 1,
-					Shards: []dbShard{
+					Shards: []dbSector{
 						{
-							DBSlabID:   1,
-							DBSectorID: 1,
-							DBSector: dbSector{
-								Root:       obj1.Slabs[0].Shards[0].Root[:],
-								LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
-								Contracts: []dbContract{
-									{
-										HostID: 1,
-										Host: dbHost{
-											PublicKey: publicKey(hk1),
-										},
+							Root:       obj1.Slabs[0].Shards[0].Root[:],
+							LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
+							Contracts: []dbContract{
+								{
+									HostID: 1,
+									Host: dbHost{
+										PublicKey: publicKey(hk1),
+									},
 
-										ContractCommon: ContractCommon{
-											FCID: fileContractID(fcid1),
+									ContractCommon: ContractCommon{
+										FCID: fileContractID(fcid1),
 
-											TotalCost:      currency(totalCost1),
-											RevisionNumber: "0",
-											StartHeight:    startHeight1,
-											WindowStart:    400,
-											WindowEnd:      500,
+										TotalCost:      currency(totalCost1),
+										RevisionNumber: "0",
+										StartHeight:    startHeight1,
+										WindowStart:    400,
+										WindowEnd:      500,
 
-											UploadSpending:      zeroCurrency,
-											DownloadSpending:    zeroCurrency,
-											FundAccountSpending: zeroCurrency,
-										},
+										UploadSpending:      zeroCurrency,
+										DownloadSpending:    zeroCurrency,
+										FundAccountSpending: zeroCurrency,
 									},
 								},
 							},
@@ -942,32 +938,28 @@ func TestSQLMetadataStore(t *testing.T) {
 					Key:         obj1Slab1Key,
 					MinShards:   2,
 					TotalShards: 1,
-					Shards: []dbShard{
+					Shards: []dbSector{
 						{
-							DBSlabID:   2,
-							DBSectorID: 2,
-							DBSector: dbSector{
-								Root:       obj1.Slabs[1].Shards[0].Root[:],
-								LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
-								Contracts: []dbContract{
-									{
-										HostID: 2,
-										Host: dbHost{
-											PublicKey: publicKey(hk2),
-										},
-										ContractCommon: ContractCommon{
-											FCID: fileContractID(fcid2),
+							Root:       obj1.Slabs[1].Shards[0].Root[:],
+							LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
+							Contracts: []dbContract{
+								{
+									HostID: 2,
+									Host: dbHost{
+										PublicKey: publicKey(hk2),
+									},
+									ContractCommon: ContractCommon{
+										FCID: fileContractID(fcid2),
 
-											TotalCost:      currency(totalCost2),
-											RevisionNumber: "0",
-											StartHeight:    startHeight2,
-											WindowStart:    400,
-											WindowEnd:      500,
+										TotalCost:      currency(totalCost2),
+										RevisionNumber: "0",
+										StartHeight:    startHeight2,
+										WindowStart:    400,
+										WindowEnd:      500,
 
-											UploadSpending:      zeroCurrency,
-											DownloadSpending:    zeroCurrency,
-											FundAccountSpending: zeroCurrency,
-										},
+										UploadSpending:      zeroCurrency,
+										DownloadSpending:    zeroCurrency,
+										FundAccountSpending: zeroCurrency,
 									},
 								},
 							},
@@ -1620,8 +1612,7 @@ func TestPutSlab(t *testing.T) {
 		t.Helper()
 		if err = db.db.
 			Where(&dbSlab{Key: key}).
-			Preload("Shards.DBSector").
-			Preload("Shards.DBSector.Contracts").
+			Preload("Shards.Contracts").
 			Take(&slab).
 			Error; err != nil {
 			t.Fatal(err)
@@ -1642,9 +1633,9 @@ func TestPutSlab(t *testing.T) {
 
 	// assert both sectors were upload to one contract/host
 	for i := 0; i < 2; i++ {
-		if cids := contractIds(inserted.Shards[i].DBSector.Contracts); len(cids) != 1 {
+		if cids := contractIds(inserted.Shards[i].Contracts); len(cids) != 1 {
 			t.Fatalf("sector %d was uploaded to unexpected amount of contracts, %v!=1", i+1, len(cids))
-		} else if inserted.Shards[i].DBSector.LatestHost != publicKey(hks[i]) {
+		} else if inserted.Shards[i].LatestHost != publicKey(hks[i]) {
 			t.Fatalf("sector %d was uploaded to unexpected amount of hosts, %v!=1", i+1, len(hks))
 		}
 	}
@@ -1684,23 +1675,23 @@ func TestPutSlab(t *testing.T) {
 	updated := fetchSlab()
 
 	// assert the first sector is still only on one host, also assert it's h1
-	if cids := contractIds(updated.Shards[0].DBSector.Contracts); len(cids) != 1 {
+	if cids := contractIds(updated.Shards[0].Contracts); len(cids) != 1 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
-	} else if updated.Shards[0].DBSector.LatestHost != publicKey(hks[0]) {
-		t.Fatal("host key was invalid", updated.Shards[0].DBSector.LatestHost, publicKey(hks[0]))
+	} else if updated.Shards[0].LatestHost != publicKey(hks[0]) {
+		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, publicKey(hks[0]))
 	} else if hks[0] != hk1 {
 		t.Fatal("sector 1 was uploaded to unexpected host", hks[0])
 	}
 
 	// assert the second sector however is uploaded to two hosts, assert it's h2 and h3
-	if cids := contractIds(updated.Shards[1].DBSector.Contracts); len(cids) != 2 {
+	if cids := contractIds(updated.Shards[1].Contracts); len(cids) != 2 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
-	} else if updated.Shards[0].DBSector.LatestHost != publicKey(hks[0]) {
-		t.Fatal("host key was invalid", updated.Shards[0].DBSector.LatestHost, publicKey(hks[0]))
+	} else if updated.Shards[0].LatestHost != publicKey(hks[0]) {
+		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, publicKey(hks[0]))
 	}
 
 	// assert there's still only one entry in the dbslab table
@@ -1927,7 +1918,7 @@ func TestObjectsStats(t *testing.T) {
 func (s *SQLStore) dbObject(ctx context.Context, key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.DBSlab.Shards.DBSector.Contracts.Host").
+		Preload("Slabs.DBSlab.Shards.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, api.ErrObjectNotFound

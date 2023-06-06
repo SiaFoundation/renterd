@@ -34,7 +34,6 @@ func performMigrations(db *gorm.DB) error {
 		&dbContractSet{},
 		&dbObject{},
 		&dbSector{},
-		&dbShard{},
 		&dbSlab{},
 		&dbSlice{},
 
