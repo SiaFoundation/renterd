@@ -109,6 +109,7 @@ type (
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
+	// TODO: add a hook that deletes a buffer if the slab is deleted
 	dbSlabBuffer struct {
 		Model
 		DBSlabID uint `gorm:"index;unique"`
@@ -1085,14 +1086,13 @@ func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN slices sli ON o.id = sli.`db_object_id`").
-		Joins("INNER JOIN slabs sla ON sli.id = sla.`db_slice_id`").
-		Joins("INNER JOIN shards sha ON sla.id = sha.`db_slab_id`").
-		Joins("INNER JOIN sectors sec ON sha.`db_sector_id` = sec.id").
+		Joins("INNER JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+		Joins("INNER JOIN sectors sec ON sla.id = sec.`db_slab_id`").
 		Where("o.object_id = ?", key).
 		Order("o.id ASC").
 		Order("sla.id ASC").
 		Order("sli.offset ASC").
-		Order("sha.db_sector_id ASC").
+		Order("sec.id ASC").
 		Scan(&rows)
 
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
