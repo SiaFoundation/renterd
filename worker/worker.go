@@ -737,17 +737,17 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
-		err = h.FundAccount(ctx, rfr.Balance, rev)
+		err = h.FundAccount(ctx, rfr.Balance, &rev)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
-			err = h.SyncAccount(ctx, rev)
+			err = h.SyncAccount(ctx, &rev)
 			if err != nil {
 				w.logger.Debugf(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 				return
 			}
 
 			// try funding the account again
-			err = h.FundAccount(ctx, rfr.Balance, rev)
+			err = h.FundAccount(ctx, rfr.Balance, &rev)
 			if errors.Is(err, errBalanceSufficient) {
 				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
 				return nil
@@ -819,8 +819,8 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	if jc.Check("failed to create host for renewal", err) != nil {
 		return
 	}
-	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(revision types.FileContractRevision) error {
-		return h.SyncAccount(ctx, revision)
+	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(rev types.FileContractRevision) error {
+		return h.SyncAccount(ctx, &rev)
 	}))
 }
 

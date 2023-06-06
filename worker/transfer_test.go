@@ -64,13 +64,13 @@ func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractR
 func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (_ types.FileContractRevision, _ error) {
 	panic("not implemented")
 }
-func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev types.FileContractRevision) error {
+func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
 	panic("not implemented")
 }
 func (h *mockHost) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
 	panic("not implemented")
 }
-func (h *mockHost) SyncAccount(ctx context.Context, rev types.FileContractRevision) error {
+func (h *mockHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	panic("not implemented")
 }
 
