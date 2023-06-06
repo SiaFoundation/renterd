@@ -69,13 +69,13 @@ type (
 		maintenanceTxnID types.TransactionID
 
 		mu               sync.Mutex
-		cachedHostInfo   map[types.PublicKey]cachedHostInfo
+		cachedHostInfo   map[types.PublicKey]hostInfo
 		cachedDataStored map[types.PublicKey]uint64
 		cachedMinScore   float64
 		currPeriod       uint64
 	}
 
-	cachedHostInfo struct {
+	hostInfo struct {
 		Usable         bool
 		UnusableResult unusableHostResult
 	}
@@ -186,13 +186,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// prepare hosts for cache
 	f := newIPFilter(c.logger)
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-	hostInfos := make(map[types.PublicKey]cachedHostInfo)
+	hostInfos := make(map[types.PublicKey]hostInfo)
 	for _, h := range hosts {
 		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
 		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, h, minScore, storedData[h.PublicKey])
-		hostInfos[h.PublicKey] = cachedHostInfo{
+		hostInfos[h.PublicKey] = hostInfo{
 			Usable:         isUsable,
 			UnusableResult: unusableResult,
 		}

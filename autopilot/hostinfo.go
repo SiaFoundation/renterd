@@ -66,14 +66,15 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 }
 
 func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerGET, error) {
+	// declare helper to decide whether to keep a host.
+	if !isValidUsabilityFilterMode(usabilityMode) {
+		return nil, fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
+	}
+
 	c.mu.Lock()
 	hostInfo := c.cachedHostInfo
 	c.mu.Unlock()
 
-	// declare helper to decide whether to keep a host.
-	if usabilityMode != api.UsabilityFilterModeUsable && usabilityMode != api.UsabilityFilterModeUnusable && usabilityMode != api.UsabilityFilterModeAll {
-		return nil, fmt.Errorf("invalid usability mode: %v, options are usable and unusable", usabilityMode)
-	}
 	keep := func(usable bool) bool {
 		switch usabilityMode {
 		case api.UsabilityFilterModeUsable:
@@ -129,8 +130,19 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 		}
 
 		// if no hosts were kept from this batch, double the limit.
-		if keptHosts == 0 {
+		if limit > 0 && keptHosts == 0 {
 			limit *= 2
 		}
 	}
+}
+
+func isValidUsabilityFilterMode(usabilityMode string) bool {
+	switch usabilityMode {
+	case api.UsabilityFilterModeUsable:
+	case api.UsabilityFilterModeUnusable:
+	case api.UsabilityFilterModeAll:
+	default:
+		return false
+	}
+	return true
 }
