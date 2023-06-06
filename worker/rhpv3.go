@@ -231,9 +231,9 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 	err = h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
 		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
-			rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			rev, err = RPCLatestRevision(ctx, t, contractID, func(rev types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				// Fetch pt.
-				pt, err := h.priceTable(ctx, rev)
+				pt, err := h.priceTable(ctx, &rev)
 				if err != nil {
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 				}
@@ -254,9 +254,9 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 // a contract to pay for it.
 func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
-		rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+		rev, err = RPCLatestRevision(ctx, t, contractID, func(rev types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Fetch pt.
-			pt, err := h.priceTable(ctx, rev)
+			pt, err := h.priceTable(ctx, &rev)
 			if err != nil {
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 			}
@@ -272,9 +272,9 @@ func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.Publ
 	return rev, err
 }
 
-func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
+func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev types.FileContractRevision) error {
 	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
+	pt, err := h.priceTable(ctx, &rev)
 	if err != nil {
 		return err
 	}
@@ -313,9 +313,9 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 	})
 }
 
-func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevision) error {
+func (h *host) SyncAccount(ctx context.Context, rev types.FileContractRevision) error {
 	// fetch pricetable
-	pt, err := h.priceTable(ctx, revision)
+	pt, err := h.priceTable(ctx, &rev)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
-			payment, err := payByContract(revision, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			payment, err := payByContract(rev, pt.AccountBalanceCost, h.acc.id, h.renterKey)
 			if err != nil {
 				return err
 			}
@@ -775,7 +775,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 // NOTE: This way of paying for a price table should only be used if payment by
 // EA is not possible or if we already need a contract revision anyway. e.g.
 // funding an EA.
-func (h *host) preparePriceTableContractPayment(rev *types.FileContractRevision) PriceTablePaymentFunc {
+func (h *host) preparePriceTableContractPayment(rev types.FileContractRevision) PriceTablePaymentFunc {
 	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
 		// TODO: gouging check on price table
 
@@ -853,9 +853,9 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 	var txnSet []types.Transaction
 	var renewErr error
 	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
-		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
-			rev, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
+			rev, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, revision, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err
@@ -885,7 +885,7 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 
 	// pay by contract if a revision is given
 	if rev != nil {
-		return fetchPT(h.preparePriceTableContractPayment(rev))
+		return fetchPT(h.preparePriceTableContractPayment(*rev))
 	}
 
 	// pay by account
@@ -978,7 +978,7 @@ func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMe
 // RPCLatestRevision calls the LatestRevision RPC. The paymentFunc allows for
 // fetching a pricetable using the fetched revision to pay for it. If
 // paymentFunc returns 'nil' as payment, the host is not paid.
-func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
+func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID, paymentFunc func(rev types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
 	defer wrapErr(&err, "LatestRevision")
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -993,7 +993,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 		return types.FileContractRevision{}, err
 	} else if err := s.ReadResponse(&resp, 4096); err != nil {
 		return types.FileContractRevision{}, err
-	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil || payment == nil {
+	} else if pt, payment, err := paymentFunc(resp.Revision); err != nil || payment == nil {
 		return types.FileContractRevision{}, err
 	} else if err := s.WriteResponse(&pt.UID); err != nil {
 		return types.FileContractRevision{}, err
@@ -1466,11 +1466,11 @@ func RPCUpdateRegistry(ctx context.Context, t *transportV3, payment rhpv3.Paymen
 	return nil
 }
 
-func payByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct rhpv3.Account, sk types.PrivateKey) (rhpv3.PayByContractRequest, error) {
+func payByContract(rev types.FileContractRevision, amount types.Currency, refundAcct rhpv3.Account, sk types.PrivateKey) (rhpv3.PayByContractRequest, error) {
 	if rev.RevisionNumber == math.MaxUint64 {
 		return rhpv3.PayByContractRequest{}, errMaxRevisionReached
 	}
-	payment, ok := rhpv3.PayByContract(rev, amount, refundAcct, sk)
+	payment, ok := rhpv3.PayByContract(&rev, amount, refundAcct, sk)
 	if !ok {
 		return rhpv3.PayByContractRequest{}, ErrInsufficientFunds
 	}

@@ -68,10 +68,13 @@ type (
 
 		maintenanceTxnID types.TransactionID
 
-		mu               sync.Mutex
-		cachedDataStored map[types.PublicKey]uint64
-		cachedMinScore   float64
-		currPeriod       uint64
+		mu                         sync.Mutex
+		cachedContracts            []api.Contract
+		cachedContractRenewals     map[types.FileContractID]struct{}
+		cachedContractSetContracts map[string]map[types.FileContractID]struct{}
+		cachedDataStored           map[types.PublicKey]uint64
+		cachedMinScore             float64
+		currPeriod                 uint64
 	}
 
 	contractInfo struct {
@@ -84,7 +87,40 @@ func newContractor(ap *Autopilot) *contractor {
 	return &contractor{
 		ap:     ap,
 		logger: ap.logger.Named("contractor"),
+
+		cachedContractSetContracts: make(map[string]map[types.FileContractID]struct{}),
 	}
+}
+
+func (c *contractor) Contracts(_ context.Context) ([]api.ContractMetadata, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var contracts []api.ContractMetadata
+	for _, contract := range c.cachedContracts {
+		contracts = append(contracts, contract.ContractMetadata)
+	}
+	return contracts, nil
+}
+
+func (c *contractor) IsInContractSet(fcid types.FileContractID, set string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	csc, exists := c.cachedContractSetContracts[set]
+	if !exists {
+		return false
+	}
+
+	_, exists = csc[fcid]
+	return exists
+}
+
+func (c *contractor) IsUpForRenewal(fcid types.FileContractID) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	_, exists := c.cachedContractRenewals[fcid]
+	return exists
 }
 
 func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (err error) {
@@ -134,6 +170,15 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
+	// update contract set contracts
+	c.mu.Lock()
+	dict := make(map[types.FileContractID]struct{})
+	for _, c := range currentSet {
+		dict[c.ID] = struct{}{}
+	}
+	c.cachedContractSetContracts[state.cfg.Contracts.Set] = dict
+	c.mu.Unlock()
+
 	// fetch all contracts from the worker.
 	start := time.Now()
 	resp, err := w.Contracts(ctx, timeoutHostRevision)
@@ -145,6 +190,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	contracts := resp.Contracts
 	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
+
+	// update contracts
+	c.mu.Lock()
+	c.cachedContracts = contracts
+	c.mu.Unlock()
 
 	// get used hosts
 	usedHosts := make(map[types.PublicKey]struct{})
@@ -177,7 +227,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
 
-	// update cache.
+	// update cache
 	c.mu.Lock()
 	c.cachedDataStored = storedData
 	c.cachedMinScore = minScore
@@ -280,6 +330,18 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return
 	}
 	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
+	if err != nil {
+		return err
+	}
+
+	// update contract set contracts
+	c.mu.Lock()
+	dict = make(map[types.FileContractID]struct{})
+	for _, id := range updatedSet {
+		dict[id] = struct{}{}
+	}
+	c.cachedContractSetContracts[state.cfg.Contracts.Set] = dict
+	c.mu.Unlock()
 	return
 }
 
@@ -385,8 +447,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
-	// state variables
-	renewIndices := make(map[types.FileContractID]int)
+	// cache variables
+	renewals := make(map[types.FileContractID]struct{})
 
 	// return variables
 	toArchive = make(map[types.FileContractID]string)
@@ -472,7 +534,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		if renew {
-			renewIndices[fcid] = len(toRenew)
+			renewals[contract.ID] = struct{}{}
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
 				settings: host.Settings,
@@ -486,6 +548,11 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toKeep = append(toKeep, fcid)
 		}
 	}
+
+	// update cache
+	c.mu.Lock()
+	c.cachedContractRenewals = renewals
+	c.mu.Unlock()
 
 	return toKeep, toArchive, toRefresh, toRenew, nil
 }
@@ -1176,14 +1243,6 @@ func addLeeway(n uint64, pct float64) uint64 {
 		panic("given leeway percent has to be positive")
 	}
 	return uint64(math.Ceil(float64(n) * pct))
-}
-
-func contractMapBool(contracts []types.FileContractID) map[types.FileContractID]bool {
-	contractsMap := make(map[types.FileContractID]bool)
-	for _, fcid := range contracts {
-		contractsMap[fcid] = true
-	}
-	return contractsMap
 }
 
 func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {

@@ -265,7 +265,6 @@ func (ap *Autopilot) Run() error {
 
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {
-				ap.a.UpdateContracts(ctx, ap.state.cfg)
 				launchAccountRefillsOnce.Do(func() {
 					ap.logger.Debug("account refills loop launched")
 					go ap.a.refillWorkersAccountsLoop(ap.stopChan)
@@ -458,11 +457,10 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 		return nil, err
 	}
 
-	ap.a = newAccounts(ap.logger, ap.bus, ap.workers, accountsRefillInterval)
 	ap.s = scanner
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap, migrationHealthCutoff)
-
+	ap.a = newAccounts(ap, ap.bus, ap.c, ap.workers, ap.logger, accountsRefillInterval)
 	return ap, nil
 }
 
