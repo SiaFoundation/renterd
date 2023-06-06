@@ -137,9 +137,9 @@ type RHPRegistryUpdateRequest struct {
 // UploadStatsResponse is the response type for the /stats/uploads endpoint.
 type UploadStatsResponse struct {
 	AvgSlabUploadSpeedMBPS float64         `json:"avgSlabUploadSpeedMBPS"`
+	AvgOverdrivePct        float64         `json:"avgOverdrivePct"`
 	HealthyUploaders       uint64          `json:"healthyUploaders"`
 	NumUploaders           uint64          `json:"numUploaders"`
-	OverdrivePct           float64         `json:"overdrivePct"`
 	UploadersStats         []UploaderStats `json:"uploadersStats"`
 }
 

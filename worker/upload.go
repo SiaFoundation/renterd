@@ -138,9 +138,9 @@ type (
 
 	uploadManagerStats struct {
 		avgSlabUploadSpeedMBPS float64
+		avgOverdrivePct        float64
 		healthyUploaders       uint64
 		numUploaders           uint64
-		overdrivePct           float64
 		uploadSpeedsMBPS       map[types.PublicKey]float64
 	}
 
@@ -219,8 +219,8 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 	// prepare stats
 	return uploadManagerStats{
 		avgSlabUploadSpeedMBPS: mgr.statsSlabUploadSpeed.Average() * 0.008, // convert bytes per ms to mbps,
+		avgOverdrivePct:        mgr.statsOverdrive.Average(),
 		healthyUploaders:       uint64(numHealthy),
-		overdrivePct:           mgr.statsOverdrive.P90(),
 		numUploaders:           uint64(len(speeds)),
 		uploadSpeedsMBPS:       speeds,
 	}

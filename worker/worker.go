@@ -913,9 +913,9 @@ func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 
 	// encode response
 	jc.Encode(api.UploadStatsResponse{
-		AvgSlabUploadSpeedMBPS: stats.avgSlabUploadSpeedMBPS,
+		AvgSlabUploadSpeedMBPS: math.Ceil(stats.avgSlabUploadSpeedMBPS*100) / 100,
+		AvgOverdrivePct:        math.Floor(stats.avgOverdrivePct*100*100) / 100,
 		HealthyUploaders:       stats.healthyUploaders,
-		OverdrivePct:           math.Floor(stats.overdrivePct*100*100) / 100,
 		NumUploaders:           stats.numUploaders,
 		UploadersStats:         uss,
 	})
