@@ -89,7 +89,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), want, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), t.Name(), want, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -449,7 +449,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), "foo", obj, map[types.PublicKey]types.FileContractID{
+	if err := cs.UpdateObject(context.Background(), "foo", obj, nil, map[types.PublicKey]types.FileContractID{
 		hk:  fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -846,12 +846,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := db.UpdateObject(ctx, objID, obj1, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.UpdateObject(ctx, objID, obj1, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -880,11 +880,11 @@ func TestSQLMetadataStore(t *testing.T) {
 	obj.Model = Model{}
 	for i := range obj.Slabs {
 		obj.Slabs[i].Model = Model{}
-		obj.Slabs[i].Slab.Model = Model{}
-		obj.Slabs[i].Slab.Shards[0].ID = 0
-		obj.Slabs[i].Slab.Shards[0].DBSector.Model = Model{}
-		obj.Slabs[i].Slab.Shards[0].DBSector.Contracts[0].Model = Model{}
-		obj.Slabs[i].Slab.Shards[0].DBSector.Contracts[0].Host.Model = Model{}
+		obj.Slabs[i].DBSlab.Model = Model{}
+		obj.Slabs[i].DBSlab.Shards[0].ID = 0
+		obj.Slabs[i].DBSlab.Shards[0].DBSector.Model = Model{}
+		obj.Slabs[i].DBSlab.Shards[0].DBSector.Contracts[0].Model = Model{}
+		obj.Slabs[i].DBSlab.Shards[0].DBSector.Contracts[0].Host.Model = Model{}
 	}
 
 	expectedObj := dbObject{
@@ -894,8 +894,8 @@ func TestSQLMetadataStore(t *testing.T) {
 		Slabs: []dbSlice{
 			{
 				DBObjectID: 1,
-				Slab: dbSlab{
-					DBSliceID:   1,
+				DBSlabID:   1,
+				DBSlab: dbSlab{
 					Key:         obj1Slab0Key,
 					MinShards:   1,
 					TotalShards: 1,
@@ -937,8 +937,8 @@ func TestSQLMetadataStore(t *testing.T) {
 			},
 			{
 				DBObjectID: 1,
-				Slab: dbSlab{
-					DBSliceID:   2,
+				DBSlabID:   2,
+				DBSlab: dbSlab{
 					Key:         obj1Slab1Key,
 					MinShards:   2,
 					TotalShards: 1,
@@ -996,7 +996,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	// second one.
 	obj1.Slabs = obj1.Slabs[1:]
 	obj1.Slabs[0].Slab.MinShards = 123
-	if err := db.UpdateObject(ctx, objID, obj1, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = db.Object(ctx, objID)
@@ -1079,7 +1079,7 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, obj, ucs)
+		os.UpdateObject(ctx, o.path, obj, nil, ucs)
 	}
 	tests := []struct {
 		path   string
@@ -1138,7 +1138,7 @@ func TestSearchObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, obj, ucs)
+		os.UpdateObject(ctx, o.path, obj, nil, ucs)
 	}
 	tests := []struct {
 		path string
@@ -1330,7 +1330,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1441,7 +1441,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1511,7 +1511,7 @@ func TestContractSectors(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", obj, nil, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1537,7 +1537,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.UpdateObject(ctx, "foo", obj, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", obj, nil, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1602,7 +1602,7 @@ func TestPutSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -1873,7 +1873,7 @@ func TestObjectsStats(t *testing.T) {
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := cs.UpdateObject(context.Background(), key, obj, contracts)
+		err := cs.UpdateObject(context.Background(), key, obj, nil, contracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1927,7 +1927,7 @@ func TestObjectsStats(t *testing.T) {
 func (s *SQLStore) dbObject(ctx context.Context, key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.Slab.Shards.DBSector.Contracts.Host").
+		Preload("Slabs.DBSlab.Shards.DBSector.Contracts.Host").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, api.ErrObjectNotFound

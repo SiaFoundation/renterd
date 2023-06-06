@@ -92,31 +92,33 @@ type (
 		DBObjectID uint `gorm:"index"`
 
 		// Slice related fields.
-		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slabs too
-		Offset uint32
-		Length uint32
+		DBSlab   dbSlab
+		DBSlabID uint `gorm:"index"`
+		Offset   uint32
+		Length   uint32
 	}
 
 	dbSlab struct {
 		Model
-		DBSliceID uint `gorm:"index"`
 
 		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
 		TotalShards uint8
 
-		Buffer dbSlabBuffer
-
+		Slices []dbSlice `gorm:"constraint:OnDelete:SET NULL"`
 		Shards []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
 	dbSlabBuffer struct {
 		Model
 		DBSlabID uint `gorm:"index;unique"`
+		DBSlab   dbSlab
 
+		Complete    bool `gorm:"index"`
 		Data        []byte
-		Complete    bool  `gorm:"index"`
 		LockedUntil int64 // unix timestamp
+		MinShards   uint8 `gorm:"index"`
+		TotalShards uint8 `gorm:"index"`
 	}
 
 	dbSector struct {
@@ -735,7 +737,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	return nil
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
@@ -772,29 +774,30 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 		}
 
 		for _, ss := range o.Slabs {
-			// Create Slice.
-			slice := dbSlice{
-				DBObjectID: obj.ID,
-				Offset:     ss.Offset,
-				Length:     ss.Length,
-			}
-			err = tx.Create(&slice).Error
-			if err != nil {
-				return err
-			}
-
-			// Create Slab.
+			// Create Slab if it doesn't exist yet.
 			slabKey, err := ss.Key.MarshalText()
 			if err != nil {
 				return err
 			}
 			slab := &dbSlab{
-				DBSliceID:   slice.ID,
 				Key:         slabKey,
 				MinShards:   ss.MinShards,
 				TotalShards: uint8(len(ss.Shards)),
 			}
-			err = tx.Create(&slab).Error
+			err = tx.Where(dbSlab{Key: slabKey}).
+				FirstOrCreate(&slab).Error
+			if err != nil {
+				return err
+			}
+
+			// Create Slice.
+			slice := dbSlice{
+				DBSlabID:   slab.ID,
+				DBObjectID: obj.ID,
+				Offset:     ss.Offset,
+				Length:     ss.Length,
+			}
+			err = tx.Create(&slice).Error
 			if err != nil {
 				return err
 			}
@@ -844,18 +847,112 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 					}
 				}
 			}
-
-			// TODO: check if incomplete slab
-
-			// TODO: fetch a buffer if possible
-
-			// 3 cases:
-			// 1. we have no buffer -> create one
-			// 2. we have a buffer with space -> add to it
-			// 3. we have a buffer without space -> fill it up, mark as done, create new one
 		}
-		return nil
+
+		// Handle partial slab.
+		if partialSlab == nil {
+			return nil
+		}
+
+		// Find a buffer that is not yet marked as complete where the MinShards
+		// and TotalShards match.
+		var buffer dbSlabBuffer
+		err = tx.Preload("DBSlab").Take(&buffer, "complete = ? AND min_shards = ? AND total_shards = ?", false, partialSlab.MinShards, partialSlab.TotalShards).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			// No buffer found, create a new one.
+			return createSlabBuffer(tx, obj.ID, *partialSlab)
+		}
+
+		// We have a buffer. Sanity check it.
+		slabSize := slabSize(partialSlab.MinShards, partialSlab.TotalShards)
+		if len(buffer.Data) >= slabSize {
+			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
+		}
+
+		// Create the slice.
+		remainingSpace := slabSize - len(buffer.Data)
+		slice := dbSlice{
+			DBObjectID: obj.ID,
+			DBSlabID:   buffer.DBSlabID,
+			Offset:     uint32(len(buffer.Data)),
+		}
+		if remainingSpace <= len(partialSlab.Data) {
+			slice.Length = uint32(len(partialSlab.Data))
+		} else {
+			slice.Length = uint32(remainingSpace)
+		}
+		if err := tx.Create(&slice).Error; err != nil {
+			return err
+		}
+
+		// Add the data to the buffer and remember the overflowing data.
+		var overflow []byte
+		buffer.Data = append(buffer.Data, partialSlab.Data...)
+		if len(buffer.Data) > slabSize {
+			buffer.Data, overflow = buffer.Data[:slabSize], buffer.Data[slabSize:]
+		}
+
+		// Update buffer.
+		buffer.Complete = len(buffer.Data) == slabSize
+		err = tx.Model(&dbSlabBuffer{}).Updates(map[string]interface{}{
+			"complete": buffer.Complete,
+			"data":     buffer.Data,
+		}).Error
+		if err != nil {
+			return err
+		}
+
+		// If there is no overflow, we are done.
+		if len(overflow) == 0 {
+			return nil
+		}
+
+		// Otherwise, create a new buffer with a new slab and slice.
+		partialSlab.Data = overflow
+		return createSlabBuffer(tx, obj.ID, *partialSlab)
 	})
+}
+
+func slabSize(minShards, totalShards uint8) int {
+	return int(rhpv2.SectorSize) * int(totalShards) / int(minShards)
+}
+
+func createSlabBuffer(tx *gorm.DB, objectID uint, partialSlab object.PartialSlab) error {
+	if partialSlab.TotalShards == 0 || partialSlab.MinShards == 0 {
+		return fmt.Errorf("min shards and total shards must be greater than 0: %v, %v", partialSlab.MinShards, partialSlab.TotalShards)
+	}
+	if partialSlab.MinShards > partialSlab.TotalShards {
+		return fmt.Errorf("min shards must be less than or equal to total shards: %v > %v", partialSlab.MinShards, partialSlab.TotalShards)
+	}
+	if slabSize := int(rhpv2.SectorSize) * int(partialSlab.TotalShards) / int(partialSlab.MinShards); len(partialSlab.Data) >= slabSize {
+		return fmt.Errorf("partial slab data size must be less than %v to count as a partial slab: %v", slabSize, len(partialSlab.Data))
+	}
+	key, err := partialSlab.Key.MarshalText()
+	if err != nil {
+		return err
+	}
+	// Create a new buffer and slab.
+	return tx.Create(&dbSlabBuffer{
+		DBSlab: dbSlab{
+			Key:         key,
+			MinShards:   partialSlab.MinShards,
+			TotalShards: partialSlab.TotalShards,
+			Slices: []dbSlice{
+				{
+					DBObjectID: objectID,
+					Offset:     0,
+					Length:     uint32(len(partialSlab.Data)),
+				},
+			},
+		},
+		Complete:    false,
+		Data:        partialSlab.Data,
+		LockedUntil: 0,
+		MinShards:   partialSlab.MinShards,
+		TotalShards: partialSlab.TotalShards,
+	}).Error
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
