@@ -88,6 +88,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 	}
 
 	var hostInfos []api.HostHandlerGET
+	wanted := limit
 	for {
 		// fetch up to 'limit' hosts.
 		hosts, err := c.ap.bus.SearchHosts(ctx, filterMode, addressContains, keyIn, offset, limit)
@@ -98,10 +99,11 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 
 		// if there are no more hosts, we're done.
 		if len(hosts) == 0 {
-			break // no more hosts
+			return hostInfos, nil // no more hosts
 		}
 
 		// decide how many of the returned hosts to keep.
+		var keptHosts int
 		for _, host := range hosts {
 			hi, cached := hostInfo[host.PublicKey]
 			if !cached {
@@ -120,10 +122,15 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 				Usable:           hi.Usable,
 				UnusableReasons:  hi.UnusableResult.reasons(),
 			})
-			if limit > 0 {
-				limit -= 1
+			if wanted > 0 && len(hostInfos) == wanted {
+				return hostInfos, nil // we're done.
 			}
+			keptHosts++
+		}
+
+		// if no hosts were kept from this batch, double the limit.
+		if keptHosts == 0 {
+			limit *= 2
 		}
 	}
-	return hostInfos, nil
 }
