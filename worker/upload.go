@@ -22,6 +22,11 @@ import (
 	"lukechampine.com/frand"
 )
 
+const (
+	statsDecayHalfTime        = 5 * time.Minute
+	statsRecomputeMinInterval = 10 * time.Second
+)
+
 var (
 	errNoFreeUploader     = errors.New("no free uploader")
 	errNotEnoughContracts = errors.New("not enough contracts to support requested redundancy")
@@ -42,8 +47,9 @@ type (
 		statsSpeed     *dataPoints
 		stopChan       chan struct{}
 
-		mu        sync.Mutex
-		uploaders []*uploader
+		mu            sync.Mutex
+		uploaders     []*uploader
+		lastRecompute time.Time
 	}
 
 	uploader struct {
@@ -58,8 +64,9 @@ type (
 		signalNewUpload     chan struct{}
 		queue               []*shardUpload
 
-		statsSpeed *dataPoints
-		stopChan   chan struct{}
+		statsEstimate *dataPoints
+		statsSpeed    *dataPoints // keep track of this separately for stats (no decay is applied)
+		stopChan      chan struct{}
 	}
 
 	upload struct {
@@ -156,10 +163,10 @@ func (w *worker) initUploadManager() {
 	w.uploadManager = newUploadManager(w, w, w.uploadMaxOverdrive, w.uploadOverdriveTimeout)
 }
 
-func newDataPoints() *dataPoints {
+func newDataPoints(halfLife time.Duration) *dataPoints {
 	return &dataPoints{
 		Float64Data: make([]float64, 20),
-		halfLife:    time.Minute,
+		halfLife:    halfLife,
 		lastDecay:   time.Now(),
 	}
 }
@@ -172,8 +179,8 @@ func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, s
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: sectorTimeout,
 
-		statsOverdrive: newDataPoints(),
-		statsSpeed:     newDataPoints(),
+		statsOverdrive: newDataPoints(0),
+		statsSpeed:     newDataPoints(0),
 
 		stopChan: make(chan struct{}),
 
@@ -193,26 +200,30 @@ func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contract
 }
 
 func (mgr *uploadManager) Stats() uploadManagerStats {
+	// recompute stats
+	mgr.tryRecomputeStats()
+
+	// collect stats
 	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	// prepare stats
-	stats := uploadManagerStats{
-		avgUploadSpeedMBPS:  mgr.statsSpeed.percentileP90() * 0.008, // convert bytes per ms to mbps,
-		overdrivePct:        mgr.statsOverdrive.percentileP90(),
-		numUploaders:        uint64(len(mgr.uploaders)),
-		uploadSpeedsP90MBPS: make(map[types.PublicKey]float64),
-	}
-
-	// fill in uploader stats
+	var numHealthy int
+	speeds := make(map[types.PublicKey]float64)
 	for _, u := range mgr.uploaders {
-		stats.uploadSpeedsP90MBPS[u.hk] = u.statsSpeed.percentileP90() * 0.008 // convert bytes per ms to mbps
-		if u.healthy() {
-			stats.healthyUploaders++
+		healthy, mbps := u.stats()
+		speeds[u.hk] = mbps
+		if healthy {
+			numHealthy++
 		}
 	}
+	mgr.mu.Unlock()
 
-	return stats
+	// prepare stats
+	return uploadManagerStats{
+		avgUploadSpeedMBPS:  mgr.statsSpeed.Average() * 0.008, // convert bytes per ms to mbps,
+		healthyUploaders:    uint64(numHealthy),
+		overdrivePct:        mgr.statsOverdrive.P90(),
+		numUploaders:        uint64(len(speeds)),
+		uploadSpeedsP90MBPS: speeds,
+	}
 }
 
 func (mgr *uploadManager) Stop() {
@@ -302,14 +313,16 @@ loop:
 }
 
 func (mgr *uploadManager) enqueue(s *shardUpload) error {
+	// recompute stats
+	mgr.tryRecomputeStats()
+
+	// find a free uploader
 	uploader := mgr.uploader(s)
 	if uploader == nil {
 		return errNoFreeUploader
 	}
 	uploader.schedule(s)
 
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
 	s.upload.registerUsedUploader(s.sID, uploader.fcid)
 	return nil
 }
@@ -362,8 +375,9 @@ func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
 		queue:           make([]*shardUpload, 0),
 		signalNewUpload: make(chan struct{}, 1),
 
-		statsSpeed: newDataPoints(),
-		stopChan:   make(chan struct{}),
+		statsEstimate: newDataPoints(statsDecayHalfTime),
+		statsSpeed:    newDataPoints(0), // no decay for exposed stats
+		stopChan:      make(chan struct{}),
 	}
 }
 
@@ -371,6 +385,52 @@ func (mgr *uploadManager) numUploaders() int {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	return len(mgr.uploaders)
+}
+
+func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
+	mgr.mu.Lock()
+	if len(mgr.uploaders) == 0 {
+		mgr.mu.Unlock()
+		return nil
+	}
+
+	// sort the uploaders by their estimate
+	sort.Slice(mgr.uploaders, func(i, j int) bool {
+		return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
+	})
+
+	// filter queues
+	var candidates []*uploader
+	for _, uploader := range mgr.uploaders {
+		if shard.upload.canUseUploader(uploader, shard.sID) {
+			candidates = append(candidates, uploader)
+		}
+	}
+	mgr.mu.Unlock()
+
+	// return early if we have no queues left
+	if len(candidates) == 0 {
+		return nil
+	}
+
+loop:
+	for {
+		// if this slab does not have more than 1 parent, we return the first
+		// (and thus best) candidate
+		if len(shard.upload.parents(shard.sID)) <= 1 {
+			return candidates[0]
+		}
+
+		// otherwise we wait, allowing the parents to complete
+		select {
+		case <-shard.upload.doneShardTrigger:
+			continue loop
+		case <-shard.ctx.Done():
+			break loop
+		}
+	}
+
+	return nil
 }
 
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
@@ -408,67 +468,32 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	}
 }
 
-func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
+func (mgr *uploadManager) tryRecomputeStats() {
 	mgr.mu.Lock()
-	if len(mgr.uploaders) == 0 {
-		mgr.mu.Unlock()
-		return nil
+	defer mgr.mu.Unlock()
+	if time.Since(mgr.lastRecompute) < statsRecomputeMinInterval {
+		return
 	}
 
-	// grab the upload
-	upload := shard.upload
-
-	// sort the uploaders by their estimate
-	sort.Slice(mgr.uploaders, func(i, j int) bool {
-		return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
-	})
-
-	// filter queues
-	var candidates []*uploader
-	for _, uploader := range mgr.uploaders {
-		if upload.canUseUploader(uploader, shard.sID) {
-			candidates = append(candidates, uploader)
-		}
+	for _, u := range mgr.uploaders {
+		u.statsEstimate.Recompute()
+		u.statsSpeed.Recompute()
 	}
-	mgr.mu.Unlock()
+	mgr.lastRecompute = time.Now()
+}
 
-	// return early if we have no queues left
-	if len(candidates) == 0 {
-		return nil
+func (u *upload) parents(sID slabID) []slabID {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	var parents []slabID
+	for _, ongoing := range u.ongoing {
+		if ongoing == sID {
+			break
+		}
+		parents = append(parents, ongoing)
 	}
-
-loop:
-	for {
-		// grab ongoing slab uploads
-		upload.mu.Lock()
-		ongoing := upload.ongoing
-		upload.mu.Unlock()
-
-		// grab the slabs parents
-		var parents []slabID
-		for _, sID := range ongoing {
-			if sID == shard.sID {
-				break
-			}
-			parents = append(parents, sID)
-		}
-
-		// if this slab does not have more than 1 parent, we return the first
-		// (and thus best) candidate
-		if len(parents) < 2 {
-			return candidates[0]
-		}
-
-		// otherwise we wait, allowing the parents to complete
-		select {
-		case <-upload.doneShardTrigger:
-			continue loop
-		case <-shard.ctx.Done():
-			break loop
-		}
-	}
-
-	return nil
+	return parents
 }
 
 func (u *upload) finishSlabUpload(upload *slabUpload) {
@@ -684,8 +709,8 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 	span.SetAttributes(attribute.Int("overdrive", slab.overdriveCnt()))
 
 	// track stats
-	mgr.statsOverdrive.track(slab.overdrivePct())
-	mgr.statsSpeed.track(float64(slab.uploadSpeed()))
+	mgr.statsOverdrive.Track(slab.overdrivePct())
+	mgr.statsSpeed.Track(float64(slab.uploadSpeed()))
 	return slab.finish()
 }
 
@@ -738,7 +763,7 @@ outer:
 			isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
 			canceledOverdrive := upload.done() && upload.overdrive && err != nil
 			if !canceledOverdrive && !isErrClosedStream {
-				u.track(err, time.Since(start))
+				u.trackSectorUpload(err, time.Since(start))
 			}
 		}
 	}
@@ -754,14 +779,36 @@ func (u *uploader) estimate() float64 {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// fetch average speed
-	bytesPerMS := u.statsSpeed.percentileP90()
-	if bytesPerMS == 0 {
-		bytesPerMS = math.MaxFloat64
+	// fetch estimated duration per sector
+	estimateP90 := u.statsEstimate.P90()
+	if estimateP90 == 0 {
+		estimateP90 = 1
 	}
 
-	outstanding := (len(u.queue) + 1) * rhpv2.SectorSize
-	return float64(outstanding) / bytesPerMS
+	// calculate estimated time
+	numSectors := float64(len(u.queue) + 1)
+	return numSectors * estimateP90
+}
+
+func (u *uploader) stats() (healthy bool, p90MBPS float64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	healthy = u.consecutiveFailures == 0
+	p90MBPS = u.statsSpeed.P90() * 0.008
+	return
+}
+
+func (u *uploader) pop() *shardUpload {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	if len(u.queue) > 0 {
+		j := u.queue[0]
+		u.queue[0] = nil
+		u.queue = u.queue[1:]
+		return j
+	}
+	return nil
 }
 
 func (u *uploader) schedule(upload *shardUpload) {
@@ -786,21 +833,17 @@ func (u *uploader) schedule(upload *shardUpload) {
 	}
 }
 
-func (u *uploader) healthy() bool {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.consecutiveFailures == 0
-}
-
-func (u *uploader) track(err error, d time.Duration) {
+func (u *uploader) trackSectorUpload(err error, d time.Duration) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if err != nil {
 		u.consecutiveFailures++
-		u.statsSpeed.track(1)
+		u.statsEstimate.Track(math.MaxFloat64)
 	} else {
+		ms := d.Milliseconds()
 		u.consecutiveFailures = 0
-		u.statsSpeed.track(float64(rhpv2.SectorSize / d.Milliseconds()))
+		u.statsEstimate.Track(float64(ms))                 // duration in ms
+		u.statsSpeed.Track(float64(rhpv2.SectorSize / ms)) // bytes per ms
 	}
 }
 
@@ -808,19 +851,6 @@ func (u *uploader) updateBlockHeight(bh uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.bh = bh
-}
-
-func (u *uploader) pop() *shardUpload {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	if len(u.queue) > 0 {
-		j := u.queue[0]
-		u.queue[0] = nil
-		u.queue = u.queue[1:]
-		return j
-	}
-	return nil
 }
 
 func (upload *shardUpload) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
@@ -1031,50 +1061,71 @@ func (s *slabUpload) tryTriggerNextRead() {
 	}
 }
 
+func (a *dataPoints) Average() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	avg, err := a.Mean()
+	if err != nil {
+		avg = 0
+	}
+	return avg
+}
+
+func (a *dataPoints) P90() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.p90
+}
+
+func (a *dataPoints) Recompute() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// apply decay
+	a.tryDecay()
+
+	// recalculate the p90
+	p90, err := a.Percentile(90)
+	if err != nil {
+		p90 = 0
+	}
+	a.p90 = p90
+}
+
+func (a *dataPoints) Track(p float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// reset last decay to avoid applying decay too frequently if we're
+	// constantly tracking data points
+	a.lastDecay = time.Now()
+
+	a.Float64Data[a.cnt%len(a.Float64Data)] = p
+	a.cnt++
+}
+
 func (a *dataPoints) tryDecay() {
-	// return early
+	// return if decay is disabled
 	if a.halfLife == 0 {
 		return
 	}
 
-	// return if we're not due for a decay round
-	decayFreq := a.halfLife / 6
+	// return if decay is not due
+	decayFreq := a.halfLife / 5
 	timePassed := time.Since(a.lastDecay)
 	if timePassed < decayFreq {
 		return
 	}
 
-	// calculate how much decay to apply
+	// calculate decay and apply it
 	strength := float64(timePassed) / float64(a.halfLife)
 	decay := math.Pow(0.5, strength)
 	for i := range a.Float64Data {
 		a.Float64Data[i] *= decay
 	}
 
-	// recompute the p90
-	p90, err := a.Percentile(90)
-	if err != nil {
-		p90 = 0
-	}
-	a.p90 = p90
-
 	// update the last decay time
 	a.lastDecay = time.Now()
-}
-
-func (a *dataPoints) percentileP90() float64 {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.tryDecay()
-	return a.p90
-}
-
-func (a *dataPoints) track(p float64) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.tryDecay()
-	a.Float64Data[a.cnt%len(a.Float64Data)] = p
-	a.cnt++
 }
 
 func (uID uploadID) String() string {
