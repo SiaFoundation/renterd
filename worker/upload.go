@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	statsDecayHalfTime        = 5 * time.Minute
+	statsDecayHalfTime        = time.Minute
 	statsRecomputeMinInterval = 10 * time.Second
 )
 
@@ -838,7 +838,7 @@ func (u *uploader) trackSectorUpload(err error, d time.Duration) {
 	defer u.mu.Unlock()
 	if err != nil {
 		u.consecutiveFailures++
-		u.statsEstimate.Track(math.MaxFloat64)
+		u.statsEstimate.Track(float64(time.Hour.Milliseconds()))
 	} else {
 		ms := d.Milliseconds()
 		u.consecutiveFailures = 0
