@@ -120,7 +120,9 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 				Usable:           hi.Usable,
 				UnusableReasons:  hi.UnusableResult.reasons(),
 			})
-			limit -= 1
+			if limit > 0 {
+				limit -= 1
+			}
 		}
 	}
 	return hostInfos, nil

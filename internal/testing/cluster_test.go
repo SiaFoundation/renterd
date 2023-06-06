@@ -236,6 +236,20 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("host wasn't set")
 		}
 	}
+	hostInfosUsable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, "usable", "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(hostInfos, hostInfosUsable) {
+		t.Fatal("result for 'usable' should match the result for ''")
+	}
+	hostInfosUnusable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, "unusable", "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hostInfosUnusable) != 0 {
+		t.Fatal("there should be no unusable hosts", len(hostInfosUnusable))
+	}
 }
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
