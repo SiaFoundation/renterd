@@ -65,66 +65,63 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
-func (c *contractor) HostInfos(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerGET, error) {
-	cfg := c.ap.Config()
-	if cfg.Contracts.Allowance.IsZero() {
-		return nil, fmt.Errorf("can not score hosts because contracts allowance is zero")
-	}
-	if cfg.Contracts.Amount == 0 {
-		return nil, fmt.Errorf("can not score hosts because contracts amount is zero")
-	}
-	if cfg.Contracts.Period == 0 {
-		return nil, fmt.Errorf("can not score hosts because contract period is zero")
-	}
-
-	hosts, err := c.ap.bus.SearchHosts(ctx, filterMode, addressContains, keyIn, offset, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch requested hosts from bus: %w", err)
-	}
-	gs, err := c.ap.bus.GougingSettings(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
-	}
-	rs, err := c.ap.bus.RedundancySettings(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
-	}
-	cs, err := c.ap.bus.ConsensusState(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
-	}
-	fee, err := c.ap.bus.RecommendedFee(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
-	}
-
-	f := newIPFilter(c.logger)
-	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
-
+func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerGET, error) {
 	c.mu.Lock()
-	storedData := make(map[types.PublicKey]uint64)
-	for _, host := range hosts {
-		storedData[host.PublicKey] = c.cachedDataStored[host.PublicKey]
-	}
-	minScore := c.cachedMinScore
+	hostInfo := c.cachedHostInfo
 	c.mu.Unlock()
 
+	// declare helper to decide whether to keep a host.
+	if usabilityMode != "usable" && usabilityMode != "unusable" && usabilityMode != "" {
+		return nil, fmt.Errorf("invalid usability mode: %v, options are usable and unusable", usabilityMode)
+	}
+	keep := func(usable bool) bool {
+		switch usabilityMode {
+		case "usable":
+			return usable
+		case "unusable":
+			return !usable
+		case "":
+			return usable
+		default:
+			panic("unreachable")
+		}
+	}
+
 	var hostInfos []api.HostHandlerGET
-	for _, host := range hosts {
-		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
-		host.PriceTable.HostBlockHeight = cs.BlockHeight
+	for {
+		// fetch up to 'limit' hosts.
+		hosts, err := c.ap.bus.SearchHosts(ctx, filterMode, addressContains, keyIn, offset, limit)
+		if err != nil {
+			return nil, err
+		}
+		offset += len(hosts)
 
-		isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host, minScore, storedData[host.PublicKey])
-		hostInfos = append(hostInfos, api.HostHandlerGET{
-			Host: host,
+		// if there are no more hosts, we're done.
+		if len(hosts) == 0 {
+			break // no more hosts
+		}
 
-			Gouging:          unusableResult.gougingBreakdown.Gouging(),
-			GougingBreakdown: unusableResult.gougingBreakdown,
-			Score:            unusableResult.scoreBreakdown.Score(),
-			ScoreBreakdown:   unusableResult.scoreBreakdown,
-			Usable:           isUsable,
-			UnusableReasons:  unusableResult.reasons(),
-		})
+		// decide how many of the returned hosts to keep.
+		for _, host := range hosts {
+			hi, cached := hostInfo[host.PublicKey]
+			if !cached {
+				continue
+			}
+			if !keep(hi.Usable) {
+				continue
+			}
+			hostInfos = append(hostInfos, api.HostHandlerGET{
+				Host: host,
+
+				Gouging:          hi.UnusableResult.gougingBreakdown.Gouging(),
+				GougingBreakdown: hi.UnusableResult.gougingBreakdown,
+				Score:            hi.UnusableResult.scoreBreakdown.Score(),
+				ScoreBreakdown:   hi.UnusableResult.scoreBreakdown,
+				Usable:           hi.Usable,
+				UnusableReasons:  hi.UnusableResult.reasons(),
+			})
+			limit -= 1
+		}
 	}
 	return hostInfos, nil
 }

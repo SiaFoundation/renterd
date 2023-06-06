@@ -349,6 +349,7 @@ type SearchHostsRequest struct {
 	Offset          int               `json:"offset"`
 	Limit           int               `json:"limit"`
 	FilterMode      string            `json:"filterMode"`
+	UsabilityMode   string            `json:"usabilityMode"`
 	AddressContains string            `json:"addressContains"`
 	KeyIn           []types.PublicKey `json:"keyIn"`
 }
