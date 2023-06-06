@@ -19,6 +19,10 @@ const (
 	ContractArchivalReasonHostPruned = "hostpruned"
 	ContractArchivalReasonRemoved    = "removed"
 	ContractArchivalReasonRenewed    = "renewed"
+
+	UsabilityFilterModeAll      = ""
+	UsabilityFilterModeUsable   = "usable"
+	UsabilityFilterModeUnusable = "unusable"
 )
 
 const (

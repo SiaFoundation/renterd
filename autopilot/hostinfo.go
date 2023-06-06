@@ -71,17 +71,17 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 	c.mu.Unlock()
 
 	// declare helper to decide whether to keep a host.
-	if usabilityMode != "usable" && usabilityMode != "unusable" && usabilityMode != "" {
+	if usabilityMode != api.UsabilityFilterModeUsable && usabilityMode != api.UsabilityFilterModeUnusable && usabilityMode != api.UsabilityFilterModeAll {
 		return nil, fmt.Errorf("invalid usability mode: %v, options are usable and unusable", usabilityMode)
 	}
 	keep := func(usable bool) bool {
 		switch usabilityMode {
-		case "usable":
-			return usable
-		case "unusable":
-			return !usable
-		case "":
-			return usable
+		case api.UsabilityFilterModeUsable:
+			return usable // keep usable
+		case api.UsabilityFilterModeUnusable:
+			return !usable // keep unusable
+		case api.UsabilityFilterModeAll:
+			return true // keep all
 		default:
 			panic("unreachable")
 		}
