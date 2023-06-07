@@ -49,6 +49,7 @@ func newTestLogger() logger.Interface {
 	})
 }
 
+// TestConsensusReset is a unit test for ResetConsensusSubscription.
 func TestConsensusReset(t *testing.T) {
 	db, _, ccid, err := newTestSQLStore()
 	if err != nil {

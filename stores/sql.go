@@ -412,6 +412,7 @@ func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID,
 }
 
 func (s *SQLStore) ResetConsensusSubscription() error {
+	// drop tables
 	if err := s.db.Migrator().DropTable(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{}); err != nil {
 		return err
 	}
