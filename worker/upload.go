@@ -403,11 +403,14 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 		return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
 	})
 
-	// filter queues
+	// select top ten candidates
 	var candidates []*uploader
 	for _, uploader := range mgr.uploaders {
 		if shard.upload.canUseUploader(uploader, shard.sID) {
 			candidates = append(candidates, uploader)
+			if len(candidates) == 10 {
+				break
+			}
 		}
 	}
 	mgr.mu.Unlock()
@@ -419,9 +422,12 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 
 loop:
 	for {
-		// if this slab does not have more than 1 parent, we return the first
-		// (and thus best) candidate
+		// if this slab does not have more than 1 parent, we resort the
+		// candidates and return the best one at the time
 		if len(shard.upload.parents(shard.sID)) <= 1 {
+			sort.Slice(candidates, func(i, j int) bool {
+				return candidates[i].estimate() < candidates[j].estimate()
+			})
 			return candidates[0]
 		}
 
