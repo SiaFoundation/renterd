@@ -29,26 +29,30 @@ func performMigrations(tx *gorm.DB) error {
 	// sectors before then dropping the shards table as well as the db_slice_id
 	// column from the slabs table.
 	if m.HasTable("shards") {
-		// add db_slab_id column to slices.
 		if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
 			return err
 		}
-		if err := tx.Exec(`UPDATE slices sli SET sli.db_slab_id=(
-			SELECT sla.id FROM slabs sla WHERE sla.db_slice_id=sli.id)`).Error; err != nil {
-			return err
-		}
-		// add db_slab_id column to sectors.
 		if err := m.AddColumn(&dbSector{}, "db_slab_id"); err != nil {
 			return err
 		}
-		if err := tx.Exec(`UPDATE sectors sec SET sec.db_slab_id=(
-			SELECT sha.db_slab_id FROM shards sha WHERE sha.db_sector_id=sec.id)`).Error; err != nil {
+
+		if err := tx.Exec(`UPDATE slices SET db_slab_id=(
+			SELECT id FROM slabs sla WHERE sla.db_slice_id=slices.id)`).Error; err != nil {
 			return err
 		}
+		if err := tx.Exec(`UPDATE sectors SET db_slab_id=(
+			SELECT db_slab_id FROM shards sha WHERE sha.db_sector_id=sectors.id)`).Error; err != nil {
+			return err
+		}
+
 		// drop column db_slice_id from slabs.
+		if err := m.DropConstraint(&dbSlab{}, "fk_slices_slab"); err != nil {
+			return err
+		}
 		if err := m.DropColumn(&dbSlab{}, "db_slice_id"); err != nil {
 			return err
 		}
+
 		// drop table shards.
 		if err := m.DropTable("shards"); err != nil {
 			return err
