@@ -148,6 +148,7 @@ type (
 	dataPoints struct {
 		stats.Float64Data
 		halfLife time.Duration
+		size     int
 
 		mu            sync.Mutex
 		cnt           int
@@ -167,7 +168,8 @@ func (w *worker) initUploadManager() {
 
 func newDataPoints(halfLife time.Duration) *dataPoints {
 	return &dataPoints{
-		Float64Data: make([]float64, 20),
+		size:        20,
+		Float64Data: make([]float64, 0),
 		halfLife:    halfLife,
 		lastDecay:   time.Now(),
 	}
@@ -1098,8 +1100,13 @@ func (a *dataPoints) Track(p float64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	if a.cnt < a.size {
+		a.Float64Data = append(a.Float64Data, p)
+	} else {
+		a.Float64Data[a.cnt%a.size] = p
+	}
+
 	a.lastDatapoint = time.Now()
-	a.Float64Data[a.cnt%len(a.Float64Data)] = p
 	a.cnt++
 }
 
