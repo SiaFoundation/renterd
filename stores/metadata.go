@@ -92,24 +92,26 @@ type (
 		DBObjectID uint `gorm:"index"`
 
 		// Slice related fields.
-		Slab   dbSlab `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slabs too
-		Offset uint32
-		Length uint32
+		DBSlabID uint `gorm:"index"`
+		Offset   uint32
+		Length   uint32
 	}
 
 	dbSlab struct {
 		Model
-		DBSliceID uint `gorm:"index"`
 
 		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
 		TotalShards uint8
-		Shards      []dbShard `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+
+		Slices []dbSlice  `gorm:"constraint:OnDelete:SET NULL"`
+		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
 	dbSector struct {
 		Model
 
+		DBSlabID   uint      `gorm:"index;NOT NULL"`
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 
@@ -120,14 +122,6 @@ type (
 	dbContractSector struct {
 		DBContractID uint `gorm:"primaryKey"`
 		DBSectorID   uint `gorm:"primaryKey"`
-	}
-
-	// dbShard is a join table between dbSlab and dbSector.
-	dbShard struct {
-		ID         uint `gorm:"primaryKey"`
-		DBSlabID   uint `gorm:"index"`
-		DBSector   dbSector
-		DBSectorID uint `gorm:"index"`
 	}
 
 	// rawObject is used for hydration and is made up of one or many raw sectors.
@@ -171,9 +165,6 @@ func (dbObject) TableName() string { return "objects" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbShard) TableName() string { return "shards" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlab) TableName() string { return "slabs" }
@@ -243,14 +234,10 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	slab.MinShards = s.MinShards
 	slab.Shards = make([]object.Sector, len(s.Shards))
 
-	// hydrate shards if possible
+	// hydrate shards
 	for i, shard := range s.Shards {
-		if shard.DBSector.ID == 0 {
-			continue // sector wasn't preloaded
-		}
-
-		slab.Shards[i].Host = types.PublicKey(shard.DBSector.LatestHost)
-		slab.Shards[i].Root = *(*types.Hash256)(shard.DBSector.Root)
+		slab.Shards[i].Host = types.PublicKey(shard.LatestHost)
+		slab.Shards[i].Root = *(*types.Hash256)(shard.Root)
 	}
 
 	return
@@ -723,6 +710,12 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	return nil
 }
 
+func pruneSlabs(tx *gorm.DB) error {
+	return tx.Exec(`DELETE FROM slabs WHERE slabs.id IN (SELECT * FROM (SELECT sla.id FROM slabs sla
+		LEFT JOIN slices sli ON sli.db_slab_id  = sla.id
+		WHERE db_object_id IS NULL) toDelete)`).Error
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
@@ -738,7 +731,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 	// UpdateObject is ACID.
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
-		// slabs if it exists.
+		// slices if it exists.
 		err := deleteObject(tx, key)
 		if err != nil {
 			return err
@@ -760,29 +753,30 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 		}
 
 		for _, ss := range o.Slabs {
-			// Create Slice.
-			slice := dbSlice{
-				DBObjectID: obj.ID,
-				Offset:     ss.Offset,
-				Length:     ss.Length,
-			}
-			err = tx.Create(&slice).Error
-			if err != nil {
-				return err
-			}
-
-			// Create Slab.
+			// Create Slab if it doesn't exist yet.
 			slabKey, err := ss.Key.MarshalText()
 			if err != nil {
 				return err
 			}
 			slab := &dbSlab{
-				DBSliceID:   slice.ID,
 				Key:         slabKey,
 				MinShards:   ss.MinShards,
 				TotalShards: uint8(len(ss.Shards)),
 			}
-			err = tx.Create(&slab).Error
+			err = tx.Where(dbSlab{Key: slabKey}).
+				FirstOrCreate(&slab).Error
+			if err != nil {
+				return err
+			}
+
+			// Create Slice.
+			slice := dbSlice{
+				DBSlabID:   slab.ID,
+				DBObjectID: obj.ID,
+				Offset:     ss.Offset,
+				Length:     ss.Length,
+			}
+			err = tx.Create(&slice).Error
 			if err != nil {
 				return err
 			}
@@ -795,19 +789,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 				var sector dbSector
 				err := tx.
 					Where(dbSector{Root: shard.Root[:]}).
-					Assign(dbSector{LatestHost: publicKey(shard.Host)}).
+					Assign(dbSector{
+						DBSlabID:   slab.ID,
+						LatestHost: publicKey(shard.Host),
+					}).
 					FirstOrCreate(&sector).
 					Error
-				if err != nil {
-					return err
-				}
-
-				// Add the slab-sector link to the sector to the
-				// shards table.
-				err = tx.Create(&dbShard{
-					DBSlabID:   slab.ID,
-					DBSectorID: sector.ID,
-				}).Error
 				if err != nil {
 					return err
 				}
@@ -884,18 +871,12 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 		if err = tx.
 			Where(&dbSlab{Key: key}).
 			Assign(&dbSlab{TotalShards: uint8(len(slab.Shards))}).
-			Preload("Shards.DBSector").
+			Preload("Shards").
 			Take(&slab).
 			Error; err == gorm.ErrRecordNotFound {
 			return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
 		} else if err != nil {
 			return err
-		}
-
-		// build map out of current shards
-		shards := make(map[uint]struct{})
-		for _, shard := range slab.Shards {
-			shards[shard.DBSectorID] = struct{}{}
 		}
 
 		// loop updated shards
@@ -904,22 +885,13 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 			var sector dbSector
 			if err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{LatestHost: publicKey(shard.Host)}).
+				Assign(dbSector{
+					DBSlabID:   slab.ID,
+					LatestHost: publicKey(shard.Host)},
+				).
 				FirstOrCreate(&sector).
 				Error; err != nil {
 				return err
-			}
-
-			// ensure the join table has an entry
-			_, exists := shards[sector.ID]
-			if !exists {
-				if err := tx.
-					Create(&dbShard{
-						DBSlabID:   slab.ID,
-						DBSectorID: sector.ID,
-					}).Error; err != nil {
-					return err
-				}
 			}
 
 			// ensure the associations are updated
@@ -963,9 +935,8 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 				  (CAST(COUNT(DISTINCT(c.host_id)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
 				  END AS health`).
 		Model(&dbSlab{}).
-		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
-		Joins("INNER JOIN sectors s ON sh.db_sector_id = s.id").
-		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
+		Joins("INNER JOIN sectors s ON s.db_slab_id = slabs.id").
+		Joins("LEFT JOIN contract_sectors se ON s.id = se.db_sector_id").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
 		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
@@ -974,7 +945,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Having("health >= 0 AND health <= ?", healthCutoff).
 		Order("health ASC").
 		Limit(limit).
-		Preload("Shards.DBSector").
+		Preload("Shards").
 		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, dbSlab := range dbBatch {
 				if slab, err := dbSlab.convert(); err == nil {
@@ -1000,14 +971,13 @@ func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN slices sli ON o.id = sli.`db_object_id`").
-		Joins("INNER JOIN slabs sla ON sli.id = sla.`db_slice_id`").
-		Joins("INNER JOIN shards sha ON sla.id = sha.`db_slab_id`").
-		Joins("INNER JOIN sectors sec ON sha.`db_sector_id` = sec.id").
+		Joins("INNER JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+		Joins("INNER JOIN sectors sec ON sla.id = sec.`db_slab_id`").
 		Where("o.object_id = ?", key).
 		Order("o.id ASC").
 		Order("sla.id ASC").
 		Order("sli.offset ASC").
-		Order("sha.db_sector_id ASC").
+		Order("sec.id ASC").
 		Scan(&rows)
 
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -1155,7 +1125,12 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 	return nil
 }
 
-// deleteObject deletes an object from the store.
+// deleteObject deletes an object from the store and prunes all slabs which are
+// without an obect after the deletion. That means in case of packed uploads,
+// the slab is only deleted when no more objects point to it.
 func deleteObject(tx *gorm.DB, key string) error {
-	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
+	if err := tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error; err != nil {
+		return err
+	}
+	return pruneSlabs(tx)
 }

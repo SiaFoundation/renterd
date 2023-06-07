@@ -13,8 +13,8 @@ func (dbHostBlocklistEntryHost) TableName() string {
 	return "host_blocklist_entry_hosts"
 }
 
-func performMigrations(db *gorm.DB) error {
-	m := db.Migrator()
+func performMigrations(tx *gorm.DB) error {
+	m := tx.Migrator()
 
 	// Perform pre-auto migrations
 	//
@@ -22,6 +22,35 @@ func performMigrations(db *gorm.DB) error {
 	// force a resync.
 	if m.HasTable(&dbConsensusInfo{}) && !m.HasColumn(&dbConsensusInfo{}, "height") {
 		if err := m.DropTable(&dbConsensusInfo{}); err != nil {
+			return err
+		}
+	}
+	// If the shards table exists, we add the db_slab_id column to slices and
+	// sectors before then dropping the shards table as well as the db_slice_id
+	// column from the slabs table.
+	if m.HasTable("shards") {
+		// add db_slab_id column to slices.
+		if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
+			return err
+		}
+		if err := tx.Exec(`UPDATE slices sli SET sli.db_slab_id=(
+			SELECT sla.id FROM slabs sla WHERE sla.db_slice_id=sli.id)`).Error; err != nil {
+			return err
+		}
+		// add db_slab_id column to sectors.
+		if err := m.AddColumn(&dbSector{}, "db_slab_id"); err != nil {
+			return err
+		}
+		if err := tx.Exec(`UPDATE sectors sec SET sec.db_slab_id=(
+			SELECT sha.db_slab_id FROM shards sha WHERE sha.db_sector_id=sec.id)`).Error; err != nil {
+			return err
+		}
+		// drop column db_slice_id from slabs.
+		if err := m.DropColumn(&dbSlab{}, "db_slice_id"); err != nil {
+			return err
+		}
+		// drop table shards.
+		if err := m.DropTable("shards"); err != nil {
 			return err
 		}
 	}
@@ -34,7 +63,6 @@ func performMigrations(db *gorm.DB) error {
 		&dbContractSet{},
 		&dbObject{},
 		&dbSector{},
-		&dbShard{},
 		&dbSlab{},
 		&dbSlice{},
 
@@ -56,7 +84,7 @@ func performMigrations(db *gorm.DB) error {
 		// bus.EphemeralAccountStore tables
 		&dbAccount{},
 	}
-	if err := db.AutoMigrate(tables...); err != nil {
+	if err := tx.AutoMigrate(tables...); err != nil {
 		return err
 	}
 
