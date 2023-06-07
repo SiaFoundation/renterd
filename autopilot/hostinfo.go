@@ -83,6 +83,8 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 			return !usable // keep unusable
 		case api.UsabilityFilterModeAll:
 			return true // keep all
+		case "":
+			return true // keep all
 		default:
 			panic("unreachable")
 		}
@@ -141,6 +143,7 @@ func isValidUsabilityFilterMode(usabilityMode string) bool {
 	case api.UsabilityFilterModeUsable:
 	case api.UsabilityFilterModeUnusable:
 	case api.UsabilityFilterModeAll:
+	case "":
 	default:
 		return false
 	}

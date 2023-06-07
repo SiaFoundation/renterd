@@ -20,7 +20,7 @@ const (
 	ContractArchivalReasonRemoved    = "removed"
 	ContractArchivalReasonRenewed    = "renewed"
 
-	UsabilityFilterModeAll      = ""
+	UsabilityFilterModeAll      = "all"
 	UsabilityFilterModeUsable   = "usable"
 	UsabilityFilterModeUnusable = "unusable"
 )
