@@ -1049,9 +1049,8 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 				  (CAST(COUNT(DISTINCT(c.host_id)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
 				  END AS health`).
 		Model(&dbSlab{}).
-		Joins("INNER JOIN shards sh ON sh.db_slab_id = slabs.id").
-		Joins("INNER JOIN sectors s ON sh.db_sector_id = s.id").
-		Joins("LEFT JOIN contract_sectors se USING (db_sector_id)").
+		Joins("INNER JOIN sectors s ON s.db_slab_id = slabs.id").
+		Joins("LEFT JOIN contract_sectors se ON s.id = se.db_sector_id").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
 		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
