@@ -725,9 +725,9 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 }
 
 func pruneSlabs(tx *gorm.DB) error {
-	return tx.Exec(`DELETE FROM slabs WHERE slabs.id IN (SELECT sla.id FROM slabs sla
+	return tx.Exec(`DELETE FROM slabs WHERE slabs.id IN (SELECT * FROM (SELECT sla.id FROM slabs sla
 		LEFT JOIN slices sli ON sli.db_slab_id  = sla.id
-		WHERE db_object_id IS NULL)`).Error
+		WHERE db_object_id IS NULL) toDelete)`).Error
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
