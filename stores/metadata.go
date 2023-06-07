@@ -125,7 +125,7 @@ type (
 	dbSector struct {
 		Model
 
-		DBSlabID   uint      `gorm:"index"`
+		DBSlabID   uint      `gorm:"index;NOT NULL"`
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 
@@ -724,6 +724,12 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	return nil
 }
 
+func pruneSlabs(tx *gorm.DB) error {
+	return tx.Exec(`DELETE FROM slabs WHERE slabs.id IN (SELECT sla.id FROM slabs sla
+		LEFT JOIN slices sli ON sli.db_slab_id  = sla.id
+		WHERE db_object_id IS NULL)`).Error
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
@@ -744,9 +750,6 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 		if err != nil {
 			return err
 		}
-
-		// TODO: If deletion of the object led to slabs without slices pointing
-		// to them, delete them as well.
 
 		// Insert a new object.
 		objKey, err := o.Key.MarshalText()
@@ -1239,7 +1242,12 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 	return nil
 }
 
-// deleteObject deletes an object from the store.
+// deleteObject deletes an object from the store and prunes all slabs which are
+// without an obect after the deletion. That means in case of packed uploads,
+// the slab is only deleted when no more objects point to it.
 func deleteObject(tx *gorm.DB, key string) error {
-	return tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error
+	if err := tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error; err != nil {
+		return err
+	}
+	return pruneSlabs(tx)
 }

@@ -901,6 +901,7 @@ func TestSQLMetadataStore(t *testing.T) {
 					TotalShards: 1,
 					Shards: []dbSector{
 						{
+							DBSlabID:   1,
 							Root:       obj1.Slabs[0].Shards[0].Root[:],
 							LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
 							Contracts: []dbContract{
@@ -940,6 +941,7 @@ func TestSQLMetadataStore(t *testing.T) {
 					TotalShards: 1,
 					Shards: []dbSector{
 						{
+							DBSlabID:   2,
 							Root:       obj1.Slabs[1].Shards[0].Root[:],
 							LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
 							Contracts: []dbContract{
@@ -984,10 +986,8 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch")
 	}
 
-	// Remove the first slab of the object and change the min shards of the
-	// second one.
+	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	obj1.Slabs[0].Slab.MinShards = 123
 	if err := db.UpdateObject(ctx, objID, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
@@ -1003,9 +1003,8 @@ func TestSQLMetadataStore(t *testing.T) {
 	// - 1 element in the object table since we only stored and overwrote a single object
 	// - 1 element in the slabs table since we updated the object to only have 1 slab
 	// - 1 element in the slices table for the same reason
-	// - 2 elements in the sectors table because we don't delete sectors from the sectors table
-	// - 1 element in the sector_slabs table since we got 1 slab linked to a sector
-	countCheck := func(objCount, sliceCount, slabCount, shardCount, sectorCount, sectorSlabCount int64) error {
+	// - 1 element in the sectors table for the same reason
+	countCheck := func(objCount, sliceCount, slabCount, sectorCount int64) error {
 		tableCountCheck := func(table interface{}, tblCount int64) error {
 			var count int64
 			if err := db.db.Model(table).Count(&count).Error; err != nil {
@@ -1029,14 +1028,10 @@ func TestSQLMetadataStore(t *testing.T) {
 		if err := tableCountCheck(&dbSector{}, sectorCount); err != nil {
 			return err
 		}
-		var ssc int64
-		if err := db.db.Table("shards").Count(&ssc).Error; err != nil {
-			return err
-		}
 		return nil
 	}
-	if err := countCheck(1, 1, 1, 1, 2, 1); err != nil {
-		t.Error(err)
+	if err := countCheck(1, 1, 1, 1); err != nil {
+		t.Fatal(err)
 	}
 
 	// Delete the object. Due to the cascade this should delete everything
@@ -1044,7 +1039,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err := db.RemoveObject(ctx, objID); err != nil {
 		t.Fatal(err)
 	}
-	if err := countCheck(0, 0, 0, 0, 2, 0); err != nil {
+	if err := countCheck(0, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 }
