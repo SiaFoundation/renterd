@@ -43,7 +43,6 @@ type AccountStore interface {
 type ContractStore interface {
 	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
 	IsInContractSet(fcid types.FileContractID, set string) bool
-	IsUpForRenewal(fcid types.FileContractID) bool
 }
 
 func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, l *zap.SugaredLogger, refillInterval time.Duration) *accounts {
@@ -134,10 +133,6 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 
 	// refill accounts in separate goroutines
 	for _, c := range contracts {
-		// skip contracts that are up for renewal
-		if a.c.IsUpForRenewal(c.ID) {
-			continue
-		}
 		// skip logging for contracts not in the set
 		if a.c.IsInContractSet(c.ID, cfg.Contracts.Set) {
 			logger = a.l

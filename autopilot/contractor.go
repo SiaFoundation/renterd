@@ -70,7 +70,6 @@ type (
 
 		mu                         sync.Mutex
 		cachedContracts            []api.Contract
-		cachedContractRenewals     map[types.FileContractID]struct{}
 		cachedContractSetContracts map[string]map[types.FileContractID]struct{}
 		cachedDataStored           map[types.PublicKey]uint64
 		cachedMinScore             float64
@@ -112,14 +111,6 @@ func (c *contractor) IsInContractSet(fcid types.FileContractID, set string) bool
 	}
 
 	_, exists = csc[fcid]
-	return exists
-}
-
-func (c *contractor) IsUpForRenewal(fcid types.FileContractID) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	_, exists := c.cachedContractRenewals[fcid]
 	return exists
 }
 
@@ -172,11 +163,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// update contract set contracts
 	c.mu.Lock()
-	dict := make(map[types.FileContractID]struct{})
+	contractsMap := make(map[types.FileContractID]struct{})
 	for _, c := range currentSet {
-		dict[c.ID] = struct{}{}
+		contractsMap[c.ID] = struct{}{}
 	}
-	c.cachedContractSetContracts[state.cfg.Contracts.Set] = dict
+	c.cachedContractSetContracts[state.cfg.Contracts.Set] = contractsMap
 	c.mu.Unlock()
 
 	// fetch all contracts from the worker.
@@ -336,11 +327,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// update contract set contracts
 	c.mu.Lock()
-	dict = make(map[types.FileContractID]struct{})
+	contractsMap = make(map[types.FileContractID]struct{})
 	for _, id := range updatedSet {
-		dict[id] = struct{}{}
+		contractsMap[id] = struct{}{}
 	}
-	c.cachedContractSetContracts[state.cfg.Contracts.Set] = dict
+	c.cachedContractSetContracts[state.cfg.Contracts.Set] = contractsMap
 	c.mu.Unlock()
 	return
 }
@@ -447,9 +438,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
-	// cache variables
-	renewals := make(map[types.FileContractID]struct{})
-
 	// return variables
 	toArchive = make(map[types.FileContractID]string)
 
@@ -534,7 +522,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		if renew {
-			renewals[contract.ID] = struct{}{}
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
 				settings: host.Settings,
@@ -548,11 +535,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toKeep = append(toKeep, fcid)
 		}
 	}
-
-	// update cache
-	c.mu.Lock()
-	c.cachedContractRenewals = renewals
-	c.mu.Unlock()
 
 	return toKeep, toArchive, toRefresh, toRenew, nil
 }
