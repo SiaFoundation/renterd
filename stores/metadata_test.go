@@ -856,7 +856,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it using get and verify every field.
-	obj, err := db.dbObject(ctx, objID)
+	obj, err := db.dbObject(objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -880,11 +880,6 @@ func TestSQLMetadataStore(t *testing.T) {
 	obj.Model = Model{}
 	for i := range obj.Slabs {
 		obj.Slabs[i].Model = Model{}
-		obj.Slabs[i].DBSlab.Model = Model{}
-		obj.Slabs[i].DBSlab.Shards[0].ID = 0
-		obj.Slabs[i].DBSlab.Shards[0].Model = Model{}
-		obj.Slabs[i].DBSlab.Shards[0].Contracts[0].Model = Model{}
-		obj.Slabs[i].DBSlab.Shards[0].Contracts[0].Host.Model = Model{}
 	}
 
 	expectedObj := dbObject{
@@ -895,81 +890,14 @@ func TestSQLMetadataStore(t *testing.T) {
 			{
 				DBObjectID: 1,
 				DBSlabID:   1,
-				DBSlab: dbSlab{
-					Key:         obj1Slab0Key,
-					MinShards:   1,
-					TotalShards: 1,
-					Shards: []dbSector{
-						{
-							DBSlabID:   1,
-							Root:       obj1.Slabs[0].Shards[0].Root[:],
-							LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
-							Contracts: []dbContract{
-								{
-									HostID: 1,
-									Host: dbHost{
-										PublicKey: publicKey(hk1),
-									},
-
-									ContractCommon: ContractCommon{
-										FCID: fileContractID(fcid1),
-
-										TotalCost:      currency(totalCost1),
-										RevisionNumber: "0",
-										StartHeight:    startHeight1,
-										WindowStart:    400,
-										WindowEnd:      500,
-
-										UploadSpending:      zeroCurrency,
-										DownloadSpending:    zeroCurrency,
-										FundAccountSpending: zeroCurrency,
-									},
-								},
-							},
-						},
-					},
-				},
-				Offset: 10,
-				Length: 100,
+				Offset:     10,
+				Length:     100,
 			},
 			{
 				DBObjectID: 1,
 				DBSlabID:   2,
-				DBSlab: dbSlab{
-					Key:         obj1Slab1Key,
-					MinShards:   2,
-					TotalShards: 1,
-					Shards: []dbSector{
-						{
-							DBSlabID:   2,
-							Root:       obj1.Slabs[1].Shards[0].Root[:],
-							LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
-							Contracts: []dbContract{
-								{
-									HostID: 2,
-									Host: dbHost{
-										PublicKey: publicKey(hk2),
-									},
-									ContractCommon: ContractCommon{
-										FCID: fileContractID(fcid2),
-
-										TotalCost:      currency(totalCost2),
-										RevisionNumber: "0",
-										StartHeight:    startHeight2,
-										WindowStart:    400,
-										WindowEnd:      500,
-
-										UploadSpending:      zeroCurrency,
-										DownloadSpending:    zeroCurrency,
-										FundAccountSpending: zeroCurrency,
-									},
-								},
-							},
-						},
-					},
-				},
-				Offset: 20,
-				Length: 200,
+				Offset:     20,
+				Length:     200,
 			},
 		},
 	}
@@ -984,6 +912,98 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 	if !reflect.DeepEqual(fullObj, obj1) {
 		t.Fatal("object mismatch")
+	}
+
+	expectedObjSlab1 := dbSlab{
+		Key:         obj1Slab0Key,
+		MinShards:   1,
+		TotalShards: 1,
+		Shards: []dbSector{
+			{
+				DBSlabID:   1,
+				Root:       obj1.Slabs[0].Shards[0].Root[:],
+				LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
+				Contracts: []dbContract{
+					{
+						HostID: 1,
+						Host: dbHost{
+							PublicKey: publicKey(hk1),
+						},
+
+						ContractCommon: ContractCommon{
+							FCID: fileContractID(fcid1),
+
+							TotalCost:      currency(totalCost1),
+							RevisionNumber: "0",
+							StartHeight:    startHeight1,
+							WindowStart:    400,
+							WindowEnd:      500,
+
+							UploadSpending:      zeroCurrency,
+							DownloadSpending:    zeroCurrency,
+							FundAccountSpending: zeroCurrency,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	expectedObjSlab2 := dbSlab{
+		Key:         obj1Slab1Key,
+		MinShards:   2,
+		TotalShards: 1,
+		Shards: []dbSector{
+			{
+				DBSlabID:   2,
+				Root:       obj1.Slabs[1].Shards[0].Root[:],
+				LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
+				Contracts: []dbContract{
+					{
+						HostID: 2,
+						Host: dbHost{
+							PublicKey: publicKey(hk2),
+						},
+						ContractCommon: ContractCommon{
+							FCID: fileContractID(fcid2),
+
+							TotalCost:      currency(totalCost2),
+							RevisionNumber: "0",
+							StartHeight:    startHeight2,
+							WindowStart:    400,
+							WindowEnd:      500,
+
+							UploadSpending:      zeroCurrency,
+							DownloadSpending:    zeroCurrency,
+							FundAccountSpending: zeroCurrency,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Compare slabs.
+	slab1, err := db.dbSlab(obj1Slab0Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slab2, err := db.dbSlab(obj1Slab1Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabs := []*dbSlab{&slab1, &slab2}
+	for i := range slabs {
+		slabs[i].Model = Model{}
+		slabs[i].Shards[0].Model = Model{}
+		slabs[i].Shards[0].Contracts[0].Model = Model{}
+		slabs[i].Shards[0].Contracts[0].Host.Model = Model{}
+	}
+	if !reflect.DeepEqual(slab1, expectedObjSlab1) {
+		t.Fatal("mismatch", cmp.Diff(slab1, expectedObjSlab1))
+	}
+	if !reflect.DeepEqual(slab2, expectedObjSlab2) {
+		t.Fatal("mismatch", cmp.Diff(slab2, expectedObjSlab2))
 	}
 
 	// Remove the first slab of the object.
@@ -1706,7 +1726,7 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := db.dbObject(ctx, "foo"); err != nil {
+	if obj, err := db.dbObject("foo"); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
@@ -1910,13 +1930,25 @@ func TestObjectsStats(t *testing.T) {
 }
 
 // dbObject retrieves a dbObject from the store.
-func (s *SQLStore) dbObject(ctx context.Context, key string) (dbObject, error) {
+func (s *SQLStore) dbObject(key string) (dbObject, error) {
 	var obj dbObject
 	tx := s.db.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs.DBSlab.Shards.Contracts.Host").
+		Preload("Slabs").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return dbObject{}, api.ErrObjectNotFound
 	}
 	return obj, nil
+}
+
+// dbObject retrieves a dbObject from the store.
+func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
+	var slab dbSlab
+	tx := s.db.Where(&dbSlab{Key: key}).
+		Preload("Shards.Contracts.Host").
+		Take(&slab)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return dbSlab{}, api.ErrObjectNotFound
+	}
+	return slab, nil
 }

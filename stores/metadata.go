@@ -92,7 +92,6 @@ type (
 		DBObjectID uint `gorm:"index"`
 
 		// Slice related fields.
-		DBSlab   dbSlab
 		DBSlabID uint `gorm:"index"`
 		Offset   uint32
 		Length   uint32
@@ -248,7 +247,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	slab.MinShards = s.MinShards
 	slab.Shards = make([]object.Sector, len(s.Shards))
 
-	// hydrate shards if possible
+	// hydrate shards
 	for i, shard := range s.Shards {
 		slab.Shards[i].Host = types.PublicKey(shard.LatestHost)
 		slab.Shards[i].Root = *(*types.Hash256)(shard.Root)

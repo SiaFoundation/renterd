@@ -25,8 +25,9 @@ func performMigrations(tx *gorm.DB) error {
 			return err
 		}
 	}
-	// If the shards table exists, drop it, drop the db_slice_id column from the
-	// slabs table and add a db_slab_id column to the slices table.
+	// If the shards table exists, we add the db_slab_id column to slices and
+	// sectors before then dropping the shards table as well as the db_slice_id
+	// column from the slabs table.
 	if m.HasTable("shards") {
 		// add db_slab_id column to slices.
 		if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
