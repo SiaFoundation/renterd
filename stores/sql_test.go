@@ -3,6 +3,8 @@ package stores
 import (
 	"encoding/hex"
 	"os"
+	"strings"
+	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -45,4 +47,60 @@ func newTestLogger() logger.Interface {
 		LogLevel:                  logger.Warn,
 		SlowThreshold:             100 * time.Millisecond,
 	})
+}
+
+func TestConsensusReset(t *testing.T) {
+	db, _, ccid, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ccid != modules.ConsensusChangeBeginning {
+		t.Fatal("wrong ccid", ccid, modules.ConsensusChangeBeginning)
+	}
+
+	if ccid != modules.ConsensusChangeBeginning {
+		t.Fatal("wrong ccid", ccid, modules.ConsensusChangeBeginning)
+	}
+
+	// Manually insert into the consenus_infos, the transactions and siacoin_elements tables.
+	ccid2 := modules.ConsensusChangeID{1}
+	db.db.Create(&dbConsensusInfo{
+		CCID: ccid2[:],
+	})
+	db.db.Create(&dbSiacoinElement{
+		OutputID: hash256{2},
+	})
+	db.db.Create(&dbTransaction{
+		TransactionID: hash256{3},
+	})
+
+	// Reset the consensus.
+	if err := db.ResetConsensusSubscription(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check tables.
+	tables, err := db.db.Migrator().GetTables()
+	if err != nil {
+		t.Fatal(err)
+	}
+	migratedTables := 0
+	for _, table := range tables {
+		if strings.HasPrefix(table, "consensus_infos-") ||
+			strings.HasPrefix(table, "siacoin_elements-") ||
+			strings.HasPrefix(table, "transactions-") {
+			migratedTables++
+		}
+	}
+	if migratedTables != 3 {
+		t.Fatal("not all migrated tables were found", migratedTables)
+	}
+
+	if db.db.Migrator().HasTable(&dbConsensusInfo{}) {
+		t.Fatal("consensus_infos table should have been dropped")
+	} else if db.db.Migrator().HasTable(&dbSiacoinElement{}) {
+		t.Fatal("siacoin_elements table should have been dropped")
+	} else if db.db.Migrator().HasTable(&dbTransaction{}) {
+		t.Fatal("transactions table should have been dropped")
+	}
 }
