@@ -54,11 +54,12 @@ func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerGET, err
 	return
 }
 
-func (c *Client) HostInfos(ctx context.Context, filterMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostHandlerGET, err error) {
+func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostHandlerGET, err error) {
 	err = c.c.POST("/hosts", api.SearchHostsRequest{
 		Offset:          offset,
 		Limit:           limit,
 		FilterMode:      filterMode,
+		UsabilityMode:   usabilityMode,
 		AddressContains: addressContains,
 		KeyIn:           keyIn,
 	}, &resp)
