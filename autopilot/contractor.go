@@ -182,6 +182,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	contracts := resp.Contracts
 	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
 
+	// sort contracts by their size
+	sort.Slice(contracts, func(i, j int) bool {
+		return contracts[i].FileSize() > contracts[j].FileSize()
+	})
+
 	// update contracts
 	c.mu.Lock()
 	c.cachedContracts = contracts
@@ -200,8 +205,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// compile map of stored data per host
+	sizeIndex := make(map[types.FileContractID]int)
 	storedData := make(map[types.PublicKey]uint64)
-	for _, c := range contracts {
+	for i, c := range contracts {
+		sizeIndex[c.ID] = i
 		if c.Revision != nil {
 			storedData[c.HostKey] += c.FileSize()
 		}
@@ -244,9 +251,33 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return err
 	}
 
+	// assert renewals are sorted by their size
+	if len(toRenew) > 1 {
+		for i := 1; i < len(toRenew); i++ {
+			if toRenew[i].contract.FileSize() < toRenew[i-1].contract.FileSize() {
+				panic("toRenew is not sorted by size") // developer error
+			}
+		}
+	}
+
+	// calculate 'limit' amount of contracts we want to renew
+	var limit int
+	if len(toRenew) > 0 {
+		for _, r := range toRenew {
+			// renew contracts that were part of the 'Amount' largest contracts in the set
+			if sizeIndex[r.contract.ID] < int(state.cfg.Contracts.Amount) {
+				limit++
+			}
+		}
+		for len(updatedSet)+limit < int(state.cfg.Contracts.Amount) && limit < len(toRenew) {
+			// as long as we're missing contracts, increase the renewal limit
+			limit++
+		}
+	}
+
 	// run renewals
 	var renewed []types.FileContractID
-	if limit := int(state.cfg.Contracts.Amount) - len(updatedSet); limit > 0 {
+	if limit > 0 {
 		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
 		if err != nil {
 			c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
