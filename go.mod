@@ -26,7 +26,7 @@ require (
 	golang.org/x/term v0.7.0
 	gorm.io/driver/mysql v1.4.6
 	gorm.io/driver/sqlite v1.4.3
-	gorm.io/gorm v1.24.3
+	gorm.io/gorm v1.25.1
 	lukechampine.com/frand v1.4.2
 )
 

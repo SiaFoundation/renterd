@@ -412,29 +412,23 @@ func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID,
 }
 
 func (s *SQLStore) ResetConsensusSubscription() error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
-		now := time.Now().Unix()
-		// Rename consenus info table
-		err := tx.Migrator().RenameTable("consensus_infos", fmt.Sprintf("consensus_infos-%d", now))
-		if err != nil {
-			return err
-		}
-		err = tx.Migrator().RenameTable("siacoin_elements", fmt.Sprintf("siacoin_elements-%d", now))
-		if err != nil {
-			return err
-		}
-		err = tx.Migrator().RenameTable("transactions", fmt.Sprintf("transactions-%d", now))
-		if err != nil {
-			return err
-		}
-		ci, _, err := initConsensusInfo(tx)
-		if err != nil {
-			return err
-		}
-		s.chainIndex = types.ChainIndex{
-			Height: ci.Height,
-			ID:     types.BlockID(ci.BlockID),
-		}
-		return nil
-	})
+	if err := s.db.Migrator().DropTable(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{}); err != nil {
+		return err
+	}
+	// recreate the tables.
+	err := s.db.Migrator().AutoMigrate(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
+	if err != nil {
+		return err
+	}
+	// initialise the consenus_info table.
+	ci, _, err := initConsensusInfo(s.db)
+	if err != nil {
+		return err
+	}
+	// reset in-memory state.
+	s.chainIndex = types.ChainIndex{
+		Height: ci.Height,
+		ID:     types.BlockID(ci.BlockID),
+	}
+	return nil
 }

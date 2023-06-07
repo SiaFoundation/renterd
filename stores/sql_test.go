@@ -1,9 +1,9 @@
 package stores
 
 import (
+	"bytes"
 	"encoding/hex"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -80,27 +80,29 @@ func TestConsensusReset(t *testing.T) {
 	}
 
 	// Check tables.
-	tables, err := db.db.Migrator().GetTables()
-	if err != nil {
-		t.Fatal(err)
-	}
-	migratedTables := 0
-	for _, table := range tables {
-		if strings.HasPrefix(table, "consensus_infos-") ||
-			strings.HasPrefix(table, "siacoin_elements-") ||
-			strings.HasPrefix(table, "transactions-") {
-			migratedTables++
-		}
-	}
-	if migratedTables != 3 {
-		t.Fatal("not all migrated tables were found", migratedTables)
+	var count int64
+	if err := db.db.Model(&dbConsensusInfo{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatal("table should have 1 entry", err, count)
+	} else if err = db.db.Model(&dbTransaction{}).Count(&count).Error; err != nil || count > 0 {
+		t.Fatal("table not empty", err)
+	} else if err = db.db.Model(&dbSiacoinElement{}).Count(&count).Error; err != nil || count > 0 {
+		t.Fatal("table not empty", err)
 	}
 
-	if db.db.Migrator().HasTable(&dbConsensusInfo{}) {
-		t.Fatal("consensus_infos table should have been dropped")
-	} else if db.db.Migrator().HasTable(&dbSiacoinElement{}) {
-		t.Fatal("siacoin_elements table should have been dropped")
-	} else if db.db.Migrator().HasTable(&dbTransaction{}) {
-		t.Fatal("transactions table should have been dropped")
+	// Check consensus info.
+	var ci dbConsensusInfo
+	if err := db.db.Take(&ci).Error; err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(ci.CCID, modules.ConsensusChangeBeginning[:]) {
+		t.Fatal("wrong ccid", ci.CCID, modules.ConsensusChangeBeginning)
+	} else if ci.Height != 0 {
+		t.Fatal("wrong height", ci.Height, 0)
+	}
+
+	// Check SQLStore.
+	if db.chainIndex.Height != 0 {
+		t.Fatal("wrong height", db.chainIndex.Height, 0)
+	} else if db.chainIndex.ID != (types.BlockID{}) {
+		t.Fatal("wrong id", db.chainIndex.ID, types.BlockID{})
 	}
 }
