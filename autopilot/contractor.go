@@ -71,9 +71,15 @@ type (
 		mu                         sync.Mutex
 		cachedContracts            []api.Contract
 		cachedContractSetContracts map[string]map[types.FileContractID]struct{}
+		cachedHostInfo             map[types.PublicKey]hostInfo
 		cachedDataStored           map[types.PublicKey]uint64
 		cachedMinScore             float64
 		currPeriod                 uint64
+	}
+
+	hostInfo struct {
+		Usable         bool
+		UnusableResult unusableHostResult
 	}
 
 	contractInfo struct {
@@ -198,12 +204,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		usedHosts[contract.HostKey] = struct{}{}
 	}
 
-	// fetch all hosts
-	hosts, err := c.ap.bus.Hosts(ctx, 0, -1)
-	if err != nil {
-		return err
-	}
-
 	// compile map of stored data per host
 	sizeIndex := make(map[types.FileContractID]int)
 	storedData := make(map[types.PublicKey]uint64)
@@ -212,6 +212,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		if c.Revision != nil {
 			storedData[c.HostKey] += c.FileSize()
 		}
+	}
+
+	// fetch all hosts
+	hosts, err := c.ap.bus.Hosts(ctx, 0, -1)
+	if err != nil {
+		return err
 	}
 
 	// min score to pass checks.
@@ -225,8 +231,24 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
 
-	// update cache
+	// prepare hosts for cache
+	f := newIPFilter(c.logger)
+	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	hostInfos := make(map[types.PublicKey]hostInfo)
+	for _, h := range hosts {
+		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
+		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
+
+		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, h, minScore, storedData[h.PublicKey])
+		hostInfos[h.PublicKey] = hostInfo{
+			Usable:         isUsable,
+			UnusableResult: unusableResult,
+		}
+	}
+
+	// update cache.
 	c.mu.Lock()
+	c.cachedHostInfo = hostInfos
 	c.cachedDataStored = storedData
 	c.cachedMinScore = minScore
 	c.mu.Unlock()
