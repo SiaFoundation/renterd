@@ -422,18 +422,19 @@ func (mgr *uploadManager) uploader(shard *shardUpload) *uploader {
 
 loop:
 	for {
-		// if this slab does not have more than 1 parent, we resort the
-		// candidates and return the best one at the time
+		// if this slab does not have more than 1 parent, we return the best
+		// candidate
 		if len(shard.upload.parents(shard.sID)) <= 1 {
-			sort.Slice(candidates, func(i, j int) bool {
-				return candidates[i].estimate() < candidates[j].estimate()
-			})
 			return candidates[0]
 		}
 
-		// otherwise we wait, allowing the parents to complete
+		// otherwise we wait, allowing the parents to complete, after which we
+		// re-sort the candidates
 		select {
 		case <-shard.upload.doneShardTrigger:
+			sort.Slice(candidates, func(i, j int) bool {
+				return candidates[i].estimate() < candidates[j].estimate()
+			})
 			continue loop
 		case <-shard.ctx.Done():
 			break loop
