@@ -59,10 +59,6 @@ func TestConsensusReset(t *testing.T) {
 		t.Fatal("wrong ccid", ccid, modules.ConsensusChangeBeginning)
 	}
 
-	if ccid != modules.ConsensusChangeBeginning {
-		t.Fatal("wrong ccid", ccid, modules.ConsensusChangeBeginning)
-	}
-
 	// Manually insert into the consenus_infos, the transactions and siacoin_elements tables.
 	ccid2 := modules.ConsensusChangeID{1}
 	db.db.Create(&dbConsensusInfo{

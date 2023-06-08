@@ -413,11 +413,12 @@ func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID,
 
 func (s *SQLStore) ResetConsensusSubscription() error {
 	// drop tables
-	if err := s.db.Migrator().DropTable(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{}); err != nil {
+	err := s.db.Migrator().DropTable(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
+	if err != nil {
 		return err
 	}
 	// recreate the tables.
-	err := s.db.Migrator().AutoMigrate(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
+	err = s.db.Migrator().AutoMigrate(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
 	if err != nil {
 		return err
 	}
@@ -427,9 +428,11 @@ func (s *SQLStore) ResetConsensusSubscription() error {
 		return err
 	}
 	// reset in-memory state.
+	s.persistMu.Lock()
 	s.chainIndex = types.ChainIndex{
 		Height: ci.Height,
 		ID:     types.BlockID(ci.BlockID),
 	}
+	s.persistMu.Unlock()
 	return nil
 }
