@@ -57,6 +57,11 @@ func performMigrations(tx *gorm.DB) error {
 		if err := m.DropTable("shards"); err != nil {
 			return err
 		}
+
+		// delete any sectors that are not referenced by a slab.
+		if err := tx.Exec(`DELETE FROM sectors WHERE db_slab_id IS NULL`).Error; err != nil {
+			return err
+		}
 	}
 
 	// Perform auto migrations.
