@@ -621,7 +621,6 @@ func (c *TestCluster) AddHost(h *Host) error {
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
 // themselves on the network, ready to form contracts.
 func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
-	// Create hosts.
 	var newHosts []*Host
 	for i := 0; i < n; i++ {
 		h, err := c.NewHost()
