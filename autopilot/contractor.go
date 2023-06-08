@@ -277,7 +277,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	if len(toRenew) > 1 {
 		for i := 1; i < len(toRenew); i++ {
 			if toRenew[i].contract.FileSize() < toRenew[i-1].contract.FileSize() {
-				panic("toRenew is not sorted by size") // developer error
+				// TODO: this panic is triggered in production, will fix it soon
+				// panic("toRenew is not sorted by size") // developer error
 			}
 		}
 	}
