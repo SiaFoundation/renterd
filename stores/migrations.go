@@ -13,8 +13,8 @@ func (dbHostBlocklistEntryHost) TableName() string {
 	return "host_blocklist_entry_hosts"
 }
 
-func performMigrations(tx *gorm.DB) error {
-	m := tx.Migrator()
+func performMigrations(db *gorm.DB) error {
+	m := db.Migrator()
 
 	// Perform pre-auto migrations
 	//
@@ -29,6 +29,7 @@ func performMigrations(tx *gorm.DB) error {
 	// sectors before then dropping the shards table as well as the db_slice_id
 	// column from the slabs table.
 	if m.HasTable("shards") {
+		// add columns
 		if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
 			return err
 		}
@@ -36,16 +37,19 @@ func performMigrations(tx *gorm.DB) error {
 			return err
 		}
 
-		if err := tx.Exec(`UPDATE slices SET db_slab_id=(
-			SELECT id FROM slabs sla WHERE sla.db_slice_id=slices.id)`).Error; err != nil {
+		// populate columns
+		if err := db.Exec(`UPDATE slices sli
+		INNER JOIN slabs sla ON sli.id=sla.db_slice_id
+		SET sli.db_slab_id=sla.id`).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec(`UPDATE sectors SET db_slab_id=(
-			SELECT db_slab_id FROM shards sha WHERE sha.db_sector_id=sectors.id)`).Error; err != nil {
+		if err := db.Exec(`UPDATE sectors sec
+		INNER JOIN shards sha ON sec.id=sha.db_sector_id
+		SET sec.db_slab_id=sha.db_slab_id`).Error; err != nil {
 			return err
 		}
 
-		// drop column db_slice_id from slabs.
+		// drop column db_slice_id from slabs
 		if err := m.DropConstraint(&dbSlab{}, "fk_slices_slab"); err != nil {
 			return err
 		}
@@ -53,13 +57,13 @@ func performMigrations(tx *gorm.DB) error {
 			return err
 		}
 
-		// drop table shards.
-		if err := m.DropTable("shards"); err != nil {
+		// delete any sectors that are not referenced by a slab
+		if err := db.Exec(`DELETE FROM sectors WHERE db_slab_id IS NULL`).Error; err != nil {
 			return err
 		}
 
-		// delete any sectors that are not referenced by a slab.
-		if err := tx.Exec(`DELETE FROM sectors WHERE db_slab_id IS NULL`).Error; err != nil {
+		// drop table shards
+		if err := m.DropTable("shards"); err != nil {
 			return err
 		}
 	}
@@ -93,7 +97,7 @@ func performMigrations(tx *gorm.DB) error {
 		// bus.EphemeralAccountStore tables
 		&dbAccount{},
 	}
-	if err := tx.AutoMigrate(tables...); err != nil {
+	if err := db.AutoMigrate(tables...); err != nil {
 		return err
 	}
 
