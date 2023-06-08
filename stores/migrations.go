@@ -30,18 +30,24 @@ func performMigrations(db *gorm.DB) error {
 	// column from the slabs table.
 	if m.HasTable("shards") {
 		// add columns
-		if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
-			return err
+		if !m.HasColumn(&dbSlice{}, "db_slab_id") {
+			if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
+				return err
+			}
 		}
-		if err := m.AddColumn(&dbSector{}, "db_slab_id"); err != nil {
-			return err
+		if !m.HasColumn(&dbSector{}, "db_slab_id") {
+			if err := m.AddColumn(&dbSector{}, "db_slab_id"); err != nil {
+				return err
+			}
 		}
 
-		// populate columns
-		if err := db.Exec(`UPDATE slices sli
+		// populate new columns
+		if m.HasColumn(&dbSlab{}, "db_slice_id") {
+			if err := db.Exec(`UPDATE slices sli
 		INNER JOIN slabs sla ON sli.id=sla.db_slice_id
 		SET sli.db_slab_id=sla.id`).Error; err != nil {
-			return err
+				return err
+			}
 		}
 		if err := db.Exec(`UPDATE sectors sec
 		INNER JOIN shards sha ON sec.id=sha.db_sector_id
