@@ -624,78 +624,15 @@ func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
 	// Create hosts.
 	var newHosts []*Host
 	for i := 0; i < n; i++ {
-		hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-		h, err := NewHost(types.GeneratePrivateKey(), hostDir, false)
+		h, err := c.NewHost()
 		if err != nil {
 			return nil, err
 		}
-		c.hosts = append(c.hosts, h)
-		newHosts = append(newHosts, h)
-
-		// Connect gateways.
-		if err := c.Bus.SyncerConnect(context.Background(), h.GatewayAddr()); err != nil {
+		err = c.AddHost(h)
+		if err != nil {
 			return nil, err
 		}
-	}
-
-	// Fund host from bus.
-	balance, err := c.Bus.WalletBalance(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	fundAmt := balance.Div64(2).Div64(uint64(len(newHosts))) // 50% of bus balance
-	var scos []types.SiacoinOutput
-	for _, h := range newHosts {
-		for i := 0; i < 10; i++ {
-			scos = append(scos, types.SiacoinOutput{
-				Value:   fundAmt.Div64(10),
-				Address: h.WalletAddress(),
-			})
-		}
-	}
-	if err := c.Bus.SendSiacoins(context.Background(), scos); err != nil {
-		return nil, err
-	}
-
-	// Mine transaction.
-	if err := c.MineBlocks(1); err != nil {
-		return nil, err
-	}
-
-	// Wait for hosts to sync up with consensus.
-	if err := c.sync(newHosts); err != nil {
-		return nil, err
-	}
-
-	// Announce hosts.
-	if err := addStorageFolderToHost(newHosts); err != nil {
-		return nil, err
-	}
-	if err := announceHosts(newHosts); err != nil {
-		return nil, err
-	}
-
-	// Mine a few blocks. The host should show up eventually.
-	err = Retry(10, time.Second, func() error {
-		if err := c.MineBlocks(1); err != nil {
-			return err
-		}
-
-		for _, h := range newHosts {
-			_, err = c.Bus.Host(context.Background(), h.PublicKey())
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Wait for all hosts to be synced.
-	if err := c.Sync(); err != nil {
-		return nil, err
+		newHosts = append(newHosts, h)
 	}
 	return newHosts, nil
 }

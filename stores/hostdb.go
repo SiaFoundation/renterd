@@ -405,7 +405,7 @@ func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 func (e *dbBlocklistEntry) blocks(h dbHost) bool {
-	values := []string{e.Entry}
+	values := []string{h.NetAddress}
 	host, _, err := net.SplitHostPort(h.NetAddress)
 	if err == nil {
 		values = append(values, host)
