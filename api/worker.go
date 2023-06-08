@@ -136,14 +136,14 @@ type RHPRegistryUpdateRequest struct {
 
 // UploadStatsResponse is the response type for the /stats/uploads endpoint.
 type UploadStatsResponse struct {
-	AvgUploadSpeedMBPS float64         `json:"avgUploadSpeedMBPS"`
-	HealthyUploaders   uint64          `json:"healthyUploaders"`
-	NumUploaders       uint64          `json:"numUploaders"`
-	OverdrivePct       float64         `json:"overdrivePct"`
-	UploadersStats     []UploaderStats `json:"uploadersStats"`
+	AvgSlabUploadSpeedMBPS float64         `json:"avgSlabUploadSpeedMBPS"`
+	AvgOverdrivePct        float64         `json:"avgOverdrivePct"`
+	HealthyUploaders       uint64          `json:"healthyUploaders"`
+	NumUploaders           uint64          `json:"numUploaders"`
+	UploadersStats         []UploaderStats `json:"uploadersStats"`
 }
 
 type UploaderStats struct {
-	HostKey            types.PublicKey `json:"hostKey"`
-	UploadSpeedP90MBPS float64         `json:"uploadSpeedP90MBPS"`
+	HostKey                  types.PublicKey `json:"hostKey"`
+	AvgSectorUploadSpeedMBPS float64         `json:"avgSectorUploadSpeedMBPS"`
 }
