@@ -75,6 +75,9 @@ func (c Contract) EndHeight() uint64 { return c.WindowStart }
 
 // FileSize returns the current Size of the contract.
 func (c Contract) FileSize() uint64 {
+	if c.Revision == nil {
+		return 0
+	}
 	return c.Revision.Filesize
 }
 

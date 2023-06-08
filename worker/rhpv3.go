@@ -291,9 +291,10 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 
 	// cap the amount by the amount of money left in the contract
 	renterFunds := rev.ValidRenterPayout()
-	if renterFunds.Cmp(pt.FundAccountCost) <= 0 {
-		return fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, pt.FundAccountCost)
-	} else if maxAmount := renterFunds.Sub(pt.FundAccountCost); maxAmount.Cmp(amount) < 0 {
+	possibleFundCost := pt.FundAccountCost.Add(pt.UpdatePriceTableCost)
+	if renterFunds.Cmp(possibleFundCost) <= 0 {
+		return fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, possibleFundCost)
+	} else if maxAmount := renterFunds.Sub(possibleFundCost); maxAmount.Cmp(amount) < 0 {
 		amount = maxAmount
 	}
 
@@ -313,9 +314,9 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 	})
 }
 
-func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevision) error {
+func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable
-	pt, err := h.priceTable(ctx, revision)
+	pt, err := h.priceTable(ctx, rev)
 	if err != nil {
 		return err
 	}
@@ -323,7 +324,7 @@ func (h *host) SyncAccount(ctx context.Context, revision *types.FileContractRevi
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
-			payment, err := payByContract(revision, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			payment, err := payByContract(rev, pt.AccountBalanceCost, h.acc.id, h.renterKey)
 			if err != nil {
 				return err
 			}
