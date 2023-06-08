@@ -71,8 +71,8 @@ func performMigrations(tx *gorm.DB) error {
 		&dbContract{},
 		&dbContractSet{},
 		&dbObject{},
-		&dbSector{},
 		&dbSlab{},
+		&dbSector{},
 		&dbSlice{},
 
 		// bus.HostDB tables
