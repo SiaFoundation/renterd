@@ -548,7 +548,7 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 	return pt.HostPriceTable, nil
 }
 
-func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	pt, err := r.priceTable(ctx, nil)
 	if err != nil {
 		return err
@@ -1004,7 +1004,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
+func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -1014,8 +1014,8 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
-	e.WriteUint64(length)
-	e.WriteUint64(offset)
+	e.WriteUint64(uint64(length))
+	e.WriteUint64(uint64(offset))
 	merkleRoot.EncodeTo(e)
 	e.Flush()
 

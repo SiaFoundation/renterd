@@ -40,11 +40,11 @@ func (h *mockHost) UploadSector(_ context.Context, sector *[rhpv2.SectorSize]byt
 	return root, nil
 }
 
-func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
+func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
 	sector, ok := h.sectors[root]
 	if !ok {
 		return errors.New("unknown root")
-	} else if uint64(offset)+uint64(length) > rhpv2.SectorSize {
+	} else if offset+length > rhpv2.SectorSize {
 		return errors.New("offset+length out of bounds")
 	}
 	_, err := w.Write(sector[offset:][:length])
@@ -209,11 +209,11 @@ func TestMultipleObjects(t *testing.T) {
 	}
 
 	// download
-	checkDownload := func(data []byte, o object.Object, offset, length int) {
+	checkDownload := func(data []byte, o object.Object, offset, length uint32) {
 		t.Helper()
 		var buf bytes.Buffer
-		dst := o.Key.Decrypt(&buf, int64(offset))
-		ss := slabsForDownload(o.Slabs, int64(offset), int64(length))
+		dst := o.Key.Decrypt(&buf, offset)
+		ss := slabsForDownload(o.Slabs, offset, length)
 		for _, s := range ss {
 			if _, err := downloadSlab(context.Background(), hp, dst, s, contracts, 0, 0, zap.NewNop().Sugar()); err != nil {
 				t.Error(err)
@@ -242,10 +242,9 @@ func TestMultipleObjects(t *testing.T) {
 			{0, 1},
 			{0, len(data[i]) / 2},
 			{len(data[i]) / 2, len(data[i]) / 2},
-			{len(data[i]) - 1, 1},
 			{0, len(data[i])},
 		} {
-			checkDownload(data[i], o, r.offset, r.length)
+			checkDownload(data[i], o, uint32(r.offset), uint32(r.length))
 		}
 	}
 

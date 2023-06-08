@@ -45,7 +45,7 @@ func (k EncryptionKey) Encrypt(r io.Reader) cipher.StreamReader {
 
 // Decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
 // specified offset.
-func (k EncryptionKey) Decrypt(w io.Writer, offset int64) cipher.StreamWriter {
+func (k EncryptionKey) Decrypt(w io.Writer, offset uint32) cipher.StreamWriter {
 	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], make([]byte, 24))
 	c.SetCounter(uint32(offset / 64))
 	var buf [64]byte

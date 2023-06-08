@@ -39,7 +39,7 @@ type hostV2 interface {
 type hostV3 interface {
 	hostV2
 
-	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
+	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
 	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
 	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
 	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
@@ -81,8 +81,8 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 
 	// declare types for a download request and response
 	type req struct {
-		offset     uint64
-		length     uint64
+		offset     uint32
+		length     uint32
 		shardIndex int
 	}
 	type resp struct {
@@ -290,30 +290,30 @@ func downloadSlab(ctx context.Context, hp hostProvider, out io.Writer, ss object
 
 // slabsForDownload returns the slices that comprise the specified offset-length
 // span within slabs.
-func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.SlabSlice {
+func slabsForDownload(slabs []object.SlabSlice, offset, length uint32) []object.SlabSlice {
 	// mutate a copy
 	slabs = append([]object.SlabSlice(nil), slabs...)
 
 	firstOffset := offset
 	for i, ss := range slabs {
-		if firstOffset <= int64(ss.Length) {
+		if firstOffset <= ss.Length {
 			slabs = slabs[i:]
 			break
 		}
-		firstOffset -= int64(ss.Length)
+		firstOffset -= ss.Length
 	}
-	slabs[0].Offset += uint32(firstOffset)
-	slabs[0].Length -= uint32(firstOffset)
+	slabs[0].Offset += firstOffset
+	slabs[0].Length -= firstOffset
 
 	lastLength := length
 	for i, ss := range slabs {
-		if lastLength <= int64(ss.Length) {
+		if lastLength <= ss.Length {
 			slabs = slabs[:i+1]
 			break
 		}
-		lastLength -= int64(ss.Length)
+		lastLength -= ss.Length
 	}
-	slabs[len(slabs)-1].Length = uint32(lastLength)
+	slabs[len(slabs)-1].Length = lastLength
 	return slabs
 }
 
@@ -351,7 +351,7 @@ func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []hostV2) error
 	return nil
 }
 
-func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout, uploadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, locker revisionLocker, downloadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
