@@ -564,7 +564,6 @@ func (d *downloader) enqueue(download *sectorDownloadReq) {
 	select {
 	case d.signalNewDownload <- struct{}{}:
 	default:
-		fmt.Println("could not signal work")
 	}
 }
 
