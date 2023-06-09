@@ -41,8 +41,8 @@ type AccountStore interface {
 }
 
 type ContractStore interface {
-	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
-	IsInContractSet(fcid types.FileContractID, set string) bool
+	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
+	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 }
 
 func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, l *zap.SugaredLogger, refillInterval time.Duration) *accounts {
@@ -127,16 +127,32 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		return
 	}
 
+	// fetch all contract set contracts
+	contractSetContracts, err := a.c.ContractSetContracts(ctx, cfg.Contracts.Set)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, fmt.Sprintf("failed to fetch contracts for set '%s'", cfg.Contracts.Set))
+		a.l.Errorw(fmt.Sprintf("failed to fetch contract set contracts: %v", err))
+		return
+	}
+
+	// build a map of contract set contracts
+	inContractSet := make(map[types.FileContractID]struct{})
+	for _, contract := range contractSetContracts {
+		inContractSet[contract.ID] = struct{}{}
+	}
+
 	// prepare no-op logger
 	noop := zap.NewNop().Sugar()
 	logger := noop
 
 	// refill accounts in separate goroutines
 	for _, c := range contracts {
-		// skip logging for contracts not in the set
-		if a.c.IsInContractSet(c.ID, cfg.Contracts.Set) {
+		// add logging for contracts in the set
+		if _, inSet := inContractSet[c.ID]; inSet {
 			logger = a.l
 		}
+
 		// launch refill if not already in progress
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata, l *zap.SugaredLogger) {
