@@ -19,8 +19,9 @@ func (dbHostBlocklistEntryHost) TableName() string {
 
 // migrateShards performs the migrations necessary for removing the 'shards'
 // table.
-func migrateShards(ctx context.Context, db *gorm.DB, logger glogger.Interface) error {
+func migrateShards(ctx context.Context, db *gorm.DB, l glogger.Interface) error {
 	m := db.Migrator()
+	logger := l.LogMode(glogger.Info)
 
 	// add columns
 	if !m.HasColumn(&dbSlice{}, "db_slab_id") {
@@ -39,19 +40,30 @@ func migrateShards(ctx context.Context, db *gorm.DB, logger glogger.Interface) e
 	}
 
 	// populate new columns
+	var err error
 	if m.HasColumn(&dbSlab{}, "db_slice_id") {
 		logger.Info(ctx, "populating column 'db_slab_id' in table 'slices'")
-		if err := db.Exec(`UPDATE slices sli
-		INNER JOIN slabs sla ON sli.id=sla.db_slice_id
-		SET sli.db_slab_id=sla.id`).Error; err != nil {
+		if isSQLite(db) {
+			err = db.Exec(`UPDATE slices SET db_slab_id = (SELECT slabs.id FROM slabs WHERE slabs.db_slice_id = slices.id)`).Error
+		} else {
+			err = db.Exec(`UPDATE slices sli
+			INNER JOIN slabs sla ON sli.id=sla.db_slice_id
+			SET sli.db_slab_id=sla.id`).Error
+		}
+		if err != nil {
 			return err
 		}
 		logger.Info(ctx, "done populating column 'db_slab_id' in table 'slices'")
 	}
 	logger.Info(ctx, "populating column 'db_slab_id' in table 'sectors'")
-	if err := db.Exec(`UPDATE sectors sec
-		INNER JOIN shards sha ON sec.id=sha.db_sector_id
-		SET sec.db_slab_id=sha.db_slab_id`).Error; err != nil {
+	if isSQLite(db) {
+		err = db.Exec(`UPDATE sectors SET db_slab_id = (SELECT shards.db_slab_id FROM shards WHERE shards.db_sector_id = sectors.id)`).Error
+	} else {
+		err = db.Exec(`UPDATE sectors sec
+			INNER JOIN shards sha ON sec.id=sha.db_sector_id
+			SET sec.db_slab_id=sha.db_slab_id`).Error
+	}
+	if err != nil {
 		return err
 	}
 	logger.Info(ctx, "done populating column 'db_slab_id' in table 'sectors'")
