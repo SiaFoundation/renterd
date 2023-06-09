@@ -49,29 +49,22 @@ type (
 
 		statsSectorDownloadEstimateInMS    *dataPoints
 		statsSectorDownloadSpeedBytesPerMS *dataPoints // keep track of this separately for stats (no decay is applied)
-		signalNewDownload                  chan struct{}
-		stopChan                           chan struct{}
+
+		signalNewDownload chan struct{}
+		stopChan          chan struct{}
 
 		mu                  sync.Mutex
 		consecutiveFailures uint64
 		queue               []*sectorDownloadReq
 	}
 
-	download struct {
-		mgr *downloadManager
-
-		nextSlabTrigger chan struct{}
-
-		mu sync.Mutex
-	}
-
 	slabDownload struct {
 		mgr *downloadManager
 
-		sID       slabID
-		created   time.Time
-		hosts     map[types.PublicKey]int
-		minShards int
+		sID           slabID
+		created       time.Time
+		sectorIndices map[types.PublicKey]int
+		minShards     int
 
 		mu           sync.Mutex
 		numInflight  uint64
@@ -92,9 +85,7 @@ type (
 	}
 
 	sectorDownloadReq struct {
-		sID      slabID
-		ctx      context.Context
-		download *slabDownload
+		ctx context.Context
 
 		length uint32
 		offset uint32
@@ -104,16 +95,13 @@ type (
 		overdrive    bool
 		sectorIndex  int
 		responseChan chan sectorDownloadResp
-
-		// these fields are set by the downloader performing the download
-		fcid       types.FileContractID
-		siamuxAddr string
 	}
 
 	sectorDownloadResp struct {
-		req    *sectorDownloadReq
-		sector []byte
-		err    error
+		hk          types.PublicKey
+		sectorIndex int
+		sector      []byte
+		err         error
 	}
 
 	downloadManagerStats struct {
@@ -145,6 +133,7 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 
 		stopChan: make(chan struct{}),
 
+		ongoing:     make(map[slabID]struct{}),
 		downloaders: make(map[types.PublicKey]*downloader),
 	}
 }
@@ -306,45 +295,6 @@ func (mgr *downloadManager) tryRecomputeStats() {
 	mgr.lastRecompute = time.Now()
 }
 
-func (mgr *downloadManager) newDownload(o object.Object, contracts []api.ContractMetadata) (*download, error) {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	// refresh the downloaders
-	mgr.refreshDownloaders(contracts)
-
-	// check if we have enough contracts
-	if len(o.Slabs) > 1 {
-		// turn the array into a map
-		contractsMap := make(map[types.PublicKey]struct{})
-		for _, c := range contracts {
-			contractsMap[c.HostKey] = struct{}{}
-		}
-
-		// count all shards for which we have a contract
-		var n uint8
-		for _, shard := range o.Slabs[0].Shards {
-			if _, exists := contractsMap[shard.Host]; exists {
-				n++
-			}
-		}
-
-		// assert we have at least 'MinShards' contracts
-		if n < o.Slabs[0].MinShards {
-			return nil, errNotEnoughContracts
-		}
-	}
-
-	// trigger first slab download
-	nextSlabTrigger := make(chan struct{}, 1)
-	nextSlabTrigger <- struct{}{}
-
-	return &download{
-		mgr:             mgr,
-		nextSlabTrigger: nextSlabTrigger,
-	}, nil
-}
-
 func (mgr *downloadManager) numDownloaders() int {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -407,9 +357,9 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.Sl
 		created:   time.Now(),
 		minShards: int(slice.MinShards),
 
-		hosts:   hosts,
-		used:    make(map[types.PublicKey]struct{}),
-		sectors: make([][]byte, len(slice.Shards)),
+		sectorIndices: hosts,
+		used:          make(map[types.PublicKey]struct{}),
+		sectors:       make([][]byte, len(slice.Shards)),
 	}, finishFn
 }
 
@@ -493,7 +443,7 @@ outer:
 					defer wg.Done()
 
 					// execute and handle the response
-					sector, err := req.execute(hp)
+					sector, err := req.execute(hp, d.hk, d.fcid, d.siamuxAddr)
 					if err != nil {
 						req.fail(err)
 					} else {
@@ -544,10 +494,6 @@ func (d *downloader) enqueue(download *sectorDownloadReq) {
 	span := trace.SpanFromContext(download.ctx)
 	span.AddEvent("enqueued")
 
-	// decorate req
-	download.fcid = d.fcid
-	download.siamuxAddr = d.siamuxAddr
-
 	// enqueue the job
 	d.mu.Lock()
 	d.queue = append(d.queue, download)
@@ -583,10 +529,10 @@ func (d *downloader) trackFailure(err error) {
 	}
 }
 
-func (download *sectorDownloadReq) execute(hp hostProvider) (_ []byte, err error) {
+func (req *sectorDownloadReq) execute(hp hostProvider, hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) (_ []byte, err error) {
 	// add tracing
 	start := time.Now()
-	span := trace.SpanFromContext(download.ctx)
+	span := trace.SpanFromContext(req.ctx)
 	span.AddEvent("execute")
 	defer func() {
 		elapsed := time.Since(start)
@@ -596,14 +542,14 @@ func (download *sectorDownloadReq) execute(hp hostProvider) (_ []byte, err error
 	}()
 
 	// fetch the host
-	h, err := hp.newHostV3(download.ctx, download.fcid, download.hk, download.siamuxAddr)
+	h, err := hp.newHostV3(req.ctx, fcid, hk, siamuxAddr)
 	if err != nil {
 		return nil, err
 	}
 
 	// download the sector
 	buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
-	err = h.DownloadSector(download.ctx, buf, download.root, download.offset, download.length)
+	err = h.DownloadSector(req.ctx, buf, req.root, req.offset, req.length)
 	if err != nil {
 		return nil, err
 	}
@@ -611,29 +557,30 @@ func (download *sectorDownloadReq) execute(hp hostProvider) (_ []byte, err error
 	return buf.Bytes(), nil
 }
 
-func (download *sectorDownloadReq) succeed(sector []byte) {
+func (req *sectorDownloadReq) succeed(sector []byte) {
 	select {
-	case <-download.ctx.Done():
-	case download.responseChan <- sectorDownloadResp{
-		req:    download,
-		sector: sector,
+	case <-req.ctx.Done():
+	case req.responseChan <- sectorDownloadResp{
+		hk:          req.hk,
+		sectorIndex: req.sectorIndex,
+		sector:      sector,
 	}:
 	}
 }
 
-func (download *sectorDownloadReq) fail(err error) {
+func (req *sectorDownloadReq) fail(err error) {
 	select {
-	case <-download.ctx.Done():
-	case download.responseChan <- sectorDownloadResp{
-		req: download,
+	case <-req.ctx.Done():
+	case req.responseChan <- sectorDownloadResp{
+		hk:  req.hk,
 		err: err,
 	}:
 	}
 }
 
-func (download *sectorDownloadReq) done() bool {
+func (req *sectorDownloadReq) done() bool {
 	select {
-	case <-download.ctx.Done():
+	case <-req.ctx.Done():
 		return true
 	default:
 		return false
@@ -711,7 +658,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 
 	// build a list of hosts
 	var hosts []types.PublicKey
-	for hk := range s.hosts {
+	for hk := range s.sectorIndices {
 		hosts = append(hosts, hk)
 	}
 
@@ -723,11 +670,9 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 		sCtx, span := tracing.Tracer.Start(ctx, "sectorDownloadReq")
 		span.SetAttributes(attribute.Stringer("hk", hk))
 		span.SetAttributes(attribute.Bool("overdrive", false))
-		span.SetAttributes(attribute.Int("sector", s.hosts[hk]))
+		span.SetAttributes(attribute.Int("sector", s.sectorIndices[hk]))
 		return &sectorDownloadReq{
-			sID:      s.sID,
-			download: s,
-			ctx:      sCtx,
+			ctx: sCtx,
 
 			offset: offset,
 			length: length,
@@ -735,7 +680,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 			hk:     h2shard[hk].Host,
 
 			overdrive:    overdrive,
-			sectorIndex:  s.hosts[hk],
+			sectorIndex:  s.sectorIndices[hk],
 			responseChan: respChan,
 		}
 	}
@@ -872,12 +817,12 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next boo
 	// failed reqs can't complete the upload
 	s.numInflight--
 	if resp.err != nil {
-		s.errs = append(s.errs, &HostError{resp.req.hk, resp.err})
+		s.errs = append(s.errs, &HostError{resp.hk, resp.err})
 		return false, false
 	}
 
 	// store the sector
-	s.sectors[resp.req.sectorIndex] = resp.sector
+	s.sectors[resp.sectorIndex] = resp.sector
 	s.numCompleted++
 
 	return s.numCompleted >= s.minShards, s.numCompleted+int(s.mgr.maxOverdrive) >= s.minShards
