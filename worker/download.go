@@ -449,12 +449,6 @@ func (d *download) downloadSlab(ctx context.Context, slice object.SlabSlice, ind
 	}
 }
 
-func (d *downloader) healthy() bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.consecutiveFailures == 0
-}
-
 func (d *downloader) stats() (healthy bool, mbps float64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -654,6 +648,34 @@ func (download *sectorDownloadReq) done() bool {
 	}
 }
 
+func (s *slabDownload) overdrive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	remaining := s.minShards - s.numCompleted
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	// overdrive is not kicking in yet
+	if uint64(remaining) >= s.mgr.maxOverdrive {
+		return false
+	}
+
+	// overdrive is not due yet
+	if time.Since(s.lastOverdrive) < s.mgr.overdriveTimeout {
+		return false
+	}
+
+	// overdrive is maxed out
+	if s.numInflight-uint64(remaining) >= s.mgr.maxOverdrive {
+		return false
+	}
+
+	s.lastOverdrive = time.Now()
+	return true
+}
+
 func (s *slabDownload) nextHost(hosts []types.PublicKey) types.PublicKey {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -725,8 +747,10 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 			case <-ctx.Done():
 				return
 			case <-timeout.C:
-				s.mgr.sort(hosts)
-				_ = s.launch(buildRequest(s.nextHost(hosts), true)) // ignore error
+				if s.overdrive() {
+					s.mgr.sort(hosts)
+					_ = s.launch(buildRequest(s.nextHost(hosts), true)) // ignore error
+				}
 				resetTimeout()
 			}
 		}
@@ -755,12 +779,16 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 				resetTimeout()
 			}
 		}
+
 		done, next = s.receive(resp)
 		if next {
 			select {
 			case nextSlabTrigger <- struct{}{}:
 			default:
 			}
+		}
+		if !done && resp.err != nil {
+			_ = s.launch(buildRequest(s.nextHost(hosts), true)) // ignore error
 		}
 	}
 

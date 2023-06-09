@@ -661,8 +661,8 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 			case <-ctx.Done():
 				return
 			case <-timeout.C:
-				if upload := slab.overdrive(respChan, shards); upload != nil {
-					_ = slab.launch(upload) // ignore error
+				if req := slab.overdrive(respChan, shards); req != nil {
+					_ = slab.launch(req) // ignore error
 				}
 				resetTimeout()
 			}
