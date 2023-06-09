@@ -137,27 +137,27 @@ type RHPRegistryUpdateRequest struct {
 // DownloadStatsResponse is the response type for the /stats/downloads endpoint.
 type DownloadStatsResponse struct {
 	AvgDownloadSpeedMBPS float64           `json:"avgDownloadSpeedMBPS"`
+	AvgOverdrivePct      float64           `json:"avgOverdrivePct"`
 	HealthyDownloaders   uint64            `json:"healthyDownloaders"`
 	NumDownloaders       uint64            `json:"numDownloaders"`
-	OverdrivePct         float64           `json:"overdrivePct"`
 	DownloadersStats     []DownloaderStats `json:"downloadersStats"`
 }
 
 type DownloaderStats struct {
-	HostKey              types.PublicKey `json:"hostKey"`
-	DownloadSpeedP90MBPS float64         `json:"downloadSpeedP90MBPS"`
+	HostKey                    types.PublicKey `json:"hostKey"`
+	AvgSectorDownloadSpeedMBPS float64         `json:"avgSectorDownloadSpeedMBPS"`
 }
 
 // UploadStatsResponse is the response type for the /stats/uploads endpoint.
 type UploadStatsResponse struct {
-	AvgUploadSpeedMBPS float64         `json:"avgUploadSpeedMBPS"`
-	HealthyUploaders   uint64          `json:"healthyUploaders"`
-	NumUploaders       uint64          `json:"numUploaders"`
-	OverdrivePct       float64         `json:"overdrivePct"`
-	UploadersStats     []UploaderStats `json:"uploadersStats"`
+	AvgSlabUploadSpeedMBPS float64         `json:"avgSlabUploadSpeedMBPS"`
+	AvgOverdrivePct        float64         `json:"avgOverdrivePct"`
+	HealthyUploaders       uint64          `json:"healthyUploaders"`
+	NumUploaders           uint64          `json:"numUploaders"`
+	UploadersStats         []UploaderStats `json:"uploadersStats"`
 }
 
 type UploaderStats struct {
-	HostKey            types.PublicKey `json:"hostKey"`
-	UploadSpeedP90MBPS float64         `json:"uploadSpeedP90MBPS"`
+	HostKey                  types.PublicKey `json:"hostKey"`
+	AvgSectorUploadSpeedMBPS float64         `json:"avgSectorUploadSpeedMBPS"`
 }

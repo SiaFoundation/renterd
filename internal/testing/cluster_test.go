@@ -214,7 +214,7 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("host wasn't set")
 		}
 	}
-	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
+	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +235,20 @@ func TestNewTestCluster(t *testing.T) {
 		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
 			t.Fatal("host wasn't set")
 		}
+	}
+	hostInfosUsable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(hostInfos, hostInfosUsable) {
+		t.Fatal("result for 'usable' should match the result for ''")
+	}
+	hostInfosUnusable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hostInfosUnusable) != 0 {
+		t.Fatal("there should be no unusable hosts", len(hostInfosUnusable))
 	}
 }
 

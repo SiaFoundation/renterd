@@ -537,61 +537,60 @@ func (c *TestCluster) RemoveHost(host *Host) error {
 	return nil
 }
 
-// AddHosts adds n hosts to the cluster. These hosts will be funded and announce
-// themselves on the network, ready to form contracts.
-func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
-	// Create hosts.
-	var newHosts []*Host
-	for i := 0; i < n; i++ {
-		hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-		h, err := NewHost(types.GeneratePrivateKey(), hostDir, false)
-		if err != nil {
-			return nil, err
-		}
-		c.hosts = append(c.hosts, h)
-		newHosts = append(newHosts, h)
-
-		// Connect gateways.
-		if err := c.Bus.SyncerConnect(context.Background(), h.GatewayAddr()); err != nil {
-			return nil, err
-		}
+func (c *TestCluster) NewHost() (*Host, error) {
+	// Create host.
+	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, false)
+	if err != nil {
+		return nil, err
 	}
+
+	// Connect gateways.
+	if err := c.Bus.SyncerConnect(context.Background(), h.GatewayAddr()); err != nil {
+		return nil, err
+	}
+
+	return h, nil
+}
+
+func (c *TestCluster) AddHost(h *Host) error {
+	// Add the host
+	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
 	balance, err := c.Bus.WalletBalance(context.Background())
 	if err != nil {
-		return nil, err
+		return err
 	}
-	fundAmt := balance.Div64(2).Div64(uint64(len(newHosts))) // 50% of bus balance
+	fundAmt := balance.Div64(2).Div64(uint64(len(c.hosts))) // 50% of bus balance
 	var scos []types.SiacoinOutput
-	for _, h := range newHosts {
-		for i := 0; i < 10; i++ {
-			scos = append(scos, types.SiacoinOutput{
-				Value:   fundAmt.Div64(10),
-				Address: h.WalletAddress(),
-			})
-		}
+	for i := 0; i < 10; i++ {
+		scos = append(scos, types.SiacoinOutput{
+			Value:   fundAmt.Div64(10),
+			Address: h.WalletAddress(),
+		})
 	}
 	if err := c.Bus.SendSiacoins(context.Background(), scos); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Mine transaction.
 	if err := c.MineBlocks(1); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Wait for hosts to sync up with consensus.
-	if err := c.sync(newHosts); err != nil {
-		return nil, err
+	hosts := []*Host{h}
+	if err := c.sync(hosts); err != nil {
+		return err
 	}
 
 	// Announce hosts.
-	if err := addStorageFolderToHost(newHosts); err != nil {
-		return nil, err
+	if err := addStorageFolderToHost(hosts); err != nil {
+		return err
 	}
-	if err := announceHosts(newHosts); err != nil {
-		return nil, err
+	if err := announceHosts(hosts); err != nil {
+		return err
 	}
 
 	// Mine a few blocks. The host should show up eventually.
@@ -600,21 +599,39 @@ func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
 			return err
 		}
 
-		for _, h := range newHosts {
-			_, err = c.Bus.Host(context.Background(), h.PublicKey())
-			if err != nil {
-				return err
-			}
+		_, err = c.Bus.Host(context.Background(), h.PublicKey())
+		if err != nil {
+			return err
 		}
+
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// Wait for all hosts to be synced.
+	// Wait for host to be synced.
 	if err := c.Sync(); err != nil {
-		return nil, err
+		return err
+	}
+
+	return nil
+}
+
+// AddHosts adds n hosts to the cluster. These hosts will be funded and announce
+// themselves on the network, ready to form contracts.
+func (c *TestCluster) AddHosts(n int) ([]*Host, error) {
+	var newHosts []*Host
+	for i := 0; i < n; i++ {
+		h, err := c.NewHost()
+		if err != nil {
+			return nil, err
+		}
+		err = c.AddHost(h)
+		if err != nil {
+			return nil, err
+		}
+		newHosts = append(newHosts, h)
 	}
 	return newHosts, nil
 }

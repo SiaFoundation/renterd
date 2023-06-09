@@ -19,6 +19,10 @@ const (
 	ContractArchivalReasonHostPruned = "hostpruned"
 	ContractArchivalReasonRemoved    = "removed"
 	ContractArchivalReasonRenewed    = "renewed"
+
+	UsabilityFilterModeAll      = "all"
+	UsabilityFilterModeUsable   = "usable"
+	UsabilityFilterModeUnusable = "unusable"
 )
 
 const (
@@ -349,6 +353,7 @@ type SearchHostsRequest struct {
 	Offset          int               `json:"offset"`
 	Limit           int               `json:"limit"`
 	FilterMode      string            `json:"filterMode"`
+	UsabilityMode   string            `json:"usabilityMode"`
 	AddressContains string            `json:"addressContains"`
 	KeyIn           []types.PublicKey `json:"keyIn"`
 }

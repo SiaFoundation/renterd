@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -33,12 +32,13 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrive *dataPoints
-		statsSpeed     *dataPoints
-		stopChan       chan struct{}
+		statsOverdrivePct                *dataPoints
+		statsSlabDownloadSpeedBytesPerMS *dataPoints
+		stopChan                         chan struct{}
 
-		mu          sync.Mutex
-		downloaders map[types.PublicKey]*downloader
+		mu            sync.Mutex
+		downloaders   map[types.PublicKey]*downloader
+		lastRecompute time.Time
 	}
 
 	downloader struct {
@@ -46,9 +46,10 @@ type (
 		hk         types.PublicKey
 		siamuxAddr string
 
-		statsSpeed        *dataPoints
-		signalNewDownload chan struct{}
-		stopChan          chan struct{}
+		statsSectorDownloadEstimateInMS    *dataPoints
+		statsSectorDownloadSpeedBytesPerMS *dataPoints // keep track of this separately for stats (no decay is applied)
+		signalNewDownload                  chan struct{}
+		stopChan                           chan struct{}
 
 		mu                  sync.Mutex
 		consecutiveFailures uint64
@@ -116,11 +117,11 @@ type (
 	}
 
 	downloadManagerStats struct {
-		avgDownloadSpeedMBPS  float64
-		healthyDownloaders    uint64
-		numDownloaders        uint64
-		overdrivePct          float64
-		downloadSpeedsP90MBPS map[types.PublicKey]float64
+		avgSlabDownloadSpeedMBPS float64
+		avgOverdrivePct          float64
+		healthyDownloaders       uint64
+		numDownloaders           uint64
+		downloadSpeedsMBPS       map[types.PublicKey]float64
 	}
 )
 
@@ -139,9 +140,10 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
 
-		statsOverdrive: newDataPoints(),
-		statsSpeed:     newDataPoints(),
-		stopChan:       make(chan struct{}),
+		statsOverdrivePct:                newDataPoints(0),
+		statsSlabDownloadSpeedBytesPerMS: newDataPoints(0),
+
+		stopChan: make(chan struct{}),
 
 		downloaders: make(map[types.PublicKey]*downloader),
 	}
@@ -153,9 +155,10 @@ func newDownloader(c api.ContractMetadata) *downloader {
 		hk:         c.HostKey,
 		siamuxAddr: c.SiamuxAddr,
 
-		statsSpeed:        newDataPoints(),
-		signalNewDownload: make(chan struct{}, 1),
-		stopChan:          make(chan struct{}),
+		statsSectorDownloadEstimateInMS:    newDataPoints(statsDecayHalfTime),
+		statsSectorDownloadSpeedBytesPerMS: newDataPoints(0), // no decay for exposed stats
+		signalNewDownload:                  make(chan struct{}, 1),
+		stopChan:                           make(chan struct{}),
 
 		queue: make([]*sectorDownloadReq, 0),
 	}
@@ -252,28 +255,32 @@ loop:
 	return nil
 }
 func (mgr *downloadManager) Stats() downloadManagerStats {
+	// recompute stats
+	mgr.tryRecomputeStats()
+
+	// collect stats
 	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	// prepare stats
-	stats := downloadManagerStats{
-		avgDownloadSpeedMBPS:  mgr.statsSpeed.recompute() * 0.008, // convert bytes per ms to mbps,
-		overdrivePct:          mgr.statsOverdrive.recompute(),
-		numDownloaders:        uint64(len(mgr.downloaders)),
-		downloadSpeedsP90MBPS: make(map[types.PublicKey]float64),
-	}
-
-	// fill in download stats
+	var numHealthy uint64
+	speeds := make(map[types.PublicKey]float64)
 	for _, d := range mgr.downloaders {
-		d.statsSpeed.recompute()
-		stats.downloadSpeedsP90MBPS[d.hk] = d.statsSpeed.percentileP90() * 0.008 // convert bytes per ms to mbps
-		if d.healthy() {
-			stats.healthyDownloaders++
+		healthy, mbps := d.stats()
+		speeds[d.hk] = mbps
+		if healthy {
+			numHealthy++
 		}
 	}
+	mgr.mu.Unlock()
 
-	return stats
+	// prepare stats
+	return downloadManagerStats{
+		avgSlabDownloadSpeedMBPS: mgr.statsSlabDownloadSpeedBytesPerMS.Average() * 0.008, // convert bytes per ms to mbps,
+		avgOverdrivePct:          mgr.statsOverdrivePct.Average(),
+		healthyDownloaders:       numHealthy,
+		numDownloaders:           uint64(len(mgr.downloaders)),
+		downloadSpeedsMBPS:       speeds,
+	}
 }
+
 func (mgr *downloadManager) Stop() {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -281,6 +288,20 @@ func (mgr *downloadManager) Stop() {
 	for _, d := range mgr.downloaders {
 		close(d.stopChan)
 	}
+}
+
+func (mgr *downloadManager) tryRecomputeStats() {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if time.Since(mgr.lastRecompute) < statsRecomputeMinInterval {
+		return
+	}
+
+	for _, d := range mgr.downloaders {
+		d.statsSectorDownloadEstimateInMS.Recompute()
+		d.statsSectorDownloadSpeedBytesPerMS.Recompute()
+	}
+	mgr.lastRecompute = time.Now()
 }
 
 func (mgr *downloadManager) newDownload(o object.Object, contracts []api.ContractMetadata) (*download, error) {
@@ -434,6 +455,14 @@ func (d *downloader) healthy() bool {
 	return d.consecutiveFailures == 0
 }
 
+func (d *downloader) stats() (healthy bool, mbps float64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	healthy = d.consecutiveFailures == 0
+	mbps = d.statsSectorDownloadSpeedBytesPerMS.Average() * 0.008
+	return
+}
+
 func (d *downloader) processQueue(hp hostProvider) {
 outer:
 	for {
@@ -499,9 +528,11 @@ outer:
 			if completed == uint64(len(batch)) {
 				downloadedB := completed * rhpv2.SectorSize
 				durationMS := time.Since(start).Milliseconds()
-				d.statsSpeed.track(float64(downloadedB / uint64(durationMS)))
+				durationAvg := durationMS / int64(completed)
+				d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / uint64(durationMS)))
+				d.statsSectorDownloadEstimateInMS.Track(float64(durationAvg))
 			} else {
-				d.statsSpeed.track(1)
+				d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
 			}
 		}
 	}
@@ -511,14 +542,14 @@ func (d *downloader) estimate() float64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// fetch average speed
-	bytesPerMS := d.statsSpeed.percentileP90()
-	if bytesPerMS == 0 {
-		bytesPerMS = math.MaxFloat64
+	// fetch estimated duration per sector
+	estimateP90 := d.statsSectorDownloadEstimateInMS.P90()
+	if estimateP90 == 0 {
+		estimateP90 = 1
 	}
 
-	outstanding := (len(d.queue) + 1) * rhpv2.SectorSize
-	return float64(outstanding) / bytesPerMS
+	numSectors := float64(len(d.queue) + 1)
+	return numSectors * estimateP90
 }
 
 func (d *downloader) enqueue(download *sectorDownloadReq) {
@@ -734,8 +765,8 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 	}
 
 	// track stats
-	s.mgr.statsOverdrive.track(s.overdrivePct())
-	s.mgr.statsSpeed.track(float64(s.downloadSpeed()))
+	s.mgr.statsOverdrivePct.Track(s.overdrivePct())
+	s.mgr.statsSlabDownloadSpeedBytesPerMS.Track(float64(s.downloadSpeed()))
 	return s.finish()
 }
 
@@ -823,13 +854,11 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next boo
 }
 
 func (mgr *downloadManager) sort(hosts []types.PublicKey) {
+	// recompute stats
+	mgr.tryRecomputeStats()
+
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-
-	// recompute the stats first
-	for _, downloader := range mgr.downloaders {
-		downloader.statsSpeed.recompute()
-	}
 
 	// sort the hosts fastest to slowest
 	sort.Slice(hosts, func(i, j int) bool {
