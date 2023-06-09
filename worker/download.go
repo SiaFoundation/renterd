@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -22,6 +23,9 @@ import (
 	"lukechampine.com/frand"
 )
 
+// TODO: make this configurable
+const maxBatchSize = 4
+
 type (
 	downloadManager struct {
 		hp hostProvider
@@ -33,9 +37,8 @@ type (
 		statsSpeed     *dataPoints
 		stopChan       chan struct{}
 
-		mu               sync.Mutex
-		downloaders      []*downloader
-		downloadersIndex map[types.PublicKey]int
+		mu          sync.Mutex
+		downloaders map[types.PublicKey]*downloader
 	}
 
 	downloader struct {
@@ -62,22 +65,23 @@ type (
 	}
 
 	slabDownload struct {
-		mgr      *downloadManager
-		download *download
+		mgr *downloadManager
 
 		sID       slabID
 		created   time.Time
+		hosts     map[types.PublicKey]int
 		minShards int
 
-		mu          sync.Mutex
-		numInflight uint64
-		numLaunched uint64
+		mu           sync.Mutex
+		numInflight  uint64
+		numLaunched  uint64
+		numCompleted int
 
-		nextSlabTriggered bool
-		lastOverdrive     time.Time
-		sectors           [][]byte
-		used              map[types.PublicKey]struct{}
-		errs              HostErrorSet
+		used    map[types.PublicKey]struct{}
+		sectors [][]byte
+
+		lastOverdrive time.Time
+		errs          HostErrorSet
 	}
 
 	slabDownloadResponse struct {
@@ -111,11 +115,6 @@ type (
 		err    error
 	}
 
-	sectorInfo struct {
-		object.Sector
-		index int
-	}
-
 	downloadManagerStats struct {
 		avgDownloadSpeedMBPS  float64
 		healthyDownloaders    uint64
@@ -144,8 +143,7 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 		statsSpeed:     newDataPoints(),
 		stopChan:       make(chan struct{}),
 
-		downloaders:      make([]*downloader, 0),
-		downloadersIndex: make(map[types.PublicKey]int),
+		downloaders: make(map[types.PublicKey]*downloader),
 	}
 }
 
@@ -175,7 +173,7 @@ func (mgr *downloadManager) Download(ctx context.Context, w io.Writer, o object.
 		span.End()
 	}()
 
-	// calculate what slabs to download
+	// calculate what slabs we need
 	slabs := slabsForDownload(o.Slabs, offset, length)
 	if len(slabs) == 0 {
 		return nil
@@ -184,7 +182,6 @@ func (mgr *downloadManager) Download(ctx context.Context, w io.Writer, o object.
 	// create the cipher writer
 	cw := o.Key.Decrypt(w, offset)
 
-	fmt.Println("DEBUG PJ: creating download...")
 	// create the download
 	d, err := mgr.newDownload(o, contracts)
 	if err != nil {
@@ -195,11 +192,11 @@ func (mgr *downloadManager) Download(ctx context.Context, w io.Writer, o object.
 	responseChan := make(chan *slabDownloadResponse)
 	var slabIndex int
 
-	// collect responses
+	// responses cache (might come in out of order)
 	responses := make(map[int]*slabDownloadResponse)
 	var respIndex int
 
-	fmt.Println("DEBUG PJ: starting download...")
+	fmt.Printf("DEBUG PJ: %v | downloading %d slabs\n", o.Key.String(), len(slabs))
 loop:
 	for {
 		select {
@@ -208,19 +205,23 @@ loop:
 		case <-ctx.Done():
 			return errors.New("download timed out")
 		case <-d.nextSlabTrigger:
-			if slabIndex < len(slabs) {
-				fmt.Println("DEBUG PJ: downloading slab", slabIndex, len(slabs))
-				go d.downloadSlab(ctx, slabs[slabIndex], slabIndex, responseChan)
-				slabIndex++
+			if slabIndex == len(slabs) {
+				continue
 			}
+			if d.ongoingDownloads() >= 3 {
+				continue
+			}
+			go d.downloadSlab(ctx, slabs[slabIndex], slabIndex, responseChan)
+			slabIndex++
 		case resp := <-responseChan:
+			fmt.Printf("DEBUG PJ: %v | received slab %d/%d\n", o.Key.String(), resp.index+1, len(slabs))
+
 			// receive the response
 			if resp.err != nil {
 				return resp.err
 			}
 			responses[resp.index] = resp
 
-			fmt.Println("DEBUG PJ: received slab response")
 			// slabs might download out of order, therefore we need to keep
 			// sending slabs for as long as we have consecutive slabs in the
 			// response map
@@ -233,10 +234,6 @@ loop:
 				slabs[respIndex].Decrypt(next.shards)
 				err := slabs[respIndex].Recover(cw, next.shards)
 				if err != nil {
-					fmt.Println("DEBUG PJ: recover failed", err, len(next.shards))
-					for _, s := range resp.shards {
-						fmt.Println("DEBUGP PJ: shard length", len(s))
-					}
 					return err
 				}
 
@@ -246,7 +243,7 @@ loop:
 			}
 
 			// exit condition
-			if respIndex == len(slabs) {
+			if respIndex == slabIndex {
 				break loop
 			}
 		}
@@ -315,12 +312,14 @@ func (mgr *downloadManager) newDownload(o object.Object, contracts []api.Contrac
 		}
 	}
 
-	download := &download{
+	// trigger first slab download
+	nextSlabTrigger := make(chan struct{}, 1)
+	nextSlabTrigger <- struct{}{}
+
+	return &download{
 		mgr:             mgr,
-		nextSlabTrigger: make(chan struct{}, 1),
-	}
-	download.nextSlabTrigger <- struct{}{} // trigger first download
-	return download, nil
+		nextSlabTrigger: nextSlabTrigger,
+	}, nil
 }
 
 func (mgr *downloadManager) numDownloaders() int {
@@ -331,74 +330,78 @@ func (mgr *downloadManager) numDownloaders() int {
 
 func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata) {
 	// build map
-	c2m := make(map[types.FileContractID]api.ContractMetadata)
+	m := make(map[types.PublicKey]api.ContractMetadata)
+	for _, contract := range contracts {
+		m[contract.HostKey] = contract
+	}
+
+	// delete downloaders that are not in the given contracts
+	for h := range mgr.downloaders {
+		if _, exists := m[h]; !exists {
+			mgr.downloaders[h] = nil
+			delete(mgr.downloaders, h)
+		}
+	}
+
+	// add downloaders that are not in the manager yet
 	for _, c := range contracts {
-		c2m[c.ID] = c
-	}
-
-	var i int
-	for _, downloader := range mgr.downloaders {
-		// throw out downloaders not in the given contracts
-		_, keep := c2m[downloader.fcid]
-		if !keep {
-			continue
-		}
-
-		// delete it from the map to ensure we don't add it
-		delete(c2m, downloader.fcid)
-		mgr.downloaders[i] = downloader
-		i++
-	}
-	for j := i; j < len(mgr.downloaders); j++ {
-		mgr.downloaders[j] = nil
-	}
-	mgr.downloaders = mgr.downloaders[:i]
-
-	// add missing downloaders
-	for _, contract := range c2m {
-		downloader := newDownloader(contract)
-		mgr.downloaders = append(mgr.downloaders, downloader)
-		go downloader.start(mgr.hp)
-	}
-}
-
-func (d *download) finishSlabDownload(download *slabDownload) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for i, prev := range d.ongoing {
-		if prev == download.sID {
-			d.ongoing = append(d.ongoing[:i], d.ongoing[i+1:]...)
-			break
+		if _, exists := mgr.downloaders[c.HostKey]; !exists {
+			downloader := newDownloader(c)
+			go downloader.processQueue(mgr.hp)
+			mgr.downloaders[c.HostKey] = downloader
 		}
 	}
 }
 
-func (d *download) newSlabDownload(ctx context.Context, shards []object.Sector, minShards int) *slabDownload {
+func (d *download) newSlabDownload(ctx context.Context, slice object.SlabSlice) (*slabDownload, func()) {
 	// create slab id
 	var sID slabID
 	frand.Read(sID[:])
 
-	// add to ongoing downloads
+	// add slab to ongoing downloads
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.ongoing = append(d.ongoing, sID)
-	d.mu.Unlock()
+
+	// prepare a function to remove it from the ongoing downloads
+	finishFn := func() {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		for i, prev := range d.ongoing {
+			if prev == sID {
+				d.ongoing = append(d.ongoing[:i], d.ongoing[i+1:]...)
+				break
+			}
+		}
+	}
+
+	// prepare hosts
+	hosts := make(map[types.PublicKey]int)
+	for sI, shard := range slice.Shards {
+		hosts[shard.Host] = sI
+	}
 
 	// create slab download
 	return &slabDownload{
-		mgr:      d.mgr,
-		download: d,
+		mgr: d.mgr,
 
 		sID:       sID,
 		created:   time.Now(),
-		minShards: minShards,
+		minShards: int(slice.MinShards),
 
+		hosts:   hosts,
 		used:    make(map[types.PublicKey]struct{}),
-		sectors: make([][]byte, len(shards)),
-	}
+		sectors: make([][]byte, len(slice.Shards)),
+	}, finishFn
+}
+
+func (d *download) ongoingDownloads() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.ongoing)
 }
 
 func (d *download) downloadSlab(ctx context.Context, slice object.SlabSlice, index int, responseChan chan *slabDownloadResponse) {
-	fmt.Println("DEBUG PJ: downloading slab", index)
 	// cancel any sector downloads once the slab is done.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -407,10 +410,16 @@ func (d *download) downloadSlab(ctx context.Context, slice object.SlabSlice, ind
 	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
 	defer span.End()
 
-	// create the response
+	// prepare the download
+	slab, finishFn := d.newSlabDownload(ctx, slice)
+	defer finishFn()
+
+	// calculate the offset and length
+	offset, length := slice.SectorRegion()
+
+	// download shards
 	resp := &slabDownloadResponse{index: index}
-	resp.shards, resp.err = d.downloadShards(ctx, slice)
-	fmt.Println("DEBUG PJ: download resp", len(resp.shards), resp.err)
+	resp.shards, resp.err = slab.downloadShards(ctx, slice.Shards, offset, length, d.nextSlabTrigger)
 
 	// send the response
 	select {
@@ -425,7 +434,7 @@ func (d *downloader) healthy() bool {
 	return d.consecutiveFailures == 0
 }
 
-func (d *downloader) start(hp hostProvider) {
+func (d *downloader) processQueue(hp hostProvider) {
 outer:
 	for {
 		// wait for work
@@ -443,33 +452,56 @@ outer:
 			default:
 			}
 
-			// pop the next download
-			download := d.pop()
-			if download == nil {
+			// fill next batch
+			var batch []*sectorDownloadReq
+			for len(batch) < maxBatchSize {
+				req := d.pop()
+				if req == nil {
+					break
+				}
+				if req.done() {
+					continue
+				}
+				batch = append(batch, req)
+			}
+			if len(batch) == 0 {
 				continue outer
 			}
-			fmt.Println("DEBUG PJ: processing download")
 
-			// skip if download is done
-			if download.done() {
-				continue
-			}
-
-			// execute and handle the response
 			start := time.Now()
-			sector, err := download.execute(hp)
-			fmt.Println("DEBUG PJ: download executed", len(sector), err)
-			if err != nil {
-				download.fail(err)
-			} else {
-				download.succeed(sector)
+			var completed uint64
+			var wg sync.WaitGroup
+			wg.Add(len(batch))
+			for _, req := range batch {
+				go func(req *sectorDownloadReq) {
+					defer wg.Done()
+
+					// execute and handle the response
+					sector, err := req.execute(hp)
+					if err != nil {
+						req.fail(err)
+					} else {
+						req.succeed(sector)
+						atomic.AddUint64(&completed, 1)
+					}
+
+					// track the error, ignore gracefully closed streams and canceled overdrives
+					isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
+					canceledOverdrive := req.done() && req.overdrive && err != nil
+					if !canceledOverdrive && !isErrClosedStream {
+						d.trackFailure(err)
+					}
+				}(req)
 			}
 
-			// track the error, ignore gracefully closed streams and canceled overdrives
-			isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
-			canceledOverdrive := download.done() && download.overdrive && err != nil
-			if !canceledOverdrive && !isErrClosedStream {
-				d.track(err, time.Since(start))
+			wg.Wait()
+
+			if completed == uint64(len(batch)) {
+				downloadedB := completed * rhpv2.SectorSize
+				durationMS := time.Since(start).Milliseconds()
+				d.statsSpeed.track(float64(downloadedB / uint64(durationMS)))
+			} else {
+				d.statsSpeed.track(1)
 			}
 		}
 	}
@@ -524,15 +556,13 @@ func (d *downloader) pop() *sectorDownloadReq {
 	return nil
 }
 
-func (d *downloader) track(err error, dur time.Duration) {
+func (d *downloader) trackFailure(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err != nil {
 		d.consecutiveFailures++
-		d.statsSpeed.track(1)
 	} else {
 		d.consecutiveFailures = 0
-		d.statsSpeed.track(float64(rhpv2.SectorSize / dur.Milliseconds()))
 	}
 }
 
@@ -561,13 +591,10 @@ func (download *sectorDownloadReq) execute(hp hostProvider) (_ []byte, err error
 		return nil, err
 	}
 
-	data := buf.Bytes()
-	fmt.Println("DEBUG PJ: received sector data", data[:16])
-	return data, nil
+	return buf.Bytes(), nil
 }
 
 func (download *sectorDownloadReq) succeed(sector []byte) {
-	fmt.Println("DEBUG PJ: trying to send sector resp")
 	select {
 	case <-download.ctx.Done():
 	case download.responseChan <- sectorDownloadResp{
@@ -575,7 +602,6 @@ func (download *sectorDownloadReq) succeed(sector []byte) {
 		sector: sector,
 	}:
 	}
-	fmt.Println("DEBUG PJ: sector resp sent")
 }
 
 func (download *sectorDownloadReq) fail(err error) {
@@ -597,46 +623,69 @@ func (download *sectorDownloadReq) done() bool {
 	}
 }
 
-func (d *download) downloadShards(ctx context.Context, slice object.SlabSlice) ([][]byte, error) {
+func (s *slabDownload) nextHost(hosts []types.PublicKey) types.PublicKey {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, host := range hosts {
+		if _, used := s.used[host]; used {
+			continue
+		}
+		return host
+	}
+	return types.PublicKey{}
+}
+
+func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Sector, offset, length uint32, nextSlabTrigger chan struct{}) ([][]byte, error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadShards")
 	defer span.End()
-
-	// prepare the download
-	slab := d.newSlabDownload(ctx, slice.Shards, int(slice.MinShards))
-	span.SetAttributes(attribute.Stringer("id", slab.sID))
-	defer d.finishSlabDownload(slab)
-
-	// calculate the offset and length
-	offset, length := slice.SectorRegion()
 
 	// create the response channel
 	respChan := make(chan sectorDownloadResp)
 
 	// create a timer to trigger overdrive
-	timeout := time.NewTimer(d.mgr.overdriveTimeout)
+	timeout := time.NewTimer(s.mgr.overdriveTimeout)
 	resetTimeout := func() {
 		timeout.Stop()
 		select {
 		case <-timeout.C:
 		default:
 		}
-		timeout.Reset(d.mgr.overdriveTimeout)
+		timeout.Reset(s.mgr.overdriveTimeout)
 	}
 
-	// build a sectors map
-	hosts := make([]types.PublicKey, len(slice.Shards))
-	sectors := make(map[types.PublicKey]sectorInfo)
-	for i, shard := range slice.Shards {
-		hosts[i] = shard.Host
-		sectors[shard.Host] = sectorInfo{
-			shard,
-			i,
+	// build a map of host to shard
+	h2shard := make(map[types.PublicKey]object.Sector)
+	for _, s := range shards {
+		h2shard[s.Host] = s
+	}
+
+	// build a list of hosts
+	var hosts []types.PublicKey
+	for hk := range s.hosts {
+		hosts = append(hosts, hk)
+	}
+
+	// build a helper function that returns a download req for a given host
+	buildRequest := func(hk types.PublicKey, overdrive bool) *sectorDownloadReq {
+		if hk == (types.PublicKey{}) {
+			return nil
+		}
+		return &sectorDownloadReq{
+			sID:      s.sID,
+			download: s,
+			ctx:      ctx,
+
+			offset: offset,
+			length: length,
+			root:   h2shard[hk].Root,
+			hk:     h2shard[hk].Host,
+
+			overdrive:    overdrive,
+			sectorIndex:  s.hosts[hk],
+			responseChan: respChan,
 		}
 	}
-
-	// have the manager sort the hosts
-	d.mgr.sort(hosts)
 
 	// launch a goroutine to trigger overdrive
 	go func() {
@@ -645,66 +694,49 @@ func (d *download) downloadShards(ctx context.Context, slice object.SlabSlice) (
 			case <-ctx.Done():
 				return
 			case <-timeout.C:
-				if req := slab.overdrive(ctx, hosts, sectors, offset, length, respChan); req != nil {
-					_ = slab.launch(req) // ignore error
-				}
+				s.mgr.sort(hosts)
+				_ = s.launch(buildRequest(s.nextHost(hosts), true)) // ignore error
 				resetTimeout()
 			}
 		}
 	}()
 
 	// launch 'MinShard' requests
-	for i := 0; i < int(slice.MinShards); i++ {
-		sector := sectors[hosts[i]]
-		fmt.Println("DEBUG PJ: launch shard", i)
-		if err := slab.launch(&sectorDownloadReq{
-			sID:      slab.sID,
-			download: slab,
-			ctx:      ctx,
-
-			offset: offset,
-			length: length,
-			root:   sector.Root,
-			hk:     sector.Host,
-
-			sectorIndex:  sector.index,
-			responseChan: respChan,
-		}); err != nil {
-			return nil, err
+	s.mgr.sort(hosts)
+	for i := 0; i < int(s.minShards); i++ {
+		if err := s.launch(buildRequest(s.nextHost(hosts), false)); err != nil {
+			return nil, errors.New("no hosts available")
 		}
-		fmt.Println("DEBUG PJ: launched shard", i)
 	}
-	fmt.Println("DEBUG PJ: all requests launched")
 
 	// collect responses
-	var finished bool
-	for slab.inflight() > 0 && !finished {
+	var done bool
+	var next bool
+	for s.inflight() > 0 && !done {
 		var resp sectorDownloadResp
 		select {
-		case <-d.mgr.stopChan:
+		case <-s.mgr.stopChan:
 			return nil, errors.New("download stopped")
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case resp = <-respChan:
+			if resp.err == nil {
+				resetTimeout()
+			}
 		}
-		fmt.Println("DEBUG PJ: received download resp err", resp.err)
-
-		// receive the response
-		finished = slab.receive(resp)
-
-		// handle the response
-		if resp.err == nil {
-			resetTimeout()
-
-			// try and trigger the next slab read
-			slab.tryTriggerNextRead()
+		done, next = s.receive(resp)
+		if next {
+			select {
+			case nextSlabTrigger <- struct{}{}:
+			default:
+			}
 		}
 	}
 
 	// track stats
-	d.mgr.statsOverdrive.track(slab.overdrivePct())
-	d.mgr.statsSpeed.track(float64(slab.downloadSpeed()))
-	return slab.finish()
+	s.mgr.statsOverdrive.track(s.overdrivePct())
+	s.mgr.statsSpeed.track(float64(s.downloadSpeed()))
+	return s.finish()
 }
 
 func (s *slabDownload) overdrivePct() float64 {
@@ -712,8 +744,8 @@ func (s *slabDownload) overdrivePct() float64 {
 	defer s.mu.Unlock()
 
 	numOverdrive := int(s.numLaunched) - s.minShards
-	if numOverdrive <= 0 {
-		return 0
+	if numOverdrive < 0 {
+		numOverdrive = 0
 	}
 
 	return float64(numOverdrive) / float64(s.minShards)
@@ -731,17 +763,8 @@ func (s *slabDownload) downloadSpeed() int64 {
 func (s *slabDownload) finish() ([][]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// count whether we have 'MinShards' sectors
-	var completed int
-	for _, sector := range s.sectors {
-		if len(sector) > 0 {
-			completed++
-		}
-	}
-
-	if completed < s.minShards {
-		return nil, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", completed, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
+	if s.numCompleted < s.minShards {
+		return nil, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
 	}
 	return s.sectors, nil
 }
@@ -752,47 +775,24 @@ func (s *slabDownload) inflight() uint64 {
 	return s.numInflight
 }
 
-func (s *slabDownload) overdrive(ctx context.Context, hosts []types.PublicKey, sectors map[types.PublicKey]sectorInfo, offset, length uint32, respChan chan sectorDownloadResp) *sectorDownloadReq {
-	s.mgr.sort(hosts)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, h := range hosts {
-		_, used := s.used[h]
-		if !used {
-			sector := sectors[h]
-			return &sectorDownloadReq{
-				sID:      s.sID,
-				download: s,
-				ctx:      ctx,
-
-				offset: offset,
-				length: length,
-				root:   sector.Root,
-				hk:     sector.Host,
-
-				sectorIndex:  sector.index,
-				responseChan: respChan,
-			}
-		}
-	}
-	return nil
-}
-
 func (s *slabDownload) launch(req *sectorDownloadReq) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// check for nil
+	if req == nil {
+		return errors.New("no request given")
+	}
+
 	// launch the req
-	hk, err := s.mgr.launch(req)
+	err := s.mgr.launch(req)
 	if err != nil {
 		span := trace.SpanFromContext(req.ctx)
 		span.RecordError(err)
 		span.End()
 		return err
 	}
-	s.used[hk] = struct{}{}
+	s.used[req.hk] = struct{}{}
 
 	// update the state
 	s.numInflight++
@@ -804,7 +804,7 @@ func (s *slabDownload) launch(req *sectorDownloadReq) error {
 	return nil
 }
 
-func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool) {
+func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -812,37 +812,14 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool) {
 	s.numInflight--
 	if resp.err != nil {
 		s.errs = append(s.errs, &HostError{resp.req.hk, resp.err})
-		return false
+		return false, false
 	}
 
-	// store the sector and call cancel on the sector ctx
+	// store the sector
 	s.sectors[resp.req.sectorIndex] = resp.sector
+	s.numCompleted++
 
-	// count whether we have 'MinShards' sectors
-	var received int
-	for _, sector := range s.sectors {
-		if len(sector) > 0 {
-			received++
-			if received >= int(s.minShards) {
-				fmt.Println("DEBUG PJ: download complete", received, s.minShards)
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (s *slabDownload) tryTriggerNextRead() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.nextSlabTriggered && len(s.sectors)+int(s.mgr.maxOverdrive) >= s.minShards {
-		select {
-		case s.download.nextSlabTrigger <- struct{}{}:
-			s.nextSlabTriggered = true
-		default:
-		}
-	}
+	return s.numCompleted >= s.minShards, s.numCompleted+int(s.mgr.maxOverdrive) >= s.minShards
 }
 
 func (mgr *downloadManager) sort(hosts []types.PublicKey) {
@@ -854,43 +831,27 @@ func (mgr *downloadManager) sort(hosts []types.PublicKey) {
 		downloader.statsSpeed.recompute()
 	}
 
-	// sort the downloaders fastest to slowest
-	sort.Slice(mgr.downloaders, func(i, j int) bool {
-		return mgr.downloaders[i].estimate() < mgr.downloaders[j].estimate()
-	})
-
-	// build a map of host to 'speed index'
-	indices := make(map[types.PublicKey]int)
-	for i, downloader := range mgr.downloaders {
-		indices[downloader.hk] = i
-	}
-	mgr.downloadersIndex = indices
-
-	// sort the hosts so fastest hosts are first
+	// sort the hosts fastest to slowest
 	sort.Slice(hosts, func(i, j int) bool {
-		indexI, exists := indices[hosts[i]]
-		if !exists {
+		if dI, exists := mgr.downloaders[hosts[i]]; !exists {
 			return false
+		} else if dJ, exists := mgr.downloaders[hosts[j]]; !exists {
+			return true
+		} else {
+			return dI.estimate() < dJ.estimate()
 		}
-		indexJ, exists := indices[hosts[j]]
-		if !exists {
-			return false
-		}
-		return indexI < indexJ
 	})
 }
 
-func (mgr *downloadManager) launch(req *sectorDownloadReq) (types.PublicKey, error) {
+func (mgr *downloadManager) launch(req *sectorDownloadReq) error {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
-	index, exists := mgr.downloadersIndex[req.hk]
+	downloader, exists := mgr.downloaders[req.hk]
 	if !exists {
-		return types.PublicKey{}, errors.New("downloader not found")
+		return fmt.Errorf("no downloader for host %v", req.hk)
 	}
-	downloader := mgr.downloaders[index]
 
-	fmt.Println("DEBUG PJ: enqueueing req to downloader", downloader.hk)
 	downloader.enqueue(req)
-	return req.hk, nil
+	return nil
 }
