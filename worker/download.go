@@ -423,10 +423,6 @@ func (d *download) ongoingDownloads() int {
 }
 
 func (d *download) downloadSlab(ctx context.Context, slice object.SlabSlice, index int, responseChan chan *slabDownloadResponse) {
-	// cancel any sector downloads once the slab is done.
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
 	defer span.End()
@@ -547,18 +543,18 @@ func (d *downloader) estimate() float64 {
 }
 
 func (d *downloader) enqueue(download *sectorDownloadReq) {
-	// decorate req
+	// add tracing
 	span := trace.SpanFromContext(download.ctx)
-	span.SetAttributes(attribute.Stringer("hk", d.hk))
 	span.AddEvent("enqueued")
+
+	// decorate req
 	download.fcid = d.fcid
 	download.siamuxAddr = d.siamuxAddr
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	// enqueue the job
+	d.mu.Lock()
 	d.queue = append(d.queue, download)
+	d.mu.Unlock()
 
 	// signal there's work
 	select {
@@ -688,6 +684,10 @@ func (s *slabDownload) nextHost(hosts []types.PublicKey) types.PublicKey {
 }
 
 func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Sector, offset, length uint32, nextSlabTrigger chan struct{}) ([][]byte, error) {
+	// cancel any sector downloads once the download is done
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadShards")
 	defer span.End()
@@ -723,10 +723,14 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 		if hk == (types.PublicKey{}) {
 			return nil
 		}
+		sCtx, span := tracing.Tracer.Start(ctx, "sectorDownloadReq")
+		span.SetAttributes(attribute.Stringer("hk", hk))
+		span.SetAttributes(attribute.Bool("overdrive", false))
+		span.SetAttributes(attribute.Int("sector", s.hosts[hk]))
 		return &sectorDownloadReq{
 			sID:      s.sID,
 			download: s,
-			ctx:      ctx,
+			ctx:      sCtx,
 
 			offset: offset,
 			length: length,
