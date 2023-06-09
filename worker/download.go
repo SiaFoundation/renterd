@@ -591,23 +591,13 @@ func (s *slabDownload) overdrive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	remaining := s.minShards - s.numCompleted
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	// overdrive is not kicking in yet
-	if uint64(remaining) >= s.mgr.maxOverdrive {
-		return false
-	}
-
 	// overdrive is not due yet
 	if time.Since(s.lastOverdrive) < s.mgr.overdriveTimeout {
 		return false
 	}
 
 	// overdrive is maxed out
-	if s.numInflight-uint64(remaining) >= s.mgr.maxOverdrive {
+	if s.numInflight >= s.mgr.maxOverdrive+uint64(s.minShards) {
 		return false
 	}
 
@@ -694,7 +684,8 @@ func (s *slabDownload) downloadShards(ctx context.Context, shards []object.Secto
 			case <-timeout.C:
 				if s.overdrive() {
 					s.mgr.sort(hosts)
-					_ = s.launch(buildRequest(s.nextHost(hosts), true)) // ignore error
+					req := buildRequest(s.nextHost(hosts), true)
+					_ = s.launch(req) // ignore error
 				}
 				resetTimeout()
 			}
