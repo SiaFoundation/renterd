@@ -37,6 +37,7 @@ type (
 		stopChan                         chan struct{}
 
 		mu            sync.Mutex
+		ongoing       map[slabID]struct{}
 		downloaders   map[types.PublicKey]*downloader
 		lastRecompute time.Time
 	}
@@ -61,8 +62,7 @@ type (
 
 		nextSlabTrigger chan struct{}
 
-		mu      sync.Mutex
-		ongoing []slabID
+		mu sync.Mutex
 	}
 
 	slabDownload struct {
@@ -165,6 +165,9 @@ func newDownloader(c api.ContractMetadata) *downloader {
 }
 
 func (mgr *downloadManager) Download(ctx context.Context, w io.Writer, o object.Object, offset, length uint32, contracts []api.ContractMetadata) (err error) {
+	// refresh the downloaders
+	mgr.refreshDownloaders(contracts)
+
 	// cancel all in-flight requests when the download is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -185,11 +188,9 @@ func (mgr *downloadManager) Download(ctx context.Context, w io.Writer, o object.
 	// create the cipher writer
 	cw := o.Key.Decrypt(w, offset)
 
-	// create the download
-	d, err := mgr.newDownload(o, contracts)
-	if err != nil {
-		return err
-	}
+	// create the trigger chan
+	nextSlabChan := make(chan struct{}, 1)
+	nextSlabChan <- struct{}{}
 
 	// create response channel
 	responseChan := make(chan *slabDownloadResponse)
@@ -207,14 +208,15 @@ loop:
 			return errors.New("manager was stopped")
 		case <-ctx.Done():
 			return errors.New("download timed out")
-		case <-d.nextSlabTrigger:
+		case <-nextSlabChan:
 			if slabIndex == len(slabs) {
 				continue
 			}
-			if d.ongoingDownloads() >= 3 {
+			if mgr.ongoingDownloads() >= 10 {
+				fmt.Println("DEBUG PJ: ongoing downloads >= 10, waiting for one to finish")
 				continue
 			}
-			go d.downloadSlab(ctx, slabs[slabIndex], slabIndex, responseChan)
+			go mgr.downloadSlab(ctx, slabs[slabIndex], slabIndex, responseChan, nextSlabChan)
 			slabIndex++
 		case resp := <-responseChan:
 			fmt.Printf("DEBUG PJ: %v | received slab %d/%d\n", o.Key.String(), resp.index+1, len(slabs))
@@ -374,26 +376,21 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	}
 }
 
-func (d *download) newSlabDownload(ctx context.Context, slice object.SlabSlice) (*slabDownload, func()) {
+func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.SlabSlice) (*slabDownload, func()) {
 	// create slab id
 	var sID slabID
 	frand.Read(sID[:])
 
 	// add slab to ongoing downloads
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.ongoing = append(d.ongoing, sID)
+	mgr.mu.Lock()
+	mgr.ongoing[sID] = struct{}{}
+	mgr.mu.Unlock()
 
 	// prepare a function to remove it from the ongoing downloads
 	finishFn := func() {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		for i, prev := range d.ongoing {
-			if prev == sID {
-				d.ongoing = append(d.ongoing[:i], d.ongoing[i+1:]...)
-				break
-			}
-		}
+		mgr.mu.Lock()
+		delete(mgr.ongoing, sID)
+		mgr.mu.Unlock()
 	}
 
 	// prepare hosts
@@ -404,7 +401,7 @@ func (d *download) newSlabDownload(ctx context.Context, slice object.SlabSlice) 
 
 	// create slab download
 	return &slabDownload{
-		mgr: d.mgr,
+		mgr: mgr,
 
 		sID:       sID,
 		created:   time.Now(),
@@ -416,19 +413,19 @@ func (d *download) newSlabDownload(ctx context.Context, slice object.SlabSlice) 
 	}, finishFn
 }
 
-func (d *download) ongoingDownloads() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return len(d.ongoing)
+func (mgr *downloadManager) ongoingDownloads() int {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	return len(mgr.ongoing)
 }
 
-func (d *download) downloadSlab(ctx context.Context, slice object.SlabSlice, index int, responseChan chan *slabDownloadResponse) {
+func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabSlice, index int, responseChan chan *slabDownloadResponse, nextSlabChan chan struct{}) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
 	defer span.End()
 
 	// prepare the download
-	slab, finishFn := d.newSlabDownload(ctx, slice)
+	slab, finishFn := mgr.newSlabDownload(ctx, slice)
 	defer finishFn()
 
 	// calculate the offset and length
@@ -436,7 +433,7 @@ func (d *download) downloadSlab(ctx context.Context, slice object.SlabSlice, ind
 
 	// download shards
 	resp := &slabDownloadResponse{index: index}
-	resp.shards, resp.err = slab.downloadShards(ctx, slice.Shards, offset, length, d.nextSlabTrigger)
+	resp.shards, resp.err = slab.downloadShards(ctx, slice.Shards, offset, length, nextSlabChan)
 
 	// send the response
 	select {
@@ -826,7 +823,9 @@ func (s *slabDownload) finish() ([][]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
-		return nil, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
+		err := fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
+		fmt.Println("DEBUG PJ: download failed err", err)
+		return nil, err
 	}
 	return s.sectors, nil
 }
