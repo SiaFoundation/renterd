@@ -121,9 +121,10 @@ type TransactionPool interface {
 // A SingleAddressWallet is a hot wallet that manages the outputs controlled by
 // a single address.
 type SingleAddressWallet struct {
-	priv  types.PrivateKey
-	addr  types.Address
-	store SingleAddressStore
+	priv           types.PrivateKey
+	addr           types.Address
+	store          SingleAddressStore
+	usedUTXOExpiry time.Duration
 
 	// for building transactions
 	mu       sync.Mutex
@@ -351,7 +352,10 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 
 func (w *SingleAddressWallet) isOutputUsed(id types.Hash256) bool {
 	lastUsed := w.lastUsed[id]
-	return time.Since(lastUsed) > 24*time.Hour
+	if w.usedUTXOExpiry == 0 {
+		return !lastUsed.IsZero()
+	}
+	return time.Since(lastUsed) <= w.usedUTXOExpiry
 }
 
 // SumOutputs returns the total value of the supplied outputs.
@@ -363,11 +367,12 @@ func SumOutputs(outputs []SiacoinElement) (sum types.Currency) {
 }
 
 // NewSingleAddressWallet returns a new SingleAddressWallet using the provided private key and store.
-func NewSingleAddressWallet(priv types.PrivateKey, store SingleAddressStore) *SingleAddressWallet {
+func NewSingleAddressWallet(priv types.PrivateKey, store SingleAddressStore, usedUTXOExpiry time.Duration) *SingleAddressWallet {
 	return &SingleAddressWallet{
-		priv:     priv,
-		addr:     StandardAddress(priv.PublicKey()),
-		store:    store,
-		lastUsed: make(map[types.Hash256]time.Time),
+		priv:           priv,
+		addr:           StandardAddress(priv.PublicKey()),
+		store:          store,
+		lastUsed:       make(map[types.Hash256]time.Time),
+		usedUTXOExpiry: usedUTXOExpiry,
 	}
 }
