@@ -273,15 +273,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return err
 	}
 
-	// assert renewals are sorted by their size
-	if len(toRenew) > 1 {
-		for i := 1; i < len(toRenew); i++ {
-			if toRenew[i].contract.FileSize() < toRenew[i-1].contract.FileSize() {
-				// TODO: this panic is triggered in production, will fix it soon
-				// panic("toRenew is not sorted by size") // developer error
-			}
-		}
-	}
+	// sort renewals by their size
+	sort.Slice(toRenew, func(i, j int) bool {
+		return toRenew[i].contract.FileSize() > toRenew[j].contract.FileSize()
+	})
 
 	// calculate 'limit' amount of contracts we want to renew
 	var limit int
