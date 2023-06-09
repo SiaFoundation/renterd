@@ -157,13 +157,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata, l *zap.SugaredLogger) {
 				rCtx, cancel := context.WithTimeout(ctx, time.Minute)
-				if account, err := refillWorkerAccount(rCtx, a.a, w, workerID, contract, l); err == nil {
-					a.l.Infow("Successfully funded account",
-						"account", account,
-						"host", contract.HostKey,
-						"balance", maxBalance,
-					)
-				}
+				_ = refillWorkerAccount(rCtx, a.a, w, workerID, contract, l)
 				a.markRefillDone(workerID, contract.HostKey)
 				cancel()
 			}(c, logger)
@@ -171,7 +165,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	}
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (accountID rhpv3.Account, err error) {
+func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (err error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 	span.SetAttributes(attribute.Stringer("host", contract.HostKey))
@@ -184,13 +178,14 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 	}()
 
 	// fetch the account
+	var accountID rhpv3.Account
 	accountID, err = w.Account(ctx, contract.HostKey)
 	if err != nil {
 		return
 	}
 	account, err := a.Account(ctx, accountID, contract.HostKey)
 	if err != nil {
-		return accountID, err
+		return err
 	}
 
 	// update span
@@ -243,6 +238,12 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 			"host", contract.HostKey,
 			"balance", account.Balance,
 			"expected", maxBalance)
+	} else {
+		logger.Infow("Successfully funded account",
+			"account", account,
+			"host", contract.HostKey,
+			"balance", maxBalance,
+		)
 	}
 	return
 }
