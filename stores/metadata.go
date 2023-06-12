@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -181,6 +182,9 @@ func (dbSector) TableName() string { return "sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlab) TableName() string { return "slabs" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbSlabBuffer) TableName() string { return "buffered_slabs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlice) TableName() string { return "slices" }
@@ -842,7 +846,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 		// Find a buffer that is not yet marked as complete where the MinShards
 		// and TotalShards match.
 		var buffer dbSlabBuffer
-		err = tx.Preload("DBSlab").Take(&buffer, "complete = ? AND min_shards = ? AND total_shards = ?", false, partialSlab.MinShards, partialSlab.TotalShards).Error
+		err = tx.Preload("DBSlab").Where("complete = ? AND min_shards = ? AND total_shards = ?", false, partialSlab.MinShards, partialSlab.TotalShards).Take(&buffer).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -864,9 +868,9 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 			Offset:     uint32(len(buffer.Data)),
 		}
 		if remainingSpace <= len(partialSlab.Data) {
-			slice.Length = uint32(len(partialSlab.Data))
-		} else {
 			slice.Length = uint32(remainingSpace)
+		} else {
+			slice.Length = uint32(len(partialSlab.Data))
 		}
 		if err := tx.Create(&slice).Error; err != nil {
 			return err
@@ -881,10 +885,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 
 		// Update buffer.
 		buffer.Complete = len(buffer.Data) == slabSize
-		err = tx.Model(&dbSlabBuffer{}).Updates(map[string]interface{}{
-			"complete": buffer.Complete,
-			"data":     buffer.Data,
-		}).Error
+		err = tx.Model(&dbSlabBuffer{}).
+			Where("ID", buffer.ID).
+			Updates(map[string]interface{}{
+				"complete": buffer.Complete,
+				"data":     buffer.Data,
+			}).Error
 		if err != nil {
 			return err
 		}
@@ -895,8 +901,9 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 		}
 
 		// Otherwise, create a new buffer with a new slab and slice.
-		partialSlab.Data = overflow
-		return createSlabBuffer(tx, obj.ID, *partialSlab)
+		overflowSlab := *partialSlab
+		overflowSlab.Data = overflow
+		return createSlabBuffer(tx, obj.ID, overflowSlab)
 	})
 }
 
@@ -1123,6 +1130,38 @@ func (s *SQLStore) contracts(ctx context.Context, set string) ([]dbContract, err
 	}
 
 	return cs.Contracts, nil
+}
+
+// packedSlabsForUpload retrieves up to 'limit' dbSlabBuffers that have their
+// 'Complete' flag set to true and locks them using the 'LockedUntil' field
+func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, limit int) ([]dbSlabBuffer, error) {
+	var buffers []dbSlabBuffer
+	now := time.Now().Unix()
+	err := s.db.Raw(`UPDATE buffered_slabs SET locked_until = ? WHERE id IN (
+		SELECT id FROM buffered_slabs WHERE complete = ? AND locked_until < ? LIMIT ?) RETURNING *`, now+int64(lockingDuration.Seconds()), true, now, limit).
+		Scan(&buffers).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return buffers, nil
+}
+
+func (s *SQLStore) PackedSlabsForUpload(lockingDuration time.Duration, limit int) ([]api.PackedSlab, error) {
+	buffers, err := s.packedSlabsForUpload(lockingDuration, limit)
+	if err != nil {
+		return nil, err
+	}
+	slabs := make([]api.PackedSlab, len(buffers))
+	for i, buf := range buffers {
+		slabs[i] = api.PackedSlab{
+			BufferID:    buf.ID,
+			MinShards:   buf.MinShards,
+			TotalShards: buf.TotalShards,
+			Data:        buf.Data,
+		}
+	}
+	return slabs, nil
 }
 
 // contract retrieves a contract from the store.

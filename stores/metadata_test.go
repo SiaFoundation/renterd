@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -1926,6 +1927,231 @@ func TestObjectsStats(t *testing.T) {
 	}
 	if info.NumObjects != 2 {
 		t.Fatal("wrong number of objects", info.NumObjects, 2)
+	}
+}
+
+func TestPartialSlab(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create 2 hosts
+	hks, err := db.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2 := hks[0], hks[1]
+
+	// create 2 contracts
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1, fcid2 := fcids[0], fcids[1]
+	usedContracts := map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+	}
+
+	// create an object. It has 1 slab with 2 sectors and a partial slab.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hk1,
+							Root: types.Hash256{1},
+						},
+						{
+							Host: hk2,
+							Root: types.Hash256{2},
+						},
+					},
+				},
+				Offset: 0,
+				Length: rhpv2.SectorSize,
+			},
+		},
+	}
+	partialSlab := object.PartialSlab{
+		Key:         object.GenerateEncryptionKey(),
+		MinShards:   1,
+		TotalShards: 2,
+		Data:        []byte{1, 2, 3, 4},
+	}
+	err = db.UpdateObject(context.Background(), "key", obj, &partialSlab, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check that the object was created
+	storedObject, err := db.dbObject("key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedObject.Slabs) != 2 {
+		t.Fatal("expected 2 slabs to be created", len(storedObject.Slabs))
+	}
+	// check the slice
+	storedSlice := storedObject.Slabs[1]
+	if storedSlice.Offset != 0 || storedSlice.Length != uint32(len(partialSlab.Data)) {
+		t.Fatalf("wrong offset/length: %v/%v", storedSlice.Offset, storedSlice.Length)
+	}
+	// check the slab
+	var storedSlab dbSlab
+	if err := db.db.Take(&storedSlab, "id = ?", storedSlice.DBSlabID).Error; err != nil {
+		t.Fatal(err)
+	}
+	// check the buffer
+	var buffer dbSlabBuffer
+	if err := db.db.Take(&buffer, "db_slab_id = ?", storedSlab.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	buffer.Model = Model{}
+	expectedBuffer := dbSlabBuffer{
+		DBSlabID:    storedSlab.ID,
+		Complete:    false,
+		Data:        partialSlab.Data,
+		LockedUntil: 0,
+		MinShards:   partialSlab.MinShards,
+		TotalShards: partialSlab.TotalShards,
+	}
+	if !reflect.DeepEqual(buffer, expectedBuffer) {
+		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
+	}
+
+	// add another object with a partial slab. This should append to the buffer.
+	fullSlabSize := slabSize(1, 2)
+	obj2 := object.Object{Key: object.GenerateEncryptionKey()}
+	partialSlab2 := object.PartialSlab{
+		Key:         object.GenerateEncryptionKey(),
+		MinShards:   1,
+		TotalShards: 2,
+		Data:        frand.Bytes(int(fullSlabSize) - len(partialSlab.Data) - 1), // leave 1 byte
+	}
+	err = db.UpdateObject(context.Background(), "key2", obj2, &partialSlab2, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedObject2, err := db.dbObject("key2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedObject2.Slabs) != 1 {
+		t.Fatal("expected 1 slab to be created", len(storedObject2.Slabs))
+	}
+	// check the slice
+	storedSlice2 := storedObject2.Slabs[0]
+	if storedSlice2.Offset != storedSlice.Length || storedSlice2.Length != uint32(len(partialSlab2.Data)) {
+		t.Fatalf("wrong offset/length: %v/%v", storedSlice2.Offset, storedSlice2.Length)
+	}
+	// check the slab
+	var storedSlab2 dbSlab
+	if err := db.db.Take(&storedSlab2, "id = ?", storedSlice2.DBSlabID).Error; err != nil {
+		t.Fatal(err)
+	}
+	// check the buffer
+	if err := db.db.Take(&buffer, "db_slab_id = ?", storedSlab.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	buffer.Model = Model{}
+	expectedBuffer.Data = append(expectedBuffer.Data, partialSlab2.Data...)
+	if !reflect.DeepEqual(buffer, expectedBuffer) {
+		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
+	}
+
+	// add one last object. This should fill the buffer and create a new slab.
+	obj3 := object.Object{Key: object.GenerateEncryptionKey()}
+	partialSlab3 := object.PartialSlab{
+		Key:         object.GenerateEncryptionKey(),
+		MinShards:   1,
+		TotalShards: 2,
+		Data:        []byte{5, 6}, // 1 byte more than fits in the slab
+	}
+	err = db.UpdateObject(context.Background(), "key3", obj3, &partialSlab3, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedObject3, err := db.dbObject("key3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedObject3.Slabs) != 2 {
+		t.Fatal("expected 2 slabs to be created", len(storedObject2.Slabs))
+	}
+	// check the slice
+	storedSlice3, storedSlice4 := storedObject3.Slabs[0], storedObject3.Slabs[1]
+	if storedSlice3.Offset != storedSlice.Length+storedSlice2.Length || storedSlice3.Length != 1 {
+		t.Fatalf("wrong offset/length: %v/%v", storedSlice3.Offset, storedSlice3.Length)
+	}
+	if storedSlice4.Offset != 0 || storedSlice4.Length != 1 {
+		t.Fatalf("wrong offset/length: %v/%v", storedSlice4.Offset, storedSlice4.Length)
+	}
+	// check the slab for slab3
+	var storedSlab3 dbSlab
+	if err := db.db.Take(&storedSlab3, "id = ?", storedSlice3.DBSlabID).Error; err != nil {
+		t.Fatal(err)
+	}
+	// check the buffer
+	if err := db.db.Take(&buffer, "db_slab_id = ?", storedSlab.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	buffer.Model = Model{}
+	expectedBuffer.Complete = true // full now
+	expectedBuffer.Data = append(expectedBuffer.Data, partialSlab3.Data[0])
+	if !reflect.DeepEqual(buffer, expectedBuffer) {
+		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
+	}
+
+	// check the new buffer
+	var buffer2 dbSlabBuffer
+	if err := db.db.Take(&buffer2, "db_slab_id = ?", storedSlab.ID+1).Error; err != nil {
+		t.Fatal(err)
+	}
+	buffer2.Model = Model{}
+	expectedBuffer2 := dbSlabBuffer{
+		DBSlabID:    storedSlab.ID + 1,
+		Complete:    false,
+		Data:        partialSlab3.Data[1:],
+		LockedUntil: 0,
+		MinShards:   partialSlab.MinShards,
+		TotalShards: partialSlab.TotalShards,
+	}
+	if !reflect.DeepEqual(buffer2, expectedBuffer2) {
+		t.Fatal("invalid buffer", cmp.Diff(buffer2, expectedBuffer2))
+	}
+
+	// fetch the buffer for uploading
+	now := time.Now().Unix()
+	buffers, err := db.packedSlabsForUpload(time.Hour, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buffers) != 1 {
+		t.Fatal("expected 1 buffer to be returned", len(buffers))
+	}
+	completedBuffer := buffers[0]
+	if completedBuffer.LockedUntil < now+int64(time.Hour.Seconds()) {
+		t.Fatal("buffer should be locked for at least an hour", completedBuffer.LockedUntil, now+int64(time.Hour.Seconds()))
+	}
+	completedBuffer.LockedUntil = 0
+	completedBuffer.Model = Model{}
+	if !reflect.DeepEqual(completedBuffer, buffer) {
+		t.Fatal("invalid buffer", cmp.Diff(completedBuffer, buffer))
+	}
+
+	// try fetching it again. Should still be locked.
+	buffers, err = db.packedSlabsForUpload(time.Hour, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buffers) != 0 {
+		t.Fatal("expected 0 buffers to be returned", len(buffers))
 	}
 }
 
