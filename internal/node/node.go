@@ -255,7 +255,18 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 	cancelSubscribe := make(chan struct{})
 	go func() {
-		if err := cs.ConsensusSetSubscribe(sqlStore, ccid, cancelSubscribe); err != nil && !errors.Is(err, sync.ErrStopped) {
+		subscribeErr := cs.ConsensusSetSubscribe(sqlStore, ccid, cancelSubscribe)
+		if errors.Is(subscribeErr, modules.ErrInvalidConsensusChangeID) {
+			l.Warn("Invalid consensus change ID detected - resyncing consensus")
+			// Reset the consensus state within the database and rescan.
+			if err := sqlStore.ResetConsensusSubscription(); err != nil {
+				l.Fatal(fmt.Sprintf("Failed to reset consensus subscription of SQLStore: %v", err))
+				return
+			}
+			// Subscribe from the beginning.
+			subscribeErr = cs.ConsensusSetSubscribe(sqlStore, modules.ConsensusChangeBeginning, cancelSubscribe)
+		}
+		if subscribeErr != nil && !errors.Is(subscribeErr, sync.ErrStopped) {
 			l.Fatal(fmt.Sprintf("ConsensusSetSubscribe returned an error: %v", err))
 		}
 	}()
