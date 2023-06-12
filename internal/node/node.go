@@ -52,6 +52,7 @@ type BusConfig struct {
 	Network         *consensus.Network
 	Miner           *Miner
 	PersistInterval time.Duration
+	UsedUTXOExpiry  time.Duration
 
 	DBLoggerConfig stores.LoggerConfig
 	DBDialector    gorm.Dialector
@@ -259,7 +260,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		}
 	}()
 
-	w := wallet.NewSingleAddressWallet(seed, sqlStore)
+	w := wallet.NewSingleAddressWallet(seed, sqlStore, cfg.UsedUTXOExpiry)
 
 	if m := cfg.Miner; m != nil {
 		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {

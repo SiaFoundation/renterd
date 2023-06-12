@@ -47,7 +47,7 @@ func TestWalletRedistribute(t *testing.T) {
 		0,
 	}
 	s := &mockStore{utxos: []wallet.SiacoinElement{utxo}}
-	w := wallet.NewSingleAddressWallet(priv, s)
+	w := wallet.NewSingleAddressWallet(priv, s, 0)
 
 	numOutputsWithValue := func(v types.Currency) (c uint64) {
 		utxos, _ := w.UnspentOutputs()
