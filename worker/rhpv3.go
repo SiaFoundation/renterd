@@ -446,7 +446,11 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	if err != nil {
 		return err
 	}
-	defer a.bus.UnlockAccount(ctx, a.id, lockID)
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		a.bus.UnlockAccount(unlockCtx, a.id, lockID)
+		cancel()
+	}()
 
 	// return early if the account needs to sync
 	if account.RequiresSync {
