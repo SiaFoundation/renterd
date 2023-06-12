@@ -733,6 +733,27 @@ func pruneSlabs(tx *gorm.DB) error {
 		WHERE db_object_id IS NULL) toDelete)`).Error
 }
 
+func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.FileContractID) (map[types.PublicKey]dbContract, error) {
+	fcids := make([]fileContractID, 0, len(usedContracts))
+	hostForFCID := make(map[types.FileContractID]types.PublicKey, len(usedContracts))
+	for hk, fcid := range usedContracts {
+		fcids = append(fcids, fileContractID(fcid))
+		hostForFCID[fcid] = hk
+	}
+	var contracts []dbContract
+	err := tx.Model(&dbContract{}).
+		Where("fcid IN (?)", fcids).
+		Find(&contracts).Error
+	if err != nil {
+		return nil, err
+	}
+	fetchedContracts := make(map[types.PublicKey]dbContract, len(contracts))
+	for _, c := range contracts {
+		fetchedContracts[hostForFCID[types.FileContractID(c.FCID)]] = c
+	}
+	return fetchedContracts, nil
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
@@ -769,6 +790,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 			return err
 		}
 
+		// Fetch the used contracts.
+		contracts, err := fetchUsedContracts(tx, usedContracts)
+		if err != nil {
+			return err
+		}
+
 		for _, ss := range o.Slabs {
 			// Create Slab if it doesn't exist yet.
 			slabKey, err := ss.Key.MarshalText()
@@ -799,9 +826,6 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 			}
 
 			for _, shard := range ss.Shards {
-				// Translate pubkey to contract.
-				fcid := usedContracts[shard.Host]
-
 				// Create sector if it doesn't exist yet.
 				var sector dbSector
 				err := tx.
@@ -816,19 +840,8 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 					return err
 				}
 
-				// Look for the contract referenced by the shard.
-				contractFound := true
-				var contract dbContract
-				err = tx.Model(&dbContract{}).
-					Where(&dbContract{ContractCommon: ContractCommon{FCID: fileContractID(fcid)}}).
-					Take(&contract).Error
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					contractFound = false
-				} else if err != nil {
-					return err
-				}
-
 				// Add contract and host to join tables.
+				contract, contractFound := contracts[shard.Host]
 				if contractFound {
 					err = tx.Model(&sector).Association("Contracts").Append(&contract)
 					if err != nil {
@@ -921,14 +934,14 @@ func createSlabBuffer(tx *gorm.DB, objectID uint, partialSlab object.PartialSlab
 	if slabSize := int(rhpv2.SectorSize) * int(partialSlab.TotalShards) / int(partialSlab.MinShards); len(partialSlab.Data) >= slabSize {
 		return fmt.Errorf("partial slab data size must be less than %v to count as a partial slab: %v", slabSize, len(partialSlab.Data))
 	}
-	key, err := partialSlab.Key.MarshalText()
+	key, err := object.GenerateEncryptionKey().MarshalText()
 	if err != nil {
 		return err
 	}
 	// Create a new buffer and slab.
 	return tx.Create(&dbSlabBuffer{
 		DBSlab: dbSlab{
-			Key:         key,
+			Key:         key, // random placeholder key
 			MinShards:   partialSlab.MinShards,
 			TotalShards: partialSlab.TotalShards,
 			Slices: []dbSlice{
@@ -1147,6 +1160,9 @@ func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, limit int
 	return buffers, nil
 }
 
+// PackedSlabsForUpload returns up to 'limit' packed slabs that are ready for
+// uploading. They are locked for 'lockingDuration' time before being handed out
+// again.
 func (s *SQLStore) PackedSlabsForUpload(lockingDuration time.Duration, limit int) ([]api.PackedSlab, error) {
 	buffers, err := s.packedSlabsForUpload(lockingDuration, limit)
 	if err != nil {
@@ -1162,6 +1178,74 @@ func (s *SQLStore) PackedSlabsForUpload(lockingDuration time.Duration, limit int
 		}
 	}
 	return slabs, nil
+}
+
+// MarkPackedSlabsUploaded marks the given slabs as uploaded and deletes them
+// from the buffer.
+func (s *SQLStore) MarkPackedSlabsUploaded(slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
+	// Sanity check input.
+	for _, ss := range slabs {
+		for _, shard := range ss.Shards {
+			// Verify that all hosts have a contract.
+			_, exists := usedContracts[shard.Host]
+			if !exists {
+				return fmt.Errorf("missing contract for host %v", shard.Host)
+			}
+		}
+	}
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		contracts, err := fetchUsedContracts(tx, usedContracts)
+		if err != nil {
+			return err
+		}
+		for _, slab := range slabs {
+			if err := markPackedSlabUploaded(tx, slab, contracts); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) error {
+	// delete the buffer
+	var buffer dbSlabBuffer
+	err := tx.Raw("DELETE FROM buffered_slabs WHERE id = ? AND complete=? RETURNING *", slab.BufferID, true).
+		Scan(&buffer).
+		Error
+	if err != nil {
+		return err
+	}
+
+	// sanity check slab
+	if len(slab.Shards) != int(buffer.TotalShards) {
+		return fmt.Errorf("invalid number of shards in slab %v, expected %v, got %v", slab.BufferID, buffer.TotalShards, len(slab.Shards))
+	}
+
+	// update the slab
+	key, err := slab.Key.MarshalText()
+	if err != nil {
+		return err
+	}
+	if err := tx.Model(&dbSlab{}).Update("key", key).Error; err != nil {
+		return err
+	}
+
+	// add the shards to the slab
+	var shards []dbSector
+	for _, shard := range slab.Shards {
+		contract, exists := contracts[shard.Host]
+		if !exists {
+			return fmt.Errorf("missing contract for host %v", shard.Host)
+		}
+		shards = append(shards, dbSector{
+			DBSlabID:   buffer.DBSlabID,
+			LatestHost: publicKey(shard.Host),
+			Root:       shard.Root[:],
+			Contracts:  []dbContract{contract},
+		})
+	}
+	return tx.Create(shards).Error
 }
 
 // contract retrieves a contract from the store.

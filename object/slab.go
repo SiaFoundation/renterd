@@ -27,10 +27,9 @@ type Slab struct {
 }
 
 type PartialSlab struct {
-	Key         EncryptionKey `json:"key"`
-	MinShards   uint8         `json:"minShards"`
-	TotalShards uint8         `json:"totalShards"`
-	Data        []byte        `json:"data"`
+	MinShards   uint8  `json:"minShards"`
+	TotalShards uint8  `json:"totalShards"`
+	Data        []byte `json:"data"`
 }
 
 // NewSlab returns a new slab for the shards.

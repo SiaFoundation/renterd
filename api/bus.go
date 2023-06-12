@@ -239,6 +239,12 @@ type PackedSlab struct {
 	Data        []byte `json:"data"`
 }
 
+type UploadedPackedSlab struct {
+	BufferID uint
+	Key      object.EncryptionKey
+	Shards   []object.Sector
+}
+
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
 	Slab          object.Slab                              `json:"slab"`

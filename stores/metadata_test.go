@@ -1979,7 +1979,6 @@ func TestPartialSlab(t *testing.T) {
 		},
 	}
 	partialSlab := object.PartialSlab{
-		Key:         object.GenerateEncryptionKey(),
 		MinShards:   1,
 		TotalShards: 2,
 		Data:        []byte{1, 2, 3, 4},
@@ -2029,7 +2028,6 @@ func TestPartialSlab(t *testing.T) {
 	fullSlabSize := slabSize(1, 2)
 	obj2 := object.Object{Key: object.GenerateEncryptionKey()}
 	partialSlab2 := object.PartialSlab{
-		Key:         object.GenerateEncryptionKey(),
 		MinShards:   1,
 		TotalShards: 2,
 		Data:        frand.Bytes(int(fullSlabSize) - len(partialSlab.Data) - 1), // leave 1 byte
@@ -2068,7 +2066,6 @@ func TestPartialSlab(t *testing.T) {
 	// add one last object. This should fill the buffer and create a new slab.
 	obj3 := object.Object{Key: object.GenerateEncryptionKey()}
 	partialSlab3 := object.PartialSlab{
-		Key:         object.GenerateEncryptionKey(),
 		MinShards:   1,
 		TotalShards: 2,
 		Data:        []byte{5, 6}, // 1 byte more than fits in the slab
