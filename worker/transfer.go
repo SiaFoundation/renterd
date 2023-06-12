@@ -50,7 +50,7 @@ type hostV3 interface {
 
 type hostProvider interface {
 	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(hostV2) error) (err error)
-	newHostV3(context.Context, types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
+	newHostV3(types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
 }
 
 func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
@@ -110,7 +110,7 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 
 			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 			err := func() error {
-				h, err := hp.newHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
+				h, err := hp.newHostV3(contract.ID, contract.HostKey, contract.SiamuxAddr)
 				if err != nil {
 					return err
 				}

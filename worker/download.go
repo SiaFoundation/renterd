@@ -9,7 +9,6 @@ import (
 	"math"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -20,15 +19,14 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
-// TODO: make this configurable
-const maxBatchSize = 4
-
 type (
 	downloadManager struct {
-		hp hostProvider
+		hp     hostProvider
+		logger *zap.SugaredLogger
 
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
@@ -44,15 +42,13 @@ type (
 	}
 
 	downloader struct {
-		fcid       types.FileContractID
-		hk         types.PublicKey
-		siamuxAddr string
+		host hostV3
 
 		statsSectorDownloadEstimateInMS    *dataPoints
 		statsSectorDownloadSpeedBytesPerMS *dataPoints // keep track of this separately for stats (no decay is applied)
 
-		signalNewDownload chan struct{}
-		stopChan          chan struct{}
+		signalWorkChan chan struct{}
+		stopChan       chan struct{}
 
 		mu                  sync.Mutex
 		consecutiveFailures uint64
@@ -114,17 +110,18 @@ type (
 	}
 )
 
-func (w *worker) initDownloadManager(maxOverdrive uint64, overdriveTimeout time.Duration) {
+func (w *worker) initDownloadManager(maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
 
-	w.downloadManager = newDownloadManager(w, maxOverdrive, overdriveTimeout)
+	w.downloadManager = newDownloadManager(w, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout time.Duration) *downloadManager {
+func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
 	return &downloadManager{
-		hp: hp,
+		hp:     hp,
+		logger: logger,
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
@@ -139,15 +136,13 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 	}
 }
 
-func newDownloader(c api.ContractMetadata) *downloader {
+func newDownloader(c api.ContractMetadata, h hostV3) *downloader {
 	return &downloader{
-		fcid:       c.ID,
-		hk:         c.HostKey,
-		siamuxAddr: c.SiamuxAddr,
+		host: h,
 
 		statsSectorDownloadEstimateInMS:    newDataPoints(statsDecayHalfTime),
 		statsSectorDownloadSpeedBytesPerMS: newDataPoints(0), // no decay for exposed stats
-		signalNewDownload:                  make(chan struct{}, 1),
+		signalWorkChan:                     make(chan struct{}, 1),
 		stopChan:                           make(chan struct{}),
 
 		queue: make([]*sectorDownloadReq, 0),
@@ -256,7 +251,7 @@ func (mgr *downloadManager) Stats() downloadManagerStats {
 	speeds := make(map[types.PublicKey]float64)
 	for _, d := range mgr.downloaders {
 		healthy, mbps := d.stats()
-		speeds[d.hk] = mbps
+		speeds[d.host.HostKey()] = mbps
 		if healthy {
 			numHealthy++
 		}
@@ -320,7 +315,13 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	// add downloaders that are not in the manager yet
 	for _, c := range contracts {
 		if _, exists := mgr.downloaders[c.HostKey]; !exists {
-			downloader := newDownloader(c)
+			host, err := mgr.hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
+			if err != nil {
+				mgr.logger.Errorw(fmt.Sprintf("failed to create downloader, err: %v", err), "hk", c.HostKey, "fcid", c.ID, "address", c.SiamuxAddr)
+				continue
+			}
+
+			downloader := newDownloader(c, host)
 			go downloader.processQueue(mgr.hp)
 			mgr.downloaders[c.HostKey] = downloader
 		}
@@ -406,7 +407,7 @@ outer:
 	for {
 		// wait for work
 		select {
-		case <-d.signalNewDownload:
+		case <-d.signalWorkChan:
 		case <-d.stopChan:
 			return
 		}
@@ -419,60 +420,38 @@ outer:
 			default:
 			}
 
-			// fill next batch
-			var batch []*sectorDownloadReq
-			for len(batch) < maxBatchSize {
-				req := d.pop()
-				if req == nil {
-					break
-				}
-				if req.done() {
-					continue
-				}
-				batch = append(batch, req)
-			}
-			if len(batch) == 0 {
+			// pop next job
+			req := d.pop()
+			if req == nil {
 				continue outer
 			}
-
-			start := time.Now()
-			var completed uint64
-			var wg sync.WaitGroup
-			wg.Add(len(batch))
-			for _, req := range batch {
-				span := trace.SpanFromContext(req.ctx)
-				span.SetAttributes(attribute.Int("batchsize", len(batch)))
-				go func(req *sectorDownloadReq) {
-					defer wg.Done()
-
-					// execute and handle the response
-					sector, err := req.execute(hp, d.hk, d.fcid, d.siamuxAddr)
-					if err != nil {
-						req.fail(err)
-					} else {
-						req.succeed(sector)
-						atomic.AddUint64(&completed, 1)
-					}
-
-					// track the error, ignore gracefully closed streams and canceled overdrives
-					isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
-					canceledOverdrive := req.done() && req.overdrive && err != nil
-					if !canceledOverdrive && !isErrClosedStream {
-						d.trackFailure(err)
-					}
-				}(req)
+			if req.done() {
+				continue
 			}
 
-			wg.Wait()
+			// execute and handle the response
+			start := time.Now()
+			sector, err := req.execute(d.host)
+			if err != nil {
+				req.fail(err)
 
-			if completed == uint64(len(batch)) {
-				downloadedB := completed * rhpv2.SectorSize
-				durationMS := time.Since(start).Milliseconds()
-				durationAvg := durationMS / int64(completed)
-				d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / uint64(durationMS)))
-				d.statsSectorDownloadEstimateInMS.Track(float64(durationAvg))
-			} else {
+				// update estimates
 				d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
+			} else {
+				req.succeed(sector)
+
+				// update estimates
+				downloadedB := int64(rhpv2.SectorSize)
+				durationMS := time.Since(start).Milliseconds()
+				d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
+				d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
+			}
+
+			// track the error, ignore gracefully closed streams and canceled overdrives
+			isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
+			canceledOverdrive := req.done() && req.overdrive && err != nil
+			if !canceledOverdrive && !isErrClosedStream {
+				d.trackFailure(err)
 			}
 		}
 	}
@@ -504,7 +483,7 @@ func (d *downloader) enqueue(download *sectorDownloadReq) {
 
 	// signal there's work
 	select {
-	case d.signalNewDownload <- struct{}{}:
+	case d.signalWorkChan <- struct{}{}:
 	default:
 	}
 }
@@ -532,7 +511,7 @@ func (d *downloader) trackFailure(err error) {
 	}
 }
 
-func (req *sectorDownloadReq) execute(hp hostProvider, hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) (_ []byte, err error) {
+func (req *sectorDownloadReq) execute(h hostV3) (_ []byte, err error) {
 	// add tracing
 	start := time.Now()
 	span := trace.SpanFromContext(req.ctx)
@@ -543,12 +522,6 @@ func (req *sectorDownloadReq) execute(hp hostProvider, hk types.PublicKey, fcid 
 		span.RecordError(err)
 		span.End()
 	}()
-
-	// fetch the host
-	h, err := hp.newHostV3(req.ctx, fcid, hk, siamuxAddr)
-	if err != nil {
-		return nil, err
-	}
 
 	// download the sector
 	buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))

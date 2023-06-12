@@ -476,7 +476,9 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	}
 
 	// if an amount was returned, we withdraw it.
-	errAdd := a.bus.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
+	addCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	errAdd := a.bus.AddBalance(addCtx, a.id, a.host, new(big.Int).Neg(amt.Big()))
 	if errAdd != nil {
 		err = fmt.Errorf("%w; failed to add balance to account, error: %v", err, errAdd)
 	}

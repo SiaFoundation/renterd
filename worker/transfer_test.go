@@ -118,7 +118,7 @@ func (sp *mockHostProvider) withHostV2(ctx context.Context, contractID types.Fil
 	return f(h)
 }
 
-func (sp *mockHostProvider) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
+func (sp *mockHostProvider) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
@@ -159,7 +159,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 
 	// prepare upload manager
-	mgr := newUploadManager(hp, mockLocker, 0, 0)
+	mgr := newUploadManager(hp, mockLocker, 0, 0, zap.NewNop().Sugar())
 	upload, err := mgr.newUpload(10, contracts, 0)
 	if err != nil {
 		t.Fatal(err)

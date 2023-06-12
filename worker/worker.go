@@ -415,7 +415,7 @@ func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID
 	return err
 }
 
-func (w *worker) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
+func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return nil, err
@@ -447,7 +447,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 		cancel()
 	}()
 
-	h, err := w.newHostV3(ctx, contractID, hk, siamuxAddr)
+	h, err := w.newHostV3(contractID, hk, siamuxAddr)
 	if err != nil {
 		return err
 	}
@@ -567,7 +567,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
 
-	h, err := w.newHostV3(ctx, types.FileContractID{}, hk, siamuxAddr)
+	h, err := w.newHostV3(types.FileContractID{}, hk, siamuxAddr)
 	if err != nil {
 		return hostdb.HostPriceTable{}, err
 	}
@@ -688,7 +688,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// renew the contract
-	h, err := w.newHostV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
+	h, err := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
 	if jc.Check("failed to create host for renewal", err) != nil {
 		return
 	}
@@ -729,7 +729,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// fund the account
 	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
-		h, err := w.newHostV3(ctx, rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
+		h, err := w.newHostV3(rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
 		if err != nil {
 			return err
 		}
@@ -811,7 +811,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// sync the account
-	h, err := w.newHostV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
+	h, err := w.newHostV3(rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
 	if jc.Check("failed to create host for renewal", err) != nil {
 		return
 	}
@@ -1186,8 +1186,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
-	w.initDownloadManager(downloadMaxOverdrive, downloadOverdriveTimeout)
-	w.initUploadManager(uploadMaxOverdrive, uploadOverdriveTimeout)
+	w.initDownloadManager(downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
+	w.initUploadManager(uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
 	return w, nil
 }
 

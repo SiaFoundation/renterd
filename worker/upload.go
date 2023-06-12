@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -37,8 +38,9 @@ type (
 	slabID [8]byte
 
 	uploadManager struct {
-		hp hostProvider
-		rl revisionLocker
+		hp     hostProvider
+		rl     revisionLocker
+		logger *zap.SugaredLogger
 
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
@@ -53,6 +55,7 @@ type (
 	}
 
 	uploader struct {
+		host       hostV3
 		fcid       types.FileContractID
 		hk         types.PublicKey
 		siamuxAddr string
@@ -154,12 +157,12 @@ type (
 	}
 )
 
-func (w *worker) initUploadManager(maxOverdrive uint64, overdriveTimeout time.Duration) {
+func (w *worker) initUploadManager(maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
 
-	w.uploadManager = newUploadManager(w, w, maxOverdrive, overdriveTimeout)
+	w.uploadManager = newUploadManager(w, w, maxOverdrive, overdriveTimeout, logger)
 }
 
 func newDataPoints(halfLife time.Duration) *dataPoints {
@@ -171,10 +174,11 @@ func newDataPoints(halfLife time.Duration) *dataPoints {
 	}
 }
 
-func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, overdriveTimeout time.Duration) *uploadManager {
+func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
-		hp: hp,
-		rl: rl,
+		hp:     hp,
+		rl:     rl,
+		logger: logger,
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
@@ -188,8 +192,10 @@ func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, o
 	}
 }
 
-func newUploader(c api.ContractMetadata) *uploader {
+func newUploader(c api.ContractMetadata, h hostV3) *uploader {
 	return &uploader{
+		host: h,
+
 		fcid:       c.ID,
 		hk:         c.HostKey,
 		siamuxAddr: c.SiamuxAddr,
@@ -459,7 +465,15 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 	// add missing uploaders
 	for _, contract := range c2m {
-		uploader := newUploader(contract)
+		// create a host
+		h, err := mgr.hp.newHostV3(contract.ID, contract.HostKey, contract.SiamuxAddr)
+		if err != nil {
+			mgr.logger.Errorw(fmt.Sprintf("failed to create uploader, err: %v", err), "hk", contract.HostKey, "fcid", contract.ID, "address", contract.SiamuxAddr)
+			continue
+		}
+
+		// create uploader
+		uploader := newUploader(contract, h)
 		mgr.uploaders = append(mgr.uploaders, uploader)
 		go uploader.start(mgr.hp, mgr.rl)
 	}
@@ -749,7 +763,7 @@ outer:
 			start := time.Now()
 			err := rl.withRevision(upload.ctx, defaultRevisionFetchTimeout, u.fcid, u.hk, u.siamuxAddr, lockingPriorityUpload, u.blockHeight(), func(rev types.FileContractRevision) error {
 				var err error
-				root, err = upload.execute(hp, rev)
+				root, err = upload.execute(u.host, rev)
 				return err
 			})
 
@@ -854,16 +868,10 @@ func (u *uploader) pop() *sectorUploadReq {
 	return nil
 }
 
-func (upload *sectorUploadReq) execute(hp hostProvider, rev types.FileContractRevision) (types.Hash256, error) {
+func (upload *sectorUploadReq) execute(h hostV3, rev types.FileContractRevision) (types.Hash256, error) {
 	// fetch span from context
 	span := trace.SpanFromContext(upload.ctx)
 	span.AddEvent("execute")
-
-	// create a host
-	h, err := hp.newHostV3(upload.ctx, upload.fcid, upload.hk, upload.siamuxAddr)
-	if err != nil {
-		return types.Hash256{}, err
-	}
 
 	// upload the sector
 	start := time.Now()
