@@ -162,9 +162,15 @@ func (mgr *downloadManager) newDownloader(host hostV3) *downloader {
 	}
 }
 
-func (mgr *downloadManager) Download(ctx context.Context, w io.Writer, o object.Object, offset, length uint32, contracts []api.ContractMetadata) (err error) {
+func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint32, contracts []api.ContractMetadata) (err error) {
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
+
+	// build a map to count available shards later
+	hosts := make(map[types.PublicKey]struct{})
+	for _, c := range contracts {
+		hosts[c.HostKey] = struct{}{}
+	}
 
 	// cancel all in-flight requests when the download is done
 	ctx, cancel := context.WithCancel(ctx)
@@ -210,6 +216,19 @@ loop:
 			if slabIndex == len(slabs) {
 				continue
 			}
+
+			// check if we have enough downloaders
+			var available uint8
+			for _, s := range slabs[slabIndex].Shards {
+				if _, exists := hosts[s.Host]; exists {
+					available++
+				}
+			}
+			if available < slabs[slabIndex].MinShards {
+				return fmt.Errorf("not enough hosts available to download the slab: %v/%v", available, slabs[slabIndex].MinShards)
+			}
+
+			// launch the download
 			go mgr.downloadSlab(ctx, slabs[slabIndex], slabIndex, responseChan, nextSlabChan)
 			slabIndex++
 		case resp := <-responseChan:
@@ -250,6 +269,61 @@ loop:
 
 	return nil
 }
+
+func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, error) {
+	// refresh the downloaders
+	mgr.refreshDownloaders(contracts)
+
+	// grab available hosts
+	available := make(map[types.PublicKey]struct{})
+	for _, c := range contracts {
+		available[c.HostKey] = struct{}{}
+	}
+
+	// count how many shards we can download (best-case)
+	var availableShards uint8
+	for _, shard := range slab.Shards {
+		if _, exists := available[shard.Host]; exists {
+			availableShards++
+		}
+	}
+
+	// check if we have enough shards
+	if availableShards < slab.MinShards {
+		return nil, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, slab.MinShards)
+	}
+
+	// download the slab
+	responseChan := make(chan *slabDownloadResponse)
+	nextSlabChan := make(chan struct{})
+	slice := object.SlabSlice{
+		Slab:   slab,
+		Offset: 0,
+		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
+	}
+	go mgr.downloadSlab(ctx, slice, 0, responseChan, nextSlabChan)
+
+	// await the response
+	var resp *slabDownloadResponse
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case resp = <-responseChan:
+		if resp.err != nil {
+			return nil, resp.err
+		}
+	}
+
+	// decrypt and recover
+	slice.Decrypt(resp.shards)
+	err := slice.Reconstruct(resp.shards)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.shards, err
+}
+
 func (mgr *downloadManager) Stats() downloadManagerStats {
 	// recompute stats
 	mgr.tryRecomputeStats()
@@ -854,4 +928,31 @@ func (mgr *downloadManager) launch(req *sectorDownloadReq) error {
 
 	downloader.enqueue(req)
 	return nil
+}
+
+func slabsForDownload(slabs []object.SlabSlice, offset, length uint32) []object.SlabSlice {
+	// mutate a copy
+	slabs = append([]object.SlabSlice(nil), slabs...)
+
+	firstOffset := offset
+	for i, ss := range slabs {
+		if firstOffset <= ss.Length {
+			slabs = slabs[i:]
+			break
+		}
+		firstOffset -= ss.Length
+	}
+	slabs[0].Offset += firstOffset
+	slabs[0].Length -= firstOffset
+
+	lastLength := length
+	for i, ss := range slabs {
+		if lastLength <= ss.Length {
+			slabs = slabs[:i+1]
+			break
+		}
+		lastLength -= ss.Length
+	}
+	slabs[len(slabs)-1].Length = lastLength
+	return slabs
 }

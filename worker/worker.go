@@ -866,7 +866,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, time.Second, up.CurrentHeight, w.logger)
+	err = migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1019,7 +1019,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// download the object
-	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.Download(ctx, &rw, obj, uint32(offset), uint32(length), contracts)) != nil {
+	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, obj, uint32(offset), uint32(length), contracts)) != nil {
 		return
 	}
 }
