@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"sort"
 	"sync"
 	"time"
@@ -485,7 +484,7 @@ func (d *downloader) estimate() float64 {
 		estimateP90 = 1
 	}
 
-	numSectors := math.Sqrt(float64(len(d.queue))) + 1
+	numSectors := float64(len(d.queue) + 1)
 	return numSectors * estimateP90
 }
 
@@ -493,6 +492,7 @@ func (d *downloader) enqueue(download *sectorDownloadReq) {
 	// add tracing
 	span := trace.SpanFromContext(download.ctx)
 	span.AddEvent("enqueued")
+	span.SetAttributes(attribute.Float64("estimate", d.estimate()))
 
 	// enqueue the job
 	d.mu.Lock()
@@ -693,7 +693,12 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 
 	// launch 'MinShard' requests
 	for i := 0; i < int(s.minShards); i++ {
-		if err := s.launch(s.nextRequest(ctx, respChan, false)); err != nil {
+		req := s.nextRequest(ctx, respChan, false)
+		if i < 3 && req != nil {
+			fmt.Println("DEBUG PJ: selected host", req.hk)
+		}
+
+		if err := s.launch(req); err != nil {
 			return nil, errors.New("no hosts available")
 		}
 	}
