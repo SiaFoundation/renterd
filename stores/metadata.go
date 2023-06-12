@@ -124,7 +124,7 @@ type (
 	dbSector struct {
 		Model
 
-		DBSlabID   uint      `gorm:"index;NOT NULL"`
+		DBSlabID   uint      `gorm:"index"`
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 

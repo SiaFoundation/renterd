@@ -731,25 +731,23 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
-	// create host
-
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(revision types.FileContractRevision) (err error) {
-		h, err := w.newHostV3(ctx, revision.ParentID, rfr.HostKey, rfr.SiamuxAddr)
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
+		h, err := w.newHostV3(ctx, rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
 		if err != nil {
 			return err
 		}
-		err = h.FundAccount(ctx, rfr.Balance, &revision)
+		err = h.FundAccount(ctx, rfr.Balance, &rev)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
-			err = h.SyncAccount(ctx, &revision)
+			err = h.SyncAccount(ctx, &rev)
 			if err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+				w.logger.Debugf(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 				return
 			}
 
 			// try funding the account again
-			err = h.FundAccount(ctx, rfr.Balance, &revision)
+			err = h.FundAccount(ctx, rfr.Balance, &rev)
 			if errors.Is(err, errBalanceSufficient) {
 				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
 				return nil
@@ -821,8 +819,8 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	if jc.Check("failed to create host for renewal", err) != nil {
 		return
 	}
-	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(revision types.FileContractRevision) error {
-		return h.SyncAccount(ctx, &revision)
+	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(rev types.FileContractRevision) error {
+		return h.SyncAccount(ctx, &rev)
 	}))
 }
 
@@ -899,23 +897,25 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
 	stats := w.uploadManager.Stats()
 
+	// prepare upload stats
 	var uss []api.UploaderStats
-	for hk, us := range stats.uploadSpeedsP90MBPS {
+	for hk, mbps := range stats.uploadSpeedsMBPS {
 		uss = append(uss, api.UploaderStats{
-			HostKey:            hk,
-			UploadSpeedP90MBPS: us,
+			HostKey:                  hk,
+			AvgSectorUploadSpeedMBPS: mbps,
 		})
 	}
 	sort.SliceStable(uss, func(i, j int) bool {
-		return uss[i].UploadSpeedP90MBPS > uss[j].UploadSpeedP90MBPS
+		return uss[i].AvgSectorUploadSpeedMBPS > uss[j].AvgSectorUploadSpeedMBPS
 	})
 
+	// encode response
 	jc.Encode(api.UploadStatsResponse{
-		AvgUploadSpeedMBPS: stats.avgUploadSpeedMBPS,
-		HealthyUploaders:   stats.healthyUploaders,
-		OverdrivePct:       math.Floor(stats.overdrivePct*100*100) / 100,
-		NumUploaders:       stats.numUploaders,
-		UploadersStats:     uss,
+		AvgSlabUploadSpeedMBPS: math.Ceil(stats.avgSlabUploadSpeedMBPS*100) / 100,
+		AvgOverdrivePct:        math.Floor(stats.avgOverdrivePct*100*100) / 100,
+		HealthyUploaders:       stats.healthyUploaders,
+		NumUploaders:           stats.numUploaders,
+		UploadersStats:         uss,
 	})
 }
 

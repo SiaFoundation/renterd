@@ -1941,7 +1941,7 @@ func (s *SQLStore) dbObject(key string) (dbObject, error) {
 	return obj, nil
 }
 
-// dbObject retrieves a dbObject from the store.
+// dbSlab retrieves a dbSlab from the store.
 func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
 	var slab dbSlab
 	tx := s.db.Where(&dbSlab{Key: key}).

@@ -125,10 +125,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 
 	// Perform migrations.
 	if migrate {
-		err = db.Transaction(func(tx *gorm.DB) error {
-			return performMigrations(tx)
-		})
-		if err != nil {
+		if err := performMigrations(db, logger); err != nil {
 			return nil, modules.ConsensusChangeID{}, err
 		}
 	}

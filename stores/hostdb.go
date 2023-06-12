@@ -405,12 +405,18 @@ func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 func (e *dbBlocklistEntry) blocks(h dbHost) bool {
+	values := []string{h.NetAddress}
 	host, _, err := net.SplitHostPort(h.NetAddress)
-	if err != nil {
-		return false // do nothing
+	if err == nil {
+		values = append(values, host)
 	}
 
-	return host == e.Entry || strings.HasSuffix(host, "."+e.Entry)
+	for _, value := range values {
+		if value == e.Entry || strings.HasSuffix(value, "."+e.Entry) {
+			return true
+		}
+	}
+	return false
 }
 
 // Host returns information about a host.

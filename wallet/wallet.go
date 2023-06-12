@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -195,7 +196,7 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 		}
 	}
 	if outputSum.Cmp(amount) < 0 {
-		return nil, ErrInsufficientBalance
+		return nil, fmt.Errorf("%w: outputSum: %v, amount: %v", ErrInsufficientBalance, outputSum.String(), amount.String())
 	} else if outputSum.Cmp(amount) > 0 {
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
 			Value:   outputSum.Sub(amount),
@@ -318,8 +319,8 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 
 	// not enough outputs found
 	fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
-	if SumOutputs(inputs).Cmp(want.Add(fee)) < 0 {
-		return types.Transaction{}, nil, ErrInsufficientBalance
+	if sumOut := SumOutputs(inputs); sumOut.Cmp(want.Add(fee)) < 0 {
+		return types.Transaction{}, nil, fmt.Errorf("%w: %v < %v + %v (inputs < needed + txnFee)", ErrInsufficientBalance, sumOut.String(), want.String(), fee.String())
 	}
 
 	// set the miner fee
