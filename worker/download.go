@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -439,6 +440,8 @@ outer:
 			var wg sync.WaitGroup
 			wg.Add(len(batch))
 			for _, req := range batch {
+				span := trace.SpanFromContext(req.ctx)
+				span.SetAttributes(attribute.Int("batchsize", len(batch)))
 				go func(req *sectorDownloadReq) {
 					defer wg.Done()
 
@@ -485,7 +488,7 @@ func (d *downloader) estimate() float64 {
 		estimateP90 = 1
 	}
 
-	numSectors := float64(len(d.queue) + 1)
+	numSectors := math.Sqrt(float64(len(d.queue))) + 1
 	return numSectors * estimateP90
 }
 
