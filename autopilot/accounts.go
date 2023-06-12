@@ -157,7 +157,13 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata, l *zap.SugaredLogger) {
 				rCtx, cancel := context.WithTimeout(ctx, time.Minute)
-				_ = refillWorkerAccount(rCtx, a.a, w, workerID, contract, l)
+				if accountID, refilled, err := refillWorkerAccount(rCtx, a.a, w, workerID, contract, l); err == nil && refilled {
+					logger.Infow("Successfully funded account",
+						"account", accountID,
+						"host", contract.HostKey,
+						"balance", maxBalance,
+					)
+				}
 				a.markRefillDone(workerID, contract.HostKey)
 				cancel()
 			}(c, logger)
@@ -165,7 +171,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	}
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (err error) {
+func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (accountID rhpv3.Account, refilled bool, err error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 	span.SetAttributes(attribute.Stringer("host", contract.HostKey))
@@ -178,14 +184,14 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 	}()
 
 	// fetch the account
-	var accountID rhpv3.Account
 	accountID, err = w.Account(ctx, contract.HostKey)
 	if err != nil {
 		return
 	}
-	account, err := a.Account(ctx, accountID, contract.HostKey)
+	var account api.Account
+	account, err = a.Account(ctx, accountID, contract.HostKey)
 	if err != nil {
-		return err
+		return
 	}
 
 	// update span
@@ -239,11 +245,7 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 			"balance", account.Balance,
 			"expected", maxBalance)
 	} else {
-		logger.Infow("Successfully funded account",
-			"account", account,
-			"host", contract.HostKey,
-			"balance", maxBalance,
-		)
+		refilled = true
 	}
 	return
 }
