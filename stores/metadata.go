@@ -971,6 +971,14 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 			return errors.New("shard root can never be the empty root")
 		}
 	}
+	// Sanity check input.
+	for _, shard := range s.Shards {
+		// Verify that all hosts have a contract.
+		_, exists := usedContracts[shard.Host]
+		if !exists {
+			return fmt.Errorf("missing contract for host %v", shard.Host)
+		}
+	}
 
 	// extract the slab key
 	key, err := s.Key.MarshalText()
@@ -978,28 +986,12 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 		return err
 	}
 
-	// extract file contract ids
-	fcids := make([]fileContractID, 0, len(usedContracts))
-	for _, fcid := range usedContracts {
-		fcids = append(fcids, fileContractID(fcid))
-	}
-
 	// Update slab.
 	return ss.retryTransaction(func(tx *gorm.DB) (err error) {
 		// find all contracts
-		var dbContracts []dbContract
-		if err := tx.
-			Model(&dbContract{}).
-			Where("fcid IN (?)", fcids).
-			Find(&dbContracts).
-			Error; err != nil {
+		contracts, err := fetchUsedContracts(tx, usedContracts)
+		if err != nil {
 			return err
-		}
-
-		// make a contracts map
-		contracts := make(map[fileContractID]*dbContract)
-		for i := range dbContracts {
-			contracts[fileContractID(dbContracts[i].FCID)] = &dbContracts[i]
 		}
 
 		// find existing slab
@@ -1031,7 +1023,8 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 			}
 
 			// ensure the associations are updated
-			if contract := contracts[fileContractID(usedContracts[shard.Host])]; contract != nil {
+			contract, contractFound := contracts[shard.Host]
+			if contractFound {
 				if err := tx.
 					Model(&sector).
 					Association("Contracts").
