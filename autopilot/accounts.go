@@ -142,13 +142,10 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		inContractSet[contract.ID] = struct{}{}
 	}
 
-	// prepare no-op logger
-	noop := zap.NewNop().Sugar()
-	logger := noop
-
 	// refill accounts in separate goroutines
 	for _, c := range contracts {
 		// add logging for contracts in the set
+		logger := zap.NewNop().Sugar()
 		if _, inSet := inContractSet[c.ID]; inSet {
 			logger = a.l
 		}
@@ -158,7 +155,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 			go func(contract api.ContractMetadata, l *zap.SugaredLogger) {
 				rCtx, cancel := context.WithTimeout(ctx, time.Minute)
 				if accountID, refilled, err := refillWorkerAccount(rCtx, a.a, w, workerID, contract, l); err == nil && refilled {
-					logger.Infow("Successfully funded account",
+					a.l.Infow("Successfully funded account",
 						"account", accountID,
 						"host", contract.HostKey,
 						"balance", maxBalance,
