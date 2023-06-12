@@ -142,13 +142,10 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		inContractSet[contract.ID] = struct{}{}
 	}
 
-	// prepare no-op logger
-	noop := zap.NewNop().Sugar()
-	logger := noop
-
 	// refill accounts in separate goroutines
 	for _, c := range contracts {
 		// add logging for contracts in the set
+		logger := zap.NewNop().Sugar()
 		if _, inSet := inContractSet[c.ID]; inSet {
 			logger = a.l
 		}
@@ -157,9 +154,9 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata, l *zap.SugaredLogger) {
 				rCtx, cancel := context.WithTimeout(ctx, time.Minute)
-				if account, err := refillWorkerAccount(rCtx, a.a, w, workerID, contract, l); err == nil {
+				if accountID, refilled, err := refillWorkerAccount(rCtx, a.a, w, workerID, contract, l); err == nil && refilled {
 					a.l.Infow("Successfully funded account",
-						"account", account,
+						"account", accountID,
 						"host", contract.HostKey,
 						"balance", maxBalance,
 					)
@@ -171,7 +168,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	}
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (accountID rhpv3.Account, err error) {
+func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (accountID rhpv3.Account, refilled bool, err error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 	span.SetAttributes(attribute.Stringer("host", contract.HostKey))
@@ -188,9 +185,10 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 	if err != nil {
 		return
 	}
-	account, err := a.Account(ctx, accountID, contract.HostKey)
+	var account api.Account
+	account, err = a.Account(ctx, accountID, contract.HostKey)
 	if err != nil {
-		return accountID, err
+		return
 	}
 
 	// update span
@@ -243,6 +241,8 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 			"host", contract.HostKey,
 			"balance", account.Balance,
 			"expected", maxBalance)
+	} else {
+		refilled = true
 	}
 	return
 }

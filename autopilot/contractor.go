@@ -453,6 +453,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 			continue
+		} else if contract.RevisionNumber == math.MaxUint64 {
+			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+			continue
 		}
 
 		// starting here we need a revision for checking the contract. So if
