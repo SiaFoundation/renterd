@@ -460,7 +460,7 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 	ap.s = scanner
 	ap.c = newContractor(ap)
 	ap.m = newMigrator(ap, migrationHealthCutoff)
-	ap.a = newAccounts(ap, ap.bus, ap.c, ap.workers, ap.logger, accountsRefillInterval)
+	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
 	return ap, nil
 }
 

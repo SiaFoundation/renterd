@@ -233,7 +233,7 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
 			rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				// Fetch pt.
-				pt, err := h.priceTable(ctx, rev)
+				pt, err := h.priceTable(ctx, nil)
 				if err != nil {
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 				}

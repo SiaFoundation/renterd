@@ -68,13 +68,11 @@ type (
 
 		maintenanceTxnID types.TransactionID
 
-		mu                         sync.Mutex
-		cachedContracts            []api.Contract
-		cachedContractSetContracts map[string]map[types.FileContractID]struct{}
-		cachedHostInfo             map[types.PublicKey]hostInfo
-		cachedDataStored           map[types.PublicKey]uint64
-		cachedMinScore             float64
-		currPeriod                 uint64
+		mu               sync.Mutex
+		cachedHostInfo   map[types.PublicKey]hostInfo
+		cachedDataStored map[types.PublicKey]uint64
+		cachedMinScore   float64
+		currPeriod       uint64
 	}
 
 	hostInfo struct {
@@ -92,32 +90,7 @@ func newContractor(ap *Autopilot) *contractor {
 	return &contractor{
 		ap:     ap,
 		logger: ap.logger.Named("contractor"),
-
-		cachedContractSetContracts: make(map[string]map[types.FileContractID]struct{}),
 	}
-}
-
-func (c *contractor) Contracts(_ context.Context) ([]api.ContractMetadata, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var contracts []api.ContractMetadata
-	for _, contract := range c.cachedContracts {
-		contracts = append(contracts, contract.ContractMetadata)
-	}
-	return contracts, nil
-}
-
-func (c *contractor) IsInContractSet(fcid types.FileContractID, set string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	csc, exists := c.cachedContractSetContracts[set]
-	if !exists {
-		return false
-	}
-
-	_, exists = csc[fcid]
-	return exists
 }
 
 func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (err error) {
@@ -167,15 +140,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
-	// update contract set contracts
-	c.mu.Lock()
-	contractsMap := make(map[types.FileContractID]struct{})
-	for _, c := range currentSet {
-		contractsMap[c.ID] = struct{}{}
-	}
-	c.cachedContractSetContracts[state.cfg.Contracts.Set] = contractsMap
-	c.mu.Unlock()
-
 	// fetch all contracts from the worker.
 	start := time.Now()
 	resp, err := w.Contracts(ctx, timeoutHostRevision)
@@ -192,11 +156,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	sort.Slice(contracts, func(i, j int) bool {
 		return contracts[i].FileSize() > contracts[j].FileSize()
 	})
-
-	// update contracts
-	c.mu.Lock()
-	c.cachedContracts = contracts
-	c.mu.Unlock()
 
 	// get used hosts
 	usedHosts := make(map[types.PublicKey]struct{})
@@ -273,15 +232,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return err
 	}
 
-	// assert renewals are sorted by their size
-	if len(toRenew) > 1 {
-		for i := 1; i < len(toRenew); i++ {
-			if toRenew[i].contract.FileSize() < toRenew[i-1].contract.FileSize() {
-				// TODO: this panic is triggered in production, will fix it soon
-				// panic("toRenew is not sorted by size") // developer error
-			}
-		}
-	}
+	// sort renewals by their size
+	sort.Slice(toRenew, func(i, j int) bool {
+		return toRenew[i].contract.FileSize() > toRenew[j].contract.FileSize()
+	})
 
 	// calculate 'limit' amount of contracts we want to renew
 	var limit int
@@ -374,20 +328,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		err = errors.New("autopilot stopped before maintenance could be completed")
 		return
 	}
-	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
-	if err != nil {
-		return err
-	}
-
-	// update contract set contracts
-	c.mu.Lock()
-	contractsMap = make(map[types.FileContractID]struct{})
-	for _, id := range updatedSet {
-		contractsMap[id] = struct{}{}
-	}
-	c.cachedContractSetContracts[state.cfg.Contracts.Set] = contractsMap
-	c.mu.Unlock()
-	return
+	return c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
@@ -510,6 +451,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toArchive[fcid] = errContractExpired.Error()
 			continue
 		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
+			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+			continue
+		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 			continue
 		}
