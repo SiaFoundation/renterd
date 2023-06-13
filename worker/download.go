@@ -680,7 +680,7 @@ func (s *slabDownload) overdrive() bool {
 	}
 
 	// overdrive is maxed out
-	if s.numInflight >= s.mgr.maxOverdrive+uint64(s.minShards) {
+	if s.numInflight >= s.mgr.maxOverdrive+uint64(remaining) {
 		return false
 	}
 
@@ -863,7 +863,7 @@ func (s *slabDownload) finish() ([][]byte, error) {
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
 		err := fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
-		fmt.Println("DEBUG PJ: DOWNLOAD FAILED err", err)
+		fmt.Printf("DEBUG PJ: %v | DOWNLOAD FAILED | err: %v\n", s.key.String(), err)
 		return nil, err
 	}
 	return s.sectors, nil
