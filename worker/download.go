@@ -381,7 +381,8 @@ func (mgr *downloadManager) numDownloaders() int {
 }
 
 func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata) {
-	fmt.Println("DEBUG PJ: refresh downloaders", len(contracts))
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
 
 	// build map
 	want := make(map[types.PublicKey]api.ContractMetadata)
