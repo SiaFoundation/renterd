@@ -14,7 +14,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -531,20 +530,13 @@ outer:
 			// execute the job
 			start := time.Now()
 			sector, err := req.execute(d.host)
-			elapsed := time.Since(start)
-			d.trackFailure(err)
+			d.track(err, time.Since(start))
 
 			// handle the response
 			if err != nil {
 				req.fail(err)
 			} else {
 				req.succeed(sector)
-
-				// update estimates
-				downloadedB := int64(rhpv2.SectorSize)
-				durationMS := elapsed.Milliseconds()
-				d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
-				d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
 			}
 		}
 	}
@@ -599,17 +591,22 @@ func (d *downloader) pop() *sectorDownloadReq {
 	return nil
 }
 
-func (d *downloader) trackFailure(err error) {
+func (d *downloader) track(err error, dur time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err != nil {
 		d.consecutiveFailures++
-		// don't punish the downloader for gracefully closed streams
-		if !errors.Is(err, mux.ErrClosedStream) {
-			d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-		}
+
+		// update estimates
+		d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
 	} else {
 		d.consecutiveFailures = 0
+
+		// update estimates
+		downloadedB := int64(rhpv2.SectorSize)
+		durationMS := dur.Milliseconds()
+		d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
+		d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
 	}
 }
 
@@ -669,18 +666,13 @@ func (s *slabDownload) overdrive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// overdrive not kicking in yet
-	remaining := s.minShards - s.numCompleted
-	if remaining >= int(s.mgr.maxOverdrive) {
-		return false
-	}
-
 	// overdrive is not due yet
 	if time.Since(s.lastOverdrive) < s.mgr.overdriveTimeout {
 		return false
 	}
 
 	// overdrive is maxed out
+	remaining := s.minShards - s.numCompleted
 	if s.numInflight >= s.mgr.maxOverdrive+uint64(remaining) {
 		return false
 	}
@@ -793,7 +785,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, index int, nextSlabTr
 			s.mgr.mu.Lock()
 			estimate := s.mgr.downloaders[req.hk].estimate()
 			s.mgr.mu.Unlock()
-			fmt.Printf("DEBUG PJ: %v | selected host %v w/esitmate %v\n", s.key, req.hk, estimate)
+			fmt.Printf("DEBUG PJ: %v | %d | selected host %v w/estimate %v\n", s.key, index, req.hk, estimate)
 		}
 
 		if err := s.launch(req); err != nil {
@@ -815,12 +807,11 @@ func (s *slabDownload) downloadShards(ctx context.Context, index int, nextSlabTr
 			fmt.Printf("DEBUG PJ: %v | shards download timed out after %v\n", s.key.String(), time.Since(start))
 			return nil, ctx.Err()
 		case resp = <-respChan:
-			if resp.err == nil {
-				resetTimeout()
-			}
 		}
 
-		done, next = s.receive(resp)
+		resetTimeout()
+
+		done, next = s.receive(resp, index)
 		if !done && resp.err != nil {
 			lErr := s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
 			fmt.Printf("DEBUG PJ: %v | req failed %v launching overdrive req w/err %v\n", s.key.String(), resp.err, lErr)
@@ -900,18 +891,15 @@ func (s *slabDownload) launch(req *sectorDownloadReq) error {
 	// update the state
 	s.numInflight++
 	s.numLaunched++
-	if req.overdrive {
-		s.lastOverdrive = time.Now()
-	}
-
 	return nil
 }
 
-func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next bool) {
-	fmt.Printf("DEBUG PJ: %v | receive resp for sector %v host %v err %v\n", s.key.String(), resp.sectorIndex, resp.hk, resp.err)
+func (s *slabDownload) receive(resp sectorDownloadResp, index int) (finished bool, next bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	remaining := s.minShards - s.numCompleted
+	fmt.Printf("DEBUG PJ: %v | %d | %d | %v | remaining %d err %v\n", s.key.String(), index, resp.sectorIndex, resp.hk, remaining, resp.err)
 	// failed reqs can't complete the upload
 	s.numInflight--
 	if resp.err != nil {
