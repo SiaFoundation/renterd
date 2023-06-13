@@ -181,6 +181,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 
 func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
 	path = strings.TrimLeft(path, "/")
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
 	if err != nil {

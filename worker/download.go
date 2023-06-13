@@ -60,6 +60,9 @@ type (
 	}
 
 	slabDownload struct {
+		// TODO PJ: remove (debug id)
+		key object.EncryptionKey
+
 		mgr *downloadManager
 
 		sID       slabID
@@ -229,7 +232,8 @@ loop:
 			}
 
 			// launch the download
-			go mgr.downloadSlab(ctx, slabs[slabIndex], slabIndex, responseChan, nextSlabChan)
+			fmt.Printf("DEBUG PJ: %v | launched slab %d/%d | ongoing slabs %d\n", o.Key.String(), slabIndex+1, len(slabs), mgr.ongoingDownloads())
+			go mgr.downloadSlab(ctx, o.Key, slabs[slabIndex], slabIndex, responseChan, nextSlabChan)
 			slabIndex++
 		case resp := <-responseChan:
 			fmt.Printf("DEBUG PJ: %v | received slab %d/%d\n", o.Key.String(), resp.index+1, len(slabs))
@@ -301,12 +305,14 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 		Offset: 0,
 		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
 	}
-	go mgr.downloadSlab(ctx, slice, 0, responseChan, nextSlabChan)
+	go mgr.downloadSlab(ctx, slab.Key, slice, 0, responseChan, nextSlabChan)
 
 	// await the response
+	start := time.Now()
 	var resp *slabDownloadResponse
 	select {
 	case <-ctx.Done():
+		fmt.Printf("DEBUG PJ: %v | slab download timed out after %v\n", slab.Key.String(), time.Since(start))
 		return nil, ctx.Err()
 	case resp = <-responseChan:
 		if resp.err != nil {
@@ -417,7 +423,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	}
 }
 
-func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.SlabSlice) (*slabDownload, func()) {
+func (mgr *downloadManager) newSlabDownload(ctx context.Context, key object.EncryptionKey, slice object.SlabSlice) (*slabDownload, func()) {
 	// create slab id
 	var sID slabID
 	frand.Read(sID[:])
@@ -445,6 +451,7 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.Sl
 
 	// create slab download
 	return &slabDownload{
+		key: key,
 		mgr: mgr,
 
 		sID:       sID,
@@ -466,18 +473,18 @@ func (mgr *downloadManager) ongoingDownloads() int {
 	return len(mgr.ongoing)
 }
 
-func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabSlice, index int, responseChan chan *slabDownloadResponse, nextSlabChan chan struct{}) {
+func (mgr *downloadManager) downloadSlab(ctx context.Context, key object.EncryptionKey, slice object.SlabSlice, index int, responseChan chan *slabDownloadResponse, nextSlabChan chan struct{}) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
 	defer span.End()
 
 	// prepare the download
-	slab, finishFn := mgr.newSlabDownload(ctx, slice)
+	slab, finishFn := mgr.newSlabDownload(ctx, key, slice)
 	defer finishFn()
 
 	// download shards
 	resp := &slabDownloadResponse{index: index}
-	resp.shards, resp.err = slab.downloadShards(ctx, nextSlabChan)
+	resp.shards, resp.err = slab.downloadShards(ctx, index, nextSlabChan)
 
 	// send the response
 	select {
@@ -661,6 +668,12 @@ func (s *slabDownload) overdrive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// overdrive not kicking in yet
+	remaining := s.minShards - s.numCompleted
+	if remaining >= int(s.mgr.maxOverdrive) {
+		return false
+	}
+
 	// overdrive is not due yet
 	if time.Since(s.lastOverdrive) < s.mgr.overdriveTimeout {
 		return false
@@ -728,7 +741,7 @@ func (s *slabDownload) nextRequest(ctx context.Context, responseChan chan sector
 	}
 }
 
-func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan struct{}) ([][]byte, error) {
+func (s *slabDownload) downloadShards(ctx context.Context, index int, nextSlabTrigger chan struct{}) ([][]byte, error) {
 	// cancel any sector downloads once the download is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -759,7 +772,13 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 				return
 			case <-timeout.C:
 				if s.overdrive() {
-					_ = s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
+					req := s.nextRequest(ctx, respChan, true)
+					if req == nil {
+						fmt.Printf("DEBUG PJ: %v | could not overdrive\n", s.key.String())
+					} else {
+						lErr := s.launch(req) // ignore error
+						fmt.Printf("DEBUG PJ: %v | overdriving slab %d on sector %d on host %v w/err %v\n", s.key.String(), index+1, req.sectorIndex, req.hk, lErr)
+					}
 				}
 				resetTimeout()
 			}
@@ -770,7 +789,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 	for i := 0; i < int(s.minShards); i++ {
 		req := s.nextRequest(ctx, respChan, false)
 		if i < 3 && req != nil {
-			fmt.Println("DEBUG PJ: selected host", req.hk)
+			fmt.Printf("DEBUG PJ: %v | selected host %v\n", s.key, req.hk)
 		}
 
 		if err := s.launch(req); err != nil {
@@ -782,12 +801,14 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 	var done bool
 	var next bool
 	var triggered bool
+	start := time.Now()
 	for s.inflight() > 0 && !done {
 		var resp sectorDownloadResp
 		select {
 		case <-s.mgr.stopChan:
 			return nil, errors.New("download stopped")
 		case <-ctx.Done():
+			fmt.Printf("DEBUG PJ: %v | shards download timed out after %v\n", s.key.String(), time.Since(start))
 			return nil, ctx.Err()
 		case resp = <-respChan:
 			if resp.err == nil {
@@ -797,7 +818,8 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 
 		done, next = s.receive(resp)
 		if !done && resp.err != nil {
-			_ = s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
+			lErr := s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
+			fmt.Printf("DEBUG PJ: %v | req failed %v launching overdrive req w/err %v\n", s.key.String(), resp.err, lErr)
 		}
 
 		if !triggered && (done || (next && s.mgr.ongoingDownloads() < maxOngoingSlabDownloads)) {
@@ -841,7 +863,7 @@ func (s *slabDownload) finish() ([][]byte, error) {
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
 		err := fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
-		fmt.Println("DEBUG PJ: download failed err", err)
+		fmt.Println("DEBUG PJ: DOWNLOAD FAILED err", err)
 		return nil, err
 	}
 	return s.sectors, nil

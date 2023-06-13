@@ -69,7 +69,10 @@ type (
 		mu                  sync.Mutex
 		bh                  uint64
 		consecutiveFailures uint64
+		ongoingUploads      uint64
 		queue               []*sectorUploadReq
+
+		trackErrs uint64
 	}
 
 	upload struct {
@@ -730,6 +733,35 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 	return slab.finish()
 }
 
+func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision) (types.Hash256, error) {
+	u.mu.Lock()
+	u.ongoingUploads++
+	u.mu.Unlock()
+
+	defer func() {
+		u.mu.Lock()
+		u.ongoingUploads--
+		u.mu.Unlock()
+	}()
+
+	// fetch span from context
+	span := trace.SpanFromContext(req.ctx)
+	span.AddEvent("execute")
+
+	// upload the sector
+	start := time.Now()
+	root, err := u.host.UploadSector(req.ctx, req.sector, rev)
+	if err != nil {
+		return types.Hash256{}, err
+	}
+
+	// update span
+	elapsed := time.Since(start)
+	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
+	span.RecordError(err)
+	span.End()
+	return root, nil
+}
 func (u *uploader) start(hp hostProvider, rl revisionLocker) {
 outer:
 	for {
@@ -764,7 +796,7 @@ outer:
 			start := time.Now()
 			err := rl.withRevision(upload.ctx, defaultRevisionFetchTimeout, u.fcid, u.hk, u.siamuxAddr, lockingPriorityUpload, u.blockHeight(), func(rev types.FileContractRevision) error {
 				var err error
-				root, err = upload.execute(u.host, rev)
+				root, err = u.execute(upload, rev)
 				return err
 			})
 
@@ -842,6 +874,8 @@ func (u *uploader) trackSectorUpload(err error, d time.Duration) {
 	if err != nil {
 		u.consecutiveFailures++
 		u.statsSectorUploadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
+		u.trackErrs++
+		fmt.Printf("DEBUG PJ: uploader %v tracked failure #%d curr estimate %v\n", u.hk, u.trackErrs, u.estimate())
 	} else {
 		ms := d.Milliseconds()
 		u.consecutiveFailures = 0
