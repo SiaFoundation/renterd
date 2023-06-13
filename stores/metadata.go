@@ -429,7 +429,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 
 		// Overwrite the old contract with the new one.
 		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
-		newContract.ID = oldContract.ID
+		newContract.Model = oldContract.Model
 		err = tx.Save(&newContract).Error
 		if err != nil {
 			return err
