@@ -436,6 +436,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 		s.knownContracts[c.ID()] = struct{}{}
 		renewed = newContract
+		fmt.Println("renewed from", renewedFrom, "to", c.ID(), oldContract.ID)
 		return nil
 	}); err != nil {
 		return api.ContractMetadata{}, err
