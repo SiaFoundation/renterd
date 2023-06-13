@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -2133,6 +2134,7 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("expected 1 buffer to be returned", len(buffers))
 	}
 	completedBuffer := buffers[0]
+	completedBufferID := completedBuffer.ID
 	if completedBuffer.LockedUntil < now+int64(time.Hour.Seconds()) {
 		t.Fatal("buffer should be locked for at least an hour", completedBuffer.LockedUntil, now+int64(time.Hour.Seconds()))
 	}
@@ -2149,6 +2151,45 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if len(buffers) != 0 {
 		t.Fatal("expected 0 buffers to be returned", len(buffers))
+	}
+
+	// mark the slab as uploaded
+	packedSlab := api.UploadedPackedSlab{
+		BufferID: completedBufferID,
+		Key:      object.GenerateEncryptionKey(),
+		Shards: []object.Sector{
+			{
+				Host: hk1,
+				Root: types.Hash256{3},
+			},
+			{
+				Host: hk2,
+				Root: types.Hash256{4},
+			},
+		},
+	}
+	err = db.MarkPackedSlabsUploaded([]api.UploadedPackedSlab{packedSlab}, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// buffer should be gone now.
+	if err := db.db.Take(&buffer, "id = ?", completedBufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("shouldn't be able to find buffer", err)
+	}
+	// check the sectors - there should be 4 now.
+	var sectors []dbSector
+	if err := db.db.Find(&sectors).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(sectors) != 4 {
+		t.Fatal("expected 4 sectors to be created", len(sectors))
+	}
+	if sectors[2].LatestHost != publicKey(packedSlab.Shards[0].Host) || sectors[2].DBSlabID != storedSlab.ID || !bytes.Equal(sectors[2].Root, packedSlab.Shards[0].Root[:]) {
+		t.Fatal("invalid sector", sectors[2])
+	}
+	if sectors[3].LatestHost != publicKey(packedSlab.Shards[1].Host) || sectors[3].DBSlabID != storedSlab.ID || !bytes.Equal(sectors[3].Root, packedSlab.Shards[1].Root[:]) {
+		t.Fatal("invalid sector", sectors[3])
 	}
 }
 

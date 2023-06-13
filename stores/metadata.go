@@ -1201,10 +1201,16 @@ func (s *SQLStore) MarkPackedSlabsUploaded(slabs []api.UploadedPackedSlab, usedC
 }
 
 func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) error {
-	// delete the buffer
+	// fetch and delete buffer
 	var buffer dbSlabBuffer
-	err := tx.Raw("DELETE FROM buffered_slabs WHERE id = ? AND complete=? RETURNING *", slab.BufferID, true).
-		Scan(&buffer).
+	err := tx.Where("id = ? AND complete = ?", slab.BufferID, true).
+		Take(&buffer).
+		Error
+	if err != nil {
+		return err
+	}
+	err = tx.Where("id", buffer.ID).
+		Delete(&dbSlabBuffer{}).
 		Error
 	if err != nil {
 		return err
@@ -1220,21 +1226,23 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	if err != nil {
 		return err
 	}
-	if err := tx.Model(&dbSlab{}).Update("key", key).Error; err != nil {
+	if err := tx.Model(&dbSlab{}).
+		Where("id", buffer.DBSlabID).
+		Update("key", key).Error; err != nil {
 		return err
 	}
 
 	// add the shards to the slab
 	var shards []dbSector
-	for _, shard := range slab.Shards {
-		contract, exists := contracts[shard.Host]
+	for i := range slab.Shards {
+		contract, exists := contracts[slab.Shards[i].Host]
 		if !exists {
-			return fmt.Errorf("missing contract for host %v", shard.Host)
+			return fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
 		}
 		shards = append(shards, dbSector{
 			DBSlabID:   buffer.DBSlabID,
-			LatestHost: publicKey(shard.Host),
-			Root:       shard.Root[:],
+			LatestHost: publicKey(slab.Shards[i].Host),
+			Root:       slab.Shards[i].Root[:],
 			Contracts:  []dbContract{contract},
 		})
 	}
