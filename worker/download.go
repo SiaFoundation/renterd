@@ -789,7 +789,10 @@ func (s *slabDownload) downloadShards(ctx context.Context, index int, nextSlabTr
 	for i := 0; i < int(s.minShards); i++ {
 		req := s.nextRequest(ctx, respChan, false)
 		if i < 3 && req != nil {
-			fmt.Printf("DEBUG PJ: %v | selected host %v\n", s.key, req.hk)
+			s.mgr.mu.Lock()
+			estimate := s.mgr.downloaders[req.hk].estimate()
+			s.mgr.mu.Unlock()
+			fmt.Printf("DEBUG PJ: %v | selected host %v w/esitmate %v\n", s.key, req.hk, estimate)
 		}
 
 		if err := s.launch(req); err != nil {
