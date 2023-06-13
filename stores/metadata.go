@@ -1028,7 +1028,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 				if err := tx.
 					Model(&sector).
 					Association("Contracts").
-					Append(contract); err != nil {
+					Append(&contract); err != nil {
 					return err
 				}
 			}
