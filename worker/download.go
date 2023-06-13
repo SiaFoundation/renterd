@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	maxOngoingSlabDownloads = 10
+	maxOngoingSlabDownloads = 3
 )
 
 type (
@@ -532,6 +532,7 @@ outer:
 			start := time.Now()
 			sector, err := req.execute(d.host)
 			elapsed := time.Since(start)
+			d.trackFailure(err)
 
 			// handle the response
 			if err != nil {
@@ -544,13 +545,6 @@ outer:
 				durationMS := elapsed.Milliseconds()
 				d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
 				d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
-			}
-
-			// track the failure, ignore gracefully closed streams and canceled overdrives
-			isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
-			canceledOverdrive := req.done() && req.overdrive && err != nil
-			if !canceledOverdrive && !isErrClosedStream {
-				d.trackFailure(err)
 			}
 		}
 	}
@@ -606,7 +600,10 @@ func (d *downloader) trackFailure(err error) {
 	defer d.mu.Unlock()
 	if err != nil {
 		d.consecutiveFailures++
-		d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
+		// don't punish the downloader for gracefully closed streams
+		if !errors.Is(err, mux.ErrClosedStream) {
+			d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
+		}
 	} else {
 		d.consecutiveFailures = 0
 	}
