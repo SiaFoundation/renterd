@@ -557,7 +557,11 @@ func (d *downloader) estimate() float64 {
 	// fetch estimated duration per sector
 	estimateP90 := d.statsSectorDownloadEstimateInMS.P90()
 	if estimateP90 == 0 {
-		estimateP90 = 1
+		if avg := d.statsSectorDownloadEstimateInMS.Average(); avg > 0 {
+			estimateP90 = avg
+		} else {
+			estimateP90 = 1
+		}
 	}
 
 	numSectors := float64(len(d.queue) + 1)
@@ -904,6 +908,7 @@ func (s *slabDownload) launch(req *sectorDownloadReq) error {
 }
 
 func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next bool) {
+	fmt.Printf("DEBUG PJ: %v | receive resp for sector %v host %v err %v\n", s.key.String(), resp.sectorIndex, resp.hk, resp.err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
