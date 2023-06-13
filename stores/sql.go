@@ -131,19 +131,10 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	}
 
 	// Get latest consensus change ID or init db.
-	var ci dbConsensusInfo
-	if err := db.
-		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
-		Attrs(dbConsensusInfo{
-			Model: Model{ID: consensusInfoID},
-			CCID:  modules.ConsensusChangeBeginning[:],
-		}).
-		FirstOrCreate(&ci).
-		Error; err != nil {
+	ci, ccid, err := initConsensusInfo(db)
+	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
-	var ccid modules.ConsensusChangeID
-	copy(ccid[:], ci.CCID)
 
 	// Check allowlist and blocklist counts
 	allowlistCnt, err := tableCount(db, &dbAllowlistEntry{})
@@ -401,4 +392,47 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
+}
+
+func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID, error) {
+	var ci dbConsensusInfo
+	if err := db.
+		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
+		Attrs(dbConsensusInfo{
+			Model: Model{ID: consensusInfoID},
+			CCID:  modules.ConsensusChangeBeginning[:],
+		}).
+		FirstOrCreate(&ci).
+		Error; err != nil {
+		return dbConsensusInfo{}, modules.ConsensusChangeID{}, err
+	}
+	var ccid modules.ConsensusChangeID
+	copy(ccid[:], ci.CCID)
+	return ci, ccid, nil
+}
+
+func (s *SQLStore) ResetConsensusSubscription() error {
+	// drop tables
+	err := s.db.Migrator().DropTable(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
+	if err != nil {
+		return err
+	}
+	// recreate the tables.
+	err = s.db.Migrator().AutoMigrate(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
+	if err != nil {
+		return err
+	}
+	// initialise the consenus_info table.
+	ci, _, err := initConsensusInfo(s.db)
+	if err != nil {
+		return err
+	}
+	// reset in-memory state.
+	s.persistMu.Lock()
+	s.chainIndex = types.ChainIndex{
+		Height: ci.Height,
+		ID:     types.BlockID(ci.BlockID),
+	}
+	s.persistMu.Unlock()
+	return nil
 }

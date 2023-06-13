@@ -427,39 +427,15 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
-		// Add the new contract.
-		renewed, err = addContract(tx, c, totalCost, startHeight, renewedFrom)
+		// Overwrite the old contract with the new one.
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+		newContract.Model = oldContract.Model
+		err = tx.Save(&newContract).Error
 		if err != nil {
 			return err
 		}
 		s.knownContracts[c.ID()] = struct{}{}
-
-		// Update the old contract in the contract set to the new one.
-		err = tx.Table("contract_set_contracts").
-			Where("db_contract_id = ?", oldContract.ID).
-			Update("db_contract_id", renewed.ID).Error
-		if err != nil {
-			return err
-		}
-
-		// Update the contract_sectors table from the old contract to the new
-		// one.
-		err = tx.Table("contract_sectors").
-			Where("db_contract_id = ?", oldContract.ID).
-			Update("db_contract_id", renewed.ID).Error
-		if err != nil {
-			return err
-		}
-
-		// Finally delete the old contract.
-		res := tx.Delete(&oldContract)
-		if err := res.Error; err != nil {
-			return err
-		}
-		if res.RowsAffected != 1 {
-			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
-		}
-
+		renewed = newContract
 		return nil
 	}); err != nil {
 		return api.ContractMetadata{}, err
@@ -1050,6 +1026,27 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 	return
 }
 
+func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd uint64) dbContract {
+	return dbContract{
+		HostID: hostID,
+
+		ContractCommon: ContractCommon{
+			FCID:        fileContractID(fcid),
+			RenewedFrom: fileContractID(renewedFrom),
+
+			TotalCost:      currency(totalCost),
+			RevisionNumber: "0",
+			StartHeight:    startHeight,
+			WindowStart:    windowStart,
+			WindowEnd:      windowEnd,
+
+			UploadSpending:      zeroCurrency,
+			DownloadSpending:    zeroCurrency,
+			FundAccountSpending: zeroCurrency,
+		},
+	}
+}
+
 // addContract adds a contract to the store.
 func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
 	fcid := c.ID()
@@ -1063,24 +1060,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := dbContract{
-		HostID: host.ID,
-
-		ContractCommon: ContractCommon{
-			FCID:        fileContractID(fcid),
-			RenewedFrom: fileContractID(renewedFrom),
-
-			TotalCost:      currency(totalCost),
-			RevisionNumber: "0",
-			StartHeight:    startHeight,
-			WindowStart:    c.Revision.WindowStart,
-			WindowEnd:      c.Revision.WindowEnd,
-
-			UploadSpending:      zeroCurrency,
-			DownloadSpending:    zeroCurrency,
-			FundAccountSpending: zeroCurrency,
-		},
-	}
+	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error

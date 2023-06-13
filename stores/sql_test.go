@@ -1,8 +1,10 @@
 package stores
 
 import (
+	"bytes"
 	"encoding/hex"
 	"os"
+	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -45,4 +47,59 @@ func newTestLogger() logger.Interface {
 		LogLevel:                  logger.Warn,
 		SlowThreshold:             100 * time.Millisecond,
 	})
+}
+
+// TestConsensusReset is a unit test for ResetConsensusSubscription.
+func TestConsensusReset(t *testing.T) {
+	db, _, ccid, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ccid != modules.ConsensusChangeBeginning {
+		t.Fatal("wrong ccid", ccid, modules.ConsensusChangeBeginning)
+	}
+
+	// Manually insert into the consenus_infos, the transactions and siacoin_elements tables.
+	ccid2 := modules.ConsensusChangeID{1}
+	db.db.Create(&dbConsensusInfo{
+		CCID: ccid2[:],
+	})
+	db.db.Create(&dbSiacoinElement{
+		OutputID: hash256{2},
+	})
+	db.db.Create(&dbTransaction{
+		TransactionID: hash256{3},
+	})
+
+	// Reset the consensus.
+	if err := db.ResetConsensusSubscription(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check tables.
+	var count int64
+	if err := db.db.Model(&dbConsensusInfo{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatal("table should have 1 entry", err, count)
+	} else if err = db.db.Model(&dbTransaction{}).Count(&count).Error; err != nil || count > 0 {
+		t.Fatal("table not empty", err)
+	} else if err = db.db.Model(&dbSiacoinElement{}).Count(&count).Error; err != nil || count > 0 {
+		t.Fatal("table not empty", err)
+	}
+
+	// Check consensus info.
+	var ci dbConsensusInfo
+	if err := db.db.Take(&ci).Error; err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(ci.CCID, modules.ConsensusChangeBeginning[:]) {
+		t.Fatal("wrong ccid", ci.CCID, modules.ConsensusChangeBeginning)
+	} else if ci.Height != 0 {
+		t.Fatal("wrong height", ci.Height, 0)
+	}
+
+	// Check SQLStore.
+	if db.chainIndex.Height != 0 {
+		t.Fatal("wrong height", db.chainIndex.Height, 0)
+	} else if db.chainIndex.ID != (types.BlockID{}) {
+		t.Fatal("wrong id", db.chainIndex.ID, types.BlockID{})
+	}
 }

@@ -768,6 +768,7 @@ func testBusCfg() node.BusConfig {
 		GatewayAddr:     "127.0.0.1:0",
 		Network:         testNetwork(),
 		PersistInterval: testPersistInterval,
+		UsedUTXOExpiry:  time.Minute,
 	}
 }
 
