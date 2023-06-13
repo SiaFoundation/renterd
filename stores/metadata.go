@@ -427,39 +427,26 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
-		// Add the new contract.
-		renewed, err = addContract(tx, c, totalCost, startHeight, renewedFrom)
+		// Update the old contract to the new one.
+		err = tx.Updates(map[string]interface{}{
+			"id":           oldContract.ID,
+			"fcid":         fileContractID(c.ID()),
+			"renewed_from": fileContractID(renewedFrom),
+
+			"total_cost":      currency(totalCost),
+			"revision_number": "0",
+			"start_height":    startHeight,
+			"window_start":    c.Revision.WindowStart,
+			"window_end":      c.Revision.WindowEnd,
+
+			"upload_spending":       zeroCurrency,
+			"download_spending":     zeroCurrency,
+			"fund_account_spending": zeroCurrency,
+		}).Error
 		if err != nil {
 			return err
 		}
 		s.knownContracts[c.ID()] = struct{}{}
-
-		// Update the old contract in the contract set to the new one.
-		err = tx.Table("contract_set_contracts").
-			Where("db_contract_id = ?", oldContract.ID).
-			Update("db_contract_id", renewed.ID).Error
-		if err != nil {
-			return err
-		}
-
-		// Update the contract_sectors table from the old contract to the new
-		// one.
-		err = tx.Table("contract_sectors").
-			Where("db_contract_id = ?", oldContract.ID).
-			Update("db_contract_id", renewed.ID).Error
-		if err != nil {
-			return err
-		}
-
-		// Finally delete the old contract.
-		res := tx.Delete(&oldContract)
-		if err := res.Error; err != nil {
-			return err
-		}
-		if res.RowsAffected != 1 {
-			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
-		}
-
 		return nil
 	}); err != nil {
 		return api.ContractMetadata{}, err
