@@ -427,22 +427,10 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
-		// Update the old contract to the new one.
-		err = tx.Updates(map[string]interface{}{
-			"id":           oldContract.ID,
-			"fcid":         fileContractID(c.ID()),
-			"renewed_from": fileContractID(renewedFrom),
-
-			"total_cost":      currency(totalCost),
-			"revision_number": "0",
-			"start_height":    startHeight,
-			"window_start":    c.Revision.WindowStart,
-			"window_end":      c.Revision.WindowEnd,
-
-			"upload_spending":       zeroCurrency,
-			"download_spending":     zeroCurrency,
-			"fund_account_spending": zeroCurrency,
-		}).Error
+		// Overwrite the old contract with the new one.
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+		newContract.ID = oldContract.ID
+		err = tx.Save(&newContract).Error
 		if err != nil {
 			return err
 		}
@@ -1037,6 +1025,27 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 	return
 }
 
+func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd uint64) dbContract {
+	return dbContract{
+		HostID: hostID,
+
+		ContractCommon: ContractCommon{
+			FCID:        fileContractID(fcid),
+			RenewedFrom: fileContractID(renewedFrom),
+
+			TotalCost:      currency(totalCost),
+			RevisionNumber: "0",
+			StartHeight:    startHeight,
+			WindowStart:    windowStart,
+			WindowEnd:      windowEnd,
+
+			UploadSpending:      zeroCurrency,
+			DownloadSpending:    zeroCurrency,
+			FundAccountSpending: zeroCurrency,
+		},
+	}
+}
+
 // addContract adds a contract to the store.
 func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
 	fcid := c.ID()
@@ -1050,24 +1059,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := dbContract{
-		HostID: host.ID,
-
-		ContractCommon: ContractCommon{
-			FCID:        fileContractID(fcid),
-			RenewedFrom: fileContractID(renewedFrom),
-
-			TotalCost:      currency(totalCost),
-			RevisionNumber: "0",
-			StartHeight:    startHeight,
-			WindowStart:    c.Revision.WindowStart,
-			WindowEnd:      c.Revision.WindowEnd,
-
-			UploadSpending:      zeroCurrency,
-			DownloadSpending:    zeroCurrency,
-			FundAccountSpending: zeroCurrency,
-		},
-	}
+	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error
