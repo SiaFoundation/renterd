@@ -402,8 +402,8 @@ func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *obje
 	}
 
 	// perform some sanity checks
-	if len(ulContracts)-len(usedMap) < int(s.MinShards) {
-		return fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts)-len(usedMap), int(s.MinShards))
+	if len(ulContracts) < int(s.MinShards) {
+		return fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
 	}
 	if len(s.Shards)-missingShards < int(s.MinShards) {
 		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
