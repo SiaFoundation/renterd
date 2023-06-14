@@ -1605,7 +1605,9 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
 	}
 
-	expected := []object.Slab{obj.Slabs[1].Slab}
+	expected := []api.UnhealthySlab{
+		{Key: obj.Slabs[1].Slab.Key, Health: -1},
+	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
