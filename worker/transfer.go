@@ -130,7 +130,7 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 			default:
 			}
 			if err != nil && !errors.Is(err, context.Canceled) && !isBalanceInsufficient(err) && !aborted && !errors.Is(err, os.ErrDeadlineExceeded) {
-				logger.Errorf("withHostV3 failed when downloading sector, err: %v", err)
+				logger.Debugf("withHostV3 failed when downloading sector, err: %v", err)
 			}
 		}(r)
 
@@ -391,9 +391,21 @@ func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *obje
 		return nil
 	}
 
-	// sanity check that we have enough hosts to reach minimum redundancy.
-	if len(s.Shards)-len(shardIndices) < int(s.MinShards) {
-		return fmt.Errorf("not enough hosts to download unhealthy shard, totalShards: %d, minShards: %d, missingShards: %d, totalContracts: %d", len(s.Shards), int(s.MinShards), len(shardIndices), len(ulContracts))
+	// subtract the number of shards that
+	missingShards := len(shardIndices)
+	for _, si := range shardIndices {
+		_, hasContract := h2c[s.Shards[si].Host]
+		if hasContract {
+			missingShards--
+		}
+	}
+
+	// perform some sanity checks
+	if len(ulContracts)-len(usedMap) < int(s.MinShards) {
+		return fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts)-len(usedMap), int(s.MinShards))
+	}
+	if len(s.Shards)-missingShards < int(s.MinShards) {
+		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
 	}
 
 	// download + reconstruct slab
