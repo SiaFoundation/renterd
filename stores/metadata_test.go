@@ -1178,6 +1178,7 @@ func TestSearchObjects(t *testing.T) {
 
 // TestUnhealthySlabs tests the functionality of UnhealthySlabs.
 func TestUnhealthySlabs(t *testing.T) {
+	// create db
 	db, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
@@ -1355,13 +1356,13 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=4", len(slabs))
 	}
 
-	expected := []object.SlabSlice{
-		obj.Slabs[4],
-		obj.Slabs[2],
-		obj.Slabs[1],
-		obj.Slabs[3],
+	expected := []api.UnhealthySlab{
+		{Key: obj.Slabs[2].Key, Health: 0},
+		{Key: obj.Slabs[4].Key, Health: 0},
+		{Key: obj.Slabs[1].Key, Health: 0.5},
+		{Key: obj.Slabs[3].Key, Health: 0.5},
 	}
-	if reflect.DeepEqual(slabs, expected) {
+	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 
@@ -1373,12 +1374,152 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=2", len(slabs))
 	}
 
-	expected = []object.SlabSlice{
-		obj.Slabs[4],
-		obj.Slabs[2],
+	expected = []api.UnhealthySlab{
+		{Key: obj.Slabs[2].Key, Health: 0},
+		{Key: obj.Slabs[4].Key, Health: 0},
 	}
-	if reflect.DeepEqual(slabs, expected) {
-		t.Fatal("slabs are not returned in the correct order")
+	if !reflect.DeepEqual(slabs, expected) {
+		t.Fatal("slabs are not returned in the correct order", slabs, expected)
+	}
+}
+
+func TestUnhealthySlabsNegHealth(t *testing.T) {
+	// create db
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a host
+	hks, err := db.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// add a contract
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+
+	// add it to the contract set
+	if err := db.SetContractSet(context.Background(), "autopilot", fcids); err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 2,
+					Shards: []object.Sector{
+						{
+							Host: hk1,
+							Root: types.Hash256{1},
+						},
+						{
+							Host: hk1,
+							Root: types.Hash256{2},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// add the object
+	ctx := context.Background()
+	if err := db.UpdateObject(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's unhealthy
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) != 1 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
+	}
+}
+
+func TestUnhealthySlabsNoContracts(t *testing.T) {
+	// create db
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a host
+	hks, err := db.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// add a contract
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+
+	// add it to the contract set
+	if err := db.SetContractSet(context.Background(), "autopilot", fcids); err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hk1,
+							Root: types.Hash256{1},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// add the object
+	ctx := context.Background()
+	if err := db.UpdateObject(ctx, "foo", obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's healthy
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) != 0 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=0", len(slabs))
+	}
+
+	// delete the sector
+	if err := db.db.Table("contract_sectors").Where("TRUE").Delete(&dbContractSector{}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's unhealthy
+	slabs, err = db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) != 1 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
 	}
 }
 
@@ -1460,14 +1601,14 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(slabs) != 0 {
-		t.Fatalf("unexpected amount of slabs to migrate, %v!=0", len(slabs))
+	if len(slabs) != 1 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
 	}
 
-	expected := []object.SlabSlice{
-		obj.Slabs[0],
+	expected := []api.UnhealthySlab{
+		{Key: obj.Slabs[1].Slab.Key, Health: -1},
 	}
-	if reflect.DeepEqual(slabs, expected) {
+	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 }
@@ -1671,7 +1812,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// migrate the sector from h2 to h3
-	slab := toMigrate[0]
+	slab := obj.Slabs[0].Slab
 	slab.Shards[1] = object.Sector{
 		Host: hk3,
 		Root: types.Hash256{2},

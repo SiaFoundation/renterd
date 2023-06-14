@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
@@ -72,7 +71,7 @@ func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 
 	// prepare a channel to push work to the workers
 	type job struct {
-		object.Slab
+		api.UnhealthySlab
 		slabIdx int
 	}
 	jobs := make(chan job)
@@ -95,9 +94,14 @@ func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 				}
 
 				for j := range jobs {
-					err := w.MigrateSlab(ctx, j.Slab)
+					slab, err := b.Slab(ctx, j.Key)
 					if err != nil {
-						m.logger.Errorf("%v: failed to migrate slab %d/%d, err: %v", id, j.slabIdx+1, len(toMigrate), err)
+						m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, len(toMigrate), j.Health, err)
+						continue
+					}
+					err = w.MigrateSlab(ctx, slab)
+					if err != nil {
+						m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, len(toMigrate), j.Health, err)
 						continue
 					}
 					m.logger.Debugf("%v: successfully migrated slab '%v' %d/%d", id, j.Key, j.slabIdx+1, len(toMigrate))

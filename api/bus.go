@@ -238,6 +238,15 @@ type UpdateSlabRequest struct {
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
+type UnhealthySlabsResponse struct {
+	Slabs []UnhealthySlab `json:"slabs"`
+}
+
+type UnhealthySlab struct {
+	Key    object.EncryptionKey `json:"key"`
+	Health float64              `json:"health"`
+}
+
 // UpdateAllowlistRequest is the request type for /hosts/allowlist endpoint.
 type UpdateAllowlistRequest struct {
 	Add    []types.PublicKey `json:"add"`

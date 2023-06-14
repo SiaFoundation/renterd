@@ -804,6 +804,21 @@ func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
 	return deleteObject(s.db, key)
 }
 
+func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
+	k, err := key.MarshalText()
+	if err != nil {
+		return object.Slab{}, err
+	}
+	var slab dbSlab
+	tx := s.db.Where(&dbSlab{Key: k}).
+		Preload("Shards.Contracts.Host").
+		Take(&slab)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return object.Slab{}, api.ErrObjectNotFound
+	}
+	return slab.convert()
+}
+
 func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// sanity check the shards don't contain an empty root
 	for _, s := range s.Shards {
@@ -887,55 +902,52 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, usedContracts
 // UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
 // in the given contract set. These slabs need to be migrated to good contracts
 // so they are restored to full health.
-func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error) {
+func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
 
-	var dbBatch []dbSlab
-	var slabs []object.Slab
+	var rows []struct {
+		Key    []byte
+		Health float64
+	}
 
 	if err := s.db.
-		Select(`slabs.*,
-		        CASE
-				  WHEN (slabs.min_shards = slabs.total_shards)
-				  THEN
-				    CASE
-					WHEN (COUNT(DISTINCT(c.host_id)) < slabs.min_shards)
-					THEN
-					  -1
-					ELSE
-					  1
-					END
-				  ELSE
-				  (CAST(COUNT(DISTINCT(c.host_id)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-				  END AS health`).
+		Select(`slabs.Key,
+CASE WHEN (slabs.min_shards = slabs.total_shards)
+THEN
+    CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+    THEN -1
+    ELSE 1
+    END
+ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+END AS health`).
 		Model(&dbSlab{}).
 		Joins("INNER JOIN sectors s ON s.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se ON s.id = se.db_sector_id").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
-		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
-		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-		Where("cs.name = ?", set).
+		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
+		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name=?", set).
 		Group("slabs.id").
-		Having("health >= 0 AND health <= ?", healthCutoff).
+		Having("health <= ?", healthCutoff).
 		Order("health ASC").
 		Limit(limit).
-		Preload("Shards").
-		FindInBatches(&dbBatch, slabRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
-			for _, dbSlab := range dbBatch {
-				if slab, err := dbSlab.convert(); err == nil {
-					slabs = append(slabs, slab)
-				} else {
-					panic(err)
-				}
-			}
-			return nil
-		}).
+		Find(&rows).
 		Error; err != nil {
 		return nil, err
 	}
 
+	slabs := make([]api.UnhealthySlab, len(rows))
+	for i, row := range rows {
+		var key object.EncryptionKey
+		if err := key.UnmarshalText(row.Key); err != nil {
+			return nil, err
+		}
+		slabs[i] = api.UnhealthySlab{
+			Key:    key,
+			Health: row.Health,
+		}
+	}
 	return slabs, nil
 }
 
