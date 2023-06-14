@@ -914,11 +914,11 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Joins("INNER JOIN sectors s ON s.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se ON s.id = se.db_sector_id").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
-		Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
-		Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-		Where("cs.name = ?", set).
+		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
+		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
+		Where("cs.name = ? OR cs.name IS NULL", set).
 		Group("slabs.id").
-		Having("health >= 0 AND health <= ?", healthCutoff).
+		Having("health <= ?", healthCutoff).
 		Order("health ASC").
 		Limit(limit).
 		Preload("Shards").
