@@ -391,7 +391,8 @@ func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *obje
 		return nil
 	}
 
-	// subtract the number of shards that
+	// subtract the number of shards that are on hosts with contracts and might
+	// therefore be used for downloading from.
 	missingShards := len(shardIndices)
 	for _, si := range shardIndices {
 		_, hasContract := h2c[s.Shards[si].Host]
