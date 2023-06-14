@@ -392,28 +392,28 @@ func (mgr *uploadManager) numUploaders() int {
 }
 
 func (mgr *uploadManager) uploader(req *sectorUploadReq) *uploader {
-	mgr.mu.Lock()
-	if len(mgr.uploaders) == 0 {
-		mgr.mu.Unlock()
-		return nil
-	}
+	// fetch candidates
+	candidates := func() []*uploader {
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
 
-	// sort the uploaders by their estimate
-	sort.Slice(mgr.uploaders, func(i, j int) bool {
-		return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
-	})
+		// sort the uploaders by their estimate
+		sort.Slice(mgr.uploaders, func(i, j int) bool {
+			return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
+		})
 
-	// select top ten candidates
-	var candidates []*uploader
-	for _, uploader := range mgr.uploaders {
-		if req.upload.canUseUploader(uploader, req.sID) {
-			candidates = append(candidates, uploader)
-			if len(candidates) == 10 {
-				break
+		// select top ten candidates
+		var candidates []*uploader
+		for _, uploader := range mgr.uploaders {
+			if req.upload.canUseUploader(uploader, req.sID) {
+				candidates = append(candidates, uploader)
+				if len(candidates) == 10 {
+					break
+				}
 			}
 		}
-	}
-	mgr.mu.Unlock()
+		return candidates
+	}()
 
 	// return early if we have no queues left
 	if len(candidates) == 0 {
@@ -824,9 +824,6 @@ func (u *uploader) blockHeight() uint64 {
 }
 
 func (u *uploader) estimate() float64 {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
 	// fetch estimated duration per sector
 	estimateP90 := u.statsSectorUploadEstimateInMS.P90()
 	if estimateP90 == 0 {
