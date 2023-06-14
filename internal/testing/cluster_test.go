@@ -46,7 +46,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), "/foo", object.Object{
+	err = b.AddObject(context.Background(), "/foo", "autopilot", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{

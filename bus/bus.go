@@ -94,14 +94,14 @@ type (
 		Object(ctx context.Context, path string) (object.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, path string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
-		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
 
 	// A SettingStore stores settings.
@@ -751,7 +751,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.Object, nil, aor.UsedContracts)) // TODO
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
 	}
 }
 
@@ -786,7 +786,7 @@ func (b *bus) slabHandlerGET(jc jape.Context) {
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.UsedContracts))
+		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet, usr.UsedContracts))
 	}
 }
 

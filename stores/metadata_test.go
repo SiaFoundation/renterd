@@ -91,7 +91,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), want, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -451,7 +451,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), "foo", obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := cs.UpdateObject(context.Background(), "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk:  fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -848,12 +848,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := db.UpdateObject(ctx, objID, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.UpdateObject(ctx, objID, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1010,7 +1010,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := db.UpdateObject(ctx, objID, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = db.Object(ctx, objID)
@@ -1088,7 +1088,7 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, obj, nil, ucs)
+		os.UpdateObject(ctx, o.path, testContractSet, obj, nil, ucs)
 	}
 	tests := []struct {
 		path   string
@@ -1147,7 +1147,7 @@ func TestSearchObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, obj, nil, ucs)
+		os.UpdateObject(ctx, o.path, testContractSet, obj, nil, ucs)
 	}
 	tests := []struct {
 		path string
@@ -1340,7 +1340,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1436,7 +1436,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1497,7 +1497,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1591,7 +1591,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1661,7 +1661,7 @@ func TestContractSectors(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, nil, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1687,7 +1687,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.UpdateObject(ctx, "foo", obj, nil, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1752,7 +1752,7 @@ func TestPutSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -1821,7 +1821,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// update the slab to reflect the migration
-	err = db.UpdateSlab(ctx, slab, map[types.PublicKey]types.FileContractID{
+	err = db.UpdateSlab(ctx, slab, testContractSet, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk3: fcid3,
 	})
@@ -2022,7 +2022,7 @@ func TestObjectsStats(t *testing.T) {
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := cs.UpdateObject(context.Background(), key, obj, nil, contracts)
+		err := cs.UpdateObject(context.Background(), key, testContractSet, obj, nil, contracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2125,7 +2125,7 @@ func TestPartialSlab(t *testing.T) {
 		TotalShards: 2,
 		Data:        []byte{1, 2, 3, 4},
 	}
-	err = db.UpdateObject(context.Background(), "key", obj, &partialSlab, usedContracts)
+	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, &partialSlab, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2174,7 +2174,7 @@ func TestPartialSlab(t *testing.T) {
 		TotalShards: 2,
 		Data:        frand.Bytes(int(fullSlabSize) - len(partialSlab.Data) - 1), // leave 1 byte
 	}
-	err = db.UpdateObject(context.Background(), "key2", obj2, &partialSlab2, usedContracts)
+	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, &partialSlab2, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2212,7 +2212,7 @@ func TestPartialSlab(t *testing.T) {
 		TotalShards: 2,
 		Data:        []byte{5, 6}, // 1 byte more than fits in the slab
 	}
-	err = db.UpdateObject(context.Background(), "key3", obj3, &partialSlab3, usedContracts)
+	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, &partialSlab3, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
