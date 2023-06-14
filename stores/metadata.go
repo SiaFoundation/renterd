@@ -292,16 +292,27 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 		return nil
 	}
 
-	// hydrate all slabs
-	for j, sector := range raw {
-		if sector.SlabID != curr {
-			if err := addSlab(j, sector.SlabID); err != nil {
-				return object.Object{}, err
-			}
+	// filter out slabs with invalid ID - this is possible if the object has no
+	// data and thus no slabs
+	filtered := raw[:0]
+	for _, sector := range raw {
+		if sector.SlabID != 0 {
+			filtered = append(filtered, sector)
 		}
 	}
-	if err := addSlab(len(raw), 0); err != nil {
-		return object.Object{}, err
+
+	// hydrate all slabs
+	if len(filtered) > 0 {
+		for j, sector := range filtered {
+			if sector.SlabID != curr {
+				if err := addSlab(j, sector.SlabID); err != nil {
+					return object.Object{}, err
+				}
+			}
+		}
+		if err := addSlab(len(raw), 0); err != nil {
+			return object.Object{}, err
+		}
 	}
 
 	// hydrate all fields
@@ -1087,9 +1098,9 @@ func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
 		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN slices sli ON o.id = sli.`db_object_id`").
-		Joins("INNER JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Joins("INNER JOIN sectors sec ON sla.id = sec.`db_slab_id`").
+		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
 		Where("o.object_id = ?", key).
 		Order("o.id ASC").
 		Order("sla.id ASC").
