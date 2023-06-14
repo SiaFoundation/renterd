@@ -1177,7 +1177,8 @@ func TestSearchObjects(t *testing.T) {
 }
 
 // TestUnhealthySlabs tests the functionality of UnhealthySlabs.
-func TestUnhealthySlabs1(t *testing.T) {
+func TestUnhealthySlabs(t *testing.T) {
+	// create db
 	db, _, _, err := newTestSQLStore()
 	if err != nil {
 		t.Fatal(err)
@@ -1351,18 +1352,17 @@ func TestUnhealthySlabs1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(slabs)
 	if len(slabs) != 4 {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=4", len(slabs))
 	}
 
-	expected := []object.SlabSlice{
-		obj.Slabs[4],
-		obj.Slabs[2],
-		obj.Slabs[1],
-		obj.Slabs[3],
+	expected := []object.Slab{
+		obj.Slabs[2].Slab,
+		obj.Slabs[4].Slab,
+		obj.Slabs[1].Slab,
+		obj.Slabs[3].Slab,
 	}
-	if reflect.DeepEqual(slabs, expected) {
+	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 
@@ -1374,11 +1374,11 @@ func TestUnhealthySlabs1(t *testing.T) {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=2", len(slabs))
 	}
 
-	expected = []object.SlabSlice{
-		obj.Slabs[4],
-		obj.Slabs[2],
+	expected = []object.Slab{
+		obj.Slabs[2].Slab,
+		obj.Slabs[4].Slab,
 	}
-	if reflect.DeepEqual(slabs, expected) {
+	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 }
@@ -1601,14 +1601,12 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(slabs) != 0 {
-		t.Fatalf("unexpected amount of slabs to migrate, %v!=0", len(slabs))
+	if len(slabs) != 1 {
+		t.Fatalf("unexpected amount of slabs to migrate, %v!=1", len(slabs))
 	}
 
-	expected := []object.SlabSlice{
-		obj.Slabs[0],
-	}
-	if reflect.DeepEqual(slabs, expected) {
+	expected := []object.Slab{obj.Slabs[1].Slab}
+	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 }

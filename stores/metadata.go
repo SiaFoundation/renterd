@@ -897,26 +897,20 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 
 	if err := s.db.
 		Select(`slabs.*,
-		        CASE
-				  WHEN (slabs.min_shards = slabs.total_shards)
-				  THEN
-				    CASE
-					WHEN (COUNT(DISTINCT(c.host_id)) < slabs.min_shards)
-					THEN
-					  -1
-					ELSE
-					  1
-					END
-				  ELSE
-				  (CAST(COUNT(DISTINCT(c.host_id)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-				  END AS health`).
+CASE WHEN (slabs.min_shards = slabs.total_shards)
+THEN
+    CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+    THEN -1
+    ELSE 1
+    END
+ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+END AS health`).
 		Model(&dbSlab{}).
 		Joins("INNER JOIN sectors s ON s.db_slab_id = slabs.id").
 		Joins("LEFT JOIN contract_sectors se ON s.id = se.db_sector_id").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id").
-		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-		Where("cs.name = ? OR cs.name IS NULL", set).
+		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name=?", set).
 		Group("slabs.id").
 		Having("health <= ?", healthCutoff).
 		Order("health ASC").
