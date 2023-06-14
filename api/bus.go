@@ -232,10 +232,32 @@ type MigrationSlabsRequest struct {
 	Limit        int     `json:"limit"`
 }
 
+type PackedSlab struct {
+	BufferID    uint   `json:"bufferID"`
+	MinShards   uint8  `json:"minShards"`
+	TotalShards uint8  `json:"totalShards"`
+	Data        []byte `json:"data"`
+}
+
+type UploadedPackedSlab struct {
+	BufferID uint
+	Key      object.EncryptionKey
+	Shards   []object.Sector
+}
+
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
 	Slab          object.Slab                              `json:"slab"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+}
+
+type UnhealthySlabsResponse struct {
+	Slabs []UnhealthySlab `json:"slabs"`
+}
+
+type UnhealthySlab struct {
+	Key    object.EncryptionKey `json:"key"`
+	Health float64              `json:"health"`
 }
 
 // UpdateAllowlistRequest is the request type for /hosts/allowlist endpoint.

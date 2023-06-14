@@ -130,6 +130,7 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 		&dbSlab{},
 		&dbSector{},
 		&dbSlice{},
+		&dbSlabBuffer{},
 
 		// bus.HostDB tables
 		&dbAnnouncement{},

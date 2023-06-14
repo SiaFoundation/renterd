@@ -26,6 +26,12 @@ type Slab struct {
 	Shards    []Sector      `json:"shards"`
 }
 
+type PartialSlab struct {
+	MinShards   uint8  `json:"minShards"`
+	TotalShards uint8  `json:"totalShards"`
+	Data        []byte `json:"data"`
+}
+
 // NewSlab returns a new slab for the shards.
 func NewSlab(minShards uint8) Slab {
 	return Slab{
