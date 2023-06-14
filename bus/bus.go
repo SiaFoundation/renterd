@@ -99,7 +99,8 @@ type (
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
-		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]object.Slab, error)
+		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
 
@@ -766,6 +767,22 @@ func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 	jc.Encode(info)
 }
 
+func (b *bus) slabHandlerGET(jc jape.Context) {
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+	slab, err := b.ms.Slab(jc.Request.Context(), key)
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(slab)
+}
+
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
@@ -777,7 +794,9 @@ func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
 		if slabs, err := b.ms.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
-			jc.Encode(slabs)
+			jc.Encode(api.UnhealthySlabsResponse{
+				Slabs: slabs,
+			})
 		}
 	}
 }
@@ -1252,6 +1271,7 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /objects/*path": b.objectsHandlerDELETE,
 
 		"POST   /slabs/migration": b.slabsMigrationHandlerPOST,
+		"GET    /slab/:key":       b.slabHandlerGET,
 		"PUT    /slab":            b.slabHandlerPUT,
 
 		"GET    /settings":     b.settingsHandlerGET,

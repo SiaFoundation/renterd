@@ -1356,11 +1356,11 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=4", len(slabs))
 	}
 
-	expected := []object.Slab{
-		obj.Slabs[2].Slab,
-		obj.Slabs[4].Slab,
-		obj.Slabs[1].Slab,
-		obj.Slabs[3].Slab,
+	expected := []api.UnhealthySlab{
+		{Key: obj.Slabs[2].Key, Health: 0},
+		{Key: obj.Slabs[4].Key, Health: 0},
+		{Key: obj.Slabs[1].Key, Health: 0.5},
+		{Key: obj.Slabs[3].Key, Health: 0.5},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
@@ -1374,12 +1374,12 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=2", len(slabs))
 	}
 
-	expected = []object.Slab{
-		obj.Slabs[2].Slab,
-		obj.Slabs[4].Slab,
+	expected = []api.UnhealthySlab{
+		{Key: obj.Slabs[2].Key, Health: 0},
+		{Key: obj.Slabs[4].Key, Health: 0},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
-		t.Fatal("slabs are not returned in the correct order")
+		t.Fatal("slabs are not returned in the correct order", slabs, expected)
 	}
 }
 
@@ -1810,7 +1810,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// migrate the sector from h2 to h3
-	slab := toMigrate[0]
+	slab := obj.Slabs[0].Slab
 	slab.Shards[1] = object.Sector{
 		Host: hk3,
 		Root: types.Hash256{2},

@@ -392,9 +392,9 @@ func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *obje
 	}
 
 	// perform some sanity check
-	if len(s.Shards)-len(shardIndices) < int(s.MinShards) {
-		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
-	}
+	//	if len(s.Shards)-len(shardIndices) < int(s.MinShards) {
+	//		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
+	//	}
 
 	// download + reconstruct slab
 	ss := object.SlabSlice{

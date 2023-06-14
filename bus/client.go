@@ -518,9 +518,13 @@ func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
 // SlabsForMigration returns up to 'limit' slabs which require migration. A slab
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.
-func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) (slabs []object.Slab, err error) {
-	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, HealthCutoff: healthCutoff, Limit: limit}, &slabs)
-	return
+func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) (slabs []api.UnhealthySlab, err error) {
+	var usr api.UnhealthySlabsResponse
+	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, HealthCutoff: healthCutoff, Limit: limit}, &usr)
+	if err != nil {
+		return
+	}
+	return usr.Slabs, nil
 }
 
 // UpdateSlab updates the given slab in the database.
@@ -529,6 +533,12 @@ func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, usedContracts
 		Slab:          slab,
 		UsedContracts: usedContracts,
 	})
+	return
+}
+
+// Slab returns the slab with the given key from the bus.
+func (c *Client) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%s", key), &slab)
 	return
 }
 
