@@ -824,6 +824,9 @@ func (u *uploader) blockHeight() uint64 {
 }
 
 func (u *uploader) estimate() float64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
 	// fetch estimated duration per sector
 	estimateP90 := u.statsSectorUploadEstimateInMS.P90()
 	if estimateP90 == 0 {
@@ -866,13 +869,14 @@ func (u *uploader) enqueue(upload *sectorUploadReq) {
 }
 
 func (u *uploader) trackSectorUpload(err error, d time.Duration) {
+	estimate := u.estimate()
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if err != nil {
 		u.consecutiveFailures++
 		u.statsSectorUploadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
 		u.trackErrs++
-		fmt.Printf("DEBUG PJ: uploader %v tracked failure #%d curr estimate %v\n", u.hk, u.trackErrs, u.estimate())
+		fmt.Printf("DEBUG PJ: uploader %v tracked failure #%d curr estimate %v\n", u.hk, u.trackErrs, estimate)
 	} else {
 		ms := d.Milliseconds()
 		u.consecutiveFailures = 0
