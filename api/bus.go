@@ -232,6 +232,19 @@ type MigrationSlabsRequest struct {
 	Limit        int     `json:"limit"`
 }
 
+type PackedSlab struct {
+	BufferID    uint   `json:"bufferID"`
+	MinShards   uint8  `json:"minShards"`
+	TotalShards uint8  `json:"totalShards"`
+	Data        []byte `json:"data"`
+}
+
+type UploadedPackedSlab struct {
+	BufferID uint
+	Key      object.EncryptionKey
+	Shards   []object.Sector
+}
+
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
 	Slab          object.Slab                              `json:"slab"`
