@@ -950,7 +950,6 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 	if len(obj.Slabs) == 0 {
-		jc.Error(errors.New("object has no data"), http.StatusInternalServerError)
 		return
 	}
 

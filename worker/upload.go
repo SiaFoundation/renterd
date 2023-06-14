@@ -285,6 +285,9 @@ loop:
 			data := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(cr, size), data)
 			if err == io.EOF {
+				if slabIndex == 0 {
+					break loop
+				}
 				numSlabs = slabIndex
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {

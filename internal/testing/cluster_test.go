@@ -252,6 +252,54 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
+// TestUploadDownloadEmpty is an integration test that verifies empty objects
+// can be uploaded and download correctly.
+func TestUploadDownloadEmpty(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload an empty file
+	if err := w.UploadObject(context.Background(), bytes.NewReader(nil), "empty"); err != nil {
+		t.Fatal(err)
+	}
+
+	// download the empty file
+	var buffer bytes.Buffer
+	if err := w.DownloadObject(context.Background(), &buffer, "empty"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's empty
+	if len(buffer.Bytes()) != 0 {
+		t.Fatal("unexpected")
+	}
+}
+
 // TestUploadDownloadBasic is an integration test that verifies objects can be
 // uploaded and download correctly.
 func TestUploadDownloadBasic(t *testing.T) {
