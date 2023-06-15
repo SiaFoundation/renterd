@@ -221,34 +221,34 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable, refresh, renew bool, reasons []error) {
+func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable, refresh, renew bool, reasons []string) {
 	c, s := ci.contract, ci.settings
 
 	if bh > c.EndHeight() {
-		reasons = append(reasons, errContractExpired)
+		reasons = append(reasons, errContractExpired.Error())
 		renew = false
 		refresh = false
 	}
 
 	if c.Revision.RevisionNumber == math.MaxUint64 {
-		reasons = append(reasons, errContractMaxRevisionNumber)
+		reasons = append(reasons, errContractMaxRevisionNumber.Error())
 		renew = false
 		refresh = false
 	}
 
 	if isOutOfCollateral(c, s, renterFunds, bh) {
-		reasons = append(reasons, errContractOutOfCollateral)
+		reasons = append(reasons, errContractOutOfCollateral.Error())
 		renew = false
 		refresh = true
 	}
 	if isOutOfFunds(cfg, s, c) {
-		reasons = append(reasons, errContractOutOfFunds)
+		reasons = append(reasons, errContractOutOfFunds.Error())
 		renew = false
 		refresh = true
 	}
 	if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
 		if secondHalf {
-			reasons = append(reasons, errContractUpForRenewal) // only unusable if in second half of renew window
+			reasons = append(reasons, errContractUpForRenewal.Error()) // only unusable if in second half of renew window
 		}
 		renew = true
 		refresh = false

@@ -48,6 +48,14 @@ const (
 	// usable.
 	minAllowedScoreLeeway = 500
 
+	// reasonRenewed is returned as reason for a contract being no longer usable
+	// because it needs to be renewed
+	reasonRenewed = "renewed"
+
+	// reasonRefreshed is returned as reason for a contract being no longer usable
+	// because it needs to be refreshed
+	reasonRefreshed = "refreshed"
+
 	// timeoutHostPriceTable is the amount of time we wait to receive a price
 	// table from the host
 	timeoutHostPriceTable = 30 * time.Second
@@ -213,7 +221,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.mu.Unlock()
 
 	// run checks
-	updatedSet, toArchive, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, minScore)
+	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, minScore)
 	if err != nil {
 		return fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -283,6 +291,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// defer logging
+	var truncated bool
 	defer func() {
 		var added, removed, total int
 
@@ -295,17 +304,33 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			for _, c := range append(renewed, refreshed...) {
 				renewals[c] = struct{}{}
 			}
+
+			updated := make(map[types.FileContractID]struct{})
 			for _, c := range updatedSet {
-				total++
+				updated[c] = struct{}{}
 				_, renewal := renewals[c]
 				_, existed := previous[c]
 				if !existed && !renewal {
 					added++
 				}
 			}
+			total = len(updated)
 			kept := total - added
 			if len(previous) > kept {
 				removed = len(previous) - kept
+				for _, curr := range currentSet {
+					_, exists := updated[curr.ID]
+					if !exists {
+						reason, ok := toStopUsing[curr.ID]
+						if ok && reason != reasonRenewed && reason != reasonRefreshed {
+							c.logger.Debug("contract %v was removed from the contract set because it is no longer usable, reasons: %v", curr.ID, reason)
+						} else if !ok && truncated {
+							c.logger.Debug("contract %v was removed from the contract set because there was a contract surplus", curr.ID)
+						} else if !ok {
+							c.logger.Debug("contract %v was removed from the contract set for unknown reasons, should be investigated", curr.ID)
+						}
+					}
+				}
 			}
 		} else {
 			total = len(currentSet)
@@ -350,6 +375,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		})
 
 		updatedSet = updatedSet[:state.cfg.Contracts.Amount]
+		truncated = true
 	}
 
 	// update contract set
@@ -435,7 +461,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toKeep []types.FileContractID, toArchive map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -465,6 +491,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 	// return variables
 	toArchive = make(map[types.FileContractID]string)
+	toStopUsing = make(map[types.FileContractID]string)
 
 	// check all contracts
 	for _, contract := range contracts {
@@ -479,12 +506,13 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// check if contract is ready to be archived.
 		if state.cs.BlockHeight > contract.EndHeight() {
 			toArchive[fcid] = errContractExpired.Error()
-			continue
 		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
-			continue
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+		}
+		if _, archived := toArchive[fcid]; archived {
+			toStopUsing[fcid] = toArchive[fcid]
 			continue
 		}
 
@@ -526,7 +554,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// decide whether the host is still good
 		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, revision.Filesize)
 		if !usable {
-			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", unusableResult.reasons())
+			reasons := unusableResult.reasons()
+			toStopUsing[fcid] = strings.Join(reasons, ",")
+			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", reasons)
 			continue
 		}
 
@@ -539,22 +569,25 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
 		if !usable {
+			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
 				"unusable contract",
 				"hk", hk,
 				"fcid", fcid,
-				"reasons", errStr(joinErrors(reasons)),
+				"reasons", reasons,
 				"refresh", refresh,
 				"renew", renew,
 			)
 		}
 
 		if renew {
+			toStopUsing[contract.ID] = "renewed"
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
 				settings: host.Settings,
 			})
 		} else if refresh {
+			toStopUsing[contract.ID] = "refreshed"
 			toRefresh = append(toRefresh, contractInfo{
 				contract: contract,
 				settings: host.Settings,
@@ -564,7 +597,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 	}
 
-	return toKeep, toArchive, toRefresh, toRenew, nil
+	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
 func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, missing uint64, budget *types.Currency, renterAddress types.Address, minScore float64) ([]types.FileContractID, error) {
