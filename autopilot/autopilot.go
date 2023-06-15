@@ -264,6 +264,12 @@ func (ap *Autopilot) Run() error {
 			}
 			maintenanceSuccess := err == nil
 
+			// upon success, notify the migrator. The health of slabs might have
+			// changed.
+			if maintenanceSuccess {
+				ap.m.SignalMaintenanceFinished()
+			}
+
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
