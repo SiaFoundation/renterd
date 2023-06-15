@@ -287,19 +287,26 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		var added, removed, total int
 
 		if err == nil {
-			current := make(map[types.FileContractID]struct{})
+			previous := make(map[types.FileContractID]struct{})
 			for _, c := range currentSet {
-				current[c.ID] = struct{}{}
+				previous[c.ID] = struct{}{}
+			}
+			renewals := make(map[types.FileContractID]struct{})
+			for _, c := range append(renewed, refreshed...) {
+				renewals[c] = struct{}{}
 			}
 			for _, c := range updatedSet {
 				total++
-				if _, exists := current[c]; !exists {
+				_, renewal := renewals[c]
+				_, existed := previous[c]
+				if !existed && !renewal {
 					added++
-				} else {
-					delete(current, c)
 				}
 			}
-			removed = len(current)
+			kept := total - added
+			if len(previous) > kept {
+				removed = len(previous) - kept
+			}
 		} else {
 			total = len(currentSet)
 		}
