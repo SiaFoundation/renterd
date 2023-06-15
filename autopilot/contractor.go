@@ -284,23 +284,44 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// defer logging
 	defer func() {
-		numContractsInSet := len(currentSet)
+		var added, removed, total int
+
+		total = len(currentSet)
 		if err == nil {
-			numContractsInSet = len(updatedSet)
+			current := make(map[types.FileContractID]struct{})
+			for _, c := range currentSet {
+				current[c.ID] = struct{}{}
+			}
+			for _, c := range updatedSet {
+				total++
+				if _, exists := current[c]; !exists {
+					added++
+				} else {
+					delete(current, c)
+				}
+			}
+			removed = len(current)
 		}
-		if numContractsInSet < int(state.rs.TotalShards) {
+
+		if total < int(state.rs.TotalShards) {
 			c.logger.Warnw(
 				"contracts after maintenance are below the minimum required",
 				"formed", len(formed),
 				"renewed", len(renewed),
-				"contractset", numContractsInSet,
+				"refreshed", len(refreshed),
+				"contractset", total,
+				"contractsadded", added,
+				"contractsremoved", removed,
 			)
 		} else {
 			c.logger.Debugw(
 				"contracts after maintenance",
 				"formed", len(formed),
 				"renewed", len(renewed),
-				"contractset", numContractsInSet,
+				"refreshed", len(refreshed),
+				"contractset", total,
+				"contractsadded", added,
+				"contractsremoved", removed,
 			)
 		}
 	}()
@@ -328,7 +349,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		err = errors.New("autopilot stopped before maintenance could be completed")
 		return
 	}
-	return c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
+
+	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
+	return
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
