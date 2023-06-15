@@ -323,11 +323,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 					if !exists {
 						reason, ok := toStopUsing[curr.ID]
 						if ok && reason != reasonRenewed && reason != reasonRefreshed {
-							c.logger.Debug("contract %v was removed from the contract set because it is no longer usable, reasons: %v", curr.ID, reason)
+							c.logger.Debugf("contract %v was removed from the contract set because it is no longer usable, reasons: %v", curr.ID, reason)
 						} else if !ok && truncated {
-							c.logger.Debug("contract %v was removed from the contract set because there was a contract surplus", curr.ID)
+							c.logger.Debugf("contract %v was removed from the contract set because there was a contract surplus", curr.ID)
 						} else if !ok {
-							c.logger.Debug("contract %v was removed from the contract set for unknown reasons, should be investigated", curr.ID)
+							c.logger.Debugf("contract %v was removed from the contract set for unknown reasons, should be investigated", curr.ID)
 						}
 					}
 				}
