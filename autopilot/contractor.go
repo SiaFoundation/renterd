@@ -373,7 +373,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			toStopUsing[c] = "truncated"
 		}
 		updatedSet = updatedSet[:state.cfg.Contracts.Amount]
-
 	}
 
 	// update contract set
