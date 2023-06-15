@@ -517,6 +517,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// starting here we need a revision for checking the contract. So if
 		// there is no revision, the contract isn't considered good.
 		if contract.Revision == nil {
+			toStopUsing[fcid] = errContractNoRevision.Error()
 			continue
 		}
 		revision := contract.Revision
@@ -526,6 +527,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host, err := c.ap.bus.Host(ctx, hk)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("missing host, err: %v", err), "hk", hk)
+			toStopUsing[fcid] = errHostNotFound.Error()
 			notfound++
 			continue
 		}
@@ -533,6 +535,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// if the host is blocked we ignore it, it might be unblocked later
 		if host.Blocked {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errHostBlocked.Error())
+			toStopUsing[fcid] = errHostBlocked.Error()
 			continue
 		}
 
@@ -540,6 +543,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable, err = c.priceTable(ctx, w, host.Host)
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
+			toStopUsing[fcid] = "could not fetch price table"
 			continue
 		}
 

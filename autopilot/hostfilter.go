@@ -29,6 +29,7 @@ const (
 
 var (
 	errHostBlocked               = errors.New("host is blocked")
+	errHostNotFound              = errors.New("host not found")
 	errHostOffline               = errors.New("host is offline")
 	errLowScore                  = errors.New("host's score is below minimum")
 	errHostRedundantIP           = errors.New("host has redundant IP")
@@ -41,6 +42,7 @@ var (
 	errContractOutOfFunds        = errors.New("contract is out of funds")
 	errContractUpForRenewal      = errors.New("contract is up for renewal")
 	errContractMaxRevisionNumber = errors.New("contract has reached max revision number")
+	errContractNoRevision        = errors.New("contract has no revision")
 	errContractExpired           = errors.New("contract has expired")
 )
 
