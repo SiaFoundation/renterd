@@ -138,6 +138,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
 		return err
 	}
+	wasInPreviousSet := make(map[types.FileContractID]struct{})
+	for _, c := range currentSet {
+		wasInPreviousSet[c.ID] = struct{}{}
+	}
 	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
 	// fetch all contracts from the worker.
@@ -230,14 +234,21 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return err
 	}
 
-	// sort renewals by their size
-	sort.Slice(toRenew, func(i, j int) bool {
-		return toRenew[i].contract.FileSize() > toRenew[j].contract.FileSize()
-	})
-
 	// calculate 'limit' amount of contracts we want to renew
 	var limit int
 	if len(toRenew) > 0 {
+		// when renewing, prioritise contracts that have already been in the set
+		// before and out of those prefer the largest ones.
+		sort.Slice(toRenew, func(i, j int) bool {
+			_, icsI := wasInPreviousSet[toRenew[i].contract.ID]
+			_, icsJ := wasInPreviousSet[toRenew[j].contract.ID]
+			if icsI && !icsJ {
+				return true
+			} else if !icsI && icsJ {
+				return false
+			}
+			return toRenew[i].contract.FileSize() > toRenew[j].contract.FileSize()
+		})
 		for len(updatedSet)+limit < int(state.cfg.Contracts.Amount) && limit < len(toRenew) {
 			// as long as we're missing contracts, increase the renewal limit
 			limit++
@@ -280,10 +291,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 		if err == nil {
 			// build some maps for easier lookups
-			previous := make(map[types.FileContractID]struct{})
-			for _, c := range currentSet {
-				previous[c.ID] = struct{}{}
-			}
 			upForRenewal := make(map[types.FileContractID]struct{})
 			for _, c := range append(toRenew, toRefresh...) {
 				upForRenewal[c.contract.ID] = struct{}{}
@@ -313,7 +320,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 				}
 			}
 			for _, fcid := range updatedSet {
-				_, existed := previous[fcid]
+				_, existed := wasInPreviousSet[fcid]
 				_, renewed := renewals[fcid]
 				if !existed && !renewed {
 					added = append(added, fcid)
