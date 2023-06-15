@@ -870,7 +870,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
+	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1344,7 +1344,10 @@ func (cl *contractLock) Release(ctx context.Context) error {
 
 func (cl *contractLock) keepaliveLoop() {
 	// Create ticker for 20% of the lock duration.
-	t := time.NewTicker(cl.d / 5)
+	start := time.Now()
+	var lastUpdate time.Time
+	tickDuration := cl.d / 5
+	t := time.NewTicker(tickDuration)
 
 	// Cleanup
 	defer func() {
@@ -1363,9 +1366,15 @@ func (cl *contractLock) keepaliveLoop() {
 		case <-t.C:
 		}
 		if err := cl.locker.KeepaliveContract(cl.stopCtx, cl.fcid, cl.lockID, cl.d); err != nil && !errors.Is(err, context.Canceled) {
-			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err), "contract", cl.fcid, "lockID", cl.lockID)
+			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err),
+				"contract", cl.fcid,
+				"lockID", cl.lockID,
+				"loopStart", start,
+				"timeSinceLastUpdate", time.Since(lastUpdate),
+				"tickDuration", tickDuration)
 			return
 		}
+		lastUpdate = time.Now()
 	}
 }
 
