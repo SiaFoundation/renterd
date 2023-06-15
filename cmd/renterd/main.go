@@ -391,4 +391,5 @@ func main() {
 			log.Fatalf("Shutdown function %v failed: %v", i+1, err)
 		}
 	}
+	log.Println("Shutdown complete")
 }
