@@ -55,6 +55,7 @@ type (
 		stopChan       chan struct{}
 
 		mu                  sync.Mutex
+		numJobs             uint64
 		consecutiveFailures uint64
 		queue               []*sectorDownloadReq
 	}
@@ -122,6 +123,7 @@ type (
 		healthyDownloaders       uint64
 		numDownloaders           uint64
 		downloadSpeedsMBPS       map[types.PublicKey]float64
+		numJobs                  map[types.PublicKey]uint64
 	}
 )
 
@@ -338,9 +340,11 @@ func (mgr *downloadManager) Stats() downloadManagerStats {
 	mgr.mu.Lock()
 	var numHealthy uint64
 	speeds := make(map[types.PublicKey]float64)
+	numJobs := make(map[types.PublicKey]uint64)
 	for hk, d := range mgr.downloaders {
-		healthy, mbps := d.stats()
+		healthy, mbps, jobs := d.stats()
 		speeds[hk] = mbps
+		numJobs[hk] = jobs
 		if healthy {
 			numHealthy++
 		}
@@ -354,6 +358,7 @@ func (mgr *downloadManager) Stats() downloadManagerStats {
 		healthyDownloaders:       numHealthy,
 		numDownloaders:           uint64(len(mgr.downloaders)),
 		downloadSpeedsMBPS:       speeds,
+		numJobs:                  numJobs,
 	}
 }
 
@@ -493,11 +498,12 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, key object.Encrypt
 	}
 }
 
-func (d *downloader) stats() (healthy bool, mbps float64) {
+func (d *downloader) stats() (healthy bool, mbps float64, jobs uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	healthy = d.consecutiveFailures == 0
 	mbps = d.statsSectorDownloadSpeedBytesPerMS.Average() * 0.008
+	jobs = d.numJobs
 	return
 }
 
@@ -649,6 +655,7 @@ func (d *downloader) enqueue(download *sectorDownloadReq) {
 
 	// enqueue the job
 	d.mu.Lock()
+	d.numJobs++
 	d.queue = append(d.queue, download)
 	d.mu.Unlock()
 

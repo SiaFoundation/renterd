@@ -899,6 +899,7 @@ func (w *worker) downloadsStatshandlerGET(jc jape.Context) {
 		dss = append(dss, api.DownloaderStats{
 			HostKey:                    hk,
 			AvgSectorDownloadSpeedMBPS: mbps,
+			NumJobs:                    stats.numJobs[hk],
 		})
 	}
 	sort.SliceStable(dss, func(i, j int) bool {
