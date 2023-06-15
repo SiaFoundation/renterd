@@ -164,11 +164,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// compile map of stored data per host
-	sizeIndex := make(map[types.FileContractID]int)
-	storedData := make(map[types.PublicKey]uint64)
-	for i, c := range contracts {
-		sizeIndex[c.ID] = i
-		storedData[c.HostKey] += c.FileSize()
+	contractData := make(map[types.FileContractID]uint64)
+	hostData := make(map[types.PublicKey]uint64)
+	for _, c := range contracts {
+		contractData[c.ID] = c.FileSize()
+		hostData[c.HostKey] += c.FileSize()
 	}
 
 	// fetch all hosts
@@ -180,7 +180,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// min score to pass checks.
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore, err = c.managedFindMinAllowedHostScores(ctx, w, hosts, storedData)
+		minScore, err = c.managedFindMinAllowedHostScores(ctx, w, hosts, hostData)
 		if err != nil {
 			return fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
@@ -196,7 +196,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
-		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, h, minScore, storedData[h.PublicKey])
+		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, h, minScore, hostData[h.PublicKey])
 		hostInfos[h.PublicKey] = hostInfo{
 			Usable:         isUsable,
 			UnusableResult: unusableResult,
@@ -206,7 +206,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// update cache.
 	c.mu.Lock()
 	c.cachedHostInfo = hostInfos
-	c.cachedDataStored = storedData
+	c.cachedDataStored = hostData
 	c.cachedMinScore = minScore
 	c.mu.Unlock()
 
@@ -238,12 +238,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// calculate 'limit' amount of contracts we want to renew
 	var limit int
 	if len(toRenew) > 0 {
-		for _, r := range toRenew {
-			// renew contracts that were part of the 'Amount' largest contracts in the set
-			if sizeIndex[r.contract.ID] < int(state.cfg.Contracts.Amount) {
-				limit++
-			}
-		}
 		for len(updatedSet)+limit < int(state.cfg.Contracts.Amount) && limit < len(toRenew) {
 			// as long as we're missing contracts, increase the renewal limit
 			limit++
@@ -315,7 +309,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 					if !ok {
 						reason = "unknown"
 					}
-					c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, sizeIndex[contract.ID], reason)
+					c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
 				}
 			}
 			for _, fcid := range updatedSet {
@@ -323,13 +317,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 				_, renewed := renewals[fcid]
 				if !existed && !renewed {
 					added = append(added, fcid)
-					c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, sizeIndex[fcid])
+					c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, contractData[fcid])
 				}
 			}
 			for _, fcid := range append(refreshed, renewed...) {
 				_, exists := updated[fcid]
 				if !exists {
-					c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, sizeIndex[fcid])
+					c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid])
 				}
 			}
 
@@ -367,7 +361,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	if len(updatedSet) > int(state.cfg.Contracts.Amount) {
 		// sort by contract size
 		sort.Slice(updatedSet, func(i, j int) bool {
-			return sizeIndex[updatedSet[i]] > sizeIndex[updatedSet[j]]
+			return contractData[updatedSet[i]] > contractData[updatedSet[j]]
 		})
 		for _, c := range updatedSet[state.cfg.Contracts.Amount:] {
 			toStopUsing[c] = "truncated"
