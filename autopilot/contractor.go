@@ -286,7 +286,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	defer func() {
 		var added, removed, total int
 
-		total = len(currentSet)
 		if err == nil {
 			current := make(map[types.FileContractID]struct{})
 			for _, c := range currentSet {
@@ -301,6 +300,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 				}
 			}
 			removed = len(current)
+		} else {
+			total = len(currentSet)
 		}
 
 		if total < int(state.rs.TotalShards) {
