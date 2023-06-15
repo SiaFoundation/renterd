@@ -121,6 +121,10 @@ OUTER:
 		}
 
 		// merge toMigrateNew with toMigrate
+		// NOTE: when merging, we remove all slabs from toMigrate that don't
+		// require migration anymore. However, slabs that have been in toMigrate
+		// before will be repaired before any new slabs. This is to prevent
+		// starvation.
 		migrateNewMap := make(map[object.EncryptionKey]*api.UnhealthySlab)
 		for i, slab := range toMigrateNew {
 			migrateNewMap[slab.Key] = &toMigrateNew[i]
@@ -128,8 +132,7 @@ OUTER:
 		removed := 0
 		for i := 0; i < len(toMigrate)-removed; {
 			slab := toMigrate[i]
-			if newSlab, exists := migrateNewMap[slab.Key]; exists {
-				toMigrate[i] = *newSlab         // update slab since the health might have changed
+			if _, exists := migrateNewMap[slab.Key]; exists {
 				delete(migrateNewMap, slab.Key) // delete from map to leave only new slabs
 				i++
 			} else {
@@ -141,12 +144,13 @@ OUTER:
 		for _, slab := range migrateNewMap {
 			toMigrate = append(toMigrate, *slab)
 		}
-		migrateNewMap = nil // free map
 
-		// resort slabs
-		sort.Slice(toMigrate, func(i, j int) bool {
-			return toMigrate[i].Health < toMigrate[j].Health
+		// sort the newsly added slabs by health
+		newSlabs := toMigrate[len(toMigrate)-len(migrateNewMap):]
+		sort.Slice(newSlabs, func(i, j int) bool {
+			return newSlabs[i].Health < newSlabs[j].Health
 		})
+		migrateNewMap = nil // free map
 
 		// log the updated list of slabs to migrate
 		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
