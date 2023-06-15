@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	maxOngoingSlabDownloads = 3
+	maxOngoingSlabDownloads       = 3
+	maxConcurrentDownloadsPerHost = 3
 )
 
 type (
@@ -500,6 +501,15 @@ func (d *downloader) stats() (healthy bool, mbps float64) {
 	return
 }
 
+func (d *downloader) isStopped() bool {
+	select {
+	case <-d.stopChan:
+		return true
+	default:
+	}
+	return false
+}
+
 func (d *downloader) processQueue(hp hostProvider) {
 outer:
 	for {
@@ -512,32 +522,103 @@ outer:
 
 		for {
 			// check if we are stopped
-			select {
-			case <-d.stopChan:
+			if d.isStopped() {
 				return
-			default:
 			}
 
-			// pop next job
-			req := d.pop()
-			if req == nil {
+			// fill batch
+			var batch []*sectorDownloadReq
+			for len(batch) < maxConcurrentDownloadsPerHost {
+				if req := d.pop(); req == nil {
+					break
+				} else if req.done() {
+					continue
+				} else {
+					batch = append(batch, req)
+				}
+			}
+			if len(batch) == 0 {
 				continue outer
 			}
-			if req.done() {
-				continue
+
+			fmt.Printf("DEBUG PJ: downloader %v is processing batch of size %v\n", d.host.HostKey(), len(batch))
+
+			var mu sync.Mutex
+			var completed int
+			var failed int
+			var first time.Time
+
+			// launch workers
+			var wg sync.WaitGroup
+			jobsChan := make(chan *sectorDownloadReq)
+			for i := 0; i < len(batch); i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for job := range jobsChan {
+						// check if we are stopped
+						if d.isStopped() {
+							return
+						}
+
+						// execute the job
+						start := time.Now()
+						err := d.execute(job)
+						d.trackFailure(err)
+
+						// update stats
+						mu.Lock()
+						if first.IsZero() {
+							first = start
+						}
+						if err != nil {
+							failed++
+							completed = 0
+							d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
+							fmt.Printf("DEBUG PJ: downloader %v errored and is tracking bad timing\n", d.host.HostKey())
+						} else {
+							completed++
+							if completed == maxConcurrentDownloadsPerHost {
+								downloadedB := int64(completed * rhpv2.SectorSize)
+								durationMS := time.Since(first).Milliseconds()
+								d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
+								d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
+								completed = 0
+								first = time.Time{}
+								fmt.Printf("DEBUG PJ: downloader %v processed %d jobs and is tracking %v mbps\n", d.host.HostKey(), completed, float64(downloadedB/durationMS)*0.008)
+							}
+						}
+						mu.Unlock()
+					}
+
+					// update stats
+					mu.Lock()
+					if completed > 0 {
+						downloadedB := int64(completed * rhpv2.SectorSize)
+						durationMS := time.Since(first).Milliseconds()
+						d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
+						d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
+						fmt.Printf("DEBUG PJ: downloader %v processed %d jobs and is tracking %v mbps\n", d.host.HostKey(), completed, float64(downloadedB/durationMS)*0.008)
+					}
+					mu.Unlock()
+				}()
+			}
+			for _, job := range batch {
+				jobsChan <- job
 			}
 
-			// execute the job
-			start := time.Now()
-			sector, err := d.execute(req)
-			d.track(err, time.Since(start))
-
-			// handle the response
-			if err != nil {
-				req.fail(err)
-			} else {
-				req.succeed(sector)
+			// keep processing the queue for as long as there's jobs
+			for {
+				if req := d.pop(); req == nil {
+					break
+				} else if req.done() {
+					continue
+				} else {
+					jobsChan <- req
+				}
 			}
+			close(jobsChan)
+			wg.Wait()
 		}
 	}
 }
@@ -591,26 +672,17 @@ func (d *downloader) pop() *sectorDownloadReq {
 	return nil
 }
 
-func (d *downloader) track(err error, dur time.Duration) {
+func (d *downloader) trackFailure(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err != nil {
 		d.consecutiveFailures++
-
-		// update estimates
-		d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
 	} else {
 		d.consecutiveFailures = 0
-
-		// update estimates
-		downloadedB := int64(rhpv2.SectorSize)
-		durationMS := dur.Milliseconds()
-		d.statsSectorDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
-		d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
 	}
 }
 
-func (d *downloader) execute(req *sectorDownloadReq) (_ []byte, err error) {
+func (d *downloader) execute(req *sectorDownloadReq) (err error) {
 	// add tracing
 	start := time.Now()
 	span := trace.SpanFromContext(req.ctx)
@@ -626,10 +698,12 @@ func (d *downloader) execute(req *sectorDownloadReq) (_ []byte, err error) {
 	buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length)
 	if err != nil {
-		return nil, err
+		req.fail(err)
+		return err
 	}
 
-	return buf.Bytes(), nil
+	req.succeed(buf.Bytes())
+	return nil
 }
 
 func (req *sectorDownloadReq) succeed(sector []byte) {
