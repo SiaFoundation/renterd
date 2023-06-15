@@ -176,9 +176,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	storedData := make(map[types.PublicKey]uint64)
 	for i, c := range contracts {
 		sizeIndex[c.ID] = i
-		if c.Revision != nil {
-			storedData[c.HostKey] += c.FileSize()
-		}
+		storedData[c.HostKey] += c.FileSize()
 	}
 
 	// fetch all hosts
@@ -291,60 +289,74 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// defer logging
-	var truncated bool
 	defer func() {
-		var added, removed, total int
+		var numAdded, numRemoved, numTotal int
 
 		if err == nil {
+			// build some maps for easier lookups
 			previous := make(map[types.FileContractID]struct{})
 			for _, c := range currentSet {
 				previous[c.ID] = struct{}{}
+			}
+			upForRenewal := make(map[types.FileContractID]struct{})
+			for _, c := range append(toRenew, toRefresh...) {
+				upForRenewal[c.contract.ID] = struct{}{}
 			}
 			renewals := make(map[types.FileContractID]struct{})
 			for _, c := range append(renewed, refreshed...) {
 				renewals[c] = struct{}{}
 			}
-
 			updated := make(map[types.FileContractID]struct{})
 			for _, c := range updatedSet {
 				updated[c] = struct{}{}
-				_, renewal := renewals[c]
-				_, existed := previous[c]
-				if !existed && !renewal {
-					added++
-				}
 			}
-			total = len(updated)
-			kept := total - added
-			if len(previous) > kept {
-				removed = len(previous) - kept
-				for _, curr := range currentSet {
-					_, exists := updated[curr.ID]
-					if !exists {
-						reason, ok := toStopUsing[curr.ID]
-						if ok && reason != reasonRenewed && reason != reasonRefreshed {
-							c.logger.Debugf("contract %v was removed from the contract set because it is no longer usable, reasons: %v", curr.ID, reason)
-						} else if !ok && truncated {
-							c.logger.Debugf("contract %v was removed from the contract set because there was a contract surplus", curr.ID)
-						} else if !ok {
-							c.logger.Debugf("contract %v was removed from the contract set for unknown reasons, should be investigated", curr.ID)
-						}
+
+			// log added and removed contracts
+			var added []types.FileContractID
+			var removed []types.FileContractID
+			for _, contract := range currentSet {
+				_, exists := updated[contract.ID]
+				_, renewal := upForRenewal[contract.ID]
+				if !exists && !renewal {
+					removed = append(removed, contract.ID)
+					reason, ok := toStopUsing[contract.ID]
+					if !ok {
+						reason = "unknown"
 					}
+					c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, sizeIndex[contract.ID], reason)
 				}
 			}
+			for _, fcid := range updatedSet {
+				_, existed := previous[fcid]
+				_, renewed := renewals[fcid]
+				if !existed && !renewed {
+					added = append(added, fcid)
+					c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, sizeIndex[fcid])
+				}
+			}
+			for _, fcid := range append(refreshed, renewed...) {
+				_, exists := updated[fcid]
+				if !exists {
+					c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, sizeIndex[fcid])
+				}
+			}
+
+			numAdded = len(added)
+			numRemoved = len(removed)
+			numTotal = len(updatedSet)
 		} else {
-			total = len(currentSet)
+			numTotal = len(currentSet)
 		}
 
-		if total < int(state.rs.TotalShards) {
+		if numTotal < int(state.rs.TotalShards) {
 			c.logger.Warnw(
 				"contracts after maintenance are below the minimum required",
 				"formed", len(formed),
 				"renewed", len(renewed),
 				"refreshed", len(refreshed),
-				"contractset", total,
-				"added", added,
-				"removed", removed,
+				"contractset", numTotal,
+				"added", numAdded,
+				"removed", numRemoved,
 			)
 		} else {
 			c.logger.Debugw(
@@ -352,30 +364,20 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 				"formed", len(formed),
 				"renewed", len(renewed),
 				"refreshed", len(refreshed),
-				"contractset", total,
-				"added", added,
-				"removed", removed,
+				"contractset", numTotal,
+				"added", numAdded,
+				"removed", numRemoved,
 			)
 		}
 	}()
 
 	// cap the amount of contracts we want to keep to the configured amount
 	if len(updatedSet) > int(state.cfg.Contracts.Amount) {
-		// build sizemap
-		sizemap := make(map[types.FileContractID]uint64)
-		for _, c := range contracts {
-			if c.Revision != nil {
-				sizemap[c.ID] = c.FileSize()
-			}
-		}
-
 		// sort by contract size
 		sort.Slice(updatedSet, func(i, j int) bool {
-			return sizemap[updatedSet[i]] > sizemap[updatedSet[j]]
+			return sizeIndex[updatedSet[i]] > sizeIndex[updatedSet[j]]
 		})
-
 		updatedSet = updatedSet[:state.cfg.Contracts.Amount]
-		truncated = true
 	}
 
 	// update contract set
