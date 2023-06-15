@@ -310,8 +310,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 				"renewed", len(renewed),
 				"refreshed", len(refreshed),
 				"contractset", total,
-				"contractsadded", added,
-				"contractsremoved", removed,
+				"added", added,
+				"removed", removed,
 			)
 		} else {
 			c.logger.Debugw(
@@ -320,8 +320,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 				"renewed", len(renewed),
 				"refreshed", len(refreshed),
 				"contractset", total,
-				"contractsadded", added,
-				"contractsremoved", removed,
+				"added", added,
+				"removed", removed,
 			)
 		}
 	}()
@@ -350,8 +350,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return
 	}
 
-	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
-	return
+	return c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
