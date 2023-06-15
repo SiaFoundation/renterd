@@ -529,7 +529,7 @@ outer:
 
 			// execute the job
 			start := time.Now()
-			sector, err := req.execute(d.host)
+			sector, err := d.execute(req)
 			d.track(err, time.Since(start))
 
 			// handle the response
@@ -610,7 +610,7 @@ func (d *downloader) track(err error, dur time.Duration) {
 	}
 }
 
-func (req *sectorDownloadReq) execute(h hostV3) (_ []byte, err error) {
+func (d *downloader) execute(req *sectorDownloadReq) (_ []byte, err error) {
 	// add tracing
 	start := time.Now()
 	span := trace.SpanFromContext(req.ctx)
@@ -624,7 +624,7 @@ func (req *sectorDownloadReq) execute(h hostV3) (_ []byte, err error) {
 
 	// download the sector
 	buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
-	err = h.DownloadSector(req.ctx, buf, req.root, req.offset, req.length)
+	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length)
 	if err != nil {
 		return nil, err
 	}

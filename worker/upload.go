@@ -904,26 +904,6 @@ func (u *uploader) pop() *sectorUploadReq {
 	return nil
 }
 
-func (upload *sectorUploadReq) execute(h hostV3, rev types.FileContractRevision) (types.Hash256, error) {
-	// fetch span from context
-	span := trace.SpanFromContext(upload.ctx)
-	span.AddEvent("execute")
-
-	// upload the sector
-	start := time.Now()
-	root, err := h.UploadSector(upload.ctx, upload.sector, rev)
-	if err != nil {
-		return types.Hash256{}, err
-	}
-
-	// update span
-	elapsed := time.Since(start)
-	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-	span.RecordError(err)
-	span.End()
-	return root, nil
-}
-
 func (upload *sectorUploadReq) succeed(root types.Hash256) {
 	select {
 	case <-upload.ctx.Done():
