@@ -48,14 +48,6 @@ const (
 	// usable.
 	minAllowedScoreLeeway = 500
 
-	// reasonRenewed is returned as reason for a contract being no longer usable
-	// because it needs to be renewed
-	reasonRenewed = "renewed"
-
-	// reasonRefreshed is returned as reason for a contract being no longer usable
-	// because it needs to be refreshed
-	reasonRefreshed = "refreshed"
-
 	// timeoutHostPriceTable is the amount of time we wait to receive a price
 	// table from the host
 	timeoutHostPriceTable = 30 * time.Second
@@ -377,7 +369,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		sort.Slice(updatedSet, func(i, j int) bool {
 			return sizeIndex[updatedSet[i]] > sizeIndex[updatedSet[j]]
 		})
+		for _, c := range updatedSet[state.cfg.Contracts.Amount:] {
+			toStopUsing[c] = "truncated"
+		}
 		updatedSet = updatedSet[:state.cfg.Contracts.Amount]
+
 	}
 
 	// update contract set
