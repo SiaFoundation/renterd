@@ -1318,11 +1318,12 @@ type contractLock struct {
 
 	stopCtx       context.Context
 	stopCtxCancel context.CancelFunc
+	stopWG        sync.WaitGroup
 }
 
 func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &contractLock{
+	cl := &contractLock{
 		lockID: lockID,
 		fcid:   fcid,
 		d:      d,
@@ -1332,11 +1333,18 @@ func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, 
 		stopCtx:       ctx,
 		stopCtxCancel: cancel,
 	}
+	cl.stopWG.Add(1)
+	go func() {
+		cl.keepaliveLoop()
+		cl.stopWG.Done()
+	}()
+	return cl
 }
 
 func (cl *contractLock) Release(ctx context.Context) error {
 	// Stop background loop.
 	cl.stopCtxCancel()
+	cl.stopWG.Wait()
 
 	// Release the contract.
 	return cl.locker.ReleaseContract(ctx, cl.fcid, cl.lockID)
@@ -1383,9 +1391,7 @@ func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID,
 	if err != nil {
 		return nil, err
 	}
-	cl := newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger)
-	go cl.keepaliveLoop()
-	return cl, nil
+	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
