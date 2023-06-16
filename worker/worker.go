@@ -894,12 +894,16 @@ func (w *worker) downloadsStatshandlerGET(jc jape.Context) {
 	stats := w.downloadManager.Stats()
 
 	// prepare downloaders stats
+	var healthy uint64
 	var dss []api.DownloaderStats
-	for hk, mbps := range stats.downloadSpeedsMBPS {
+	for hk, stat := range stats.downloaders {
+		if stat.healthy {
+			healthy++
+		}
 		dss = append(dss, api.DownloaderStats{
 			HostKey:                    hk,
-			AvgSectorDownloadSpeedMBPS: mbps,
-			NumJobs:                    stats.numJobs[hk],
+			AvgSectorDownloadSpeedMBPS: stat.avgSpeedMBPS,
+			NumDownloads:               stat.numDownloads,
 		})
 	}
 	sort.SliceStable(dss, func(i, j int) bool {
@@ -908,10 +912,10 @@ func (w *worker) downloadsStatshandlerGET(jc jape.Context) {
 
 	// encode response
 	jc.Encode(api.DownloadStatsResponse{
-		AvgDownloadSpeedMBPS: math.Ceil(stats.avgSlabDownloadSpeedMBPS*100) / 100,
+		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
-		HealthyDownloaders:   stats.healthyDownloaders,
-		NumDownloaders:       stats.numDownloaders,
+		HealthyDownloaders:   healthy,
+		NumDownloaders:       uint64(len(stats.downloaders)),
 		DownloadersStats:     dss,
 	})
 }
