@@ -468,6 +468,11 @@ func TestUploadDownloadBasic(t *testing.T) {
 		if !bytes.Equal(data, buffer.Bytes()) {
 			t.Fatal("unexpected")
 		}
+
+		// delete the object
+		if err := w.DeleteObject(context.Background(), name); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

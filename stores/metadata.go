@@ -757,7 +757,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key string, o object.Object
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete first. We want to get rid of the object and its
 		// slices if it exists.
-		err := deleteObject(tx, key)
+		_, err := deleteObject(tx, key)
 		if err != nil {
 			return err
 		}
@@ -948,7 +948,14 @@ func createSlabBuffer(tx *gorm.DB, objectID uint, partialSlab object.PartialSlab
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
-	return deleteObject(s.db, key)
+	rowsAffected, err := deleteObject(s.db, key)
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("%w: key: %s", api.ErrObjectNotFound, key)
+	}
+	return err
 }
 
 func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
@@ -1371,9 +1378,13 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func deleteObject(tx *gorm.DB, key string) error {
-	if err := tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{}).Error; err != nil {
-		return err
+func deleteObject(tx *gorm.DB, key string) (int64, error) {
+	tx = tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{})
+	if tx.Error != nil {
+		return 0, tx.Error
 	}
-	return pruneSlabs(tx)
+	if err := pruneSlabs(tx); err != nil {
+		return 0, err
+	}
+	return tx.RowsAffected, nil
 }
