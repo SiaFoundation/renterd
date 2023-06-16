@@ -153,7 +153,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		// launch refill if not already in progress
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata, l *zap.SugaredLogger) {
-				rCtx, cancel := context.WithTimeout(ctx, time.Minute)
+				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				if accountID, refilled, err := refillWorkerAccount(rCtx, a.a, w, workerID, contract, l); err == nil && refilled {
 					a.l.Infow("Successfully funded account",
 						"account", accountID,

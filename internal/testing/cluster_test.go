@@ -46,7 +46,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), "/foo", object.Object{
+	err = b.AddObject(context.Background(), "foo", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -467,6 +467,11 @@ func TestUploadDownloadBasic(t *testing.T) {
 		// assert it matches
 		if !bytes.Equal(data, buffer.Bytes()) {
 			t.Fatal("unexpected")
+		}
+
+		// delete the object
+		if err := w.DeleteObject(context.Background(), name); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

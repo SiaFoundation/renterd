@@ -870,7 +870,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
+	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1138,7 +1138,13 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path")))
+	path := strings.TrimPrefix(jc.PathParam("path"), "/")
+	err := w.bus.DeleteObject(jc.Request.Context(), path)
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	jc.Check("couldn't delete object", err)
 }
 
 func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
@@ -1318,11 +1324,12 @@ type contractLock struct {
 
 	stopCtx       context.Context
 	stopCtxCancel context.CancelFunc
+	stopWG        sync.WaitGroup
 }
 
 func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &contractLock{
+	cl := &contractLock{
 		lockID: lockID,
 		fcid:   fcid,
 		d:      d,
@@ -1332,11 +1339,18 @@ func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, 
 		stopCtx:       ctx,
 		stopCtxCancel: cancel,
 	}
+	cl.stopWG.Add(1)
+	go func() {
+		cl.keepaliveLoop()
+		cl.stopWG.Done()
+	}()
+	return cl
 }
 
 func (cl *contractLock) Release(ctx context.Context) error {
 	// Stop background loop.
 	cl.stopCtxCancel()
+	cl.stopWG.Wait()
 
 	// Release the contract.
 	return cl.locker.ReleaseContract(ctx, cl.fcid, cl.lockID)
@@ -1344,7 +1358,10 @@ func (cl *contractLock) Release(ctx context.Context) error {
 
 func (cl *contractLock) keepaliveLoop() {
 	// Create ticker for 20% of the lock duration.
-	t := time.NewTicker(cl.d / 5)
+	start := time.Now()
+	var lastUpdate time.Time
+	tickDuration := cl.d / 5
+	t := time.NewTicker(tickDuration)
 
 	// Cleanup
 	defer func() {
@@ -1363,9 +1380,15 @@ func (cl *contractLock) keepaliveLoop() {
 		case <-t.C:
 		}
 		if err := cl.locker.KeepaliveContract(cl.stopCtx, cl.fcid, cl.lockID, cl.d); err != nil && !errors.Is(err, context.Canceled) {
-			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err), "contract", cl.fcid, "lockID", cl.lockID)
+			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err),
+				"contract", cl.fcid,
+				"lockID", cl.lockID,
+				"loopStart", start,
+				"timeSinceLastUpdate", time.Since(lastUpdate),
+				"tickDuration", tickDuration)
 			return
 		}
+		lastUpdate = time.Now()
 	}
 }
 
@@ -1374,9 +1397,7 @@ func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID,
 	if err != nil {
 		return nil, err
 	}
-	cl := newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger)
-	go cl.keepaliveLoop()
-	return cl, nil
+	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {

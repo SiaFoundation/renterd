@@ -104,7 +104,7 @@ func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 						m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 						continue
 					}
-					m.logger.Debugf("%v: successfully migrated slab '%v' %d/%d", id, j.Key, j.slabIdx+1, j.batchSize)
+					m.logger.Debugf("%v: successfully migrated slab '%v' (health: %v) %d/%d", id, j.Key, j.Health, j.slabIdx+1, j.batchSize)
 				}
 			}(w)
 		}
