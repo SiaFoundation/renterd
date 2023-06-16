@@ -98,7 +98,7 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (err error) {
+func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) error {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
 
@@ -143,9 +143,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
 		return err
 	}
-	wasInPreviousSet := make(map[types.FileContractID]struct{})
+	isInCurrentSet := make(map[types.FileContractID]struct{})
 	for _, c := range currentSet {
-		wasInPreviousSet[c.ID] = struct{}{}
+		isInCurrentSet[c.ID] = struct{}{}
 	}
 	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
@@ -245,8 +245,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		// when renewing, prioritise contracts that have already been in the set
 		// before and out of those prefer the largest ones.
 		sort.Slice(toRenew, func(i, j int) bool {
-			_, icsI := wasInPreviousSet[toRenew[i].contract.ID]
-			_, icsJ := wasInPreviousSet[toRenew[j].contract.ID]
+			_, icsI := isInCurrentSet[toRenew[i].contract.ID]
+			_, icsJ := isInCurrentSet[toRenew[j].contract.ID]
 			if icsI && !icsJ {
 				return true
 			} else if !icsI && icsJ {
@@ -294,83 +294,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		}
 	}
 
-	// defer logging
-	defer func() {
-		var numAdded, numRemoved, numTotal int
-
-		if err == nil {
-			// build some maps for easier lookups
-			renewalsFromTo := make(map[types.FileContractID]types.FileContractID)
-			renewalsToFrom := make(map[types.FileContractID]types.FileContractID)
-			for _, c := range append(renewed, refreshed...) {
-				renewalsFromTo[c.from] = c.to
-				renewalsToFrom[c.to] = c.from
-			}
-			updated := make(map[types.FileContractID]struct{})
-			for _, c := range updatedSet {
-				updated[c] = struct{}{}
-			}
-
-			// log added and removed contracts
-			var added []types.FileContractID
-			var removed []types.FileContractID
-			for _, contract := range currentSet {
-				_, exists := updated[contract.ID]
-				_, renewed := updated[renewalsFromTo[contract.ID]]
-				if !exists && !renewed {
-					removed = append(removed, contract.ID)
-					reason, ok := toStopUsing[contract.ID]
-					if !ok {
-						reason = "unknown"
-					}
-					c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
-				}
-			}
-			for _, fcid := range updatedSet {
-				_, existed := wasInPreviousSet[fcid]
-				_, renewed := renewalsToFrom[fcid]
-				if !existed && !renewed {
-					added = append(added, fcid)
-					c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, contractData[fcid])
-				}
-			}
-			for _, fcid := range renewed {
-				_, exists := updated[fcid.to]
-				if !exists {
-					c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid.to])
-				}
-			}
-
-			numAdded = len(added)
-			numRemoved = len(removed)
-			numTotal = len(updatedSet)
-		} else {
-			numTotal = len(currentSet)
-		}
-
-		if numTotal < int(state.rs.TotalShards) {
-			c.logger.Warnw(
-				"contracts after maintenance are below the minimum required",
-				"formed", len(formed),
-				"renewed", len(renewed),
-				"refreshed", len(refreshed),
-				"contractset", numTotal,
-				"added", numAdded,
-				"removed", numRemoved,
-			)
-		} else {
-			c.logger.Debugw(
-				"contracts after maintenance",
-				"formed", len(formed),
-				"renewed", len(renewed),
-				"refreshed", len(refreshed),
-				"contractset", numTotal,
-				"added", numAdded,
-				"removed", numRemoved,
-			)
-		}
-	}()
-
 	// cap the amount of contracts we want to keep to the configured amount
 	if len(updatedSet) > int(state.cfg.Contracts.Amount) {
 		// sort by contract size
@@ -385,11 +308,83 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// update contract set
 	if c.ap.isStopped() {
-		err = errors.New("autopilot stopped before maintenance could be completed")
-		return
+		return errors.New("autopilot stopped before maintenance could be completed")
+	}
+	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
+	if err != nil {
+		return err
 	}
 
-	return c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
+	// log the contract set after maintenance
+	c.logContractSetUpdate(currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData)
+	return nil
+}
+
+func (c *contractor) logContractSetUpdate(oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewInfo, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) {
+	// build some maps for easier lookups
+	previous := make(map[types.FileContractID]struct{})
+	for _, c := range oldSet {
+		previous[c.ID] = struct{}{}
+	}
+	updated := make(map[types.FileContractID]struct{})
+	for _, c := range newSet {
+		updated[c] = struct{}{}
+	}
+	renewalsFromTo := make(map[types.FileContractID]types.FileContractID)
+	renewalsToFrom := make(map[types.FileContractID]types.FileContractID)
+	for _, c := range append(refreshed, renewed...) {
+		renewalsFromTo[c.from] = c.to
+		renewalsToFrom[c.to] = c.from
+	}
+
+	// log added and removed contracts
+	var added []types.FileContractID
+	var removed []types.FileContractID
+	for _, contract := range oldSet {
+		_, exists := updated[contract.ID]
+		_, renewed := updated[renewalsFromTo[contract.ID]]
+		if !exists && !renewed {
+			removed = append(removed, contract.ID)
+			reason, ok := toStopUsing[contract.ID]
+			if !ok {
+				reason = "unknown"
+			}
+			c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
+		}
+	}
+	for _, fcid := range newSet {
+		_, existed := previous[fcid]
+		_, renewed := renewalsToFrom[fcid]
+		if !existed && !renewed {
+			added = append(added, fcid)
+			c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, contractData[fcid])
+		}
+	}
+
+	// log renewed contracts that did not make it into the contract set
+	for _, fcid := range renewed {
+		_, exists := updated[fcid.to]
+		if !exists {
+			c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid.to])
+		}
+	}
+
+	// log a warning if the contract set does not contain enough contracts
+	logFn := c.logger.Debugw
+	if len(newSet) < int(c.ap.state.rs.TotalShards) {
+		logFn = c.logger.Warnw
+	}
+
+	// log the contract set after maintenance
+	logFn(
+		"contractset after maintenance",
+		"formed", len(formed),
+		"renewed", len(renewed),
+		"refreshed", len(refreshed),
+		"contracts", len(newSet),
+		"added", len(added),
+		"removed", len(removed),
+	)
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
