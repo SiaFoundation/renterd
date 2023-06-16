@@ -690,7 +690,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// check if we already have a contract with a host on that subnet
-		if f.isRedundantIP(host.NetAddress, host.PublicKey) {
+		if !state.cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(host.NetAddress, host.PublicKey) {
 			continue
 		}
 
