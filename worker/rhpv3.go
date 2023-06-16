@@ -602,8 +602,9 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		return types.Hash256{}, errors.New("failed to create payment")
 	}
 
+	var cost types.Currency
 	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
-		root, _, err = RPCAppendSector(ctx, t, h.renterKey, pt, rev, &payment, sector)
+		root, cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, rev, &payment, sector)
 		return err
 	})
 	if err != nil {
@@ -611,7 +612,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	}
 
 	// record spending
-	h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, api.ContractSpending{Uploads: expectedCost})
+	h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, api.ContractSpending{Uploads: cost})
 	return root, err
 }
 
