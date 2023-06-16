@@ -164,7 +164,7 @@ func (l *contractLocks) KeepAlive(id types.FileContractID, lockID uint64, d time
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
 	if lock.heldByID != lockID {
-		return errors.New("lockID doesn't match")
+		return fmt.Errorf("lockID doesn't match: %v != %v", lock.heldByID, lockID)
 	}
 	if !lock.wakeupTimer.Stop() {
 		return errors.New("timer has fired already")
