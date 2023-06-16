@@ -1138,7 +1138,13 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path")))
+	path := strings.TrimPrefix(jc.PathParam("path"), "/")
+	err := w.bus.DeleteObject(jc.Request.Context(), path)
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	jc.Check("couldn't delete object", err)
 }
 
 func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
