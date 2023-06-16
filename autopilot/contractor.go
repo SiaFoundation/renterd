@@ -327,7 +327,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 					c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, contractData[fcid])
 				}
 			}
-			for _, fcid := range append(refreshed, renewed...) {
+			for _, fcid := range renewed {
 				_, exists := updated[fcid]
 				if !exists {
 					c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid])
