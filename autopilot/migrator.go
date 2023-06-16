@@ -3,9 +3,11 @@ package autopilot
 import (
 	"context"
 	"math"
+	"sort"
 	"sync"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
@@ -15,9 +17,10 @@ const (
 )
 
 type migrator struct {
-	ap           *Autopilot
-	logger       *zap.SugaredLogger
-	healthCutoff float64
+	ap                        *Autopilot
+	logger                    *zap.SugaredLogger
+	healthCutoff              float64
+	signalMaintenanceFinished chan struct{}
 
 	mu      sync.Mutex
 	running bool
@@ -25,9 +28,17 @@ type migrator struct {
 
 func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
 	return &migrator{
-		ap:           ap,
-		logger:       ap.logger.Named("migrator"),
-		healthCutoff: healthCutoff,
+		ap:                        ap,
+		logger:                    ap.logger.Named("migrator"),
+		healthCutoff:              healthCutoff,
+		signalMaintenanceFinished: make(chan struct{}, 1),
+	}
+}
+
+func (m *migrator) SignalMaintenanceFinished() {
+	select {
+	case m.signalMaintenanceFinished <- struct{}{}:
+	default:
 	}
 }
 
@@ -56,23 +67,11 @@ func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
 	defer span.End()
 
-	// fetch slabs for migration
-	toMigrate, err := b.SlabsForMigration(ctx, m.healthCutoff, cfg.Contracts.Set, migratorBatchSize)
-	if err != nil {
-		m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
-		return
-	}
-	m.logger.Debugf("%d slabs to migrate", len(toMigrate))
-
-	// return if there are no slabs to migrate
-	if len(toMigrate) == 0 {
-		return
-	}
-
 	// prepare a channel to push work to the workers
 	type job struct {
 		api.UnhealthySlab
-		slabIdx int
+		slabIdx   int
+		batchSize int
 	}
 	jobs := make(chan job)
 	var wg sync.WaitGroup
@@ -81,6 +80,7 @@ func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 		wg.Wait()
 	}()
 
+	// launch workers
 	p.withWorkers(func(workers []Worker) {
 		for _, w := range workers {
 			wg.Add(1)
@@ -96,26 +96,80 @@ func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 				for j := range jobs {
 					slab, err := b.Slab(ctx, j.Key)
 					if err != nil {
-						m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, len(toMigrate), j.Health, err)
+						m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 						continue
 					}
 					err = w.MigrateSlab(ctx, slab)
 					if err != nil {
-						m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, len(toMigrate), j.Health, err)
+						m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 						continue
 					}
-					m.logger.Debugf("%v: successfully migrated slab '%v' (health: %v) %d/%d", id, j.Key, j.Health, j.slabIdx+1, len(toMigrate))
+					m.logger.Debugf("%v: successfully migrated slab '%v' (health: %v) %d/%d", id, j.Key, j.Health, j.slabIdx+1, j.batchSize)
 				}
 			}(w)
 		}
 	})
+	var toMigrate []api.UnhealthySlab
 
-	// push work to workers
-	for i, slab := range toMigrate {
-		select {
-		case <-m.ap.stopChan:
+OUTER:
+	for {
+		// fetch slabs for migration
+		toMigrateNew, err := b.SlabsForMigration(ctx, m.healthCutoff, cfg.Contracts.Set, migratorBatchSize)
+		if err != nil {
+			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return
-		case jobs <- job{slab, i}:
+		}
+		m.logger.Debugf("%d potential slabs fetched for migration", len(toMigrateNew))
+
+		// merge toMigrateNew with toMigrate
+		// NOTE: when merging, we remove all slabs from toMigrate that don't
+		// require migration anymore. However, slabs that have been in toMigrate
+		// before will be repaired before any new slabs. This is to prevent
+		// starvation.
+		migrateNewMap := make(map[object.EncryptionKey]*api.UnhealthySlab)
+		for i, slab := range toMigrateNew {
+			migrateNewMap[slab.Key] = &toMigrateNew[i]
+		}
+		removed := 0
+		for i := 0; i < len(toMigrate)-removed; {
+			slab := toMigrate[i]
+			if _, exists := migrateNewMap[slab.Key]; exists {
+				delete(migrateNewMap, slab.Key) // delete from map to leave only new slabs
+				i++
+			} else {
+				toMigrate[i] = toMigrate[len(toMigrate)-1-removed]
+				removed++
+			}
+		}
+		toMigrate = toMigrate[:len(toMigrate)-removed]
+		for _, slab := range migrateNewMap {
+			toMigrate = append(toMigrate, *slab)
+		}
+
+		// sort the newsly added slabs by health
+		newSlabs := toMigrate[len(toMigrate)-len(migrateNewMap):]
+		sort.Slice(newSlabs, func(i, j int) bool {
+			return newSlabs[i].Health < newSlabs[j].Health
+		})
+		migrateNewMap = nil // free map
+
+		// log the updated list of slabs to migrate
+		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
+
+		// return if there are no slabs to migrate
+		if len(toMigrate) == 0 {
+			return
+		}
+
+		for i, slab := range toMigrate {
+			select {
+			case <-m.ap.stopChan:
+				return
+			case <-m.signalMaintenanceFinished:
+				m.logger.Info("migrations interrupted - updating slabs for migration")
+				continue OUTER
+			case jobs <- job{slab, i, len(toMigrate)}:
+			}
 		}
 	}
 }
