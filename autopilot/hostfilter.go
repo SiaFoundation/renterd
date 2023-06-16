@@ -190,11 +190,6 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 			errs = append(errs, errHostOffline)
 		}
 
-		// redundant IP check
-		if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(h) {
-			errs = append(errs, errHostRedundantIP)
-		}
-
 		// accepting contracts check
 		if !h.Settings.AcceptingContracts {
 			errs = append(errs, errHostNotAcceptingContracts)
@@ -216,6 +211,12 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 				errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
 			}
 		}
+
+		// optional redundant IP check - always perform this last since it will
+		// update the ipFilter.
+		if f != nil && !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(h.NetAddress, h.PublicKey) {
+			errs = append(errs, errHostRedundantIP)
+		}
 	}
 
 	return len(errs) == 0, newUnusableHostResult(errs, gougingBreakdown, scoreBreakdown)
@@ -223,7 +224,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable, refresh, renew bool, reasons []string) {
+func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, refresh, renew bool, reasons []string) {
 	c, s := ci.contract, ci.settings
 
 	if bh > c.EndHeight() {
@@ -253,6 +254,13 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 			reasons = append(reasons, errContractUpForRenewal.Error()) // only unusable if in second half of renew window
 		}
 		renew = true
+		refresh = false
+	}
+	// redundant IP check - always perform this last since it will update
+	// the ipFilter.
+	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(ci.contract.HostIP, ci.contract.HostKey) {
+		reasons = append(reasons, errHostRedundantIP.Error())
+		renew = false
 		refresh = false
 	}
 

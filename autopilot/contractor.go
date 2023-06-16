@@ -493,6 +493,13 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	toArchive = make(map[types.FileContractID]string)
 	toStopUsing = make(map[types.FileContractID]string)
 
+	// when checking the contracts, do so from largest to smallest. That way, we
+	// prefer larger hosts on redundant networks.
+	contracts = append([]api.Contract{}, contracts...)
+	sort.Slice(contracts, func(i, j int) bool {
+		return contracts[i].FileSize() > contracts[j].FileSize()
+	})
+
 	// check all contracts
 	for _, contract := range contracts {
 		// break if autopilot is stopped
@@ -555,8 +562,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// whole new set of contracts with new hosts
 		host.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
-		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, revision.Filesize)
+		// decide whether the host is still good - we don't pass an IP filter
+		// here and instead perform that check in isUsableContract.
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, nil, host.Host, minScore, revision.Filesize)
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
@@ -571,7 +579,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
+		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds, f)
 		if !usable {
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
@@ -948,7 +956,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	for _, h := range hosts {
 		// filter out used hosts
 		if _, exclude := usedHosts[h.PublicKey]; exclude {
-			_ = ipFilter.isRedundantIP(h) // ensure the host's IP is registered as used
+			_ = ipFilter.isRedundantIP(h.NetAddress, h.PublicKey) // ensure the host's IP is registered as used
 			excluded++
 			continue
 		}
