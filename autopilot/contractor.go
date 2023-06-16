@@ -85,7 +85,7 @@ type (
 		settings rhpv2.HostSettings
 	}
 
-	renewInfo struct {
+	renewal struct {
 		from types.FileContractID
 		to   types.FileContractID
 	}
@@ -261,7 +261,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	}
 
 	// run renewals
-	var renewed []renewInfo
+	var renewed []renewal
 	if limit > 0 {
 		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
 		if err != nil {
@@ -320,7 +320,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	return nil
 }
 
-func (c *contractor) logContractSetUpdate(oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewInfo, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) {
+func (c *contractor) logContractSetUpdate(oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) {
 	// build some maps for easier lookups
 	previous := make(map[types.FileContractID]struct{})
 	for _, c := range oldSet {
@@ -690,7 +690,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	return formed, nil
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewals []renewInfo, _ error) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewals []renewal, _ error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
 	defer span.End()
 
@@ -729,7 +729,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 
 		renewed, proceed, err := c.renewContract(ctx, w, ci, budget, renterAddress)
 		if err == nil {
-			renewals = append(renewals, renewInfo{from: ci.contract.ID, to: renewed.ID})
+			renewals = append(renewals, renewal{from: ci.contract.ID, to: renewed.ID})
 		}
 		if !proceed {
 			break
@@ -739,7 +739,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 	return renewals, nil
 }
 
-func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) (refreshed []renewInfo, _ error) {
+func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) (refreshed []renewal, _ error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRefreshes")
 	defer span.End()
 
@@ -766,7 +766,7 @@ func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget 
 
 		renewed, proceed, err := c.refreshContract(ctx, w, ci, budget, renterAddress)
 		if err == nil {
-			refreshed = append(refreshed, renewInfo{from: ci.contract.ID, to: renewed.ID})
+			refreshed = append(refreshed, renewal{from: ci.contract.ID, to: renewed.ID})
 		}
 		if !proceed {
 			break
