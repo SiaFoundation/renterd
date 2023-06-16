@@ -51,13 +51,6 @@ func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Has
 	return err
 }
 
-func (h *mockHost) DeleteSectors(_ context.Context, roots []types.Hash256) error {
-	for _, root := range roots {
-		delete(h.sectors, root)
-	}
-	return nil
-}
-
 func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	panic("not implemented")
 }
@@ -108,14 +101,6 @@ func newMockHostProvider(hosts []hostV3) *mockHostProvider {
 		sp.hosts[h.HostKey()] = h
 	}
 	return sp
-}
-
-func (sp *mockHostProvider) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, f func(hostV2) error) (err error) {
-	h, exists := sp.hosts[hostKey]
-	if !exists {
-		panic("doesn't exist")
-	}
-	return f(h)
 }
 
 func (sp *mockHostProvider) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {

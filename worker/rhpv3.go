@@ -527,10 +527,6 @@ func (r *host) HostKey() types.PublicKey {
 	return r.acc.host
 }
 
-func (*host) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
-	panic("not implemented")
-}
-
 // priceTable fetches a price table from the host. If a revision is provided, it
 // will be used to pay for the price table. The returned price table is
 // guaranteed to be safe to use.
