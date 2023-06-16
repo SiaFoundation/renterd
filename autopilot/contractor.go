@@ -503,20 +503,10 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// convenience variables
 		fcid := contract.ID
 
-		// if we have no revision we can't perform any checks
-		if contract.Revision == nil {
-			// NOTE: if we can not fetch the revision, we give the host the
-			// benefit of the doubt and keep it in the contractset, removing it
-			// might cause a lot of unnecessary migrations
-			toKeep = append(toKeep, fcid)
-			continue
-		}
-		revision := contract.Revision
-
 		// check if contract is ready to be archived.
 		if state.cs.BlockHeight > contract.EndHeight() {
 			toArchive[fcid] = errContractExpired.Error()
-		} else if revision.RevisionNumber == math.MaxUint64 {
+		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
@@ -525,6 +515,16 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toStopUsing[fcid] = toArchive[fcid]
 			continue
 		}
+
+		// check if we have a revision
+		if contract.Revision == nil {
+			// NOTE: if we can not fetch the revision, we give the host the
+			// benefit of the doubt and keep it in the contractset, removing it
+			// might cause a lot of unnecessary migrations
+			toKeep = append(toKeep, fcid)
+			continue
+		}
+		revision := contract.Revision
 
 		// fetch host from hostdb
 		hk := contract.HostKey
