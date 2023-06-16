@@ -119,6 +119,7 @@ OUTER:
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return
 		}
+		m.logger.Debugf("%d potential slabs fetched for migration", len(toMigrateNew))
 
 		// merge toMigrateNew with toMigrate
 		// NOTE: when merging, we remove all slabs from toMigrate that don't
