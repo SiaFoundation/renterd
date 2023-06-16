@@ -171,7 +171,7 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64) (bool, unusableHostResult) {
+func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.Host, minScore float64, storedData uint64) (bool, unusableHostResult) {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
@@ -210,12 +210,6 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 			if scoreBreakdown.Score() < minScore {
 				errs = append(errs, fmt.Errorf("%w: %v < %v", errLowScore, scoreBreakdown.Score(), minScore))
 			}
-		}
-
-		// optional redundant IP check - always perform this last since it will
-		// update the ipFilter.
-		if f != nil && !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(h.NetAddress, h.PublicKey) {
-			errs = append(errs, errHostRedundantIP)
 		}
 	}
 
