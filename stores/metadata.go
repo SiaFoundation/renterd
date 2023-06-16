@@ -462,7 +462,11 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		if err != nil {
 			return err
 		}
+
+		s.mu.Lock()
 		s.knownContracts[c.ID()] = struct{}{}
+		s.mu.Unlock()
+
 		renewed = newContract
 		return nil
 	}); err != nil {
