@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/web/renterd"
 	"golang.org/x/term"
 )
 
@@ -278,7 +279,7 @@ func main() {
 
 	auth := jape.BasicAuth(getAPIPassword())
 	mux := treeMux{
-		h:   createUIHandler(),
+		h:   renterd.Handler(),
 		sub: make(map[string]treeMux),
 	}
 
