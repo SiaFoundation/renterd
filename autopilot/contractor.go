@@ -198,14 +198,12 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// prepare hosts for cache
-	f := newIPFilter(c.logger)
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 	hostInfos := make(map[types.PublicKey]hostInfo)
 	for _, h := range hosts {
 		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
-
-		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, h, minScore, hostData[h.PublicKey])
+		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, h, minScore, hostData[h.PublicKey])
 		hostInfos[h.PublicKey] = hostInfo{
 			Usable:         isUsable,
 			UnusableResult: unusableResult,
@@ -493,6 +491,13 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	toArchive = make(map[types.FileContractID]string)
 	toStopUsing = make(map[types.FileContractID]string)
 
+	// when checking the contracts, do so from largest to smallest. That way, we
+	// prefer larger hosts on redundant networks.
+	contracts = append([]api.Contract{}, contracts...)
+	sort.Slice(contracts, func(i, j int) bool {
+		return contracts[i].FileSize() > contracts[j].FileSize()
+	})
+
 	// check all contracts
 	for _, contract := range contracts {
 		// break if autopilot is stopped
@@ -556,7 +561,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, revision.Filesize)
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, revision.Filesize)
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
@@ -571,7 +576,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
+		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds, f)
 		if !usable {
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
@@ -638,6 +643,14 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		return nil, err
 	}
 
+	// prepare an IP filter that contains all used hosts
+	f := newIPFilter(c.logger)
+	for _, h := range hosts {
+		if _, used := usedHosts[h.PublicKey]; used {
+			_ = f.isRedundantIP(h.NetAddress, h.PublicKey)
+		}
+	}
+
 	// calculate min/max contract funds
 	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(state.cfg)
 
@@ -673,6 +686,11 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
 		if breakdown := gc.Check(nil, &host.PriceTable.HostPriceTable); breakdown.Gouging() {
 			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", breakdown.Reasons())
+			continue
+		}
+
+		// check if we already have a contract with a host on that subnet
+		if !state.cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(host.NetAddress, host.PublicKey) {
 			continue
 		}
 
@@ -936,9 +954,6 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 	state := c.ap.state
 
-	// create an IP filter
-	ipFilter := newIPFilter(c.logger)
-
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
@@ -948,7 +963,6 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	for _, h := range hosts {
 		// filter out used hosts
 		if _, exclude := usedHosts[h.PublicKey]; exclude {
-			_ = ipFilter.isRedundantIP(h) // ensure the host's IP is registered as used
 			excluded++
 			continue
 		}
@@ -980,7 +994,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
-		if usable, result := isUsableHost(state.cfg, state.rs, gc, ipFilter, h, minScore, storedData[h.PublicKey]); usable {
+		if usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey]); usable {
 			scored = append(scored, h)
 			scores = append(scores, result.scoreBreakdown.Score())
 		} else {
