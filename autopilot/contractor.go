@@ -84,6 +84,11 @@ type (
 		contract api.Contract
 		settings rhpv2.HostSettings
 	}
+
+	renewInfo struct {
+		from types.FileContractID
+		to   types.FileContractID
+	}
 )
 
 func newContractor(ap *Autopilot) *contractor {
@@ -256,13 +261,15 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// run renewals
-	var renewed []types.FileContractID
+	var renewed []renewInfo
 	if limit > 0 {
 		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
 		if err != nil {
 			c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
 		} else {
-			updatedSet = append(updatedSet, renewed...)
+			for _, ri := range renewed {
+				updatedSet = append(updatedSet, ri.to)
+			}
 		}
 	}
 
@@ -271,7 +278,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	if err != nil {
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	} else {
-		updatedSet = append(updatedSet, refreshed...)
+		for _, ri := range refreshed {
+			updatedSet = append(updatedSet, ri.to)
+		}
 	}
 
 	// check if we need to form contracts and add them to the contract set
@@ -291,13 +300,11 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 		if err == nil {
 			// build some maps for easier lookups
-			upForRenewal := make(map[types.FileContractID]struct{})
-			for _, c := range append(toRenew, toRefresh...) {
-				upForRenewal[c.contract.ID] = struct{}{}
-			}
-			renewals := make(map[types.FileContractID]struct{})
+			renewalsFromTo := make(map[types.FileContractID]types.FileContractID)
+			renewalsToFrom := make(map[types.FileContractID]types.FileContractID)
 			for _, c := range append(renewed, refreshed...) {
-				renewals[c] = struct{}{}
+				renewalsFromTo[c.from] = c.to
+				renewalsToFrom[c.to] = c.from
 			}
 			updated := make(map[types.FileContractID]struct{})
 			for _, c := range updatedSet {
@@ -309,8 +316,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			var removed []types.FileContractID
 			for _, contract := range currentSet {
 				_, exists := updated[contract.ID]
-				_, renewal := upForRenewal[contract.ID]
-				if !exists && !renewal {
+				_, renewed := updated[renewalsFromTo[contract.ID]]
+				if !exists && !renewed {
 					removed = append(removed, contract.ID)
 					reason, ok := toStopUsing[contract.ID]
 					if !ok {
@@ -321,16 +328,16 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			}
 			for _, fcid := range updatedSet {
 				_, existed := wasInPreviousSet[fcid]
-				_, renewed := renewals[fcid]
+				_, renewed := renewalsToFrom[fcid]
 				if !existed && !renewed {
 					added = append(added, fcid)
 					c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, contractData[fcid])
 				}
 			}
 			for _, fcid := range renewed {
-				_, exists := updated[fcid]
+				_, exists := updated[fcid.to]
 				if !exists {
-					c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid])
+					c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid.to])
 				}
 			}
 
@@ -688,7 +695,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	return formed, nil
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewed []types.FileContractID, _ error) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewals []renewInfo, _ error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
 	defer span.End()
 
@@ -701,7 +708,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 	defer func() {
 		c.logger.Debugw(
 			"contracts renewals completed",
-			"renewed", len(renewed),
+			"renewals", len(renewals),
 			"budget", budget,
 		)
 	}()
@@ -725,19 +732,19 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 			break
 		}
 
-		contract, proceed, err := c.renewContract(ctx, w, ci, budget, renterAddress)
+		renewed, proceed, err := c.renewContract(ctx, w, ci, budget, renterAddress)
 		if err == nil {
-			renewed = append(renewed, contract.ID)
+			renewals = append(renewals, renewInfo{from: ci.contract.ID, to: renewed.ID})
 		}
 		if !proceed {
 			break
 		}
 	}
 
-	return renewed, nil
+	return renewals, nil
 }
 
-func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) (refreshed []types.FileContractID, _ error) {
+func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) (refreshed []renewInfo, _ error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRefreshes")
 	defer span.End()
 
@@ -762,9 +769,9 @@ func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget 
 			break
 		}
 
-		contract, proceed, err := c.refreshContract(ctx, w, ci, budget, renterAddress)
+		renewed, proceed, err := c.refreshContract(ctx, w, ci, budget, renterAddress)
 		if err == nil {
-			refreshed = append(refreshed, contract.ID)
+			refreshed = append(refreshed, renewInfo{from: ci.contract.ID, to: renewed.ID})
 		}
 		if !proceed {
 			break
