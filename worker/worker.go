@@ -820,9 +820,6 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// attach contract spending recorder to the context.
-	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
-
 	// fetch all contracts
 	dlContracts, err := w.bus.Contracts(ctx)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {

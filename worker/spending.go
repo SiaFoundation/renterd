@@ -41,12 +41,6 @@ func recordContractSpending(ctx context.Context, rev *types.FileContractRevision
 	}
 }
 
-// WithContractSpendingRecorder returns a context with the
-// ContractSpendingRecorder attached.
-func WithContractSpendingRecorder(ctx context.Context, sr ContractSpendingRecorder) context.Context {
-	return context.WithValue(ctx, keyContractSpendingRecorder, sr)
-}
-
 func (w *worker) initContractSpendingRecorder() {
 	if w.contractSpendingRecorder != nil {
 		panic("contractSpendingRecorder already initialized") // developer error
