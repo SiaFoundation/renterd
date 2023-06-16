@@ -258,7 +258,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// perform maintenance
-			err = ap.c.performContractMaintenance(ctx, w)
+			setChanged, err := ap.c.performContractMaintenance(ctx, w)
 			if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
@@ -266,7 +266,7 @@ func (ap *Autopilot) Run() error {
 
 			// upon success, notify the migrator. The health of slabs might have
 			// changed.
-			if maintenanceSuccess {
+			if maintenanceSuccess && setChanged {
 				ap.m.SignalMaintenanceFinished()
 			}
 
