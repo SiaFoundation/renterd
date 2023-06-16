@@ -18,7 +18,6 @@ import (
 type hostV2 interface {
 	Contract() types.FileContractID
 	HostKey() types.PublicKey
-	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }
 
 type hostV3 interface {
@@ -34,7 +33,6 @@ type hostV3 interface {
 }
 
 type hostProvider interface {
-	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(hostV2) error) (err error)
 	newHostV3(types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
 }
 

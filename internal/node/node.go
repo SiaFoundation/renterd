@@ -37,9 +37,6 @@ type WorkerConfig struct {
 	AllowPrivateIPs          bool
 	BusFlushInterval         time.Duration
 	ContractLockTimeout      time.Duration
-	SessionLockTimeout       time.Duration
-	SessionReconnectTimeout  time.Duration
-	SessionTTL               time.Duration
 	DownloadOverdriveTimeout time.Duration
 	UploadOverdriveTimeout   time.Duration
 	DownloadMaxOverdrive     uint64
@@ -303,7 +300,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
-	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.SessionLockTimeout, cfg.SessionReconnectTimeout, cfg.SessionTTL, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.AllowPrivateIPs, l)
+	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.AllowPrivateIPs, l)
 	if err != nil {
 		return nil, nil, err
 	}

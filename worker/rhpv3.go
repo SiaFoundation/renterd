@@ -533,10 +533,6 @@ func (r *host) HostKey() types.PublicKey {
 	return r.acc.host
 }
 
-func (*host) DeleteSectors(ctx context.Context, roots []types.Hash256) error {
-	panic("not implemented")
-}
-
 // priceTable fetches a price table from the host. If a revision is provided, it
 // will be used to pay for the price table. The returned price table is
 // guaranteed to be safe to use.
@@ -555,27 +551,27 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 	return pt.HostPriceTable, nil
 }
 
-func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
-	pt, err := r.priceTable(ctx, nil)
+func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
+	pt, err := h.priceTable(ctx, nil)
 	if err != nil {
 		return err
 	}
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
 		if isBalanceInsufficient(err) {
-			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, r.HostKey(), err)
+			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, h.HostKey(), err)
 		}
 	}()
 
-	return r.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
+	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
 			cost, err := readSectorCost(pt)
 			if err != nil {
 				return err
 			}
 
 			var refund types.Currency
-			payment := rhpv3.PayByEphemeralAccount(r.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, r.accountKey)
+			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 			cost, refund, err = RPCReadSector(ctx, t, w, pt, &payment, offset, length, root, true)
 			amount = cost.Sub(refund)
 			return err
@@ -585,9 +581,9 @@ func (r *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 }
 
 // UploadSector uploads a sector to the host.
-func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (root types.Hash256, err error) {
+func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (root types.Hash256, err error) {
 	// fetch price table
-	pt, err := r.priceTable(ctx, nil)
+	pt, err := h.priceTable(ctx, nil)
 	if err != nil {
 		return types.Hash256{}, err
 	}
@@ -603,15 +599,22 @@ func (r *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	if rev.RevisionNumber == math.MaxUint64 {
 		return types.Hash256{}, errors.New("revision number has reached max")
 	}
-	payment, ok := rhpv3.PayByContract(&rev, expectedCost, r.acc.id, r.renterKey)
+	payment, ok := rhpv3.PayByContract(&rev, expectedCost, h.acc.id, h.renterKey)
 	if !ok {
 		return types.Hash256{}, errors.New("failed to create payment")
 	}
 
-	err = r.transportPool.withTransportV3(ctx, r.HostKey(), r.siamuxAddr, func(t *transportV3) error {
-		root, _, err = RPCAppendSector(ctx, t, r.renterKey, pt, rev, &payment, sector)
+	var cost types.Currency
+	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
+		root, cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, rev, &payment, sector)
 		return err
 	})
+	if err != nil {
+		return types.Hash256{}, err
+	}
+
+	// record spending
+	h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, api.ContractSpending{Uploads: cost})
 	return root, err
 }
 

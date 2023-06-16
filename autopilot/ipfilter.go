@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/core/types"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +42,7 @@ func newIPFilter(logger *zap.SugaredLogger) *ipFilter {
 	}
 }
 
-func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
+func (f *ipFilter) isRedundantIP(hostIP string, hostKey types.PublicKey) bool {
 	// create a context
 	ctx := context.Background()
 	if f.timeout > 0 {
@@ -52,14 +52,14 @@ func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
 	}
 
 	// lookup all IP addresses for the given host
-	host, _, err := net.SplitHostPort(h.NetAddress)
+	host, _, err := net.SplitHostPort(hostIP)
 	if err != nil {
 		return true
 	}
 	addresses, err := f.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		if !strings.Contains(err.Error(), "no such host") {
-			f.logger.Debugf("failed to lookup IP for host %v, err: %v", h.PublicKey, err)
+			f.logger.Debugf("failed to lookup IP for host %v, err: %v", hostKey, err)
 		}
 		return true
 	}
@@ -75,10 +75,10 @@ func (f *ipFilter) isRedundantIP(h hostdb.Host) bool {
 	var filter bool
 	for _, subnet := range subnets(addresses) {
 		original, exists := f.subnets[subnet]
-		if exists && h.PublicKey.String() != original {
+		if exists && hostKey.String() != original {
 			filter = true
 		} else if !exists {
-			f.subnets[subnet] = h.PublicKey.String()
+			f.subnets[subnet] = hostKey.String()
 		}
 	}
 	return filter

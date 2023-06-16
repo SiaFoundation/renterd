@@ -46,13 +46,12 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	minScore := c.cachedMinScore
 	c.mu.Unlock()
 
-	f := newIPFilter(c.logger)
 	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
 
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
-	isUsable, unusableResult := isUsableHost(cfg, rs, gc, f, host.Host, minScore, storedData)
+	isUsable, unusableResult := isUsableHost(cfg, rs, gc, host.Host, minScore, storedData)
 	return api.HostHandlerGET{
 		Host: host.Host,
 
