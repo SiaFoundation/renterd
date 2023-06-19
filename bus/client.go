@@ -515,6 +515,12 @@ func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
 	return
 }
 
+// DeleteObjects deletes all objects with a given prefix.
+func (c *Client) DeleteObjects(ctx context.Context, prefix string) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?batch=true", prefix))
+	return
+}
+
 // SlabsForMigration returns up to 'limit' slabs which require migration. A slab
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.

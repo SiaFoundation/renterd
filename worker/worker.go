@@ -250,6 +250,7 @@ type Bus interface {
 	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []api.ObjectMetadata, error)
 	AddObject(ctx context.Context, path string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string) error
+	DeleteObjects(ctx context.Context, path string) error
 
 	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, goodContracts map[types.PublicKey]types.FileContractID) error
@@ -1100,8 +1101,21 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
+	var batch bool
+	if jc.DecodeForm("batch", &batch) != nil {
+		return
+	}
 	path := strings.TrimPrefix(jc.PathParam("path"), "/")
-	err := w.bus.DeleteObject(jc.Request.Context(), path)
+	var err error
+	if batch {
+		if !strings.HasSuffix(path, "/") {
+			jc.Error(fmt.Errorf("batch delete path must end with '/'"), http.StatusBadRequest)
+			return
+		}
+		err = w.bus.DeleteObjects(jc.Request.Context(), path)
+	} else {
+		err = w.bus.DeleteObject(jc.Request.Context(), path)
+	}
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
