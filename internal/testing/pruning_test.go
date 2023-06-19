@@ -3,6 +3,7 @@ package testing
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,7 +143,7 @@ func TestHostPruning(t *testing.T) {
 	// assert validation on MaxDowntimeHours
 	cfg := api.DefaultAutopilotConfig()
 	cfg.Hosts.MaxDowntimeHours = 99*365*24 + 1 // exceed by one
-	if err = b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: cfg}); !errors.Is(err, api.ErrMaxDowntimeHoursTooHigh) {
+	if err = b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: cfg}); !strings.Contains(err.Error(), api.ErrMaxDowntimeHoursTooHigh.Error()) {
 		t.Fatal(err)
 	}
 	cfg.Hosts.MaxDowntimeHours = 99 * 365 * 24 // allowed max
