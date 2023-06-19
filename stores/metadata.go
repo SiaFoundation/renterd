@@ -1081,7 +1081,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	}
 
 	if err := s.db.
-		Select(`slabs.Key,
+		Select(`slabs.Key, slabs.db_contract_set_id,
 CASE WHEN (slabs.min_shards = slabs.total_shards)
 THEN
     CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
