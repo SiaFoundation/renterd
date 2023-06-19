@@ -62,6 +62,7 @@ type (
 		ProofHeight    uint64 `gorm:"index;default:0"`
 		RevisionHeight uint64 `gorm:"index;default:0"`
 		RevisionNumber string `gorm:"NOT NULL;default:'0'"` // string since db can't store math.MaxUint64
+		Size           uint64
 		StartHeight    uint64 `gorm:"index;NOT NULL"`
 		WindowStart    uint64 `gorm:"index;NOT NULL;default:0"`
 		WindowEnd      uint64 `gorm:"index;NOT NULL;default:0"`
@@ -201,6 +202,7 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 		ProofHeight:    c.ProofHeight,
 		RevisionHeight: c.RevisionHeight,
 		RevisionNumber: revisionNumber,
+		Size:           c.Size,
 		StartHeight:    c.StartHeight,
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
@@ -233,6 +235,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		ProofHeight:    c.ProofHeight,
 		RevisionHeight: c.RevisionHeight,
 		RevisionNumber: revisionNumber,
+		Size:           c.Size,
 		StartHeight:    c.StartHeight,
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
@@ -677,10 +680,12 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	}
 	squashedRecords := make(map[types.FileContractID]api.ContractSpending)
 	latestRevision := make(map[types.FileContractID]uint64)
+	latestSize := make(map[types.FileContractID]uint64)
 	for _, r := range records {
 		squashedRecords[r.ContractID] = squashedRecords[r.ContractID].Add(r.ContractSpending)
 		if r.RevisionNumber > latestRevision[r.ContractID] {
 			latestRevision[r.ContractID] = r.RevisionNumber
+			latestSize[r.ContractID] = r.Size
 		}
 	}
 	for fcid, newSpending := range squashedRecords {
@@ -705,6 +710,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				updates["fund_account_spending"] = currency(types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount))
 			}
 			updates["revision_number"] = latestRevision[fcid]
+			updates["size"] = latestSize[fcid]
 			return tx.Model(&contract).Updates(updates).Error
 		})
 		if err != nil {
@@ -1306,6 +1312,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
+			Size:           0,
 			StartHeight:    startHeight,
 			WindowStart:    windowStart,
 			WindowEnd:      windowEnd,

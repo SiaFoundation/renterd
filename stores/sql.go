@@ -70,6 +70,7 @@ type (
 	revisionUpdate struct {
 		height uint64
 		number uint64
+		size   uint64
 	}
 )
 
@@ -339,7 +340,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 			}
 		}
 		for fcid, rev := range ss.unappliedRevisions {
-			if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
+			if err := applyRevisionUpdate(tx, types.FileContractID(fcid), rev); err != nil {
 				return fmt.Errorf("%w; failed to update revision number and height", err)
 			}
 		}
