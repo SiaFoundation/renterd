@@ -95,6 +95,7 @@ type Worker interface {
 type Autopilot struct {
 	id string
 
+	dir     string
 	bus     Bus
 	logger  *zap.SugaredLogger
 	state   loopState
@@ -176,6 +177,37 @@ func (ap *Autopilot) Config(ctx context.Context) (api.AutopilotConfig, error) {
 	}
 
 	return autopilot.Config, nil
+}
+
+func (ap *Autopilot) Compat() error {
+	// make sure we don't hang
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// check if the file exists
+	path := filepath.Join(ap.dir, "autopilot.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+
+	// read the json config
+	var cfg api.AutopilotConfig
+	if data, err := os.ReadFile(path); err != nil {
+		return err
+	} else if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+
+	// create an autopilot entry
+	if err := ap.bus.UpdateAutopilot(ctx, api.Autopilot{
+		ID:     ap.id,
+		Config: cfg,
+	}); err != nil {
+		return err
+	}
+
+	// remove config
+	return os.Remove(path)
 }
 
 func (ap *Autopilot) Run() error {
@@ -421,6 +453,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 func New(id, dir string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		id:      id,
+		dir:     dir,
 		bus:     bus,
 		logger:  logger.Sugar().Named("autopilot"),
 		workers: newWorkerPool(workers),
@@ -445,11 +478,6 @@ func New(id, dir string, bus Bus, workers []Worker, logger *zap.Logger, heartbea
 	ap.m = newMigrator(ap, migrationHealthCutoff)
 	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
 
-	// compat
-	err = ap.compatMigrateAutopilotJSON(dir)
-	if err != nil {
-		return nil, err
-	}
 	return ap, nil
 }
 
@@ -476,35 +504,4 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(hosts)
-}
-
-func (ap *Autopilot) compatMigrateAutopilotJSON(dir string) error {
-	// ensure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// check if the file exists
-	path := filepath.Join(dir, "autopilot.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
-
-	// read the json config
-	var cfg api.AutopilotConfig
-	if data, err := os.ReadFile(path); err != nil {
-		return err
-	} else if err := json.Unmarshal(data, &cfg); err != nil {
-		return err
-	}
-
-	// create an autopilot entry
-	if err := ap.bus.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     ap.id,
-		Config: cfg,
-	}); err != nil {
-		return err
-	}
-
-	// remove config
-	return os.Remove(path)
 }

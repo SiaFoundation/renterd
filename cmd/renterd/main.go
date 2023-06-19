@@ -265,6 +265,9 @@ func main() {
 		log.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
 
+	// Init ready chan
+	readyChan := make(chan struct{})
+
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
 	l, err := net.Listen("tcp", *apiAddr)
@@ -339,7 +342,7 @@ func main() {
 			log.Fatal("failed to create autopilot dir", err)
 		}
 
-		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, autopilotDir, logger)
+		ap, runFn, compatFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, autopilotDir, logger)
 		if err != nil {
 			log.Fatal("failed to create autopilot", err)
 		}
@@ -347,7 +350,13 @@ func main() {
 		// functions array because it needs to be called first
 		autopilotShutdownFn = shutdownFn
 
-		go func() { autopilotErr <- runFn() }()
+		go func() {
+			<-readyChan
+			if err := compatFn(); err != nil {
+				autopilotErr <- err
+			}
+			autopilotErr <- runFn()
+		}()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
 	}
 
@@ -360,6 +369,9 @@ func main() {
 		log.Fatal("failed to fetch syncer address", err)
 	}
 	log.Println("bus: Listening on", syncerAddress)
+
+	// Signal we're ready
+	close(readyChan)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)

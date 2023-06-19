@@ -278,7 +278,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	workerShutdownFns = append(workerShutdownFns, wStopFn)
 
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, apDir, logger)
+	ap, aStartFn, _, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, apDir, logger)
 	if err != nil {
 		return nil, err
 	}

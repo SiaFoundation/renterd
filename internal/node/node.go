@@ -309,12 +309,12 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Log
 	return w.Handler(), w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, dir string, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, dir string, l *zap.Logger) (http.Handler, func() error, func() error, ShutdownFn, error) {
 	ap, err := autopilot.New(cfg.ID, dir, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return ap.Handler(), ap.Run, ap.Shutdown, nil
+	return ap.Handler(), ap.Run, ap.Compat, ap.Shutdown, nil
 }
 
 func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {
