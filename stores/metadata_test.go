@@ -1222,7 +1222,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// select the first three contracts as good contracts
 	goodContracts := []types.FileContractID{fcid1, fcid2, fcid3}
-	if err := db.SetContractSet(context.Background(), "autopilot", goodContracts); err != nil {
+	if err := db.SetContractSet(context.Background(), testContractSet, goodContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1370,7 +1370,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1388,7 +1388,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 
-	slabs, err = db.UnhealthySlabs(ctx, 0.49, "autopilot", -1)
+	slabs, err = db.UnhealthySlabs(ctx, 0.49, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1402,6 +1402,15 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order", slabs, expected)
+	}
+
+	// Fetch unhealthy slabs again but for different contract set.
+	slabs, err = db.UnhealthySlabs(ctx, 0.49, "foo", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slabs) != 0 {
+		t.Fatal("expected no slabs to migrate", len(slabs))
 	}
 }
 
@@ -1427,7 +1436,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	fcid1 := fcids[0]
 
 	// add it to the contract set
-	if err := db.SetContractSet(context.Background(), "autopilot", fcids); err != nil {
+	if err := db.SetContractSet(context.Background(), testContractSet, fcids); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1461,7 +1470,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1492,7 +1501,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	fcid1 := fcids[0]
 
 	// add it to the contract set
-	if err := db.SetContractSet(context.Background(), "autopilot", fcids); err != nil {
+	if err := db.SetContractSet(context.Background(), testContractSet, fcids); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1522,7 +1531,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	}
 
 	// assert it's healthy
-	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1536,7 +1545,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	slabs, err = db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	slabs, err = db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1569,7 +1578,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 
 	// select the first two contracts as good contracts
 	goodContracts := []types.FileContractID{fcid1, fcid2}
-	if err := db.SetContractSet(context.Background(), "autopilot", goodContracts); err != nil {
+	if err := db.SetContractSet(context.Background(), testContractSet, goodContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1619,7 +1628,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slabs, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1820,12 +1829,12 @@ func TestPutSlab(t *testing.T) {
 
 	// select contracts h1 and h3 as good contracts (h2 is bad)
 	goodContracts := []types.FileContractID{fcid1, fcid3}
-	if err := db.SetContractSet(ctx, "autopilot", goodContracts); err != nil {
+	if err := db.SetContractSet(ctx, testContractSet, goodContracts); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch slabs for migration and assert there is only one
-	toMigrate, err := db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	toMigrate, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1881,7 +1890,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there are none left
-	toMigrate, err = db.UnhealthySlabs(ctx, 0.99, "autopilot", -1)
+	toMigrate, err = db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}

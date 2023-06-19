@@ -1092,9 +1092,9 @@ END AS health`).
 		Joins("LEFT JOIN contract_sectors se ON s.id = se.db_sector_id").
 		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
 		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id").
-		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name=?", set).
+		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
 		Group("slabs.id").
-		Having("health <= ?", healthCutoff).
+		Having("health <= ? AND slabs.db_contract_set_id = (SELECT id FROM contract_sets cs WHERE cs.name = ?)", healthCutoff, set).
 		Order("health ASC").
 		Limit(limit).
 		Find(&rows).
