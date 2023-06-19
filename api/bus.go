@@ -26,9 +26,8 @@ const (
 )
 
 const (
-	SettingContractSet = "contractset"
-	SettingGouging     = "gouging"
-	SettingRedundancy  = "redundancy"
+	SettingGouging    = "gouging"
+	SettingRedundancy = "redundancy"
 )
 
 var (
@@ -308,12 +307,6 @@ type GougingParams struct {
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
 	TransactionFee     types.Currency
-}
-
-// ContractSetSettings contains settings needed by the worker to figure out what
-// contract set to use.
-type ContractSetSettings struct {
-	Set string `json:"set"`
 }
 
 // GougingSettings contain some price settings used in price gouging.

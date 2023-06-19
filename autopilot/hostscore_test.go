@@ -111,13 +111,13 @@ func TestRandSelectByWeight(t *testing.T) {
 func TestPriceAdjustmentScore(t *testing.T) {
 	score := func(cpp uint32) float64 {
 		t.Helper()
-		cfg := api.AutopilotConfig{
+		as := api.AutopilotConfig{
 			Contracts: api.ContractsConfig{
 				Allowance: types.Siacoins(5000),
 				Amount:    50,
 			},
 		}
-		return priceAdjustmentScore(types.Siacoins(cpp), cfg)
+		return priceAdjustmentScore(types.Siacoins(cpp), as)
 	}
 
 	// Cost matches budges.
@@ -174,7 +174,7 @@ func TestPriceAdjustmentScore(t *testing.T) {
 func TestCollateralScore(t *testing.T) {
 	score := func(collateral, maxCollateral uint64) float64 {
 		t.Helper()
-		cfg := api.AutopilotConfig{
+		as := api.AutopilotConfig{
 			Contracts: api.ContractsConfig{
 				Period:  5,
 				Storage: 5,
@@ -184,7 +184,7 @@ func TestCollateralScore(t *testing.T) {
 			Collateral:    types.NewCurrency64(collateral),
 			MaxCollateral: types.NewCurrency64(maxCollateral),
 		}
-		return collateralScore(cfg, types.NewCurrency64(5000), settings, 2.0)
+		return collateralScore(as, types.NewCurrency64(5000), settings, 2.0)
 	}
 
 	// NOTE: with the above settings, the cutoff is at 1000H.

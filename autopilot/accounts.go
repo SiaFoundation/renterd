@@ -107,7 +107,11 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	defer span.End()
 
 	// fetch config
-	cfg := a.ap.Config()
+	cfg, err := a.ap.Config(ctx)
+	if err != nil {
+		a.l.Errorw(fmt.Sprintf("could not fetch config, err: %v", err))
+		return
+	}
 
 	// fetch worker id
 	workerID, err := w.ID(ctx)

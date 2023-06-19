@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"context"
+	"errors"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -13,23 +14,43 @@ func (c *contractor) currentPeriod() uint64 {
 	return c.currPeriod
 }
 
-func (c *contractor) updateCurrentPeriod() {
-	c.mu.Lock()
-	defer func(prevPeriod uint64) {
-		if c.currPeriod != prevPeriod {
-			c.logger.Debugf("updated current period, %d->%d", prevPeriod, c.currPeriod)
-		}
-		c.mu.Unlock()
-	}(c.currPeriod)
-
-	cfg := c.ap.state.cfg
-	cs := c.ap.state.cs
-
-	if c.currPeriod == 0 {
-		c.currPeriod = cs.BlockHeight
-	} else if cs.BlockHeight >= c.currPeriod+cfg.Contracts.Period {
-		c.currPeriod += cfg.Contracts.Period
+func (c *contractor) updateCurrentPeriod(ctx context.Context) error {
+	// check if we are synced
+	state := c.ap.state
+	if !state.cs.Synced {
+		return errors.New("can't update current period if we are not synced")
 	}
+
+	// fetch autopilot
+	autopilot, err := c.ap.bus.Autopilot(ctx, c.ap.id)
+	if err != nil {
+		return err
+	}
+
+	// initialize current period
+	if autopilot.CurrentPeriod == 0 {
+		autopilot.CurrentPeriod = state.cs.BlockHeight
+		err := c.ap.bus.UpdateAutopilot(ctx, autopilot)
+		if err != nil {
+			return err
+		}
+		c.logger.Infof("initialised current period to %d", state.cs.BlockHeight)
+	} else if state.cs.BlockHeight >= autopilot.CurrentPeriod+state.cfg.Contracts.Period {
+		prevPeriod := autopilot.CurrentPeriod
+		autopilot.CurrentPeriod += state.cfg.Contracts.Period
+		err := c.ap.bus.UpdateAutopilot(ctx, autopilot)
+		if err != nil {
+			return err
+		}
+		c.logger.Infof("updated current period from %d to %d", prevPeriod, autopilot.CurrentPeriod)
+	}
+
+	// update the current period on the contractor
+	c.mu.Lock()
+	c.currPeriod = autopilot.CurrentPeriod
+	c.mu.Unlock()
+
+	return nil
 }
 
 func (c *contractor) contractSpending(ctx context.Context, contract api.Contract, currentPeriod uint64) (api.ContractSpending, error) {

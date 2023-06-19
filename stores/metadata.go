@@ -16,14 +16,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	// slabRetrievalBatchSize is the number of slabs we fetch from the
-	// database per batch
-	// NOTE: This value can't be too big or otherwise UnhealthySlabs will fail
-	// due to "too many SQL variables".
-	slabRetrievalBatchSize = 100
-)
-
 var (
 	// ErrSlabNotFound is returned if get is unable to retrieve a slab from the
 	// database.

@@ -70,8 +70,8 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// See if autopilot is running by fetching the config.
-	_, err = cluster.Autopilot.Config()
+	// See if autopilot is running by fetching the actions.
+	_, err = cluster.Autopilot.Trigger(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,11 +102,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Verify startHeight and endHeight of the contract.
-	currentPeriod, err := cluster.Autopilot.Status()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := cluster.Autopilot.Config()
+	cfg, currentPeriod, err := cluster.AutopilotConfig(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +433,12 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// update the bus setting and specify a non-existing contract set
-	err = b.UpdateSetting(context.Background(), api.SettingContractSet, api.ContractSetSettings{Set: t.Name()})
+	cfg, _, err := cluster.AutopilotConfig(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Contracts.Set = t.Name()
+	err = cluster.UpdateAutopilotConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1133,9 +1134,9 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingContractSet, api.ContractSetSettings{
-		Set: "test",
-	})
+	cfg := api.DefaultAutopilotConfig()
+	cfg.Contracts.Set = "test"
+	err = cluster.Bus.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}

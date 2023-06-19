@@ -2,9 +2,13 @@ package autopilot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,15 +26,14 @@ import (
 	"lukechampine.com/frand"
 )
 
-type Store interface {
-	Config() api.AutopilotConfig
-	SetConfig(c api.AutopilotConfig) error
-}
-
 type Bus interface {
 	// Accounts
 	Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error)
 	Accounts(ctx context.Context) (accounts []api.Account, err error)
+
+	// Autopilots
+	Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error)
+	UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error
 
 	// wallet
 	WalletAddress(ctx context.Context) (types.Address, error)
@@ -90,10 +93,11 @@ type Worker interface {
 }
 
 type Autopilot struct {
+	id string
+
 	bus     Bus
 	logger  *zap.SugaredLogger
 	state   loopState
-	store   Store
 	workers *workerPool
 
 	a *accounts
@@ -155,22 +159,13 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 	workerFunc(wp.workers)
 }
 
-// Actions returns the autopilot actions that have occurred since the given time.
-func (ap *Autopilot) Actions(since time.Time, max int) []api.Action {
-	panic("unimplemented")
-}
-
-// Config returns the autopilot's current configuration.
-func (ap *Autopilot) Config() api.AutopilotConfig {
-	return ap.store.Config()
-}
-
-// SetConfig updates the autopilot's configuration.
-func (ap *Autopilot) SetConfig(c api.AutopilotConfig) error {
-	if err := c.Validate(); err != nil {
-		return err
+// Config returns the autopilot config.
+func (ap *Autopilot) Config(ctx context.Context) (api.AutopilotConfig, error) {
+	autopilot, err := ap.bus.Autopilot(ctx, ap.id)
+	if err != nil {
+		return api.AutopilotConfig{}, err
 	}
-	return ap.store.SetConfig(c)
+	return autopilot.Config, nil
 }
 
 func (ap *Autopilot) Run() error {
@@ -187,13 +182,6 @@ func (ap *Autopilot) Run() error {
 	ap.wg.Add(1)
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
-
-	// update the contract set setting
-	setting := api.ContractSetSettings{Set: ap.store.Config().Contracts.Set}
-	err := ap.bus.UpdateSetting(context.Background(), api.SettingContractSet, setting)
-	if err != nil {
-		ap.logger.Errorf("failed to update contract set setting, err: %v", err)
-	}
 
 	// block until consensus is synced
 	if !ap.blockUntilSynced() {
@@ -231,13 +219,6 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// update the contract set setting
-			setting = api.ContractSetSettings{Set: ap.store.Config().Contracts.Set}
-			err = ap.bus.UpdateSetting(context.Background(), api.SettingContractSet, setting)
-			if err != nil {
-				ap.logger.Errorf("failed to update contract set setting, err: %v", err)
-			}
-
 			// initiate a host scan
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan(ctx, w, forceScan)
@@ -249,7 +230,10 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// update current period
-			ap.c.updateCurrentPeriod()
+			err = ap.c.updateCurrentPeriod(ctx)
+			if err != nil {
+				ap.logger.Warnf("failed to update current period, err: %v", err)
+			}
 
 			// perform wallet maintenance
 			err = ap.c.performWalletMaintenance(ctx)
@@ -294,6 +278,15 @@ func (ap *Autopilot) Run() error {
 			forceScan = false
 		}
 	}
+}
+
+// Handler returns an HTTP handler that serves the autopilot api.
+func (ap *Autopilot) Handler() http.Handler {
+	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
+		"POST   /debug/trigger": ap.triggerHandlerPOST,
+		"POST   /hosts":         ap.hostsHandlerPOST,
+		"GET    /host/:hostKey": ap.hostHandlerGET,
+	}))
 }
 
 // Shutdown shuts down the autopilot.
@@ -350,8 +343,11 @@ func (ap *Autopilot) blockUntilSynced() bool {
 }
 
 func (ap *Autopilot) updateLoopState(ctx context.Context) error {
-	// fetch the current config
-	cfg := ap.store.Config()
+	// fetch the config
+	cfg, err := ap.Config(ctx)
+	if err != nil {
+		return fmt.Errorf("could not fetch config, err: %v", err)
+	}
 
 	// fetch consensus state
 	cs, err := ap.bus.ConsensusState(ctx)
@@ -401,36 +397,6 @@ func (ap *Autopilot) isStopped() bool {
 	}
 }
 
-func (ap *Autopilot) actionsHandler(jc jape.Context) {
-	var since time.Time
-	max := -1
-	if jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
-		return
-	}
-	jc.Encode(ap.Actions(since, max))
-}
-
-func (ap *Autopilot) configHandlerGET(jc jape.Context) {
-	jc.Encode(ap.Config())
-}
-
-func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
-	var c api.AutopilotConfig
-	if jc.Decode(&c) != nil {
-		return
-	}
-	if jc.Check("failed to set config", ap.SetConfig(c)) != nil {
-		return
-	}
-	ap.Trigger(false) // trigger the autopilot loop
-}
-
-func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
-	jc.Encode(api.AutopilotStatusResponseGET{
-		CurrentPeriod: ap.c.currentPeriod(),
-	})
-}
-
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	var req api.AutopilotTriggerRequest
 	if jc.Decode(&req) != nil {
@@ -442,11 +408,11 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
+func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, dir string) (*Autopilot, error) {
 	ap := &Autopilot{
+		id:      id,
 		bus:     bus,
 		logger:  logger.Sugar().Named("autopilot"),
-		store:   store,
 		workers: newWorkerPool(workers),
 
 		tickerDuration: heartbeat,
@@ -460,6 +426,20 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 		scannerTimeoutInterval,
 		scannerTimeoutMinTimeout,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	// migrate autopilot json config to bus
+	if err := compatMigrateAutopilotJSONConfigToBus(bus, id, dir); err != nil {
+		return nil, fmt.Errorf("failed to migrate autopilot config to the bus: %v", err)
+	}
+
+	// ensure autopilot exists
+	_, err = bus.Autopilot(context.Background(), id)
+	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		err = bus.UpdateAutopilot(context.Background(), api.Autopilot{ID: id, Config: api.DefaultAutopilotConfig()})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -496,17 +476,33 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 	jc.Encode(hosts)
 }
 
-// Handler returns an HTTP handler that serves the autopilot api.
-func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
-		"GET    /actions": ap.actionsHandler,
-		"GET    /config":  ap.configHandlerGET,
-		"PUT    /config":  ap.configHandlerPUT,
-		"GET    /status":  ap.statusHandlerGET,
+func compatMigrateAutopilotJSONConfigToBus(b Bus, id, dir string) error {
+	// check if the file exists
+	path := filepath.Join(dir, "autopilot.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
 
-		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"POST    /hosts":        ap.hostsHandlerPOST,
+	// read the json config
+	var cfg api.AutopilotConfig
+	if data, err := os.ReadFile(path); err != nil {
+		return err
+	} else if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
 
-		"POST    /debug/trigger": ap.triggerHandlerPOST,
-	}))
+	// ensure we don't hang
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// create an autopilot entry
+	if err := b.UpdateAutopilot(ctx, api.Autopilot{
+		ID:     id,
+		Config: cfg,
+	}); err != nil {
+		return err
+	}
+
+	// remove config
+	return os.Remove(path)
 }

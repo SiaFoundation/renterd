@@ -16,9 +16,52 @@ const (
 )
 
 var (
+	// ErrAutopilotNotFound is returned when an autopilot can't be found.
+	ErrAutopilotNotFound = errors.New("couldn't find autopilot")
+
 	// ErrMaxDowntimeHoursTooHigh is returned if the autopilot config is updated
 	// with a value that exceeds the maximum of 99 years.
 	ErrMaxDowntimeHoursTooHigh = errors.New("MaxDowntimeHours is too high, exceeds max value of 99 years")
+)
+
+type (
+	// Autopilot contains the autopilot's config and current period.
+	Autopilot struct {
+		ID            string          `json:"id"`
+		Config        AutopilotConfig `json:"config"`
+		CurrentPeriod uint64          `json:"currentPeriod"`
+	}
+
+	// AutopilotConfig contains all autopilot configuration.
+	AutopilotConfig struct {
+		Contracts ContractsConfig `json:"contracts"`
+		Hosts     HostsConfig     `json:"hosts"`
+		Wallet    WalletConfig    `json:"wallet"`
+	}
+
+	// ContractsConfig contains all contract settings used in the autopilot.
+	ContractsConfig struct {
+		Set         string         `json:"set"`
+		Amount      uint64         `json:"amount"`
+		Allowance   types.Currency `json:"allowance"`
+		Period      uint64         `json:"period"`
+		RenewWindow uint64         `json:"renewWindow"`
+		Download    uint64         `json:"download"`
+		Upload      uint64         `json:"upload"`
+		Storage     uint64         `json:"storage"`
+	}
+
+	// HostsConfig contains all hosts settings used in the autopilot.
+	HostsConfig struct {
+		AllowRedundantIPs bool                        `json:"allowRedundantIPs"`
+		MaxDowntimeHours  uint64                      `json:"maxDowntimeHours"`
+		ScoreOverrides    map[types.PublicKey]float64 `json:"scoreOverrides"`
+	}
+
+	// WalletConfig contains all wallet settings used in the autopilot.
+	WalletConfig struct {
+		DefragThreshold uint64 `json:"defragThreshold"`
+	}
 )
 
 type (
@@ -27,13 +70,6 @@ type (
 		Timestamp time.Time
 		Type      string
 		Action    interface{ isAction() }
-	}
-
-	// AutopilotConfig contains all autopilot configuration parameters.
-	AutopilotConfig struct {
-		Wallet    WalletConfig    `json:"wallet"`
-		Hosts     HostsConfig     `json:"hosts"`
-		Contracts ContractsConfig `json:"contracts"`
 	}
 
 	// AutopilotTriggerRequest is the request object used by the /debug/trigger
@@ -48,11 +84,7 @@ type (
 		Triggered bool `json:"triggered"`
 	}
 
-	// WalletConfig contains all wallet configuration parameters.
-	WalletConfig struct {
-		DefragThreshold uint64 `json:"defragThreshold"`
-	}
-
+	// HostHandlerGET is the response type for the /host/:hostkey endpoint.
 	HostHandlerGET struct {
 		Host hostdb.Host `json:"host"`
 
@@ -84,31 +116,6 @@ type (
 		Uptime           float64 `json:"uptime"`
 		Version          float64 `json:"version"`
 		Prices           float64 `json:"prices"`
-	}
-
-	// HostsConfig contains all hosts configuration parameters.
-	HostsConfig struct {
-		AllowRedundantIPs bool                        `json:"allowRedundantIPs"`
-		MaxDowntimeHours  uint64                      `json:"maxDowntimeHours"`
-		ScoreOverrides    map[types.PublicKey]float64 `json:"scoreOverrides"`
-	}
-
-	// ContractsConfig contains all contracts configuration parameters.
-	ContractsConfig struct {
-		Set         string         `json:"set"`
-		Amount      uint64         `json:"amount"`
-		Allowance   types.Currency `json:"allowance"`
-		Period      uint64         `json:"period"`
-		RenewWindow uint64         `json:"renewWindow"`
-		Download    uint64         `json:"download"`
-		Upload      uint64         `json:"upload"`
-		Storage     uint64         `json:"storage"`
-	}
-
-	// AutopilotStatusResponseGET is the response type for the /autopilot/status
-	// endpoint.
-	AutopilotStatusResponseGET struct {
-		CurrentPeriod uint64 `json:"currentPeriod"`
 	}
 )
 

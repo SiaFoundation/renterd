@@ -339,12 +339,7 @@ func main() {
 			log.Fatal("failed to create autopilot dir", err)
 		}
 
-		s, err := stores.NewJSONAutopilotStore(autopilotDir)
-		if err != nil {
-			log.Fatal("failed to create JSON autopilot store", err)
-		}
-
-		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, workers, logger)
+		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, autopilotDir, logger)
 		if err != nil {
 			log.Fatal("failed to create autopilot", err)
 		}

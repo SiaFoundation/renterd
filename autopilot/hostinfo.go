@@ -10,7 +10,10 @@ import (
 )
 
 func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerGET, error) {
-	cfg := c.ap.Config()
+	cfg, err := c.ap.Config(ctx)
+	if err != nil {
+		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch autopilot settings: %w", err)
+	}
 	if cfg.Contracts.Allowance.IsZero() {
 		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
 	}
