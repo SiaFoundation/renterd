@@ -309,8 +309,8 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Log
 	return w.Handler(), w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
-	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, dir string, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
+	ap, err := autopilot.New(cfg.ID, dir, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
 	if err != nil {
 		return nil, nil, nil, err
 	}
