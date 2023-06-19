@@ -860,7 +860,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key, contractSet string, o 
 			return err
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
 			// No buffer found, create a new one.
-			return createSlabBuffer(tx, obj.ID, *partialSlab)
+			return createSlabBuffer(tx, obj.ID, cs.ID, *partialSlab)
 		}
 
 		// We have a buffer. Sanity check it.
@@ -912,7 +912,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key, contractSet string, o 
 		// Otherwise, create a new buffer with a new slab and slice.
 		overflowSlab := *partialSlab
 		overflowSlab.Data = overflow
-		return createSlabBuffer(tx, obj.ID, overflowSlab)
+		return createSlabBuffer(tx, obj.ID, cs.ID, overflowSlab)
 	})
 }
 
@@ -920,7 +920,7 @@ func slabSize(minShards, totalShards uint8) int {
 	return int(rhpv2.SectorSize) * int(totalShards) / int(minShards)
 }
 
-func createSlabBuffer(tx *gorm.DB, objectID uint, partialSlab object.PartialSlab) error {
+func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab object.PartialSlab) error {
 	if partialSlab.TotalShards == 0 || partialSlab.MinShards == 0 {
 		return fmt.Errorf("min shards and total shards must be greater than 0: %v, %v", partialSlab.MinShards, partialSlab.TotalShards)
 	}
@@ -935,11 +935,14 @@ func createSlabBuffer(tx *gorm.DB, objectID uint, partialSlab object.PartialSlab
 		return err
 	}
 	// Create a new buffer and slab.
+	// TODO: Eventually we want to create a buffer per contract set to make sure
+	// data is not packed into a contract set that it wasn't uploaded for.
 	return tx.Create(&dbSlabBuffer{
 		DBSlab: dbSlab{
-			Key:         key, // random placeholder key
-			MinShards:   partialSlab.MinShards,
-			TotalShards: partialSlab.TotalShards,
+			DBContractSetID: contractSetID,
+			Key:             key, // random placeholder key
+			MinShards:       partialSlab.MinShards,
+			TotalShards:     partialSlab.TotalShards,
 			Slices: []dbSlice{
 				{
 					DBObjectID: objectID,

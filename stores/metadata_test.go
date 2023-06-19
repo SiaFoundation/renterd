@@ -280,7 +280,7 @@ func TestSQLContractStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sets) != 2 {
+	if len(sets) != 3 { // 2 sets + default set
 		t.Fatal("wrong number of sets")
 	}
 	if sets[0] != "foo" || sets[1] != "foo2" {
@@ -937,9 +937,10 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObjSlab1 := dbSlab{
-		Key:         obj1Slab0Key,
-		MinShards:   1,
-		TotalShards: 1,
+		DBContractSetID: 1,
+		Key:             obj1Slab0Key,
+		MinShards:       1,
+		TotalShards:     1,
 		Shards: []dbSector{
 			{
 				DBSlabID:   1,
@@ -972,9 +973,10 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObjSlab2 := dbSlab{
-		Key:         obj1Slab1Key,
-		MinShards:   2,
-		TotalShards: 1,
+		DBContractSetID: 1,
+		Key:             obj1Slab1Key,
+		MinShards:       2,
+		TotalShards:     1,
 		Shards: []dbSector{
 			{
 				DBSlabID:   2,
