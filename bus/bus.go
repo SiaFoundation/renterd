@@ -1109,6 +1109,7 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) autopilotsListHandlerGET(jc jape.Context) {
+	fmt.Println("FETCHING AUTOPILOTS")
 	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
 		jc.Encode(autopilots)
 	}
@@ -1160,13 +1161,14 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
 		tp:            tp,
 		w:             w,
 		hdb:           hdb,
+		as:            as,
 		ms:            ms,
 		ss:            ss,
 		eas:           eas,
@@ -1261,9 +1263,9 @@ func (b *bus) Handler() http.Handler {
 		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
 		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
 
-		"GET     /autopilots":     b.autopilotsListHandlerGET,
-		"GET     /autopilots/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilots/:id":  b.autopilotsHandlerPUT,
+		"GET    /autopilots":     b.autopilotsListHandlerGET,
+		"GET    /autopilots/:id": b.autopilotsHandlerGET,
+		"PUT    /autopilots/:id": b.autopilotsHandlerPUT,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,

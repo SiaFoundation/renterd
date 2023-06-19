@@ -339,7 +339,7 @@ func main() {
 			log.Fatal("failed to create autopilot dir", err)
 		}
 
-		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, autopilotDir, logger)
+		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, logger)
 		if err != nil {
 			log.Fatal("failed to create autopilot", err)
 		}

@@ -3,6 +3,7 @@ package testing
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -278,7 +279,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	workerShutdownFns = append(workerShutdownFns, wStopFn)
 
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, apDir, logger)
+	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -357,12 +358,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		}
 	}
 
-	// Update the autopilot config.
-	err = cluster.UpdateAutopilotConfig(context.Background(), api.DefaultAutopilotConfig())
-	if err != nil {
-		return nil, err
-	}
-
 	// Update the bus settings.
 	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
 	if err != nil {
@@ -373,7 +368,40 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		return nil, err
 	}
 
+	// Migrate the autopilot JSON.
+	err = compatMigrateAutopilotJSON(context.Background(), busClient, apCfg.ID, apDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return cluster, nil
+}
+
+func compatMigrateAutopilotJSON(ctx context.Context, bc *bus.Client, id, dir string) error {
+	// check if the file exists
+	path := filepath.Join(dir, "autopilot.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+
+	// read the json config
+	var cfg api.AutopilotConfig
+	if data, err := os.ReadFile(path); err != nil {
+		return err
+	} else if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+
+	// create an autopilot entry
+	if err := bc.UpdateAutopilot(ctx, api.Autopilot{
+		ID:     id,
+		Config: cfg,
+	}); err != nil {
+		return err
+	}
+
+	// remove config
+	return os.Remove(path)
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.

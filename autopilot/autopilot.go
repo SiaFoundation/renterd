@@ -2,12 +2,9 @@ package autopilot
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -162,9 +159,19 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 // Config returns the autopilot config.
 func (ap *Autopilot) Config(ctx context.Context) (api.AutopilotConfig, error) {
 	autopilot, err := ap.bus.Autopilot(ctx, ap.id)
+	if err == nil {
+		return autopilot.Config, nil
+	}
+
+	// if no autopilot was found, persist default config
+	if strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		autopilot = api.Autopilot{ID: ap.id, Config: api.DefaultAutopilotConfig()}
+		err = ap.bus.UpdateAutopilot(ctx, autopilot)
+	}
 	if err != nil {
 		return api.AutopilotConfig{}, err
 	}
+
 	return autopilot.Config, nil
 }
 
@@ -408,7 +415,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, dir string) (*Autopilot, error) {
+func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		id:      id,
 		bus:     bus,
@@ -426,20 +433,6 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 		scannerTimeoutInterval,
 		scannerTimeoutMinTimeout,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	// migrate autopilot json config to bus
-	if err := compatMigrateAutopilotJSONConfigToBus(bus, id, dir); err != nil {
-		return nil, fmt.Errorf("failed to migrate autopilot config to the bus: %v", err)
-	}
-
-	// ensure autopilot exists
-	_, err = bus.Autopilot(context.Background(), id)
-	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
-		err = bus.UpdateAutopilot(context.Background(), api.Autopilot{ID: id, Config: api.DefaultAutopilotConfig()})
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -474,35 +467,4 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(hosts)
-}
-
-func compatMigrateAutopilotJSONConfigToBus(b Bus, id, dir string) error {
-	// check if the file exists
-	path := filepath.Join(dir, "autopilot.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
-
-	// read the json config
-	var cfg api.AutopilotConfig
-	if data, err := os.ReadFile(path); err != nil {
-		return err
-	} else if err := json.Unmarshal(data, &cfg); err != nil {
-		return err
-	}
-
-	// ensure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// create an autopilot entry
-	if err := b.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     id,
-		Config: cfg,
-	}); err != nil {
-		return err
-	}
-
-	// remove config
-	return os.Remove(path)
 }
