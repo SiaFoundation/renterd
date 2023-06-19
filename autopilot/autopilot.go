@@ -258,11 +258,17 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// perform maintenance
-			err = ap.c.performContractMaintenance(ctx, w)
+			setChanged, err := ap.c.performContractMaintenance(ctx, w)
 			if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 			maintenanceSuccess := err == nil
+
+			// upon success, notify the migrator. The health of slabs might have
+			// changed.
+			if maintenanceSuccess && setChanged {
+				ap.m.SignalMaintenanceFinished()
+			}
 
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {

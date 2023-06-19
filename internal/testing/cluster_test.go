@@ -46,7 +46,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), "/foo", "autopilot", object.Object{
+	err = b.AddObject(context.Background(), "foo", "autopilot", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -252,6 +252,54 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
+// TestUploadDownloadEmpty is an integration test that verifies empty objects
+// can be uploaded and download correctly.
+func TestUploadDownloadEmpty(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload an empty file
+	if err := w.UploadObject(context.Background(), bytes.NewReader(nil), "empty"); err != nil {
+		t.Fatal(err)
+	}
+
+	// download the empty file
+	var buffer bytes.Buffer
+	if err := w.DownloadObject(context.Background(), &buffer, "empty"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's empty
+	if len(buffer.Bytes()) != 0 {
+		t.Fatal("unexpected")
+	}
+}
+
 // TestUploadDownloadBasic is an integration test that verifies objects can be
 // uploaded and download correctly.
 func TestUploadDownloadBasic(t *testing.T) {
@@ -420,6 +468,11 @@ func TestUploadDownloadBasic(t *testing.T) {
 		if !bytes.Equal(data, buffer.Bytes()) {
 			t.Fatal("unexpected")
 		}
+
+		// delete the object
+		if err := w.DeleteObject(context.Background(), name); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -471,6 +524,12 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 		nFunded := 0
 		for _, c := range cms {
+			if !c.Spending.Uploads.IsZero() {
+				t.Fatal("upload spending should be zero")
+			}
+			if !c.Spending.Downloads.IsZero() {
+				t.Fatal("download spending should be zero")
+			}
 			if !c.Spending.FundAccount.IsZero() {
 				nFunded++
 				if c.RevisionNumber == 0 {
@@ -601,11 +660,17 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		for _, c := range cms {
-			if !c.Spending.Uploads.IsZero() {
-				t.Fatal("upload spending should be zero")
+			if c.Spending.Uploads.IsZero() {
+				t.Fatal("upload spending shouldn't be zero")
 			}
 			if !c.Spending.Downloads.IsZero() {
 				t.Fatal("download spending should be zero")
+			}
+			if c.RevisionNumber == 0 {
+				t.Fatalf("revision number for contract wasn't recorded: %v", c.RevisionNumber)
+			}
+			if c.Size == 0 {
+				t.Fatalf("size for contract wasn't recorded: %v", c.Size)
 			}
 		}
 		return nil

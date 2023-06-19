@@ -106,6 +106,26 @@ func TestObjectBasic(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal("object mismatch", cmp.Diff(got, want))
 	}
+
+	// create an object without slabs
+	want2 := object.Object{
+		Key:   object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{},
+	}
+
+	// add the object
+	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want2, nil, make(map[types.PublicKey]types.FileContractID)); err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the object
+	got2, err := db.Object(context.Background(), t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got2, want2) {
+		t.Fatal("object mismatch", cmp.Diff(got2, want2))
+	}
 }
 
 // TestSQLContractStore tests SQLContractStore functionality.

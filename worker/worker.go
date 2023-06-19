@@ -299,7 +299,6 @@ type worker struct {
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
-	pool            *sessionPool
 	masterKey       [32]byte
 
 	uploadManager *uploadManager
@@ -396,29 +395,6 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(hostV2) error) (err error) {
-	host := w.pool.session(hostKey, hostIP, contractID, w.deriveRenterKey(hostKey))
-	done := make(chan struct{})
-
-	// Unlock hosts either after the context is closed or the function is done
-	// executing.
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-		}
-		w.unlockHost(host)
-	}()
-	defer func() {
-		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-	}()
-	err = fn(host)
-	return err
-}
-
 func (w *worker) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
@@ -461,17 +437,6 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	}
 
 	return fn(rev)
-}
-
-func (w *worker) unlockHost(host hostV2) {
-	// apply a pessimistic timeout, ensuring unlocking the contract or force
-	// closing the session does not deadlock and keep this goroutine around
-	// forever. Use a background context as the parent to avoid timing out
-	// the unlock when 'withHosts' returns and the parent context gets
-	// closed.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
-	defer cancel()
-	w.pool.unlockContract(ctx, host.(*sharedSession))
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
@@ -855,9 +820,6 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// attach contract spending recorder to the context.
-	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
-
 	// fetch all contracts
 	dlContracts, err := w.bus.Contracts(ctx)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
@@ -870,7 +832,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
+	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -950,7 +912,6 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 	if len(obj.Slabs) == 0 {
-		jc.Error(errors.New("object has no data"), http.StatusInternalServerError)
 		return
 	}
 
@@ -1139,7 +1100,13 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path")))
+	path := strings.TrimPrefix(jc.PathParam("path"), "/")
+	err := w.bus.DeleteObject(jc.Request.Context(), path)
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	jc.Check("couldn't delete object", err)
 }
 
 func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
@@ -1190,18 +1157,9 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadSectorTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
-	}
-	if sessionLockTimeout == 0 {
-		return nil, errors.New("session lock timeout must be positive")
-	}
-	if sessionReconectTimeout == 0 {
-		return nil, errors.New("session reconnect timeout must be positive")
-	}
-	if sessionTTL == 0 {
-		return nil, errors.New("session TTL must be positive")
 	}
 	if busFlushInterval == 0 {
 		return nil, errors.New("bus flush interval must be positive")
@@ -1218,7 +1176,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
 		bus:                     b,
-		pool:                    newSessionPool(sessionLockTimeout, sessionReconectTimeout, sessionTTL),
 		masterKey:               masterKey,
 		busFlushInterval:        busFlushInterval,
 		downloadSectorTimeout:   downloadSectorTimeout,
@@ -1319,11 +1276,12 @@ type contractLock struct {
 
 	stopCtx       context.Context
 	stopCtxCancel context.CancelFunc
+	stopWG        sync.WaitGroup
 }
 
 func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &contractLock{
+	cl := &contractLock{
 		lockID: lockID,
 		fcid:   fcid,
 		d:      d,
@@ -1333,11 +1291,18 @@ func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, 
 		stopCtx:       ctx,
 		stopCtxCancel: cancel,
 	}
+	cl.stopWG.Add(1)
+	go func() {
+		cl.keepaliveLoop()
+		cl.stopWG.Done()
+	}()
+	return cl
 }
 
 func (cl *contractLock) Release(ctx context.Context) error {
 	// Stop background loop.
 	cl.stopCtxCancel()
+	cl.stopWG.Wait()
 
 	// Release the contract.
 	return cl.locker.ReleaseContract(ctx, cl.fcid, cl.lockID)
@@ -1345,7 +1310,10 @@ func (cl *contractLock) Release(ctx context.Context) error {
 
 func (cl *contractLock) keepaliveLoop() {
 	// Create ticker for 20% of the lock duration.
-	t := time.NewTicker(cl.d / 5)
+	start := time.Now()
+	var lastUpdate time.Time
+	tickDuration := cl.d / 5
+	t := time.NewTicker(tickDuration)
 
 	// Cleanup
 	defer func() {
@@ -1364,9 +1332,15 @@ func (cl *contractLock) keepaliveLoop() {
 		case <-t.C:
 		}
 		if err := cl.locker.KeepaliveContract(cl.stopCtx, cl.fcid, cl.lockID, cl.d); err != nil && !errors.Is(err, context.Canceled) {
-			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err), "contract", cl.fcid, "lockID", cl.lockID)
+			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err),
+				"contract", cl.fcid,
+				"lockID", cl.lockID,
+				"loopStart", start,
+				"timeSinceLastUpdate", time.Since(lastUpdate),
+				"tickDuration", tickDuration)
 			return
 		}
+		lastUpdate = time.Now()
 	}
 }
 
@@ -1375,9 +1349,7 @@ func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID,
 	if err != nil {
 		return nil, err
 	}
-	cl := newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger)
-	go cl.keepaliveLoop()
-	return cl, nil
+	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {

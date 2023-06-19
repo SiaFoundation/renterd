@@ -756,7 +756,12 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) objectsHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't delete object", b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path")))
+	err := b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"))
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	jc.Check("couldn't delete object", err)
 }
 
 func (b *bus) objectsStatshandlerGET(jc jape.Context) {

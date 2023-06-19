@@ -70,6 +70,7 @@ type (
 	revisionUpdate struct {
 		height uint64
 		number uint64
+		size   uint64
 	}
 )
 
@@ -339,7 +340,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 			}
 		}
 		for fcid, rev := range ss.unappliedRevisions {
-			if err := updateRevisionNumberAndHeight(tx, types.FileContractID(fcid), rev.height, rev.number); err != nil {
+			if err := applyRevisionUpdate(tx, types.FileContractID(fcid), rev); err != nil {
 				return fmt.Errorf("%w; failed to update revision number and height", err)
 			}
 		}
@@ -383,13 +384,14 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	var err error
-	for i := 0; i < 5; i++ {
+	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second}
+	for i := 0; i < len(timeoutIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)
 		if err == nil {
 			return nil
 		}
 		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, 5, err))
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(timeoutIntervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
 }

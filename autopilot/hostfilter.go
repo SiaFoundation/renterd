@@ -29,6 +29,7 @@ const (
 
 var (
 	errHostBlocked               = errors.New("host is blocked")
+	errHostNotFound              = errors.New("host not found")
 	errHostOffline               = errors.New("host is offline")
 	errLowScore                  = errors.New("host's score is below minimum")
 	errHostRedundantIP           = errors.New("host has redundant IP")
@@ -41,6 +42,7 @@ var (
 	errContractOutOfFunds        = errors.New("contract is out of funds")
 	errContractUpForRenewal      = errors.New("contract is up for renewal")
 	errContractMaxRevisionNumber = errors.New("contract has reached max revision number")
+	errContractNoRevision        = errors.New("contract has no revision")
 	errContractExpired           = errors.New("contract has expired")
 )
 
@@ -169,7 +171,7 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, f *ipFilter, h hostdb.Host, minScore float64, storedData uint64) (bool, unusableHostResult) {
+func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.Host, minScore float64, storedData uint64) (bool, unusableHostResult) {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
@@ -186,11 +188,6 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		// online check
 		if !h.IsOnline() {
 			errs = append(errs, errHostOffline)
-		}
-
-		// redundant IP check
-		if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(h) {
-			errs = append(errs, errHostRedundantIP)
 		}
 
 		// accepting contracts check
@@ -221,36 +218,43 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 
 // isUsableContract returns whether the given contract is usable and whether it
 // can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency) (usable, refresh, renew bool, reasons []error) {
+func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, refresh, renew bool, reasons []string) {
 	c, s := ci.contract, ci.settings
 
 	if bh > c.EndHeight() {
-		reasons = append(reasons, errContractExpired)
+		reasons = append(reasons, errContractExpired.Error())
 		renew = false
 		refresh = false
 	}
 
 	if c.Revision.RevisionNumber == math.MaxUint64 {
-		reasons = append(reasons, errContractMaxRevisionNumber)
+		reasons = append(reasons, errContractMaxRevisionNumber.Error())
 		renew = false
 		refresh = false
 	}
 
 	if isOutOfCollateral(c, s, renterFunds, bh) {
-		reasons = append(reasons, errContractOutOfCollateral)
+		reasons = append(reasons, errContractOutOfCollateral.Error())
 		renew = false
 		refresh = true
 	}
 	if isOutOfFunds(cfg, s, c) {
-		reasons = append(reasons, errContractOutOfFunds)
+		reasons = append(reasons, errContractOutOfFunds.Error())
 		renew = false
 		refresh = true
 	}
 	if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
 		if secondHalf {
-			reasons = append(reasons, errContractUpForRenewal) // only unusable if in second half of renew window
+			reasons = append(reasons, errContractUpForRenewal.Error()) // only unusable if in second half of renew window
 		}
 		renew = true
+		refresh = false
+	}
+	// redundant IP check - always perform this last since it will update
+	// the ipFilter.
+	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(ci.contract.HostIP, ci.contract.HostKey) {
+		reasons = append(reasons, errHostRedundantIP.Error())
+		renew = false
 		refresh = false
 	}
 

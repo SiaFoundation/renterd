@@ -22,6 +22,7 @@ type (
 		ProofHeight    uint64 `json:"proofHeight"`
 		RevisionHeight uint64 `json:"revisionHeight"`
 		RevisionNumber uint64 `json:"revisionNumber"`
+		Size           uint64 `json:"size"`
 		StartHeight    uint64 `json:"startHeight"`
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
@@ -42,6 +43,7 @@ type (
 		ContractSpending
 		ContractID     types.FileContractID `json:"contractID"`
 		RevisionNumber uint64               `json:"revisionNumber"`
+		Size           uint64               `json:"size"`
 	}
 
 	// An ArchivedContract contains all information about a contract with a host
@@ -55,6 +57,7 @@ type (
 		ProofHeight    uint64 `json:"proofHeight"`
 		RevisionHeight uint64 `json:"revisionHeight"`
 		RevisionNumber uint64 `json:"revisionNumber"`
+		Size           uint64 `json:"size"`
 		StartHeight    uint64 `json:"startHeight"`
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
@@ -76,7 +79,7 @@ func (c Contract) EndHeight() uint64 { return c.WindowStart }
 // FileSize returns the current Size of the contract.
 func (c Contract) FileSize() uint64 {
 	if c.Revision == nil {
-		return 0
+		return c.Size // use latest recorded value if we don't have a recent revision
 	}
 	return c.Revision.Filesize
 }
