@@ -909,7 +909,7 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Delete all objects.
-	if err := cluster.Bus.DeleteObjects(context.Background(), "/dir/"); err != nil {
+	if err := cluster.Bus.DeleteObject(context.Background(), "/dir/", true); err != nil {
 		t.Fatal(err)
 	}
 	objects, err = cluster.Bus.SearchObjects(context.Background(), "/dir/", 0, 100)
