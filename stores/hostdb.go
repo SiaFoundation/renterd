@@ -876,6 +876,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
 						height: height,
 						number: rev.NewRevisionNumber,
+						size:   rev.NewFileSize,
 					}
 				}
 			}
@@ -974,10 +975,11 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	return tx.Create(&hosts).Error
 }
 
-func updateRevisionNumberAndHeight(db *gorm.DB, fcid types.FileContractID, revisionHeight, revisionNumber uint64) error {
+func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpdate) error {
 	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"revision_height": revisionHeight,
-		"revision_number": fmt.Sprint(revisionNumber),
+		"revision_height": rev.height,
+		"revision_number": fmt.Sprint(rev.number),
+		"size":            rev.size,
 	})
 }
 

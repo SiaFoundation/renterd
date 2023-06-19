@@ -33,7 +33,6 @@ var (
 type hostV2 interface {
 	Contract() types.FileContractID
 	HostKey() types.PublicKey
-	DeleteSectors(ctx context.Context, roots []types.Hash256) error
 }
 
 type hostV3 interface {
@@ -49,7 +48,6 @@ type hostV3 interface {
 }
 
 type hostProvider interface {
-	withHostV2(context.Context, types.FileContractID, types.PublicKey, string, func(hostV2) error) (err error)
 	newHostV3(context.Context, types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
 }
 
@@ -315,40 +313,6 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.S
 	}
 	slabs[len(slabs)-1].Length = uint32(lastLength)
 	return slabs
-}
-
-func deleteSlabs(ctx context.Context, slabs []object.Slab, hosts []hostV2) error {
-	rootsByHost := make(map[types.PublicKey][]types.Hash256)
-	for _, s := range slabs {
-		for _, sector := range s.Shards {
-			rootsByHost[sector.Host] = append(rootsByHost[sector.Host], sector.Root)
-		}
-	}
-
-	errChan := make(chan *HostError)
-	for _, h := range hosts {
-		go func(h hostV2) {
-			// NOTE: if host is not storing any sectors, the map lookup will return
-			// nil, making this a no-op
-			err := h.DeleteSectors(ctx, rootsByHost[h.HostKey()])
-			if err != nil {
-				errChan <- &HostError{h.HostKey(), err}
-			} else {
-				errChan <- nil
-			}
-		}(h)
-	}
-
-	var errs HostErrorSet
-	for range hosts {
-		if err := <-errChan; err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if len(errs) > 0 {
-		return errs
-	}
-	return nil
 }
 
 func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, downloadSectorTimeout, uploadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {

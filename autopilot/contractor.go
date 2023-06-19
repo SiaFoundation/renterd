@@ -98,12 +98,12 @@ func newContractor(ap *Autopilot) *contractor {
 	}
 }
 
-func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) error {
+func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (bool, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
 
 	if c.ap.isStopped() || !c.ap.isSynced() {
-		return nil // skip contract maintenance if we're not synced
+		return false, nil // skip contract maintenance if we're not synced
 	}
 
 	c.logger.Info("performing contract maintenance")
@@ -117,31 +117,31 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// not zero in several places
 	if state.cfg.Contracts.Amount == 0 {
 		c.logger.Warn("contracts is set to zero, skipping contract maintenance")
-		return nil
+		return false, nil
 	}
 
 	// no maintenance if no allowance was set
 	if state.cfg.Contracts.Allowance.IsZero() {
 		c.logger.Warn("allowance is set to zero, skipping contract maintenance")
-		return nil
+		return false, nil
 	}
 
 	// no maintenance if no period was set
 	if state.cfg.Contracts.Period == 0 {
 		c.logger.Warn("period is set to zero, skipping contract maintenance")
-		return nil
+		return false, nil
 	}
 
 	// fetch our wallet address
 	address, err := c.ap.bus.WalletAddress(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// fetch current contract set
 	currentSet, err := c.ap.bus.ContractSetContracts(ctx, state.cfg.Contracts.Set)
 	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
-		return err
+		return false, err
 	}
 	isInCurrentSet := make(map[types.FileContractID]struct{})
 	for _, c := range currentSet {
@@ -153,7 +153,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	start := time.Now()
 	resp, err := w.Contracts(ctx, timeoutHostRevision)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if resp.Error != "" {
 		c.logger.Error(resp.Error)
@@ -183,7 +183,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// fetch all hosts
 	hosts, err := c.ap.bus.Hosts(ctx, 0, -1)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// min score to pass checks.
@@ -191,21 +191,19 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	if len(hosts) > 0 {
 		minScore, err = c.managedFindMinAllowedHostScores(ctx, w, hosts, hostData)
 		if err != nil {
-			return fmt.Errorf("failed to determine min score for contract check: %w", err)
+			return false, fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
 
 	// prepare hosts for cache
-	f := newIPFilter(c.logger)
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 	hostInfos := make(map[types.PublicKey]hostInfo)
 	for _, h := range hosts {
 		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
-
-		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, h, minScore, hostData[h.PublicKey])
+		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, h, minScore, hostData[h.PublicKey])
 		hostInfos[h.PublicKey] = hostInfo{
 			Usable:         isUsable,
 			UnusableResult: unusableResult,
@@ -222,7 +220,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// run checks
 	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, minScore)
 	if err != nil {
-		return fmt.Errorf("failed to run contract checks, err: %v", err)
+		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
 
 	// archive contracts
@@ -236,7 +234,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 	// calculate remaining funds
 	remaining, err := c.remainingFunds(contracts)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// calculate 'limit' amount of contracts we want to renew
@@ -308,19 +306,18 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) e
 
 	// update contract set
 	if c.ap.isStopped() {
-		return errors.New("autopilot stopped before maintenance could be completed")
+		return false, errors.New("autopilot stopped before maintenance could be completed")
 	}
 	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	// log the contract set after maintenance
-	c.logContractSetUpdate(currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData)
-	return nil
+	// return whether the maintenance changed the contract set
+	return c.computeContractSetChanged(currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
 }
 
-func (c *contractor) logContractSetUpdate(oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) {
+func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
 	// build some maps for easier lookups
 	previous := make(map[types.FileContractID]struct{})
 	for _, c := range oldSet {
@@ -385,6 +382,7 @@ func (c *contractor) logContractSetUpdate(oldSet []api.ContractMetadata, newSet,
 		"added", len(added),
 		"removed", len(removed),
 	)
+	return len(added)+len(removed) > 0
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
@@ -493,6 +491,13 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	toArchive = make(map[types.FileContractID]string)
 	toStopUsing = make(map[types.FileContractID]string)
 
+	// when checking the contracts, do so from largest to smallest. That way, we
+	// prefer larger hosts on redundant networks.
+	contracts = append([]api.Contract{}, contracts...)
+	sort.Slice(contracts, func(i, j int) bool {
+		return contracts[i].FileSize() > contracts[j].FileSize()
+	})
+
 	// check all contracts
 	for _, contract := range contracts {
 		// break if autopilot is stopped
@@ -562,7 +567,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, f, host.Host, minScore, revision.Filesize)
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, revision.Filesize)
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
@@ -577,7 +582,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds)
+		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds, f)
 		if !usable {
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
@@ -644,6 +649,14 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		return nil, err
 	}
 
+	// prepare an IP filter that contains all used hosts
+	f := newIPFilter(c.logger)
+	for _, h := range hosts {
+		if _, used := usedHosts[h.PublicKey]; used {
+			_ = f.isRedundantIP(h.NetAddress, h.PublicKey)
+		}
+	}
+
 	// calculate min/max contract funds
 	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(state.cfg)
 
@@ -679,6 +692,11 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
 		if breakdown := gc.Check(nil, &host.PriceTable.HostPriceTable); breakdown.Gouging() {
 			c.logger.Errorw("candidate host became unusable", "hk", host.PublicKey, "reasons", breakdown.Reasons())
+			continue
+		}
+
+		// check if we already have a contract with a host on that subnet
+		if !state.cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(host.NetAddress, host.PublicKey) {
 			continue
 		}
 
@@ -942,9 +960,6 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 	state := c.ap.state
 
-	// create an IP filter
-	ipFilter := newIPFilter(c.logger)
-
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
@@ -954,7 +969,6 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	for _, h := range hosts {
 		// filter out used hosts
 		if _, exclude := usedHosts[h.PublicKey]; exclude {
-			_ = ipFilter.isRedundantIP(h) // ensure the host's IP is registered as used
 			excluded++
 			continue
 		}
@@ -986,7 +1000,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = state.cs.BlockHeight
-		if usable, result := isUsableHost(state.cfg, state.rs, gc, ipFilter, h, minScore, storedData[h.PublicKey]); usable {
+		if usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey]); usable {
 			scored = append(scored, h)
 			scores = append(scores, result.scoreBreakdown.Score())
 		} else {

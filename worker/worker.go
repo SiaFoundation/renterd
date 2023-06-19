@@ -299,7 +299,6 @@ type worker struct {
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
-	pool            *sessionPool
 	masterKey       [32]byte
 
 	uploadManager *uploadManager
@@ -396,29 +395,6 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withHostV2(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP string, fn func(hostV2) error) (err error) {
-	host := w.pool.session(hostKey, hostIP, contractID, w.deriveRenterKey(hostKey))
-	done := make(chan struct{})
-
-	// Unlock hosts either after the context is closed or the function is done
-	// executing.
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-		}
-		w.unlockHost(host)
-	}()
-	defer func() {
-		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-	}()
-	err = fn(host)
-	return err
-}
-
 func (w *worker) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
@@ -461,17 +437,6 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 	}
 
 	return fn(rev)
-}
-
-func (w *worker) unlockHost(host hostV2) {
-	// apply a pessimistic timeout, ensuring unlocking the contract or force
-	// closing the session does not deadlock and keep this goroutine around
-	// forever. Use a background context as the parent to avoid timing out
-	// the unlock when 'withHosts' returns and the parent context gets
-	// closed.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
-	defer cancel()
-	w.pool.unlockContract(ctx, host.(*sharedSession))
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
@@ -855,9 +820,6 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// attach contract spending recorder to the context.
-	ctx = WithContractSpendingRecorder(ctx, w.contractSpendingRecorder)
-
 	// fetch all contracts
 	dlContracts, err := w.bus.Contracts(ctx)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
@@ -1195,18 +1157,9 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionLockTimeout, sessionReconectTimeout, sessionTTL, busFlushInterval, downloadSectorTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadSectorTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
-	}
-	if sessionLockTimeout == 0 {
-		return nil, errors.New("session lock timeout must be positive")
-	}
-	if sessionReconectTimeout == 0 {
-		return nil, errors.New("session reconnect timeout must be positive")
-	}
-	if sessionTTL == 0 {
-		return nil, errors.New("session TTL must be positive")
 	}
 	if busFlushInterval == 0 {
 		return nil, errors.New("bus flush interval must be positive")
@@ -1223,7 +1176,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, sessionL
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
 		bus:                     b,
-		pool:                    newSessionPool(sessionLockTimeout, sessionReconectTimeout, sessionTTL),
 		masterKey:               masterKey,
 		busFlushInterval:        busFlushInterval,
 		downloadSectorTimeout:   downloadSectorTimeout,

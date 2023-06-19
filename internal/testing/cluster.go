@@ -790,16 +790,13 @@ func testBusCfg() node.BusConfig {
 
 func testWorkerCfg() node.WorkerConfig {
 	return node.WorkerConfig{
-		AllowPrivateIPs:         true,
-		ContractLockTimeout:     5 * time.Second,
-		ID:                      "worker",
-		BusFlushInterval:        testBusFlushInterval,
-		SessionLockTimeout:      30 * time.Second,
-		SessionReconnectTimeout: 10 * time.Second,
-		SessionTTL:              2 * time.Minute,
-		DownloadSectorTimeout:   500 * time.Millisecond,
-		UploadOverdriveTimeout:  500 * time.Millisecond,
-		UploadMaxOverdrive:      5,
+		AllowPrivateIPs:        true,
+		ContractLockTimeout:    5 * time.Second,
+		ID:                     "worker",
+		BusFlushInterval:       testBusFlushInterval,
+		DownloadSectorTimeout:  500 * time.Millisecond,
+		UploadOverdriveTimeout: 500 * time.Millisecond,
+		UploadMaxOverdrive:     5,
 	}
 }
 

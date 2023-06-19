@@ -524,6 +524,12 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 		nFunded := 0
 		for _, c := range cms {
+			if !c.Spending.Uploads.IsZero() {
+				t.Fatal("upload spending should be zero")
+			}
+			if !c.Spending.Downloads.IsZero() {
+				t.Fatal("download spending should be zero")
+			}
 			if !c.Spending.FundAccount.IsZero() {
 				nFunded++
 				if c.RevisionNumber == 0 {
@@ -654,11 +660,17 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		for _, c := range cms {
-			if !c.Spending.Uploads.IsZero() {
-				t.Fatal("upload spending should be zero")
+			if c.Spending.Uploads.IsZero() {
+				t.Fatal("upload spending shouldn't be zero")
 			}
 			if !c.Spending.Downloads.IsZero() {
 				t.Fatal("download spending should be zero")
+			}
+			if c.RevisionNumber == 0 {
+				t.Fatalf("revision number for contract wasn't recorded: %v", c.RevisionNumber)
+			}
+			if c.Size == 0 {
+				t.Fatalf("size for contract wasn't recorded: %v", c.Size)
 			}
 		}
 		return nil
