@@ -191,7 +191,9 @@ func (ap *Autopilot) Compat() error {
 	}
 
 	// read the json config
-	var cfg api.AutopilotConfig
+	var cfg struct {
+		Config api.AutopilotConfig `json:"Config"`
+	}
 	if data, err := os.ReadFile(path); err != nil {
 		return err
 	} else if err := json.Unmarshal(data, &cfg); err != nil {
@@ -201,7 +203,7 @@ func (ap *Autopilot) Compat() error {
 	// create an autopilot entry
 	if err := ap.bus.UpdateAutopilot(ctx, api.Autopilot{
 		ID:     ap.id,
-		Config: cfg,
+		Config: cfg.Config,
 	}); err != nil {
 		return err
 	}
@@ -451,6 +453,10 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 
 // New initializes an Autopilot.
 func New(id, dir string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
+	if id == "" {
+		return nil, errors.New("id cannot be empty")
+	}
+
 	ap := &Autopilot{
 		id:      id,
 		dir:     dir,

@@ -342,6 +342,7 @@ func main() {
 			log.Fatal("failed to create autopilot dir", err)
 		}
 
+		autopilotCfg.AutopilotConfig.ID = "autopilot" // hardcoded
 		ap, runFn, compatFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, autopilotDir, logger)
 		if err != nil {
 			log.Fatal("failed to create autopilot", err)
