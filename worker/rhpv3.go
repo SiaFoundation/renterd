@@ -212,7 +212,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	defer cancel()
 	rev, err := h.fetchRevisionWithAccount(ctx, h.HostKey(), h.siamuxAddr, blockHeight, h.fcid)
 	if err != nil && !isBalanceInsufficient(err) {
-		return types.FileContractRevision{}, err
+		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
 		return rev, nil
 	}
@@ -221,8 +221,18 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	ctx, cancel = timeoutCtx()
 	defer cancel()
 	rev, err = h.fetchRevisionWithContract(ctx, h.HostKey(), h.siamuxAddr, h.fcid)
+	if err != nil && !strings.Contains(err.Error(), ErrInsufficientFunds.Error()) {
+		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with contract: %v", err)
+	} else if err == nil {
+		return rev, nil
+	}
+
+	// If we don't have enough money in the contract, try again without paying.
+	ctx, cancel = timeoutCtx()
+	defer cancel()
+	rev, err = h.fetchRevisionNoPayment(ctx, h.HostKey(), h.siamuxAddr, h.fcid)
 	if err != nil {
-		return types.FileContractRevision{}, err
+		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision without payment: %v", err)
 	}
 	return rev, nil
 }
@@ -266,6 +276,17 @@ func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.Publ
 				return rhpv3.HostPriceTable{}, nil, err
 			}
 			return pt, &payment, nil
+		})
+		return err
+	})
+	return rev, err
+}
+
+func (h *host) fetchRevisionNoPayment(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
+		_, err = RPCLatestRevision(ctx, t, contractID, func(r *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			rev = *r
+			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err
 	})
