@@ -50,11 +50,11 @@ const (
 
 	// timeoutHostPriceTable is the amount of time we wait to receive a price
 	// table from the host
-	timeoutHostPriceTable = 30 * time.Second
+	timeoutHostPriceTable = time.Minute
 
 	// timeoutHostRevision is the amount of time we wait to receive the latest
 	// revision from the host
-	timeoutHostRevision = 30 * time.Second
+	timeoutHostRevision = time.Minute
 
 	// timeoutHostScan is the amount of time we wait for a host scan to be
 	// completed
