@@ -33,7 +33,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v3
         with:
-          args: --timeout=5m
+          args: --timeout=30m
       - name: Test
         uses: n8maninger/action-golang-test@v1
         with:
