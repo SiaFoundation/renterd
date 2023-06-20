@@ -410,7 +410,7 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, to
 		return
 	}
 
-	s.knownContracts[types.FileContractID(added.FCID)] = struct{}{}
+	s.addKnownContract(types.FileContractID(added.FCID))
 	return added.convert(), nil
 }
 
@@ -466,10 +466,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
-		s.mu.Lock()
-		s.knownContracts[c.ID()] = struct{}{}
-		s.mu.Unlock()
-
+		s.addKnownContract(c.ID())
 		renewed = newContract
 		return nil
 	}); err != nil {
@@ -722,6 +719,19 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 		}
 	}
 	return nil
+}
+
+func (s *SQLStore) addKnownContract(fcid types.FileContractID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.knownContracts[fcid] = struct{}{}
+}
+
+func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, found := s.knownContracts[fcid]
+	return found
 }
 
 func pruneSlabs(tx *gorm.DB) error {

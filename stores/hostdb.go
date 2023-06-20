@@ -872,7 +872,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 		// Update RevisionHeight and RevisionNumber for our contracts.
 		for _, txn := range sb.Transactions {
 			for _, rev := range txn.FileContractRevisions {
-				if _, isOurs := ss.knownContracts[types.FileContractID(rev.ParentID)]; isOurs {
+				if ss.isKnownContract(types.FileContractID(rev.ParentID)) {
 					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
 						height: height,
 						number: rev.NewRevisionNumber,
@@ -882,7 +882,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 			}
 			// Get ProofHeight for our contracts.
 			for _, sp := range txn.StorageProofs {
-				if _, isOurs := ss.knownContracts[types.FileContractID(sp.ParentID)]; isOurs {
+				if ss.isKnownContract(types.FileContractID(sp.ParentID)) {
 					ss.unappliedProofs[types.FileContractID(sp.ParentID)] = height
 				}
 			}
