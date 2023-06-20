@@ -554,11 +554,11 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// if the host doesn't have a valid pricetable, update it
-		var outdatedPT bool
+		var invalidPT bool
 		if time.Now().After(host.PriceTable.Expiry) {
 			if update, err := c.priceTable(ctx, w, host.Host); err != nil {
 				c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
-				outdatedPT = true
+				invalidPT = true
 			} else {
 				host.PriceTable = update
 			}
@@ -583,7 +583,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// did pass the host checks, we only want to be lenient if this contract
 		// is in the current set and only for a certain number of times,
 		// controlled by maxKeepLeeway
-		if outdatedPT {
+		if invalidPT {
 			if _, found := inCurrentSet[fcid]; !found || maxKeepLeeway == 0 {
 				toStopUsing[fcid] = "no valid price table"
 				continue
