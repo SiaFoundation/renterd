@@ -66,7 +66,8 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		maintenanceTxnID types.TransactionID
+		maintenanceTxnID         types.TransactionID
+		revisionSubmissionBuffer uint64
 
 		mu               sync.Mutex
 		cachedHostInfo   map[types.PublicKey]hostInfo
@@ -91,10 +92,11 @@ type (
 	}
 )
 
-func newContractor(ap *Autopilot) *contractor {
+func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64) *contractor {
 	return &contractor{
-		ap:     ap,
-		logger: ap.logger.Named("contractor"),
+		ap:                       ap,
+		logger:                   ap.logger.Named("contractor"),
+		revisionSubmissionBuffer: revisionSubmissionBuffer,
 	}
 }
 
@@ -509,7 +511,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		fcid := contract.ID
 
 		// check if contract is ready to be archived.
-		if state.cs.BlockHeight > contract.EndHeight()-api.BlocksPerDay {
+		if state.cs.BlockHeight > contract.EndHeight()-c.revisionSubmissionBuffer {
 			toArchive[fcid] = errContractExpired.Error()
 		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()

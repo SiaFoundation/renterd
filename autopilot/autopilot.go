@@ -442,7 +442,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
+func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer uint64) (*Autopilot, error) {
 	ap := &Autopilot{
 		bus:     bus,
 		logger:  logger.Sugar().Named("autopilot"),
@@ -465,7 +465,7 @@ func New(store Store, bus Bus, workers []Worker, logger *zap.Logger, heartbeat t
 	}
 
 	ap.s = scanner
-	ap.c = newContractor(ap)
+	ap.c = newContractor(ap, revisionSubmissionBuffer)
 	ap.m = newMigrator(ap, migrationHealthCutoff)
 	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
 	return ap, nil
