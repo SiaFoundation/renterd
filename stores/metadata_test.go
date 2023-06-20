@@ -283,7 +283,7 @@ func TestSQLContractStore(t *testing.T) {
 	if len(sets) != 3 { // 2 sets + default set
 		t.Fatal("wrong number of sets")
 	}
-	if sets[0] != "foo" || sets[1] != "foo2" {
+	if sets[0] != "foo" || sets[1] != "foo2" || sets[2] != testContractSet {
 		t.Fatal("wrong sets returned", sets)
 	}
 
