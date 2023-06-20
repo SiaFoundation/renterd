@@ -36,6 +36,8 @@ const (
 	// contracts the config dictates we should have, we'll only form new
 	// contracts if the number of contracts dips below 87.5% of the required
 	// contracts
+	//
+	// NOTE: updating this value indirectly affects 'maxKeepLeeway'
 	leewayPctRequiredContracts = 0.875
 
 	// maxInitialContractFundingDivisor and minInitialContractFundingDivisor
@@ -218,7 +220,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.mu.Unlock()
 
 	// run checks
-	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, minScore)
+	maxKeepLeeway := addLeeway(state.cfg.Contracts.Amount, 1-leewayPctRequiredContracts)
+	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore, maxKeepLeeway)
 	if err != nil {
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -459,7 +462,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64, maxKeepLeeway uint64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -521,16 +524,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// check if we have a revision
-		if contract.Revision == nil {
-			// NOTE: if we can not fetch the revision, we give the host the
-			// benefit of the doubt and keep it in the contractset, removing it
-			// might cause a lot of unnecessary migrations
-			toKeep = append(toKeep, fcid)
-			continue
-		}
-		revision := contract.Revision
-
 		// fetch host from hostdb
 		hk := contract.HostKey
 		host, err := c.ap.bus.Host(ctx, hk)
@@ -548,16 +541,24 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// fetch recent price table and attach it to host.
-		host.PriceTable, err = c.priceTable(ctx, w, host.Host)
-		if err != nil {
-			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
+		// if the host doesn't have a valid pricetable, update it
+		if time.Now().After(host.PriceTable.Expiry) {
+			host.PriceTable, err = c.priceTable(ctx, w, host.Host)
+			if err != nil {
+				c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 
-			// NOTE: if we can not fetch the price table, we give the host the
-			// benefit of the doubt and keep it in the contractset, removing it
-			// might cause a lot of unnecessary migrations
-			toKeep = append(toKeep, fcid)
-			continue
+				// NOTE: if we can not fetch the price table, we give the host
+				// the benefit of the doubt if it's in the current set and we
+				// have some leeway
+				_, ok := inCurrentSet[fcid]
+				if ok && maxKeepLeeway > 0 {
+					toKeep = append(toKeep, fcid)
+					maxKeepLeeway--
+				} else {
+					toStopUsing[fcid] = "could not fetch price table"
+				}
+				continue
+			}
 		}
 
 		// set the host's block height to ours to disable the height check in
@@ -567,11 +568,27 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, revision.Filesize)
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, contract.FileSize())
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", reasons)
+			continue
+		}
+
+		// check if we have a revision, without revision we can't perform the
+		// contract checks
+		if contract.Revision == nil {
+			// NOTE: if we can not fetch the revision, we give the host the
+			// benefit of the doubt if it's in the current set and we have some
+			// leeway
+			_, ok := inCurrentSet[fcid]
+			if ok && maxKeepLeeway > 0 {
+				toKeep = append(toKeep, fcid)
+				maxKeepLeeway--
+			} else {
+				toStopUsing[fcid] = errContractNoRevision.Error()
+			}
 			continue
 		}
 
