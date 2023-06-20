@@ -46,7 +46,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), "foo", object.Object{
+	err = b.AddObject(context.Background(), "foo", "autopilot", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -725,6 +725,12 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 			if !c.Spending.Downloads.IsZero() {
 				t.Fatal("download spending should be zero")
+			}
+			if c.RevisionNumber == 0 {
+				t.Fatalf("revision number for contract wasn't recorded: %v", c.RevisionNumber)
+			}
+			if c.Size == 0 {
+				t.Fatalf("size for contract wasn't recorded: %v", c.Size)
 			}
 		}
 		return nil
