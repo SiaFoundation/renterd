@@ -34,11 +34,11 @@ const (
 
 	// leewayPctRequiredContracts is the leeway we apply on the amount of
 	// contracts the config dictates we should have, we'll only form new
-	// contracts if the number of contracts dips below 87.5% of the required
+	// contracts if the number of contracts dips below 90% of the required
 	// contracts
 	//
 	// NOTE: updating this value indirectly affects 'maxKeepLeeway'
-	leewayPctRequiredContracts = 0.875
+	leewayPctRequiredContracts = 0.9
 
 	// maxInitialContractFundingDivisor and minInitialContractFundingDivisor
 	// define a range we use when calculating the initial contract funding
@@ -284,9 +284,17 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		}
 	}
 
+	// to avoid forming new contracts as soon as we dip below
+	// 'Contracts.Amount', we define a threshold but only if we have more
+	// contracts than 'Contracts.Amount' already
+	threshold := state.cfg.Contracts.Amount
+	if uint64(len(contracts)) > state.cfg.Contracts.Amount {
+		threshold = addLeeway(threshold, leewayPctRequiredContracts)
+	}
+
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
-	if uint64(len(updatedSet)) < addLeeway(state.cfg.Contracts.Amount, leewayPctRequiredContracts) {
+	if uint64(len(updatedSet)) < threshold {
 		formed, err = c.runContractFormations(ctx, w, hosts, usedHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, address, minScore)
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
