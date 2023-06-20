@@ -122,6 +122,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 	}
 	fillSlabContractSetID := !m.HasColumn(&dbSlab{}, "db_contract_set_id")
 
+	// Drop owner column from accounts table.
+	if m.HasColumn(&dbAccount{}, "owner") {
+		if err := m.DropColumn(&dbAccount{}, "owner"); err != nil {
+			return err
+		}
+	}
+
 	// Perform auto migrations.
 	tables := []interface{}{
 		// bus.MetadataStore tables
