@@ -164,7 +164,7 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 		var cs dbContractSet
 		err := db.Take(&cs, "name = ?", "autopilot").Error
 		if err == nil {
-			if err := db.Exec("UPDATE slabs s SET s.db_contract_set_id = ? WHERE s.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
+			if err := db.Exec("UPDATE slabs SET db_contract_set_id = ? WHERE slabs.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
 				return fmt.Errorf("failed to update slab contract set ID: %w", err)
 			}
 		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
