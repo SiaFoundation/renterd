@@ -295,40 +295,23 @@ func bytesToSectors(bytes uint64) uint64 {
 }
 
 func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
-	uploadSectorCostRHPv2, _ := rhpv2.RPCAppendCost(h.Settings, cfg.Contracts.Period)
-
 	asc := h.PriceTable.BaseCost().Add(h.PriceTable.AppendSectorCost(cfg.Contracts.Period))
 	uploadSectorCostRHPv3, _ := asc.Total()
-
 	numSectors := bytesToSectors(bytes)
-	if uploadSectorCostRHPv2.Cmp(uploadSectorCostRHPv3) > 0 {
-		return uploadSectorCostRHPv2.Mul64(numSectors)
-	}
 	return uploadSectorCostRHPv3.Mul64(numSectors)
 }
 
 func downloadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
-	downloadSectorCostRHPv2 := rhpv2.RPCReadCost(h.Settings, []rhpv2.RPCReadRequestSection{{Offset: 0, Length: rhpv2.SectorSize}})
 	rsc := h.PriceTable.BaseCost().Add(h.PriceTable.ReadSectorCost(rhpv2.SectorSize))
 	downloadSectorCostRHPv3, _ := rsc.Total()
-
 	numSectors := bytesToSectors(bytes)
-	if downloadSectorCostRHPv2.Cmp(downloadSectorCostRHPv3) > 0 {
-		return downloadSectorCostRHPv2.Mul64(numSectors)
-	}
 	return downloadSectorCostRHPv3.Mul64(numSectors)
 }
 
 func storageCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
-	storeSectorCostRHPv2 := h.Settings.StoragePrice.Mul64(bytes)
-
 	asc := h.PriceTable.BaseCost().Add(h.PriceTable.AppendSectorCost(cfg.Contracts.Period))
 	storeSectorCostRHPv3 := asc.Storage
-
 	numSectors := bytesToSectors(bytes)
-	if storeSectorCostRHPv2.Cmp(storeSectorCostRHPv3) > 0 {
-		return storeSectorCostRHPv2.Mul64(numSectors)
-	}
 	return storeSectorCostRHPv3.Mul64(numSectors)
 }
 
