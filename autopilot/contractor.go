@@ -220,8 +220,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.mu.Unlock()
 
 	// run checks
-	maxKeepLeeway := addLeeway(state.cfg.Contracts.Amount, 1-leewayPctRequiredContracts)
-	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore, maxKeepLeeway)
+	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -470,7 +469,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64, maxKeepLeeway uint64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -497,6 +496,11 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
+	// calculate 'maxKeepLeeway' which defines the amount of contracts we'll be
+	// lenient towards when we fail to either fetch a valid price table or the
+	// contract's revision
+	maxKeepLeeway := addLeeway(state.cfg.Contracts.Amount, 1-leewayPctRequiredContracts)
 
 	// return variables
 	toArchive = make(map[types.FileContractID]string)
@@ -550,22 +554,13 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// if the host doesn't have a valid pricetable, update it
+		var outdatedPT bool
 		if time.Now().After(host.PriceTable.Expiry) {
-			host.PriceTable, err = c.priceTable(ctx, w, host.Host)
-			if err != nil {
+			if update, err := c.priceTable(ctx, w, host.Host); err != nil {
 				c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
-
-				// NOTE: if we can not fetch the price table, we give the host
-				// the benefit of the doubt if it's in the current set and we
-				// have some leeway
-				_, ok := inCurrentSet[fcid]
-				if ok && maxKeepLeeway > 0 {
-					toKeep = append(toKeep, fcid)
-					maxKeepLeeway--
-				} else {
-					toStopUsing[fcid] = "could not fetch price table"
-				}
-				continue
+				outdatedPT = true
+			} else {
+				host.PriceTable = update
 			}
 		}
 
@@ -584,20 +579,29 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// check if we have a revision, without revision we can't perform the
-		// contract checks
+		// if we were not able to get a valid price table for the host, but we
+		// did pass the host checks, we only want to be lenient if this contract
+		// is in the current set and only for a certain number of times,
+		// controlled by maxKeepLeeway
+		if outdatedPT {
+			if _, found := inCurrentSet[fcid]; !found || maxKeepLeeway == 0 {
+				toStopUsing[fcid] = "no valid price table"
+				continue
+			}
+			maxKeepLeeway-- // we let it slide
+		}
+
+		// if we were not able to the contract's revision, we can't properly
+		// perform the checks that follow, however we do want to be lenient if
+		// this contract is in the current set and we still have leeway left
 		if contract.Revision == nil {
-			// NOTE: if we can not fetch the revision, we give the host the
-			// benefit of the doubt if it's in the current set and we have some
-			// leeway
-			_, ok := inCurrentSet[fcid]
-			if ok && maxKeepLeeway > 0 {
+			if _, found := inCurrentSet[fcid]; found && maxKeepLeeway > 0 {
 				toKeep = append(toKeep, fcid)
 				maxKeepLeeway--
 			} else {
 				toStopUsing[fcid] = errContractNoRevision.Error()
 			}
-			continue
+			continue // always continue
 		}
 
 		// decide whether the contract is still good
