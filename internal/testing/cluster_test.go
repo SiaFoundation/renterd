@@ -1224,16 +1224,25 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	}
 
 	// Download the file multiple times.
-	for i := 0; i < 5; i++ {
-		buf := &bytes.Buffer{}
-		err = cluster.Worker.DownloadObject(context.Background(), buf, "foo")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(buf.Bytes(), data) {
-			t.Fatal("data mismatch")
-		}
+	var wg sync.WaitGroup
+	for tt := 0; tt < 3; tt++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 5; i++ {
+				buf := &bytes.Buffer{}
+				if err := cluster.Worker.DownloadObject(context.Background(), buf, "foo"); err != nil {
+					t.Error(err)
+					break
+				}
+				if !bytes.Equal(buf.Bytes(), data) {
+					t.Error("data mismatch")
+					break
+				}
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 func TestContractArchival(t *testing.T) {

@@ -908,12 +908,22 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 			fmt.Printf("DEBUG PJ: %v | %d | err %v launching overdrive req err %v\n", s.dID, s.index, resp.err, lErr)
 		}
 
-		if !triggered && (done || (next && s.mgr.ongoingDownloads() < maxConcurrentSlabsPerDownload)) {
+		if next && !triggered && s.mgr.ongoingDownloads() < maxConcurrentSlabsPerDownload {
 			select {
 			case nextSlabTrigger <- struct{}{}:
 				triggered = true
 			default:
+				fmt.Printf("DEBUG PJ: %v | %d | next slab could not be triggered, ongoing downloads %d\n", s.dID, s.index, s.mgr.ongoingDownloads())
 			}
+		}
+	}
+
+	// make sure next slab is triggered
+	if done && !triggered {
+		select {
+		case nextSlabTrigger <- struct{}{}:
+		case <-time.After(time.Minute):
+			fmt.Printf("DEBUG PJ: %v | %d | next slab could not be triggered\n", s.dID, s.index)
 		}
 	}
 
@@ -989,8 +999,11 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	remaining := s.minShards - s.numCompleted
-	fmt.Printf("DEBUG PJ: %v | %d | sector %d received err %v remaining %d\n", s.dID, s.index, resp.sectorIndex, resp.err, remaining)
+	defer func() {
+		remaining := s.minShards - s.numCompleted
+		fmt.Printf("DEBUG PJ: %v | %d | sector %d received | err %v | remaining %d | finished %v | next %v\n", s.dID, s.index, resp.sectorIndex, resp.err, remaining, finished, next)
+	}()
+
 	// failed reqs can't complete the upload
 	s.numInflight--
 	if resp.err != nil {
