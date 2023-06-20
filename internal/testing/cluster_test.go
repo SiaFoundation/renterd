@@ -70,7 +70,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// See if autopilot is running by fetching the actions.
+	// See if autopilot is running by triggering the loop.
 	_, err = cluster.Autopilot.Trigger(false)
 	if err != nil {
 		t.Fatal(err)

@@ -2,12 +2,9 @@ package autopilot
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -95,11 +92,12 @@ type Worker interface {
 type Autopilot struct {
 	id string
 
-	dir     string
 	bus     Bus
 	logger  *zap.SugaredLogger
-	state   loopState
 	workers *workerPool
+
+	mu    sync.Mutex
+	state state
 
 	a *accounts
 	c *contractor
@@ -116,16 +114,15 @@ type Autopilot struct {
 	stopChan    chan struct{}
 }
 
-// loopState holds a bunch of state variables that are used by the autopilot and
-// updated in every iteration. The state is not protected by a mutex because the
-// autopilot's loop is single threaded and the state should never be accessed
-// from multiple goroutines.
-type loopState struct {
-	cfg api.AutopilotConfig
+// state holds a bunch of variables that are used by the autopilot and updated
+type state struct {
 	cs  api.ConsensusState
-	rs  api.RedundancySettings
 	gs  api.GougingSettings
-	fee types.Currency
+	rs  api.RedundancySettings
+	cfg api.AutopilotConfig
+
+	fee    types.Currency
+	period uint64
 }
 
 // workerPool contains all workers known to the autopilot.  Users can call
@@ -160,56 +157,15 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 	workerFunc(wp.workers)
 }
 
-// Config returns the autopilot config.
-func (ap *Autopilot) Config(ctx context.Context) (api.AutopilotConfig, error) {
-	autopilot, err := ap.bus.Autopilot(ctx, ap.id)
-	if err == nil {
-		return autopilot.Config, nil
-	}
-
-	// if no autopilot was found, persist default config
-	if strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
-		autopilot = api.Autopilot{ID: ap.id, Config: api.DefaultAutopilotConfig()}
-		err = ap.bus.UpdateAutopilot(ctx, autopilot)
-	}
-	if err != nil {
-		return api.AutopilotConfig{}, err
-	}
-
-	return autopilot.Config, nil
-}
-
-func (ap *Autopilot) Compat() error {
-	// make sure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// check if the file exists
-	path := filepath.Join(ap.dir, "autopilot.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
-
-	// read the json config
-	var cfg struct {
-		Config api.AutopilotConfig `json:"Config"`
-	}
-	if data, err := os.ReadFile(path); err != nil {
-		return err
-	} else if err := json.Unmarshal(data, &cfg); err != nil {
-		return err
-	}
-
-	// create an autopilot entry
-	if err := ap.bus.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     ap.id,
-		Config: cfg.Config,
-	}); err != nil {
-		return err
-	}
-
-	// remove config
-	return os.Remove(path)
+// Handler returns an HTTP handler that serves the autopilot api.
+func (ap *Autopilot) Handler() http.Handler {
+	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
+		"GET    /config":        ap.configHandlerGET,
+		"PUT    /config":        ap.configHandlerPUT,
+		"POST   /debug/trigger": ap.triggerHandlerPOST,
+		"POST   /hosts":         ap.hostsHandlerPOST,
+		"GET    /host/:hostKey": ap.hostHandlerGET,
+	}))
 }
 
 func (ap *Autopilot) Run() error {
@@ -226,6 +182,12 @@ func (ap *Autopilot) Run() error {
 	ap.wg.Add(1)
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
+
+	// register the autopilot in the bus
+	if err := ap.registerWithBus(); err != nil {
+		ap.logger.Errorf("failed to register autopilot with bus, err %v", err)
+		return err
+	}
 
 	// block until consensus is synced
 	if !ap.blockUntilSynced() {
@@ -257,9 +219,9 @@ func (ap *Autopilot) Run() error {
 			// iteration of the loop, keeping a state object ensures we use the
 			// same state throughout the entire iteration and we don't needless
 			// fetch the same information twice
-			err = ap.updateLoopState(ctx)
+			err = ap.updateState(ctx)
 			if err != nil {
-				ap.logger.Errorf("failed to update loop state, err: %v", err)
+				ap.logger.Errorf("failed to update state, err: %v", err)
 				return
 			}
 
@@ -271,12 +233,6 @@ func (ap *Autopilot) Run() error {
 			if !ap.isSynced() {
 				ap.logger.Debug("iteration interrupted, consensus not synced")
 				return
-			}
-
-			// update current period
-			err = ap.c.updateCurrentPeriod(ctx)
-			if err != nil {
-				ap.logger.Warnf("failed to update current period, err: %v", err)
 			}
 
 			// perform wallet maintenance
@@ -324,15 +280,6 @@ func (ap *Autopilot) Run() error {
 	}
 }
 
-// Handler returns an HTTP handler that serves the autopilot api.
-func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
-		"POST   /debug/trigger": ap.triggerHandlerPOST,
-		"POST   /hosts":         ap.hostsHandlerPOST,
-		"GET    /host/:hostKey": ap.hostHandlerGET,
-	}))
-}
-
 // Shutdown shuts down the autopilot.
 func (ap *Autopilot) Shutdown(_ context.Context) error {
 	ap.startStopMu.Lock()
@@ -346,6 +293,12 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 		ap.running = false
 	}
 	return nil
+}
+
+func (ap *Autopilot) State() state {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	return ap.state
 }
 
 func (ap *Autopilot) Trigger(forceScan bool) bool {
@@ -386,11 +339,24 @@ func (ap *Autopilot) blockUntilSynced() bool {
 	}
 }
 
-func (ap *Autopilot) updateLoopState(ctx context.Context) error {
-	// fetch the config
-	cfg, err := ap.Config(ctx)
+func (ap *Autopilot) registerWithBus() error {
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// ensure autopilot is registered with the bus
+	_, err := ap.bus.Autopilot(ctx, ap.id)
+	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		err = ap.bus.UpdateAutopilot(ctx, api.Autopilot{ID: ap.id, Config: api.DefaultAutopilotConfig()})
+	}
+	return err
+}
+
+func (ap *Autopilot) updateState(ctx context.Context) error {
+	// fetch the autopilot from the bus
+	autopilot, err := ap.bus.Autopilot(ctx, ap.id)
 	if err != nil {
-		return fmt.Errorf("could not fetch config, err: %v", err)
+		return err
 	}
 
 	// fetch consensus state
@@ -417,19 +383,43 @@ func (ap *Autopilot) updateLoopState(ctx context.Context) error {
 		return fmt.Errorf("could not fetch fee, err: %v", err)
 	}
 
-	// update the loop state
-	ap.state = loopState{
-		cfg: cfg,
-		cs:  cs,
-		rs:  rs,
-		gs:  gs,
-		fee: fee,
+	// update current period if necessary
+	if cs.Synced {
+		if autopilot.CurrentPeriod == 0 {
+			autopilot.CurrentPeriod = cs.BlockHeight
+			err := ap.bus.UpdateAutopilot(ctx, autopilot)
+			if err != nil {
+				return err
+			}
+			ap.logger.Infof("initialised current period to %d", autopilot.CurrentPeriod)
+		} else if nextPeriod := autopilot.CurrentPeriod + autopilot.Config.Contracts.Period; cs.BlockHeight >= nextPeriod {
+			prevPeriod := autopilot.CurrentPeriod
+			autopilot.CurrentPeriod = nextPeriod
+			err := ap.bus.UpdateAutopilot(ctx, autopilot)
+			if err != nil {
+				return err
+			}
+			ap.logger.Infof("updated current period from %d to %d", prevPeriod, nextPeriod)
+		}
 	}
+
+	// update the state
+	ap.mu.Lock()
+	ap.state = state{
+		cs:  cs,
+		gs:  gs,
+		rs:  rs,
+		cfg: autopilot.Config,
+
+		fee:    fee,
+		period: autopilot.CurrentPeriod,
+	}
+	ap.mu.Unlock()
 	return nil
 }
 
 func (ap *Autopilot) isSynced() bool {
-	return ap.state.cs.Synced
+	return ap.State().cs.Synced
 }
 
 func (ap *Autopilot) isStopped() bool {
@@ -439,6 +429,34 @@ func (ap *Autopilot) isStopped() bool {
 	default:
 		return false
 	}
+}
+
+func (ap *Autopilot) configHandlerGET(jc jape.Context) {
+	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
+	if jc.Check("failed to get autopilot config", err) == nil {
+		jc.Encode(autopilot.Config)
+	}
+}
+
+func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
+	// decode and validate the config
+	var cfg api.AutopilotConfig
+	if jc.Decode(&cfg) != nil {
+		return
+	} else if err := cfg.Validate(); jc.Check("invalid autopilot config", err) != nil {
+		return
+	}
+
+	// fetch the autopilot and update its config
+	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
+	if strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
+	} else {
+		autopilot.Config = cfg
+	}
+
+	// update the autopilot
+	jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot))
 }
 
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
@@ -452,14 +470,13 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(id, dir string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
+func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration) (*Autopilot, error) {
 	if id == "" {
 		return nil, errors.New("id cannot be empty")
 	}
 
 	ap := &Autopilot{
 		id:      id,
-		dir:     dir,
 		bus:     bus,
 		logger:  logger.Sugar().Named("autopilot"),
 		workers: newWorkerPool(workers),

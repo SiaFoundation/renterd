@@ -132,7 +132,7 @@ func TestScanner(t *testing.T) {
 
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	ap := &Autopilot{
-		state:    loopState{cfg: api.DefaultAutopilotConfig()},
+		state:    state{cfg: api.DefaultAutopilotConfig()},
 		stopChan: make(chan struct{}),
 	}
 	return &scanner{

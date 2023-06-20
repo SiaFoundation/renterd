@@ -1109,7 +1109,6 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) autopilotsListHandlerGET(jc jape.Context) {
-	fmt.Println("FETCHING AUTOPILOTS")
 	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
 		jc.Encode(autopilots)
 	}

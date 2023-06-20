@@ -2,56 +2,10 @@ package autopilot
 
 import (
 	"context"
-	"errors"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
-
-func (c *contractor) currentPeriod() uint64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.currPeriod
-}
-
-func (c *contractor) updateCurrentPeriod(ctx context.Context) error {
-	// check if we are synced
-	state := c.ap.state
-	if !state.cs.Synced {
-		return errors.New("can't update current period if we are not synced")
-	}
-
-	// fetch autopilot
-	autopilot, err := c.ap.bus.Autopilot(ctx, c.ap.id)
-	if err != nil {
-		return err
-	}
-
-	// initialize current period
-	if autopilot.CurrentPeriod == 0 {
-		autopilot.CurrentPeriod = state.cs.BlockHeight
-		err := c.ap.bus.UpdateAutopilot(ctx, autopilot)
-		if err != nil {
-			return err
-		}
-		c.logger.Infof("initialised current period to %d", state.cs.BlockHeight)
-	} else if state.cs.BlockHeight >= autopilot.CurrentPeriod+state.cfg.Contracts.Period {
-		prevPeriod := autopilot.CurrentPeriod
-		autopilot.CurrentPeriod += state.cfg.Contracts.Period
-		err := c.ap.bus.UpdateAutopilot(ctx, autopilot)
-		if err != nil {
-			return err
-		}
-		c.logger.Infof("updated current period from %d to %d", prevPeriod, autopilot.CurrentPeriod)
-	}
-
-	// update the current period on the contractor
-	c.mu.Lock()
-	c.currPeriod = autopilot.CurrentPeriod
-	c.mu.Unlock()
-
-	return nil
-}
 
 func (c *contractor) contractSpending(ctx context.Context, contract api.Contract, currentPeriod uint64) (api.ContractSpending, error) {
 	ancestors, err := c.ap.bus.AncestorContracts(ctx, contract.ID, currentPeriod)
@@ -66,7 +20,7 @@ func (c *contractor) contractSpending(ctx context.Context, contract api.Contract
 	return total, nil
 }
 
-func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Currency, error) {
+func (c *contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) (types.Currency, error) {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
@@ -76,7 +30,7 @@ func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Curr
 	var filtered []api.ContractMetadata
 	c.mu.Lock()
 	for _, contract := range contracts {
-		if contract.WindowStart <= c.currPeriod {
+		if contract.WindowStart <= currentPeriod {
 			filtered = append(filtered, contract.ContractMetadata)
 		}
 	}
@@ -91,18 +45,18 @@ func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Curr
 }
 
 func (c *contractor) remainingFunds(contracts []api.Contract) (types.Currency, error) {
-	cfg := c.ap.state.cfg
+	state := c.ap.State()
 
 	// find out how much we spent in the current period
-	spent, err := c.currentPeriodSpending(contracts)
+	spent, err := c.currentPeriodSpending(contracts, state.period)
 	if err != nil {
 		return types.ZeroCurrency, err
 	}
 
 	// figure out remaining funds
 	var remaining types.Currency
-	if cfg.Contracts.Allowance.Cmp(spent) > 0 {
-		remaining = cfg.Contracts.Allowance.Sub(spent)
+	if state.cfg.Contracts.Allowance.Cmp(spent) > 0 {
+		remaining = state.cfg.Contracts.Allowance.Sub(spent)
 	}
 	return remaining, nil
 }

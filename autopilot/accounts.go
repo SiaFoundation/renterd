@@ -107,11 +107,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	defer span.End()
 
 	// fetch config
-	cfg, err := a.ap.Config(ctx)
-	if err != nil {
-		a.l.Errorw(fmt.Sprintf("could not fetch config, err: %v", err))
-		return
-	}
+	state := a.ap.State()
 
 	// fetch worker id
 	workerID, err := w.ID(ctx)
@@ -132,10 +128,10 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	}
 
 	// fetch all contract set contracts
-	contractSetContracts, err := a.c.ContractSetContracts(ctx, cfg.Contracts.Set)
+	contractSetContracts, err := a.c.ContractSetContracts(ctx, state.cfg.Contracts.Set)
 	if err != nil {
 		span.RecordError(err)
-		span.SetStatus(codes.Error, fmt.Sprintf("failed to fetch contracts for set '%s'", cfg.Contracts.Set))
+		span.SetStatus(codes.Error, fmt.Sprintf("failed to fetch contracts for set '%s'", state.cfg.Contracts.Set))
 		a.l.Errorw(fmt.Sprintf("failed to fetch contract set contracts: %v", err))
 		return
 	}

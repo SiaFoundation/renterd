@@ -217,7 +217,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	}
 
 	// Prepare individual dirs.
-	apDir := filepath.Join(dir, "autopilot")
 	busDir := filepath.Join(dir, "bus")
 
 	// Generate API passwords.
@@ -278,7 +277,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	workerShutdownFns = append(workerShutdownFns, wStopFn)
 
 	// Create autopilot.
-	ap, aStartFn, _, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, apDir, logger)
+	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"go.sia.tech/renterd/api"
@@ -14,9 +13,9 @@ type (
 	dbAutopilot struct {
 		Model
 
-		Identifier    string `gorm:"unique;NOT NULL;"`
-		Config        json.RawMessage
-		CurrentPeriod uint64 `gorm:"index;default:0"`
+		Identifier    string              `gorm:"unique;NOT NULL;"`
+		Config        api.AutopilotConfig `gorm:"serializer:json"`
+		CurrentPeriod uint64              `gorm:"default:0"`
 	}
 )
 
@@ -25,14 +24,9 @@ func (dbAutopilot) TableName() string { return "autopilots" }
 
 // convert converts a dbContract to a ContractMetadata.
 func (c dbAutopilot) convert() api.Autopilot {
-	var cfg api.AutopilotConfig
-	if err := json.Unmarshal(c.Config, &cfg); err != nil {
-		panic("failed to unmarshal autopilot config")
-	}
-
 	return api.Autopilot{
 		ID:            c.Identifier,
-		Config:        cfg,
+		Config:        c.Config,
 		CurrentPeriod: c.CurrentPeriod,
 	}
 }
@@ -78,19 +72,13 @@ func (s *SQLStore) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error 
 		return err
 	}
 
-	// marshal the config
-	cfg, err := json.Marshal(ap.Config)
-	if err != nil {
-		return err
-	}
-
 	// upsert
 	return s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "identifier"}},
 		UpdateAll: true,
 	}).Create(&dbAutopilot{
 		Identifier:    ap.ID,
-		Config:        cfg,
+		Config:        ap.Config,
 		CurrentPeriod: ap.CurrentPeriod,
 	}).Error
 }
