@@ -23,10 +23,13 @@ func NewClient(addr, password string) *Client {
 	}}
 }
 
-func (c *Client) Trigger(forceScan bool) (_ bool, err error) {
-	var resp api.AutopilotTriggerResponse
-	err = c.c.POST("/debug/trigger", api.AutopilotTriggerRequest{ForceScan: forceScan}, &resp)
-	return resp.Triggered, err
+func (c *Client) Config() (cfg api.AutopilotConfig, err error) {
+	err = c.c.GET("/config", &cfg)
+	return
+}
+
+func (c *Client) UpdateConfig(cfg api.AutopilotConfig) error {
+	return c.c.PUT("/config", cfg)
 }
 
 func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerGET, err error) {
@@ -44,4 +47,10 @@ func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string
 		KeyIn:           keyIn,
 	}, &resp)
 	return
+}
+
+func (c *Client) Trigger(forceScan bool) (_ bool, err error) {
+	var resp api.AutopilotTriggerResponse
+	err = c.c.POST("/debug/trigger", api.AutopilotTriggerRequest{ForceScan: forceScan}, &resp)
+	return resp.Triggered, err
 }
