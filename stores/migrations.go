@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -119,6 +120,7 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 		}
 		logger.Info(ctx, "finished migrating 'shards' table")
 	}
+	fillSlabContractSetID := !m.HasColumn(&dbSlab{}, "db_contract_set_id")
 
 	// Perform auto migrations.
 	tables := []interface{}{
@@ -152,6 +154,22 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 	}
 	if err := db.AutoMigrate(tables...); err != nil {
 		return err
+	}
+
+	if fillSlabContractSetID {
+		// Compat code for databases that don't have the db_contract_set_id.
+		// Since we don't know what contract set a slab was uploaded with, we
+		// associate all slabs with the autopilot set.
+		logger.Info(ctx, "slabs table is missing 'db_contract_set_id' column - adding it and associating slabs with 'autopilot' set if set exists")
+		var cs dbContractSet
+		err := db.Take(&cs, "name = ?", "autopilot").Error
+		if err == nil {
+			if err := db.Exec("UPDATE slabs s SET s.db_contract_set_id = ? WHERE s.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
+				return fmt.Errorf("failed to update slab contract set ID: %w", err)
+			}
+		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("failed to fetch autopilot contract set: %w", err)
+		}
 	}
 
 	// Perform post-auto migrations.
