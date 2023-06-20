@@ -509,7 +509,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		fcid := contract.ID
 
 		// check if contract is ready to be archived.
-		if state.cs.BlockHeight > contract.EndHeight() {
+		if state.cs.BlockHeight > contract.EndHeight()-api.BlocksPerDay {
 			toArchive[fcid] = errContractExpired.Error()
 		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
