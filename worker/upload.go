@@ -873,10 +873,11 @@ func (upload *shardUpload) execute(hp hostProvider, rev types.FileContractRevisi
 	span.AddEvent("execute")
 
 	// create a host
-	h, err := hp.newHostV3(upload.ctx, upload.fcid, upload.hk, upload.siamuxAddr)
+	h, err := hp.newHostV3(upload.fcid, upload.hk, upload.siamuxAddr)
 	if err != nil {
 		return types.Hash256{}, err
 	}
+	defer h.Close()
 
 	// upload the sector
 	start := time.Now()

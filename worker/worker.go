@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -93,105 +92,6 @@ func (rw *rangedResponseWriter) Header() http.Header {
 func (rw *rangedResponseWriter) WriteHeader(statusCode int) {
 	rw.headerWritten = true
 	rw.rw.WriteHeader(statusCode)
-}
-
-func errToStr(err error) string {
-	if err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-type InteractionResult struct {
-	Error string `json:"error,omitempty"`
-}
-
-type ephemeralMetricsRecorder struct {
-	ms []metrics.Metric
-	mu sync.Mutex
-}
-
-func (mr *ephemeralMetricsRecorder) RecordMetric(m metrics.Metric) {
-	mr.mu.Lock()
-	defer mr.mu.Unlock()
-	mr.ms = append(mr.ms, m)
-}
-
-func (mr *ephemeralMetricsRecorder) interactions() []hostdb.Interaction {
-	// TODO: merge/filter metrics?
-	var his []hostdb.Interaction
-	mr.mu.Lock()
-	defer mr.mu.Unlock()
-	for _, m := range mr.ms {
-		if hi, ok := toHostInteraction(m); ok {
-			his = append(his, hi)
-		}
-	}
-	return his
-}
-
-// MetricHostDial contains metrics relating to a host dial.
-type MetricHostDial struct {
-	HostKey   types.PublicKey
-	HostIP    string
-	Timestamp time.Time
-	Elapsed   time.Duration
-	Err       error
-}
-
-// IsMetric implements metrics.Metric.
-func (MetricHostDial) IsMetric() {}
-
-// IsSuccess implements metrics.Metric.
-func (m MetricHostDial) IsSuccess() bool { return m.Err == nil }
-
-func dial(ctx context.Context, hostIP string, hostKey types.PublicKey) (net.Conn, error) {
-	start := time.Now()
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
-	metrics.Record(ctx, MetricHostDial{
-		HostKey:   hostKey,
-		HostIP:    hostIP,
-		Timestamp: start,
-		Elapsed:   time.Since(start),
-		Err:       err,
-	})
-	return conn, err
-}
-
-func toHostInteraction(m metrics.Metric) (hostdb.Interaction, bool) {
-	transform := func(hk types.PublicKey, timestamp time.Time, typ string, err error, res interface{}) (hostdb.Interaction, bool) {
-		b, _ := json.Marshal(InteractionResult{Error: errToStr(err)})
-		hi := hostdb.Interaction{
-			Host:      hk,
-			Timestamp: timestamp,
-			Type:      typ,
-			Result:    json.RawMessage(b),
-			Success:   err == nil,
-		}
-		return hi, true
-	}
-
-	switch m := m.(type) {
-	case MetricHostDial:
-		return transform(m.HostKey, m.Timestamp, "dial", m.Err, struct {
-			HostIP    string        `json:"hostIP"`
-			Timestamp time.Time     `json:"timestamp"`
-			Elapsed   time.Duration `json:"elapsed"`
-		}{m.HostIP, m.Timestamp, m.Elapsed})
-	case MetricRPC:
-		return transform(m.HostKey, m.Timestamp, "rhpv2 rpc", m.Err, struct {
-			RPC        string         `json:"RPC"`
-			Timestamp  time.Time      `json:"timestamp"`
-			Elapsed    time.Duration  `json:"elapsed"`
-			Contract   string         `json:"contract"`
-			Uploaded   uint64         `json:"uploaded"`
-			Downloaded uint64         `json:"downloaded"`
-			Cost       types.Currency `json:"cost"`
-			Collateral types.Currency `json:"collateral"`
-		}{m.RPC.String(), m.Timestamp, m.Elapsed, m.Contract.String(), m.Uploaded, m.Downloaded, m.Cost, m.Collateral})
-	default:
-		return hostdb.Interaction{}, false
-	}
 }
 
 type AccountStore interface {
@@ -324,43 +224,19 @@ type worker struct {
 	logger          *zap.SugaredLogger
 }
 
-func (w *worker) recordPriceTableUpdate(hostKey types.PublicKey, pt hostdb.HostPriceTable, err error) {
-	hi := hostdb.Interaction{
-		Host:      hostKey,
-		Timestamp: time.Now(),
-		Type:      hostdb.InteractionTypePriceTableUpdate,
-		Success:   err == nil,
-	}
-	if err == nil {
-		hi.Result, _ = json.Marshal(hostdb.PriceTableUpdateResult{
-			PriceTable: pt,
-		})
-	} else {
-		hi.Result, _ = json.Marshal(hostdb.PriceTableUpdateResult{
-			Error: errToStr(err),
-		})
-	}
-	w.recordInteractions([]hostdb.Interaction{hi})
-}
-
-func (w *worker) recordScan(hostKey types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings, err error) {
-	hi := hostdb.Interaction{
-		Host:      hostKey,
-		Timestamp: time.Now(),
-		Type:      hostdb.InteractionTypeScan,
-		Success:   err == nil,
-	}
-	if err == nil {
-		hi.Result, _ = json.Marshal(hostdb.ScanResult{
-			PriceTable: pt,
-			Settings:   settings,
-		})
-	} else {
-		hi.Result, _ = json.Marshal(hostdb.ScanResult{
-			Error: errToStr(err),
-		})
-	}
-	w.recordInteractions([]hostdb.Interaction{hi})
+func dial(ctx context.Context, hostIP string, hostKey types.PublicKey) (net.Conn, error) {
+	start := time.Now()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	metrics.Record(ctx, MetricHostDial{
+		metricCommon: metricCommon{
+			address:   hostIP,
+			hostKey:   hostKey,
+			timestamp: start,
+			elapsed:   time.Since(start),
+			err:       err,
+		},
+	})
+	return conn, err
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
@@ -395,7 +271,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
+func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
 	acc, err := w.accounts.ForHost(hostKey)
 	if err != nil {
 		return nil, err
@@ -405,8 +281,10 @@ func (w *worker) newHostV3(ctx context.Context, contractID types.FileContractID,
 		acc:                      acc,
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
+		mr:                       &ephemeralMetricsRecorder{},
 		logger:                   w.logger.Named(hostKey.String()[:4]),
 		fcid:                     contractID,
+		recordInteractions:       w.recordInteractions,
 		siamuxAddr:               siamuxAddr,
 		renterKey:                w.deriveRenterKey(hostKey),
 		accountKey:               w.accounts.deriveAccountKey(hostKey),
@@ -427,10 +305,11 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 		cancel()
 	}()
 
-	h, err := w.newHostV3(ctx, contractID, hk, siamuxAddr)
+	h, err := w.newHostV3(contractID, hk, siamuxAddr)
 	if err != nil {
 		return err
 	}
+	defer h.Close()
 	rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
 	if err != nil {
 		return err
@@ -462,19 +341,17 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		return
 	}
 
-	// defer scan result
-	var settings rhpv2.HostSettings
-	var priceTable rhpv3.HostPriceTable
-	defer func() {
-		w.recordScan(rsr.HostKey, priceTable, settings, err)
-	}()
-
 	// scan host
 	var errStr string
 	settings, priceTable, elapsed, err := w.scanHost(ctx, rsr.HostKey, rsr.HostIP)
 	if err != nil {
 		errStr = err.Error()
 	}
+
+	// record scan
+	var mr ephemeralMetricsRecorder
+	recordScan(&mr, elapsed, rsr.HostIP, rsr.HostKey, priceTable, settings, err)
+	w.recordInteractions(mr.interactions())
 
 	jc.Encode(api.RHPScanResponse{
 		Ping:      api.ParamDuration(elapsed),
@@ -534,12 +411,11 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 }
 
 func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	defer func() { w.recordPriceTableUpdate(hk, hpt, err) }()
-
-	h, err := w.newHostV3(ctx, types.FileContractID{}, hk, siamuxAddr)
+	h, err := w.newHostV3(types.FileContractID{}, hk, siamuxAddr)
 	if err != nil {
 		return hostdb.HostPriceTable{}, err
 	}
+	defer h.Close()
 	hpt, err = h.FetchPriceTable(ctx, rev)
 	if err != nil {
 		return hostdb.HostPriceTable{}, err
@@ -657,10 +533,11 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// renew the contract
-	h, err := w.newHostV3(ctx, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
+	h, err := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
 	if jc.Check("failed to create host for renewal", err) != nil {
 		return
 	}
+	defer h.Close()
 	renewed, txnSet, err := h.Renew(ctx, rrr)
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
@@ -698,10 +575,11 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// fund the account
 	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
-		h, err := w.newHostV3(ctx, rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
+		h, err := w.newHostV3(rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
 		if err != nil {
 			return err
 		}
+		defer h.Close()
 		err = h.FundAccount(ctx, rfr.Balance, &rev)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
@@ -780,10 +658,11 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// sync the account
-	h, err := w.newHostV3(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
+	h, err := w.newHostV3(rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
 	if jc.Check("failed to create host for renewal", err) != nil {
 		return
 	}
+	defer h.Close()
 	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	}))
@@ -1233,38 +1112,6 @@ func (w *worker) Shutdown(_ context.Context) error {
 	// Stop the uploader.
 	w.uploadManager.Stop()
 	return nil
-}
-
-func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
-	w.interactionsMu.Lock()
-	defer w.interactionsMu.Unlock()
-
-	// Append interactions to buffer.
-	w.interactions = append(w.interactions, interactions...)
-
-	// If a thread was scheduled to flush the buffer we are done.
-	if w.interactionsFlushTimer != nil {
-		return
-	}
-	// Otherwise we schedule a flush.
-	w.interactionsFlushTimer = time.AfterFunc(w.busFlushInterval, func() {
-		w.interactionsMu.Lock()
-		w.flushInteractions()
-		w.interactionsMu.Unlock()
-	})
-}
-
-func (w *worker) flushInteractions() {
-	if len(w.interactions) > 0 {
-		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushInteractions")
-		defer span.End()
-		if err := w.bus.RecordInteractions(ctx, w.interactions); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to record interactions: %v", err))
-		} else {
-			w.interactions = nil
-		}
-	}
-	w.interactionsFlushTimer = nil
 }
 
 type contractLock struct {

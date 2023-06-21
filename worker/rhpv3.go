@@ -396,8 +396,10 @@ type (
 		acc                      *account
 		bus                      Bus
 		contractSpendingRecorder *contractSpendingRecorder
-		logger                   *zap.SugaredLogger
 		fcid                     types.FileContractID
+		logger                   *zap.SugaredLogger
+		mr                       *ephemeralMetricsRecorder
+		recordInteractions       func(interactions []hostdb.Interaction)
 		siamuxAddr               string
 		renterKey                types.PrivateKey
 		accountKey               types.PrivateKey
@@ -405,6 +407,11 @@ type (
 		priceTables              *priceTables
 	}
 )
+
+func (h *host) Close() error {
+	h.recordInteractions(h.mr.interactions())
+	return nil
+}
 
 func (w *worker) initAccounts(as AccountStore) {
 	if w.accounts != nil {
@@ -892,6 +899,8 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 }
 
 func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+	defer recordPriceTableUpdate(h.mr, h.siamuxAddr, h.HostKey(), hpt, &err)
+
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
