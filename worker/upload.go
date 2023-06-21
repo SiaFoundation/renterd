@@ -69,10 +69,7 @@ type (
 		mu                  sync.Mutex
 		bh                  uint64
 		consecutiveFailures uint64
-		ongoingUploads      uint64
 		queue               []*sectorUploadReq
-
-		trackErrs uint64
 	}
 
 	upload struct {
@@ -88,22 +85,22 @@ type (
 	}
 
 	slabUpload struct {
-		mgr *uploadManager
+		mgr    *uploadManager
+		upload *upload
 
-		upload  *upload
 		sID     slabID
 		created time.Time
+		shards  [][]byte
 
 		mu          sync.Mutex
 		numInflight uint64
 		numLaunched uint64
 
-		nextSlabTriggered bool
-		lastOverdrive     time.Time
-		overdriving       map[int]int
-		remaining         map[int]sectorCtx
-		sectors           []object.Sector
-		errs              HostErrorSet
+		lastOverdrive time.Time
+		overdriving   map[int]int
+		remaining     map[int]sectorCtx
+		sectors       []object.Sector
+		errs          HostErrorSet
 	}
 
 	slabUploadResponse struct {
@@ -119,8 +116,9 @@ type (
 
 	sectorUploadReq struct {
 		upload *upload
-		sID    slabID
-		ctx    context.Context
+
+		sID slabID
+		ctx context.Context
 
 		overdrive    bool
 		sector       *[rhpv2.SectorSize]byte
@@ -555,6 +553,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte) (*slabUploa
 		upload:  u,
 		sID:     sID,
 		created: time.Now(),
+		shards:  shards,
 
 		overdriving: make(map[int]int, len(shards)),
 		remaining:   make(map[int]sectorCtx, len(shards)),
@@ -664,35 +663,14 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 		}
 	}
 
-	// create a timer to trigger overdrive
-	timeout := time.NewTimer(u.mgr.overdriveTimeout)
-	resetTimeout := func() {
-		timeout.Stop()
-		select {
-		case <-timeout.C:
-		default:
-		}
-		timeout.Reset(u.mgr.overdriveTimeout)
-	}
-
-	// launch a goroutine to trigger overdrive
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-timeout.C:
-				if req := slab.overdrive(respChan, shards); req != nil {
-					_ = slab.launch(req) // ignore error
-				}
-				resetTimeout()
-			}
-		}
-	}()
+	// launch overdrive
+	resetOverdrive := slab.overdrive(ctx, respChan)
 
 	// collect responses
-	var finished bool
-	for slab.inflight() > 0 && !finished {
+	var done bool
+	var next bool
+	var triggered bool
+	for slab.inflight() > 0 && !done {
 		var resp sectorUploadResp
 		select {
 		case <-u.mgr.stopChan:
@@ -702,28 +680,42 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 		case resp = <-respChan:
 		}
 
+		resetOverdrive()
+
 		// receive the response
-		finished = slab.receive(resp)
+		done, next = slab.receive(resp)
+
+		// try and trigger next slab
+		if next && !triggered {
+			select {
+			case u.nextSlabTrigger <- struct{}{}:
+				triggered = true
+			default:
+			}
+		}
+
+		// relaunch non-overdrive uploads
+		if !done && resp.err != nil && !resp.req.overdrive {
+			if err := slab.launch(resp.req); err != nil {
+				break // fail the download
+			}
+		}
 
 		// handle the response
 		if resp.err == nil {
-			resetTimeout()
-
 			// signal the upload a shard was received
 			select {
 			case u.doneShardTrigger <- struct{}{}:
 			default:
 			}
-
-			// try and trigger the next slab read
-			slab.tryTriggerNextRead()
 		}
+	}
 
-		// relaunch non-overdrive uploads
-		if resp.err != nil && !resp.req.overdrive {
-			if err := slab.launch(resp.req); err != nil {
-				break // fail the download
-			}
+	// make sure next slab is triggered
+	if done && !triggered {
+		select {
+		case u.nextSlabTrigger <- struct{}{}:
+		default:
 		}
 	}
 
@@ -737,16 +729,6 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 }
 
 func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision) (types.Hash256, error) {
-	u.mu.Lock()
-	u.ongoingUploads++
-	u.mu.Unlock()
-
-	defer func() {
-		u.mu.Lock()
-		u.ongoingUploads--
-		u.mu.Unlock()
-	}()
-
 	// fetch span from context
 	span := trace.SpanFromContext(req.ctx)
 	span.AddEvent("execute")
@@ -872,14 +854,11 @@ func (u *uploader) enqueue(upload *sectorUploadReq) {
 }
 
 func (u *uploader) trackSectorUpload(err error, d time.Duration) {
-	estimate := u.estimate()
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if err != nil {
 		u.consecutiveFailures++
 		u.statsSectorUploadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-		u.trackErrs++
-		fmt.Printf("DEBUG PJ: uploader %v tracked failure #%d curr estimate %v\n", u.hk, u.trackErrs, estimate)
 	} else {
 		ms := d.Milliseconds()
 		u.consecutiveFailures = 0
@@ -987,24 +966,70 @@ func (s *slabUpload) launch(req *sectorUploadReq) error {
 	return nil
 }
 
-func (s *slabUpload) overdrive(responseChan chan sectorUploadResp, shards [][]byte) *sectorUploadReq {
+func (s *slabUpload) overdrive(ctx context.Context, respChan chan sectorUploadResp) (resetTimer func()) {
+	// overdrive is disabled
+	if s.mgr.overdriveTimeout == 0 {
+		return func() {}
+	}
+
+	// create a timer to trigger overdrive
+	timer := time.NewTimer(s.mgr.overdriveTimeout)
+	resetTimer = func() {
+		timer.Stop()
+		select {
+		case <-timer.C:
+		default:
+		}
+		timer.Reset(s.mgr.overdriveTimeout)
+	}
+
+	// create a function to check whether overdrive is possible
+	canOverdrive := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		// overdrive is not kicking in yet
+		if uint64(len(s.remaining)) >= s.mgr.maxOverdrive {
+			return false
+		}
+
+		// overdrive is not due yet
+		if time.Since(s.lastOverdrive) < s.mgr.overdriveTimeout {
+			return false
+		}
+
+		// overdrive is maxed out
+		if s.numInflight-uint64(len(s.remaining)) >= s.mgr.maxOverdrive {
+			return false
+		}
+
+		return true
+	}
+
+	// try overdriving every time the timer fires
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				if canOverdrive() {
+					req := s.nextRequest(respChan)
+					if req != nil {
+						_ = s.launch(req) // ignore error
+					}
+				}
+				resetTimer()
+			}
+		}
+	}()
+
+	return
+}
+
+func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUploadReq {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// overdrive is not kicking in yet
-	if uint64(len(s.remaining)) >= s.mgr.maxOverdrive {
-		return nil
-	}
-
-	// overdrive is not due yet
-	if time.Since(s.lastOverdrive) < s.mgr.overdriveTimeout {
-		return nil
-	}
-
-	// overdrive is maxed out
-	if s.numInflight-uint64(len(s.remaining)) >= s.mgr.maxOverdrive {
-		return nil
-	}
 
 	// overdrive the remaining sector with the least number of overdrives
 	lowestSI := -1
@@ -1027,7 +1052,7 @@ func (s *slabUpload) overdrive(responseChan chan sectorUploadResp, shards [][]by
 		responseChan: responseChan,
 
 		sectorIndex: lowestSI,
-		sector:      (*[rhpv2.SectorSize]byte)(shards[lowestSI]),
+		sector:      (*[rhpv2.SectorSize]byte)(s.shards[lowestSI]),
 	}
 }
 
@@ -1049,7 +1074,7 @@ func (s *slabUpload) overdrivePct() float64 {
 	return float64(numOverdrive) / float64(len(s.sectors))
 }
 
-func (s *slabUpload) receive(resp sectorUploadResp) (finished bool) {
+func (s *slabUpload) receive(resp sectorUploadResp) (finished bool, next bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1057,12 +1082,12 @@ func (s *slabUpload) receive(resp sectorUploadResp) (finished bool) {
 	s.numInflight--
 	if resp.err != nil {
 		s.errs = append(s.errs, &HostError{resp.req.hk, resp.err})
-		return false
+		return false, false
 	}
 
 	// redundant sectors can't complete the upload
 	if s.sectors[resp.req.sectorIndex].Root != (types.Hash256{}) {
-		return false
+		return false, false
 	}
 
 	// store the sector and call cancel on the sector ctx
@@ -1072,21 +1097,11 @@ func (s *slabUpload) receive(resp sectorUploadResp) (finished bool) {
 	}
 	s.remaining[resp.req.sectorIndex].cancel()
 
-	// count the sector as complete and check if we're done
+	// update remaining sectors
 	delete(s.remaining, resp.req.sectorIndex)
-	return len(s.remaining) == 0
-}
-
-func (s *slabUpload) tryTriggerNextRead() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.nextSlabTriggered && len(s.remaining) <= int(s.mgr.maxOverdrive) {
-		select {
-		case s.upload.nextSlabTrigger <- struct{}{}:
-			s.nextSlabTriggered = true
-		default:
-		}
-	}
+	finished = len(s.remaining) == 0
+	next = len(s.remaining) <= int(s.mgr.maxOverdrive)
+	return
 }
 
 func (a *dataPoints) Average() float64 {
