@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"math"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -22,6 +24,7 @@ import (
 )
 
 const (
+	downloadOverheadB             = 284
 	maxConcurrentSectorsPerHost   = 3
 	maxConcurrentSlabsPerDownload = 3
 )
@@ -49,7 +52,6 @@ type (
 	}
 
 	downloader struct {
-		mgr  *downloadManager // TODO PJ: remove
 		host hostV3
 
 		statsDownloadSpeedBytesPerMS    *dataPoints // keep track of this separately for stats (no decay is applied)
@@ -161,14 +163,8 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 	}
 }
 
-func (mgr *downloadManager) DEBUGPJ(msg string) {
-	mgr.logger.Debug(msg)
-	fmt.Print("DEBUG PJ: " + msg)
-}
-
 func (mgr *downloadManager) newDownloader(host hostV3) *downloader {
 	return &downloader{
-		mgr:  mgr,
 		host: host,
 
 		statsSectorDownloadEstimateInMS: newDataPoints(statsDecayHalfTime),
@@ -197,8 +193,6 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	if len(slabs) == 0 {
 		return nil
 	}
-
-	mgr.DEBUGPJ(fmt.Sprintf("%v | downloading %d slabs\n", id, len(slabs)))
 
 	// ensure everything cancels if download is done
 	ctx, cancel := context.WithCancel(ctx)
@@ -243,8 +237,6 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				}
 
 				// launch the download
-
-				mgr.DEBUGPJ(fmt.Sprintf("%v | slab %d | launched\n", id, slabIndex))
 				go mgr.downloadSlab(ctx, id, next, slabIndex, responseChan, nextSlabChan)
 				slabIndex++
 			}
@@ -273,7 +265,7 @@ outer:
 			if resp.err != nil {
 				return resp.err
 			}
-			mgr.DEBUGPJ(fmt.Sprintf("%v | slab %d | received\n", id, resp.index))
+
 			responses[resp.index] = resp
 			for {
 				if next, exists := responses[respIndex]; exists {
@@ -338,11 +330,9 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	go mgr.downloadSlab(ctx, id, slice, 0, responseChan, nextSlabChan)
 
 	// await the response
-	start := time.Now()
 	var resp *slabDownloadResponse
 	select {
 	case <-ctx.Done():
-		mgr.DEBUGPJ(fmt.Sprintf("%v | 0 | TIMEOUT after %v\n", id, time.Since(start)))
 		return nil, ctx.Err()
 	case resp = <-responseChan:
 		if resp.err != nil {
@@ -542,6 +532,103 @@ func (d *downloader) isStopped() bool {
 	return false
 }
 
+func (d *downloader) fillBatch() (batch []*sectorDownloadReq) {
+	for len(batch) < maxConcurrentSectorsPerHost {
+		if req := d.pop(); req == nil {
+			break
+		} else if req.done() {
+			continue
+		} else {
+			batch = append(batch, req)
+		}
+	}
+	return
+}
+
+func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
+	doneChan := make(chan struct{})
+
+	// define some state to keep track of stats
+	var mu sync.Mutex
+	var start time.Time
+	var concurrent int64
+	var downloadedB int64
+	trackStatsFn := func() {
+		durationMS := time.Since(start).Milliseconds()
+		d.statsDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
+		d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
+		start = time.Time{}
+		downloadedB = 0
+	}
+
+	// define a worker to process download requests
+	inflight := uint64(len(batch))
+	reqsChan := make(chan *sectorDownloadReq)
+	workerFn := func() {
+		for req := range reqsChan {
+			if d.isStopped() {
+				break
+			}
+
+			// update state
+			mu.Lock()
+			if start.IsZero() {
+				start = time.Now()
+			}
+			concurrent++
+			mu.Unlock()
+
+			// execute the request
+			err := d.execute(req)
+			d.trackFailure(err)
+
+			// update state + potentially track stats
+			mu.Lock()
+			if err == nil {
+				downloadedB += int64(req.length) + downloadOverheadB
+				if downloadedB >= maxConcurrentSectorsPerHost*rhpv2.SectorSize || concurrent == maxConcurrentSectorsPerHost {
+					trackStatsFn()
+				}
+			}
+			concurrent--
+			if concurrent < 0 {
+				panic("concurrent can never be less than zero") // developer error
+			}
+			mu.Unlock()
+		}
+
+		// last worker that's done closes the channel and flushes the stats
+		if atomic.AddUint64(&inflight, ^uint64(0)) == 0 {
+			close(doneChan)
+			trackStatsFn()
+		}
+	}
+
+	// launch workers
+	for i := 0; i < len(batch); i++ {
+		go workerFn()
+	}
+	for _, req := range batch {
+		reqsChan <- req
+	}
+
+	// launch a goroutine to keep the request coming
+	go func() {
+		defer close(reqsChan)
+		for {
+			if req := d.pop(); req == nil {
+				break
+			} else if req.done() {
+				continue
+			} else {
+				reqsChan <- req
+			}
+		}
+	}()
+
+	return doneChan
+}
+
 func (d *downloader) processQueue(hp hostProvider) {
 outer:
 	for {
@@ -553,102 +640,22 @@ outer:
 		}
 
 		for {
-			// check if we are stopped
-			if d.isStopped() {
-				return
-			}
-
-			// fill batch
-			var batch []*sectorDownloadReq
-			for len(batch) < maxConcurrentSectorsPerHost {
-				if req := d.pop(); req == nil {
-					break
-				} else if req.done() {
-					continue
-				} else {
-					batch = append(batch, req)
-				}
-			}
+			// try fill a batch of requests
+			batch := d.fillBatch()
 			if len(batch) == 0 {
 				continue outer
 			}
 
-			d.mgr.DEBUGPJ(fmt.Sprintf("downloader %v is processing batch of size %v\n", d.host.HostKey(), len(batch)))
-
-			var mu sync.Mutex
-			var completed int
-			var failed int
-			var first time.Time
-
-			// launch workers
-			var wg sync.WaitGroup
-			jobsChan := make(chan *sectorDownloadReq)
-			for i := 0; i < len(batch); i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for job := range jobsChan {
-						// check if we are stopped
-						if d.isStopped() {
-							return
-						}
-
-						// execute the job
-						start := time.Now()
-						err := d.execute(job)
-						d.trackFailure(err)
-
-						// update stats
-						mu.Lock()
-						if first.IsZero() {
-							first = start
-						}
-						if err != nil {
-							failed++
-							completed = 0
-							d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-							d.mgr.DEBUGPJ(fmt.Sprintf("host %v errored out %v\n", d.host.HostKey(), err))
-						} else {
-							completed++
-							if completed == maxConcurrentSectorsPerHost {
-								downloadedB := int64(completed * rhpv2.SectorSize)
-								durationMS := time.Since(first).Milliseconds()
-								d.statsDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
-								d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
-								completed = 0
-								first = time.Time{}
-							}
-						}
-						mu.Unlock()
-					}
-
-					// update stats
-					mu.Lock()
-					if completed > 0 {
-						downloadedB := int64(completed * rhpv2.SectorSize)
-						durationMS := time.Since(first).Milliseconds()
-						d.statsDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
-						d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
-					}
-					mu.Unlock()
-				}()
-			}
-			for _, job := range batch {
-				jobsChan <- job
-			}
-
-			// keep processing the queue for as long as there's jobs
+			// process the batch
+			doneChan := d.processBatch(batch)
 			for {
-				if req := d.pop(); req == nil {
-					break
-				} else if req.done() {
-					continue
-				} else {
-					jobsChan <- req
+				select {
+				case <-d.stopChan:
+					return
+				case <-doneChan:
+					continue outer
 				}
 			}
-			close(jobsChan)
-			wg.Wait()
 		}
 	}
 }
@@ -705,11 +712,21 @@ func (d *downloader) pop() *sectorDownloadReq {
 func (d *downloader) trackFailure(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err != nil {
-		d.consecutiveFailures++
-	} else {
+
+	if err == nil {
 		d.consecutiveFailures = 0
+		return
 	}
+
+	if strings.Contains(err.Error(), errBalanceInsufficient.Error()) ||
+		strings.Contains(err.Error(), errPriceTableExpired.Error()) ||
+		strings.Contains(err.Error(), errPriceTableNotFound.Error()) ||
+		strings.Contains(err.Error(), errSectorNotFound.Error()) {
+		return // host is not to blame for these errors
+	}
+
+	d.consecutiveFailures++
+	d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
 }
 
 func (d *downloader) execute(req *sectorDownloadReq) (err error) {
@@ -824,13 +841,7 @@ func (s *slabDownload) overdrive(ctx context.Context, respChan chan sectorDownlo
 				return
 			case <-timer.C:
 				if canOverdrive(timeout()) {
-					req := s.nextRequest(ctx, respChan, true)
-					if req == nil {
-						s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | no sector to overdrive\n", s.dID, s.index))
-					} else {
-						lErr := s.launch(req) // ignore error
-						s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | overdriving sector %d err %v\n", s.dID, s.index, req.sectorIndex, lErr))
-					}
+					_ = s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
 				}
 				resetTimer()
 			}
@@ -854,13 +865,9 @@ func (s *slabDownload) nextRequest(ctx context.Context, responseChan chan sector
 			}
 		}
 
-		// sort them and assign the current host
-		s.mgr.sort(hosts)
-		for _, host := range hosts {
-			s.used[host] = struct{}{}
-			s.curr = host
-			break
-		}
+		// make the fastest host the current host
+		s.curr = s.mgr.fastest(hosts)
+		s.used[s.curr] = struct{}{}
 
 		// no more sectors to download
 		if len(s.hostToSectors[s.curr]) == 0 {
@@ -920,14 +927,12 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 	var done bool
 	var next bool
 	var triggered bool
-	start := time.Now()
 	for s.inflight() > 0 && !done {
 		var resp sectorDownloadResp
 		select {
 		case <-s.mgr.stopChan:
 			return nil, errors.New("download stopped")
 		case <-ctx.Done():
-			s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | TIMEOUT after %v\n", s.dID, s.index, time.Since(start)))
 			return nil, ctx.Err()
 		case resp = <-respChan:
 		}
@@ -936,8 +941,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 
 		done, next = s.receive(resp)
 		if !done && resp.err != nil {
-			lErr := s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
-			s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | err %v launching overdrive req err %v\n", s.dID, s.index, resp.err, lErr))
+			_ = s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
 		}
 
 		if next && !triggered && s.mgr.ongoingDownloads() < maxConcurrentSlabsPerDownload {
@@ -953,8 +957,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 	if done && !triggered {
 		select {
 		case nextSlabTrigger <- struct{}{}:
-		case <-time.After(time.Minute):
-			s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | next slab could not be triggered\n", s.dID, s.index))
+		default:
 		}
 	}
 
@@ -989,9 +992,7 @@ func (s *slabDownload) finish() ([][]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
-		err := fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
-		s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | FAILED err: %v\n", s.index, s.dID, err))
-		return nil, err
+		return nil, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
 	}
 	return s.sectors, nil
 }
@@ -1033,11 +1034,6 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	defer func() {
-		remaining := s.minShards - s.numCompleted
-		s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | sector %d received | err %v | remaining %d | finished %v | next %v\n", s.dID, s.index, resp.sectorIndex, resp.err, remaining, finished, next))
-	}()
-
 	// update num overdriving
 	if resp.overdrive {
 		s.numOverdriving--
@@ -1057,23 +1053,23 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next boo
 	return s.numCompleted >= s.minShards, s.numCompleted+int(s.mgr.maxOverdrive) >= s.minShards
 }
 
-func (mgr *downloadManager) sort(hosts []types.PublicKey) {
+func (mgr *downloadManager) fastest(hosts []types.PublicKey) (fastest types.PublicKey) {
 	// recompute stats
 	mgr.tryRecomputeStats()
 
+	// return the fastest host
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-
-	// sort the hosts fastest to slowest
-	sort.Slice(hosts, func(i, j int) bool {
-		if dI, exists := mgr.downloaders[hosts[i]]; !exists {
-			return false
-		} else if dJ, exists := mgr.downloaders[hosts[j]]; !exists {
-			return true
-		} else {
-			return dI.estimate() < dJ.estimate()
+	lowest := math.MaxFloat64
+	for _, h := range hosts {
+		if d, ok := mgr.downloaders[h]; !ok {
+			continue
+		} else if estimate := d.estimate(); estimate < lowest {
+			lowest = estimate
+			fastest = h
 		}
-	})
+	}
+	return
 }
 
 func (mgr *downloadManager) launch(req *sectorDownloadReq) error {

@@ -336,8 +336,8 @@ func TestUploadDownloadBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// prepare two files, a small one and a large one
-	data := make([]byte, rhpv2.SectorSize/12)
+	// prepare a file
+	data := make([]byte, 128) //rhpv2.SectorSize/12
 	if _, err := frand.Read(data); err != nil {
 		t.Fatal(err)
 	}

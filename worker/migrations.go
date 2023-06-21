@@ -3,38 +3,13 @@ package worker
 import (
 	"context"
 	"fmt"
-	"io"
-	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
-
-type hostV2 interface {
-	Contract() types.FileContractID
-	HostKey() types.PublicKey
-}
-
-type hostV3 interface {
-	hostV2
-
-	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
-	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
-	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
-	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
-	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
-	SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
-}
-
-type hostProvider interface {
-	newHostV3(types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
-}
 
 func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")

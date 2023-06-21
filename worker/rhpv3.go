@@ -58,6 +58,19 @@ var (
 	// when trying to use a renewed contract.
 	errMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
 
+	// errPriceTableExpired is returned by the host when the price table that
+	// corresponds to the id it was given is already expired and thus no longer
+	// valid.
+	errPriceTableExpired = errors.New("Price table requested is expired")
+
+	// errPriceTableNotFound is returned by the host when it can not find a
+	// price table that corresponds with the id we sent it.
+	errPriceTableNotFound = errors.New("Price table not found")
+
+	// errSectorNotFound is returned by the host when it can not find the
+	// requested sector.
+	errSectorNotFound = errors.New("sector not found")
+
 	// errTransportClosed is returned when using a transportV3 which was already
 	// closed.
 	errTransportClosed = errors.New("transport closed")
