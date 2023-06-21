@@ -908,11 +908,36 @@ func TestParallelUpload(t *testing.T) {
 		t.Fatal("wrong number of objects", len(objects))
 	}
 
-	// Delete all objects.
+	// Upload one more object.
+	if err := w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), "/foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 4 {
+		t.Fatal("wrong number of objects", len(objects))
+	}
+
+	// Delete all objects under /dir/.
 	if err := cluster.Bus.DeleteObject(context.Background(), "/dir/", true); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), "/dir/", 0, 100)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 1 {
+		t.Fatal("objects weren't deleted")
+	}
+
+	// Delete all objects under /.
+	if err := cluster.Bus.DeleteObject(context.Background(), "/", true); err != nil {
+		t.Fatal(err)
+	}
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
