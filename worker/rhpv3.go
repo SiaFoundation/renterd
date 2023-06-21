@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -135,13 +136,16 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 
 // transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
 type transportPoolV3 struct {
+	recordInteractions func([]hostdb.Interaction)
+
 	mu   sync.Mutex
 	pool map[string]*transportV3
 }
 
-func newTransportPoolV3() *transportPoolV3 {
+func newTransportPoolV3(w *worker) *transportPoolV3 {
 	return &transportPoolV3{
-		pool: make(map[string]*transportV3),
+		recordInteractions: w.recordInteractions,
+		pool:               make(map[string]*transportV3),
 	}
 }
 
@@ -189,6 +193,11 @@ func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, h
 }
 
 func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(*transportV3) error) (err error) {
+	var mr ephemeralMetricsRecorder
+	defer func() {
+		p.recordInteractions(mr.interactions())
+	}()
+	ctx = metrics.WithRecorder(ctx, &mr)
 	t, err := p.newTransport(ctx, siamuxAddr, hostKey)
 	if err != nil {
 		return err
@@ -887,11 +896,11 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 }
 
 func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	defer recordPriceTableUpdate(h.mr, h.siamuxAddr, h.HostKey(), hpt, &err)()
-
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
+			defer recordPriceTableUpdate(ctx, h.siamuxAddr, h.HostKey(), hpt, &err)()
+
 			pt, err := RPCPriceTable(ctx, t, paymentFn)
 			if err != nil {
 				return err

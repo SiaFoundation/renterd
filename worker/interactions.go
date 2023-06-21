@@ -60,11 +60,11 @@ func (w *worker) flushInteractions() {
 }
 
 // recordPriceTableUpdate records a price table metric.
-func recordPriceTableUpdate(mr metrics.MetricsRecorder, siamuxAddr string, hostKey types.PublicKey, pt hostdb.HostPriceTable, err *error) func() {
+func recordPriceTableUpdate(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, pt hostdb.HostPriceTable, err *error) func() {
 	startTime := time.Now()
 	return func() {
 		now := time.Now()
-		mr.RecordMetric(MetricPriceTableUpdate{
+		metrics.Record(ctx, MetricPriceTableUpdate{
 			metricCommon: metricCommon{
 				address:   siamuxAddr,
 				hostKey:   hostKey,

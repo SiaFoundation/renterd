@@ -730,8 +730,7 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	span.AddEvent("execute")
 
 	// create a host
-	h, done := req.upload.mgr.hp.newHostV3(u.fcid, u.hk, u.siamuxAddr)
-	defer done()
+	h := req.upload.mgr.hp.newHostV3(u.fcid, u.hk, u.siamuxAddr)
 
 	// upload the sector
 	start := time.Now()

@@ -43,7 +43,7 @@ type hostV3 interface {
 }
 
 type hostProvider interface {
-	newHostV3(types.FileContractID, types.PublicKey, string) (hostV3, func())
+	newHostV3(types.FileContractID, types.PublicKey, string) hostV3
 }
 
 func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
@@ -103,8 +103,7 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 
 			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 			err := func() error {
-				h, done := hp.newHostV3(contract.ID, contract.HostKey, contract.SiamuxAddr)
-				defer done()
+				h := hp.newHostV3(contract.ID, contract.HostKey, contract.SiamuxAddr)
 				err := h.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")

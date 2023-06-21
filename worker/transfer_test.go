@@ -105,12 +105,12 @@ func newMockHostProvider(hosts []hostV3) *mockHostProvider {
 	return sp
 }
 
-func (sp *mockHostProvider) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (hostV3, func()) {
+func (sp *mockHostProvider) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) hostV3 {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
 	}
-	return h, func() {}
+	return h
 }
 
 func TestMultipleObjects(t *testing.T) {
