@@ -49,6 +49,7 @@ type (
 	}
 
 	downloader struct {
+		mgr  *downloadManager // TODO PJ: remove
 		host hostV3
 
 		statsDownloadSpeedBytesPerMS    *dataPoints // keep track of this separately for stats (no decay is applied)
@@ -80,11 +81,12 @@ type (
 		length    uint32
 		offset    uint32
 
-		mu            sync.Mutex
-		lastOverdrive time.Time
-		numInflight   uint64
-		numLaunched   uint64
-		numCompleted  int
+		mu             sync.Mutex
+		lastOverdrive  time.Time
+		numCompleted   int
+		numInflight    uint64
+		numLaunched    uint64
+		numOverdriving uint64
 
 		curr          types.PublicKey
 		hostToSectors map[types.PublicKey][]sectorInfo
@@ -114,6 +116,7 @@ type (
 	}
 
 	sectorDownloadResp struct {
+		overdrive   bool
 		hk          types.PublicKey
 		sectorIndex int
 		sector      []byte
@@ -158,8 +161,14 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 	}
 }
 
+func (mgr *downloadManager) DEBUGPJ(msg string) {
+	mgr.logger.Debug(msg)
+	fmt.Println("DEBUG PJ: " + msg)
+}
+
 func (mgr *downloadManager) newDownloader(host hostV3) *downloader {
 	return &downloader{
+		mgr:  mgr,
 		host: host,
 
 		statsSectorDownloadEstimateInMS: newDataPoints(statsDecayHalfTime),
@@ -188,7 +197,8 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	if len(slabs) == 0 {
 		return nil
 	}
-	fmt.Printf("DEBUG PJ: %v | downloading %d slabs\n", id, len(slabs))
+
+	mgr.DEBUGPJ(fmt.Sprintf("%v | downloading %d slabs\n", id, len(slabs)))
 
 	// ensure everything cancels if download is done
 	ctx, cancel := context.WithCancel(ctx)
@@ -233,7 +243,8 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				}
 
 				// launch the download
-				fmt.Printf("DEBUG PJ: %v | slab %d | launched\n", id, slabIndex)
+
+				mgr.DEBUGPJ(fmt.Sprintf("%v | slab %d | launched\n", id, slabIndex))
 				go mgr.downloadSlab(ctx, id, next, slabIndex, responseChan, nextSlabChan)
 				slabIndex++
 			}
@@ -262,7 +273,7 @@ outer:
 			if resp.err != nil {
 				return resp.err
 			}
-			fmt.Printf("DEBUG PJ: %v | slab %d | received\n", id, resp.index)
+			mgr.DEBUGPJ(fmt.Sprintf("%v | slab %d | received\n", id, resp.index))
 			responses[resp.index] = resp
 			for {
 				if next, exists := responses[respIndex]; exists {
@@ -331,7 +342,7 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	var resp *slabDownloadResponse
 	select {
 	case <-ctx.Done():
-		fmt.Printf("DEBUG PJ: %v | 0 | TIMEOUT after %v\n", id, time.Since(start))
+		mgr.DEBUGPJ(fmt.Sprintf("%v | 0 | TIMEOUT after %v\n", id, time.Since(start)))
 		return nil, ctx.Err()
 	case resp = <-responseChan:
 		if resp.err != nil {
@@ -499,10 +510,16 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice obje
 	resp := &slabDownloadResponse{index: index}
 	resp.shards, resp.err = slab.downloadShards(ctx, nextSlabChan)
 
-	// send the response
+	// check if we're done first
 	select {
 	case <-ctx.Done():
-	case responseChan <- resp:
+		return
+	default:
+		// if not try and send the response
+		select {
+		case <-ctx.Done():
+		case responseChan <- resp:
+		}
 	}
 }
 
@@ -556,7 +573,7 @@ outer:
 				continue outer
 			}
 
-			fmt.Printf("DEBUG PJ: downloader %v is processing batch of size %v\n", d.host.HostKey(), len(batch))
+			d.mgr.DEBUGPJ(fmt.Sprintf("downloader %v is processing batch of size %v\n", d.host.HostKey(), len(batch)))
 
 			var mu sync.Mutex
 			var completed int
@@ -590,7 +607,7 @@ outer:
 							failed++
 							completed = 0
 							d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-							fmt.Printf("DEBUG PJ: host %v errored out\n", d.host.HostKey())
+							d.mgr.DEBUGPJ(fmt.Sprintf("host %v errored out %v\n", d.host.HostKey(), err))
 						} else {
 							completed++
 							if completed == maxConcurrentSectorsPerHost {
@@ -728,6 +745,7 @@ func (req *sectorDownloadReq) succeed(sector []byte) {
 	case <-req.ctx.Done():
 	case req.responseChan <- sectorDownloadResp{
 		hk:          req.hk,
+		overdrive:   req.overdrive,
 		sectorIndex: req.sectorIndex,
 		sector:      sector,
 	}:
@@ -738,8 +756,9 @@ func (req *sectorDownloadReq) fail(err error) {
 	select {
 	case <-req.ctx.Done():
 	case req.responseChan <- sectorDownloadResp{
-		hk:  req.hk,
-		err: err,
+		err:       err,
+		hk:        req.hk,
+		overdrive: req.overdrive,
 	}:
 	}
 }
@@ -759,24 +778,31 @@ func (s *slabDownload) overdrive(ctx context.Context, respChan chan sectorDownlo
 		return func() {}
 	}
 
+	// create a helper function that increases the timeout for each overdrive
+	timeout := func() time.Duration {
+		s.mu.Lock()
+		s.mu.Unlock()
+		return time.Duration(s.numOverdriving+1) * s.mgr.overdriveTimeout
+	}
+
 	// create a timer to trigger overdrive
-	timer := time.NewTimer(s.mgr.overdriveTimeout)
+	timer := time.NewTimer(timeout())
 	resetTimer = func() {
 		timer.Stop()
 		select {
 		case <-timer.C:
 		default:
 		}
-		timer.Reset(s.mgr.overdriveTimeout)
+		timer.Reset(timeout())
 	}
 
 	// create a function to check whether overdrive is possible
-	canOverdrive := func() bool {
+	canOverdrive := func(timeout time.Duration) bool {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
 		// overdrive is not due yet
-		if time.Since(s.lastOverdrive) < s.mgr.overdriveTimeout {
+		if time.Since(s.lastOverdrive) < timeout {
 			return false
 		}
 
@@ -797,13 +823,13 @@ func (s *slabDownload) overdrive(ctx context.Context, respChan chan sectorDownlo
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				if canOverdrive() {
+				if canOverdrive(timeout()) {
 					req := s.nextRequest(ctx, respChan, true)
 					if req == nil {
-						fmt.Printf("DEBUG PJ: %v | %d | no sector to overdrive\n", s.dID, s.index)
+						s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | no sector to overdrive\n", s.dID, s.index))
 					} else {
 						lErr := s.launch(req) // ignore error
-						fmt.Printf("DEBUG PJ: %v | %d | overdriving sector %d err %v\n", s.dID, s.index, req.sectorIndex, lErr)
+						s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | overdriving sector %d err %v\n", s.dID, s.index, req.sectorIndex, lErr))
 					}
 				}
 				resetTimer()
@@ -901,7 +927,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 		case <-s.mgr.stopChan:
 			return nil, errors.New("download stopped")
 		case <-ctx.Done():
-			fmt.Printf("DEBUG PJ: %v | %d | TIMEOUT after %v\n", s.dID, s.index, time.Since(start))
+			s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | TIMEOUT after %v\n", s.dID, s.index, time.Since(start)))
 			return nil, ctx.Err()
 		case resp = <-respChan:
 		}
@@ -911,7 +937,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 		done, next = s.receive(resp)
 		if !done && resp.err != nil {
 			lErr := s.launch(s.nextRequest(ctx, respChan, true)) // ignore error
-			fmt.Printf("DEBUG PJ: %v | %d | err %v launching overdrive req err %v\n", s.dID, s.index, resp.err, lErr)
+			s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | err %v launching overdrive req err %v\n", s.dID, s.index, resp.err, lErr))
 		}
 
 		if next && !triggered && s.mgr.ongoingDownloads() < maxConcurrentSlabsPerDownload {
@@ -928,7 +954,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 		select {
 		case nextSlabTrigger <- struct{}{}:
 		case <-time.After(time.Minute):
-			fmt.Printf("DEBUG PJ: %v | %d | next slab could not be triggered\n", s.dID, s.index)
+			s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | next slab could not be triggered\n", s.dID, s.index))
 		}
 	}
 
@@ -964,7 +990,7 @@ func (s *slabDownload) finish() ([][]byte, error) {
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
 		err := fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), s.errs)
-		fmt.Printf("DEBUG PJ: %v | %d | FAILED err: %v\n", s.index, s.dID, err)
+		s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | FAILED err: %v\n", s.index, s.dID, err))
 		return nil, err
 	}
 	return s.sectors, nil
@@ -997,6 +1023,9 @@ func (s *slabDownload) launch(req *sectorDownloadReq) error {
 	// update the state
 	s.numInflight++
 	s.numLaunched++
+	if req.overdrive {
+		s.numOverdriving++
+	}
 	return nil
 }
 
@@ -1006,8 +1035,13 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool, next boo
 
 	defer func() {
 		remaining := s.minShards - s.numCompleted
-		fmt.Printf("DEBUG PJ: %v | %d | sector %d received | err %v | remaining %d | finished %v | next %v\n", s.dID, s.index, resp.sectorIndex, resp.err, remaining, finished, next)
+		s.mgr.DEBUGPJ(fmt.Sprintf("%v | %d | sector %d received | err %v | remaining %d | finished %v | next %v\n", s.dID, s.index, resp.sectorIndex, resp.err, remaining, finished, next))
 	}()
+
+	// update num overdriving
+	if resp.overdrive {
+		s.numOverdriving--
+	}
 
 	// failed reqs can't complete the upload
 	s.numInflight--
