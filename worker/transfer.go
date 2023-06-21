@@ -31,7 +31,6 @@ var (
 )
 
 type hostV3 interface {
-	io.Closer
 	Contract() types.FileContractID
 	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
 	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
@@ -44,7 +43,7 @@ type hostV3 interface {
 }
 
 type hostProvider interface {
-	newHostV3(types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
+	newHostV3(types.FileContractID, types.PublicKey, string) (hostV3, func())
 }
 
 func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
@@ -104,12 +103,9 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 
 			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 			err := func() error {
-				h, err := hp.newHostV3(contract.ID, contract.HostKey, contract.SiamuxAddr)
-				if err != nil {
-					return err
-				}
-				defer h.Close()
-				err = h.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
+				h, done := hp.newHostV3(contract.ID, contract.HostKey, contract.SiamuxAddr)
+				defer done()
+				err := h.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")
 					span.RecordError(err)
@@ -312,7 +308,7 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.S
 	return slabs
 }
 
-func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, downloadSectorTimeout, uploadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, downloadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 

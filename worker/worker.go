@@ -216,9 +216,7 @@ type worker struct {
 
 	contractLockingDuration time.Duration
 	downloadSectorTimeout   time.Duration
-	uploadOverdriveTimeout  time.Duration
 	downloadMaxOverdrive    uint64
-	uploadMaxOverdrive      uint64
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
@@ -271,26 +269,23 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
-	acc, err := w.accounts.ForHost(hostKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return &host{
-		acc:                      acc,
+func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (hostV3, func()) {
+	h := &host{
+		acc:                      w.accounts.ForHost(hostKey),
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
 		mr:                       &ephemeralMetricsRecorder{},
 		logger:                   w.logger.Named(hostKey.String()[:4]),
 		fcid:                     contractID,
-		recordInteractions:       w.recordInteractions,
 		siamuxAddr:               siamuxAddr,
 		renterKey:                w.deriveRenterKey(hostKey),
 		accountKey:               w.accounts.deriveAccountKey(hostKey),
 		transportPool:            w.transportPoolV3,
 		priceTables:              w.priceTables,
-	}, nil
+	}
+	return h, func() {
+		w.recordInteractions(h.mr.interactions())
+	}
 }
 
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
@@ -305,11 +300,8 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 		cancel()
 	}()
 
-	h, err := w.newHostV3(contractID, hk, siamuxAddr)
-	if err != nil {
-		return err
-	}
-	defer h.Close()
+	h, done := w.newHostV3(contractID, hk, siamuxAddr)
+	defer done()
 	rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
 	if err != nil {
 		return err
@@ -411,11 +403,8 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 }
 
 func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	h, err := w.newHostV3(types.FileContractID{}, hk, siamuxAddr)
-	if err != nil {
-		return hostdb.HostPriceTable{}, err
-	}
-	defer h.Close()
+	h, done := w.newHostV3(types.FileContractID{}, hk, siamuxAddr)
+	defer done()
 	hpt, err = h.FetchPriceTable(ctx, rev)
 	if err != nil {
 		return hostdb.HostPriceTable{}, err
@@ -533,11 +522,11 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// renew the contract
-	h, err := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
+	h, done := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
 	if jc.Check("failed to create host for renewal", err) != nil {
 		return
 	}
-	defer h.Close()
+	defer done()
 	renewed, txnSet, err := h.Renew(ctx, rrr)
 	if jc.Check("couldn't renew contract", err) != nil {
 		return
@@ -575,11 +564,8 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// fund the account
 	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
-		h, err := w.newHostV3(rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
-		if err != nil {
-			return err
-		}
-		defer h.Close()
+		h, done := w.newHostV3(rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
+		defer done()
 		err = h.FundAccount(ctx, rfr.Balance, &rev)
 		if isMaxBalanceExceeded(err) {
 			// sync the account
@@ -658,11 +644,8 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// sync the account
-	h, err := w.newHostV3(rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
-	if jc.Check("failed to create host for renewal", err) != nil {
-		return
-	}
-	defer h.Close()
+	h, done := w.newHostV3(rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
+	defer done()
 	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	}))
@@ -711,7 +694,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w.downloadSectorTimeout, w.uploadOverdriveTimeout, up.CurrentHeight, w.logger)
+	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w.downloadSectorTimeout, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -1058,16 +1041,14 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		masterKey:               masterKey,
 		busFlushInterval:        busFlushInterval,
 		downloadSectorTimeout:   downloadSectorTimeout,
-		uploadOverdriveTimeout:  uploadOverdriveTimeout,
 		downloadMaxOverdrive:    downloadMaxOverdrive,
-		uploadMaxOverdrive:      uploadMaxOverdrive,
 		logger:                  l.Sugar().Named("worker").Named(id),
 		transportPoolV3:         newTransportPoolV3(),
 	}
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
-	w.initUploadManager()
+	w.initUploadManager(uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
 	return w, nil
 }
 

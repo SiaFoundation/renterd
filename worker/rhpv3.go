@@ -399,7 +399,6 @@ type (
 		fcid                     types.FileContractID
 		logger                   *zap.SugaredLogger
 		mr                       *ephemeralMetricsRecorder
-		recordInteractions       func(interactions []hostdb.Interaction)
 		siamuxAddr               string
 		renterKey                types.PrivateKey
 		accountKey               types.PrivateKey
@@ -407,11 +406,6 @@ type (
 		priceTables              *priceTables
 	}
 )
-
-func (h *host) Close() error {
-	h.recordInteractions(h.mr.interactions())
-	return nil
-}
 
 func (w *worker) initAccounts(as AccountStore) {
 	if w.accounts != nil {
@@ -425,20 +419,14 @@ func (w *worker) initAccounts(as AccountStore) {
 
 // ForHost returns an account to use for a given host. If the account
 // doesn't exist, a new one is created.
-func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
-	// Key should be set.
-	if hk == (types.PublicKey{}) {
-		return nil, errors.New("empty host key provided")
-	}
-
-	// Return account.
+func (a *accounts) ForHost(hk types.PublicKey) *account {
 	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 	return &account{
 		bus:  a.store,
 		id:   accountID,
 		key:  a.key,
 		host: hk,
-	}, nil
+	}
 }
 
 // WithDeposit increases the balance of an account by the amount returned by
