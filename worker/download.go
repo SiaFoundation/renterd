@@ -180,11 +180,15 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		span.End()
 	}()
 
+	// create identifier
+	id := newID()
+
 	// calculate what slabs we need
 	slabs := slabsForDownload(o.Slabs, offset, length)
 	if len(slabs) == 0 {
 		return nil
 	}
+	fmt.Printf("DEBUG PJ: %v | downloading %d slabs\n", id, len(slabs))
 
 	// ensure everything cancels if download is done
 	ctx, cancel := context.WithCancel(ctx)
@@ -199,9 +203,6 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		hosts[c.HostKey] = struct{}{}
 	}
 
-	// create identifier
-	id := newID()
-
 	// create the cipher writer
 	cw := o.Key.Decrypt(w, offset)
 
@@ -209,74 +210,79 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	nextSlabChan := make(chan struct{}, 1)
 	nextSlabChan <- struct{}{}
 
-	// create response channel
+	// launch a goroutine to launch consecutive slab downloads
 	responseChan := make(chan *slabDownloadResponse)
-	var slabIndex int
+	defer close(responseChan)
+	go func() {
+		var slabIndex int
 
-	// responses cache (might come in out of order)
+		for {
+			if slabIndex < len(slabs) {
+				next := slabs[slabIndex]
+
+				// check if we have enough downloaders
+				var available uint8
+				for _, s := range next.Shards {
+					if _, exists := hosts[s.Host]; exists {
+						available++
+					}
+				}
+				if available < next.MinShards {
+					responseChan <- &slabDownloadResponse{err: fmt.Errorf("not enough hosts available to download the slab: %v/%v", available, next.MinShards)}
+					return
+				}
+
+				// launch the download
+				fmt.Printf("DEBUG PJ: %v | slab %d | launched\n", id, slabIndex)
+				go mgr.downloadSlab(ctx, id, next, slabIndex, responseChan, nextSlabChan)
+				slabIndex++
+			}
+
+			// wait for the trigger to launch the next one
+			select {
+			case <-ctx.Done():
+				return
+			case <-nextSlabChan:
+			}
+		}
+	}()
+
+	// collect the response, responses might come in out of order so we keep
+	// them in a map and return what we can when we can
 	responses := make(map[int]*slabDownloadResponse)
 	var respIndex int
-
-	fmt.Printf("DEBUG PJ: %v | downloading %d slabs\n", id, len(slabs))
-loop:
+outer:
 	for {
 		select {
 		case <-mgr.stopChan:
 			return errors.New("manager was stopped")
 		case <-ctx.Done():
 			return errors.New("download timed out")
-		case <-nextSlabChan:
-			if slabIndex == len(slabs) {
-				continue
-			}
-
-			// check if we have enough downloaders
-			var available uint8
-			for _, s := range slabs[slabIndex].Shards {
-				if _, exists := hosts[s.Host]; exists {
-					available++
-				}
-			}
-			if available < slabs[slabIndex].MinShards {
-				return fmt.Errorf("not enough hosts available to download the slab: %v/%v", available, slabs[slabIndex].MinShards)
-			}
-
-			// launch the download
-			fmt.Printf("DEBUG PJ: %v | slab %d | launched\n", id, slabIndex)
-			go mgr.downloadSlab(ctx, id, slabs[slabIndex], slabIndex, responseChan, nextSlabChan)
-			slabIndex++
 		case resp := <-responseChan:
-			fmt.Printf("DEBUG PJ: %v | slab %d | received\n", id, resp.index)
-
-			// receive the response
 			if resp.err != nil {
 				return resp.err
 			}
+			fmt.Printf("DEBUG PJ: %v | slab %d | received\n", id, resp.index)
 			responses[resp.index] = resp
-
-			// slabs might download out of order, therefore we need to keep
-			// sending slabs for as long as we have consecutive slabs in the
-			// response map
 			for {
-				next, exists := responses[respIndex]
-				if !exists {
+				if next, exists := responses[respIndex]; exists {
+					slabs[respIndex].Decrypt(next.shards)
+					err := slabs[respIndex].Recover(cw, next.shards)
+					if err != nil {
+						return err
+					}
+					next = nil
+					delete(responses, respIndex)
+					respIndex++
+					continue
+				} else {
 					break
 				}
-
-				slabs[respIndex].Decrypt(next.shards)
-				err := slabs[respIndex].Recover(cw, next.shards)
-				if err != nil {
-					return err
-				}
-
-				next = nil
-				delete(responses, respIndex)
-				respIndex++
 			}
 
 			// exit condition
-			if respIndex == slabIndex {
-				break loop
+			if respIndex == len(slabs) {
+				break outer
 			}
 		}
 	}
@@ -913,7 +919,6 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 			case nextSlabTrigger <- struct{}{}:
 				triggered = true
 			default:
-				fmt.Printf("DEBUG PJ: %v | %d | next slab could not be triggered, ongoing downloads %d\n", s.dID, s.index, s.mgr.ongoingDownloads())
 			}
 		}
 	}
