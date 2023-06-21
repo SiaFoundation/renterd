@@ -163,7 +163,7 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 
 func (mgr *downloadManager) DEBUGPJ(msg string) {
 	mgr.logger.Debug(msg)
-	fmt.Println("DEBUG PJ: " + msg)
+	fmt.Print("DEBUG PJ: " + msg)
 }
 
 func (mgr *downloadManager) newDownloader(host hostV3) *downloader {
