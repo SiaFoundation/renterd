@@ -113,6 +113,12 @@ func (m *migrator) performMigrations(p *workerPool, set string) {
 	})
 	var toMigrate []api.UnhealthySlab
 
+	// ignore a potential signal before the first iteration of the 'OUTER' loop
+	select {
+	case <-m.signalMaintenanceFinished:
+	default:
+	}
+
 OUTER:
 	for {
 		// fetch slabs for migration

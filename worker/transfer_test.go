@@ -103,7 +103,7 @@ func newMockHostProvider(hosts []hostV3) *mockHostProvider {
 	return sp
 }
 
-func (sp *mockHostProvider) newHostV3(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
+func (sp *mockHostProvider) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
@@ -144,31 +144,41 @@ func TestMultipleObjects(t *testing.T) {
 	}
 
 	// prepare upload manager
-	mgr := newUploadManager(hp, mockLocker, 0, 0)
+	mgr := newUploadManager(hp, mockLocker, 0, 0, zap.NewNop().Sugar())
 	upload, err := mgr.newUpload(10, contracts, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	rs := api.RedundancySettings{MinShards: 3, TotalShards: 10}
+	dataChan := make(chan []byte)
+	go func() {
+		for {
+			<-upload.nextSlabTrigger
+
+			// read slab data
+			buf := make([]byte, int(rs.MinShards)*rhpv2.SectorSize)
+			_, err := io.ReadFull(r, buf)
+			if err == io.EOF {
+				close(dataChan)
+				return
+			} else if err != nil && err != io.ErrUnexpectedEOF {
+				t.Error(err)
+			}
+			dataChan <- buf
+		}
+	}()
+
 	// upload
 	var slabs []object.Slab
-	for {
-		// read slab data
-		rs := api.RedundancySettings{MinShards: 3, TotalShards: 10}
-		buf := make([]byte, int(rs.MinShards)*rhpv2.SectorSize)
-		shards := make([][]byte, rs.TotalShards)
-		_, err := io.ReadFull(r, buf)
-		if err == io.EOF {
-			break
-		} else if err != nil && err != io.ErrUnexpectedEOF {
-			t.Fatal(err)
-		}
-
+	for data := range dataChan {
 		s := object.Slab{
 			Key:       object.GenerateEncryptionKey(),
 			MinShards: uint8(rs.MinShards),
 		}
-		s.Encode(buf, shards)
+
+		shards := make([][]byte, rs.TotalShards)
+		s.Encode(data, shards)
 		s.Encrypt(shards)
 
 		s.Shards, err = upload.uploadShards(context.Background(), shards)

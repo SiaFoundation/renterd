@@ -212,7 +212,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	defer cancel()
 	rev, err := h.fetchRevisionWithAccount(ctx, h.HostKey(), h.siamuxAddr, blockHeight, h.fcid)
 	if err != nil && !isBalanceInsufficient(err) {
-		return types.FileContractRevision{}, err
+		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
 		return rev, nil
 	}
@@ -221,8 +221,18 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	ctx, cancel = timeoutCtx()
 	defer cancel()
 	rev, err = h.fetchRevisionWithContract(ctx, h.HostKey(), h.siamuxAddr, h.fcid)
+	if err != nil && !strings.Contains(err.Error(), ErrInsufficientFunds.Error()) {
+		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with contract: %v", err)
+	} else if err == nil {
+		return rev, nil
+	}
+
+	// If we don't have enough money in the contract, try again without paying.
+	ctx, cancel = timeoutCtx()
+	defer cancel()
+	rev, err = h.fetchRevisionNoPayment(ctx, h.HostKey(), h.siamuxAddr, h.fcid)
 	if err != nil {
-		return types.FileContractRevision{}, err
+		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision without payment: %v", err)
 	}
 	return rev, nil
 }
@@ -272,6 +282,17 @@ func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.Publ
 	return rev, err
 }
 
+func (h *host) fetchRevisionNoPayment(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
+		_, err = RPCLatestRevision(ctx, t, contractID, func(r *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
+			rev = *r
+			return rhpv3.HostPriceTable{}, nil, nil
+		})
+		return err
+	})
+	return rev, err
+}
+
 func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
 	// fetch pricetable
 	pt, err := h.priceTable(ctx, rev)
@@ -308,7 +329,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
 				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
 			}
-			h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, api.ContractSpending{FundAccount: cost})
+			h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, rev.Filesize, api.ContractSpending{FundAccount: cost})
 			return nil
 		})
 	})
@@ -608,7 +629,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	}
 
 	// record spending
-	h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, api.ContractSpending{Uploads: cost})
+	h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, rev.Filesize, api.ContractSpending{Uploads: cost})
 	return root, err
 }
 

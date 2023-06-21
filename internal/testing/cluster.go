@@ -801,6 +801,7 @@ func testApCfg() node.AutopilotConfig {
 		AccountsRefillInterval:   time.Second,
 		Heartbeat:                time.Second,
 		MigrationHealthCutoff:    0.99,
+		RevisionSubmissionBuffer: 0,
 		ScannerInterval:          time.Second,
 		ScannerBatchSize:         10,
 		ScannerNumThreads:        1,

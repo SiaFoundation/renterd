@@ -513,17 +513,21 @@ func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit 
 }
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, path string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
+		ContractSet:   contractSet,
 		Object:        o,
 		UsedContracts: usedContract,
 	})
 	return
 }
 
-// DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
+// DeleteObject either deletes the object at the given path or if batch=true
+// deletes all objects that start with the given path.
+func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
+	values := url.Values{}
+	values.Set("batch", fmt.Sprint(batch))
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 
@@ -540,8 +544,9 @@ func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, se
 }
 
 // UpdateSlab updates the given slab in the database.
-func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT("/slab", api.UpdateSlabRequest{
+		ContractSet:   contractSet,
 		Slab:          slab,
 		UsedContracts: usedContracts,
 	})

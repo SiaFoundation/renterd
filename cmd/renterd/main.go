@@ -147,6 +147,7 @@ func main() {
 		enabled bool
 		node.AutopilotConfig
 	}
+	autopilotCfg.RevisionSubmissionBuffer = api.BlocksPerDay
 	// node
 	apiAddr := flag.String("http", build.DefaultAPIAddress, "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")

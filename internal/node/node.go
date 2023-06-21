@@ -60,6 +60,7 @@ type AutopilotConfig struct {
 	AccountsRefillInterval   time.Duration
 	Heartbeat                time.Duration
 	MigrationHealthCutoff    float64
+	RevisionSubmissionBuffer uint64
 	ScannerInterval          time.Duration
 	ScannerBatchSize         uint64
 	ScannerMinRecentFailures uint64
@@ -310,7 +311,7 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Log
 }
 
 func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
-	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval)
+	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer)
 	if err != nil {
 		return nil, nil, nil, err
 	}

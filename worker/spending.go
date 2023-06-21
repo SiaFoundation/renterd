@@ -12,12 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const keyContractSpendingRecorder contextKey = "ContractSpendingRecorder"
-
 type (
 	// A ContractSpendingRecorder records the spending of a contract.
 	ContractSpendingRecorder interface {
-		Record(fcid types.FileContractID, revisionNumber uint64, cs api.ContractSpending)
+		Record(fcid types.FileContractID, revisionNumber, size uint64, cs api.ContractSpending)
 	}
 
 	contractSpendingRecorder struct {
@@ -30,16 +28,6 @@ type (
 		contractSpendingsFlushTimer *time.Timer
 	}
 )
-
-func recordContractSpending(ctx context.Context, rev *types.FileContractRevision, cs api.ContractSpending, err *error) {
-	if err != nil && *err != nil {
-		return
-	}
-	if sr, ok := ctx.Value(keyContractSpendingRecorder).(ContractSpendingRecorder); ok {
-		sr.Record(rev.ParentID, rev.RevisionNumber, cs)
-		return
-	}
-}
 
 func (w *worker) initContractSpendingRecorder() {
 	if w.contractSpendingRecorder != nil {
@@ -54,7 +42,7 @@ func (w *worker) initContractSpendingRecorder() {
 }
 
 // Record sends contract spending records to the bus.
-func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, revisionNumber uint64, cs api.ContractSpending) {
+func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, revisionNumber, size uint64, cs api.ContractSpending) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
@@ -68,6 +56,7 @@ func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, revisionNu
 	csr.ContractSpending = csr.ContractSpending.Add(cs)
 	if revisionNumber > csr.RevisionNumber {
 		csr.RevisionNumber = revisionNumber
+		csr.Size = size
 	}
 	sr.contractSpendings[fcid] = csr
 

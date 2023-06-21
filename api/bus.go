@@ -220,6 +220,7 @@ type ObjectsResponse struct {
 
 // AddObjectRequest is the request type for the /object/*key endpoint.
 type AddObjectRequest struct {
+	ContractSet   string                                   `json:"contractSet"`
 	Object        object.Object                            `json:"object"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
@@ -246,6 +247,7 @@ type UploadedPackedSlab struct {
 
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
+	ContractSet   string                                   `json:"contractSet"`
 	Slab          object.Slab                              `json:"slab"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
