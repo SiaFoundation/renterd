@@ -510,9 +510,12 @@ func (c *Client) AddObject(ctx context.Context, path, contractSet string, o obje
 	return
 }
 
-// DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
+// DeleteObject either deletes the object at the given path or if batch=true
+// deletes all objects that start with the given path.
+func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
+	values := url.Values{}
+	values.Set("batch", fmt.Sprint(batch))
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 

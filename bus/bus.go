@@ -96,6 +96,7 @@ type (
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
+		RemoveObjects(ctx context.Context, prefix string) error
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
@@ -756,7 +757,16 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) objectsHandlerDELETE(jc jape.Context) {
-	err := b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"))
+	var batch bool
+	if jc.DecodeForm("batch", &batch) != nil {
+		return
+	}
+	var err error
+	if batch {
+		err = b.ms.RemoveObjects(jc.Request.Context(), jc.PathParam("path"))
+	} else {
+		err = b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"))
+	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
