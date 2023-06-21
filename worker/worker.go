@@ -414,7 +414,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	}
 
 	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *transportV3) (err error) {
+	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		pt, err = RPCPriceTable(jc.Request.Context(), t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
@@ -590,7 +590,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 		return
 	}
 	var value rhpv3.RegistryValue
-	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(t *transportV3) (err error) {
+	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		value, err = RPCReadRegistry(jc.Request.Context(), t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
@@ -610,7 +610,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	cost, _ := rc.Total()
 	// TODO: refactor to a w.RegistryUpdate method that calls host.RegistryUpdate.
 	payment := preparePayment(w.accounts.deriveAccountKey(rrur.HostKey), cost, pt.HostBlockHeight)
-	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(t *transportV3) (err error) {
+	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		return RPCUpdateRegistry(jc.Request.Context(), t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
@@ -1206,7 +1206,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	// fetch the host pricetable
 	var pt rhpv3.HostPriceTable
 	if err == nil {
-		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(t *transportV3) (err error) {
+		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) (err error) {
 			pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 			return err
 		})

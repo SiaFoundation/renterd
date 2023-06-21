@@ -60,7 +60,7 @@ func (w *worker) flushInteractions() {
 }
 
 // recordPriceTableUpdate records a price table metric.
-func recordPriceTableUpdate(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, pt hostdb.HostPriceTable, err *error) func() {
+func recordPriceTableUpdate(ctx context.Context, siamuxAddr string, hostKey types.PublicKey, pt *hostdb.HostPriceTable, err *error) func() {
 	startTime := time.Now()
 	return func() {
 		now := time.Now()
@@ -72,7 +72,7 @@ func recordPriceTableUpdate(ctx context.Context, siamuxAddr string, hostKey type
 				elapsed:   now.Sub(startTime),
 				err:       *err,
 			},
-			pt: pt,
+			pt: *pt,
 		})
 	}
 }
@@ -150,7 +150,18 @@ type MetricHostDial struct {
 }
 
 func (m MetricHostDial) Result() interface{} {
-	return m.commonResult()
+	cr := m.commonResult()
+	er := hostdb.ErrorResult{Error: errToStr(m.err)}
+	if m.err != nil {
+		return struct {
+			metricResultCommon
+			hostdb.ErrorResult
+		}{cr, er}
+	} else {
+		return struct {
+			metricResultCommon
+		}{cr}
+	}
 }
 
 func (m MetricHostDial) Type() string { return "dial" }
