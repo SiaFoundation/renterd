@@ -449,7 +449,7 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 
 	// fetch the autopilot and update its config
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
-	if strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
 	} else {
 		autopilot.Config = cfg
