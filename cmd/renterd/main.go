@@ -16,6 +16,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
@@ -145,6 +146,7 @@ func main() {
 		enabled bool
 		node.AutopilotConfig
 	}
+	autopilotCfg.RevisionSubmissionBuffer = api.BlocksPerDay
 	// node
 	apiAddr := flag.String("http", build.DefaultAPIAddress, "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
