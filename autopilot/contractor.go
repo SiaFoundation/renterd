@@ -50,11 +50,11 @@ const (
 
 	// timeoutHostPriceTable is the amount of time we wait to receive a price
 	// table from the host
-	timeoutHostPriceTable = 30 * time.Second
+	timeoutHostPriceTable = time.Minute
 
 	// timeoutHostRevision is the amount of time we wait to receive the latest
 	// revision from the host
-	timeoutHostRevision = 30 * time.Second
+	timeoutHostRevision = time.Minute
 
 	// timeoutHostScan is the amount of time we wait for a host scan to be
 	// completed
@@ -66,7 +66,8 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		maintenanceTxnID types.TransactionID
+		maintenanceTxnID         types.TransactionID
+		revisionSubmissionBuffer uint64
 
 		mu               sync.Mutex
 		cachedHostInfo   map[types.PublicKey]hostInfo
@@ -90,10 +91,11 @@ type (
 	}
 )
 
-func newContractor(ap *Autopilot) *contractor {
+func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64) *contractor {
 	return &contractor{
-		ap:     ap,
-		logger: ap.logger.Named("contractor"),
+		ap:                       ap,
+		logger:                   ap.logger.Named("contractor"),
+		revisionSubmissionBuffer: revisionSubmissionBuffer,
 	}
 }
 
@@ -508,7 +510,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		fcid := contract.ID
 
 		// check if contract is ready to be archived.
-		if state.cs.BlockHeight > contract.EndHeight() {
+		if state.cs.BlockHeight > contract.EndHeight()-c.revisionSubmissionBuffer {
 			toArchive[fcid] = errContractExpired.Error()
 		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
