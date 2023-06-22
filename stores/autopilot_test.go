@@ -79,7 +79,7 @@ func TestAutopilotStore(t *testing.T) {
 	}
 
 	// fetch it and assert it was updated
-	updated, err := db.Autopilot(context.Background(), "autopilot")
+	updated, err := db.Autopilot(context.Background(), t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
