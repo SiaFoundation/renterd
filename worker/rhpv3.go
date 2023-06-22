@@ -664,7 +664,7 @@ func uploadSectorCost(pt rhpv3.HostPriceTable, windowEnd uint64) (cost, collater
 
 // priceTableValidityLeeway is the number of time before the actual expiry of a
 // price table when we start considering it invalid.
-const priceTableValidityLeeway = -30 * time.Second
+const priceTableValidityLeeway = 30 * time.Second
 
 type priceTables struct {
 	w *worker
@@ -742,7 +742,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	// price table is valid, no update necessary, return early
 	if !hpt.Expiry.IsZero() {
 		total := int(math.Floor(hpt.HostPriceTable.Validity.Seconds() * 0.1))
-		priceTableUpdateLeeway := time.Duration(frand.Intn(total)) * time.Second // random leeway to avoid workers updating at the same time
+		priceTableUpdateLeeway := time.Duration(frand.Intn(total)) * time.Second
 		totalLeeway := priceTableValidityLeeway + priceTableUpdateLeeway
 		if time.Now().Add(totalLeeway).Before(hpt.Expiry) {
 			return
@@ -751,7 +751,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 
 	// price table is valid and update ongoing, return early
 	ongoing, update := p.ongoingUpdate()
-	if ongoing && !hpt.Expiry.IsZero() && time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway)) {
+	if ongoing && !hpt.Expiry.IsZero() && time.Now().Add(priceTableValidityLeeway).Before(hpt.Expiry) {
 		return
 	}
 
@@ -781,7 +781,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 
 	// fetch the host, return early if it has a valid price table
 	host, err := b.Host(ctx, hk)
-	if err == nil && host.Scanned && time.Now().Before(host.PriceTable.Expiry.Add(priceTableValidityLeeway)) {
+	if err == nil && host.Scanned && time.Now().Add(priceTableValidityLeeway).Before(host.PriceTable.Expiry) {
 		hpt = host.PriceTable
 		return
 	}
