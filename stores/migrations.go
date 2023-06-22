@@ -158,6 +158,9 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 
 		// bus.EphemeralAccountStore tables
 		&dbAccount{},
+
+		// bus.AutopilotStore tables
+		&dbAutopilot{},
 	}
 	if err := db.AutoMigrate(tables...); err != nil {
 		return err

@@ -56,11 +56,6 @@ var (
 		},
 	}
 
-	testRedundancySettings = api.RedundancySettings{
-		MinShards:   2,
-		TotalShards: 3,
-	}
-
 	testGougingSettings = api.GougingSettings{
 		MinMaxCollateral: types.Siacoins(10),                   // at least up to 10 SC per contract
 		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
@@ -74,6 +69,11 @@ var (
 		MinPriceTableValidity:         10 * time.Second,  // minimum value for price table validity
 		MinAccountExpiry:              time.Hour,         // minimum value for account expiry
 		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
+	}
+
+	testRedundancySettings = api.RedundancySettings{
+		MinShards:   2,
+		TotalShards: 3,
 	}
 )
 
@@ -91,6 +91,7 @@ type TestCluster struct {
 	autopilotShutdownFns []func(context.Context) error
 
 	miner  *node.Miner
+	apID   string
 	dbName string
 	dir    string
 	logger *zap.Logger
@@ -167,6 +168,23 @@ func (c *TestCluster) Reboot(ctx context.Context) (*TestCluster, error) {
 	return newCluster, nil
 }
 
+// AutopilotConfig returns the autopilot's config and current period.
+func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, uint64, error) {
+	ap, err := c.Bus.Autopilot(context.Background(), c.apID)
+	if err != nil {
+		return api.AutopilotConfig{}, 0, err
+	}
+	return ap.Config, ap.CurrentPeriod, nil
+}
+
+// UpdateAutopilotConfig updates the cluster's autopilot with given config.
+func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error {
+	return c.Bus.UpdateAutopilot(context.Background(), api.Autopilot{
+		ID:     c.apID,
+		Config: cfg,
+	})
+}
+
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(dir string, logger *zap.Logger) (*TestCluster, error) {
 	wk := types.GeneratePrivateKey()
@@ -200,7 +218,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 
 	// Prepare individual dirs.
 	busDir := filepath.Join(dir, "bus")
-	autopilotDir := filepath.Join(dir, "autopilot")
 
 	// Generate API passwords.
 	busPassword := randomPassword()
@@ -259,20 +276,8 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	workerShutdownFns = append(workerShutdownFns, workerServer.Shutdown)
 	workerShutdownFns = append(workerShutdownFns, wStopFn)
 
-	// Create autopilot store.
-	autopilotStore, err := stores.NewJSONAutopilotStore(autopilotDir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Set autopilot config.
-	err = autopilotStore.SetConfig(testAutopilotConfig)
-	if err != nil {
-		return nil, err
-	}
-
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, autopilotStore, busClient, []autopilot.Worker{workerClient}, logger)
+	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +291,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
 
 	cluster := &TestCluster{
+		apID:   apCfg.ID,
 		dir:    dir,
 		dbName: dbName,
 		logger: logger,
@@ -323,6 +329,25 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		cluster.wg.Done()
 	}()
 
+	// Update the autopilot to use test settings
+	err = busClient.UpdateAutopilot(context.Background(), api.Autopilot{
+		ID:     apCfg.ID,
+		Config: testAutopilotConfig,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the bus settings.
+	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
+	if err != nil {
+		return nil, err
+	}
+	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
+	if err != nil {
+		return nil, err
+	}
+
 	// Fund the bus.
 	if funding {
 		if err := cluster.MineBlocks(latestHardforkHeight); err != nil {
@@ -348,16 +373,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	// Update the bus settings.
-	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
-	if err != nil {
-		return nil, err
-	}
-	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
-	if err != nil {
-		return nil, err
 	}
 
 	return cluster, nil
@@ -402,17 +417,13 @@ func (c *TestCluster) MineToRenewWindow() error {
 	if err != nil {
 		return err
 	}
-	cfg, err := c.Autopilot.Config()
+	ap, err := c.Bus.Autopilot(context.Background(), c.apID)
 	if err != nil {
 		return err
 	}
-	currentPeriod, err := c.Autopilot.Status()
-	if err != nil {
-		return err
-	}
-	renewWindowStart := currentPeriod + cfg.Contracts.Period
+	renewWindowStart := ap.CurrentPeriod + ap.Config.Contracts.Period
 	if cs.BlockHeight >= renewWindowStart {
-		return fmt.Errorf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, currentPeriod, cfg.Contracts.Period, renewWindowStart)
+		return fmt.Errorf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
 	}
 	err = c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
 	if err != nil {
@@ -786,6 +797,7 @@ func testWorkerCfg() node.WorkerConfig {
 
 func testApCfg() node.AutopilotConfig {
 	return node.AutopilotConfig{
+		ID:                       api.DefaultAutopilotID,
 		AccountsRefillInterval:   time.Second,
 		Heartbeat:                time.Second,
 		MigrationHealthCutoff:    0.99,

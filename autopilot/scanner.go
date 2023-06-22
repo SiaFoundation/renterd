@@ -163,7 +163,9 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	s.scanning = true
 	s.mu.Unlock()
 
-	go func(cfg api.AutopilotConfig) {
+	maxDowntimeHours := s.ap.State().cfg.Hosts.MaxDowntimeHours
+
+	go func() {
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
 			if s.ap.isStopped() {
 				break
@@ -173,9 +175,9 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 			}
 		}
 
-		if !s.ap.isStopped() && cfg.Hosts.MaxDowntimeHours > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v hours", cfg.Hosts.MaxDowntimeHours)
-			maxDowntime := time.Hour * time.Duration(cfg.Hosts.MaxDowntimeHours)
+		if !s.ap.isStopped() && maxDowntimeHours > 0 {
+			s.logger.Debugf("removing hosts that have been offline for more than %v hours", maxDowntimeHours)
+			maxDowntime := time.Hour * time.Duration(maxDowntimeHours)
 			removed, err := s.bus.RemoveOfflineHosts(ctx, s.scanMinRecentFailures, maxDowntime)
 			if removed > 0 {
 				s.logger.Infof("removed %v offline hosts", removed)
@@ -189,7 +191,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		s.scanning = false
 		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
 		s.mu.Unlock()
-	}(s.ap.state.cfg)
+	}()
 	return true
 }
 
