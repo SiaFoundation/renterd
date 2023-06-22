@@ -338,7 +338,7 @@ func main() {
 	autopilotErr := make(chan error, 1)
 	autopilotDir := filepath.Join(*dir, "autopilot")
 	if autopilotCfg.enabled {
-		autopilotCfg.AutopilotConfig.ID = "autopilot" // hardcoded
+		autopilotCfg.AutopilotConfig.ID = api.DefaultAutopilotID // hardcoded
 		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, logger)
 		if err != nil {
 			log.Fatal("failed to create autopilot", err)
@@ -348,9 +348,7 @@ func main() {
 		// functions array because it needs to be called first
 		autopilotShutdownFn = shutdownFn
 
-		go func() {
-			autopilotErr <- runFn()
-		}()
+		go func() { autopilotErr <- runFn() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
 	}
 
@@ -397,16 +395,6 @@ func main() {
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
-	// make sure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// check if the file exists
-	path := filepath.Join(dir, "autopilot.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
-
 	// defer autopilot dir cleanup
 	defer func() {
 		if err == nil {
@@ -418,6 +406,12 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 		}
 	}()
 
+	// check if the file exists
+	path := filepath.Join(dir, "autopilot.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+
 	// read the json config
 	log.Println("migration: reading autopilot.json")
 	var cfg struct {
@@ -428,6 +422,10 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 	} else if err := json.Unmarshal(data, &cfg); err != nil {
 		return err
 	}
+
+	// make sure we don't hang
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// check if the autopilot already exists, if so we don't need to migrate
 	_, err = bc.Autopilot(ctx, api.DefaultAutopilotID)
