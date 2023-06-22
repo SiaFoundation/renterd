@@ -743,8 +743,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	if !hpt.Expiry.IsZero() {
 		total := int(math.Floor(hpt.HostPriceTable.Validity.Seconds() * 0.1))
 		priceTableUpdateLeeway := -time.Duration(frand.Intn(total)) * time.Second
-		totalLeeway := priceTableValidityLeeway + priceTableUpdateLeeway
-		if time.Now().Add(totalLeeway).Before(hpt.Expiry) {
+		if time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway).Add(priceTableUpdateLeeway)) {
 			return
 		}
 	}
