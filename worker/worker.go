@@ -415,7 +415,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 
 	var pt rhpv3.HostPriceTable
 	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-		pt, err = RPCPriceTable(jc.Request.Context(), t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+		pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
 		return
@@ -591,7 +591,7 @@ func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
 	}
 	var value rhpv3.RegistryValue
 	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-		value, err = RPCReadRegistry(jc.Request.Context(), t, &rrrr.Payment, rrrr.RegistryKey)
+		value, err = RPCReadRegistry(ctx, t, &rrrr.Payment, rrrr.RegistryKey)
 		return
 	})
 	if jc.Check("couldn't read registry", err) != nil {
@@ -611,7 +611,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 	// TODO: refactor to a w.RegistryUpdate method that calls host.RegistryUpdate.
 	payment := preparePayment(w.accounts.deriveAccountKey(rrur.HostKey), cost, pt.HostBlockHeight)
 	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-		return RPCUpdateRegistry(jc.Request.Context(), t, &payment, rrur.RegistryKey, rrur.RegistryValue)
+		return RPCUpdateRegistry(ctx, t, &payment, rrur.RegistryKey, rrur.RegistryValue)
 	})
 	if jc.Check("couldn't update registry", err) != nil {
 		return
@@ -1036,7 +1036,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		downloadMaxOverdrive:    downloadMaxOverdrive,
 		logger:                  l.Sugar().Named("worker").Named(id),
 	}
-	w.transportPoolV3 = newTransportPoolV3(w)
+	w.initTransportPool()
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()

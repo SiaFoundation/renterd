@@ -426,6 +426,13 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
+func (w *worker) initTransportPool() {
+	if w.transportPoolV3 != nil {
+		panic("transport pool already initialized") // developer error
+	}
+	w.transportPoolV3 = newTransportPoolV3(w)
+}
+
 // ForHost returns an account to use for a given host. If the account
 // doesn't exist, a new one is created.
 func (a *accounts) ForHost(hk types.PublicKey) *account {

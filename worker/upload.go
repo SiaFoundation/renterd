@@ -55,6 +55,7 @@ type (
 	}
 
 	uploader struct {
+		host       hostV3
 		fcid       types.FileContractID
 		hk         types.PublicKey
 		siamuxAddr string
@@ -192,8 +193,10 @@ func newUploadManager(hp hostProvider, rl revisionLocker, maxOverdrive uint64, o
 	}
 }
 
-func newUploader(c api.ContractMetadata) *uploader {
+func newUploader(c api.ContractMetadata, h hostV3) *uploader {
 	return &uploader{
+		host: h,
+
 		fcid:       c.ID,
 		hk:         c.HostKey,
 		siamuxAddr: c.SiamuxAddr,
@@ -468,7 +471,8 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range c2m {
 		// create uploader
-		uploader := newUploader(c)
+		h := mgr.hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
+		uploader := newUploader(c, h)
 		mgr.uploaders = append(mgr.uploaders, uploader)
 		go uploader.start(mgr.hp, mgr.rl)
 	}
@@ -729,12 +733,9 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	span := trace.SpanFromContext(req.ctx)
 	span.AddEvent("execute")
 
-	// create a host
-	h := req.upload.mgr.hp.newHostV3(u.fcid, u.hk, u.siamuxAddr)
-
 	// upload the sector
 	start := time.Now()
-	root, err := h.UploadSector(req.ctx, req.sector, rev)
+	root, err := u.host.UploadSector(req.ctx, req.sector, rev)
 	if err != nil {
 		return types.Hash256{}, err
 	}
