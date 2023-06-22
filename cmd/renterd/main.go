@@ -425,6 +425,6 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 		return err
 	}
 
-	// remove config
-	return os.Remove(path)
+	// remove autopilot folder and config
+	return os.RemoveAll(dir)
 }
