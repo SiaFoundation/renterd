@@ -335,6 +335,7 @@ func main() {
 		}
 	}
 
+	autopilotCompatDone := make(chan struct{})
 	autopilotErr := make(chan error, 1)
 	autopilotDir := filepath.Join(*dir, "autopilot")
 	if autopilotCfg.enabled {
@@ -348,7 +349,10 @@ func main() {
 		// functions array because it needs to be called first
 		autopilotShutdownFn = shutdownFn
 
-		go func() { autopilotErr <- runFn() }()
+		go func() {
+			<-autopilotCompatDone
+			autopilotErr <- runFn()
+		}()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
 	}
 
@@ -369,6 +373,7 @@ func main() {
 			log.Fatal("failed to migrate autopilot JSON", err)
 		}
 	}
+	close(autopilotCompatDone)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
@@ -408,6 +413,7 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 	}
 
 	// read the json config
+	log.Println("Reading autopilot.json...")
 	var cfg struct {
 		Config api.AutopilotConfig `json:"Config"`
 	}
@@ -418,6 +424,7 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 	}
 
 	// create an autopilot entry
+	log.Println("Migrating autopilot.json to the bus...")
 	if err := bc.UpdateAutopilot(ctx, api.Autopilot{
 		ID:     id,
 		Config: cfg.Config,
@@ -426,5 +433,12 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 	}
 
 	// remove autopilot folder and config
-	return os.RemoveAll(dir)
+	log.Println("Removing autopilot directory...")
+	err := os.RemoveAll(dir)
+	if err != nil {
+		return err
+	}
+
+	log.Println("autopilot.json migration done")
+	return nil
 }
