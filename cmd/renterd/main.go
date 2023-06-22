@@ -413,7 +413,7 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 	}
 
 	// read the json config
-	log.Println("Reading autopilot.json...")
+	log.Println("migration: reading autopilot.json")
 	var cfg struct {
 		Config api.AutopilotConfig `json:"Config"`
 	}
@@ -424,7 +424,7 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 	}
 
 	// create an autopilot entry
-	log.Println("Migrating autopilot.json to the bus...")
+	log.Println("migration: persisting autopilot to the bus")
 	if err := bc.UpdateAutopilot(ctx, api.Autopilot{
 		ID:     id,
 		Config: cfg.Config,
@@ -433,12 +433,12 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 	}
 
 	// remove autopilot folder and config
-	log.Println("Removing autopilot directory...")
+	log.Println("migration: cleaning up autopilot directory")
 	err := os.RemoveAll(dir)
 	if err != nil {
 		return err
 	}
 
-	log.Println("autopilot.json migration done")
+	log.Println("migration: done")
 	return nil
 }
