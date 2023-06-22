@@ -337,10 +337,6 @@ func main() {
 	autopilotErr := make(chan error, 1)
 	autopilotDir := filepath.Join(*dir, "autopilot")
 	if autopilotCfg.enabled {
-		if err := os.MkdirAll(autopilotDir, 0700); err != nil {
-			log.Fatal("failed to create autopilot dir", err)
-		}
-
 		autopilotCfg.AutopilotConfig.ID = "autopilot" // hardcoded
 		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, logger)
 		if err != nil {
