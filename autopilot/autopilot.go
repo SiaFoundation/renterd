@@ -179,6 +179,9 @@ func (ap *Autopilot) Run() error {
 	ap.stopChan = make(chan struct{})
 	ap.triggerChan = make(chan bool)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
+
+	ap.wg.Add(1)
+	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
 
 	// block until consensus is synced
@@ -192,9 +195,6 @@ func (ap *Autopilot) Run() error {
 		ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
 		return nil
 	}
-
-	ap.wg.Add(1)
-	defer ap.wg.Done()
 
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
@@ -315,7 +315,7 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 }
 
 func (ap *Autopilot) blockUntilConfigured() bool {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
