@@ -315,8 +315,10 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 }
 
 func (ap *Autopilot) blockUntilConfigured() bool {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+
+	var once sync.Once
 
 	for {
 		select {
@@ -332,7 +334,7 @@ func (ap *Autopilot) blockUntilConfigured() bool {
 
 		// if the config was not found, or we were unable to fetch it, keep blocking
 		if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
-			ap.logger.Info("autopilot is waiting to be configured...")
+			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
 			continue
 		} else if err != nil {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
