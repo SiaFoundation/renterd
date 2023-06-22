@@ -595,13 +595,13 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		// perform the checks that follow, however we do want to be lenient if
 		// this contract is in the current set and we still have leeway left
 		if contract.Revision == nil {
-			if _, found := inCurrentSet[fcid]; found && maxKeepLeeway > 0 {
-				toKeep = append(toKeep, fcid)
-				maxKeepLeeway--
-			} else {
+			if _, found := inCurrentSet[fcid]; !found || maxKeepLeeway == 0 {
 				toStopUsing[fcid] = errContractNoRevision.Error()
+			} else {
+				toKeep = append(toKeep, fcid)
+				maxKeepLeeway-- // we let it slide
 			}
-			continue // always continue
+			continue // can't perform contract checks without revision
 		}
 
 		// decide whether the contract is still good
