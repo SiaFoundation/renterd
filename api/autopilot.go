@@ -84,6 +84,12 @@ type (
 		Triggered bool `json:"triggered"`
 	}
 
+	// AutopilotStatusResponseGET is the response type for the /autopilot/status
+	// endpoint.
+	AutopilotStatusResponseGET struct {
+		CurrentPeriod uint64 `json:"currentPeriod"`
+	}
+
 	// HostHandlerGET is the response type for the /host/:hostkey endpoint.
 	HostHandlerGET struct {
 		Host hostdb.Host `json:"host"`

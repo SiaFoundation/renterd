@@ -165,6 +165,7 @@ func (ap *Autopilot) Handler() http.Handler {
 		"POST   /debug/trigger": ap.triggerHandlerPOST,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
+		"GET    /status":        ap.statusHandlerGET,
 	}))
 }
 
@@ -511,6 +512,12 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 	jc.Encode(host)
+}
+
+func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
+	jc.Encode(api.AutopilotStatusResponseGET{
+		CurrentPeriod: ap.State().period,
+	})
 }
 
 func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
