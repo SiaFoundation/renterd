@@ -1269,12 +1269,7 @@ func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host)
 		}
 		host.Settings = scan.Settings
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeoutHostPriceTable)
-	defer cancel()
-
-	// fetch the price table
-	return w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
+	return w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
 }
 
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
