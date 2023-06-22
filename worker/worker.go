@@ -551,9 +551,16 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 
+	ctx := jc.Request.Context()
+	if rptr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), rptr.Timeout)
+		defer cancel()
+	}
+
 	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *transportV3) (err error) {
-		pt, err = RPCPriceTable(jc.Request.Context(), t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(t *transportV3) (err error) {
+		pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
 		return
