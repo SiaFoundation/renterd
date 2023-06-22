@@ -742,7 +742,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	// price table is valid, no update necessary, return early
 	if !hpt.Expiry.IsZero() {
 		total := int(math.Floor(hpt.HostPriceTable.Validity.Seconds() * 0.1))
-		priceTableUpdateLeeway := time.Duration(frand.Intn(total)) * time.Second
+		priceTableUpdateLeeway := time.Duration(frand.Intn(total)) * time.Second // random leeway to avoid workers updating at the same time
 		totalLeeway := priceTableValidityLeeway + priceTableUpdateLeeway
 		if time.Now().Add(totalLeeway).Before(hpt.Expiry) {
 			return
