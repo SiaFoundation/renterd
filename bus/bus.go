@@ -23,6 +23,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const DefaultAutopilotID = "autopilot"
+
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {

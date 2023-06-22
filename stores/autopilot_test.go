@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
@@ -22,8 +24,31 @@ func TestAutopilotStore(t *testing.T) {
 		t.Fatal("expected number of autopilots", len(autopilots))
 	}
 
-	// add an autopilot with default config
-	err = db.UpdateAutopilot(context.Background(), api.Autopilot{ID: "autopilot", Config: api.DefaultAutopilotConfig()})
+	// create a cfg
+	cfg := api.AutopilotConfig{
+		Contracts: api.ContractsConfig{
+			Allowance:   types.Siacoins(1).Mul64(1e3),
+			Amount:      3,
+			Period:      144,
+			RenewWindow: 72,
+
+			Download: rhpv2.SectorSize * 500,
+			Upload:   rhpv2.SectorSize * 500,
+			Storage:  rhpv2.SectorSize * 5e3,
+
+			Set: "autopilot",
+		},
+		Hosts: api.HostsConfig{
+			MaxDowntimeHours:  10,
+			AllowRedundantIPs: true, // allow for integration tests by default
+		},
+		Wallet: api.WalletConfig{
+			DefragThreshold: 1234,
+		},
+	}
+
+	// add an autopilot with that config
+	err = db.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +63,7 @@ func TestAutopilotStore(t *testing.T) {
 	autopilot := autopilots[0]
 
 	// assert config
-	if !reflect.DeepEqual(autopilot.Config, api.DefaultAutopilotConfig()) {
+	if !reflect.DeepEqual(autopilot.Config, cfg) {
 		t.Fatal("expected autopilot config to be default config")
 	}
 	if autopilot.CurrentPeriod != 0 {
@@ -64,4 +89,25 @@ func TestAutopilotStore(t *testing.T) {
 	if updated.Config.Contracts.Amount != 99 {
 		t.Fatal("expected amount to be 99")
 	}
+}
+
+// testAutopilotConfig is the autopilot used for testing unless a different
+// one is explicitly set.
+var testAutopilotConfig = api.AutopilotConfig{
+	Contracts: api.ContractsConfig{
+		Allowance:   types.Siacoins(1).Mul64(1e3),
+		Amount:      3,
+		Period:      144,
+		RenewWindow: 72,
+
+		Download: rhpv2.SectorSize * 500,
+		Upload:   rhpv2.SectorSize * 500,
+		Storage:  rhpv2.SectorSize * 5e3,
+
+		Set: "autopilot",
+	},
+	Hosts: api.HostsConfig{
+		MaxDowntimeHours:  10,
+		AllowRedundantIPs: true, // allow for integration tests by default
+	},
 }

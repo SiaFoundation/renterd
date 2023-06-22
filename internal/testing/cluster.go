@@ -307,10 +307,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		autopilotShutdownFns: autopilotShutdownFns,
 	}
 
-	// Create a channel that blocks the autopilot until it's properly configured
-	// in the bus.
-	autopilotConfiguredChan := make(chan struct{})
-
 	// Spin up the servers.
 	cluster.wg.Add(1)
 	go func() {
@@ -324,13 +320,11 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	}()
 	cluster.wg.Add(1)
 	go func() {
-		<-autopilotConfiguredChan
 		_ = autopilotServer.Serve(autopilotListener)
 		cluster.wg.Done()
 	}()
 	cluster.wg.Add(1)
 	go func() {
-		<-autopilotConfiguredChan
 		_ = aStartFn()
 		cluster.wg.Done()
 	}()
@@ -343,7 +337,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	if err != nil {
 		return nil, err
 	}
-	close(autopilotConfiguredChan)
 
 	// Update the bus settings.
 	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
@@ -804,7 +797,7 @@ func testWorkerCfg() node.WorkerConfig {
 
 func testApCfg() node.AutopilotConfig {
 	return node.AutopilotConfig{
-		ID:                       "autopilot",
+		ID:                       api.DefaultAutopilotID,
 		AccountsRefillInterval:   time.Second,
 		Heartbeat:                time.Second,
 		MigrationHealthCutoff:    0.99,

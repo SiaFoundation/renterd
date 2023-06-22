@@ -13,6 +13,9 @@ const (
 	// BlocksPerDay defines the amount of blocks that are mined in a day (one
 	// block every 10 minutes roughly)
 	BlocksPerDay = 144
+
+	// DefaultAutopilotID is the id of the autopilot.
+	DefaultAutopilotID = "autopilot"
 )
 
 var (
@@ -179,20 +182,4 @@ func (c AutopilotConfig) Validate() error {
 		return ErrMaxDowntimeHoursTooHigh
 	}
 	return nil
-}
-
-// DefaultAutopilotConfig returns a configuration with sane default values.
-func DefaultAutopilotConfig() (c AutopilotConfig) {
-	c.Wallet.DefragThreshold = 1000
-	c.Hosts.MaxDowntimeHours = 24 * 7 * 2 // 2 weeks
-	c.Hosts.ScoreOverrides = make(map[types.PublicKey]float64)
-	c.Contracts.Set = "autopilot"
-	c.Contracts.Allowance = types.Siacoins(1000)
-	c.Contracts.Amount = 50
-	c.Contracts.Period = BlocksPerDay * 7 * 6      // 6 weeks
-	c.Contracts.RenewWindow = BlocksPerDay * 7 * 2 // 2 weeks
-	c.Contracts.Upload = 1 << 40                   // 1 TiB
-	c.Contracts.Download = 1 << 40                 // 1 TiB
-	c.Contracts.Storage = 1 << 42                  // 4 TiB
-	return
 }

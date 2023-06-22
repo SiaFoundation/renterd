@@ -335,7 +335,6 @@ func main() {
 		}
 	}
 
-	autopilotCompatDone := make(chan struct{})
 	autopilotErr := make(chan error, 1)
 	autopilotDir := filepath.Join(*dir, "autopilot")
 	if autopilotCfg.enabled {
@@ -350,7 +349,6 @@ func main() {
 		autopilotShutdownFn = shutdownFn
 
 		go func() {
-			<-autopilotCompatDone
 			autopilotErr <- runFn()
 		}()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
@@ -366,14 +364,11 @@ func main() {
 	}
 	log.Println("bus: Listening on", syncerAddress)
 
-	// Now that the bus API is online, we can run some compat code to migrate
-	// the old autopilot json to the bus if necessary.
 	if autopilotCfg.enabled {
 		if err := runCompatMigrateAutopilotJSONToStore(bc, autopilotCfg.ID, autopilotDir); err != nil {
 			log.Fatal("failed to migrate autopilot JSON", err)
 		}
 	}
-	close(autopilotCompatDone)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
@@ -401,7 +396,7 @@ func main() {
 	log.Println("Shutdown complete")
 }
 
-func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error {
+func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
 	// make sure we don't hang
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -411,6 +406,17 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
 	}
+
+	// defer autopilot dir cleanup
+	defer func() {
+		if err == nil {
+			// remove autopilot folder and config
+			log.Println("migration: cleaning up autopilot directory")
+			if err = os.RemoveAll(dir); err == nil {
+				log.Println("migration: done")
+			}
+		}
+	}()
 
 	// read the json config
 	log.Println("migration: reading autopilot.json")
@@ -423,6 +429,13 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 		return err
 	}
 
+	// check if the autopilot already exists, if so we don't need to migrate
+	_, err = bc.Autopilot(ctx, api.DefaultAutopilotID)
+	if err == nil {
+		log.Printf("migration: autopilot already exists in the bus, the autopilot.json won't be migrated\n old config: %+v\n", cfg.Config)
+		return nil
+	}
+
 	// create an autopilot entry
 	log.Println("migration: persisting autopilot to the bus")
 	if err := bc.UpdateAutopilot(ctx, api.Autopilot{
@@ -432,13 +445,5 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) error 
 		return err
 	}
 
-	// remove autopilot folder and config
-	log.Println("migration: cleaning up autopilot directory")
-	err := os.RemoveAll(dir)
-	if err != nil {
-		return err
-	}
-
-	log.Println("migration: done")
 	return nil
 }
