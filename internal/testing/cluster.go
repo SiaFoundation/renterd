@@ -307,6 +307,10 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		autopilotShutdownFns: autopilotShutdownFns,
 	}
 
+	// Create a channel that blocks the autopilot until it's properly configured
+	// in the bus.
+	autopilotConfiguredChan := make(chan struct{})
+
 	// Spin up the servers.
 	cluster.wg.Add(1)
 	go func() {
@@ -320,14 +324,36 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	}()
 	cluster.wg.Add(1)
 	go func() {
+		<-autopilotConfiguredChan
 		_ = autopilotServer.Serve(autopilotListener)
 		cluster.wg.Done()
 	}()
 	cluster.wg.Add(1)
 	go func() {
+		<-autopilotConfiguredChan
 		_ = aStartFn()
 		cluster.wg.Done()
 	}()
+
+	// Update the autopilot to use test settings
+	err = busClient.UpdateAutopilot(context.Background(), api.Autopilot{
+		ID:     apCfg.ID,
+		Config: testAutopilotConfig,
+	})
+	if err != nil {
+		return nil, err
+	}
+	close(autopilotConfiguredChan)
+
+	// Update the bus settings.
+	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
+	if err != nil {
+		return nil, err
+	}
+	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
+	if err != nil {
+		return nil, err
+	}
 
 	// Fund the bus.
 	if funding {
@@ -354,25 +380,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	// Update the bus settings.
-	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
-	if err != nil {
-		return nil, err
-	}
-	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
-	if err != nil {
-		return nil, err
-	}
-
-	// Update the autopilot to use test settings
-	err = busClient.UpdateAutopilot(context.Background(), api.Autopilot{
-		ID:     apCfg.ID,
-		Config: testAutopilotConfig,
-	})
-	if err != nil {
-		return nil, err
 	}
 
 	return cluster, nil
