@@ -1,117 +1,84 @@
 package stores
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
+	"context"
+	"errors"
 
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/modules"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-// EphemeralAutopilotStore implements autopilot.Store in memory.
-type EphemeralAutopilotStore struct {
-	mu     sync.Mutex
-	config api.AutopilotConfig
+type (
+	dbAutopilot struct {
+		Model
+
+		Identifier    string              `gorm:"unique;NOT NULL;"`
+		Config        api.AutopilotConfig `gorm:"serializer:json"`
+		CurrentPeriod uint64              `gorm:"default:0"`
+	}
+)
+
+// TableName implements the gorm.Tabler interface.
+func (dbAutopilot) TableName() string { return "autopilots" }
+
+// convert converts a dbContract to a ContractMetadata.
+func (c dbAutopilot) convert() api.Autopilot {
+	return api.Autopilot{
+		ID:            c.Identifier,
+		Config:        c.Config,
+		CurrentPeriod: c.CurrentPeriod,
+	}
 }
 
-// Config implements autopilot.Store.
-func (s *EphemeralAutopilotStore) Config() api.AutopilotConfig {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.config
-}
-
-// SetConfig implements autopilot.Store.
-func (s *EphemeralAutopilotStore) SetConfig(c api.AutopilotConfig) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.config = c
-	return nil
-}
-
-// ProcessConsensusChange implements chain.Subscriber.
-func (s *EphemeralAutopilotStore) ProcessConsensusChange(cc modules.ConsensusChange) {
-	panic("not implemented")
-}
-
-// NewEphemeralAutopilotStore returns a new EphemeralAutopilotStore.
-func NewEphemeralAutopilotStore() *EphemeralAutopilotStore {
-	return &EphemeralAutopilotStore{}
-}
-
-// JSONAutopilotStore implements autopilot.Store in memory, backed by a JSON file.
-type JSONAutopilotStore struct {
-	*EphemeralAutopilotStore
-	dir      string
-	lastSave time.Time
-}
-
-type jsonAutopilotPersistData struct {
-	Config api.AutopilotConfig
-}
-
-func (s *JSONAutopilotStore) save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var p jsonAutopilotPersistData
-	p.Config = s.config
-	js, _ := json.MarshalIndent(p, "", "  ")
-
-	// atomic save
-	dst := filepath.Join(s.dir, "autopilot.json")
-	f, err := os.OpenFile(dst+"_tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0660)
+func (s *SQLStore) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
+	var entities []dbAutopilot
+	err := s.db.
+		Model(&dbAutopilot{}).
+		Find(&entities).
+		Error
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer f.Close()
-	if _, err := f.Write(js); err != nil {
-		return err
-	} else if err := f.Sync(); err != nil {
-		return err
-	} else if err := f.Close(); err != nil {
-		return err
-	} else if err := os.Rename(dst+"_tmp", dst); err != nil {
-		return err
+
+	autopilots := make([]api.Autopilot, len(entities))
+	for i, ap := range entities {
+		autopilots[i] = ap.convert()
 	}
-	return nil
+	return autopilots, nil
 }
 
-func (s *JSONAutopilotStore) load() error {
-	var p jsonAutopilotPersistData
-	if js, err := os.ReadFile(filepath.Join(s.dir, "autopilot.json")); os.IsNotExist(err) {
-		return nil
+func (s *SQLStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
+	var entity dbAutopilot
+	err := s.db.
+		Model(&dbAutopilot{}).
+		Where("identifier = ?", id).
+		First(&entity).
+		Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return api.Autopilot{}, api.ErrAutopilotNotFound
 	} else if err != nil {
-		return err
-	} else if err := json.Unmarshal(js, &p); err != nil {
-		return err
+		return api.Autopilot{}, err
 	}
-	s.config = p.Config
-	return nil
+	return entity.convert(), nil
 }
 
-// SetConfig implements autopilot.Store.
-func (s *JSONAutopilotStore) SetConfig(c api.AutopilotConfig) error {
-	s.EphemeralAutopilotStore.SetConfig(c)
-	return s.save()
-}
-
-// NewJSONAutopilotStore returns a new JSONAutopilotStore.
-func NewJSONAutopilotStore(dir string) (*JSONAutopilotStore, error) {
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
+func (s *SQLStore) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
+	// validate autopilot
+	if ap.ID == "" {
+		return errors.New("autopilot ID cannot be empty")
+	}
+	if err := ap.Config.Validate(); err != nil {
+		return err
 	}
 
-	s := &JSONAutopilotStore{
-		EphemeralAutopilotStore: NewEphemeralAutopilotStore(),
-		dir:                     dir,
-		lastSave:                time.Now(),
-	}
-	err := s.load()
-	if err != nil {
-		return nil, err
-	}
-	return s, nil
+	// upsert
+	return s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "identifier"}},
+		UpdateAll: true,
+	}).Create(&dbAutopilot{
+		Identifier:    ap.ID,
+		Config:        ap.Config,
+		CurrentPeriod: ap.CurrentPeriod,
+	}).Error
 }

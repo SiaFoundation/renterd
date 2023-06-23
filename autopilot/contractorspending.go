@@ -7,31 +7,6 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-func (c *contractor) currentPeriod() uint64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.currPeriod
-}
-
-func (c *contractor) updateCurrentPeriod() {
-	c.mu.Lock()
-	defer func(prevPeriod uint64) {
-		if c.currPeriod != prevPeriod {
-			c.logger.Debugf("updated current period, %d->%d", prevPeriod, c.currPeriod)
-		}
-		c.mu.Unlock()
-	}(c.currPeriod)
-
-	cfg := c.ap.state.cfg
-	cs := c.ap.state.cs
-
-	if c.currPeriod == 0 {
-		c.currPeriod = cs.BlockHeight
-	} else if cs.BlockHeight >= c.currPeriod+cfg.Contracts.Period {
-		c.currPeriod += cfg.Contracts.Period
-	}
-}
-
 func (c *contractor) contractSpending(ctx context.Context, contract api.Contract, currentPeriod uint64) (api.ContractSpending, error) {
 	ancestors, err := c.ap.bus.AncestorContracts(ctx, contract.ID, currentPeriod)
 	if err != nil {
@@ -45,7 +20,7 @@ func (c *contractor) contractSpending(ctx context.Context, contract api.Contract
 	return total, nil
 }
 
-func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Currency, error) {
+func (c *contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) (types.Currency, error) {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
@@ -55,7 +30,7 @@ func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Curr
 	var filtered []api.ContractMetadata
 	c.mu.Lock()
 	for _, contract := range contracts {
-		if contract.WindowStart <= c.currPeriod {
+		if contract.WindowStart <= currentPeriod {
 			filtered = append(filtered, contract.ContractMetadata)
 		}
 	}
@@ -70,18 +45,18 @@ func (c *contractor) currentPeriodSpending(contracts []api.Contract) (types.Curr
 }
 
 func (c *contractor) remainingFunds(contracts []api.Contract) (types.Currency, error) {
-	cfg := c.ap.state.cfg
+	state := c.ap.State()
 
 	// find out how much we spent in the current period
-	spent, err := c.currentPeriodSpending(contracts)
+	spent, err := c.currentPeriodSpending(contracts, state.period)
 	if err != nil {
 		return types.ZeroCurrency, err
 	}
 
 	// figure out remaining funds
 	var remaining types.Currency
-	if cfg.Contracts.Allowance.Cmp(spent) > 0 {
-		remaining = cfg.Contracts.Allowance.Sub(spent)
+	if state.cfg.Contracts.Allowance.Cmp(spent) > 0 {
+		remaining = state.cfg.Contracts.Allowance.Sub(spent)
 	}
 	return remaining, nil
 }

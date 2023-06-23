@@ -10,14 +10,15 @@ import (
 )
 
 func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerGET, error) {
-	cfg := c.ap.Config()
-	if cfg.Contracts.Allowance.IsZero() {
+	state := c.ap.State()
+
+	if state.cfg.Contracts.Allowance.IsZero() {
 		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
 	}
-	if cfg.Contracts.Amount == 0 {
+	if state.cfg.Contracts.Amount == 0 {
 		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contracts amount is zero")
 	}
-	if cfg.Contracts.Period == 0 {
+	if state.cfg.Contracts.Period == 0 {
 		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contract period is zero")
 	}
 
@@ -46,12 +47,12 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	minScore := c.cachedMinScore
 	c.mu.Unlock()
 
-	gc := worker.NewGougingChecker(gs, rs, cs, fee, cfg.Contracts.Period, cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(gs, rs, cs, fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
-	isUsable, unusableResult := isUsableHost(cfg, rs, gc, host.Host, minScore, storedData)
+	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host.Host, minScore, storedData)
 	return api.HostHandlerGET{
 		Host: host.Host,
 

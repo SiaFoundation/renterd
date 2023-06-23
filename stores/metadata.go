@@ -960,14 +960,35 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
-	rowsAffected, err := deleteObject(s.db, key)
+	var rowsAffected int64
+	var err error
+	err = s.retryTransaction(func(tx *gorm.DB) error {
+		rowsAffected, err = deleteObject(tx, key)
+		return err
+	})
 	if err != nil {
 		return err
 	}
 	if rowsAffected == 0 {
 		return fmt.Errorf("%w: key: %s", api.ErrObjectNotFound, key)
 	}
-	return err
+	return nil
+}
+
+func (s *SQLStore) RemoveObjects(ctx context.Context, prefix string) error {
+	var rowsAffected int64
+	var err error
+	err = s.retryTransaction(func(tx *gorm.DB) error {
+		rowsAffected, err = deleteObjects(tx, prefix)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("%w: prefix: %s", api.ErrObjectNotFound, prefix)
+	}
+	return nil
 }
 
 func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
@@ -1402,6 +1423,17 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // the slab is only deleted when no more objects point to it.
 func deleteObject(tx *gorm.DB, key string) (int64, error) {
 	tx = tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{})
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	if err := pruneSlabs(tx); err != nil {
+		return 0, err
+	}
+	return tx.RowsAffected, nil
+}
+
+func deleteObjects(tx *gorm.DB, path string) (int64, error) {
+	tx = tx.Exec("DELETE FROM objects WHERE object_id LIKE ?", path+"%")
 	if tx.Error != nil {
 		return 0, tx.Error
 	}

@@ -12,8 +12,28 @@ import (
 	"lukechampine.com/frand"
 )
 
+var cfg = api.AutopilotConfig{
+	Contracts: api.ContractsConfig{
+		Allowance:   types.Siacoins(1000),
+		Amount:      50,
+		Period:      144 * 7 * 6,
+		RenewWindow: 144 * 7 * 2,
+
+		Download: 1 << 40, // 1 TiB
+		Upload:   1 << 40, // 1 TiB
+		Storage:  1 << 42, // 4 TiB
+
+		Set: "autopilot",
+	},
+	Hosts: api.HostsConfig{
+		MaxDowntimeHours: 24 * 7 * 2,
+	},
+	Wallet: api.WalletConfig{
+		DefragThreshold: 1000,
+	},
+}
+
 func TestHostScore(t *testing.T) {
-	cfg := api.DefaultAutopilotConfig()
 	day := 24 * time.Hour
 
 	newHost := func(s rhpv2.HostSettings) hostdb.Host {
