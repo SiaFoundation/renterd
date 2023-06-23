@@ -555,11 +555,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		// if the host doesn't have a valid pricetable, update it
 		var invalidPT bool
-		pricetable, err := c.priceTable(ctx, w, host.Host)
+		err = updateHostPriceTable(ctx, w, &host.Host)
 		if err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
-		} else {
-			host.PriceTable = pricetable
 			invalidPT = true
 		}
 
@@ -701,7 +699,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// fetch price table on the fly
-		host.PriceTable, err = c.priceTable(ctx, w, host)
+		err = updateHostPriceTable(ctx, w, &host)
 		if err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host.PublicKey, err)
 			continue
@@ -1293,24 +1291,30 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (hostdb.HostPriceTable, error) {
+func updateHostPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
 	if !host.Scanned {
 		// scan the host if it hasn't been successfully scanned before, which
 		// can occur when contracts are added manually to the bus or database
 		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
 		if err != nil {
-			return hostdb.HostPriceTable{}, err
+			return err
 		}
 		host.Settings = scan.Settings
 	} else if !host.PriceTable.Expiry.IsZero() && time.Now().After(host.PriceTable.Expiry) {
 		// return the host's pricetable if it's not expired yet
-		return host.PriceTable, nil
+		return nil
 	}
 
 	// fetch the price table
 	ctx, cancel := context.WithTimeout(ctx, timeoutHostPriceTable)
 	defer cancel()
-	return w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
+	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
+	if err != nil {
+		return err
+	}
+
+	host.PriceTable = hpt
+	return nil
 }
 
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
