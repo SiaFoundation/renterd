@@ -163,7 +163,7 @@ func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout t
 	}
 }
 
-func (mgr *downloadManager) newDownloader(host hostV3) *downloader {
+func newDownloader(host hostV3) *downloader {
 	return &downloader{
 		host: host,
 
@@ -430,7 +430,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 			continue
 		}
 
-		downloader := mgr.newDownloader(host)
+		downloader := newDownloader(host)
 		mgr.downloaders[c.HostKey] = downloader
 		go downloader.processQueue(mgr.hp)
 	}
