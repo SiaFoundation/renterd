@@ -26,9 +26,8 @@ const (
 )
 
 const (
-	SettingContractSet = "contractset"
-	SettingGouging     = "gouging"
-	SettingRedundancy  = "redundancy"
+	SettingGouging    = "gouging"
+	SettingRedundancy = "redundancy"
 )
 
 var (
@@ -221,6 +220,7 @@ type ObjectsResponse struct {
 
 // AddObjectRequest is the request type for the /object/*key endpoint.
 type AddObjectRequest struct {
+	ContractSet   string                                   `json:"contractSet"`
 	Object        object.Object                            `json:"object"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
@@ -247,6 +247,7 @@ type UploadedPackedSlab struct {
 
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
+	ContractSet   string                                   `json:"contractSet"`
 	Slab          object.Slab                              `json:"slab"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
@@ -308,12 +309,6 @@ type GougingParams struct {
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
 	TransactionFee     types.Currency
-}
-
-// ContractSetSettings contains settings needed by the worker to figure out what
-// contract set to use.
-type ContractSetSettings struct {
-	Set string `json:"set"`
 }
 
 // GougingSettings contain some price settings used in price gouging.

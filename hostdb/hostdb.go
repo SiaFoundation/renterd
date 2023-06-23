@@ -24,14 +24,18 @@ type hostAnnouncement struct {
 	Signature types.Signature
 }
 
+type ErrorResult struct {
+	Error string `json:"error,omitempty"`
+}
+
 type ScanResult struct {
-	Error      string               `json:"error,omitempty"`
+	ErrorResult
 	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
 }
 
 type PriceTableUpdateResult struct {
-	Error      string         `json:"error,omitempty"`
+	ErrorResult
 	PriceTable HostPriceTable `json:"priceTable,omitempty"`
 }
 

@@ -24,6 +24,24 @@ type Client struct {
 	c jape.Client
 }
 
+// Autopilots returns all autopilots in the autopilots store.
+func (c *Client) Autopilots(ctx context.Context) (autopilots []api.Autopilot, err error) {
+	err = c.c.WithContext(ctx).GET("/autopilots", &autopilots)
+	return
+}
+
+// Autopilot returns the autopilot with the given ID.
+func (c *Client) Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/autopilots/%s", id), &autopilot)
+	return
+}
+
+// UpdateAutopilot updates the given autopilot in the store.
+func (c *Client) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilots/%s", autopilot.ID), autopilot)
+	return
+}
+
 // AcceptBlock submits a block to the consensus manager.
 func (c *Client) AcceptBlock(ctx context.Context, b types.Block) (err error) {
 	err = c.c.WithContext(ctx).POST("/consensus/acceptblock", b, nil)
@@ -442,12 +460,6 @@ func (c *Client) DeleteSetting(ctx context.Context, key string) error {
 	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/setting/%s", key))
 }
 
-// ContractSetSettings returns the contract set settings.
-func (c *Client) ContractSetSettings(ctx context.Context) (css api.ContractSetSettings, err error) {
-	err = c.Setting(ctx, api.SettingContractSet, &css)
-	return
-}
-
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
 	err = c.Setting(ctx, api.SettingGouging, &gs)
@@ -501,17 +513,21 @@ func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit 
 }
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, path string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
+		ContractSet:   contractSet,
 		Object:        o,
 		UsedContracts: usedContract,
 	})
 	return
 }
 
-// DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
+// DeleteObject either deletes the object at the given path or if batch=true
+// deletes all objects that start with the given path.
+func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
+	values := url.Values{}
+	values.Set("batch", fmt.Sprint(batch))
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 
@@ -528,8 +544,9 @@ func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, se
 }
 
 // UpdateSlab updates the given slab in the database.
-func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT("/slab", api.UpdateSlabRequest{
+		ContractSet:   contractSet,
 		Slab:          slab,
 		UsedContracts: usedContracts,
 	})

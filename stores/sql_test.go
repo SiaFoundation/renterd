@@ -2,6 +2,7 @@ package stores
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"os"
 	"testing"
@@ -15,7 +16,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-const testPersistInterval = time.Second
+const (
+	testPersistInterval = time.Second
+	testContractSet     = "test"
+)
 
 // newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore() (*SQLStore, string, modules.ConsensusChangeID, error) {
@@ -26,7 +30,8 @@ func newTestSQLStore() (*SQLStore, string, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}
-	return sqlStore, dbName, ccid, nil
+	err = sqlStore.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
+	return sqlStore, dbName, ccid, err
 }
 
 // newTestLogger creates a console logger used for testing.

@@ -52,7 +52,7 @@ func TestMigrations(t *testing.T) {
 	// configure the cluster to use 1 more host than the total shards in the
 	// redundancy settings.
 	cfg.Contracts.Amount = uint64(testRedundancySettings.TotalShards) + 1
-	if err := cluster.Autopilot.SetConfig(cfg); err != nil {
+	if err := cluster.UpdateAutopilotConfig(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
 

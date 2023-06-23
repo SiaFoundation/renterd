@@ -52,11 +52,11 @@ const (
 
 	// timeoutHostPriceTable is the amount of time we wait to receive a price
 	// table from the host
-	timeoutHostPriceTable = 30 * time.Second
+	timeoutHostPriceTable = time.Minute
 
 	// timeoutHostRevision is the amount of time we wait to receive the latest
 	// revision from the host
-	timeoutHostRevision = 30 * time.Second
+	timeoutHostRevision = time.Minute
 
 	// timeoutHostScan is the amount of time we wait for a host scan to be
 	// completed
@@ -68,13 +68,13 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		maintenanceTxnID types.TransactionID
+		maintenanceTxnID         types.TransactionID
+		revisionSubmissionBuffer uint64
 
 		mu               sync.Mutex
 		cachedHostInfo   map[types.PublicKey]hostInfo
 		cachedDataStored map[types.PublicKey]uint64
 		cachedMinScore   float64
-		currPeriod       uint64
 	}
 
 	hostInfo struct {
@@ -93,10 +93,11 @@ type (
 	}
 )
 
-func newContractor(ap *Autopilot) *contractor {
+func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64) *contractor {
 	return &contractor{
-		ap:     ap,
-		logger: ap.logger.Named("contractor"),
+		ap:                       ap,
+		logger:                   ap.logger.Named("contractor"),
+		revisionSubmissionBuffer: revisionSubmissionBuffer,
 	}
 }
 
@@ -111,7 +112,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.logger.Info("performing contract maintenance")
 
 	// convenience variables
-	state := c.ap.state
+	state := c.ap.State()
 
 	// no maintenance if no hosts are requested
 	//
@@ -191,7 +192,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// min score to pass checks.
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore, err = c.managedFindMinAllowedHostScores(ctx, w, hosts, hostData)
+		minScore, err = c.managedFindMinAllowedHostScores(ctx, w, hosts, hostData, state.cfg.Contracts.Amount)
 		if err != nil {
 			return false, fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
@@ -378,7 +379,7 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 
 	// log a warning if the contract set does not contain enough contracts
 	logFn := c.logger.Debugw
-	if len(newSet) < int(c.ap.state.rs.TotalShards) {
+	if len(newSet) < int(c.ap.State().rs.TotalShards) {
 		logFn = c.logger.Warnw
 	}
 
@@ -408,7 +409,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	l := c.logger
 
 	// no contracts - nothing to do
-	cfg := c.ap.state.cfg
+	cfg := c.ap.State().cfg
 	if cfg.Contracts.Amount == 0 {
 		l.Warn("wallet maintenance skipped, no contracts wanted")
 		return nil
@@ -492,7 +493,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	f := newIPFilter(c.logger)
 
 	// convenience variables
-	state := c.ap.state
+	state := c.ap.State()
 
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
@@ -524,7 +525,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		fcid := contract.ID
 
 		// check if contract is ready to be archived.
-		if state.cs.BlockHeight > contract.EndHeight() {
+		if state.cs.BlockHeight > contract.EndHeight()-c.revisionSubmissionBuffer {
 			toArchive[fcid] = errContractExpired.Error()
 		} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
@@ -603,7 +604,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, settings: host.Settings}
-		renterFunds, err := c.renewFundingEstimate(ctx, ci, false)
+		renterFunds, err := c.renewFundingEstimate(ctx, ci, state.fee, false)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
@@ -650,10 +651,13 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	}
 	var formed []types.FileContractID
 
+	// convenience variables
+	state := c.ap.State()
+
 	c.logger.Debugw(
 		"run contract formations",
 		"usedHosts", len(usedHosts),
-		"required", c.ap.state.cfg.Contracts.Amount,
+		"required", state.cfg.Contracts.Amount,
 		"missing", missing,
 		"budget", budget,
 	)
@@ -664,9 +668,6 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			"budget", budget,
 		)
 	}()
-
-	// convenience variables
-	state := c.ap.state
 
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
@@ -841,12 +842,12 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.AutopilotConfig, ci contractInfo) (types.Currency, error) {
+func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.AutopilotConfig, ci contractInfo, fee types.Currency) (types.Currency, error) {
 	// refresh with 1.2x the funds
 	refreshAmount := ci.contract.TotalCost.Mul64(6).Div64(5)
 
 	// estimate the txn fee
-	txnFeeEstimate := c.ap.state.fee.Mul64(estimatedFileContractTransactionSetSize)
+	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)
 
 	// check for a sane minimum that is equal to the initial contract funding
 	// but without an upper cap.
@@ -863,15 +864,15 @@ func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.Autopil
 	return refreshAmountCapped, nil
 }
 
-func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, renewing bool) (types.Currency, error) {
-	cfg := c.ap.state.cfg
+func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, fee types.Currency, renewing bool) (types.Currency, error) {
+	state := c.ap.State()
 
 	// estimate the cost of the current data stored
 	dataStored := ci.contract.FileSize()
-	storageCost := types.NewCurrency64(dataStored).Mul64(cfg.Contracts.Period).Mul(ci.settings.StoragePrice)
+	storageCost := types.NewCurrency64(dataStored).Mul64(state.cfg.Contracts.Period).Mul(ci.settings.StoragePrice)
 
 	// fetch the spending of the contract we want to renew.
-	prevSpending, err := c.contractSpending(ctx, ci.contract, c.currentPeriod())
+	prevSpending, err := c.contractSpending(ctx, ci.contract, state.period)
 	if err != nil {
 		c.logger.Errorw(
 			fmt.Sprintf("could not retrieve contract spending, err: %v", err),
@@ -897,7 +898,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	// - upload cost: previous uploads + prev storage
 	// - download cost: assumed to be the same
 	// - fund acount cost: assumed to be the same
-	newUploadsCost := prevSpending.Uploads.Add(prevUploadDataEstimate.Mul64(cfg.Contracts.Period).Mul(ci.settings.StoragePrice))
+	newUploadsCost := prevSpending.Uploads.Add(prevUploadDataEstimate.Mul64(state.cfg.Contracts.Period).Mul(ci.settings.StoragePrice))
 	newDownloadsCost := prevSpending.Downloads
 	newFundAccountCost := prevSpending.FundAccount
 
@@ -914,7 +915,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	}
 
 	// estimate the txn fee
-	txnFeeEstimate := c.ap.state.fee.Mul64(estimatedFileContractTransactionSetSize)
+	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)
 
 	// add them all up and then return the estimate plus 33% for error margin
 	// and just general volatility of usage pattern.
@@ -923,7 +924,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 
 	// check for a sane minimum that is equal to the initial contract funding
 	// but without an upper cap.
-	minInitialContractFunds, _ := initialContractFundingMinMax(cfg)
+	minInitialContractFunds, _ := initialContractFundingMinMax(state.cfg)
 	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
 	cappedEstimatedCost := estimatedCost
 	if cappedEstimatedCost.Cmp(minimum) < 0 {
@@ -949,12 +950,11 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Worker, hosts []hostdb.Host, storedData map[types.PublicKey]uint64) (float64, error) {
+func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Worker, hosts []hostdb.Host, storedData map[types.PublicKey]uint64, numContracts uint64) (float64, error) {
 	// Pull a new set of hosts from the hostdb that could be used as a new set
 	// to match the allowance. The lowest scoring host of these new hosts will
 	// be used as a baseline for determining whether our existing contracts are
 	// worthwhile.
-	numContracts := c.ap.state.cfg.Contracts.Amount
 	buffer := 50
 	candidates, scores, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
@@ -984,7 +984,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		return nil, nil, nil
 	}
 
-	state := c.ap.state
+	state := c.ap.State()
 
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
@@ -1087,8 +1087,9 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	span.SetAttributes(attribute.Stringer("contract", ci.contract.ID))
 
 	// convenience variables
-	cfg := c.ap.state.cfg
-	cs := c.ap.state.cs
+	state := c.ap.State()
+	cfg := state.cfg
+	cs := state.cs
 	contract := ci.contract
 	settings := ci.settings
 	fcid := contract.ID
@@ -1096,7 +1097,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	hk := contract.HostKey
 
 	// calculate the renter funds
-	renterFunds, err := c.renewFundingEstimate(ctx, ci, true)
+	renterFunds, err := c.renewFundingEstimate(ctx, ci, state.fee, true)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("could not get renew funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, true, err
@@ -1109,7 +1110,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	}
 
 	// calculate the host collateral
-	endHeight := endHeight(cfg, c.currentPeriod())
+	endHeight := endHeight(cfg, state.period)
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, settings)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
 
@@ -1159,8 +1160,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	span.SetAttributes(attribute.Stringer("contract", ci.contract.ID))
 
 	// convenience variables
-	cfg := c.ap.state.cfg
-	cs := c.ap.state.cs
+	state := c.ap.State()
 	contract := ci.contract
 	settings := ci.settings
 	fcid := contract.ID
@@ -1168,7 +1168,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	hk := contract.HostKey
 
 	// calculate the renter funds
-	renterFunds, err := c.refreshFundingEstimate(ctx, cfg, ci)
+	renterFunds, err := c.refreshFundingEstimate(ctx, state.cfg, ci, state.fee)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, true, err
@@ -1181,8 +1181,8 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	}
 
 	// calculate the new collateral
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, settings)
-	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, contract.EndHeight())
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-state.cs.BlockHeight, settings)
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, state.cs.BlockHeight, contract.EndHeight())
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
 	_, hostMissedPayout, _, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
@@ -1210,7 +1210,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, contract.ID)
+	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, state.cs.BlockHeight, contract.ID)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1239,7 +1239,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	span.SetAttributes(attribute.Stringer("host", hk))
 
 	// convenience variables
-	state := c.ap.state
+	state := c.ap.State()
 
 	// fetch host settings
 	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
@@ -1257,7 +1257,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	}
 
 	// calculate the host collateral
-	endHeight := endHeight(state.cfg, c.currentPeriod())
+	endHeight := endHeight(state.cfg, state.period)
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-state.cs.BlockHeight, scan.Settings)
 	hostCollateral := rhpv2.ContractFormationCollateral(state.cfg.Contracts.Period, expectedStorage, scan.Settings)
 
@@ -1306,9 +1306,7 @@ func updateHostPriceTable(ctx context.Context, w Worker, host *hostdb.Host) erro
 	}
 
 	// fetch the price table
-	ctx, cancel := context.WithTimeout(ctx, timeoutHostPriceTable)
-	defer cancel()
-	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr())
+	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
 	if err != nil {
 		return err
 	}

@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/metrics"
 )
 
 var (
@@ -78,62 +75,6 @@ func wrapErr(err *error, fnName string) {
 	}
 }
 
-// wrapResponseErr formats RPC response errors nicely, wrapping them in either
-// readCtx or rejectCtx depending on whether we encountered an I/O error or the
-// host sent an explicit error message.
-func wrapResponseErr(err error, readCtx, rejectCtx string) error {
-	if errors.As(err, new(*rhpv2.RPCError)) {
-		return fmt.Errorf("%s: %w", rejectCtx, err)
-	}
-	if err != nil {
-		return fmt.Errorf("%s: %w", readCtx, err)
-	}
-	return nil
-}
-
-// MetricRPC contains metrics relating to a single RPC.
-type MetricRPC struct {
-	HostKey    types.PublicKey
-	RPC        types.Specifier
-	Timestamp  time.Time
-	Elapsed    time.Duration
-	Contract   types.FileContractID // possibly empty
-	Uploaded   uint64
-	Downloaded uint64
-	Cost       types.Currency
-	Collateral types.Currency
-	Err        error
-}
-
-// IsMetric implements metrics.Metric.
-func (MetricRPC) IsMetric() {}
-
-// IsSuccess implements metrics.Metric.
-func (m MetricRPC) IsSuccess() bool { return m.Err == nil }
-
-// helper type for ensuring that we always write in multiples of LeafSize,
-// which is required by e.g. (renter.EncryptionKey).XORKeyStream
-type segWriter struct {
-	w   io.Writer
-	buf [rhpv2.LeafSize * 64]byte
-	len int
-}
-
-func (sw *segWriter) Write(p []byte) (int, error) {
-	lenp := len(p)
-	for len(p) > 0 {
-		n := copy(sw.buf[sw.len:], p)
-		sw.len += n
-		p = p[n:]
-		segs := sw.buf[:sw.len-(sw.len%rhpv2.LeafSize)]
-		if _, err := sw.w.Write(segs); err != nil {
-			return 0, err
-		}
-		sw.len = copy(sw.buf[:], sw.buf[len(segs):sw.len])
-	}
-	return lenp, nil
-}
-
 func hashRevision(rev types.FileContractRevision) types.Hash256 {
 	h := types.NewHasher()
 	rev.EncodeTo(h.E)
@@ -174,43 +115,9 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 		[]types.Currency{rev.MissedProofOutputs[0].Value, rev.MissedProofOutputs[1].Value, rev.MissedProofOutputs[2].Value}, nil
 }
 
-func recordRPC(ctx context.Context, t *rhpv2.Transport, c rhpv2.ContractRevision, id types.Specifier, err *error) func() {
-	startTime := time.Now()
-	contractID := c.ID()
-	var startFunds types.Currency
-	if len(c.Revision.ValidProofOutputs) > 0 {
-		startFunds = c.Revision.ValidProofOutputs[0].Value
-	}
-	var startCollateral types.Currency
-	if len(c.Revision.MissedProofOutputs) > 1 {
-		startCollateral = c.Revision.MissedProofOutputs[1].Value
-	}
-	startW, startR := t.BytesWritten(), t.BytesRead()
-	return func() {
-		m := MetricRPC{
-			HostKey:    t.HostKey(),
-			RPC:        id,
-			Timestamp:  startTime,
-			Elapsed:    time.Since(startTime),
-			Contract:   contractID,
-			Uploaded:   t.BytesWritten() - startW,
-			Downloaded: t.BytesRead() - startR,
-			Err:        *err,
-		}
-		if len(c.Revision.ValidProofOutputs) > 0 && startFunds.Cmp(c.Revision.ValidProofOutputs[0].Value) > 0 {
-			m.Cost = startFunds.Sub(c.Revision.ValidProofOutputs[0].Value)
-		}
-		if len(c.Revision.MissedProofOutputs) > 1 && startCollateral.Cmp(c.Revision.MissedProofOutputs[1].Value) > 0 {
-			m.Collateral = startCollateral.Sub(c.Revision.MissedProofOutputs[1].Value)
-		}
-		metrics.Record(ctx, m)
-	}
-}
-
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
 func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
 	defer wrapErr(&err, "Settings")
-	defer recordRPC(ctx, t, rhpv2.ContractRevision{}, rhpv2.RPCSettingsID, &err)()
 
 	var resp rhpv2.RPCSettingsResponse
 	if err := t.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {

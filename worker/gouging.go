@@ -110,7 +110,7 @@ func (gc gougingChecker) checkHS(hs *rhpv2.HostSettings) (check api.GougingCheck
 	if hs != nil {
 		check = api.GougingChecks{
 			ContractErr: errToStr(checkContractGougingRHPv2(gc.period, gc.renewWindow, *hs)),
-			DownloadErr: errToStr(checkDownloadGougingRHPv2(gc.settings, gc.redundancy, *hs)),
+			DownloadErr: errToStr(checkDownloadGougingRHPv2(gc.settings, *hs)),
 			GougingErr:  errToStr(checkPriceGougingHS(gc.settings, *hs)),
 			UploadErr:   errToStr(checkUploadGougingRHPv2(gc.settings, gc.redundancy, *hs)),
 		}
@@ -122,7 +122,7 @@ func (gc gougingChecker) checkPT(pt *rhpv3.HostPriceTable) (check api.GougingChe
 	if pt != nil {
 		check = api.GougingChecks{
 			ContractErr: errToStr(checkContractGougingRHPv3(gc.period, gc.renewWindow, *pt)),
-			DownloadErr: errToStr(checkDownloadGougingRHPv3(gc.settings, gc.redundancy, *pt)),
+			DownloadErr: errToStr(checkDownloadGougingRHPv3(gc.settings, *pt)),
 			GougingErr:  errToStr(checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, *pt)),
 			UploadErr:   errToStr(checkUploadGougingRHPv3(gc.settings, gc.redundancy, *pt)),
 		}
@@ -351,34 +351,29 @@ func checkContractGouging(period, renewWindow, maxDuration, windowSize uint64) e
 	return nil
 }
 
-func checkDownloadGougingRHPv2(gs api.GougingSettings, rs api.RedundancySettings, hs rhpv2.HostSettings) error {
+func checkDownloadGougingRHPv2(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 	sectorDownloadPrice, overflow := sectorReadCostRHPv2(hs)
 	if overflow {
 		return fmt.Errorf("overflow detected when computing sector download price")
 	}
-	return checkDownloadGouging(gs, rs, sectorDownloadPrice)
+	return checkDownloadGouging(gs, sectorDownloadPrice)
 }
 
-func checkDownloadGougingRHPv3(gs api.GougingSettings, rs api.RedundancySettings, pt rhpv3.HostPriceTable) error {
+func checkDownloadGougingRHPv3(gs api.GougingSettings, pt rhpv3.HostPriceTable) error {
 	sectorDownloadPrice, overflow := sectorReadCostRHPv3(pt)
 	if overflow {
 		return fmt.Errorf("overflow detected when computing sector download price")
 	}
-	return checkDownloadGouging(gs, rs, sectorDownloadPrice)
+	return checkDownloadGouging(gs, sectorDownloadPrice)
 }
 
-func checkDownloadGouging(gs api.GougingSettings, rs api.RedundancySettings, sectorDownloadPrice types.Currency) error {
+func checkDownloadGouging(gs api.GougingSettings, sectorDownloadPrice types.Currency) error {
 	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(1 << 40 / rhpv2.SectorSize) // sectors per TiB
 	if overflow {
 		return fmt.Errorf("overflow detected when computing download price per TiB")
 	}
-	downloadPriceTotalShards, overflow := dpptb.Mul64WithOverflow(uint64(rs.TotalShards))
-	if overflow {
-		return fmt.Errorf("overflow detected when multiplying %v * %v in download gouging", dpptb, rs.TotalShards)
-	}
-	downloadPrice := downloadPriceTotalShards.Div64(uint64(rs.MinShards))
-	if !gs.MaxDownloadPrice.IsZero() && downloadPrice.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max dl price: %v > %v", downloadPrice, gs.MaxDownloadPrice)
+	if !gs.MaxDownloadPrice.IsZero() && dpptb.Cmp(gs.MaxDownloadPrice) > 0 {
+		return fmt.Errorf("cost per TiB exceeds max dl price: %v > %v", dpptb, gs.MaxDownloadPrice)
 	}
 	return nil
 }

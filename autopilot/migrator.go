@@ -51,17 +51,19 @@ func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
 	m.running = true
 	m.mu.Unlock()
 
+	set := m.ap.State().cfg.Contracts.Set
+
 	m.ap.wg.Add(1)
-	go func(cfg api.AutopilotConfig) {
+	go func() {
 		defer m.ap.wg.Done()
-		m.performMigrations(wp, cfg)
+		m.performMigrations(wp, set)
 		m.mu.Lock()
 		m.running = false
 		m.mu.Unlock()
-	}(m.ap.state.cfg)
+	}()
 }
 
-func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
+func (m *migrator) performMigrations(p *workerPool, set string) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
@@ -111,10 +113,16 @@ func (m *migrator) performMigrations(p *workerPool, cfg api.AutopilotConfig) {
 	})
 	var toMigrate []api.UnhealthySlab
 
+	// ignore a potential signal before the first iteration of the 'OUTER' loop
+	select {
+	case <-m.signalMaintenanceFinished:
+	default:
+	}
+
 OUTER:
 	for {
 		// fetch slabs for migration
-		toMigrateNew, err := b.SlabsForMigration(ctx, m.healthCutoff, cfg.Contracts.Set, migratorBatchSize)
+		toMigrateNew, err := b.SlabsForMigration(ctx, m.healthCutoff, set, migratorBatchSize)
 		if err != nil {
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return

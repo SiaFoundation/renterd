@@ -99,10 +99,11 @@ func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, h
 }
 
 // RHPPriceTable fetches a price table for a host.
-func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (pt hostdb.HostPriceTable, err error) {
+func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (pt hostdb.HostPriceTable, err error) {
 	req := api.RHPPriceTableRequest{
 		HostKey:    hostKey,
 		SiamuxAddr: siamuxAddr,
+		Timeout:    timeout,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/pricetable", req, &pt)
 	return

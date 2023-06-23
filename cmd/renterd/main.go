@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -16,6 +17,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
@@ -145,6 +147,7 @@ func main() {
 		enabled bool
 		node.AutopilotConfig
 	}
+	autopilotCfg.RevisionSubmissionBuffer = api.BlocksPerDay
 	// node
 	apiAddr := flag.String("http", build.DefaultAPIAddress, "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
@@ -333,21 +336,14 @@ func main() {
 	}
 
 	autopilotErr := make(chan error, 1)
+	autopilotDir := filepath.Join(*dir, "autopilot")
 	if autopilotCfg.enabled {
-		autopilotDir := filepath.Join(*dir, "autopilot")
-		if err := os.MkdirAll(autopilotDir, 0700); err != nil {
-			log.Fatal("failed to create autopilot dir", err)
-		}
-
-		s, err := stores.NewJSONAutopilotStore(autopilotDir)
-		if err != nil {
-			log.Fatal("failed to create JSON autopilot store", err)
-		}
-
-		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, s, bc, workers, logger)
+		autopilotCfg.AutopilotConfig.ID = api.DefaultAutopilotID // hardcoded
+		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, logger)
 		if err != nil {
 			log.Fatal("failed to create autopilot", err)
 		}
+
 		// NOTE: the autopilot shutdown function is not added to the shutdown
 		// functions array because it needs to be called first
 		autopilotShutdownFn = shutdownFn
@@ -365,6 +361,12 @@ func main() {
 		log.Fatal("failed to fetch syncer address", err)
 	}
 	log.Println("bus: Listening on", syncerAddress)
+
+	if autopilotCfg.enabled {
+		if err := runCompatMigrateAutopilotJSONToStore(bc, autopilotCfg.ID, autopilotDir); err != nil {
+			log.Fatal("failed to migrate autopilot JSON", err)
+		}
+	}
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
@@ -390,4 +392,56 @@ func main() {
 		}
 	}
 	log.Println("Shutdown complete")
+}
+
+func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
+	// defer autopilot dir cleanup
+	defer func() {
+		if err == nil {
+			// remove autopilot folder and config
+			log.Println("migration: cleaning up autopilot directory")
+			if err = os.RemoveAll(dir); err == nil {
+				log.Println("migration: done")
+			}
+		}
+	}()
+
+	// check if the file exists
+	path := filepath.Join(dir, "autopilot.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+
+	// read the json config
+	log.Println("migration: reading autopilot.json")
+	var cfg struct {
+		Config api.AutopilotConfig `json:"Config"`
+	}
+	if data, err := os.ReadFile(path); err != nil {
+		return err
+	} else if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+
+	// make sure we don't hang
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// check if the autopilot already exists, if so we don't need to migrate
+	_, err = bc.Autopilot(ctx, api.DefaultAutopilotID)
+	if err == nil {
+		log.Printf("migration: autopilot already exists in the bus, the autopilot.json won't be migrated\n old config: %+v\n", cfg.Config)
+		return nil
+	}
+
+	// create an autopilot entry
+	log.Println("migration: persisting autopilot to the bus")
+	if err := bc.UpdateAutopilot(ctx, api.Autopilot{
+		ID:     id,
+		Config: cfg.Config,
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }

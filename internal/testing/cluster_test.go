@@ -46,7 +46,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), "foo", object.Object{
+	err = b.AddObject(context.Background(), "foo", "autopilot", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -70,8 +70,8 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// See if autopilot is running by fetching the config.
-	_, err = cluster.Autopilot.Config()
+	// See if autopilot is running by triggering the loop.
+	_, err = cluster.Autopilot.Trigger(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,11 +102,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Verify startHeight and endHeight of the contract.
-	currentPeriod, err := cluster.Autopilot.Status()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := cluster.Autopilot.Config()
+	cfg, currentPeriod, err := cluster.AutopilotConfig(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +433,12 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// update the bus setting and specify a non-existing contract set
-	err = b.UpdateSetting(context.Background(), api.SettingContractSet, api.ContractSetSettings{Set: t.Name()})
+	cfg, _, err := cluster.AutopilotConfig(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Contracts.Set = t.Name()
+	err = cluster.UpdateAutopilotConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -878,7 +879,7 @@ func TestParallelUpload(t *testing.T) {
 		}
 
 		// upload the data
-		name := fmt.Sprintf("data_%v", hex.EncodeToString(data[:16]))
+		name := fmt.Sprintf("/dir/data_%v", hex.EncodeToString(data[:16]))
 		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 			return err
 		}
@@ -898,6 +899,52 @@ func TestParallelUpload(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+
+	// Check if objects exist.
+	objects, err := cluster.Bus.SearchObjects(context.Background(), "/dir/", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 3 {
+		t.Fatal("wrong number of objects", len(objects))
+	}
+
+	// Upload one more object.
+	if err := w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), "/foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 4 {
+		t.Fatal("wrong number of objects", len(objects))
+	}
+
+	// Delete all objects under /dir/.
+	if err := cluster.Bus.DeleteObject(context.Background(), "/dir/", true); err != nil {
+		t.Fatal(err)
+	}
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 1 {
+		t.Fatal("objects weren't deleted")
+	}
+
+	// Delete all objects under /.
+	if err := cluster.Bus.DeleteObject(context.Background(), "/", true); err != nil {
+		t.Fatal(err)
+	}
+	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 0 {
+		t.Fatal("objects weren't deleted")
+	}
 }
 
 // TestParallelDownload tests downloading a file in parallel.
@@ -1101,7 +1148,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// get wallet address.
+	// get wallet address
 	renterAddress, err := cluster.Bus.WalletAddress(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1116,7 +1163,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	}
 	c := contracts[0]
 
-	// Form 2 more contracts with the same host.
+	// form 2 more contracts with the same host
 	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, renterAddress, c.RenterFunds(), c.Revision.ValidHostPayout())
 	if err != nil {
 		t.Fatal(err)
@@ -1134,25 +1181,16 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a contract set with all 3 contracts.
-	err = cluster.Bus.SetContractSet(context.Background(), "test", []types.FileContractID{c.ID, c2.ID, c3.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingContractSet, api.ContractSetSettings{
-		Set: "test",
-	})
+	// create a contract set with all 3 contracts
+	err = cluster.Bus.SetContractSet(context.Background(), "autopilot", []types.FileContractID{c.ID, c2.ID, c3.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Check the bus returns the desired upload params and contract set contracts.
+	// check the bus returns the desired contracts
 	up, err := cluster.Bus.UploadParams(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	}
-	if up.ContractSet != "test" {
-		t.Fatal("unexpected contractset", up.ContractSet)
 	}
 	csc, err := cluster.Bus.ContractSetContracts(context.Background(), up.ContractSet)
 	if err != nil {
@@ -1162,14 +1200,14 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		t.Fatal("expected 3 contracts", len(csc))
 	}
 
-	// Upload a file.
+	// upload a file
 	data := frand.Bytes(5*rhpv2.SectorSize + 1)
 	err = cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Download the file multiple times.
+	// download the file multiple times
 	for i := 0; i < 5; i++ {
 		buf := &bytes.Buffer{}
 		err = cluster.Worker.DownloadObject(context.Background(), buf, "foo")

@@ -30,25 +30,20 @@ var (
 	errDownloadSectorTimeout = errors.New("download sector timed out")
 )
 
-type hostV2 interface {
-	Contract() types.FileContractID
-	HostKey() types.PublicKey
-}
-
 type hostV3 interface {
-	hostV2
-
+	Contract() types.FileContractID
 	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
 	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
 	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
 	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
+	HostKey() types.PublicKey
 	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
 	SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
 	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
 }
 
 type hostProvider interface {
-	newHostV3(context.Context, types.FileContractID, types.PublicKey, string) (_ hostV3, err error)
+	newHostV3(types.FileContractID, types.PublicKey, string) hostV3
 }
 
 func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSlice, contracts []api.ContractMetadata, downloadSectorTimeout time.Duration, maxOverdrive uint64, logger *zap.SugaredLogger) ([][]byte, []int64, error) {
@@ -108,11 +103,8 @@ func parallelDownloadSlab(ctx context.Context, hp hostProvider, ss object.SlabSl
 
 			buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
 			err := func() error {
-				h, err := hp.newHostV3(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
-				if err != nil {
-					return err
-				}
-				err = h.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
+				h := hp.newHostV3(contract.ID, contract.HostKey, contract.SiamuxAddr)
+				err := h.DownloadSector(ctx, buf, shard.Root, r.offset, r.length)
 				if err != nil {
 					span.SetStatus(codes.Error, "downloading the sector failed")
 					span.RecordError(err)
@@ -315,7 +307,7 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length int64) []object.S
 	return slabs
 }
 
-func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, downloadSectorTimeout, uploadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, u *uploadManager, hp hostProvider, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, downloadSectorTimeout time.Duration, bh uint64, logger *zap.SugaredLogger) error {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 

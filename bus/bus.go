@@ -94,14 +94,22 @@ type (
 		Object(ctx context.Context, path string) (object.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, path string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
+		RemoveObjects(ctx context.Context, prefix string) error
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
-		UpdateSlab(ctx context.Context, s object.Slab, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) error
+	}
+
+	// An AutopilotStore stores autopilots.
+	AutopilotStore interface {
+		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
 	// A SettingStore stores settings.
@@ -127,6 +135,7 @@ type bus struct {
 	tp  TransactionPool
 	w   Wallet
 	hdb HostDB
+	as  AutopilotStore
 	ms  MetadataStore
 	ss  SettingStore
 
@@ -751,12 +760,21 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.Object, nil, aor.UsedContracts)) // TODO
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
 	}
 }
 
 func (b *bus) objectsHandlerDELETE(jc jape.Context) {
-	err := b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"))
+	var batch bool
+	if jc.DecodeForm("batch", &batch) != nil {
+		return
+	}
+	var err error
+	if batch {
+		err = b.ms.RemoveObjects(jc.Request.Context(), jc.PathParam("path"))
+	} else {
+		err = b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"))
+	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -791,7 +809,7 @@ func (b *bus) slabHandlerGET(jc jape.Context) {
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.UsedContracts))
+		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet, usr.UsedContracts))
 	}
 }
 
@@ -912,16 +930,13 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	var css api.ContractSetSettings
-	if csss, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet); err != nil {
-		jc.Error(fmt.Errorf("could not fetch contract set setting, err: %v", err), http.StatusInternalServerError)
+	ap, err := b.as.Autopilot(jc.Request.Context(), "autopilot")
+	if jc.Check("could not get autopilot config", err) != nil {
 		return
-	} else if err := json.Unmarshal([]byte(csss), &css); err != nil {
-		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", csss, err)
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:   css.Set,
+		ContractSet:   ap.Config.Contracts.Set,
 		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams: gp,
 	})
@@ -1103,6 +1118,48 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) autopilotsListHandlerGET(jc jape.Context) {
+	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
+		jc.Encode(autopilots)
+	}
+}
+
+func (b *bus) autopilotsHandlerGET(jc jape.Context) {
+	var id string
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	ap, err := b.as.Autopilot(jc.Request.Context(), id)
+	if errors.Is(err, api.ErrAutopilotNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if jc.Check("couldn't load object", err) != nil {
+		return
+	}
+
+	jc.Encode(ap)
+}
+
+func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
+	var id string
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	var ap api.Autopilot
+	if jc.Decode(&ap) != nil {
+		return
+	}
+
+	if ap.ID != id {
+		jc.Error(errors.New("id in path and body don't match"), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
+}
+
 func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	var payout types.Currency
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
@@ -1113,13 +1170,14 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		s:             s,
 		cm:            cm,
 		tp:            tp,
 		w:             w,
 		hdb:           hdb,
+		as:            as,
 		ms:            ms,
 		ss:            ss,
 		eas:           eas,
@@ -1213,6 +1271,10 @@ func (b *bus) Handler() http.Handler {
 		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
 		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
 		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+
+		"GET    /autopilots":     b.autopilotsListHandlerGET,
+		"GET    /autopilots/:id": b.autopilotsHandlerGET,
+		"PUT    /autopilots/:id": b.autopilotsHandlerPUT,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
