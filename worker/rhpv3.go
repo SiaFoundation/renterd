@@ -55,6 +55,10 @@ var (
 	// when trying to use a renewed contract.
 	errMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
 
+	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
+	// unsynced and has disabled its account manager.
+	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
+
 	// errTransportClosed is returned when using a transportV3 which was already
 	// closed.
 	errTransportClosed = errors.New("transport closed")
@@ -216,7 +220,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	ctx, cancel := timeoutCtx()
 	defer cancel()
 	rev, err := h.fetchRevisionWithAccount(ctx, h.HostKey(), h.siamuxAddr, blockHeight, h.fcid)
-	if err != nil && !(isBalanceInsufficient(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
+	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
 		return rev, nil
@@ -375,6 +379,10 @@ func isClosedStream(err error) bool {
 
 func isInsufficientFunds(err error) bool {
 	return isError(err, ErrInsufficientFunds)
+}
+
+func isWithdrawalsInactive(err error) bool {
+	return isError(err, errWithdrawalsInactive)
 }
 
 func isError(err error, target error) bool {
