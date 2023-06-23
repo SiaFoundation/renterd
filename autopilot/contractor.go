@@ -230,13 +230,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	for _, fcid := range updatedSet {
 		isInSet[fcid] = struct{}{}
 	}
-	addToSet := func(fcid types.FileContractID) {
-		if _, found := isInSet[fcid]; found {
-			return
-		}
-		updatedSet = append(updatedSet, fcid)
-		isInSet[fcid] = struct{}{}
-	}
 
 	// archive contracts
 	if len(toArchive) > 0 {
@@ -273,15 +266,33 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		}
 	}
 
-	// run renewals
+	// split toRenew up in contracts that are already in the set and the ones
+	// that aren't.
+	// TODO: same for refresh
+	var renewedInSet, renewedNotInSet []contractInfo
+	for _, ri := range toRenew {
+		if _, ok := isInSet[ri.contract.ID]; ok {
+			renewedInSet = append(renewedInSet, ri)
+		} else {
+			renewedNotInSet = append(renewedNotInSet, ri)
+		}
+	}
+
+	// run renewal on contracts that are already in the set.
+	_, err = c.runContractRenewals(ctx, w, &remaining, address, renewedInSet, uint64(limit))
+	if err != nil {
+		c.logger.Errorf("failed to renew some contracts from current set, err: %v", err) // continue
+	}
+
+	// run renewals on contracts that are not in updatedSet yet.
 	var renewed []renewal
 	if limit > 0 {
-		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
+		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, renewedNotInSet, uint64(limit))
 		if err != nil {
 			c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
 		} else {
 			for _, ri := range renewed {
-				addToSet(ri.to)
+				updatedSet = append(updatedSet, ri.to)
 			}
 		}
 	}
@@ -292,7 +303,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	} else {
 		for _, ri := range refreshed {
-			addToSet(ri.to)
+			updatedSet = append(updatedSet, ri.to)
 		}
 	}
 
@@ -303,9 +314,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		} else {
-			for _, fcid := range formed {
-				addToSet(fcid)
-			}
+			updatedSet = append(updatedSet, formed...)
 		}
 	}
 
