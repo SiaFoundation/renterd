@@ -424,12 +424,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	// update downloaders
 	for _, c := range want {
 		// create a host
-		host, err := mgr.hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
-		if err != nil {
-			mgr.logger.Errorw(fmt.Sprintf("failed to create downloader, err: %v", err), "hk", c.HostKey, "fcid", c.ID, "address", c.SiamuxAddr)
-			continue
-		}
-
+		host := mgr.hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
 		downloader := newDownloader(host)
 		mgr.downloaders[c.HostKey] = downloader
 		go downloader.processQueue(mgr.hp)
