@@ -521,15 +521,20 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
+	cs, err := w.bus.ConsensusState(ctx)
+	if jc.Check("could not get consensus state", err) != nil {
+		return
+	}
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// renew the contract
-	h := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
-	if jc.Check("failed to create host for renewal", err) != nil {
-		return
-	}
-	renewed, txnSet, err := h.Renew(ctx, rrr)
-	if jc.Check("couldn't renew contract", err) != nil {
+	var renewed rhpv2.ContractRevision
+	var txnSet []types.Transaction
+	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, cs.BlockHeight, func(_ types.FileContractRevision) (err error) {
+		h := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
+		renewed, txnSet, err = h.Renew(ctx, rrr)
+		return err
+	})) != nil {
 		return
 	}
 
