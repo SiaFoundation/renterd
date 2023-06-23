@@ -556,8 +556,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		// if the host doesn't have a valid pricetable, update it
 		var invalidPT bool
-		err = updateHostPriceTable(ctx, w, &host.Host)
-		if err != nil {
+		if err := refreshPriceTable(ctx, w, &host.Host); err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
 			invalidPT = true
 		}
@@ -699,9 +698,8 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			break
 		}
 
-		// fetch price table on the fly
-		err = updateHostPriceTable(ctx, w, &host)
-		if err != nil {
+		// fetch a new price table if necessary
+		if err := refreshPriceTable(ctx, w, &host); err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host.PublicKey, err)
 			continue
 		}
@@ -1291,7 +1289,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func updateHostPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
+func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
 	if !host.Scanned {
 		// scan the host if it hasn't been successfully scanned before, which
 		// can occur when contracts are added manually to the bus or database
