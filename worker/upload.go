@@ -470,14 +470,8 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 	// add missing uploaders
 	for _, c := range c2m {
-		// create a host
-		h, err := mgr.hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
-		if err != nil {
-			mgr.logger.Errorw(fmt.Sprintf("failed to create uploader, err: %v", err), "hk", c.HostKey, "fcid", c.ID, "address", c.SiamuxAddr)
-			continue
-		}
-
 		// create uploader
+		h := mgr.hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
 		uploader := newUploader(c, h)
 		mgr.uploaders = append(mgr.uploaders, uploader)
 		go uploader.start(mgr.hp, mgr.rl)

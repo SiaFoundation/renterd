@@ -51,6 +51,8 @@ func (h *mockHost) DownloadSector(_ context.Context, w io.Writer, root types.Has
 	return err
 }
 
+func (sp *mockHost) Close() error { return nil }
+
 func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	panic("not implemented")
 }
@@ -103,12 +105,12 @@ func newMockHostProvider(hosts []hostV3) *mockHostProvider {
 	return sp
 }
 
-func (sp *mockHostProvider) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) (_ hostV3, err error) {
+func (sp *mockHostProvider) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) hostV3 {
 	h, exists := sp.hosts[hostKey]
 	if !exists {
 		panic("doesn't exist")
 	}
-	return h, nil
+	return h
 }
 
 func TestMultipleObjects(t *testing.T) {

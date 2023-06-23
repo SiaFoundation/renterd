@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -135,13 +136,16 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 
 // transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
 type transportPoolV3 struct {
+	recordInteractions func([]hostdb.Interaction)
+
 	mu   sync.Mutex
 	pool map[string]*transportV3
 }
 
-func newTransportPoolV3() *transportPoolV3 {
+func newTransportPoolV3(w *worker) *transportPoolV3 {
 	return &transportPoolV3{
-		pool: make(map[string]*transportV3),
+		recordInteractions: w.recordInteractions,
+		pool:               make(map[string]*transportV3),
 	}
 }
 
@@ -188,13 +192,18 @@ func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, h
 	return t, nil
 }
 
-func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(*transportV3) error) (err error) {
+func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
+	var mr ephemeralMetricsRecorder
+	defer func() {
+		p.recordInteractions(mr.interactions())
+	}()
+	ctx = metrics.WithRecorder(ctx, &mr)
 	t, err := p.newTransport(ctx, siamuxAddr, hostKey)
 	if err != nil {
 		return err
 	}
 	defer t.Close()
-	return fn(t)
+	return fn(ctx, t)
 }
 
 // FetchRevision tries to fetch a contract revision from the host. We pass in
@@ -240,7 +249,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
-		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
+		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				// Fetch pt.
 				pt, err := h.priceTable(ctx, nil)
@@ -263,7 +272,7 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 // FetchRevisionWithContract fetches the latest revision of a contract and uses
 // a contract to pay for it.
 func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
-	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
+	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Fetch pt.
 			pt, err := h.priceTable(ctx, rev)
@@ -283,7 +292,7 @@ func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.Publ
 }
 
 func (h *host) fetchRevisionNoPayment(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
-	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(t *transportV3) (err error) {
+	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		_, err = RPCLatestRevision(ctx, t, contractID, func(r *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			rev = *r
 			return rhpv3.HostPriceTable{}, nil, nil
@@ -320,7 +329,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 	}
 
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
+		return amount, h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			cost := amount.Add(pt.FundAccountCost)
 			payment, err := payByContract(rev, cost, rhpv3.Account{}, h.renterKey) // no account needed for funding
 			if err != nil {
@@ -344,7 +353,7 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
-		err := h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
+		err := h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 			payment, err := payByContract(rev, pt.AccountBalanceCost, h.acc.id, h.renterKey)
 			if err != nil {
 				return err
@@ -396,8 +405,9 @@ type (
 		acc                      *account
 		bus                      Bus
 		contractSpendingRecorder *contractSpendingRecorder
-		logger                   *zap.SugaredLogger
 		fcid                     types.FileContractID
+		logger                   *zap.SugaredLogger
+		mr                       *ephemeralMetricsRecorder
 		siamuxAddr               string
 		renterKey                types.PrivateKey
 		accountKey               types.PrivateKey
@@ -416,22 +426,23 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
+func (w *worker) initTransportPool() {
+	if w.transportPoolV3 != nil {
+		panic("transport pool already initialized") // developer error
+	}
+	w.transportPoolV3 = newTransportPoolV3(w)
+}
+
 // ForHost returns an account to use for a given host. If the account
 // doesn't exist, a new one is created.
-func (a *accounts) ForHost(hk types.PublicKey) (*account, error) {
-	// Key should be set.
-	if hk == (types.PublicKey{}) {
-		return nil, errors.New("empty host key provided")
-	}
-
-	// Return account.
+func (a *accounts) ForHost(hk types.PublicKey) *account {
 	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 	return &account{
 		bus:  a.store,
 		id:   accountID,
 		key:  a.key,
 		host: hk,
-	}, nil
+	}
 }
 
 // WithDeposit increases the balance of an account by the amount returned by
@@ -579,7 +590,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	}()
 
 	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
+		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 			cost, err := readSectorCost(pt)
 			if err != nil {
 				return err
@@ -620,7 +631,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	}
 
 	var cost types.Currency
-	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) error {
+	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		root, cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, rev, &payment, sector)
 		return err
 	})
@@ -877,7 +888,7 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 	var rev rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var renewErr error
-	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
+	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
 			rev, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
@@ -894,7 +905,9 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
-		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(t *transportV3) (err error) {
+		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
+			defer recordPriceTableUpdate(ctx, h.siamuxAddr, h.HostKey(), &hpt, &err)()
+
 			pt, err := RPCPriceTable(ctx, t, paymentFn)
 			if err != nil {
 				return err

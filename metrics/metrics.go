@@ -2,12 +2,18 @@ package metrics
 
 import (
 	"context"
+	"time"
+
+	"go.sia.tech/core/types"
 )
 
 // A Metric contains metadata pertaining to a particular operation.
 type Metric interface {
-	IsMetric()
+	HostKey() types.PublicKey
+	Result() interface{}
 	IsSuccess() bool
+	Timestamp() time.Time
+	Type() string
 }
 
 // A MetricsRecorder records metrics.
