@@ -395,20 +395,16 @@ func main() {
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
-	// defer autopilot dir cleanup
-	defer func() {
-		if err == nil {
-			// remove autopilot folder and config
+	// check if the file exists
+	path := filepath.Join(dir, "autopilot.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// if not check if the autopilot directory exists
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			log.Println("migration: cleaning up autopilot directory")
 			if err = os.RemoveAll(dir); err == nil {
 				log.Println("migration: done")
 			}
 		}
-	}()
-
-	// check if the file exists
-	path := filepath.Join(dir, "autopilot.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
 	}
 
@@ -441,6 +437,12 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 		Config: cfg.Config,
 	}); err != nil {
 		return err
+	}
+
+	// remove autopilot folder and config
+	log.Println("migration: cleaning up autopilot directory")
+	if err = os.RemoveAll(dir); err == nil {
+		log.Println("migration: done")
 	}
 
 	return nil

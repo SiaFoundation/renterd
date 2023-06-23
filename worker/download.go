@@ -801,7 +801,7 @@ func (s *slabDownload) overdrive(ctx context.Context, respChan chan sectorDownlo
 	// create a helper function that increases the timeout for each overdrive
 	timeout := func() time.Duration {
 		s.mu.Lock()
-		s.mu.Unlock()
+		defer s.mu.Unlock()
 		return time.Duration(s.numOverdriving+1) * s.mgr.overdriveTimeout
 	}
 
