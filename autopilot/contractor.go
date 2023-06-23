@@ -224,6 +224,20 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
 
+	// declare helper to add contracts to the updated set without adding
+	// duplicates.
+	isInSet := make(map[types.FileContractID]struct{})
+	for _, fcid := range updatedSet {
+		isInSet[fcid] = struct{}{}
+	}
+	addToSet := func(fcid types.FileContractID) {
+		if _, found := isInSet[fcid]; found {
+			return
+		}
+		updatedSet = append(updatedSet, fcid)
+		isInSet[fcid] = struct{}{}
+	}
+
 	// archive contracts
 	if len(toArchive) > 0 {
 		c.logger.Debugf("archiving %d contracts: %+v", len(toArchive), toArchive)
@@ -267,7 +281,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
 		} else {
 			for _, ri := range renewed {
-				updatedSet = append(updatedSet, ri.to)
+				addToSet(ri.to)
 			}
 		}
 	}
@@ -278,7 +292,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	} else {
 		for _, ri := range refreshed {
-			updatedSet = append(updatedSet, ri.to)
+			addToSet(ri.to)
 		}
 	}
 
@@ -289,7 +303,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		} else {
-			updatedSet = append(updatedSet, formed...)
+			for _, fcid := range formed {
+				addToSet(fcid)
+			}
 		}
 	}
 
@@ -588,22 +604,22 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"refresh", refresh,
 				"renew", renew,
 			)
+		} else {
+			// a usable contract will be kept even if it also needs to be
+			// renewed/refreshed.
+			toKeep = append(toKeep, fcid)
 		}
 
 		if renew {
-			toStopUsing[contract.ID] = "renewed"
 			toRenew = append(toRenew, contractInfo{
 				contract: contract,
 				settings: host.Settings,
 			})
 		} else if refresh {
-			toStopUsing[contract.ID] = "refreshed"
 			toRefresh = append(toRefresh, contractInfo{
 				contract: contract,
 				settings: host.Settings,
 			})
-		} else {
-			toKeep = append(toKeep, fcid)
 		}
 	}
 
