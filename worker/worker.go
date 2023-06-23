@@ -572,7 +572,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
 		h := w.newHostV3(rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
 		err = h.FundAccount(ctx, rfr.Balance, &rev)
-		if isMaxBalanceExceeded(err) {
+		if isBalanceMaxExceeded(err) {
 			// sync the account
 			err = h.SyncAccount(ctx, &rev)
 			if err != nil {
@@ -582,12 +582,6 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 			// try funding the account again
 			err = h.FundAccount(ctx, rfr.Balance, &rev)
-			if errors.Is(err, errBalanceSufficient) {
-				w.logger.Debugf("account balance for host %v restored after sync", rfr.HostKey)
-				return nil
-			}
-
-			// funding failed after syncing the account successfully
 			if err != nil {
 				w.logger.Errorw(fmt.Sprintf("failed to fund account after syncing: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
 			}
