@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -111,6 +112,10 @@ type (
 		CurrentPeriod uint64 `json:"currentPeriod"`
 	}
 )
+
+func (sb HostScoreBreakdown) String() string {
+	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)
+}
 
 func (hgb HostGougingBreakdown) Gouging() bool {
 	return hgb.V2.Gouging() || hgb.V3.Gouging()
