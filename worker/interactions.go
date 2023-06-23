@@ -3,9 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -226,7 +224,7 @@ func isSuccessfulInteraction(err error) bool {
 		return true
 	}
 	// List of errors that are considered successful interactions.
-	if errors.Is(err, ErrInsufficientFunds) || strings.Contains(err.Error(), ErrInsufficientFunds.Error()) {
+	if isInsufficientFunds(err) {
 		return true
 	}
 	if isBalanceInsufficient(err) {
