@@ -549,7 +549,7 @@ func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 	var concurrent int64
 	var downloadedB int64
 	trackStatsFn := func() {
-		if start.IsZero() || time.Since(start).Milliseconds() == 0 {
+		if start.IsZero() || time.Since(start).Milliseconds() == 0 || downloadedB == 0 {
 			return
 		}
 		durationMS := time.Since(start).Milliseconds()
