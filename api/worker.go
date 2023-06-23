@@ -45,6 +45,7 @@ type RHPScanRequest struct {
 type RHPPriceTableRequest struct {
 	HostKey    types.PublicKey `json:"hostKey"`
 	SiamuxAddr string          `json:"siamuxAddr"`
+	Timeout    time.Duration   `json:"timeout"`
 }
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.

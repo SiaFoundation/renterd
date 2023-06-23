@@ -250,7 +250,7 @@ type Bus interface {
 
 	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []api.ObjectMetadata, error)
 	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-	DeleteObject(ctx context.Context, path string) error
+	DeleteObject(ctx context.Context, path string, batch bool) error
 
 	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
@@ -571,9 +571,16 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 
+	ctx := jc.Request.Context()
+	if rptr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), rptr.Timeout)
+		defer cancel()
+	}
+
 	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(jc.Request.Context(), rptr.HostKey, rptr.SiamuxAddr, func(t *transportV3) (err error) {
-		pt, err = RPCPriceTable(jc.Request.Context(), t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(t *transportV3) (err error) {
+		pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		return
 	})) != nil {
 		return
@@ -1086,8 +1093,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
+	var batch bool
+	if jc.DecodeForm("batch", &batch) != nil {
+		return
+	}
 	path := strings.TrimPrefix(jc.PathParam("path"), "/")
-	err := w.bus.DeleteObject(jc.Request.Context(), path)
+	err := w.bus.DeleteObject(jc.Request.Context(), path, batch)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
