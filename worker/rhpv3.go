@@ -42,10 +42,6 @@ const (
 )
 
 var (
-	// errBalanceSufficient occurs when funding an account to a desired balance
-	// that's lower than its current balance.
-	errBalanceSufficient = errors.New("ephemeral account balance greater than desired balance")
-
 	// errBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
@@ -220,7 +216,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	ctx, cancel := timeoutCtx()
 	defer cancel()
 	rev, err := h.fetchRevisionWithAccount(ctx, h.HostKey(), h.siamuxAddr, blockHeight, h.fcid)
-	if err != nil && !isBalanceInsufficient(err) {
+	if err != nil && !(isBalanceInsufficient(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
 		return rev, nil
@@ -230,7 +226,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	ctx, cancel = timeoutCtx()
 	defer cancel()
 	rev, err = h.fetchRevisionWithContract(ctx, h.HostKey(), h.siamuxAddr, h.fcid)
-	if err != nil && !strings.Contains(err.Error(), ErrInsufficientFunds.Error()) {
+	if err != nil && !isInsufficientFunds(err) {
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with contract: %v", err)
 	} else if err == nil {
 		return rev, nil
@@ -315,7 +311,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 		return err
 	}
 	if curr.Cmp(balance) >= 0 {
-		return fmt.Errorf("%w; %v>%v", errBalanceSufficient, curr, balance)
+		return nil
 	}
 	amount := balance.Sub(curr)
 
@@ -365,23 +361,32 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 	})
 }
 
-func isMaxBalanceExceeded(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), errBalanceMaxExceeded.Error())
+func isBalanceInsufficient(err error) bool {
+	return isError(err, errBalanceInsufficient)
 }
 
-func isBalanceInsufficient(err error) bool {
+func isBalanceMaxExceeded(err error) bool {
+	return isError(err, errBalanceMaxExceeded)
+}
+
+func isClosedStream(err error) bool {
+	return isError(err, mux.ErrClosedStream)
+}
+
+func isInsufficientFunds(err error) bool {
+	return isError(err, ErrInsufficientFunds)
+}
+
+func isError(err error, target error) bool {
 	if err == nil {
-		return false
+		return err == target
 	}
 	// compare error first
-	if errors.Is(err, errBalanceSufficient) {
+	if errors.Is(err, target) {
 		return true
 	}
 	// then compare the string in case the error was returned by a host
-	return strings.Contains(err.Error(), errBalanceInsufficient.Error())
+	return strings.Contains(err.Error(), target.Error())
 }
 
 type (
