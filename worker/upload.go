@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -787,9 +786,8 @@ outer:
 			}
 
 			// track the error, ignore gracefully closed streams and canceled overdrives
-			isErrClosedStream := errors.Is(err, mux.ErrClosedStream)
 			canceledOverdrive := upload.done() && upload.overdrive && err != nil
-			if !canceledOverdrive && !isErrClosedStream {
+			if !canceledOverdrive && !isClosedStream(err) {
 				u.trackSectorUpload(err, time.Since(start))
 			}
 		}

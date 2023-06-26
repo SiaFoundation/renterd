@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -716,10 +715,10 @@ func (d *downloader) trackFailure(err error) {
 		return
 	}
 
-	if strings.Contains(err.Error(), errBalanceInsufficient.Error()) ||
-		strings.Contains(err.Error(), errPriceTableExpired.Error()) ||
-		strings.Contains(err.Error(), errPriceTableNotFound.Error()) ||
-		strings.Contains(err.Error(), errSectorNotFound.Error()) {
+	if isBalanceInsufficient(err) ||
+		isPriceTableExpired(err) ||
+		isPriceTableNotFound(err) ||
+		isSectorNotFound(err) {
 		return // host is not to blame for these errors
 	}
 
