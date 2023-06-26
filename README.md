@@ -82,13 +82,12 @@ In order for the contracts to get formed, your node has to be synced with the bl
 
 ## Config
 
-To have a working autopilot, it must be configured with a sane config. The
-autopilot's configuration is configurable through the following endpoints:
+The configuration can be updated through the UI or by using the following endpoints:
 
 - `GET /api/autopilot/config`
 - `PUT /api/autopilot/config`
 
-Especially the `contracts` section is important, make sure the `amount` is set to the amount of hosts with which you want to form a contract. The `allowance` is the amount of money the autopilot can spend per period, make sure it is not set to zero or contracts won't get formed.
+The autopilot will not perform any tasks until it is configured. An example configuration can be found below. Especially the `contracts` section is important, make sure the `amount` is set to the amount of hosts with which you want to form a contract. The `allowance` is the amount of money the autopilot can spend per period, make sure it is not set to zero or contracts won't get formed.
 
 ```json
 {
