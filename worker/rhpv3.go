@@ -699,9 +699,10 @@ type priceTable struct {
 }
 
 type priceTableUpdate struct {
-	err  error
-	done chan struct{}
-	hpt  hostdb.HostPriceTable
+	err           error
+	done          chan struct{}
+	hpt           hostdb.HostPriceTable
+	payByContract bool
 }
 
 func (w *worker) initPriceTables() {
@@ -730,15 +731,31 @@ func (pts *priceTables) fetch(ctx context.Context, hk types.PublicKey, rev *type
 	return pt.fetch(ctx, rev)
 }
 
-func (pt *priceTable) ongoingUpdate() (bool, *priceTableUpdate) {
+func (pt *priceTable) ongoingUpdate(rev *types.FileContractRevision) (bool, *priceTableUpdate) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	var ongoing bool
+	ongoing := true
 	if pt.update == nil {
-		pt.update = &priceTableUpdate{done: make(chan struct{})}
-	} else {
-		ongoing = true
+		// no update ongoing, start one
+		pt.update = &priceTableUpdate{done: make(chan struct{}), payByContract: rev != nil}
+		ongoing = false
+	} else if !pt.update.payByContract && rev != nil {
+		// update ongoing, but we have a revision, so launch a pay-by-contract
+		// update avoiding potential timeouts caused by withdrawal timeouts and
+		// swap it out with the ongoing update
+		//
+		// TODO: once hostd removes the withdrawal timeout this won't be
+		// necessary any more
+		update := &priceTableUpdate{done: make(chan struct{}), payByContract: rev != nil}
+
+		tmp := *pt.update
+		*pt.update = *update
+		*update = tmp
+
+		close(update.done)
+		update = nil
+		ongoing = false
 	}
 
 	return ongoing, pt.update
@@ -765,7 +782,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	}
 
 	// price table is valid and update ongoing, return early
-	ongoing, update := p.ongoingUpdate()
+	ongoing, update := p.ongoingUpdate(rev)
 	if ongoing && !hpt.Expiry.IsZero() && time.Now().Before(hpt.Expiry.Add(priceTableValidityLeeway)) {
 		return
 	}
