@@ -224,8 +224,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
 
-	// declare helper to add contracts to the updated set without adding
-	// duplicates.
+	// declare map to check if a contract is in the updated set
 	isInSet := make(map[types.FileContractID]struct{})
 	for _, fcid := range updatedSet {
 		isInSet[fcid] = struct{}{}
@@ -268,7 +267,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// split toRenew up in contracts that are already in the set and the ones
 	// that aren't.
-	// TODO: same for refresh
 	var renewedInSet, renewedNotInSet []contractInfo
 	for _, ri := range toRenew {
 		if _, ok := isInSet[ri.contract.ID]; ok {
@@ -278,13 +276,16 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		}
 	}
 
-	// run renewal on contracts that are already in the set.
-	_, err = c.runContractRenewals(ctx, w, &remaining, address, renewedInSet, uint64(limit))
+	// run renewal on contracts that are already in the set. We don't apply a
+	// limit to those since they are already in the set.
+	_, err = c.runContractRenewals(ctx, w, &remaining, address, renewedInSet, math.MaxUint64)
 	if err != nil {
 		c.logger.Errorf("failed to renew some contracts from current set, err: %v", err) // continue
 	}
 
-	// run renewals on contracts that are not in updatedSet yet.
+	// run renewals on contracts that are not in updatedSet yet. We only renew
+	// up to 'limit' of those to avoid having too many contracts in the updated
+	// set afterwards
 	var renewed []renewal
 	if limit > 0 {
 		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, renewedNotInSet, uint64(limit))
@@ -303,7 +304,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	} else {
 		for _, ri := range refreshed {
-			updatedSet = append(updatedSet, ri.to)
+			_, inSet := isInSet[ri.to]
+			if !inSet {
+				updatedSet = append(updatedSet, ri.to)
+			}
 		}
 	}
 
