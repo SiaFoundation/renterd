@@ -83,6 +83,7 @@ type (
 	contractInfo struct {
 		contract api.Contract
 		settings rhpv2.HostSettings
+		usable   bool
 	}
 
 	renewal struct {
@@ -224,12 +225,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
 
-	// declare map to check if a contract is in the updated set
-	isInSet := make(map[types.FileContractID]struct{})
-	for _, fcid := range updatedSet {
-		isInSet[fcid] = struct{}{}
-	}
-
 	// archive contracts
 	if len(toArchive) > 0 {
 		c.logger.Debugf("archiving %d contracts: %+v", len(toArchive), toArchive)
@@ -265,36 +260,18 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		}
 	}
 
-	// split toRenew up in contracts that are already in the set and the ones
-	// that aren't.
-	var renewedInSet, renewedNotInSet []contractInfo
-	for _, ri := range toRenew {
-		if _, ok := isInSet[ri.contract.ID]; ok {
-			renewedInSet = append(renewedInSet, ri)
-		} else {
-			renewedNotInSet = append(renewedNotInSet, ri)
-		}
-	}
-
-	// run renewal on contracts that are already in the set. We don't apply a
-	// limit to those since they are already in the set.
-	_, err = c.runContractRenewals(ctx, w, &remaining, address, renewedInSet, math.MaxUint64)
-	if err != nil {
-		c.logger.Errorf("failed to renew some contracts from current set, err: %v", err) // continue
-	}
-
 	// run renewals on contracts that are not in updatedSet yet. We only renew
 	// up to 'limit' of those to avoid having too many contracts in the updated
 	// set afterwards
 	var renewed []renewal
 	if limit > 0 {
-		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, renewedNotInSet, uint64(limit))
-		if err != nil {
-			c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
-		} else {
-			for _, ri := range renewed {
-				updatedSet = append(updatedSet, ri.to)
-			}
+		var toKeep []contractInfo
+		renewed, toKeep = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
+		for _, ri := range renewed {
+			updatedSet = append(updatedSet, ri.to)
+		}
+		for _, ci := range toKeep {
+			updatedSet = append(updatedSet, ci.contract.ID)
 		}
 	}
 
@@ -304,10 +281,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	} else {
 		for _, ri := range refreshed {
-			_, inSet := isInSet[ri.to]
-			if !inSet {
-				updatedSet = append(updatedSet, ri.to)
-			}
+			updatedSet = append(updatedSet, ri.to)
 		}
 	}
 
@@ -607,6 +581,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds, f)
+		ci.usable = usable
 		if !usable {
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
@@ -617,22 +592,13 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"refresh", refresh,
 				"renew", renew,
 			)
-		} else {
-			// a usable contract will be kept even if it also needs to be
-			// renewed/refreshed.
-			toKeep = append(toKeep, fcid)
 		}
-
 		if renew {
-			toRenew = append(toRenew, contractInfo{
-				contract: contract,
-				settings: host.Settings,
-			})
+			toRenew = append(toRenew, ci)
 		} else if refresh {
-			toRefresh = append(toRefresh, contractInfo{
-				contract: contract,
-				settings: host.Settings,
-			})
+			toRefresh = append(toRefresh, ci)
+		} else {
+			toKeep = append(toKeep, ci.contract.ID)
 		}
 	}
 
@@ -738,7 +704,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	return formed, nil
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewals []renewal, _ error) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewals []renewal, toKeep []contractInfo) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
 	defer span.End()
 
@@ -778,13 +744,16 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 		renewed, proceed, err := c.renewContract(ctx, w, ci, budget, renterAddress)
 		if err == nil {
 			renewals = append(renewals, renewal{from: ci.contract.ID, to: renewed.ID})
+			nRenewed++
+		} else if ci.usable {
+			toKeep = append(toKeep, ci)
+			nRenewed++
 		}
 		if !proceed {
 			break
 		}
 	}
-
-	return renewals, nil
+	return renewals, toKeep
 }
 
 func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) (refreshed []renewal, _ error) {
