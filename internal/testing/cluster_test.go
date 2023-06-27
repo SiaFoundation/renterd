@@ -255,10 +255,10 @@ func TestNewTestCluster(t *testing.T) {
 	if !status.Configured {
 		t.Fatal("autopilot should be configured")
 	}
-	if status.MigratingLastStart == (time.Time{}.Unix()) {
+	if time.Time(status.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
 	}
-	if status.ScanningLastStart == (time.Time{}.Unix()) {
+	if time.Time(status.ScanningLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a scan")
 	}
 	if !status.Synced {

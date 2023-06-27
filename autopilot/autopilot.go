@@ -96,6 +96,11 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
+	mu         sync.Mutex
+	configured bool
+	synced     bool
+	state      state
+
 	a *accounts
 	c *contractor
 	m *migrator
@@ -104,14 +109,11 @@ type Autopilot struct {
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
 
-	mu           sync.Mutex
-	state        state
-	configured   bool
-	synced       bool
+	startStopMu  sync.Mutex
 	runningSince time.Time
+	stopChan     chan struct{}
 	ticker       *time.Ticker
 	triggerChan  chan bool
-	stopChan     chan struct{}
 }
 
 // state holds a bunch of variables that are used by the autopilot and updated
@@ -170,9 +172,9 @@ func (ap *Autopilot) Handler() http.Handler {
 }
 
 func (ap *Autopilot) Run() error {
-	ap.mu.Lock()
+	ap.startStopMu.Lock()
 	if ap.isRunning() {
-		ap.mu.Unlock()
+		ap.startStopMu.Unlock()
 		return errors.New("already running")
 	}
 	ap.runningSince = time.Now()
@@ -182,7 +184,7 @@ func (ap *Autopilot) Run() error {
 
 	ap.wg.Add(1)
 	defer ap.wg.Done()
-	ap.mu.Unlock()
+	ap.startStopMu.Unlock()
 
 	// block until the autopilot is configured
 	if !ap.blockUntilConfigured() {
@@ -283,8 +285,8 @@ func (ap *Autopilot) Run() error {
 
 // Shutdown shuts down the autopilot.
 func (ap *Autopilot) Shutdown(_ context.Context) error {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
 
 	if ap.isRunning() {
 		ap.ticker.Stop()
@@ -303,8 +305,8 @@ func (ap *Autopilot) State() state {
 }
 
 func (ap *Autopilot) Trigger(forceScan bool) bool {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
 
 	select {
 	case ap.triggerChan <- forceScan:
@@ -314,13 +316,13 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 	}
 }
 
-func (ap *Autopilot) Uptime() time.Duration {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-	if ap.runningSince.IsZero() {
-		return 0
+func (ap *Autopilot) Uptime() (dur time.Duration) {
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
+	if ap.isRunning() {
+		dur = time.Since(ap.runningSince)
 	}
-	return time.Since(ap.runningSince)
+	return
 }
 
 func (ap *Autopilot) blockUntilConfigured() bool {
@@ -569,14 +571,14 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
-	jc.Encode(api.AutopilotStatusResponseGET{
+	jc.Encode(api.AutopilotStatusResponse{
 		Configured:         ap.isConfigured(),
 		Migrating:          migrating,
-		MigratingLastStart: mLastStart.Unix(),
+		MigratingLastStart: api.ParamTime(mLastStart),
 		Scanning:           scanning,
-		ScanningLastStart:  sLastStart.Unix(),
+		ScanningLastStart:  api.ParamTime(sLastStart),
 		Synced:             ap.isSynced(),
-		UptimeMS:           uint64(ap.Uptime().Milliseconds()),
+		UptimeMS:           api.ParamDuration(ap.Uptime()),
 	})
 }
 

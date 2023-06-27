@@ -21,8 +21,8 @@ type (
 	// that format the duration in hours.
 	ParamDurationHour time.Duration
 
-	// A ParamDuration is the elapsed time between two instants. ParamDurations
-	// are encoded as an integer number of milliseconds.
+	// A ParamDuration is a duration encoded as an integer number of
+	// milliseconds.
 	ParamDuration time.Duration
 
 	// ParamString is a helper type since jape expects query params to
@@ -67,6 +67,11 @@ func (t ParamTime) String() string { return url.QueryEscape((time.Time)(t).Forma
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (t *ParamTime) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
+
+// MarshalJSON implements json.Marshaler.
+func (t ParamTime) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"%s"`, (time.Time)(t).Format(time.RFC3339))), nil
+}
 
 // String implements fmt.Stringer.
 func (d ParamDuration) String() string {

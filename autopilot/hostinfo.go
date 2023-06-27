@@ -9,38 +9,38 @@ import (
 	"go.sia.tech/renterd/worker"
 )
 
-func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerGET, error) {
+func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerResponse, error) {
 	state := c.ap.State()
 
 	if state.cfg.Contracts.Allowance.IsZero() {
-		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
+		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
 	}
 	if state.cfg.Contracts.Amount == 0 {
-		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contracts amount is zero")
+		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contracts amount is zero")
 	}
 	if state.cfg.Contracts.Period == 0 {
-		return api.HostHandlerGET{}, fmt.Errorf("can not score hosts because contract period is zero")
+		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contract period is zero")
 	}
 
 	host, err := c.ap.bus.Host(ctx, hostKey)
 	if err != nil {
-		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch requested host from bus: %w", err)
 	}
 	gs, err := c.ap.bus.GougingSettings(ctx)
 	if err != nil {
-		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
 	}
 	rs, err := c.ap.bus.RedundancySettings(ctx)
 	if err != nil {
-		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
 	}
 	cs, err := c.ap.bus.ConsensusState(ctx)
 	if err != nil {
-		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
 	}
 	fee, err := c.ap.bus.RecommendedFee(ctx)
 	if err != nil {
-		return api.HostHandlerGET{}, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
 	}
 	c.mu.Lock()
 	storedData := c.cachedDataStored[hostKey]
@@ -53,7 +53,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host.Host, minScore, storedData)
-	return api.HostHandlerGET{
+	return api.HostHandlerResponse{
 		Host: host.Host,
 
 		Gouging:          unusableResult.gougingBreakdown.Gouging(),
@@ -65,7 +65,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
-func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerGET, error) {
+func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerResponse, error) {
 	// declare helper to decide whether to keep a host.
 	if !isValidUsabilityFilterMode(usabilityMode) {
 		return nil, fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
@@ -90,7 +90,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 		}
 	}
 
-	var hostInfos []api.HostHandlerGET
+	var hostInfos []api.HostHandlerResponse
 	wanted := limit
 	for {
 		// fetch up to 'limit' hosts.
@@ -115,7 +115,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 			if !keep(hi.Usable) {
 				continue
 			}
-			hostInfos = append(hostInfos, api.HostHandlerGET{
+			hostInfos = append(hostInfos, api.HostHandlerResponse{
 				Host: host,
 
 				Gouging:          hi.UnusableResult.gougingBreakdown.Gouging(),

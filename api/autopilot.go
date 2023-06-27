@@ -88,20 +88,20 @@ type (
 		Triggered bool `json:"triggered"`
 	}
 
-	// AutopilotStatusResponseGET is the response type for the /autopilot/status
+	// AutopilotStatusResponse is the response type for the /autopilot/status
 	// endpoint.
-	AutopilotStatusResponseGET struct {
-		Configured         bool   `json:"configured"`
-		Migrating          bool   `json:"migrating"`
-		MigratingLastStart int64  `json:"migratingLastStart"`
-		Scanning           bool   `json:"scanning"`
-		ScanningLastStart  int64  `json:"scanningLastStart"`
-		Synced             bool   `json:"synced"`
-		UptimeMS           uint64 `json:"uptimeMS"`
+	AutopilotStatusResponse struct {
+		Configured         bool          `json:"configured"`
+		Migrating          bool          `json:"migrating"`
+		MigratingLastStart ParamTime     `json:"migratingLastStart"`
+		Scanning           bool          `json:"scanning"`
+		ScanningLastStart  ParamTime     `json:"scanningLastStart"`
+		Synced             bool          `json:"synced"`
+		UptimeMS           ParamDuration `json:"uptimeMS"`
 	}
 
-	// HostHandlerGET is the response type for the /host/:hostkey endpoint.
-	HostHandlerGET struct {
+	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
+	HostHandlerResponse struct {
 		Host hostdb.Host `json:"host"`
 
 		Gouging          bool                 `json:"gouging"`
