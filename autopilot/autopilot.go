@@ -366,23 +366,25 @@ func (ap *Autopilot) blockUntilSynced() bool {
 		case <-ap.stopChan:
 			return false
 		case <-ticker.C:
-			if synced := func() bool {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				cs, err := ap.bus.ConsensusState(ctx)
-				if err != nil {
-					ap.logger.Errorf("failed to get consensus state, err: %v", err)
-				}
-
-				return cs.Synced
-			}(); synced {
-				ap.mu.Lock()
-				ap.synced = true
-				ap.mu.Unlock()
-				return true
-			}
 		}
+
+		// try and fetch consensus
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cs, err := ap.bus.ConsensusState(ctx)
+		cancel()
+
+		// if an error occurred, or if we're not synced, we continue
+		if err != nil {
+			ap.logger.Errorf("failed to get consensus state, err: %v", err)
+			continue
+		} else if !cs.Synced {
+			continue
+		}
+
+		ap.mu.Lock()
+		ap.synced = true
+		ap.mu.Unlock()
+		return true
 	}
 }
 
