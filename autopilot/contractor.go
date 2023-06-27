@@ -578,31 +578,29 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// if we were not able to get a valid price table for the host, but we
-		// did pass the host checks, we only want to be lenient if this contract
-		// is in the current set and only for a certain number of times,
-		// controlled by maxKeepLeeway
-		var leewayUsed bool
-		if invalidPT {
-			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
-				toStopUsing[fcid] = "no valid price table"
-				continue
-			}
-			remainingKeepLeeway-- // we let it slide
-			leewayUsed = true
-		}
-
 		// if we were not able to the contract's revision, we can't properly
 		// perform the checks that follow, however we do want to be lenient if
 		// this contract is in the current set and we still have leeway left
 		if contract.Revision == nil {
-			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 || leewayUsed {
+			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
 				toStopUsing[fcid] = errContractNoRevision.Error()
 			} else {
 				toKeep = append(toKeep, fcid)
 				remainingKeepLeeway-- // we let it slide
 			}
 			continue // can't perform contract checks without revision
+		}
+
+		// if we were not able to get a valid price table for the host, but we
+		// did pass the host checks, we only want to be lenient if this contract
+		// is in the current set and only for a certain number of times,
+		// controlled by maxKeepLeeway
+		if invalidPT {
+			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
+				toStopUsing[fcid] = "no valid price table"
+				continue
+			}
+			remainingKeepLeeway-- // we let it slide
 		}
 
 		// decide whether the contract is still good
