@@ -85,6 +85,7 @@ type (
 	contractInfo struct {
 		contract api.Contract
 		settings rhpv2.HostSettings
+		usable   bool
 	}
 
 	renewal struct {
@@ -261,16 +262,18 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		}
 	}
 
-	// run renewals
+	// run renewals on contracts that are not in updatedSet yet. We only renew
+	// up to 'limit' of those to avoid having too many contracts in the updated
+	// set afterwards
 	var renewed []renewal
 	if limit > 0 {
-		renewed, err = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
-		if err != nil {
-			c.logger.Errorf("failed to renew contracts, err: %v", err) // continue
-		} else {
-			for _, ri := range renewed {
-				updatedSet = append(updatedSet, ri.to)
-			}
+		var toKeep []contractInfo
+		renewed, toKeep = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
+		for _, ri := range renewed {
+			updatedSet = append(updatedSet, ri.to)
+		}
+		for _, ci := range toKeep {
+			updatedSet = append(updatedSet, ci.contract.ID)
 		}
 	}
 
@@ -611,6 +614,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, state.cs.BlockHeight, renterFunds, f)
+		ci.usable = usable
 		if !usable {
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
@@ -622,21 +626,12 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"renew", renew,
 			)
 		}
-
 		if renew {
-			toStopUsing[contract.ID] = "renewed"
-			toRenew = append(toRenew, contractInfo{
-				contract: contract,
-				settings: host.Settings,
-			})
+			toRenew = append(toRenew, ci)
 		} else if refresh {
-			toStopUsing[contract.ID] = "refreshed"
-			toRefresh = append(toRefresh, contractInfo{
-				contract: contract,
-				settings: host.Settings,
-			})
+			toRefresh = append(toRefresh, ci)
 		} else {
-			toKeep = append(toKeep, fcid)
+			toKeep = append(toKeep, ci.contract.ID)
 		}
 	}
 
@@ -741,7 +736,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	return formed, nil
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewals []renewal, _ error) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRenew []contractInfo, limit uint64) (renewals []renewal, toKeep []contractInfo) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
 	defer span.End()
 
@@ -758,11 +753,6 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 			"budget", budget,
 		)
 	}()
-	// start renewing from the largest contract to lose the least amount of data
-	// in case we have more contracts than we need.
-	sort.Slice(toRenew, func(i, j int) bool {
-		return toRenew[i].contract.FileSize() > toRenew[j].contract.FileSize()
-	})
 
 	var nRenewed uint64
 	for _, ci := range toRenew {
@@ -781,13 +771,16 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 		renewed, proceed, err := c.renewContract(ctx, w, ci, budget, renterAddress)
 		if err == nil {
 			renewals = append(renewals, renewal{from: ci.contract.ID, to: renewed.ID})
+			nRenewed++
+		} else if ci.usable {
+			toKeep = append(toKeep, ci)
+			nRenewed++
 		}
 		if !proceed {
 			break
 		}
 	}
-
-	return renewals, nil
+	return renewals, toKeep
 }
 
 func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, budget *types.Currency, renterAddress types.Address, toRefresh []contractInfo) (refreshed []renewal, _ error) {
