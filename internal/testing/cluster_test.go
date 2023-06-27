@@ -246,6 +246,27 @@ func TestNewTestCluster(t *testing.T) {
 	if len(hostInfosUnusable) != 0 {
 		t.Fatal("there should be no unusable hosts", len(hostInfosUnusable))
 	}
+
+	// Fetch the autopilot status
+	status, err := cluster.Autopilot.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Configured {
+		t.Fatal("autopilot should be configured")
+	}
+	if status.MigratingLastStart == (time.Time{}.Unix()) {
+		t.Fatal("autopilot should have completed a migration")
+	}
+	if status.ScanningLastStart == (time.Time{}.Unix()) {
+		t.Fatal("autopilot should have completed a scan")
+	}
+	if !status.Synced {
+		t.Fatal("autopilot should be synced")
+	}
+	if status.UptimeMS == 0 {
+		t.Fatal("uptime should be set")
+	}
 }
 
 // TestUploadDownloadEmpty is an integration test that verifies empty objects

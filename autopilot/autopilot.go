@@ -96,9 +96,6 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	mu    sync.Mutex
-	state state
-
 	a *accounts
 	c *contractor
 	m *migrator
@@ -107,11 +104,14 @@ type Autopilot struct {
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
 
-	startStopMu sync.Mutex
-	running     bool
-	ticker      *time.Ticker
-	triggerChan chan bool
-	stopChan    chan struct{}
+	mu           sync.Mutex
+	state        state
+	configured   bool
+	synced       bool
+	runningSince time.Time
+	ticker       *time.Ticker
+	triggerChan  chan bool
+	stopChan     chan struct{}
 }
 
 // state holds a bunch of variables that are used by the autopilot and updated
@@ -170,29 +170,29 @@ func (ap *Autopilot) Handler() http.Handler {
 }
 
 func (ap *Autopilot) Run() error {
-	ap.startStopMu.Lock()
-	if ap.running {
-		ap.startStopMu.Unlock()
+	ap.mu.Lock()
+	if ap.isRunning() {
+		ap.mu.Unlock()
 		return errors.New("already running")
 	}
-	ap.running = true
+	ap.runningSince = time.Now()
 	ap.stopChan = make(chan struct{})
 	ap.triggerChan = make(chan bool)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
 	ap.wg.Add(1)
 	defer ap.wg.Done()
-	ap.startStopMu.Unlock()
-
-	// block until consensus is synced
-	if !ap.blockUntilSynced() {
-		ap.logger.Error("autopilot stopped before consensus was synced")
-		return nil
-	}
+	ap.mu.Unlock()
 
 	// block until the autopilot is configured
 	if !ap.blockUntilConfigured() {
 		ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
+		return nil
+	}
+
+	// block until consensus is synced
+	if !ap.blockUntilSynced() {
+		ap.logger.Error("autopilot stopped before consensus was synced")
 		return nil
 	}
 
@@ -283,15 +283,15 @@ func (ap *Autopilot) Run() error {
 
 // Shutdown shuts down the autopilot.
 func (ap *Autopilot) Shutdown(_ context.Context) error {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
 
-	if ap.running {
+	if ap.isRunning() {
 		ap.ticker.Stop()
 		close(ap.stopChan)
 		close(ap.triggerChan)
 		ap.wg.Wait()
-		ap.running = false
+		ap.runningSince = time.Time{}
 	}
 	return nil
 }
@@ -303,8 +303,8 @@ func (ap *Autopilot) State() state {
 }
 
 func (ap *Autopilot) Trigger(forceScan bool) bool {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
 
 	select {
 	case ap.triggerChan <- forceScan:
@@ -312,6 +312,15 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 	default:
 		return false
 	}
+}
+
+func (ap *Autopilot) Uptime() time.Duration {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	if ap.runningSince.IsZero() {
+		return 0
+	}
+	return time.Since(ap.runningSince)
 }
 
 func (ap *Autopilot) blockUntilConfigured() bool {
@@ -341,6 +350,9 @@ func (ap *Autopilot) blockUntilConfigured() bool {
 			continue
 		}
 
+		ap.mu.Lock()
+		ap.configured = true
+		ap.mu.Unlock()
 		return true
 	}
 }
@@ -365,10 +377,29 @@ func (ap *Autopilot) blockUntilSynced() bool {
 
 				return cs.Synced
 			}(); synced {
+				ap.mu.Lock()
+				ap.synced = true
+				ap.mu.Unlock()
 				return true
 			}
 		}
 	}
+}
+
+func (ap *Autopilot) isConfigured() bool {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	return ap.configured
+}
+
+func (ap *Autopilot) isSynced() bool {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	return ap.synced
+}
+
+func (ap *Autopilot) isRunning() bool {
+	return !ap.runningSince.IsZero()
 }
 
 func (ap *Autopilot) updateState(ctx context.Context) error {
@@ -435,10 +466,6 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	}
 	ap.mu.Unlock()
 	return nil
-}
-
-func (ap *Autopilot) isSynced() bool {
-	return ap.State().cs.Synced
 }
 
 func (ap *Autopilot) isStopped() bool {
@@ -538,8 +565,16 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
+	migrating, mLastStart := ap.m.Status()
+	scanning, sLastStart := ap.s.Status()
 	jc.Encode(api.AutopilotStatusResponseGET{
-		CurrentPeriod: ap.State().period,
+		Configured:         ap.isConfigured(),
+		Migrating:          migrating,
+		MigratingLastStart: mLastStart.Unix(),
+		Scanning:           scanning,
+		ScanningLastStart:  sLastStart.Unix(),
+		Synced:             ap.isSynced(),
+		UptimeMS:           uint64(ap.Uptime().Milliseconds()),
 	})
 }
 

@@ -91,7 +91,13 @@ type (
 	// AutopilotStatusResponseGET is the response type for the /autopilot/status
 	// endpoint.
 	AutopilotStatusResponseGET struct {
-		CurrentPeriod uint64 `json:"currentPeriod"`
+		Configured         bool   `json:"configured"`
+		Migrating          bool   `json:"migrating"`
+		MigratingLastStart int64  `json:"migratingLastStart"`
+		Scanning           bool   `json:"scanning"`
+		ScanningLastStart  int64  `json:"scanningLastStart"`
+		Synced             bool   `json:"synced"`
+		UptimeMS           uint64 `json:"uptimeMS"`
 	}
 
 	// HostHandlerGET is the response type for the /host/:hostkey endpoint.
