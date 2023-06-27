@@ -159,7 +159,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	}
 
 	s.mu.Lock()
-	if !(force || s.isScanRequired()) {
+	if !force && (s.scanning || !s.isScanRequired()) {
 		s.mu.Unlock()
 		return false
 	}
