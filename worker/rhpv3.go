@@ -31,6 +31,10 @@ const (
 	// reserved on the bus after locking it.
 	accountLockingDuration = 30 * time.Second
 
+	// defaultRPCResponseMaxSize is the default maxSize we use whenever we read
+	// an RPC response.
+	defaultRPCResponseMaxSize = 100 * 1024 // 100 KiB
+
 	// defaultWithdrawalExpiryBlocks is the number of blocks we add to the
 	// current blockheight when we define an expiry block height for withdrawal
 	// messages.
@@ -869,7 +873,7 @@ func processPayment(s *streamV3, payment rhpv3.PaymentMethod) error {
 	}
 	if _, ok := payment.(*rhpv3.PayByContractRequest); ok {
 		var pr rhpv3.PaymentResponse
-		if err := s.ReadResponse(&pr, 4096); err != nil {
+		if err := s.ReadResponse(&pr, defaultRPCResponseMaxSize); err != nil {
 			return err
 		}
 		// TODO: return host signature
@@ -1020,7 +1024,7 @@ func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMe
 		return err
 	} else if err := processPayment(s, payment); err != nil {
 		return err
-	} else if err := s.ReadResponse(&resp, 4096); err != nil {
+	} else if err := s.ReadResponse(&resp, defaultRPCResponseMaxSize); err != nil {
 		return err
 	}
 	return nil
@@ -1042,7 +1046,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 	var resp rhpv3.RPCLatestRevisionResponse
 	if err := s.WriteRequest(rhpv3.RPCLatestRevisionID, &req); err != nil {
 		return types.FileContractRevision{}, err
-	} else if err := s.ReadResponse(&resp, 4096); err != nil {
+	} else if err := s.ReadResponse(&resp, defaultRPCResponseMaxSize); err != nil {
 		return types.FileContractRevision{}, err
 	} else if pt, payment, err := paymentFunc(&resp.Revision); err != nil || payment == nil {
 		return types.FileContractRevision{}, err
@@ -1199,7 +1203,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		return
 	} else if err = s.ReadResponse(&cancellationToken, 16); err != nil {
 		return
-	} else if err = s.ReadResponse(&executeResp, 4096); err != nil {
+	} else if err = s.ReadResponse(&executeResp, defaultRPCResponseMaxSize); err != nil {
 		return
 	}
 
@@ -1324,7 +1328,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	// host.
 	if ptUID == (rhpv3.SettingsID{}) {
 		var ptResp rhpv3.RPCUpdatePriceTableResponse
-		if err = s.ReadResponse(&ptResp, 4096); err != nil {
+		if err = s.ReadResponse(&ptResp, defaultRPCResponseMaxSize); err != nil {
 			return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to read RPCUpdatePriceTableResponse: %w", err)
 		}
 		pt = new(rhpv3.HostPriceTable)
@@ -1374,7 +1378,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 
 	// Incorporate the host's additions.
 	var hostAdditions rhpv3.RPCRenewContractHostAdditions
-	if err = s.ReadResponse(&hostAdditions, 4096); err != nil {
+	if err = s.ReadResponse(&hostAdditions, defaultRPCResponseMaxSize); err != nil {
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to read RPCRenewContractHostAdditions: %w", err)
 	}
 	parents = append(parents, hostAdditions.Parents...)
@@ -1436,7 +1440,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 
 	// Receive the host's signatures.
 	var hostSigs rhpv3.RPCRenewSignatures
-	if err = s.ReadResponse(&hostSigs, 4096); err != nil {
+	if err = s.ReadResponse(&hostSigs, defaultRPCResponseMaxSize); err != nil {
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to read RPCRenewSignatures: %w", err)
 	}
 	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
