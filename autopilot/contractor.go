@@ -721,11 +721,6 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, budget *
 			"budget", budget,
 		)
 	}()
-	// start renewing from the largest contract to lose the least amount of data
-	// in case we have more contracts than we need.
-	sort.Slice(toRenew, func(i, j int) bool {
-		return toRenew[i].contract.FileSize() > toRenew[j].contract.FileSize()
-	})
 
 	var nRenewed uint64
 	for _, ci := range toRenew {
