@@ -55,6 +55,10 @@ var (
 	// when trying to use a renewed contract.
 	errMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
 
+	// errPriceTableUpdateTimeout occurs when a thread times out waiting for the
+	// pricetable to be updated by another thread.
+	errPriceTableUpdateTimeout = errors.New("timeout while blocking for pricetable update")
+
 	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
 	// unsynced and has disabled its account manager.
 	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
@@ -63,6 +67,25 @@ var (
 	// closed.
 	errTransportClosed = errors.New("transport closed")
 )
+
+func isBalanceInsufficient(err error) bool     { return isError(err, errBalanceInsufficient) }
+func isBalanceMaxExceeded(err error) bool      { return isError(err, errBalanceMaxExceeded) }
+func isClosedStream(err error) bool            { return isError(err, mux.ErrClosedStream) }
+func isInsufficientFunds(err error) bool       { return isError(err, ErrInsufficientFunds) }
+func isPriceTableUpdateTimeout(err error) bool { return isError(err, errPriceTableUpdateTimeout) }
+func isWithdrawalsInactive(err error) bool     { return isError(err, errWithdrawalsInactive) }
+
+func isError(err error, target error) bool {
+	if err == nil {
+		return err == target
+	}
+	// compare error first
+	if errors.Is(err, target) {
+		return true
+	}
+	// then compare the string in case the error was returned by a host
+	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
+}
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
@@ -216,11 +239,12 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 		}
 		return ctx, func() {}
 	}
+
 	// Try to fetch the revision with an account first.
 	ctx, cancel := timeoutCtx()
 	defer cancel()
 	rev, err := h.fetchRevisionWithAccount(ctx, h.HostKey(), h.siamuxAddr, blockHeight, h.fcid)
-	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
+	if err != nil && !(isBalanceInsufficient(err) || isPriceTableUpdateTimeout(err) || isWithdrawalsInactive(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
 		return rev, nil
@@ -363,38 +387,6 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 		})
 		return balance, err
 	})
-}
-
-func isBalanceInsufficient(err error) bool {
-	return isError(err, errBalanceInsufficient)
-}
-
-func isBalanceMaxExceeded(err error) bool {
-	return isError(err, errBalanceMaxExceeded)
-}
-
-func isClosedStream(err error) bool {
-	return isError(err, mux.ErrClosedStream)
-}
-
-func isInsufficientFunds(err error) bool {
-	return isError(err, ErrInsufficientFunds)
-}
-
-func isWithdrawalsInactive(err error) bool {
-	return isError(err, errWithdrawalsInactive)
-}
-
-func isError(err error, target error) bool {
-	if err == nil {
-		return err == target
-	}
-	// compare error first
-	if errors.Is(err, target) {
-		return true
-	}
-	// then compare the string in case the error was returned by a host
-	return strings.Contains(err.Error(), target.Error())
 }
 
 type (
@@ -782,7 +774,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	if ongoing {
 		select {
 		case <-ctx.Done():
-			return hostdb.HostPriceTable{}, fmt.Errorf("%w; timeout while blocking for pricetable update", ctx.Err())
+			return hostdb.HostPriceTable{}, fmt.Errorf("%w; %v", ctx.Err(), errPriceTableUpdateTimeout)
 		case <-update.done:
 		}
 		return update.hpt, update.err
