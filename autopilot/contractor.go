@@ -34,9 +34,11 @@ const (
 
 	// leewayPctRequiredContracts is the leeway we apply on the amount of
 	// contracts the config dictates we should have, we'll only form new
-	// contracts if the number of contracts dips below 87.5% of the required
+	// contracts if the number of contracts dips below 90% of the required
 	// contracts
-	leewayPctRequiredContracts = 0.875
+	//
+	// NOTE: updating this value indirectly affects 'maxKeepLeeway'
+	leewayPctRequiredContracts = 0.9
 
 	// maxInitialContractFundingDivisor and minInitialContractFundingDivisor
 	// define a range we use when calculating the initial contract funding
@@ -219,7 +221,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.mu.Unlock()
 
 	// run checks
-	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, minScore)
+	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -282,9 +284,17 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		}
 	}
 
+	// to avoid forming new contracts as soon as we dip below
+	// 'Contracts.Amount', we define a threshold but only if we have more
+	// contracts than 'Contracts.Amount' already
+	threshold := state.cfg.Contracts.Amount
+	if uint64(len(contracts)) > state.cfg.Contracts.Amount {
+		threshold = addLeeway(threshold, leewayPctRequiredContracts)
+	}
+
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
-	if uint64(len(updatedSet)) < addLeeway(state.cfg.Contracts.Amount, leewayPctRequiredContracts) {
+	if uint64(len(updatedSet)) < threshold {
 		formed, err = c.runContractFormations(ctx, w, hosts, usedHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, address, minScore)
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
@@ -460,11 +470,20 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, minScore float64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
 	c.logger.Debug("running contract checks")
+
+	// convenience variables
+	state := c.ap.State()
+
+	// calculate 'maxKeepLeeway' which defines the amount of contracts we'll be
+	// lenient towards when we fail to either fetch a valid price table or the
+	// contract's revision
+	maxKeepLeeway := addLeeway(state.cfg.Contracts.Amount, 1-leewayPctRequiredContracts)
+	remainingKeepLeeway := maxKeepLeeway
 
 	var notfound int
 	defer func() {
@@ -472,6 +491,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			"contracts checks completed",
 			"contracts", len(contracts),
 			"notfound", notfound,
+			"usedKeepLeeway", maxKeepLeeway-remainingKeepLeeway,
 			"toKeep", len(toKeep),
 			"toArchive", len(toArchive),
 			"toRefresh", len(toRefresh),
@@ -481,9 +501,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 	// create a new ip filter
 	f := newIPFilter(c.logger)
-
-	// convenience variables
-	state := c.ap.State()
 
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, state.rs, state.cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
@@ -522,14 +539,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// starting here we need a revision for checking the contract. So if
-		// there is no revision, the contract isn't considered good.
-		if contract.Revision == nil {
-			toStopUsing[fcid] = errContractNoRevision.Error()
-			continue
-		}
-		revision := contract.Revision
-
 		// fetch host from hostdb
 		hk := contract.HostKey
 		host, err := c.ap.bus.Host(ctx, hk)
@@ -547,12 +556,11 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// fetch recent price table and attach it to host.
-		host.PriceTable, err = c.priceTable(ctx, w, host.Host)
-		if err != nil {
+		// if the host doesn't have a valid pricetable, update it
+		var invalidPT bool
+		if err := refreshPriceTable(ctx, w, &host.Host); err != nil {
 			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
-			toStopUsing[fcid] = "could not fetch price table"
-			continue
+			invalidPT = true
 		}
 
 		// set the host's block height to ours to disable the height check in
@@ -562,12 +570,37 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = state.cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, revision.Filesize)
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, contract.FileSize())
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", reasons)
 			continue
+		}
+
+		// if we were not able to the contract's revision, we can't properly
+		// perform the checks that follow, however we do want to be lenient if
+		// this contract is in the current set and we still have leeway left
+		if contract.Revision == nil {
+			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
+				toStopUsing[fcid] = errContractNoRevision.Error()
+			} else {
+				toKeep = append(toKeep, fcid)
+				remainingKeepLeeway-- // we let it slide
+			}
+			continue // can't perform contract checks without revision
+		}
+
+		// if we were not able to get a valid price table for the host, but we
+		// did pass the host checks, we only want to be lenient if this contract
+		// is in the current set and only for a certain number of times,
+		// controlled by maxKeepLeeway
+		if invalidPT {
+			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
+				toStopUsing[fcid] = "no valid price table"
+				continue
+			}
+			remainingKeepLeeway-- // we let it slide
 		}
 
 		// decide whether the contract is still good
@@ -667,9 +700,8 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			break
 		}
 
-		// fetch price table on the fly
-		host.PriceTable, err = c.priceTable(ctx, w, host)
-		if err != nil {
+		// fetch a new price table if necessary
+		if err := refreshPriceTable(ctx, w, &host); err != nil {
 			c.logger.Errorf("failed to fetch price table for candidate host %v: %v", host.PublicKey, err)
 			continue
 		}
@@ -1259,17 +1291,28 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) priceTable(ctx context.Context, w Worker, host hostdb.Host) (hostdb.HostPriceTable, error) {
-	// scan the host if it hasn't been successfully scanned before, which can
-	// occur when contracts are added manually to the bus or database
+func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
 	if !host.Scanned {
+		// scan the host if it hasn't been successfully scanned before, which
+		// can occur when contracts are added manually to the bus or database
 		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
 		if err != nil {
-			return hostdb.HostPriceTable{}, err
+			return err
 		}
 		host.Settings = scan.Settings
+	} else if !host.PriceTable.Expiry.IsZero() && time.Now().After(host.PriceTable.Expiry) {
+		// return the host's pricetable if it's not expired yet
+		return nil
 	}
-	return w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
+
+	// fetch the price table
+	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
+	if err != nil {
+		return err
+	}
+
+	host.PriceTable = hpt
+	return nil
 }
 
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {

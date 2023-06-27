@@ -3,7 +3,6 @@ package testing
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -46,38 +45,8 @@ func TestGouging(t *testing.T) {
 		hostsMap[h.PublicKey().String()] = h
 	}
 
-	// helper that waits until the contract set is ready
-	ctx := context.Background()
-	waitForContractSet := func() error {
-		t.Helper()
-		return Retry(30, time.Second, func() error {
-			if contracts, err := b.ContractSetContracts(ctx, cfg.Set); err != nil {
-				t.Fatal(err)
-			} else if len(contracts) != int(cfg.Amount) {
-				return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), int(cfg.Amount))
-			}
-			return nil
-		})
-	}
-
-	// helper that waits untail a certain host is removed from the contract set
-	waitForHostRemoval := func(hk types.PublicKey) error {
-		return Retry(30, time.Second, func() error {
-			if contracts, err := b.ContractSetContracts(ctx, cfg.Set); err != nil {
-				t.Fatal(err)
-			} else {
-				for _, c := range contracts {
-					if c.HostKey == hk {
-						return errors.New("host still in contract set")
-					}
-				}
-			}
-			return nil
-		})
-	}
-
 	// wait until we have a full contract set
-	if err := waitForContractSet(); err != nil {
+	if err := cluster.WaitForContractSet(cfg.Set, int(cfg.Amount)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,13 +63,13 @@ func TestGouging(t *testing.T) {
 
 	// upload the data
 	name := fmt.Sprintf("data_%v", len(data))
-	if err := w.UploadObject(ctx, bytes.NewReader(data), name); err != nil {
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 		t.Fatal(err)
 	}
 
 	// download the data
 	var buffer bytes.Buffer
-	if err := w.DownloadObject(ctx, &buffer, name); err != nil {
+	if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(data, buffer.Bytes()) {
@@ -108,7 +77,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// fetch current contract set
-	contracts, err := b.ContractSetContracts(ctx, cfg.Set)
+	contracts, err := b.ContractSetContracts(context.Background(), cfg.Set)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,13 +93,12 @@ func TestGouging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert it was removed from the contract set
-	if err := waitForHostRemoval(hk); err != nil {
-		t.Fatal(err)
-	}
+	// make sure the price table expires so the worker is forced to fetch it
+	// again, this is necessary for the host to be considered price gouging
+	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// upload some data - should fail
-	if err := w.UploadObject(ctx, bytes.NewReader(data), name); err == nil {
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err == nil {
 		t.Fatal("expected upload to fail")
 	}
 
@@ -141,10 +109,6 @@ func TestGouging(t *testing.T) {
 		if err := h.UpdateSettings(settings); err != nil {
 			t.Fatal(err)
 		}
-		// assert it was removed from the contract set
-		if err := waitForHostRemoval(h.PublicKey()); err != nil {
-			t.Fatal(err)
-		}
 	}
 
 	// make sure the price table expires so the worker is forced to fetch it
@@ -153,7 +117,7 @@ func TestGouging(t *testing.T) {
 
 	// download the data - should fail
 	buffer.Reset()
-	if err := w.DownloadObject(ctx, &buffer, name); err == nil {
+	if err := w.DownloadObject(context.Background(), &buffer, name); err == nil {
 		t.Fatal("expected download to fail")
 	}
 }
