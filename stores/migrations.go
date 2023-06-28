@@ -191,10 +191,5 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			return err
 		}
 	}
-	if m.HasConstraint(&dbSlab{}, "Slices") {
-		if err := m.DropConstraint(&dbSlab{}, "Slices"); err != nil {
-			return err
-		}
-	}
 	return nil
 }
