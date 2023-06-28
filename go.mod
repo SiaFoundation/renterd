@@ -3,6 +3,7 @@ module go.sia.tech/renterd
 go 1.18
 
 require (
+	github.com/go-gormigrate/gormigrate/v2 v2.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/gotd/contrib v0.15.0
 	github.com/klauspost/reedsolomon v1.11.7
@@ -21,11 +22,11 @@ require (
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
 	go.sia.tech/web/renterd v0.21.0
 	go.uber.org/zap v1.24.0
-	golang.org/x/crypto v0.6.0
+	golang.org/x/crypto v0.8.0
 	golang.org/x/sys v0.7.0
 	golang.org/x/term v0.7.0
-	gorm.io/driver/mysql v1.4.6
-	gorm.io/driver/sqlite v1.4.3
+	gorm.io/driver/mysql v1.5.1
+	gorm.io/driver/sqlite v1.5.1
 	gorm.io/gorm v1.25.1
 	lukechampine.com/frand v1.4.2
 )
