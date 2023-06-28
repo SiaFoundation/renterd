@@ -1294,7 +1294,7 @@ func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
 		// can occur when contracts are added manually to the bus or database
 		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to scan host %v: %w", host.PublicKey, err)
 		}
 		host.Settings = scan.Settings
 	} else if !host.PriceTable.Expiry.IsZero() && time.Now().After(host.PriceTable.Expiry) {
@@ -1305,7 +1305,7 @@ func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
 	// fetch the price table
 	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to fetch price table for host %v: %w", host.PublicKey, err)
 	}
 
 	host.PriceTable = hpt
