@@ -966,7 +966,11 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 			lowestScore = score
 		}
 	}
-	return lowestScore / minAllowedScoreLeeway, nil
+	minScore := lowestScore / minAllowedScoreLeeway
+	c.logger.Infow("finished computing minScore",
+		"minScore", minScore,
+		"lowestScore", lowestScore)
+	return minScore, nil
 }
 
 func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, []float64, error) {
