@@ -93,6 +93,16 @@ func (d *ParamDuration) UnmarshalText(b []byte) error {
 	return nil
 }
 
+// MarshalJSON implements json.Marshaler.
+func (d ParamDuration) MarshalJSON() ([]byte, error) {
+	return []byte(strconv.FormatInt(time.Duration(d).Milliseconds(), 10)), nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (d *ParamDuration) UnmarshalJSON(data []byte) error {
+	return d.UnmarshalText(data)
+}
+
 // String implements fmt.Stringer.
 func (d ParamDurationHour) String() string {
 	return strconv.Itoa(int(time.Duration(d).Hours()))
