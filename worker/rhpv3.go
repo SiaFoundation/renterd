@@ -963,19 +963,19 @@ func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePa
 	const maxPriceTableSize = 16 * 1024
 	var ptr rhpv3.RPCUpdatePriceTableResponse
 	if err := s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't send RPCUpdatePriceTableID: %w", err)
 	} else if err := s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCUpdatePriceTableResponse: %w", err)
 	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't unmarshal price table: %w", err)
 	} else if payment, err := paymentFunc(pt); err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't create payment: %w", err)
 	} else if payment == nil {
 		return pt, nil // intended not to pay
 	} else if err := processPayment(s, payment); err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w", err)
 	} else if err := s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCPriceTableResponse: %w", err)
 	}
 	return pt, nil
 }
