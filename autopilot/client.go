@@ -32,12 +32,12 @@ func (c *Client) UpdateConfig(cfg api.AutopilotConfig) error {
 	return c.c.PUT("/config", cfg)
 }
 
-func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerGET, err error) {
+func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerResponse, err error) {
 	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &resp)
 	return
 }
 
-func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostHandlerGET, err error) {
+func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostHandlerResponse, err error) {
 	err = c.c.POST("/hosts", api.SearchHostsRequest{
 		Offset:          offset,
 		Limit:           limit,
@@ -49,7 +49,7 @@ func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string
 	return
 }
 
-func (c *Client) Status() (resp api.AutopilotStatusResponseGET, err error) {
+func (c *Client) Status() (resp api.AutopilotStatusResponse, err error) {
 	err = c.c.GET("/status", &resp)
 	return
 }
