@@ -954,6 +954,7 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 // RPCPriceTable calls the UpdatePriceTable RPC.
 func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (pt rhpv3.HostPriceTable, err error) {
 	defer wrapErr(&err, "PriceTable")
+	start := time.Now()
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return rhpv3.HostPriceTable{}, err
@@ -963,19 +964,19 @@ func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePa
 	const maxPriceTableSize = 16 * 1024
 	var ptr rhpv3.RPCUpdatePriceTableResponse
 	if err := s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't send RPCUpdatePriceTableID: %w", err)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't send RPCUpdatePriceTableID: %w (%v)", err, time.Since(start))
 	} else if err := s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCUpdatePriceTableResponse: %w", err)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCUpdatePriceTableResponse: %w (%v)", err, time.Since(start))
 	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't unmarshal price table: %w", err)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't unmarshal price table: %w (%v)", err, time.Since(start))
 	} else if payment, err := paymentFunc(pt); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't create payment: %w", err)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't create payment: %w (%v)", err, time.Since(start))
 	} else if payment == nil {
 		return pt, nil // intended not to pay
 	} else if err := processPayment(s, payment); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w", err)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w (%v)", err, time.Since(start))
 	} else if err := s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCPriceTableResponse: %w", err)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCPriceTableResponse: %w (%v)", err, time.Since(start))
 	}
 	return pt, nil
 }
