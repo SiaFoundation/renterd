@@ -750,11 +750,11 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				Timestamp: interaction.Timestamp.UTC(),
 				Type:      interaction.Type,
 			})
-			interactionTime := interaction.Timestamp.UnixNano()
+			lastScan := time.Unix(0, host.LastScan)
 			if interaction.Success {
 				host.SuccessfulInteractions++
-				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
-					host.Uptime += time.Duration(interactionTime - host.LastScan)
+				if isScan && host.LastScan > 0 && lastScan.Before(interaction.Timestamp) {
+					host.Uptime += interaction.Timestamp.Sub(lastScan)
 				}
 				host.RecentDowntime = 0
 				host.RecentScanFailures = 0
@@ -762,9 +762,9 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				host.FailedInteractions++
 				if isScan {
 					host.RecentScanFailures++
-					if host.LastScan > 0 && host.LastScan < interactionTime {
-						host.Downtime += time.Duration(interactionTime - host.LastScan)
-						host.RecentDowntime += time.Duration(interactionTime - host.LastScan)
+					if host.LastScan > 0 && lastScan.Before(interaction.Timestamp) {
+						host.Downtime += interaction.Timestamp.Sub(lastScan)
+						host.RecentDowntime += interaction.Timestamp.Sub(lastScan)
 					}
 				}
 			}
