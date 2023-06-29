@@ -401,11 +401,11 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 		return nil
 	}
 
-	// defer cleanup of the config file
+	// defer autopilot dir cleanup
 	defer func() {
 		if err == nil {
-			log.Println("migration: removing autopilot.json")
-			if err = os.Remove(path); err == nil {
+			log.Println("migration: removing autopilot directory")
+			if err = os.RemoveAll(dir); err == nil {
 				log.Println("migration: done")
 			}
 		}
