@@ -138,7 +138,7 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 		{
 			ID: "00001_gormigrate",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration0001_first(tx, logger)
+				return performMigration00001_gormigrate(tx, logger)
 			},
 			Rollback: nil,
 		},
@@ -215,8 +215,10 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 	}
 
 	// Add constraint back.
-	if err := m.CreateConstraint(&dbSlab{}, "Slices"); err != nil {
-		return fmt.Errorf("failed to add constraint 'Slices' to table 'slabs': %w", err)
+	if !m.HasConstraint(&dbSlab{}, "Slices") {
+		if err := m.CreateConstraint(&dbSlab{}, "Slices"); err != nil {
+			return fmt.Errorf("failed to add constraint 'Slices' to table 'slabs': %w", err)
+		}
 	}
 
 	if fillSlabContractSetID {
