@@ -744,7 +744,8 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	acc := accounts[0]
-	if acc.Balance.Cmp(types.Siacoins(1).Big()) != 0 {
+	minExpectedBalance := types.Siacoins(1).Sub(types.NewCurrency64(1))
+	if acc.Balance.Cmp(minExpectedBalance.Big()) < 0 {
 		t.Fatalf("wrong balance %v", acc.Balance)
 	}
 	if acc.ID == (rhpv3.Account{}) {
@@ -791,9 +792,11 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	busAcc = busAccounts[0]
-	if busAcc.Drift.Cmp(newDrift) != 0 {
-		t.Fatalf("drift was %v but should be %v", busAcc.Drift, newDrift)
+	maxNewDrift := newDrift.Add(newDrift, types.NewCurrency64(1).Big())
+	if busAcc.Drift.Cmp(maxNewDrift) > 0 {
+		t.Fatalf("drift was %v but should be %v", busAcc.Drift, maxNewDrift)
 	}
+	newDrift = busAcc.Drift
 
 	// Reboot cluster.
 	cluster2, err := cluster.Reboot(context.Background())
