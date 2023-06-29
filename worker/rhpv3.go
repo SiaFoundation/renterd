@@ -118,7 +118,7 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	stream := transport.DialStream()
 
 	// Apply a sane timeout to the stream.
-	if err := stream.SetDeadline(time.Now().Add(10 * time.Minute)); err != nil {
+	if err := stream.SetDeadline(time.Now().Add(5 * time.Minute)); err != nil {
 		_ = stream.Close()
 		return nil, err
 	}

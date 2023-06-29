@@ -379,7 +379,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 
 	// launch all workers
 	var wg sync.WaitGroup
-	for t := 0; t < 10 && t < len(metadatas); t++ {
+	for t := 0; t < 20 && t < len(metadatas); t++ {
 		wg.Add(1)
 		go func() {
 			worker()

@@ -52,11 +52,15 @@ const (
 
 	// timeoutHostPriceTable is the amount of time we wait to receive a price
 	// table from the host
-	timeoutHostPriceTable = 10 * time.Minute
+	timeoutHostPriceTable = 30 * time.Second
 
 	// timeoutHostRevision is the amount of time we wait to receive the latest
-	// revision from the host
-	timeoutHostRevision = 10 * time.Minute
+	// revision from the host. This is set to 4 minutes since siad currently
+	// blocks for 3 minutes when trying to fetch a revision and not having
+	// enough funds in the account used for fetching it. That way we are
+	// guaranteed to receive the host's ErrBalanceInsufficient.
+	// TODO: This can be lowered once the network uses hostd.
+	timeoutHostRevision = 4 * time.Minute
 
 	// timeoutHostScan is the amount of time we wait for a host scan to be
 	// completed
