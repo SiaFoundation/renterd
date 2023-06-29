@@ -136,7 +136,7 @@ func migrateShards(ctx context.Context, db *gorm.DB, l glogger.Interface) error 
 func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 	migrations := []*gormigrate.Migration{
 		{
-			ID: "0001_first",
+			ID: "00001_gormigrate",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration0001_first(tx, logger)
 			},
@@ -168,9 +168,9 @@ func initSchema(tx *gorm.DB) error {
 	return tx.AutoMigrate(tables...)
 }
 
-// performMigration0001_first performs the first migration before introducing
-// gormigrate.
-func performMigration0001_first(txn *gorm.DB, logger glogger.Interface) error {
+// performMigration00001_gormigrate performs the first migration before
+// introducing gormigrate.
+func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) error {
 	ctx := context.Background()
 	m := txn.Migrator()
 
