@@ -310,7 +310,15 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	if len(updatedSet) > int(state.cfg.Contracts.Amount) {
 		// sort by contract size
 		sort.Slice(updatedSet, func(i, j int) bool {
-			return contractData[updatedSet[i]] > contractData[updatedSet[j]]
+			iData, exists := contractData[updatedSet[i]]
+			if !exists {
+				panic(fmt.Sprintf("contract %v not found in contractData", updatedSet[i]))
+			}
+			jData, exists := contractData[updatedSet[j]]
+			if !exists {
+				panic(fmt.Sprintf("contract %v not found in contractData", updatedSet[j]))
+			}
+			return iData > jData
 		})
 		for _, c := range updatedSet[state.cfg.Contracts.Amount:] {
 			toStopUsing[c] = "truncated"
