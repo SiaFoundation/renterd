@@ -100,7 +100,7 @@ type (
 		MinShards   uint8
 		TotalShards uint8
 
-		Slices []dbSlice  `gorm:"constraint:OnDelete:SET NULL"`
+		Slices []dbSlice
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
