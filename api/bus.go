@@ -187,7 +187,7 @@ type WalletPrepareFormRequest struct {
 	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
 	RenterAddress  types.Address      `json:"renterAddress"`
 	RenterFunds    types.Currency     `json:"renterFunds"`
-	RenterKey      types.PrivateKey   `json:"renterKey"`
+	RenterKey      types.PublicKey    `json:"renterKey"`
 }
 
 // WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew

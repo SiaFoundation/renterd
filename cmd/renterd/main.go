@@ -395,6 +395,11 @@ func main() {
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
+	// check if the dir exists
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+
 	// defer autopilot dir cleanup
 	defer func() {
 		if err == nil {

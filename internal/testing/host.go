@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/hostd/chain"
 	"go.sia.tech/hostd/host/accounts"
+	"go.sia.tech/hostd/host/alerts"
 	"go.sia.tech/hostd/host/contracts"
 	"go.sia.tech/hostd/host/registry"
 	"go.sia.tech/hostd/host/settings"
@@ -73,11 +74,11 @@ var defaultHostSettings = settings.Settings{
 	BaseRPCPrice:      types.NewCurrency64(100),
 	SectorAccessPrice: types.NewCurrency64(100),
 
-	Collateral:   types.Siacoins(200).Div64(1e12).Div64(blocksPerMonth),
-	StoragePrice: types.Siacoins(100).Div64(1e12).Div64(blocksPerMonth),
-	EgressPrice:  types.Siacoins(100).Div64(1e12),
-	IngressPrice: types.Siacoins(100).Div64(1e12),
-	WindowSize:   5,
+	CollateralMultiplier: 2,
+	StoragePrice:         types.Siacoins(100).Div64(1e12).Div64(blocksPerMonth),
+	EgressPrice:          types.Siacoins(100).Div64(1e12),
+	IngressPrice:         types.Siacoins(100).Div64(1e12),
+	WindowSize:           5,
 
 	PriceTableValidity: 10 * time.Second,
 
@@ -195,8 +196,12 @@ func (h *Host) RHPv3Addr() string {
 
 // AddVolume adds a new volume to the host
 func (h *Host) AddVolume(path string, size uint64) error {
-	_, err := h.storage.AddVolume(path, size)
-	return err
+	result := make(chan error)
+	_, err := h.storage.AddVolume(path, size, result)
+	if err != nil {
+		return err
+	}
+	return <-result
 }
 
 // UpdateSettings updates the host's configuration
@@ -265,11 +270,12 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
 	}
 
-	storage, err := storage.NewVolumeManager(db, cm, log.Named("storage"))
+	am := alerts.NewManager()
+	storage, err := storage.NewVolumeManager(db, am, cm, log.Named("storage"), 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage manager: %w", err)
 	}
-	contracts, err := contracts.NewManager(db, storage, cm, tp, wallet, log.Named("contracts"))
+	contracts, err := contracts.NewManager(db, am, storage, cm, tp, wallet, log.Named("contracts"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contract manager: %w", err)
 	}

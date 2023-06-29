@@ -313,7 +313,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
 		return
 	}
-	if wpfr.RenterKey == nil {
+	if wpfr.RenterKey == (types.PublicKey{}) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
@@ -366,7 +366,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	finalRevision.RevisionNumber = math.MaxUint64
 
 	// Prepare the new contract.
-	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.PriceTable, wprr.EndHeight)
+	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.PriceTable, wprr.EndHeight)
 
 	// Create the transaction containing both the final revision and new
 	// contract.
