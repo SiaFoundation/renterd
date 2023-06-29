@@ -271,6 +271,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		renewed, toKeep = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
 		for _, ri := range renewed {
 			updatedSet = append(updatedSet, ri.to)
+			contractData[ri.to] = contractData[ri.from]
 		}
 		for _, ci := range toKeep {
 			updatedSet = append(updatedSet, ci.contract.ID)
@@ -284,6 +285,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	} else {
 		for _, ri := range refreshed {
 			updatedSet = append(updatedSet, ri.to)
+			contractData[ri.to] = contractData[ri.from]
 		}
 	}
 
@@ -302,7 +304,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		} else {
-			updatedSet = append(updatedSet, formed...)
+			for _, fc := range formed {
+				updatedSet = append(updatedSet, fc)
+				contractData[fc] = 0
+			}
 		}
 	}
 
