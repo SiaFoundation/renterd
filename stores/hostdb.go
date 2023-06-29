@@ -34,6 +34,10 @@ const (
 	// database per batch. Empirically tested to verify that this is a value
 	// that performs reasonably well.
 	hostRetrievalBatchSize = 10000
+
+	// interactionInsertionBatchSize is the number of interactions we insert at
+	// once.
+	interactionInsertionBatchSize = 100
 )
 
 var (
@@ -821,7 +825,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 		}
 
 		// Save everything to the db.
-		if err := tx.CreateInBatches(&dbInteractions, 100).Error; err != nil {
+		if err := tx.CreateInBatches(&dbInteractions, interactionInsertionBatchSize).Error; err != nil {
 			return err
 		}
 		for _, h := range hostMap {
