@@ -118,7 +118,7 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	stream := transport.DialStream()
 
 	// Apply a sane timeout to the stream.
-	if err := stream.SetDeadline(time.Now().Add(5 * time.Minute)); err != nil {
+	if err := stream.SetDeadline(time.Now().Add(10 * time.Minute)); err != nil {
 		_ = stream.Close()
 		return nil, err
 	}
@@ -258,9 +258,9 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 				// Fetch pt.
 				pt, err := h.priceTable(ctx, nil)
 				if err != nil {
-					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
-				cost = pt.LatestRevisionCost
+				cost = pt.LatestRevisionCost.Add(pt.UpdatePriceTableCost) // add cost of fetching the pricetable since we might need a new one and it's just 1H anyway.
 				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
@@ -510,6 +510,7 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	// execute amtFn
 	amt, err := amtFn()
 	if isBalanceInsufficient(err) {
+		fmt.Println("schedule sync")
 		// in case of an insufficient balance, we schedule a sync
 		scheduleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
