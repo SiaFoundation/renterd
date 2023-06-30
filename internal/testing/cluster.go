@@ -56,6 +56,10 @@ var (
 		},
 	}
 
+	testContractSetSettings = api.ContractSetSetting{
+		Default: "autopilot",
+	}
+
 	testGougingSettings = api.GougingSettings{
 		MinMaxCollateral: types.Siacoins(10),                   // at least up to 10 SC per contract
 		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
@@ -344,6 +348,10 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		return nil, err
 	}
 	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
+	if err != nil {
+		return nil, err
+	}
+	err = busClient.UpdateSetting(context.Background(), api.SettingContractSet, testContractSetSettings)
 	if err != nil {
 		return nil, err
 	}

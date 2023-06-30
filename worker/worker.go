@@ -668,7 +668,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		up.ContractSet = contractset
 	}
 
-	// cancel the upload if no contract set is specified
+	// cancel the migration if no contract set is specified
 	if up.ContractSet == "" {
 		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
 		return
@@ -903,6 +903,20 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// decode the contract set from the query string
+	var contractset string
+	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
+	// cancel the upload if no contract set is specified
+	if up.ContractSet == "" {
+		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
+		return
+	}
+
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
 		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
@@ -920,14 +934,6 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
 		return
-	}
-
-	// allow overriding contract set
-	var contractset string
-	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
-		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context

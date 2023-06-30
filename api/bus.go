@@ -312,7 +312,8 @@ type GougingParams struct {
 	TransactionFee     types.Currency
 }
 
-// ContractSetSetting contains the contract set used by the worker for uploads.
+// ContractSetSetting contains the default contract set used by the worker for
+// uploads and migrations.
 type ContractSetSetting struct {
 	Default string `json:"default"`
 }

@@ -932,8 +932,10 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 
 	val, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
 	if err != nil && errors.Is(err, api.ErrSettingNotFound) {
+		// return the upload params without a contract set, if the user is
+		// specifying a contract set through the query string that's fine
 		jc.Encode(api.UploadParams{
-			ContractSet:   "", // leave empty
+			ContractSet:   "",
 			CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 			GougingParams: gp,
 		})
