@@ -104,9 +104,11 @@ func isError(err error, target error) bool {
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
-	mu       sync.Mutex
-	refCount uint64
-	t        *rhpv3.Transport
+	mu         sync.Mutex
+	refCount   uint64
+	hostKey    types.PublicKey
+	siamuxAddr string
+	t          *rhpv3.Transport
 }
 
 type streamV3 struct {
@@ -141,11 +143,17 @@ func (t *transportV3) Close() error {
 // DialStream dials a new stream on the transport.
 func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
-	transport := t.t
-	t.mu.Unlock()
-	if transport == nil {
-		return nil, errTransportClosed
+	if t.t == nil {
+		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
+		if err != nil {
+			t.mu.Unlock()
+			return nil, err
+		}
+		t.t = newTransport
 	}
+	transport := t.t
+	t.refCount++
+	t.mu.Unlock()
 
 	// Close the stream when the context is closed to unblock any reads or
 	// writes.
@@ -187,47 +195,53 @@ func newTransportPoolV3(w *worker) *transportPoolV3 {
 	}
 }
 
-func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*transportV3, error) {
+func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
+	conn, err := dial(ctx, siamuxAddr, hostKey)
+	if err != nil {
+		return nil, err
+	}
+
+	doneChan := make(chan struct{})
+	go func() {
+		select {
+		case <-doneChan:
+		case <-ctx.Done():
+			_ = conn.Close()
+		}
+	}()
+
+	t, err := rhpv3.NewRenterTransport(conn, hostKey)
+	if err != nil {
+		conn.Close()
+		close(doneChan)
+		return nil, err
+	}
+	close(doneChan)
+
+	// Check if we timed out in the meantime.
+	select {
+	case <-ctx.Done():
+		conn.Close()
+		return nil, ctx.Err()
+	default:
+	}
+
+	return t, nil
+}
+
+func (p *transportPoolV3) newTransport(siamuxAddr string, hostKey types.PublicKey) *transportV3 {
 	// Get or create a transport for the given siamux address.
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	t, found := p.pool[siamuxAddr]
 	if !found {
-		t = &transportV3{}
+		t = &transportV3{
+			hostKey:    hostKey,
+			siamuxAddr: siamuxAddr,
+		}
 		p.pool[siamuxAddr] = t
 	}
-
-	// Lock the transport and increment its refcounter.
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Unlock the pool now that the transport is locked.
-	p.mu.Unlock()
-
-	// Init the transport if necessary.
-	if t.t == nil {
-		conn, err := dial(ctx, siamuxAddr, hostKey)
-		if err != nil {
-			return nil, err
-		}
-
-		doneChan := make(chan struct{})
-		defer close(doneChan)
-		go func() {
-			select {
-			case <-doneChan:
-			case <-ctx.Done():
-				_ = conn.Close()
-			}
-		}()
-		t.t, err = rhpv3.NewRenterTransport(conn, hostKey)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Increment the refcounter upon success.
-	t.refCount++
-	return t, nil
+	return t
 }
 
 func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
@@ -236,10 +250,7 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 		p.recordInteractions(mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
-	t, err := p.newTransport(ctx, siamuxAddr, hostKey)
-	if err != nil {
-		return err
-	}
+	t := p.newTransport(siamuxAddr, hostKey)
 	defer t.Close()
 	return fn(ctx, t)
 }
