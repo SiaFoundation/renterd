@@ -460,6 +460,12 @@ func (c *Client) DeleteSetting(ctx context.Context, key string) error {
 	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/setting/%s", key))
 }
 
+// ContractSetSettings returns the contract set settings.
+func (c *Client) ContractSetSettings(ctx context.Context) (gs api.ContractSetSetting, err error) {
+	err = c.Setting(ctx, api.SettingContractSet, &gs)
+	return
+}
+
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
 	err = c.Setting(ctx, api.SettingGouging, &gs)

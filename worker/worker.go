@@ -41,10 +41,6 @@ const (
 	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 20
 	lockingPriorityUpload                 = 1 // lowest
-
-	queryStringParamContractSet = "contractset"
-	queryStringParamMinShards   = "minshards"
-	queryStringParamTotalShards = "totalshards"
 )
 
 var privateSubnets []*net.IPNet
@@ -651,6 +647,8 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 
 func (w *worker) slabMigrateHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
+
+	// decode the slab
 	var slab object.Slab
 	if jc.Decode(&slab) != nil {
 		return
@@ -662,19 +660,25 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// decode the contract set from the query string
+	var contractset string
+	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
+	// cancel the upload if no contract set is specified
+	if up.ContractSet == "" {
+		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
+		return
+	}
+
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
 		w.logger.Errorf("migration cancelled, err: %v", api.ErrConsensusNotSynced)
 		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
-	}
-
-	// allow overriding contract set
-	var contractset string
-	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
-		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context
@@ -908,10 +912,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// allow overriding the redundancy settings
 	rs := up.RedundancySettings
-	if jc.DecodeForm(queryStringParamMinShards, &rs.MinShards) != nil {
+	if jc.DecodeForm(api.QueryStringParamMinShards, &rs.MinShards) != nil {
 		return
 	}
-	if jc.DecodeForm(queryStringParamTotalShards, &rs.TotalShards) != nil {
+	if jc.DecodeForm(api.QueryStringParamTotalShards, &rs.TotalShards) != nil {
 		return
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
@@ -920,7 +924,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// allow overriding contract set
 	var contractset string
-	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
+	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
 		return
 	} else if contractset != "" {
 		up.ContractSet = contractset
