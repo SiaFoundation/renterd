@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -167,18 +166,30 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 	}
 
 	if fillSlabContractSetID {
-		// Compat code for databases that don't have the db_contract_set_id.
-		// Since we don't know what contract set a slab was uploaded with, we
-		// associate all slabs with the autopilot set.
-		logger.Info(ctx, "slabs table is missing 'db_contract_set_id' column - adding it and associating slabs with 'autopilot' set if set exists")
+		// Compat code for databases that don't have the db_contract_set_id. We
+		// have to assign all slabs to a contract set, if we only have one
+		// contract set we use that one but if we have 0 or more than 1 we
+		// create a migration set.
+		var sets []dbContractSet
+		if err := db.Find(&sets).Error; err != nil {
+			return fmt.Errorf("failed to retrieve contract sets from the database: %w", err)
+		}
+
+		logFn := logger.Info
 		var cs dbContractSet
-		err := db.Take(&cs, "name = ?", "autopilot").Error
-		if err == nil {
-			if err := db.Exec("UPDATE slabs SET db_contract_set_id = ? WHERE slabs.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
-				return fmt.Errorf("failed to update slab contract set ID: %w", err)
+		if len(sets) != 1 {
+			cs = dbContractSet{Name: "migration-slab-contract-set-id"}
+			if err := db.FirstOrCreate(&cs).Error; err != nil {
+				return fmt.Errorf("failed to create migration set: %w", err)
 			}
-		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("failed to fetch autopilot contract set: %w", err)
+			logFn = logger.Warn // warn to alert the user of the migration set
+		} else {
+			cs = sets[0]
+		}
+
+		logFn(ctx, fmt.Sprintf("slabs table is missing 'db_contract_set_id' column - adding it and associating slabs with the contract set '%s'", cs.Name))
+		if err := db.Exec("UPDATE slabs SET db_contract_set_id = ? WHERE slabs.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
+			return fmt.Errorf("failed to update slab contract set ID: %w", err)
 		}
 	}
 
