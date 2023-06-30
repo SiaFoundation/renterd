@@ -210,7 +210,7 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 	}
 	if m.HasConstraint(&dbSlab{}, "Shards") {
 		if err := m.DropConstraint(&dbSlab{}, "Shards"); err != nil {
-			return fmt.Errorf("failed to drop constraint 'Slices' from table 'slabs': %w", err)
+			return fmt.Errorf("failed to drop constraint 'Shards' from table 'slabs': %w", err)
 		}
 	}
 
