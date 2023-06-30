@@ -1154,6 +1154,10 @@ END AS health`).
 
 // object retrieves a raw object from the store.
 func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
+	// NOTE: we LEFT JOIN here because empty objects are valid and need to be
+	// included in the result set, when we convert the rawObject before
+	// returning it we'll check for SlabID and/or SectorID being 0 and act
+	// accordingly
 	var rows rawObject
 	tx := s.db.
 		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
