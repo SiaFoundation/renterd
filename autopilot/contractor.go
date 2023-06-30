@@ -271,6 +271,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		renewed, toKeep = c.runContractRenewals(ctx, w, &remaining, address, toRenew, uint64(limit))
 		for _, ri := range renewed {
 			updatedSet = append(updatedSet, ri.to)
+			contractData[ri.to] = contractData[ri.from]
 		}
 		for _, ci := range toKeep {
 			updatedSet = append(updatedSet, ci.contract.ID)
@@ -284,6 +285,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	} else {
 		for _, ri := range refreshed {
 			updatedSet = append(updatedSet, ri.to)
+			contractData[ri.to] = contractData[ri.from]
 		}
 	}
 
@@ -302,11 +304,19 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		} else {
-			updatedSet = append(updatedSet, formed...)
+			for _, fc := range formed {
+				updatedSet = append(updatedSet, fc)
+				contractData[fc] = 0
+			}
 		}
 	}
 
 	// cap the amount of contracts we want to keep to the configured amount
+	for _, fcid := range updatedSet {
+		if _, exists := contractData[fcid]; !exists {
+			c.logger.Errorf("contract %v not found in contractData", fcid)
+		}
+	}
 	if len(updatedSet) > int(state.cfg.Contracts.Amount) {
 		// sort by contract size
 		sort.Slice(updatedSet, func(i, j int) bool {
