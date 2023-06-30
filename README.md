@@ -111,6 +111,25 @@ The autopilot will not perform any tasks until it is configured. An example conf
 }
 ```
 
+## Contract Set
+
+The contract set settings on the bus are important for uploads and migrations. The settings can be updated using the settings API:
+
+- `GET /api/bus/setting/contractset`
+- `PUT /api/bus/setting/contractset`
+
+```json
+{
+        "default": "autopilot"
+}
+```
+
+The contract set settings do not have a default value, in most cases the default set should match the set from your autopilot configuration in order for migrations to work properly.
+
+The contract set can be overriden by passing it as a query string parameter to the worker's upload and migrate endpoints.
+
+- `PUT /api/worker/objects/foo?contractset=foo`
+
 ## Redundancy
 
 The default redundancy is 30-10. The redunancy can be updated using the settings API:
