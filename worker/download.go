@@ -176,7 +176,7 @@ func newDownloader(host hostV3) *downloader {
 	}
 }
 
-func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint32, contracts []api.ContractMetadata) (err error) {
+func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, contracts []api.ContractMetadata) (err error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "download")
 	defer func() {
@@ -262,6 +262,7 @@ outer:
 			return errors.New("download timed out")
 		case resp := <-responseChan:
 			if resp.err != nil {
+				mgr.logger.Errorf("download slab %v failed: %v", resp.index, resp.err)
 				return resp.err
 			}
 
@@ -271,6 +272,7 @@ outer:
 					slabs[respIndex].Decrypt(next.shards)
 					err := slabs[respIndex].Recover(cw, next.shards)
 					if err != nil {
+						mgr.logger.Errorf("failed to recover slab %v: %v", respIndex, err)
 						return err
 					}
 					next = nil
@@ -1092,29 +1094,38 @@ func (id id) String() string {
 	return fmt.Sprintf("%x", id[:])
 }
 
-func slabsForDownload(slabs []object.SlabSlice, offset, length uint32) []object.SlabSlice {
+func slabsForDownload(slabs []object.SlabSlice, offset, length uint64) []object.SlabSlice {
+	// declare a helper to cast a uint64 to uint32 with overflow detection. This
+	// could should never produce an overflow.
+	cast32 := func(in uint64) uint32 {
+		if in > math.MaxUint32 {
+			panic("slabsForDownload: overflow detected")
+		}
+		return uint32(in)
+	}
+
 	// mutate a copy
 	slabs = append([]object.SlabSlice(nil), slabs...)
 
 	firstOffset := offset
 	for i, ss := range slabs {
-		if firstOffset <= ss.Length {
+		if firstOffset <= uint64(ss.Length) {
 			slabs = slabs[i:]
 			break
 		}
-		firstOffset -= ss.Length
+		firstOffset -= uint64(ss.Length)
 	}
-	slabs[0].Offset += firstOffset
-	slabs[0].Length -= firstOffset
+	slabs[0].Offset += cast32(firstOffset)
+	slabs[0].Length -= cast32(firstOffset)
 
 	lastLength := length
 	for i, ss := range slabs {
-		if lastLength <= ss.Length {
+		if lastLength <= uint64(ss.Length) {
 			slabs = slabs[:i+1]
 			break
 		}
-		lastLength -= ss.Length
+		lastLength -= uint64(ss.Length)
 	}
-	slabs[len(slabs)-1].Length = lastLength
+	slabs[len(slabs)-1].Length = cast32(lastLength)
 	return slabs
 }

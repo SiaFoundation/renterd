@@ -851,6 +851,10 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		status = http.StatusPartialContent
 		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(obj.Size()))
 		offset, length = ranges[0].Start, ranges[0].Length
+		if offset < 0 || length < 0 || offset+length > obj.Size() {
+			jc.Error(fmt.Errorf("invalid range: %v %v", offset, length), http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	jc.ResponseWriter.Header().Set("Accept-Ranges", "bytes")
@@ -869,7 +873,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// download the object
-	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, obj, uint32(offset), uint32(length), contracts)) != nil {
+	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, obj, uint64(offset), uint64(length), contracts)) != nil {
 		return
 	}
 }
