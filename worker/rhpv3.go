@@ -510,7 +510,6 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	// execute amtFn
 	amt, err := amtFn()
 	if isBalanceInsufficient(err) {
-		fmt.Println("schedule sync")
 		// in case of an insufficient balance, we schedule a sync
 		scheduleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
