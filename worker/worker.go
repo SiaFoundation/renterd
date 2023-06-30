@@ -243,17 +243,7 @@ type worker struct {
 }
 
 func dial(ctx context.Context, hostIP string, hostKey types.PublicKey) (net.Conn, error) {
-	start := time.Now()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
-	metrics.Record(ctx, MetricHostDial{
-		metricCommon: metricCommon{
-			address:   hostIP,
-			hostKey:   hostKey,
-			timestamp: start,
-			elapsed:   time.Since(start),
-			err:       err,
-		},
-	})
 	return conn, err
 }
 
