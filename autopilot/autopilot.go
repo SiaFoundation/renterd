@@ -514,15 +514,9 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 		autopilot.Config = cfg
 	}
 
-	// update the autopilot
-	jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot))
-
-	// interrupt migrations if the set has been updated
-	if setUpdated {
-		select {
-		case ap.m.signalMaintenanceFinished <- struct{}{}:
-		default:
-		}
+	// update the autopilot and interrupt migrations if necessary
+	if err := jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot)); err == nil && setUpdated {
+		ap.m.SignalMaintenanceFinished()
 	}
 }
 
