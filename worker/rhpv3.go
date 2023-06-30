@@ -59,14 +59,48 @@ var (
 	// when trying to use a renewed contract.
 	errMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
 
-	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
-	// unsynced and has disabled its account manager.
-	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
+	// errPriceTableExpired is returned by the host when the price table that
+	// corresponds to the id it was given is already expired and thus no longer
+	// valid.
+	errPriceTableExpired = errors.New("price table requested is expired")
+
+	// errPriceTableNotFound is returned by the host when it can not find a
+	// price table that corresponds with the id we sent it.
+	errPriceTableNotFound = errors.New("price table not found")
+
+	// errSectorNotFound is returned by the host when it can not find the
+	// requested sector.
+	errSectorNotFound = errors.New("sector not found")
 
 	// errTransportClosed is returned when using a transportV3 which was already
 	// closed.
 	errTransportClosed = errors.New("transport closed")
+
+	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
+	// unsynced and has disabled its account manager.
+	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
 )
+
+func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
+func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxExceeded) }
+func isClosedStream(err error) bool        { return isError(err, mux.ErrClosedStream) }
+func isInsufficientFunds(err error) bool   { return isError(err, ErrInsufficientFunds) }
+func isPriceTableExpired(err error) bool   { return isError(err, errPriceTableExpired) }
+func isPriceTableNotFound(err error) bool  { return isError(err, errPriceTableNotFound) }
+func isSectorNotFound(err error) bool      { return isError(err, errSectorNotFound) }
+func isWithdrawalsInactive(err error) bool { return isError(err, errWithdrawalsInactive) }
+
+func isError(err error, target error) bool {
+	if err == nil {
+		return err == target
+	}
+	// compare error first
+	if errors.Is(err, target) {
+		return true
+	}
+	// then compare the string in case the error was returned by a host
+	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
+}
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
@@ -369,38 +403,6 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 	})
 }
 
-func isBalanceInsufficient(err error) bool {
-	return isError(err, errBalanceInsufficient)
-}
-
-func isBalanceMaxExceeded(err error) bool {
-	return isError(err, errBalanceMaxExceeded)
-}
-
-func isClosedStream(err error) bool {
-	return isError(err, mux.ErrClosedStream)
-}
-
-func isInsufficientFunds(err error) bool {
-	return isError(err, ErrInsufficientFunds)
-}
-
-func isWithdrawalsInactive(err error) bool {
-	return isError(err, errWithdrawalsInactive)
-}
-
-func isError(err error, target error) bool {
-	if err == nil {
-		return err == target
-	}
-	// compare error first
-	if errors.Is(err, target) {
-		return true
-	}
-	// then compare the string in case the error was returned by a host
-	return strings.Contains(err.Error(), target.Error())
-}
-
 type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
@@ -495,7 +497,11 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	if err != nil {
 		return err
 	}
-	defer a.bus.UnlockAccount(ctx, a.id, lockID)
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		a.bus.UnlockAccount(unlockCtx, a.id, lockID)
+		cancel()
+	}()
 
 	// return early if the account needs to sync
 	if account.RequiresSync {
@@ -525,7 +531,9 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	}
 
 	// if an amount was returned, we withdraw it.
-	errAdd := a.bus.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
+	addCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	errAdd := a.bus.AddBalance(addCtx, a.id, a.host, new(big.Int).Neg(amt.Big()))
 	if errAdd != nil {
 		err = fmt.Errorf("%w; failed to add balance to account, error: %v", err, errAdd)
 	}
@@ -594,7 +602,7 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 	return pt.HostPriceTable, nil
 }
 
-func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	pt, err := h.priceTable(ctx, nil)
 	if err != nil {
 		return err
@@ -1060,7 +1068,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
+func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -1070,8 +1078,8 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
-	e.WriteUint64(length)
-	e.WriteUint64(offset)
+	e.WriteUint64(uint64(length))
+	e.WriteUint64(uint64(offset))
 	merkleRoot.EncodeTo(e)
 	e.Flush()
 

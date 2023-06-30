@@ -137,6 +137,12 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
 	return c.c.WithContext(ctx).POST("/slab/migrate", slab, nil)
 }
 
+// DownloadStats returns the upload stats.
+func (c *Client) DownloadStats() (resp api.DownloadStatsResponse, err error) {
+	err = c.c.GET("/stats/downloads", &resp)
+	return
+}
+
 // UploadStats returns the upload stats.
 func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 	err = c.c.GET("/stats/uploads", &resp)

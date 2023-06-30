@@ -628,12 +628,6 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	}
 }
 
-func (u *upload) ongoingUploads() int {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return len(u.ongoing)
-}
-
 func (u *upload) registerUsedUploader(sID slabID, fcid types.FileContractID) {
 	u.mu.Lock()
 	defer u.mu.Unlock()

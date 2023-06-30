@@ -340,6 +340,66 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 	}()
 
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare a file
+	data := make([]byte, 128) //rhpv2.SectorSize/12
+	if _, err := frand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload the data
+	name := fmt.Sprintf("data_%v", len(data))
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+		t.Fatal(err)
+	}
+
+	// download data
+	var buffer bytes.Buffer
+	if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it matches
+	if !bytes.Equal(data, buffer.Bytes()) {
+		t.Fatal("unexpected")
+	}
+}
+
+// TestUploadDownloadBasic is an integration test that verifies objects can be
+// uploaded and download correctly.
+func TestUploadDownloadExtended(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
 	b := cluster.Bus
 	w := cluster.Worker
 	rs := testRedundancySettings
@@ -1231,17 +1291,26 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// download the file multiple times
-	for i := 0; i < 5; i++ {
-		buf := &bytes.Buffer{}
-		err = cluster.Worker.DownloadObject(context.Background(), buf, "foo")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(buf.Bytes(), data) {
-			t.Fatal("data mismatch")
-		}
+	// Download the file multiple times.
+	var wg sync.WaitGroup
+	for tt := 0; tt < 3; tt++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 5; i++ {
+				buf := &bytes.Buffer{}
+				if err := cluster.Worker.DownloadObject(context.Background(), buf, "foo"); err != nil {
+					t.Error(err)
+					break
+				}
+				if !bytes.Equal(buf.Bytes(), data) {
+					t.Error("data mismatch")
+					break
+				}
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 func TestContractArchival(t *testing.T) {
