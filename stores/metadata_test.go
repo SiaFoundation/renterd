@@ -107,6 +107,22 @@ func TestObjectBasic(t *testing.T) {
 		t.Fatal("object mismatch", cmp.Diff(got, want))
 	}
 
+	// delete a sector
+	var sectors []dbSector
+	if err := db.db.Find(&sectors).Error; err != nil {
+		t.Fatal(err)
+	} else if len(sectors) != 2 {
+		t.Fatal("unexpected number of sectors")
+	} else if tx := db.db.Delete(sectors[0]); tx.Error != nil || tx.RowsAffected != 1 {
+		t.Fatal("unexpected number of sectors deleted", tx.Error, tx.RowsAffected)
+	}
+
+	// fetch the object again and assert we receive an indication it was corrupted
+	_, err = db.Object(context.Background(), t.Name())
+	if !errors.Is(err, api.ErrObjectCorrupted) {
+		t.Fatal("unexpected err", err)
+	}
+
 	// create an object without slabs
 	want2 := object.Object{
 		Key:   object.GenerateEncryptionKey(),

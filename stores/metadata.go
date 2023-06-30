@@ -17,10 +17,6 @@ import (
 )
 
 var (
-	// ErrSlabNotFound is returned if get is unable to retrieve a slab from the
-	// database.
-	ErrSlabNotFound = errors.New("slab not found in database")
-
 	// ErrContractNotFound is returned when a contract can't be retrieved from
 	// the database.
 	ErrContractNotFound = errors.New("couldn't find contract")
@@ -289,8 +285,7 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 		return nil
 	}
 
-	// filter out slabs with invalid ID - this is possible if the object has no
-	// data and thus no slabs
+	// filter out slabs without slab ID - this is expected for an empty object
 	filtered := raw[:0]
 	for _, sector := range raw {
 		if sector.SlabID != 0 {
@@ -301,6 +296,9 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 	// hydrate all slabs
 	if len(filtered) > 0 {
 		for j, sector := range filtered {
+			if sector.SectorID == 0 {
+				return object.Object{}, api.ErrObjectCorrupted
+			}
 			if sector.SlabID != curr {
 				if err := addSlab(j, sector.SlabID); err != nil {
 					return object.Object{}, err
@@ -1174,6 +1172,7 @@ func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 		return nil, api.ErrObjectNotFound
 	}
+
 	return rows, nil
 }
 
