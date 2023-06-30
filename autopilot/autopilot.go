@@ -503,19 +503,19 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 
 	// fetch the autopilot and update its config
-	var setUpdated bool
+	var contractSetChanged bool
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
-			setUpdated = true
+			contractSetChanged = true
 		}
 		autopilot.Config = cfg
 	}
 
 	// update the autopilot and interrupt migrations if necessary
-	if err := jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot)); err == nil && setUpdated {
+	if err := jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot)); err == nil && contractSetChanged {
 		ap.m.SignalMaintenanceFinished()
 	}
 }
