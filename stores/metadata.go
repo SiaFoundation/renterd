@@ -93,8 +93,8 @@ type (
 
 	dbSlab struct {
 		Model
-		DBContractSetID uint          `gorm:"index"`
-		DBContractSet   dbContractSet `gorm:"constraint:OnDelete:SET NULL"`
+		DBContractSetID uint `gorm:"index"`
+		DBContractSet   dbContractSet
 
 		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8

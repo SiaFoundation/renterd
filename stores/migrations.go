@@ -141,6 +141,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00002_dropconstraintslabcsid",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00002_dropconstraintslabcsid(tx, logger)
+			},
+			Rollback: nil,
+		},
 	}
 
 	// Create migrator.
@@ -255,6 +262,33 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 	if !m.HasIndex(&dbHostBlocklistEntryHost{}, "DBHostID") {
 		if err := m.CreateIndex(&dbHostBlocklistEntryHost{}, "DBHostID"); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.Interface) error {
+	ctx := context.Background()
+	m := txn.Migrator()
+
+	// Drop the constraint on DBContractSet.
+	if m.HasConstraint(&dbSlab{}, "DBContractSet") {
+		logger.Info(ctx, "migration 00002_dropconstraintslabcsid: dropping constraint on DBContractSet")
+		if err := m.DropConstraint(&dbSlab{}, "DBContractSet"); err != nil {
+			return fmt.Errorf("failed to drop constraint 'DBContractSet' from table 'slabs': %w", err)
+		}
+	}
+
+	// Perform auto migrations.
+	if err := txn.AutoMigrate(tables...); err != nil {
+		return err
+	}
+
+	// Add constraint back.
+	if !m.HasConstraint(&dbSlab{}, "DBContractSet") {
+		logger.Info(ctx, "migration 00002_dropconstraintslabcsid: adding constraint on DBContractSet")
+		if err := m.CreateConstraint(&dbSlab{}, "DBContractSet"); err != nil {
+			return fmt.Errorf("failed to add constraint 'DBContractSet' to table 'slabs': %w", err)
 		}
 	}
 	return nil
