@@ -258,9 +258,9 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 				// Fetch pt.
 				pt, err := h.priceTable(ctx, nil)
 				if err != nil {
-					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
-				cost = pt.LatestRevisionCost
+				cost = pt.LatestRevisionCost.Add(pt.UpdatePriceTableCost) // add cost of fetching the pricetable since we might need a new one and it's better to stay pessimistic
 				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
