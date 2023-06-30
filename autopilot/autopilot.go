@@ -503,15 +503,27 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 
 	// fetch the autopilot and update its config
+	var setUpdated bool
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
 	} else {
+		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
+			setUpdated = true
+		}
 		autopilot.Config = cfg
 	}
 
 	// update the autopilot
 	jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot))
+
+	// interrupt migrations if the set has been updated
+	if setUpdated {
+		select {
+		case ap.m.signalMaintenanceFinished <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
