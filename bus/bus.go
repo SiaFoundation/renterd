@@ -1250,6 +1250,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		logger:        l.Sugar().Named("bus"),
 
 		interactionsBufferSignal: make(chan struct{}, 1),
+		shutdown:                 make(chan struct{}),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
