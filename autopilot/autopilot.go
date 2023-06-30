@@ -96,8 +96,10 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	mu    sync.Mutex
-	state state
+	mu         sync.Mutex
+	configured bool
+	synced     bool
+	state      state
 
 	a *accounts
 	c *contractor
@@ -107,11 +109,11 @@ type Autopilot struct {
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
 
-	startStopMu sync.Mutex
-	running     bool
-	ticker      *time.Ticker
-	triggerChan chan bool
-	stopChan    chan struct{}
+	startStopMu  sync.Mutex
+	runningSince time.Time
+	stopChan     chan struct{}
+	ticker       *time.Ticker
+	triggerChan  chan bool
 }
 
 // state holds a bunch of variables that are used by the autopilot and updated
@@ -171,11 +173,11 @@ func (ap *Autopilot) Handler() http.Handler {
 
 func (ap *Autopilot) Run() error {
 	ap.startStopMu.Lock()
-	if ap.running {
+	if ap.isRunning() {
 		ap.startStopMu.Unlock()
 		return errors.New("already running")
 	}
-	ap.running = true
+	ap.runningSince = time.Now()
 	ap.stopChan = make(chan struct{})
 	ap.triggerChan = make(chan bool)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
@@ -184,15 +186,15 @@ func (ap *Autopilot) Run() error {
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
 
-	// block until consensus is synced
-	if !ap.blockUntilSynced() {
-		ap.logger.Error("autopilot stopped before consensus was synced")
-		return nil
-	}
-
 	// block until the autopilot is configured
 	if !ap.blockUntilConfigured() {
 		ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
+		return nil
+	}
+
+	// block until consensus is synced
+	if !ap.blockUntilSynced() {
+		ap.logger.Error("autopilot stopped before consensus was synced")
 		return nil
 	}
 
@@ -286,12 +288,12 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 
-	if ap.running {
+	if ap.isRunning() {
 		ap.ticker.Stop()
 		close(ap.stopChan)
 		close(ap.triggerChan)
 		ap.wg.Wait()
-		ap.running = false
+		ap.runningSince = time.Time{}
 	}
 	return nil
 }
@@ -312,6 +314,15 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 	default:
 		return false
 	}
+}
+
+func (ap *Autopilot) Uptime() (dur time.Duration) {
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
+	if ap.isRunning() {
+		dur = time.Since(ap.runningSince)
+	}
+	return
 }
 
 func (ap *Autopilot) blockUntilConfigured() bool {
@@ -341,6 +352,9 @@ func (ap *Autopilot) blockUntilConfigured() bool {
 			continue
 		}
 
+		ap.mu.Lock()
+		ap.configured = true
+		ap.mu.Unlock()
 		return true
 	}
 }
@@ -354,21 +368,42 @@ func (ap *Autopilot) blockUntilSynced() bool {
 		case <-ap.stopChan:
 			return false
 		case <-ticker.C:
-			if synced := func() bool {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				cs, err := ap.bus.ConsensusState(ctx)
-				if err != nil {
-					ap.logger.Errorf("failed to get consensus state, err: %v", err)
-				}
-
-				return cs.Synced
-			}(); synced {
-				return true
-			}
 		}
+
+		// try and fetch consensus
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cs, err := ap.bus.ConsensusState(ctx)
+		cancel()
+
+		// if an error occurred, or if we're not synced, we continue
+		if err != nil {
+			ap.logger.Errorf("failed to get consensus state, err: %v", err)
+			continue
+		} else if !cs.Synced {
+			continue
+		}
+
+		ap.mu.Lock()
+		ap.synced = true
+		ap.mu.Unlock()
+		return true
 	}
+}
+
+func (ap *Autopilot) isConfigured() bool {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	return ap.configured
+}
+
+func (ap *Autopilot) isSynced() bool {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	return ap.synced
+}
+
+func (ap *Autopilot) isRunning() bool {
+	return !ap.runningSince.IsZero()
 }
 
 func (ap *Autopilot) updateState(ctx context.Context) error {
@@ -435,10 +470,6 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	}
 	ap.mu.Unlock()
 	return nil
-}
-
-func (ap *Autopilot) isSynced() bool {
-	return ap.State().cs.Synced
 }
 
 func (ap *Autopilot) isStopped() bool {
@@ -538,8 +569,16 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
-	jc.Encode(api.AutopilotStatusResponseGET{
-		CurrentPeriod: ap.State().period,
+	migrating, mLastStart := ap.m.Status()
+	scanning, sLastStart := ap.s.Status()
+	jc.Encode(api.AutopilotStatusResponse{
+		Configured:         ap.isConfigured(),
+		Migrating:          migrating,
+		MigratingLastStart: api.ParamTime(mLastStart),
+		Scanning:           scanning,
+		ScanningLastStart:  api.ParamTime(sLastStart),
+		Synced:             ap.isSynced(),
+		UptimeMS:           api.ParamDuration(ap.Uptime()),
 	})
 }
 

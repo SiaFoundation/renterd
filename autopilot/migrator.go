@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -22,8 +23,9 @@ type migrator struct {
 	healthCutoff              float64
 	signalMaintenanceFinished chan struct{}
 
-	mu      sync.Mutex
-	running bool
+	mu                 sync.Mutex
+	migrating          bool
+	migratingLastStart time.Time
 }
 
 func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
@@ -42,13 +44,20 @@ func (m *migrator) SignalMaintenanceFinished() {
 	}
 }
 
+func (m *migrator) Status() (bool, time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.migrating, m.migratingLastStart
+}
+
 func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
 	m.mu.Lock()
-	if m.running || m.ap.isStopped() {
+	if m.migrating || m.ap.isStopped() {
 		m.mu.Unlock()
 		return
 	}
-	m.running = true
+	m.migrating = true
+	m.migratingLastStart = time.Now()
 	m.mu.Unlock()
 
 	set := m.ap.State().cfg.Contracts.Set
@@ -58,7 +67,7 @@ func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
 		defer m.ap.wg.Done()
 		m.performMigrations(wp, set)
 		m.mu.Lock()
-		m.running = false
+		m.migrating = false
 		m.mu.Unlock()
 	}()
 }

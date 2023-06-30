@@ -127,7 +127,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 	// Perform migrations.
 	if migrate {
 		if err := performMigrations(db, logger); err != nil {
-			return nil, modules.ConsensusChangeID{}, err
+			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
 		}
 	}
 
@@ -390,7 +390,7 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		if err == nil {
 			return nil
 		}
-		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, 5, err))
+		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, 5, timeoutIntervals[i], err))
 		time.Sleep(timeoutIntervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)

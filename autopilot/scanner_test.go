@@ -130,6 +130,12 @@ func TestScanner(t *testing.T) {
 	}
 }
 
+func (s *scanner) isScanning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scanning
+}
+
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	ap := &Autopilot{
 		stopChan: make(chan struct{}),

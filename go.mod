@@ -3,6 +3,7 @@ module go.sia.tech/renterd
 go 1.18
 
 require (
+	github.com/go-gormigrate/gormigrate/v2 v2.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/gotd/contrib v0.15.0
 	github.com/klauspost/reedsolomon v1.11.7
@@ -14,18 +15,18 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.12.0
 	go.opentelemetry.io/otel/sdk v1.12.0
 	go.opentelemetry.io/otel/trace v1.14.0
-	go.sia.tech/core v0.1.12-0.20230525021639-f38630eccb9c
-	go.sia.tech/hostd v0.1.0-alpha.1.0.20230526131440-ac8e0c7f6e71
+	go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be
+	go.sia.tech/hostd v0.1.0
 	go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.20.0
+	go.sia.tech/web/renterd v0.21.0
 	go.uber.org/zap v1.24.0
-	golang.org/x/crypto v0.6.0
+	golang.org/x/crypto v0.8.0
 	golang.org/x/sys v0.7.0
 	golang.org/x/term v0.7.0
-	gorm.io/driver/mysql v1.4.6
-	gorm.io/driver/sqlite v1.4.3
+	gorm.io/driver/mysql v1.5.1
+	gorm.io/driver/sqlite v1.5.1
 	gorm.io/gorm v1.25.1
 	lukechampine.com/frand v1.4.2
 )
@@ -46,6 +47,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.7.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.2 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect

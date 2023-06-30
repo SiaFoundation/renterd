@@ -197,7 +197,7 @@ func (c *Client) WalletDiscard(ctx context.Context, txn types.Transaction) error
 }
 
 // WalletPrepareForm funds and signs a contract transaction.
-func (c *Client) WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error) {
+func (c *Client) WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error) {
 	req := api.WalletPrepareFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
