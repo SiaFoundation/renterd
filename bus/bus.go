@@ -204,6 +204,8 @@ func (b *bus) recordInteractions(ctx context.Context, interactions []hostdb.Inte
 	b.interactionsBufferMu.Unlock()
 
 	select {
+	case <-b.shutdown:
+		return errors.New("bus is shutting down")
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-pi.done:
