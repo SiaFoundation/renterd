@@ -30,6 +30,7 @@ import (
 
 const (
 	testBusFlushInterval = 100 * time.Millisecond
+	testContractSet      = "testset"
 	testPersistInterval  = 2 * time.Second
 	latestHardforkHeight = 50 // foundation hardfork height in testing
 )
@@ -48,7 +49,7 @@ var (
 			Upload:   rhpv2.SectorSize * 500,
 			Storage:  rhpv2.SectorSize * 5e3,
 
-			Set: "autopilot",
+			Set: testContractSet,
 		},
 		Hosts: api.HostsConfig{
 			MaxDowntimeHours:  10,
@@ -57,7 +58,7 @@ var (
 	}
 
 	testContractSetSettings = api.ContractSetSetting{
-		Default: "autopilot",
+		Default: testContractSet,
 	}
 
 	testGougingSettings = api.GougingSettings{

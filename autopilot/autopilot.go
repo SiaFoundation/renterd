@@ -161,7 +161,7 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
+	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
 		"POST   /debug/trigger": ap.triggerHandlerPOST,
@@ -529,7 +529,7 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 	ap := &Autopilot{
 		id:      id,
 		bus:     bus,
-		logger:  logger.Sugar().Named("autopilot"),
+		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
 		workers: newWorkerPool(workers),
 
 		tickerDuration: heartbeat,
