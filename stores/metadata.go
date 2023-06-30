@@ -368,7 +368,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
 		if resp.NumObjects > 0 {
 			err = tx.
 				Model(&dbSlice{}).
-				Select("SUM(length)").
+				Select("COALESCE(SUM(length), 0)").
 				Scan(&resp.TotalObjectsSize).
 				Error
 			if err != nil {
