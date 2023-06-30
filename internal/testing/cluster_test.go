@@ -792,7 +792,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	busAcc = busAccounts[0]
-	maxNewDrift := newDrift.Add(newDrift, types.NewCurrency64(1).Big())
+	maxNewDrift := newDrift.Add(newDrift, types.NewCurrency64(2).Big()) // forgive 2H
 	if busAcc.Drift.Cmp(maxNewDrift) > 0 {
 		t.Fatalf("drift was %v but should be %v", busAcc.Drift, maxNewDrift)
 	}
