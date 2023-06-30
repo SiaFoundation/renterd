@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -104,8 +105,9 @@ func isError(err error, target error) bool {
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
+	refCount uint64 // locked by pool
+
 	mu         sync.Mutex
-	refCount   uint64
 	hostKey    types.PublicKey
 	siamuxAddr string
 	t          *rhpv3.Transport
@@ -122,24 +124,6 @@ func (s *streamV3) Close() error {
 	return s.Stream.Close()
 }
 
-// Close decrements the refcounter and closes the transport if the refcounter
-// reaches 0.
-func (t *transportV3) Close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Decrement refcounter.
-	t.refCount--
-
-	// Close the transport if the refcounter is zero.
-	if t.refCount == 0 {
-		err := t.t.Close()
-		t.t = nil
-		return err
-	}
-	return nil
-}
-
 // DialStream dials a new stream on the transport.
 func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
@@ -147,12 +131,11 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
 		if err != nil {
 			t.mu.Unlock()
-			return nil, err
+			return nil, fmt.Errorf("DialStream: could not dial transport: %w", err)
 		}
 		t.t = newTransport
 	}
 	transport := t.t
-	t.refCount++
 	t.mu.Unlock()
 
 	// Close the stream when the context is closed to unblock any reads or
@@ -229,10 +212,15 @@ func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicK
 	return t, nil
 }
 
-func (p *transportPoolV3) newTransport(siamuxAddr string, hostKey types.PublicKey) *transportV3 {
-	// Get or create a transport for the given siamux address.
+func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
+	var mr ephemeralMetricsRecorder
+	defer func() {
+		p.recordInteractions(mr.interactions())
+	}()
+	ctx = metrics.WithRecorder(ctx, &mr)
+
+	// Create or fetch transport.
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	t, found := p.pool[siamuxAddr]
 	if !found {
 		t = &transportV3{
@@ -241,18 +229,23 @@ func (p *transportPoolV3) newTransport(siamuxAddr string, hostKey types.PublicKe
 		}
 		p.pool[siamuxAddr] = t
 	}
-	return t
-}
+	t.refCount++
+	p.mu.Unlock()
 
-func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
-	var mr ephemeralMetricsRecorder
-	defer func() {
-		p.recordInteractions(mr.interactions())
-	}()
-	ctx = metrics.WithRecorder(ctx, &mr)
-	t := p.newTransport(siamuxAddr, hostKey)
-	defer t.Close()
-	return fn(ctx, t)
+	// Execute function.
+	err = fn(ctx, t)
+	if errors.Is(err, net.ErrClosed) {
+		fmt.Println("net.ErrClosed!!!")
+	}
+
+	// Decrement refcounter again and clean up pool.
+	p.mu.Lock()
+	t.refCount--
+	if t.refCount == 0 {
+		delete(p.pool, siamuxAddr)
+	}
+	p.mu.Unlock()
+	return err
 }
 
 // FetchRevision tries to fetch a contract revision from the host. We pass in
