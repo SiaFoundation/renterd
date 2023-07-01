@@ -644,7 +644,7 @@ SELECT
 	ELSE %s
 	END AS name
 FROM (
-	SELECT size, trimmed, INSTR(trimmed, ?) AS slashindex
+	SELECT size, trimmed, INSTR(trimmed, "/") AS slashindex
 	FROM (
 		SELECT size, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
@@ -653,7 +653,7 @@ FROM (
 ) AS m
 WHERE name LIKE ?
 GROUP BY name
-LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, path, "/", utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), limit, offset)
+LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, path, utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), limit, offset)
 
 	var metadata []api.ObjectMetadata
 	err := query.Scan(&metadata).Error
