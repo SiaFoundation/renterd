@@ -30,7 +30,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 type WorkerConfig struct {
@@ -246,9 +245,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
 
-	cfgg := cfg.DBLoggerConfig
-	cfgg.LogLevel = logger.Info
-	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfgg)
+	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, true, cfg.PersistInterval, walletAddr, sqlLogger)
 	if err != nil {
