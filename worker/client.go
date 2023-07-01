@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -181,7 +180,6 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 }
 
 func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
-	path = strings.TrimLeft(path, "/")
 	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
@@ -216,14 +214,12 @@ func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []api.
 // DownloadObject downloads the object at the given path, writing its data to
 // w.
 func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (err error) {
-	path = strings.TrimLeft(path, "/")
 	err = c.object(ctx, path, w, nil)
 	return
 }
 
 // DeleteObject deletes the object at the given path.
 func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
-	path = strings.TrimLeft(path, "/")
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
 	return
 }

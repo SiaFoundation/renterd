@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -266,6 +267,97 @@ func TestNewTestCluster(t *testing.T) {
 	}
 	if status.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
+	}
+}
+
+// TestUploadDownloadPaths is an integration test that verifies objects are
+// uploaded, download and deleted from and to the paths we would expect.
+func TestUploadDownloadPaths(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// check the following paths
+	paths := []string{
+		"foo",
+		"/foo",
+		"//foo",
+	}
+
+	for _, path := range paths {
+		// upload/download
+		if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(path)), path); err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buf, path); err != nil {
+			t.Fatal(err)
+		}
+		if buf.String() != path {
+			t.Fatal("downloaded data does not match: ", buf.String())
+		}
+
+		// overwrite/download
+		if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(path+"overwritten")), path); err != nil {
+			t.Fatal(err)
+		}
+		buf.Reset()
+		if err := w.DownloadObject(context.Background(), &buf, path); err != nil {
+			t.Fatal(err)
+		}
+		if buf.String() != path+"overwritten" {
+			t.Fatal("downloaded data does not match: ", buf.String())
+		}
+	}
+
+	// assert we have a correct amount of entries for all directories
+	for i := 1; i <= len(paths); i++ {
+		if entries, err := w.ObjectEntries(context.Background(), strings.Repeat("/", i)); err != nil {
+			t.Fatal(err)
+		} else if len(entries) != len(paths)-i+1 {
+			t.Fatalf("unexpected number of entries for path %s, want %d got %d: %v", strings.Repeat("/", i), len(paths)-i+1, len(entries), entries)
+		}
+	}
+
+	// delete/download and assert object not found
+	for _, path := range paths {
+		if err := w.DeleteObject(context.Background(), path); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.DownloadObject(context.Background(), nil, path); !(err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error())) {
+			t.Fatal(err)
+		}
+	}
+
+	// assert root dir is empty
+	if entries, err := w.ObjectEntries(context.Background(), "/"); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Fatal("there should be no entries left", entries)
 	}
 }
 

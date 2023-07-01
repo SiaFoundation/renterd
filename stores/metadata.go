@@ -635,23 +635,25 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 		return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 	}
 
-	// base query
-	query := s.db.Raw(fmt.Sprintf(`SELECT SUM(size) AS size, CASE slashindex WHEN 0 THEN %s ELSE %s END AS name
+	query := s.db.Raw(fmt.Sprintf(`
+SELECT
+	SUM(size) AS size,
+	CASE slashindex
+	WHEN 0 THEN %s
+	WHEN 1 THEN %s
+	ELSE %s
+	END AS name
+FROM (
+	SELECT size, trimmed, INSTR(trimmed, ?) AS slashindex
 	FROM (
-		SELECT size, trimmed, INSTR(trimmed, ?) AS slashindex
-		FROM (
-			SELECT size, SUBSTR(object_id, ?) AS trimmed
-			FROM objects
-			WHERE object_id LIKE ?
-		) AS i
-	) AS m
-	GROUP BY name
-	LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, "/", utf8.RuneCountInString(path)+1, path+"%", limit, offset)
-
-	// apply prefix
-	if prefix != "" {
-		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) AS i WHERE name LIKE %s", concat("?", "?")), query, path, prefix+"%")
-	}
+		SELECT size, SUBSTR(object_id, ?) AS trimmed
+		FROM objects
+		WHERE object_id LIKE ?
+	) AS i
+) AS m
+WHERE name LIKE ?
+GROUP BY name
+LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, path, "/", utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), limit, offset)
 
 	var metadata []api.ObjectMetadata
 	err := query.Scan(&metadata).Error
@@ -1171,7 +1173,7 @@ func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
 		Order("sec.id ASC").
 		Scan(&rows)
 
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
 		return nil, api.ErrObjectNotFound
 	}
 	return rows, nil
