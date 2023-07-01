@@ -660,6 +660,12 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// NOTE: migrations do not use the default contract set but instead require
+	// the user to specify the contract set through the query string parameter,
+	// this to avoid accidentally migration to the default set if the autopilot
+	// configuration is missing a contract set
+	up.ContractSet = ""
+
 	// decode the contract set from the query string
 	var contractset string
 	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
@@ -670,7 +676,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	// cancel the migration if no contract set is specified
 	if up.ContractSet == "" {
-		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
+		jc.Error(fmt.Errorf("migrations require the contract set to be passed as a query string parameter; %w", api.ErrContractSetNotSpecified), http.StatusBadRequest)
 		return
 	}
 
