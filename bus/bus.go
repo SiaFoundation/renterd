@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -144,6 +145,20 @@ type bus struct {
 	logger        *zap.SugaredLogger
 	accounts      *accounts
 	contractLocks *contractLocks
+
+	shutdown   chan struct{}
+	shutdownWG sync.WaitGroup
+
+	mu                       sync.Mutex
+	interactionsBufferSignal chan struct{}
+	interactionsBuffer       []pendingInteractions
+}
+
+type pendingInteractions struct {
+	ctx          context.Context
+	done         chan struct{}
+	err          error
+	interactions []hostdb.Interaction
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -496,7 +511,7 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&interactions) != nil {
 		return
 	}
-	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(jc.Request.Context(), interactions)) != nil {
+	if jc.Check("failed to record interactions", b.recordInteractions(jc.Request.Context(), interactions)) != nil {
 		return
 	}
 }
@@ -1183,6 +1198,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		eas:           eas,
 		contractLocks: newContractLocks(),
 		logger:        l.Sugar().Named("bus"),
+
+		interactionsBufferSignal: make(chan struct{}, 1),
+		shutdown:                 make(chan struct{}),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
@@ -1257,6 +1275,13 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	}
 	b.accounts = newAccounts(accounts, b.logger)
+
+	// Start interaction buffer goroutine.
+	b.shutdownWG.Add(1)
+	go func() {
+		b.interactionRecordingLoop()
+		b.shutdownWG.Done()
+	}()
 	return b, nil
 }
 
@@ -1353,5 +1378,66 @@ func (b *bus) Handler() http.Handler {
 
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
+	close(b.shutdown)
+	b.shutdownWG.Wait()
+
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
+}
+
+func (b *bus) interactionRecordingLoop() {
+	for {
+		select {
+		case <-b.shutdown:
+			return
+		case <-b.interactionsBufferSignal:
+		}
+
+		// fetch next batch of interactions
+		b.mu.Lock()
+		if len(b.interactionsBuffer) == 0 {
+			b.mu.Unlock()
+			continue
+		}
+		var pi pendingInteractions
+		pi, b.interactionsBuffer = b.interactionsBuffer[0], b.interactionsBuffer[1:]
+		b.mu.Unlock()
+
+		// check if batch timed out in the meantime
+		select {
+		case <-pi.ctx.Done():
+			continue // timeout
+		default:
+		}
+
+		// record interactions
+		pi.err = b.hdb.RecordInteractions(pi.ctx, pi.interactions)
+		close(pi.done)
+		pi.interactions = nil
+	}
+}
+
+func (b *bus) recordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
+	pi := pendingInteractions{
+		ctx:          ctx,
+		done:         make(chan struct{}),
+		interactions: interactions,
+	}
+	b.mu.Lock()
+	b.interactionsBuffer = append(b.interactionsBuffer, pi)
+	b.mu.Unlock()
+
+	// notify recording loop
+	select {
+	case b.interactionsBufferSignal <- struct{}{}:
+	default:
+	}
+
+	select {
+	case <-b.shutdown:
+		return errors.New("bus is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-pi.done:
+		return pi.err
+	}
 }
