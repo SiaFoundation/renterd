@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -207,6 +208,7 @@ func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *
 
 // ObjectEntries returns the entries at the given path, which must end in /.
 func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []api.ObjectMetadata, err error) {
+	path = strings.TrimPrefix(path, "/")
 	err = c.object(ctx, path, nil, &entries)
 	return
 }
