@@ -183,7 +183,7 @@ func (sw *streamWriter) Write(src []byte) (n int, err error) {
 	}
 	// counter overflow, xor remaining bytes, then increment nonce and xor again
 	rem := 64*math.MaxUint32 - sw.counter
-	sw.counter -= 64 * math.MaxUint32
+	sw.counter -= (64*math.MaxUint32 - uint64(len(src)))
 	sw.c.XORKeyStream(c[:rem], src[:rem])
 	// NOTE: we increment the last 8 bytes because XChaCha uses the
 	// first 16 bytes to derive a new key; leaving them alone means
