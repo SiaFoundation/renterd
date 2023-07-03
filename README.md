@@ -113,7 +113,8 @@ The autopilot will not perform any tasks until it is configured. An example conf
 
 ## Redundancy
 
-The default redundancy is 30-10. The redunancy can be updated using the settings API:
+The default redundancy on mainnet is 30-10, on testnet it is 6-2. The redunancy
+can be updated using the settings API:
 
 - `GET /api/bus/setting/redundancy`
 - `PUT /api/bus/setting/redundancy`
@@ -129,6 +130,21 @@ The default gouging settings are listed below. The gouging settings can be updat
 
 - `GET /api/bus/setting/gouging`
 - `PUT /api/bus/setting/gouging`
+
+```json
+{
+	"hostBlockHeightLeeway": 6,                                   // 6 blocks
+	"maxContractPrice": "15000000000000000000000000",             // 15 SC per contract
+	"maxDownloadPrice": "3000000000000000000000000000",           // 3000 SC per 1 TiB
+	"maxRPCPrice": "1000000000000000000000",                      // 1mS per RPC
+	"maxStoragePrice": "631593542824",                            // 3000 SC per TiB per month
+	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TiB
+	"minAccountExpiry": 86400000000000,                           // 1 day
+	"minMaxCollateral": "10000000000000000000000000",             // at least up to 10 SC per contract
+	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC
+	"minPriceTableValidity": 300000000000                         // 5 minutes
+}
+```
 
 ## Blocklist
 
