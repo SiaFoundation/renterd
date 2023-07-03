@@ -12,14 +12,16 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 var errAccountsNotFound = errors.New("account doesn't exist")
 
 type accounts struct {
-	mu   sync.Mutex
-	byID map[rhpv3.Account]*account
+	mu     sync.Mutex
+	byID   map[rhpv3.Account]*account
+	logger *zap.SugaredLogger
 }
 
 type account struct {
@@ -37,9 +39,10 @@ type accountLock struct {
 	timer    *time.Timer
 }
 
-func newAccounts(accs []api.Account) *accounts {
+func newAccounts(accs []api.Account, logger *zap.SugaredLogger) *accounts {
 	a := &accounts{
-		byID: make(map[rhpv3.Account]*account),
+		byID:   make(map[rhpv3.Account]*account),
+		logger: logger.Named("accounts"),
 	}
 	for _, acc := range accs {
 		account := &account{
@@ -128,7 +131,15 @@ func (a *accounts) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
 
 	// Update balance.
 	acc.mu.Lock()
+	balanceBefore := acc.Balance.String()
 	acc.Balance.Add(acc.Balance, amt)
+
+	a.logger.Debugw("account balance was increased",
+		"account", acc.ID,
+		"host", acc.HostKey.String(),
+		"amt", amt.String(),
+		"balanceBefore", balanceBefore,
+		"balanceAfter", acc.Balance.String())
 	acc.mu.Unlock()
 }
 
@@ -140,10 +151,21 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 	// Update balance and drift.
 	acc.mu.Lock()
 	delta := new(big.Int).Sub(balance, acc.Balance)
+	balanceBefore := acc.Balance.String()
+	driftBefore := acc.Drift.String()
 	acc.Drift = acc.Drift.Add(acc.Drift, delta)
 	acc.Balance.Set(balance)
 	acc.RequiresSync = false // resetting the balance resets the sync field
 	acc.mu.Unlock()
+
+	a.logger.Debugw("account balance was reset",
+		"account", acc.ID,
+		"host", acc.HostKey.String(),
+		"balanceBefore", balanceBefore,
+		"balanceAfter", acc.Balance.String(),
+		"driftBefore", driftBefore,
+		"driftAfter", acc.Drift.String(),
+		"delta", delta.String())
 }
 
 // ScheduleSync sets the requiresSync flag of an account.
@@ -159,6 +181,12 @@ func (a *accounts) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 	}
 	acc.RequiresSync = true
 	acc.requiresSyncTime = time.Now()
+
+	a.logger.Debugw("account sync was scheduled",
+		"account", acc.ID,
+		"host", acc.HostKey.String(),
+		"balance", acc.Balance.String(),
+		"drift", acc.Drift.String())
 	acc.mu.Unlock()
 
 	a.mu.Lock()

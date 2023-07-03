@@ -1256,7 +1256,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 	if err != nil {
 		return nil, err
 	}
-	b.accounts = newAccounts(accounts)
+	b.accounts = newAccounts(accounts, b.logger)
 	return b, nil
 }
 
