@@ -203,6 +203,12 @@ func (b *bus) recordInteractions(ctx context.Context, interactions []hostdb.Inte
 	b.interactionsBuffer = append(b.interactionsBuffer, pi)
 	b.interactionsBufferMu.Unlock()
 
+	// notify recording loop
+	select {
+	case b.interactionsBufferSignal <- struct{}{}:
+	default:
+	}
+
 	select {
 	case <-b.shutdown:
 		return errors.New("bus is shutting down")
