@@ -749,7 +749,9 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	}
 
 	// look for object entries
-	path = strings.TrimPrefix(path, "/")
+	if path != "/" {
+		path = strings.TrimPrefix(path, "/")
+	}
 	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
