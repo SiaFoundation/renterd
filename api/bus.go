@@ -35,6 +35,10 @@ var (
 	// from the database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
 
+	// ErrObjectCorrupted is returned if we were unable to retrieve the object
+	// from the database.
+	ErrObjectCorrupted = errors.New("object corrupted")
+
 	// ErrObjectInvalidPath is returned if the path an object is uploaded to is
 	// not valid. A path is valid if and only if it starts with a single leading
 	// slash.
