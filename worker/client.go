@@ -227,9 +227,11 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (
 }
 
 // DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
+func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
 	path = strings.TrimPrefix(path, "/")
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
+	values := url.Values{}
+	values.Set("batch", fmt.Sprint(batch))
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 

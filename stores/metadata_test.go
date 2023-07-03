@@ -91,7 +91,8 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want, nil, map[types.PublicKey]types.FileContractID{
+	path := randomPath()
+	if err := db.UpdateObject(context.Background(), path, testContractSet, want, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -99,7 +100,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object
-	got, err := db.Object(context.Background(), t.Name())
+	got, err := db.Object(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +119,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted
-	_, err = db.Object(context.Background(), t.Name())
+	_, err = db.Object(context.Background(), path)
 	if !errors.Is(err, api.ErrObjectCorrupted) {
 		t.Fatal("unexpected err", err)
 	}
@@ -130,12 +131,12 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want2, nil, make(map[types.PublicKey]types.FileContractID)); err != nil {
+	if err := db.UpdateObject(context.Background(), path, testContractSet, want2, nil, make(map[types.PublicKey]types.FileContractID)); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch the object
-	got2, err := db.Object(context.Background(), t.Name())
+	got2, err := db.Object(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +488,8 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	path := randomPath()
+	if err := cs.UpdateObject(context.Background(), path, testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk:  fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -883,18 +885,18 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Store it.
 	ctx := context.Background()
-	objID := "key1"
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	path := randomPath()
+	if err := db.UpdateObject(ctx, path, testContractSet, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, path, testContractSet, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Fetch it using get and verify every field.
-	obj, err := db.dbObject(objID)
+	obj, err := db.dbObject(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -921,7 +923,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObj := dbObject{
-		ObjectID: objID,
+		ObjectID: path,
 		Key:      obj1Key,
 		Size:     obj1.Size(),
 		Slabs: []dbSlice{
@@ -944,7 +946,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it and verify again.
-	fullObj, err := db.Object(ctx, objID)
+	fullObj, err := db.Object(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1048,10 +1050,10 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, path, testContractSet, obj1, nil, usedHosts); err != nil {
 		t.Fatal(err)
 	}
-	fullObj, err = db.Object(ctx, objID)
+	fullObj, err = db.Object(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1096,7 +1098,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
-	if err := db.RemoveObject(ctx, objID); err != nil {
+	if err := db.RemoveObject(ctx, path); err != nil {
 		t.Fatal(err)
 	}
 	if err := countCheck(0, 0, 0, 0); err != nil {
@@ -1133,13 +1135,13 @@ func TestObjectEntries(t *testing.T) {
 		prefix string
 		want   []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}, {Name: "/fileś/", Size: 6}}},
+		{"/", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
 		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/", Size: 7}}},
 		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
 		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5}}},
 		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6}}},
 
-		{"/", "f", []api.ObjectMetadata{{Name: "/foo/", Size: 10}, {Name: "/fileś/", Size: 6}}},
+		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}}},
 		{"/foo/", "fo", []api.ObjectMetadata{}},
 		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}}},
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
@@ -1378,7 +1380,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, randomPath(), testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1483,7 +1485,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, randomPath(), testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1544,7 +1546,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, randomPath(), testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1638,7 +1640,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, randomPath(), testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1708,7 +1710,8 @@ func TestContractSectors(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
+	path := randomPath()
+	if err := db.UpdateObject(ctx, path, testContractSet, obj, nil, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1734,12 +1737,12 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, path, testContractSet, obj, nil, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Delete the object.
-	if err := db.RemoveObject(ctx, "foo"); err != nil {
+	if err := db.RemoveObject(ctx, path); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1799,7 +1802,8 @@ func TestPutSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	path := randomPath()
+	if err := db.UpdateObject(ctx, path, testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -1916,7 +1920,7 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := db.dbObject("foo"); err != nil {
+	if obj, err := db.dbObject(path); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
@@ -2068,8 +2072,8 @@ func TestObjectsStats(t *testing.T) {
 			}
 		}
 
-		key := hex.EncodeToString(frand.Bytes(32))
-		err := cs.UpdateObject(context.Background(), key, testContractSet, obj, nil, contracts)
+		path := randomPath()
+		err := cs.UpdateObject(context.Background(), path, testContractSet, obj, nil, contracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2172,13 +2176,13 @@ func TestPartialSlab(t *testing.T) {
 		TotalShards: 2,
 		Data:        []byte{1, 2, 3, 4},
 	}
-	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, &partialSlab, usedContracts)
+	err = db.UpdateObject(context.Background(), "/key", testContractSet, obj, &partialSlab, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// check that the object was created
-	storedObject, err := db.dbObject("key")
+	storedObject, err := db.dbObject("/key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2221,11 +2225,11 @@ func TestPartialSlab(t *testing.T) {
 		TotalShards: 2,
 		Data:        frand.Bytes(int(fullSlabSize) - len(partialSlab.Data) - 1), // leave 1 byte
 	}
-	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, &partialSlab2, usedContracts)
+	err = db.UpdateObject(context.Background(), "/key2", testContractSet, obj2, &partialSlab2, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	storedObject2, err := db.dbObject("key2")
+	storedObject2, err := db.dbObject("/key2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2259,11 +2263,11 @@ func TestPartialSlab(t *testing.T) {
 		TotalShards: 2,
 		Data:        []byte{5, 6}, // 1 byte more than fits in the slab
 	}
-	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, &partialSlab3, usedContracts)
+	err = db.UpdateObject(context.Background(), "/key3", testContractSet, obj3, &partialSlab3, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	storedObject3, err := db.dbObject("key3")
+	storedObject3, err := db.dbObject("/key3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2403,4 +2407,8 @@ func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
 		return dbSlab{}, api.ErrObjectNotFound
 	}
 	return slab, nil
+}
+
+func randomPath() string {
+	return "/" + hex.EncodeToString(frand.Bytes(4))
 }

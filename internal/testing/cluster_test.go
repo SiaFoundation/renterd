@@ -66,7 +66,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the worker and request the object.
-	err = w.DeleteObject(context.Background(), "foo")
+	err = w.DeleteObject(context.Background(), "foo", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,8 +346,8 @@ func TestUploadDownloadPaths(t *testing.T) {
 		want []api.ObjectMetadata
 		err  error
 	}{
-		{"", []api.ObjectMetadata{{Name: "/foo", Size: 14}, {Name: "/bar/", Size: 38}, {Name: "/baz/", Size: 0}}, nil},
-		{"/", []api.ObjectMetadata{{Name: "/foo", Size: 14}, {Name: "/bar/", Size: 38}, {Name: "/baz/", Size: 0}}, nil},
+		{"", []api.ObjectMetadata{{Name: "/bar/", Size: 38}, {Name: "/baz/", Size: 0}, {Name: "/foo", Size: 14}}, nil},
+		{"/", []api.ObjectMetadata{{Name: "/bar/", Size: 38}, {Name: "/baz/", Size: 0}, {Name: "/foo", Size: 14}}, nil},
 		{"foo", nil, nil},
 		{"/foo", nil, nil},
 		{"/bar/", []api.ObjectMetadata{{Name: "/bar/goo", Size: 19}, {Name: "/bar/hoo", Size: 19}}, nil},
@@ -376,14 +376,14 @@ func TestUploadDownloadPaths(t *testing.T) {
 
 	// delete/download and assert object not found
 	for _, path := range paths {
-		if err := w.DeleteObject(context.Background(), path); err != nil {
+		if err := w.DeleteObject(context.Background(), path, false); err != nil {
 			t.Fatal(err)
 		}
 		if err := w.DownloadObject(context.Background(), nil, path); !(err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error())) {
 			t.Fatal(err)
 		}
 	}
-	if err := w.DeleteObject(context.Background(), "/baz/"); err != nil {
+	if err := w.DeleteObject(context.Background(), "/baz/", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -688,7 +688,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 
 		// delete the object
-		if err := w.DeleteObject(context.Background(), name); err != nil {
+		if err := w.DeleteObject(context.Background(), name, false); err != nil {
 			t.Fatal(err)
 		}
 	}

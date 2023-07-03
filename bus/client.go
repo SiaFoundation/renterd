@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -496,6 +497,7 @@ func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit in
 // Object returns the object at the given path with the given prefix, or, if
 // path ends in '/', the entries under that path.
 func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit int) (o object.Object, entries []api.ObjectMetadata, err error) {
+	path = strings.TrimPrefix(path, "/")
 	values := url.Values{}
 	values.Set("prefix", prefix)
 	values.Set("offset", fmt.Sprint(offset))
@@ -512,6 +514,7 @@ func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit 
 
 // AddObject stores the provided object under the given path.
 func (c *Client) AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+	path = strings.TrimPrefix(path, "/")
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
 		ContractSet:   contractSet,
 		Object:        o,
@@ -523,6 +526,7 @@ func (c *Client) AddObject(ctx context.Context, path, contractSet string, o obje
 // DeleteObject either deletes the object at the given path or if batch=true
 // deletes all objects that start with the given path.
 func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
+	path = strings.TrimPrefix(path, "/")
 	values := url.Values{}
 	values.Set("batch", fmt.Sprint(batch))
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
