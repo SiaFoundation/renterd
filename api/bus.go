@@ -39,6 +39,10 @@ var (
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
 
+	// ErrObjectCorrupted is returned if we were unable to retrieve the object
+	// from the database.
+	ErrObjectCorrupted = errors.New("object corrupted")
+
 	// ErrContractSetNotFound is returned when a contract can't be retrieved
 	// from the database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")

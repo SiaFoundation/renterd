@@ -202,10 +202,15 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 		}
 	}
 
-	// Drop the constraint on Slices to avoid dropping slabs.
+	// Drop constraint on Slices to avoid dropping slabs and sectors.
 	if m.HasConstraint(&dbSlab{}, "Slices") {
 		if err := m.DropConstraint(&dbSlab{}, "Slices"); err != nil {
 			return fmt.Errorf("failed to drop constraint 'Slices' from table 'slabs': %w", err)
+		}
+	}
+	if m.HasConstraint(&dbSlab{}, "Shards") {
+		if err := m.DropConstraint(&dbSlab{}, "Shards"); err != nil {
+			return fmt.Errorf("failed to drop constraint 'Shards' from table 'slabs': %w", err)
 		}
 	}
 
@@ -214,10 +219,15 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 		return err
 	}
 
-	// Add constraint back.
+	// Re-add both constraints.
 	if !m.HasConstraint(&dbSlab{}, "Slices") {
 		if err := m.CreateConstraint(&dbSlab{}, "Slices"); err != nil {
 			return fmt.Errorf("failed to add constraint 'Slices' to table 'slabs': %w", err)
+		}
+	}
+	if !m.HasConstraint(&dbSlab{}, "Shards") {
+		if err := m.CreateConstraint(&dbSlab{}, "Shards"); err != nil {
+			return fmt.Errorf("failed to add constraint 'Shards' to table 'slabs': %w", err)
 		}
 	}
 
