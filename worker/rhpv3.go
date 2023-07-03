@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -234,9 +233,6 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 
 	// Execute function.
 	err = fn(ctx, t)
-	if errors.Is(err, net.ErrClosed) {
-		fmt.Println("net.ErrClosed!!!")
-	}
 
 	// Decrement refcounter again and clean up pool.
 	p.mu.Lock()
