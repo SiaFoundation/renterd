@@ -1212,7 +1212,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		api.SettingRedundancy: build.DefaultRedundancySettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
-			fmt.Println("DEBUG PJ: setting default", value)
 			if bytes, err := json.Marshal(value); err != nil {
 				panic("failed to marshal default settings") // should never happen
 			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
