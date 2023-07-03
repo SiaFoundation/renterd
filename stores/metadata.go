@@ -651,8 +651,8 @@ FROM (
 		WHERE object_id LIKE ?
 	) AS i
 ) AS m
-WHERE name LIKE ?
 GROUP BY name
+HAVING name LIKE ?
 LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, path, utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), limit, offset)
 
 	var metadata []api.ObjectMetadata
