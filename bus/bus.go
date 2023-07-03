@@ -149,7 +149,7 @@ type bus struct {
 	shutdown   chan struct{}
 	shutdownWG sync.WaitGroup
 
-	interactionsBufferMu     sync.Mutex
+	mu                       sync.Mutex
 	interactionsBufferSignal chan struct{}
 	interactionsBuffer       []pendingInteractions
 }
@@ -1393,14 +1393,14 @@ func (b *bus) interactionRecordingLoop() {
 		}
 
 		// fetch next batch of interactions
-		b.interactionsBufferMu.Lock()
+		b.mu.Lock()
 		if len(b.interactionsBuffer) == 0 {
-			b.interactionsBufferMu.Unlock()
+			b.mu.Unlock()
 			continue
 		}
 		var pi pendingInteractions
 		pi, b.interactionsBuffer = b.interactionsBuffer[0], b.interactionsBuffer[1:]
-		b.interactionsBufferMu.Unlock()
+		b.mu.Unlock()
 
 		// check if batch timed out in the meantime
 		select {
@@ -1422,9 +1422,9 @@ func (b *bus) recordInteractions(ctx context.Context, interactions []hostdb.Inte
 		done:         make(chan struct{}),
 		interactions: interactions,
 	}
-	b.interactionsBufferMu.Lock()
+	b.mu.Lock()
 	b.interactionsBuffer = append(b.interactionsBuffer, pi)
-	b.interactionsBufferMu.Unlock()
+	b.mu.Unlock()
 
 	// notify recording loop
 	select {
