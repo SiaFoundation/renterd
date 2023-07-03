@@ -161,64 +161,6 @@ type pendingInteractions struct {
 	interactions []hostdb.Interaction
 }
 
-func (b *bus) interactionRecordingLoop() {
-	for {
-		select {
-		case <-b.shutdown:
-			return
-		case <-b.interactionsBufferSignal:
-		}
-
-		// fetch next batch of interactions
-		b.interactionsBufferMu.Lock()
-		if len(b.interactionsBuffer) == 0 {
-			b.interactionsBufferMu.Unlock()
-			continue
-		}
-		var pi pendingInteractions
-		pi, b.interactionsBuffer = b.interactionsBuffer[0], b.interactionsBuffer[1:]
-		b.interactionsBufferMu.Unlock()
-
-		// check if batch timed out in the meantime
-		select {
-		case <-pi.ctx.Done():
-			continue // timeout
-		default:
-		}
-
-		// record interactions
-		pi.err = b.hdb.RecordInteractions(pi.ctx, pi.interactions)
-		close(pi.done)
-		pi.interactions = nil
-	}
-}
-
-func (b *bus) recordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
-	pi := pendingInteractions{
-		ctx:          ctx,
-		done:         make(chan struct{}),
-		interactions: interactions,
-	}
-	b.interactionsBufferMu.Lock()
-	b.interactionsBuffer = append(b.interactionsBuffer, pi)
-	b.interactionsBufferMu.Unlock()
-
-	// notify recording loop
-	select {
-	case b.interactionsBufferSignal <- struct{}{}:
-	default:
-	}
-
-	select {
-	case <-b.shutdown:
-		return errors.New("bus is shutting down")
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-pi.done:
-		return pi.err
-	}
-}
-
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
 	var block types.Block
 	if jc.Decode(&block) != nil {
@@ -1440,4 +1382,62 @@ func (b *bus) Shutdown(ctx context.Context) error {
 	b.shutdownWG.Wait()
 
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
+}
+
+func (b *bus) interactionRecordingLoop() {
+	for {
+		select {
+		case <-b.shutdown:
+			return
+		case <-b.interactionsBufferSignal:
+		}
+
+		// fetch next batch of interactions
+		b.interactionsBufferMu.Lock()
+		if len(b.interactionsBuffer) == 0 {
+			b.interactionsBufferMu.Unlock()
+			continue
+		}
+		var pi pendingInteractions
+		pi, b.interactionsBuffer = b.interactionsBuffer[0], b.interactionsBuffer[1:]
+		b.interactionsBufferMu.Unlock()
+
+		// check if batch timed out in the meantime
+		select {
+		case <-pi.ctx.Done():
+			continue // timeout
+		default:
+		}
+
+		// record interactions
+		pi.err = b.hdb.RecordInteractions(pi.ctx, pi.interactions)
+		close(pi.done)
+		pi.interactions = nil
+	}
+}
+
+func (b *bus) recordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
+	pi := pendingInteractions{
+		ctx:          ctx,
+		done:         make(chan struct{}),
+		interactions: interactions,
+	}
+	b.interactionsBufferMu.Lock()
+	b.interactionsBuffer = append(b.interactionsBuffer, pi)
+	b.interactionsBufferMu.Unlock()
+
+	// notify recording loop
+	select {
+	case b.interactionsBufferSignal <- struct{}{}:
+	default:
+	}
+
+	select {
+	case <-b.shutdown:
+		return errors.New("bus is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-pi.done:
+		return pi.err
+	}
 }
