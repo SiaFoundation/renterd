@@ -134,12 +134,15 @@ func (a *accounts) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
 	balanceBefore := acc.Balance.String()
 	acc.Balance.Add(acc.Balance, amt)
 
-	a.logger.Debugw("account balance was increased",
-		"account", acc.ID,
-		"host", acc.HostKey.String(),
-		"amt", amt.String(),
-		"balanceBefore", balanceBefore,
-		"balanceAfter", acc.Balance.String())
+	// Log deposits.
+	if amt.Cmp(big.NewInt(0)) > 0 {
+		a.logger.Debugw("account balance was increased",
+			"account", acc.ID,
+			"host", acc.HostKey.String(),
+			"amt", amt.String(),
+			"balanceBefore", balanceBefore,
+			"balanceAfter", acc.Balance.String())
+	}
 	acc.mu.Unlock()
 }
 
@@ -158,6 +161,7 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 	acc.RequiresSync = false // resetting the balance resets the sync field
 	acc.mu.Unlock()
 
+	// Log resets.
 	a.logger.Debugw("account balance was reset",
 		"account", acc.ID,
 		"host", acc.HostKey.String(),
@@ -182,6 +186,7 @@ func (a *accounts) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 	acc.RequiresSync = true
 	acc.requiresSyncTime = time.Now()
 
+	// Log scheduling a sync.
 	a.logger.Debugw("account sync was scheduled",
 		"account", acc.ID,
 		"host", acc.HostKey.String(),
