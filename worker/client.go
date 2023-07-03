@@ -151,6 +151,7 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 
 // UploadObject uploads the data in r, creating an object at the given path.
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...APIUploadOption) (err error) {
+	path = strings.TrimPrefix(path, "/")
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
 	values := make(url.Values)
@@ -216,12 +217,18 @@ func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []api.
 // DownloadObject downloads the object at the given path, writing its data to
 // w.
 func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (err error) {
+	if strings.HasSuffix(path, "/") {
+		return errors.New("the given path is a directory, use ObjectEntries instead")
+	}
+
+	path = strings.TrimPrefix(path, "/")
 	err = c.object(ctx, path, w, nil)
 	return
 }
 
 // DeleteObject deletes the object at the given path.
 func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
+	path = strings.TrimPrefix(path, "/")
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
 	return
 }

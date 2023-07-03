@@ -288,6 +288,7 @@ func TestUploadDownloadPaths(t *testing.T) {
 		}
 	}()
 
+	b := cluster.Bus
 	w := cluster.Worker
 	rs := testRedundancySettings
 
@@ -304,8 +305,8 @@ func TestUploadDownloadPaths(t *testing.T) {
 	// check the following paths
 	paths := []string{
 		"foo",
-		"/foo",
-		"//foo",
+		"/bar/goo",
+		"/bar/hoo",
 	}
 
 	for _, path := range paths {
@@ -334,12 +335,42 @@ func TestUploadDownloadPaths(t *testing.T) {
 		}
 	}
 
-	// assert we have a correct amount of entries for all directories
-	for i := 1; i <= len(paths); i++ {
-		if entries, err := w.ObjectEntries(context.Background(), strings.Repeat("/", i)); err != nil {
-			t.Fatal(err)
-		} else if len(entries) != len(paths)-i+1 {
-			t.Fatalf("unexpected number of entries for path %s, want %d got %d: %v", strings.Repeat("/", i), len(paths)-i+1, len(entries), entries)
+	// create directory
+	if err := w.UploadObject(context.Background(), nil, "/baz/"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert entries
+	tests := []struct {
+		path string
+		want []api.ObjectMetadata
+		err  error
+	}{
+		{"", []api.ObjectMetadata{{Name: "/foo", Size: 14}, {Name: "/bar/", Size: 38}, {Name: "/baz/", Size: 0}}, nil},
+		{"/", []api.ObjectMetadata{{Name: "/foo", Size: 14}, {Name: "/bar/", Size: 38}, {Name: "/baz/", Size: 0}}, nil},
+		{"foo", nil, nil},
+		{"/foo", nil, nil},
+		{"/bar/", []api.ObjectMetadata{{Name: "/bar/goo", Size: 19}, {Name: "/bar/hoo", Size: 19}}, nil},
+		{"/bar/goo", nil, nil},
+		{"/bar/hoo", nil, nil},
+		{"/bar/ioo", nil, api.ErrObjectNotFound},
+		{"/baz/", []api.ObjectMetadata{}, nil},
+	}
+	for _, test := range tests {
+		if test.path == "" || strings.HasSuffix(test.path, "/") {
+			got, err := w.ObjectEntries(context.Background(), test.path)
+			if err != nil {
+				t.Fatal(test.path, err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatal("unexpected entries", test.path, got, test.want)
+			}
+		} else {
+			var buf bytes.Buffer
+			got := w.DownloadObject(context.Background(), &buf, test.path)
+			if (test.err != nil && got == nil) || (test.err == nil && got != nil) || (got != nil && !strings.Contains(got.Error(), test.err.Error())) {
+				t.Fatal(test.path, got, test.err)
+			}
 		}
 	}
 
@@ -352,12 +383,25 @@ func TestUploadDownloadPaths(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := w.DeleteObject(context.Background(), "/baz/"); err != nil {
+		t.Fatal(err)
+	}
 
 	// assert root dir is empty
 	if entries, err := w.ObjectEntries(context.Background(), "/"); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("there should be no entries left", entries)
+	}
+
+	// assert uploading objects with double leading slash is illegal both in the worker and bus
+	err = w.UploadObject(context.Background(), nil, "//foo")
+	if err == nil || !strings.Contains(err.Error(), api.ErrObjectInvalidPath.Error()) {
+		t.Fatal("unexpected error", err)
+	}
+	err = b.AddObject(context.Background(), "//foo", "", object.NewObject(), nil)
+	if err == nil || !strings.Contains(err.Error(), api.ErrObjectInvalidPath.Error()) {
+		t.Fatal("unexpected error", err)
 	}
 }
 

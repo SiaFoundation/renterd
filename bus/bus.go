@@ -759,9 +759,10 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
-	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
+	if jc.Decode(&aor) != nil {
+		return
 	}
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
 }
 
 func (b *bus) objectsHandlerDELETE(jc jape.Context) {

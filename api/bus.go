@@ -31,17 +31,22 @@ const (
 )
 
 var (
-	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
-	// yet because it has been set too recently.
-	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
+	// ErrContractSetNotFound is returned when a contract can't be retrieved
+	// from the database.
+	ErrContractSetNotFound = errors.New("couldn't find contract set")
+
+	// ErrObjectInvalidPath is returned if the path an object is uploaded to is
+	// not valid. A path is valid if and only if it starts with a single leading
+	// slash.
+	ErrObjectInvalidPath = errors.New("object path is invalid")
 
 	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
 
-	// ErrContractSetNotFound is returned when a contract can't be retrieved
-	// from the database.
-	ErrContractSetNotFound = errors.New("couldn't find contract set")
+	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
+	// yet because it has been set too recently.
+	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
 
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
