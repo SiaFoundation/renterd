@@ -66,7 +66,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the worker and request the object.
-	err = w.DeleteObject(context.Background(), "/foo")
+	err = w.DeleteObject(context.Background(), "foo")
 	if err != nil {
 		t.Fatal(err)
 	}
