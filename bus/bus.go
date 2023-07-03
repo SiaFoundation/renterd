@@ -1274,7 +1274,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 	if err != nil {
 		return nil, err
 	}
-	b.accounts = newAccounts(accounts)
+	b.accounts = newAccounts(accounts, b.logger)
 
 	// Start interaction buffer goroutine.
 	b.shutdownWG.Add(1)
