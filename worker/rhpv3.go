@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -72,10 +73,6 @@ var (
 	// requested sector.
 	errSectorNotFound = errors.New("sector not found")
 
-	// errTransportClosed is returned when using a transportV3 which was already
-	// closed.
-	errTransportClosed = errors.New("transport closed")
-
 	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
 	// unsynced and has disabled its account manager.
 	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
@@ -83,7 +80,9 @@ var (
 
 func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
 func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxExceeded) }
-func isClosedStream(err error) bool        { return isError(err, mux.ErrClosedStream) }
+func isClosedStream(err error) bool {
+	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
+}
 func isInsufficientFunds(err error) bool   { return isError(err, ErrInsufficientFunds) }
 func isPriceTableExpired(err error) bool   { return isError(err, errPriceTableExpired) }
 func isPriceTableNotFound(err error) bool  { return isError(err, errPriceTableNotFound) }
