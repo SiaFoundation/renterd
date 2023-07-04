@@ -229,8 +229,10 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 	t.refCount--
 	if t.refCount == 0 {
 		// Cleanup
-		_ = t.t.Close()
-		t.t = nil
+		if t.t != nil {
+			_ = t.t.Close()
+			t.t = nil
+		}
 		delete(p.pool, siamuxAddr)
 	}
 	p.mu.Unlock()
