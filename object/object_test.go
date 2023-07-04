@@ -15,11 +15,12 @@ func TestEncryptionOverflow(t *testing.T) {
 	sr := key.Encrypt(bytes.NewReader(data))
 
 	// Check that the streamreader is initialized correctly.
-	if sr.counter != 0 {
-		t.Fatalf("expected counter to be 0, got %v", sr.counter)
+	rs := sr.S.(*rekeyStream)
+	if rs.counter != 0 {
+		t.Fatalf("expected counter to be 0, got %v", rs.counter)
 	}
-	if sr.nonce != 0 {
-		t.Fatalf("expected nonce to be 0, got %v", sr.nonce)
+	if rs.nonce != 0 {
+		t.Fatalf("expected nonce to be 0, got %v", rs.nonce)
 	}
 
 	// Read 64 bytes.
@@ -33,11 +34,11 @@ func TestEncryptionOverflow(t *testing.T) {
 	}
 
 	// Assert counter was incremented correctly.
-	if sr.counter != 64 {
-		t.Fatalf("expected counter to be 10, got %v", sr.counter)
+	if rs.counter != 64 {
+		t.Fatalf("expected counter to be 10, got %v", rs.counter)
 	}
-	if sr.nonce != 0 {
-		t.Fatalf("expected nonce to be 0, got %v", sr.nonce)
+	if rs.nonce != 0 {
+		t.Fatalf("expected nonce to be 0, got %v", rs.nonce)
 	}
 
 	// Assert data matches.
@@ -53,10 +54,10 @@ func TestEncryptionOverflow(t *testing.T) {
 		t.Fatal("mismatch", buf.Bytes(), data[:10])
 	}
 
-	// Read 128 bytes. 64 before the overflow, 64 after.
+	// Move the counter 64 bytes before an overflow and read 128 bytes.
 	b = make([]byte, 128)
-	sr.counter = math.MaxUint32*64 - 64
-	sr.c.SetCounter(math.MaxUint32 - 1)
+	rs.counter = math.MaxUint32*64 - 64
+	rs.c.SetCounter(math.MaxUint32 - 1)
 	n, err = sr.Read(b)
 	if err != nil {
 		t.Fatal(err)
@@ -66,11 +67,11 @@ func TestEncryptionOverflow(t *testing.T) {
 	}
 
 	// Check that counter and nonce did overflow correctly.
-	if sr.counter != 64 {
-		t.Fatalf("expected counter to be 10, got %v", sr.counter)
+	if rs.counter != 64 {
+		t.Fatalf("expected counter to be 10, got %v", rs.counter)
 	}
-	if sr.nonce != 1 {
-		t.Fatalf("expected nonce to be 0, got %v", sr.nonce)
+	if rs.nonce != 1 {
+		t.Fatalf("expected nonce to be 0, got %v", rs.nonce)
 	}
 
 	// Assert data matches.
@@ -83,6 +84,6 @@ func TestEncryptionOverflow(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 	if !bytes.Equal(buf.Bytes(), data[64:]) {
-		t.Fatal("mismatch", buf.Bytes(), data[64:])
+		t.Fatal("mismatch")
 	}
 }
