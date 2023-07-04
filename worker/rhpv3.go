@@ -178,37 +178,27 @@ func newTransportPoolV3(w *worker) *transportPoolV3 {
 }
 
 func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
+	// Dial host.
 	conn, err := dial(ctx, siamuxAddr, hostKey)
 	if err != nil {
 		return nil, err
 	}
 
-	doneChan := make(chan struct{})
+	// Upgrade to rhpv3.Transport.
+	var t *rhpv3.Transport
+	done := make(chan struct{})
 	go func() {
-		select {
-		case <-doneChan:
-		case <-ctx.Done():
-			_ = conn.Close()
-		}
+		t, err = rhpv3.NewRenterTransport(conn, hostKey)
+		close(done)
 	}()
-
-	t, err := rhpv3.NewRenterTransport(conn, hostKey)
-	if err != nil {
-		conn.Close()
-		close(doneChan)
-		return nil, err
-	}
-	close(doneChan)
-
-	// Check if we timed out in the meantime.
 	select {
 	case <-ctx.Done():
 		conn.Close()
+		<-done
 		return nil, ctx.Err()
-	default:
+	case <-done:
+		return t, err
 	}
-
-	return t, nil
 }
 
 func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
