@@ -118,7 +118,6 @@ type Autopilot struct {
 
 // state holds a bunch of variables that are used by the autopilot and updated
 type state struct {
-	cs  api.ConsensusState
 	gs  api.GougingSettings
 	rs  api.RedundancySettings
 	cfg api.AutopilotConfig
@@ -246,7 +245,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// perform maintenance
-			setChanged, err := ap.c.performContractMaintenance(ctx, w)
+			setChanged, err := ap.c.tryPerformContractMaintenance(ctx, w)
 			if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
@@ -467,7 +466,6 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	// update the state
 	ap.mu.Lock()
 	ap.state = state{
-		cs:  cs,
 		gs:  gs,
 		rs:  rs,
 		cfg: autopilot.Config,
