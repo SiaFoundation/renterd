@@ -186,7 +186,8 @@ func (c *Client) object(ctx context.Context, path, prefix string, offset, limit 
 	values.Set("prefix", prefix)
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s?%s", path, values.Encode()), nil, (*[]api.ObjectMetadata)(nil))
+	endpoint := fmt.Sprintf("%s?%s", path, values.Encode())
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s", endpoint), nil, (*[]api.ObjectMetadata)(nil))
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s?%s", c.c.BaseURL, path, values.Encode()), nil)
 	if err != nil {
 		panic(err)

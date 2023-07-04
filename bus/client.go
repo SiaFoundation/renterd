@@ -502,8 +502,9 @@ func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit 
 	values.Set("prefix", prefix)
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
+	endpoint := fmt.Sprintf("%s?%s", path, values.Encode())
 	var or api.ObjectsResponse
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s?%s", path, values.Encode()), &or)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", endpoint), &or)
 	if or.Object != nil {
 		o = *or.Object
 	} else {
