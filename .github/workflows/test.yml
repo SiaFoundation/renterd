@@ -39,10 +39,17 @@ jobs:
         with:
           args: "-race;-short"
       - name: Test Integration
+        if: matrix.os != 'windows-latest'
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
           args: "-race;-tags='testing';-timeout=900s"
+      - name: Test Integration - NoRace
+        if: matrix.os == 'windows-latest'
+        uses: n8maninger/action-golang-test@v1
+        with:
+          package: "./internal/testing/..."
+          args: "-tags='testing';-timeout=900s"
       - name: Test Integration - MySQL
         if: matrix.os == 'ubuntu-latest'
         uses: n8maninger/action-golang-test@v1

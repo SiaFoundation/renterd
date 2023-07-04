@@ -126,10 +126,11 @@ func (s *streamV3) Close() error {
 func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
 	if t.t == nil {
+		start := time.Now()
 		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
 		if err != nil {
 			t.mu.Unlock()
-			return nil, fmt.Errorf("DialStream: could not dial transport: %w", err)
+			return nil, fmt.Errorf("DialStream: could not dial transport: %w (%v)", err, time.Since(start))
 		}
 		t.t = newTransport
 	}
