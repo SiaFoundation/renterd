@@ -702,6 +702,10 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 		return nil // nothing to do
 	}
 
+	// Only allow for applying one batch of interactions at a time.
+	ss.interactionsMu.Lock()
+	defer ss.interactionsMu.Unlock()
+
 	// Get keys from input.
 	keyMap := make(map[publicKey]struct{})
 	var hks []publicKey
