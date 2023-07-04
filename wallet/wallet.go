@@ -109,7 +109,7 @@ type Transaction struct {
 type SingleAddressStore interface {
 	Balance() (types.Currency, error)
 	UnspentSiacoinElements() ([]SiacoinElement, error)
-	Transactions(since time.Time, max int) ([]Transaction, error)
+	Transactions(before, since time.Time, max int) ([]Transaction, error)
 }
 
 // A TransactionPool contains transactions that have not yet been included in a
@@ -154,8 +154,8 @@ func (w *SingleAddressWallet) UnspentOutputs() ([]SiacoinElement, error) {
 
 // Transactions returns up to max transactions relevant to the wallet that have
 // a timestamp later than since.
-func (w *SingleAddressWallet) Transactions(since time.Time, max int) ([]Transaction, error) {
-	return w.store.Transactions(since, max)
+func (w *SingleAddressWallet) Transactions(before, since time.Time, max int) ([]Transaction, error) {
+	return w.store.Transactions(before, since, max)
 }
 
 // FundTransaction adds siacoin inputs worth at least the requested amount to

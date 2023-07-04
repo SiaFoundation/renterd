@@ -58,7 +58,7 @@ type (
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
+		Transactions(before, since time.Time, max int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
 
@@ -230,12 +230,14 @@ func (b *bus) walletAddressHandler(jc jape.Context) {
 }
 
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
-	var since time.Time
+	var before, since time.Time
 	max := -1
-	if jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+	if jc.DecodeForm("before", (*api.ParamTime)(&before)) != nil ||
+		jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil ||
+		jc.DecodeForm("max", &max) != nil {
 		return
 	}
-	txns, err := b.w.Transactions(since, max)
+	txns, err := b.w.Transactions(before, since, max)
 	if jc.Check("couldn't load transactions", err) == nil {
 		jc.Encode(txns)
 	}
