@@ -671,6 +671,8 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	if len(records) == 0 {
 		return nil // nothing to do
 	}
+
+	// Only allow for applying one batch of spending records at a time.
 	s.spendingMu.Lock()
 	defer s.spendingMu.Unlock()
 
