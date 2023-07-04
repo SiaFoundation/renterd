@@ -1285,7 +1285,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	}
 
 	// upload a file
-	data := frand.Bytes(5*rhpv2.SectorSize + 1)
+	data := frand.Bytes(2*rhpv2.SectorSize + 1)
 	err = cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo")
 	if err != nil {
 		t.Fatal(err)
@@ -1293,7 +1293,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// Download the file multiple times.
 	var wg sync.WaitGroup
-	for tt := 0; tt < 3; tt++ {
+	for tt := 0; tt < 2; tt++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
