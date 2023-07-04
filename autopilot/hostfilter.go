@@ -252,7 +252,7 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 	}
 	// redundant IP check - always perform this last since it will update
 	// the ipFilter.
-	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(ci.contract.HostIP, ci.contract.HostKey) {
+	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(c.HostIP, c.HostKey) {
 		reasons = append(reasons, errHostRedundantIP.Error())
 		renew = false
 		refresh = false

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"mime"
@@ -155,7 +156,7 @@ type Bus interface {
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 }
@@ -193,6 +194,27 @@ func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 	return pk
 }
 
+type hostV2 interface {
+	Contract() types.FileContractID
+	HostKey() types.PublicKey
+}
+
+type hostV3 interface {
+	hostV2
+
+	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
+	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
+	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
+	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
+	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
+	SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
+	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
+}
+
+type hostProvider interface {
+	newHostV3(types.FileContractID, types.PublicKey, string) hostV3
+}
+
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
@@ -201,7 +223,8 @@ type worker struct {
 	bus             Bus
 	masterKey       [32]byte
 
-	uploadManager *uploadManager
+	downloadManager *downloadManager
+	uploadManager   *uploadManager
 
 	accounts    *accounts
 	priceTables *priceTables
@@ -213,27 +236,14 @@ type worker struct {
 	interactionsFlushTimer *time.Timer
 
 	contractSpendingRecorder *contractSpendingRecorder
-
-	contractLockingDuration time.Duration
-	downloadSectorTimeout   time.Duration
-	downloadMaxOverdrive    uint64
+	contractLockingDuration  time.Duration
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
 }
 
 func dial(ctx context.Context, hostIP string, hostKey types.PublicKey) (net.Conn, error) {
-	start := time.Now()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
-	metrics.Record(ctx, MetricHostDial{
-		metricCommon: metricCommon{
-			address:   hostIP,
-			hostKey:   hostKey,
-			timestamp: start,
-			elapsed:   time.Since(start),
-			err:       err,
-		},
-	})
 	return conn, err
 }
 
@@ -379,7 +389,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 
 	// launch all workers
 	var wg sync.WaitGroup
-	for t := 0; t < 10 && t < len(metadatas); t++ {
+	for t := 0; t < 20 && t < len(metadatas); t++ {
 		wg.Add(1)
 		go func() {
 			worker()
@@ -478,7 +488,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown.Reasons())
 		}
 
-		renterTxnSet, err := w.bus.WalletPrepareForm(ctx, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
+		renterTxnSet, err := w.bus.WalletPrepareForm(ctx, renterAddress, renterKey.PublicKey(), renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
 			return err
 		}
@@ -692,7 +702,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w.uploadManager, w, &slab, dlContracts, ulContracts, w.downloadSectorTimeout, up.CurrentHeight, w.logger)
+	err = migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
@@ -716,7 +726,37 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 }
 
-func (w *worker) uploadsStatshandlerGET(jc jape.Context) {
+func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
+	stats := w.downloadManager.Stats()
+
+	// prepare downloaders stats
+	var healthy uint64
+	var dss []api.DownloaderStats
+	for hk, stat := range stats.downloaders {
+		if stat.healthy {
+			healthy++
+		}
+		dss = append(dss, api.DownloaderStats{
+			HostKey:                    hk,
+			AvgSectorDownloadSpeedMBPS: stat.avgSpeedMBPS,
+			NumDownloads:               stat.numDownloads,
+		})
+	}
+	sort.SliceStable(dss, func(i, j int) bool {
+		return dss[i].AvgSectorDownloadSpeedMBPS > dss[j].AvgSectorDownloadSpeedMBPS
+	})
+
+	// encode response
+	jc.Encode(api.DownloadStatsResponse{
+		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
+		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
+		HealthyDownloaders:   healthy,
+		NumDownloaders:       uint64(len(stats.downloaders)),
+		DownloadersStats:     dss,
+	})
+}
+
+func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 	stats := w.uploadManager.Stats()
 
 	// prepare upload stats
@@ -801,6 +841,10 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		status = http.StatusPartialContent
 		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(obj.Size()))
 		offset, length = ranges[0].Start, ranges[0].Length
+		if offset < 0 || length < 0 || offset+length > obj.Size() {
+			jc.Error(fmt.Errorf("invalid range: %v %v", offset, length), http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
 	}
 	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	jc.ResponseWriter.Header().Set("Accept-Ranges", "bytes")
@@ -811,9 +855,6 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 	rw := rangedResponseWriter{rw: jc.ResponseWriter, defaultStatusCode: status}
 
-	// keep track of recent timings per host so we can favour faster hosts
-	performance := make(map[types.PublicKey]int64)
-
 	// fetch all contracts
 	contracts, err := w.bus.Contracts(ctx)
 	if err != nil {
@@ -821,68 +862,9 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	// build contract map
-	availableContracts := make(map[types.PublicKey]api.ContractMetadata)
-	for _, contract := range contracts {
-		availableContracts[contract.HostKey] = contract
-	}
-
-	cw := obj.Key.Decrypt(&rw, offset)
-	for i, ss := range slabsForDownload(obj.Slabs, offset, length) {
-		// fetch available hosts for the slab
-		hostMap := make(map[types.PublicKey]api.ContractMetadata)
-		availableShards := 0
-		for _, shard := range ss.Shards {
-			if _, available := availableContracts[shard.Host]; !available {
-				continue
-			}
-			availableShards++
-			hostMap[shard.Host] = availableContracts[shard.Host]
-		}
-
-		// check if enough slabs are available
-		if availableShards < int(ss.MinShards) {
-			err = fmt.Errorf("not enough available shards to download the slab, %d<%d", availableShards, ss.MinShards)
-			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
-			if i == 0 {
-				jc.Error(err, http.StatusInternalServerError)
-			}
-			return
-		}
-
-		// flatten host map to get a slice of contracts which is deduplicated
-		// already and contains only contracts relevant to the slab.
-		contracts := make([]api.ContractMetadata, 0, len(hostMap))
-		for _, c := range hostMap {
-			contracts = append(contracts, c)
-		}
-
-		// make sure consecutive slabs are downloaded from hosts that performed
-		// well on previous slab downloads
-		sort.SliceStable(contracts, func(i, j int) bool {
-			return performance[contracts[i].HostKey] < performance[contracts[j].HostKey]
-		})
-
-		timings, err := downloadSlab(ctx, w, cw, ss, contracts, w.downloadSectorTimeout, w.downloadMaxOverdrive, w.logger)
-
-		// update historic host performance
-		//
-		// NOTE: we only update if we don't have a datapoint yet or if the
-		// returned timing differs from the default. This ensures we don't
-		// necessarily want to try downloading from all hosts and we don't reset
-		// a host's performance to the default timing.
-		for i, timing := range timings {
-			if _, exists := performance[contracts[i].HostKey]; !exists || timing != int64(defaultSectorDownloadTiming) {
-				performance[contracts[i].HostKey] = timing
-			}
-		}
-		if err != nil {
-			w.logger.Errorf("couldn't download object '%v' slab %d, err: %v", path, i, err)
-			if i == 0 {
-				jc.Error(err, http.StatusInternalServerError)
-			}
-			return
-		}
+	// download the object
+	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, obj, uint64(offset), uint64(length), contracts)) != nil {
+		return
 	}
 }
 
@@ -1021,15 +1003,15 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadSectorTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
 	if busFlushInterval == 0 {
 		return nil, errors.New("bus flush interval must be positive")
 	}
-	if downloadSectorTimeout == 0 {
-		return nil, errors.New("download sector timeout must be positive")
+	if downloadOverdriveTimeout == 0 {
+		return nil, errors.New("download overdrive timeout must be positive")
 	}
 	if uploadOverdriveTimeout == 0 {
 		return nil, errors.New("upload overdrive timeout must be positive")
@@ -1042,14 +1024,13 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		bus:                     b,
 		masterKey:               masterKey,
 		busFlushInterval:        busFlushInterval,
-		downloadSectorTimeout:   downloadSectorTimeout,
-		downloadMaxOverdrive:    downloadMaxOverdrive,
 		logger:                  l.Sugar().Named("worker").Named(id),
 	}
 	w.initTransportPool()
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
+	w.initDownloadManager(downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
 	w.initUploadManager(uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
 	return w, nil
 }
@@ -1070,9 +1051,9 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
 		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
 
-		"POST   /slab/migrate": w.slabMigrateHandler,
-
-		"GET    /stats/uploads": w.uploadsStatshandlerGET,
+		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
+		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
+		"POST   /slab/migrate":    w.slabMigrateHandler,
 
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
@@ -1091,6 +1072,9 @@ func (w *worker) Shutdown(_ context.Context) error {
 
 	// Stop contract spending recorder.
 	w.contractSpendingRecorder.Stop()
+
+	// Stop the downloader.
+	w.downloadManager.Stop()
 
 	// Stop the uploader.
 	w.uploadManager.Stop()

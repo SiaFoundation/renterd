@@ -39,6 +39,10 @@ var (
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
 
+	// ErrObjectCorrupted is returned if we were unable to retrieve the object
+	// from the database.
+	ErrObjectCorrupted = errors.New("object corrupted")
+
 	// ErrContractSetNotFound is returned when a contract can't be retrieved
 	// from the database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
@@ -46,30 +50,6 @@ var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
-
-	// DefaultRedundancySettings define the default redundancy settings the bus
-	// is configured with on startup. These values can be adjusted using the
-	// settings API.
-	DefaultRedundancySettings = RedundancySettings{
-		MinShards:   10,
-		TotalShards: 30,
-	}
-
-	// DefaultGougingSettings define the default gouging settings the bus is
-	// configured with on startup. These values can be adjusted using the
-	// settings API.
-	DefaultGougingSettings = GougingSettings{
-		MinMaxCollateral:              types.Siacoins(10),                                  // at least up to 10 SC per contract
-		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                       // 1mS per RPC
-		MaxContractPrice:              types.Siacoins(15),                                  // 15 SC per contract
-		MaxDownloadPrice:              types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxUploadPrice:                types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxStoragePrice:               types.Siacoins(3000).Div64(1 << 40).Div64(144 * 30), // 3000 SC per TiB per month
-		HostBlockHeightLeeway:         6,                                                   // 6 blocks
-		MinPriceTableValidity:         5 * time.Minute,                                     // 5 minutes
-		MinAccountExpiry:              24 * time.Hour,                                      // 1 day
-		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
-	}
 )
 
 // ArchiveContractsRequest is the request type for the /contracts/archive endpoint.
@@ -187,7 +167,7 @@ type WalletPrepareFormRequest struct {
 	HostSettings   rhpv2.HostSettings `json:"hostSettings"`
 	RenterAddress  types.Address      `json:"renterAddress"`
 	RenterFunds    types.Currency     `json:"renterFunds"`
-	RenterKey      types.PrivateKey   `json:"renterKey"`
+	RenterKey      types.PublicKey    `json:"renterKey"`
 }
 
 // WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew

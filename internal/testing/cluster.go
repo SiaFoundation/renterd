@@ -718,6 +718,22 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) er
 	})
 }
 
+func (c *TestCluster) WaitForContractSet(set string, n int) error {
+	return Retry(30, time.Second, func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		contracts, err := c.Bus.ContractSetContracts(ctx, set)
+		if err != nil {
+			return err
+		}
+		if len(contracts) != n {
+			return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), n)
+		}
+		return nil
+	})
+}
+
 // waitForHostContracts will fetch the contracts from the bus and wait until we
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) error {
@@ -785,13 +801,13 @@ func testBusCfg() node.BusConfig {
 
 func testWorkerCfg() node.WorkerConfig {
 	return node.WorkerConfig{
-		AllowPrivateIPs:        true,
-		ContractLockTimeout:    5 * time.Second,
-		ID:                     "worker",
-		BusFlushInterval:       testBusFlushInterval,
-		DownloadSectorTimeout:  500 * time.Millisecond,
-		UploadOverdriveTimeout: 500 * time.Millisecond,
-		UploadMaxOverdrive:     5,
+		AllowPrivateIPs:          true,
+		ContractLockTimeout:      5 * time.Second,
+		ID:                       "worker",
+		BusFlushInterval:         testBusFlushInterval,
+		DownloadOverdriveTimeout: 500 * time.Millisecond,
+		UploadOverdriveTimeout:   500 * time.Millisecond,
+		UploadMaxOverdrive:       5,
 	}
 }
 

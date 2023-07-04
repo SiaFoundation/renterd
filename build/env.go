@@ -1,4 +1,4 @@
-//go:build testnet
+//go:build !testnet
 
 package build
 
@@ -11,19 +11,17 @@ import (
 )
 
 const (
-	ConsensusNetworkName  = "Testnet-Zen"
-	DefaultAPIAddress     = "localhost:9880"
-	DefaultGatewayAddress = ":9881"
+	ConsensusNetworkName  = "Mainnet"
+	DefaultAPIAddress     = "localhost:9980"
+	DefaultGatewayAddress = ":9981"
 )
 
 var (
-	ConsensusNetwork, _ = chain.TestnetZen()
+	ConsensusNetwork, _ = chain.Mainnet()
 
 	// DefaultGougingSettings define the default gouging settings the bus is
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
-	//
-	// NOTE: default gouging settings for testnet are identical to mainnet.
 	DefaultGougingSettings = api.GougingSettings{
 		MinMaxCollateral:              types.Siacoins(10),                                  // at least up to 10 SC per contract
 		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                       // 1mS per RPC
@@ -40,10 +38,8 @@ var (
 	// DefaultRedundancySettings define the default redundancy settings the bus
 	// is configured with on startup. These values can be adjusted using the
 	// settings API.
-	//
-	// NOTE: default redundancy settings for testnet are different from mainnet.
 	DefaultRedundancySettings = api.RedundancySettings{
-		MinShards:   2,
-		TotalShards: 6,
+		MinShards:   10,
+		TotalShards: 30,
 	}
 )

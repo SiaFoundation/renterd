@@ -34,6 +34,10 @@ const (
 	// database per batch. Empirically tested to verify that this is a value
 	// that performs reasonably well.
 	hostRetrievalBatchSize = 10000
+
+	// interactionInsertionBatchSize is the number of interactions we insert at
+	// once.
+	interactionInsertionBatchSize = 100
 )
 
 var (
@@ -698,6 +702,10 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 		return nil // nothing to do
 	}
 
+	// Only allow for applying one batch of interactions at a time.
+	ss.interactionsMu.Lock()
+	defer ss.interactionsMu.Unlock()
+
 	// Get keys from input.
 	keyMap := make(map[publicKey]struct{})
 	var hks []publicKey
@@ -750,11 +758,11 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				Timestamp: interaction.Timestamp.UTC(),
 				Type:      interaction.Type,
 			})
-			interactionTime := interaction.Timestamp.UnixNano()
+			lastScan := time.Unix(0, host.LastScan)
 			if interaction.Success {
 				host.SuccessfulInteractions++
-				if isScan && host.LastScan > 0 && host.LastScan < interactionTime {
-					host.Uptime += time.Duration(interactionTime - host.LastScan)
+				if isScan && host.LastScan > 0 && lastScan.Before(interaction.Timestamp) {
+					host.Uptime += interaction.Timestamp.Sub(lastScan)
 				}
 				host.RecentDowntime = 0
 				host.RecentScanFailures = 0
@@ -762,9 +770,9 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 				host.FailedInteractions++
 				if isScan {
 					host.RecentScanFailures++
-					if host.LastScan > 0 && host.LastScan < interactionTime {
-						host.Downtime += time.Duration(interactionTime - host.LastScan)
-						host.RecentDowntime += time.Duration(interactionTime - host.LastScan)
+					if host.LastScan > 0 && lastScan.Before(interaction.Timestamp) {
+						host.Downtime += interaction.Timestamp.Sub(lastScan)
+						host.RecentDowntime += interaction.Timestamp.Sub(lastScan)
 					}
 				}
 			}
@@ -821,7 +829,7 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 		}
 
 		// Save everything to the db.
-		if err := tx.CreateInBatches(&dbInteractions, 100).Error; err != nil {
+		if err := tx.CreateInBatches(&dbInteractions, interactionInsertionBatchSize).Error; err != nil {
 			return err
 		}
 		for _, h := range hostMap {
@@ -872,7 +880,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 		// Update RevisionHeight and RevisionNumber for our contracts.
 		for _, txn := range sb.Transactions {
 			for _, rev := range txn.FileContractRevisions {
-				if _, isOurs := ss.knownContracts[types.FileContractID(rev.ParentID)]; isOurs {
+				if ss.isKnownContract(types.FileContractID(rev.ParentID)) {
 					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
 						height: height,
 						number: rev.NewRevisionNumber,
@@ -882,7 +890,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 			}
 			// Get ProofHeight for our contracts.
 			for _, sp := range txn.StorageProofs {
-				if _, isOurs := ss.knownContracts[types.FileContractID(sp.ParentID)]; isOurs {
+				if ss.isKnownContract(types.FileContractID(sp.ParentID)) {
 					ss.unappliedProofs[types.FileContractID(sp.ParentID)] = height
 				}
 			}

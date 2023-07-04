@@ -178,16 +178,16 @@ func main() {
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.Uint64Var(&workerCfg.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", 5, "maximum number of active overdrive workers when downloading a slab")
 	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker used internally - can be overwritten using the RENTERD_WORKER_ID environment variable")
-	flag.DurationVar(&workerCfg.DownloadSectorTimeout, "worker.downloadSectorTimeout", 3*time.Second, "timeout applied to sector downloads when downloading a slab")
+	flag.DurationVar(&workerCfg.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", 3*time.Second, "timeout applied to slab downloads that decides when we start overdriving")
 	flag.Uint64Var(&workerCfg.UploadMaxOverdrive, "worker.uploadMaxOverdrive", 5, "maximum number of active overdrive workers when uploading a slab")
-	flag.DurationVar(&workerCfg.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", 3*time.Second, "timeout applied to slab uploads when we start overdriving shards")
+	flag.DurationVar(&workerCfg.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", 3*time.Second, "timeout applied to slab uploads that decides when we start overdriving")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
 	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using RENTERD_WORKER_REMOTE_ADDRS environment variable")
 
 	// autopilot
 	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
-	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 10*time.Minute, "interval at which autopilot loop runs")
+	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 30*time.Minute, "interval at which autopilot loop runs")
 	flag.Float64Var(&autopilotCfg.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", 0.75, "health threshold below which slabs are migrated to new hosts")
 	flag.Uint64Var(&autopilotCfg.ScannerBatchSize, "autopilot.scannerBatchSize", 1000, "size of the batch with which hosts are scanned")
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
@@ -395,22 +395,21 @@ func main() {
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
-	// defer autopilot dir cleanup
-	defer func() {
-		if err == nil {
-			// remove autopilot folder and config
-			log.Println("migration: cleaning up autopilot directory")
-			if err = os.RemoveAll(dir); err == nil {
-				log.Println("migration: done")
-			}
-		}
-	}()
-
 	// check if the file exists
 	path := filepath.Join(dir, "autopilot.json")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
 	}
+
+	// defer autopilot dir cleanup
+	defer func() {
+		if err == nil {
+			log.Println("migration: removing autopilot directory")
+			if err = os.RemoveAll(dir); err == nil {
+				log.Println("migration: done")
+			}
+		}
+	}()
 
 	// read the json config
 	log.Println("migration: reading autopilot.json")
@@ -441,6 +440,12 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 		Config: cfg.Config,
 	}); err != nil {
 		return err
+	}
+
+	// remove autopilot folder and config
+	log.Println("migration: cleaning up autopilot directory")
+	if err = os.RemoveAll(dir); err == nil {
+		log.Println("migration: done")
 	}
 
 	return nil

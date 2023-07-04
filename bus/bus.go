@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -313,7 +314,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
 		return
 	}
-	if wpfr.RenterKey == nil {
+	if wpfr.RenterKey == (types.PublicKey{}) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
@@ -366,7 +367,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	finalRevision.RevisionNumber = math.MaxUint64
 
 	// Prepare the new contract.
-	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterKey, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.PriceTable, wprr.EndHeight)
+	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.PriceTable, wprr.EndHeight)
 
 	// Create the transaction containing both the final revision and new
 	// contract.
@@ -1189,8 +1190,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 
 	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
-		api.SettingGouging:    api.DefaultGougingSettings,
-		api.SettingRedundancy: api.DefaultRedundancySettings,
+		api.SettingGouging:    build.DefaultGougingSettings,
+		api.SettingRedundancy: build.DefaultRedundancySettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
@@ -1209,7 +1210,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	} else if err := rs.Validate(); err != nil {
 		l.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
-		bytes, _ := json.Marshal(api.DefaultRedundancySettings)
+		bytes, _ := json.Marshal(build.DefaultRedundancySettings)
 		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
 			return nil, err
 		}
@@ -1223,9 +1224,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	} else if err := gs.Validate(); err != nil {
 		// compat: apply default EA gouging settings
-		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
-		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
-		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
+		gs.MinMaxEphemeralAccountBalance = build.DefaultGougingSettings.MinMaxEphemeralAccountBalance
+		gs.MinPriceTableValidity = build.DefaultGougingSettings.MinPriceTableValidity
+		gs.MinAccountExpiry = build.DefaultGougingSettings.MinAccountExpiry
 		if err := gs.Validate(); err == nil {
 			l.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
 			bytes, _ := json.Marshal(gs)
@@ -1234,7 +1235,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 			}
 		} else {
 			// compat: apply default host block leeway settings
-			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
+			gs.HostBlockHeightLeeway = build.DefaultGougingSettings.HostBlockHeightLeeway
 			if err := gs.Validate(); err == nil {
 				l.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
 				bytes, _ := json.Marshal(gs)
@@ -1243,7 +1244,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 				}
 			} else {
 				l.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
-				bytes, _ := json.Marshal(api.DefaultGougingSettings)
+				bytes, _ := json.Marshal(build.DefaultGougingSettings)
 				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
 					return nil, err
 				}
@@ -1256,7 +1257,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 	if err != nil {
 		return nil, err
 	}
-	b.accounts = newAccounts(accounts)
+	b.accounts = newAccounts(accounts, b.logger)
 	return b, nil
 }
 

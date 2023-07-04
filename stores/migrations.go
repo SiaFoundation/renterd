@@ -5,8 +5,44 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/go-gormigrate/gormigrate/v2"
 	"gorm.io/gorm"
 	glogger "gorm.io/gorm/logger"
+)
+
+var (
+	tables = []interface{}{
+		// bus.MetadataStore tables
+		&dbArchivedContract{},
+		&dbContract{},
+		&dbContractSet{},
+		&dbObject{},
+		&dbSlab{},
+		&dbSector{},
+		&dbSlice{},
+		&dbSlabBuffer{},
+
+		// bus.HostDB tables
+		&dbAnnouncement{},
+		&dbConsensusInfo{},
+		&dbHost{},
+		&dbInteraction{},
+		&dbAllowlistEntry{},
+		&dbBlocklistEntry{},
+
+		// wallet tables
+		&dbSiacoinElement{},
+		&dbTransaction{},
+
+		// bus.SettingStore tables
+		&dbSetting{},
+
+		// bus.EphemeralAccountStore tables
+		&dbAccount{},
+
+		// bus.AutopilotStore tables
+		&dbAutopilot{},
+	}
 )
 
 type dbHostBlocklistEntryHost struct {
@@ -98,8 +134,45 @@ func migrateShards(ctx context.Context, db *gorm.DB, l glogger.Interface) error 
 }
 
 func performMigrations(db *gorm.DB, logger glogger.Interface) error {
+	migrations := []*gormigrate.Migration{
+		{
+			ID: "00001_gormigrate",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00001_gormigrate(tx, logger)
+			},
+			Rollback: nil,
+		},
+	}
+
+	// Create migrator.
+	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
+
+	// Set init function. We only do this if the consenus info table doesn't
+	// exist. Because we haven't always been using gormigrate so we want to run
+	// all migrations instead of InitSchema the first time if it seems like we
+	// are not starting with a clean db.
+	if !db.Migrator().HasTable(&dbConsensusInfo{}) {
+		m.InitSchema(initSchema)
+	}
+
+	// Perform migrations.
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("failed to migrate: %v", err)
+	}
+	return nil
+}
+
+// initSchema is executed only on a clean database. Otherwise the individual
+// migrations are executed.
+func initSchema(tx *gorm.DB) error {
+	return tx.AutoMigrate(tables...)
+}
+
+// performMigration00001_gormigrate performs the first migration before
+// introducing gormigrate.
+func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) error {
 	ctx := context.Background()
-	m := db.Migrator()
+	m := txn.Migrator()
 
 	// Perform pre-auto migrations
 	//
@@ -115,7 +188,7 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 	// column from the slabs table.
 	if m.HasTable("shards") {
 		logger.Info(ctx, "'shards' table detected, starting migration")
-		if err := migrateShards(ctx, db, logger); err != nil {
+		if err := migrateShards(ctx, txn, logger); err != nil {
 			return fmt.Errorf("failed to migrate 'shards' table: %w", err)
 		}
 		logger.Info(ctx, "finished migrating 'shards' table")
@@ -129,41 +202,33 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 		}
 	}
 
-	// Perform auto migrations.
-	tables := []interface{}{
-		// bus.MetadataStore tables
-		&dbArchivedContract{},
-		&dbContract{},
-		&dbContractSet{},
-		&dbObject{},
-		&dbSlab{},
-		&dbSector{},
-		&dbSlice{},
-		&dbSlabBuffer{},
-
-		// bus.HostDB tables
-		&dbAnnouncement{},
-		&dbConsensusInfo{},
-		&dbHost{},
-		&dbInteraction{},
-		&dbAllowlistEntry{},
-		&dbBlocklistEntry{},
-
-		// wallet tables
-		&dbSiacoinElement{},
-		&dbTransaction{},
-
-		// bus.SettingStore tables
-		&dbSetting{},
-
-		// bus.EphemeralAccountStore tables
-		&dbAccount{},
-
-		// bus.AutopilotStore tables
-		&dbAutopilot{},
+	// Drop constraint on Slices to avoid dropping slabs and sectors.
+	if m.HasConstraint(&dbSlab{}, "Slices") {
+		if err := m.DropConstraint(&dbSlab{}, "Slices"); err != nil {
+			return fmt.Errorf("failed to drop constraint 'Slices' from table 'slabs': %w", err)
+		}
 	}
-	if err := db.AutoMigrate(tables...); err != nil {
+	if m.HasConstraint(&dbSlab{}, "Shards") {
+		if err := m.DropConstraint(&dbSlab{}, "Shards"); err != nil {
+			return fmt.Errorf("failed to drop constraint 'Shards' from table 'slabs': %w", err)
+		}
+	}
+
+	// Perform auto migrations.
+	if err := txn.AutoMigrate(tables...); err != nil {
 		return err
+	}
+
+	// Re-add both constraints.
+	if !m.HasConstraint(&dbSlab{}, "Slices") {
+		if err := m.CreateConstraint(&dbSlab{}, "Slices"); err != nil {
+			return fmt.Errorf("failed to add constraint 'Slices' to table 'slabs': %w", err)
+		}
+	}
+	if !m.HasConstraint(&dbSlab{}, "Shards") {
+		if err := m.CreateConstraint(&dbSlab{}, "Shards"); err != nil {
+			return fmt.Errorf("failed to add constraint 'Shards' to table 'slabs': %w", err)
+		}
 	}
 
 	if fillSlabContractSetID {
@@ -172,9 +237,9 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 		// associate all slabs with the autopilot set.
 		logger.Info(ctx, "slabs table is missing 'db_contract_set_id' column - adding it and associating slabs with 'autopilot' set if set exists")
 		var cs dbContractSet
-		err := db.Take(&cs, "name = ?", "autopilot").Error
+		err := txn.Take(&cs, "name = ?", "autopilot").Error
 		if err == nil {
-			if err := db.Exec("UPDATE slabs SET db_contract_set_id = ? WHERE slabs.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
+			if err := txn.Exec("UPDATE slabs SET db_contract_set_id = ? WHERE slabs.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
 				return fmt.Errorf("failed to update slab contract set ID: %w", err)
 			}
 		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
