@@ -1081,7 +1081,7 @@ func TestParallelDownload(t *testing.T) {
 		return nil
 	}
 
-	// Upload in parallel
+	// Download in parallel
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
