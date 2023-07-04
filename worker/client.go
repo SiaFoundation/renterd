@@ -181,10 +181,13 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
-func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
-
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
+func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
+	values := url.Values{}
+	values.Set("prefix", prefix)
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s?%s", path, values.Encode()), nil, (*[]api.ObjectMetadata)(nil))
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s?%s", c.c.BaseURL, path, values.Encode()), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -208,9 +211,9 @@ func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []api.ObjectMetadata, err error) {
+func (c *Client) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, nil, &entries)
+	err = c.object(ctx, path, prefix, offset, limit, nil, &entries)
 	return
 }
 
@@ -222,7 +225,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (
 	}
 
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, w, nil)
+	err = c.object(ctx, path, "", 0, -1, w, nil)
 	return
 }
 

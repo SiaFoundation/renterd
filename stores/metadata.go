@@ -757,11 +757,6 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
-	// Validate the given path, we only accept paths with a single leading slash.
-	if strings.HasPrefix(path, "//") || !strings.HasPrefix(path, "/") {
-		return fmt.Errorf("%w '%s'", api.ErrObjectInvalidPath, path)
-	}
-
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {

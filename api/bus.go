@@ -39,11 +39,6 @@ var (
 	// from the database.
 	ErrObjectCorrupted = errors.New("object corrupted")
 
-	// ErrObjectInvalidPath is returned if the path an object is uploaded to is
-	// not valid. A path is valid if and only if it starts with a single leading
-	// slash.
-	ErrObjectInvalidPath = errors.New("object path is invalid")
-
 	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
