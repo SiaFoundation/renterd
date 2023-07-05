@@ -1392,10 +1392,13 @@ func TestWalletTransactions(t *testing.T) {
 	}()
 	b := cluster.Bus
 
-	// Wait a bit and produce more transactions to get a nice spread of
-	// timestamps.
-	time.Sleep(100 * time.Millisecond)
-	if err := cluster.MineToRenewWindow(); err != nil {
+	// Make sure we get transactions that are spread out over multiple seconds.
+	time.Sleep(time.Second)
+	if err := cluster.MineBlocks(1); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if err := cluster.MineBlocks(1); err != nil {
 		t.Fatal(err)
 	}
 
