@@ -244,7 +244,7 @@ type worker struct {
 	logger          *zap.SugaredLogger
 }
 
-func dial(ctx context.Context, hostIP string, hostKey types.PublicKey) (net.Conn, error) {
+func dial(ctx context.Context, hostIP string) (net.Conn, error) {
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	return conn, err
 }
@@ -255,7 +255,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 		w.recordInteractions(mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
-	conn, err := dial(ctx, hostIP, hostKey)
+	conn, err := dial(ctx, hostIP)
 	if err != nil {
 		return err
 	}
@@ -531,10 +531,6 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	if jc.Check("could not get contract", err) != nil {
 		return
 	}
-	cs, err := w.bus.ConsensusState(ctx)
-	if jc.Check("could not get consensus state", err) != nil {
-		return
-	}
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
@@ -542,46 +538,35 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	rk := w.deriveRenterKey(c.HostKey)
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
-	err = w.withRevision(ctx, time.Minute, fcid, c.HostKey, c.SiamuxAddr, 100, cs.BlockHeight, func(rev types.FileContractRevision) error {
-		// Create txn with revision.
-		sig := rk.SignHash(hashRevision(rev))
-		txn := types.Transaction{
-			FileContractRevisions: []types.FileContractRevision{rev},
-			Signatures: []types.TransactionSignature{
-				{
-					ParentID:       types.Hash256(rev.ParentID),
-					PublicKeyIndex: 0, // renter key is first
-					CoveredFields: types.CoveredFields{
-						FileContractRevisions: []uint64{0},
-					},
-					Signature: sig[:],
-				},
-			}}
-		// Fund the txn. We pass 0 here since we only need the wallet to fund
-		// the fee.
-		toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency)
-		if err != nil {
-			return fmt.Errorf("failed to fund transaction: %v", err)
-		}
-		// Sign the txn.
-		err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
-			FileContractRevisions: []uint64{0},
-			WholeTransaction:      true,
-		})
-		if err != nil {
-			_ = w.bus.WalletDiscard(ctx, txn)
-			return fmt.Errorf("failed to sign transaction: %v", err)
-		}
-		// Broadcast the txn.
-		txnSet := append(parents, txn)
-		err = w.bus.BroadcastTransaction(ctx, txnSet)
-		if err != nil {
-			_ = w.bus.WalletDiscard(ctx, txn)
-			return fmt.Errorf("failed to broadcast revision transaction: %v", err)
-		}
-		return nil
+	rev, err := w.FetchSignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
+	if jc.Check("could not fetch revision", err) != nil {
+		return
+	}
+	// Create txn with revision.
+	txn := types.Transaction{
+		FileContractRevisions: []types.FileContractRevision{rev.Revision},
+		Signatures:            rev.Signatures[:],
+	}
+	// Fund the txn. We pass 0 here since we only need the wallet to fund
+	// the fee.
+	toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency)
+	if jc.Check("failed to fund transaction", err) != nil {
+		return
+	}
+	// Sign the txn.
+	err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
+		FileContractRevisions: []uint64{0},
+		WholeTransaction:      true,
 	})
-	if jc.Check("could not broadcast revision", err) != nil {
+	if jc.Check("failed to sign transaction", err) != nil {
+		_ = w.bus.WalletDiscard(ctx, txn)
+		return
+	}
+	// Broadcast the txn.
+	txnSet := append(parents, txn)
+	err = w.bus.BroadcastTransaction(ctx, txnSet)
+	if jc.Check("failed to broadcast transaction", err) != nil {
+		_ = w.bus.WalletDiscard(ctx, txn)
 		return
 	}
 }

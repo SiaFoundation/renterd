@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -212,4 +214,50 @@ func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.Pr
 			hostSigs.RevisionSignature,
 		},
 	}, signedTxnSet, nil
+}
+
+// FetchSignedRevision fetches the latest signed revision for a contract from a host.
+// TODO: stop using rhpv2 and upgrade to newer protocol when possible.
+func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (rhpv2.ContractRevision, error) {
+	var rev rhpv2.ContractRevision
+	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		req := &rhpv2.RPCLockRequest{
+			ContractID: contractID,
+			Signature:  t.SignChallenge(renterKey),
+			Timeout:    uint64(timeout.Milliseconds()),
+		}
+
+		// execute lock RPC
+		var resp rhpv2.RPCLockResponse
+		if err := t.Call(rhpv2.RPCLockID, req, &resp); err != nil {
+			return err
+		}
+		t.SetChallenge(resp.NewChallenge)
+
+		// defer unlock RPC
+		defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
+
+		// verify claimed revision
+		if len(resp.Signatures) != 2 {
+			return fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
+		} else if len(resp.Signatures[0].Signature) != 64 || len(resp.Signatures[1].Signature) != 64 {
+			return errors.New("signatures on claimed revision have wrong length")
+		}
+		revHash := hashRevision(resp.Revision)
+		if !renterKey.PublicKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[0].Signature)) {
+			return errors.New("renter's signature on claimed revision is invalid")
+		} else if !t.HostKey().VerifyHash(revHash, *(*types.Signature)(resp.Signatures[1].Signature)) {
+			return errors.New("host's signature on claimed revision is invalid")
+		} else if !resp.Acquired {
+			return ErrContractLocked
+		} else if resp.Revision.RevisionNumber == math.MaxUint64 {
+			return ErrContractFinalized
+		}
+		rev = rhpv2.ContractRevision{
+			Revision:   resp.Revision,
+			Signatures: [2]types.TransactionSignature{resp.Signatures[0], resp.Signatures[1]},
+		}
+		return nil
+	})
+	return rev, err
 }
