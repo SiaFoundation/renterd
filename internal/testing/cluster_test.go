@@ -271,11 +271,11 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
-// TestObjectEntriesIntegration is an integration test that verifies objects are
-// uploaded, download and deleted from and to the paths we would expect. It is
-// similar to the TestObjectEntries unit test, but uses the worker and bus
-// client to verify paths are passed correctly.
-func TestObjectEntriesIntegration(t *testing.T) {
+// TestObjectEntries is an integration test that verifies objects are uploaded,
+// download and deleted from and to the paths we would expect. It is similar to
+// the TestObjectEntries unit test, but uses the worker and bus client to verify
+// paths are passed correctly.
+func TestObjectEntries(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
