@@ -103,8 +103,8 @@ func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]w
 	err := s.db.
 		Where("timestamp > ? AND timestamp < ?", sinceX, beforeX).
 		Order("timestamp DESC").
-		Limit(limit).
 		Offset(offset).
+		Limit(limit).
 		Find(&dbTxns).
 		Error
 	if err != nil {
