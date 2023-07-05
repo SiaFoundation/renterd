@@ -172,6 +172,8 @@ func WalletTransactionsWithMax(max int) WalletTransactionsOption {
 
 // WalletTransactions returns all transactions relevant to the wallet.
 func (c *Client) WalletTransactions(ctx context.Context, opts ...WalletTransactionsOption) (resp []wallet.Transaction, err error) {
+	c.c.Custom("GET", "/wallet/transactions", nil, &resp)
+
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
