@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -72,10 +73,6 @@ var (
 	// requested sector.
 	errSectorNotFound = errors.New("sector not found")
 
-	// errTransportClosed is returned when using a transportV3 which was already
-	// closed.
-	errTransportClosed = errors.New("transport closed")
-
 	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
 	// unsynced and has disabled its account manager.
 	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
@@ -83,7 +80,9 @@ var (
 
 func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
 func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxExceeded) }
-func isClosedStream(err error) bool        { return isError(err, mux.ErrClosedStream) }
+func isClosedStream(err error) bool {
+	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
+}
 func isInsufficientFunds(err error) bool   { return isError(err, ErrInsufficientFunds) }
 func isPriceTableExpired(err error) bool   { return isError(err, errPriceTableExpired) }
 func isPriceTableNotFound(err error) bool  { return isError(err, errPriceTableNotFound) }
@@ -104,9 +103,12 @@ func isError(err error, target error) bool {
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
-	mu       sync.Mutex
-	refCount uint64
-	t        *rhpv3.Transport
+	refCount uint64 // locked by pool
+
+	mu         sync.Mutex
+	hostKey    types.PublicKey
+	siamuxAddr string
+	t          *rhpv3.Transport
 }
 
 type streamV3 struct {
@@ -120,32 +122,20 @@ func (s *streamV3) Close() error {
 	return s.Stream.Close()
 }
 
-// Close decrements the refcounter and closes the transport if the refcounter
-// reaches 0.
-func (t *transportV3) Close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Decrement refcounter.
-	t.refCount--
-
-	// Close the transport if the refcounter is zero.
-	if t.refCount == 0 {
-		err := t.t.Close()
-		t.t = nil
-		return err
-	}
-	return nil
-}
-
 // DialStream dials a new stream on the transport.
 func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
+	if t.t == nil {
+		start := time.Now()
+		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
+		if err != nil {
+			t.mu.Unlock()
+			return nil, fmt.Errorf("DialStream: could not dial transport: %w (%v)", err, time.Since(start))
+		}
+		t.t = newTransport
+	}
 	transport := t.t
 	t.mu.Unlock()
-	if transport == nil {
-		return nil, errTransportClosed
-	}
 
 	// Close the stream when the context is closed to unblock any reads or
 	// writes.
@@ -187,47 +177,28 @@ func newTransportPoolV3(w *worker) *transportPoolV3 {
 	}
 }
 
-func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*transportV3, error) {
-	// Get or create a transport for the given siamux address.
-	p.mu.Lock()
-	t, found := p.pool[siamuxAddr]
-	if !found {
-		t = &transportV3{}
-		p.pool[siamuxAddr] = t
+func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
+	// Dial host.
+	conn, err := dial(ctx, siamuxAddr, hostKey)
+	if err != nil {
+		return nil, err
 	}
 
-	// Lock the transport and increment its refcounter.
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Unlock the pool now that the transport is locked.
-	p.mu.Unlock()
-
-	// Init the transport if necessary.
-	if t.t == nil {
-		conn, err := dial(ctx, siamuxAddr, hostKey)
-		if err != nil {
-			return nil, err
-		}
-
-		doneChan := make(chan struct{})
-		defer close(doneChan)
-		go func() {
-			select {
-			case <-doneChan:
-			case <-ctx.Done():
-				_ = conn.Close()
-			}
-		}()
-		t.t, err = rhpv3.NewRenterTransport(conn, hostKey)
-		if err != nil {
-			return nil, err
-		}
+	// Upgrade to rhpv3.Transport.
+	var t *rhpv3.Transport
+	done := make(chan struct{})
+	go func() {
+		t, err = rhpv3.NewRenterTransport(conn, hostKey)
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		conn.Close()
+		<-done
+		return nil, ctx.Err()
+	case <-done:
+		return t, err
 	}
-
-	// Increment the refcounter upon success.
-	t.refCount++
-	return t, nil
 }
 
 func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
@@ -236,12 +207,36 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 		p.recordInteractions(mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
-	t, err := p.newTransport(ctx, siamuxAddr, hostKey)
-	if err != nil {
-		return err
+
+	// Create or fetch transport.
+	p.mu.Lock()
+	t, found := p.pool[siamuxAddr]
+	if !found {
+		t = &transportV3{
+			hostKey:    hostKey,
+			siamuxAddr: siamuxAddr,
+		}
+		p.pool[siamuxAddr] = t
 	}
-	defer t.Close()
-	return fn(ctx, t)
+	t.refCount++
+	p.mu.Unlock()
+
+	// Execute function.
+	err = fn(ctx, t)
+
+	// Decrement refcounter again and clean up pool.
+	p.mu.Lock()
+	t.refCount--
+	if t.refCount == 0 {
+		// Cleanup
+		if t.t != nil {
+			_ = t.t.Close()
+			t.t = nil
+		}
+		delete(p.pool, siamuxAddr)
+	}
+	p.mu.Unlock()
+	return err
 }
 
 // FetchRevision tries to fetch a contract revision from the host. We pass in

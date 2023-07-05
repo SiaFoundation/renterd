@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -17,6 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -145,20 +145,6 @@ type bus struct {
 	logger        *zap.SugaredLogger
 	accounts      *accounts
 	contractLocks *contractLocks
-
-	shutdown   chan struct{}
-	shutdownWG sync.WaitGroup
-
-	mu                       sync.Mutex
-	interactionsBufferSignal chan struct{}
-	interactionsBuffer       []pendingInteractions
-}
-
-type pendingInteractions struct {
-	ctx          context.Context
-	done         chan struct{}
-	err          error
-	interactions []hostdb.Interaction
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -511,7 +497,7 @@ func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&interactions) != nil {
 		return
 	}
-	if jc.Check("failed to record interactions", b.recordInteractions(jc.Request.Context(), interactions)) != nil {
+	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(jc.Request.Context(), interactions)) != nil {
 		return
 	}
 }
@@ -1198,17 +1184,14 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		eas:           eas,
 		contractLocks: newContractLocks(),
 		logger:        l.Sugar().Named("bus"),
-
-		interactionsBufferSignal: make(chan struct{}, 1),
-		shutdown:                 make(chan struct{}),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
 
 	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
-		api.SettingGouging:    api.DefaultGougingSettings,
-		api.SettingRedundancy: api.DefaultRedundancySettings,
+		api.SettingGouging:    build.DefaultGougingSettings,
+		api.SettingRedundancy: build.DefaultRedundancySettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
@@ -1227,7 +1210,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	} else if err := rs.Validate(); err != nil {
 		l.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
-		bytes, _ := json.Marshal(api.DefaultRedundancySettings)
+		bytes, _ := json.Marshal(build.DefaultRedundancySettings)
 		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
 			return nil, err
 		}
@@ -1241,9 +1224,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	} else if err := gs.Validate(); err != nil {
 		// compat: apply default EA gouging settings
-		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
-		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
-		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
+		gs.MinMaxEphemeralAccountBalance = build.DefaultGougingSettings.MinMaxEphemeralAccountBalance
+		gs.MinPriceTableValidity = build.DefaultGougingSettings.MinPriceTableValidity
+		gs.MinAccountExpiry = build.DefaultGougingSettings.MinAccountExpiry
 		if err := gs.Validate(); err == nil {
 			l.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
 			bytes, _ := json.Marshal(gs)
@@ -1252,7 +1235,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 			}
 		} else {
 			// compat: apply default host block leeway settings
-			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
+			gs.HostBlockHeightLeeway = build.DefaultGougingSettings.HostBlockHeightLeeway
 			if err := gs.Validate(); err == nil {
 				l.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
 				bytes, _ := json.Marshal(gs)
@@ -1261,7 +1244,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 				}
 			} else {
 				l.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
-				bytes, _ := json.Marshal(api.DefaultGougingSettings)
+				bytes, _ := json.Marshal(build.DefaultGougingSettings)
 				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
 					return nil, err
 				}
@@ -1275,13 +1258,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	}
 	b.accounts = newAccounts(accounts, b.logger)
-
-	// Start interaction buffer goroutine.
-	b.shutdownWG.Add(1)
-	go func() {
-		b.interactionRecordingLoop()
-		b.shutdownWG.Done()
-	}()
 	return b, nil
 }
 
@@ -1378,66 +1354,5 @@ func (b *bus) Handler() http.Handler {
 
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
-	close(b.shutdown)
-	b.shutdownWG.Wait()
-
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
-}
-
-func (b *bus) interactionRecordingLoop() {
-	for {
-		select {
-		case <-b.shutdown:
-			return
-		case <-b.interactionsBufferSignal:
-		}
-
-		// fetch next batch of interactions
-		b.mu.Lock()
-		if len(b.interactionsBuffer) == 0 {
-			b.mu.Unlock()
-			continue
-		}
-		var pi pendingInteractions
-		pi, b.interactionsBuffer = b.interactionsBuffer[0], b.interactionsBuffer[1:]
-		b.mu.Unlock()
-
-		// check if batch timed out in the meantime
-		select {
-		case <-pi.ctx.Done():
-			continue // timeout
-		default:
-		}
-
-		// record interactions
-		pi.err = b.hdb.RecordInteractions(pi.ctx, pi.interactions)
-		close(pi.done)
-		pi.interactions = nil
-	}
-}
-
-func (b *bus) recordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
-	pi := pendingInteractions{
-		ctx:          ctx,
-		done:         make(chan struct{}),
-		interactions: interactions,
-	}
-	b.mu.Lock()
-	b.interactionsBuffer = append(b.interactionsBuffer, pi)
-	b.mu.Unlock()
-
-	// notify recording loop
-	select {
-	case b.interactionsBufferSignal <- struct{}{}:
-	default:
-	}
-
-	select {
-	case <-b.shutdown:
-		return errors.New("bus is shutting down")
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-pi.done:
-		return pi.err
-	}
 }
