@@ -31,6 +31,12 @@ func (c *Client) ID(ctx context.Context) (id string, err error) {
 	return
 }
 
+// RHPBroadcast broadcasts the latest revision for a contract.
+func (c *Client) RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/broadcast/%s", fcid), nil, nil)
+	return
+}
+
 // RHPScan scans a host, returning its current settings.
 func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/rhp/scan", api.RHPScanRequest{

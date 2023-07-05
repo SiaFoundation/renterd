@@ -138,6 +138,7 @@ type Bus interface {
 
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
+	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
@@ -156,6 +157,7 @@ type Bus interface {
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
+	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
@@ -515,6 +517,73 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		Contract:       contract,
 		TransactionSet: txnSet,
 	})
+}
+
+func (w *worker) rhpBroadcastHandler(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// Fetch contract from bus.
+	ctx := jc.Request.Context()
+	c, err := w.bus.Contract(ctx, fcid)
+	if jc.Check("could not get contract", err) != nil {
+		return
+	}
+	cs, err := w.bus.ConsensusState(ctx)
+	if jc.Check("could not get consensus state", err) != nil {
+		return
+	}
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	rk := w.deriveRenterKey(c.HostKey)
+	ctx = WithGougingChecker(ctx, w.bus, gp)
+
+	err = w.withRevision(ctx, time.Minute, fcid, c.HostKey, c.SiamuxAddr, 100, cs.BlockHeight, func(rev types.FileContractRevision) error {
+		// Create txn with revision.
+		sig := rk.SignHash(hashRevision(rev))
+		txn := types.Transaction{
+			FileContractRevisions: []types.FileContractRevision{rev},
+			Signatures: []types.TransactionSignature{
+				{
+					ParentID:       types.Hash256(rev.ParentID),
+					PublicKeyIndex: 0, // renter key is first
+					CoveredFields: types.CoveredFields{
+						FileContractRevisions: []uint64{0},
+					},
+					Signature: sig[:],
+				},
+			}}
+		// Fund the txn. We pass 0 here since we only need the wallet to fund
+		// the fee.
+		toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency)
+		if err != nil {
+			return fmt.Errorf("failed to fund transaction: %v", err)
+		}
+		// Sign the txn.
+		err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
+			FileContractRevisions: []uint64{0},
+			WholeTransaction:      true,
+		})
+		if err != nil {
+			_ = w.bus.WalletDiscard(ctx, txn)
+			return fmt.Errorf("failed to sign transaction: %v", err)
+		}
+		// Broadcast the txn.
+		txnSet := append(parents, txn)
+		err = w.bus.BroadcastTransaction(ctx, txnSet)
+		if err != nil {
+			_ = w.bus.WalletDiscard(ctx, txn)
+			return fmt.Errorf("failed to broadcast revision transaction: %v", err)
+		}
+		return nil
+	})
+	if jc.Check("could not broadcast revision", err) != nil {
+		return
+	}
 }
 
 func (w *worker) rhpRenewHandler(jc jape.Context) {
@@ -1041,6 +1110,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
+		"POST   /rhp/broadcast/:id":   w.rhpBroadcastHandler,
 		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
