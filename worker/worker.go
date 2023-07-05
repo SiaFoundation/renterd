@@ -555,8 +555,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 	// Sign the txn.
 	err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
-		FileContractRevisions: []uint64{0},
-		WholeTransaction:      true,
+		WholeTransaction: true,
 	})
 	if jc.Check("failed to sign transaction", err) != nil {
 		_ = w.bus.WalletDiscard(ctx, txn)

@@ -397,6 +397,25 @@ func TestUploadDownloadBasic(t *testing.T) {
 	if err := cluster.MineBlocks(1); err != nil {
 		t.Fatal(err)
 	}
+
+	// check the revision height was updated.
+	err = Retry(100, 100*time.Millisecond, func() error {
+		// fetch the contracts.
+		contracts, err := cluster.Bus.Contracts(context.Background())
+		if err != nil {
+			return err
+		}
+		// assert the revision height was updated.
+		for _, c := range contracts {
+			if c.RevisionHeight == 0 {
+				return errors.New("revision height should be > 0")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
