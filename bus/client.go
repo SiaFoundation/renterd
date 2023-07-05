@@ -164,9 +164,15 @@ func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
 	}
 }
 
-func WalletTransactionsWithMax(max int) WalletTransactionsOption {
+func WalletTransactionsWithLimit(limit int) WalletTransactionsOption {
 	return func(q url.Values) {
-		q.Set("max", fmt.Sprint(max))
+		q.Set("limit", fmt.Sprint(limit))
+	}
+}
+
+func WalletTransactionsWithOffset(offset int) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("offset", fmt.Sprint(offset))
 	}
 }
 

@@ -1416,6 +1416,15 @@ func TestWalletTransactions(t *testing.T) {
 		t.Fatal("transactions are not sorted by timestamp")
 	}
 
+	// Get the transactions at an offset and compare.
+	txns, err := b.WalletTransactions(context.Background(), bus.WalletTransactionsWithOffset(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(txns, allTxns[2:]) {
+		t.Fatal("transactions don't match")
+	}
+
 	// Find the first index that has a different timestamp than the first.
 	var txnIdx int
 	for i := 1; i < len(allTxns); i++ {
@@ -1427,7 +1436,7 @@ func TestWalletTransactions(t *testing.T) {
 	medianTxnTimestamp := allTxns[txnIdx].Timestamp
 
 	// Limit the number of transactions to 5.
-	txns, err := b.WalletTransactions(context.Background(), bus.WalletTransactionsWithMax(5))
+	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithLimit(5))
 	if err != nil {
 		t.Fatal(err)
 	}
