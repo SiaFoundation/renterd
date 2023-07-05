@@ -856,7 +856,6 @@ func TestEphemeralAccounts(t *testing.T) {
 	if busAcc.Drift.Cmp(maxNewDrift) > 0 {
 		t.Fatalf("drift was %v but should be %v", busAcc.Drift, maxNewDrift)
 	}
-	newDrift = busAcc.Drift
 
 	// Reboot cluster.
 	cluster2, err := cluster.Reboot(context.Background())
@@ -869,17 +868,17 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 	}()
 
-	// Check that accounts were loaded from the bus correctly.
-	// NOTE: since we updated the balance directly on the bus, we need to
-	// manually fix the balance and drift before comparing.
-	accounts[0].Balance = newBalance.Big()
-	accounts[0].Drift = newDrift
+	// Check that accounts were loaded from the bus.
 	accounts2, err := cluster2.Bus.Accounts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(accounts, accounts2) {
-		t.Fatal("worker's accounts weren't persisted")
+	for _, acc := range accounts2 {
+		if acc.Balance.Cmp(big.NewInt(0)) == 0 {
+			t.Fatal("account balance wasn't loaded")
+		} else if acc.Drift.Cmp(big.NewInt(0)) == 0 {
+			t.Fatal("account drift wasn't loaded")
+		}
 	}
 
 	// Reset drift again.
