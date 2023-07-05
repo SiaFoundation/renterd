@@ -106,14 +106,15 @@ func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64) *contractor {
 	}
 }
 
-func (c *contractor) tryPerformContractMaintenance(ctx context.Context, w Worker) (bool, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "contractor.tryPerformContractMaintenance")
+func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (bool, error) {
+	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
 	defer span.End()
 
 	// skip contract maintenance if we're stopped or not synced
 	if c.ap.isStopped() || !c.ap.isSynced() {
 		return false, nil
 	}
+	c.logger.Info("performing contract maintenance")
 
 	// convenience variables
 	state := c.ap.State()
@@ -139,6 +140,17 @@ func (c *contractor) tryPerformContractMaintenance(ctx context.Context, w Worker
 		return false, nil
 	}
 
+	// fetch current contract set
+	currentSet, err := c.ap.bus.ContractSetContracts(ctx, state.cfg.Contracts.Set)
+	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
+		return false, err
+	}
+	isInCurrentSet := make(map[types.FileContractID]struct{})
+	for _, c := range currentSet {
+		isInCurrentSet[c.ID] = struct{}{}
+	}
+	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
+
 	// fetch all contracts from the worker.
 	start := time.Now()
 	resp, err := w.Contracts(ctx, timeoutHostRevision)
@@ -150,29 +162,6 @@ func (c *contractor) tryPerformContractMaintenance(ctx context.Context, w Worker
 	}
 	contracts := resp.Contracts
 	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
-
-	// perform maintenance
-	return c.performContractMaintenance(ctx, w, contracts)
-}
-
-func (c *contractor) performContractMaintenance(ctx context.Context, w Worker, contracts []api.Contract) (bool, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
-	defer span.End()
-	c.logger.Info("performing contract maintenance")
-
-	// convenience variables
-	state := c.ap.State()
-
-	// fetch current contract set
-	currentSet, err := c.ap.bus.ContractSetContracts(ctx, state.cfg.Contracts.Set)
-	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
-		return false, err
-	}
-	isInCurrentSet := make(map[types.FileContractID]struct{})
-	for _, c := range currentSet {
-		isInCurrentSet[c.ID] = struct{}{}
-	}
-	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
 	// sort contracts by their size
 	sort.Slice(contracts, func(i, j int) bool {
@@ -770,7 +759,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 			continue
 		}
 
-		formedContract, proceed, err := c.formContract(ctx, w, host, minInitialContractFunds, maxInitialContractFunds, budget, cs.BlockHeight)
+		formedContract, proceed, err := c.formContract(ctx, w, host, minInitialContractFunds, maxInitialContractFunds, budget)
 		if err == nil {
 			// add contract to contract set
 			formed = append(formed, formedContract.ID)
@@ -1170,6 +1159,11 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, settings)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
 
+	// sanity check the endheight is not the same on renewals
+	if endHeight == rev.EndHeight() {
+		return api.ContractMetadata{}, false, errors.New("renewal endheight is the same as the current contract endheight")
+	}
+
 	// renew the contract
 	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, newCollateral, settings.WindowSize)
 	if err != nil {
@@ -1288,7 +1282,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	return refreshedContract, true, nil
 }
 
-func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency, currentHeight uint64) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	ctx, span := tracing.Tracer.Start(ctx, "formContract")
 	defer span.End()
 	defer func() {
@@ -1310,6 +1304,12 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 		return api.ContractMetadata{}, true, err
 	}
 
+	// fetch consensus state
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return api.ContractMetadata{}, false, err
+	}
+
 	// check our budget
 	txnFee := state.fee.Mul64(estimatedFileContractTransactionSetSize)
 	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
@@ -1320,7 +1320,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 
 	// calculate the host collateral
 	endHeight := endHeight(state.cfg, state.period)
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-currentHeight, scan.Settings)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.Settings)
 	hostCollateral := rhpv2.ContractFormationCollateral(state.cfg.Contracts.Period, expectedStorage, scan.Settings)
 
 	// form contract
@@ -1338,7 +1338,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	*budget = budget.Sub(renterFunds)
 
 	// persist contract in store
-	formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, currentHeight)
+	formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, cs.BlockHeight)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, true, err

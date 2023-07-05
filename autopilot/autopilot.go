@@ -245,7 +245,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// perform maintenance
-			setChanged, err := ap.c.tryPerformContractMaintenance(ctx, w)
+			setChanged, err := ap.c.performContractMaintenance(ctx, w)
 			if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}

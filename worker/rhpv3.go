@@ -643,7 +643,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		return types.Hash256{}, err
 	}
 	if rev.RevisionNumber == math.MaxUint64 {
-		return types.Hash256{}, errors.New("revision number has reached max")
+		return types.Hash256{}, fmt.Errorf("revision number has reached max, fcid %v", rev.ParentID)
 	}
 	payment, ok := rhpv3.PayByContract(&rev, expectedCost, h.acc.id, h.renterKey)
 	if !ok {
