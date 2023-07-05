@@ -1403,23 +1403,23 @@ func TestWalletTransactions(t *testing.T) {
 	}
 
 	// Get all transactions of the wallet.
-	txns, err := b.WalletTransactions(context.Background())
+	allTxns, err := b.WalletTransactions(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(txns) < 5 {
-		t.Fatalf("expected at least 5 transactions, got %v", len(txns))
+	if len(allTxns) < 5 {
+		t.Fatalf("expected at least 5 transactions, got %v", len(allTxns))
 	}
-	if !sort.SliceIsSorted(txns, func(i, j int) bool {
-		return txns[i].Timestamp.Unix() > txns[j].Timestamp.Unix()
+	if !sort.SliceIsSorted(allTxns, func(i, j int) bool {
+		return allTxns[i].Timestamp.Unix() > allTxns[j].Timestamp.Unix()
 	}) {
 		t.Fatal("transactions are not sorted by timestamp")
 	}
-	medianTxnIdx := len(txns) / 2
-	medianTxnTimestamp := txns[medianTxnIdx].Timestamp
+	medianTxnIdx := len(allTxns) / 2
+	medianTxnTimestamp := allTxns[medianTxnIdx].Timestamp
 
 	// Limit the number of transactions to 5.
-	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithMax(5))
+	txns, err := b.WalletTransactions(context.Background(), bus.WalletTransactionsWithMax(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1433,7 +1433,10 @@ func TestWalletTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(txns) == 0 {
-		t.Fatal("expected at least 1 transaction before median timestamp")
+		for _, txn := range allTxns {
+			fmt.Println(txn.Timestamp.Unix())
+		}
+		t.Fatal("expected at least 1 transaction before median timestamp", medianTxnTimestamp.Unix())
 	}
 	for _, txn := range txns {
 		if txn.Timestamp.Unix() > medianTxnTimestamp.Unix() {
@@ -1445,11 +1448,14 @@ func TestWalletTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(txns) == 0 {
+		for _, txn := range allTxns {
+			fmt.Println(txn.Timestamp.Unix())
+		}
 		t.Fatal("expected at least 1 transaction after median timestamp")
 	}
 	for _, txn := range txns {
 		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
-			t.Fatal("expected only transactions after median timestamp")
+			t.Fatal("expected only transactions after median timestamp", medianTxnTimestamp.Unix())
 		}
 	}
 }
