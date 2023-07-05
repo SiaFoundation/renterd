@@ -499,12 +499,12 @@ func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit in
 func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit int) (o object.Object, entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
 	values := url.Values{}
-	values.Set("prefix", prefix)
+	values.Set("prefix", url.QueryEscape(prefix))
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
-	endpoint := fmt.Sprintf("%s?%s", path, values.Encode())
+	path += "?" + values.Encode()
 	var or api.ObjectsResponse
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", endpoint), &or)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &or)
 	if or.Object != nil {
 		o = *or.Object
 	} else {

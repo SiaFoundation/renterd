@@ -356,7 +356,7 @@ func TestObjectEntriesIntegration(t *testing.T) {
 		// use the bus client
 		_, got, err := b.Object(context.Background(), test.path, test.prefix, 0, -1)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(err, test.path)
 		}
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)

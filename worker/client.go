@@ -183,12 +183,13 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 
 func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
 	values := url.Values{}
-	values.Set("prefix", prefix)
+	values.Set("prefix", url.QueryEscape(prefix))
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
-	endpoint := fmt.Sprintf("%s?%s", path, values.Encode())
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s", endpoint), nil, (*[]api.ObjectMetadata)(nil))
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s?%s", c.c.BaseURL, path, values.Encode()), nil)
+	path += "?" + values.Encode()
+
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), nil)
 	if err != nil {
 		panic(err)
 	}
