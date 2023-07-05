@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -1371,5 +1373,80 @@ func TestContractArchival(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWalletTransactions(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b := cluster.Bus
+
+	// Wait a bit and produce more transactions to get a nice spread of
+	// timestamps.
+	time.Sleep(100 * time.Millisecond)
+	if err := cluster.MineToRenewWindow(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get all transactions of the wallet.
+	txns, err := b.WalletTransactions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) < 5 {
+		t.Fatalf("expected at least 5 transactions, got %v", len(txns))
+	}
+	if !sort.SliceIsSorted(txns, func(i, j int) bool {
+		return txns[i].Timestamp.Unix() > txns[j].Timestamp.Unix()
+	}) {
+		t.Fatal("transactions are not sorted by timestamp")
+	}
+	medianTxnIdx := len(txns) / 2
+	medianTxnTimestamp := txns[medianTxnIdx].Timestamp
+
+	// Limit the number of transactions to 5.
+	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithMax(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) != 5 {
+		t.Fatalf("expected exactly 5 transactions, got %v", len(txns))
+	}
+
+	// Fetch txns before and since median.
+	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithBefore(medianTxnTimestamp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) == 0 {
+		t.Fatal("expected at least 1 transaction before median timestamp")
+	}
+	for _, txn := range txns {
+		if txn.Timestamp.Unix() > medianTxnTimestamp.Unix() {
+			t.Fatal("expected only transactions before median timestamp")
+		}
+	}
+	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithSince(medianTxnTimestamp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) == 0 {
+		t.Fatal("expected at least 1 transaction after median timestamp")
+	}
+	for _, txn := range txns {
+		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
+			t.Fatal("expected only transactions after median timestamp")
+		}
 	}
 }

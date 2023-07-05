@@ -154,25 +154,25 @@ type WalletTransactionsOption func(url.Values)
 
 func WalletTransactionsWithBefore(since time.Time) WalletTransactionsOption {
 	return func(q url.Values) {
-		q.Set("before", api.ParamTime(since).String())
+		q.Set("before", since.Format(time.RFC3339))
 	}
 }
 
 func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
 	return func(q url.Values) {
-		q.Set("since", api.ParamTime(since).String())
+		q.Set("since", since.Format(time.RFC3339))
 	}
 }
 
 func WalletTransactionsWithMax(max int) WalletTransactionsOption {
 	return func(q url.Values) {
-		q.Set("since", fmt.Sprint(max))
+		q.Set("max", fmt.Sprint(max))
 	}
 }
 
 // WalletTransactions returns all transactions relevant to the wallet.
 func (c *Client) WalletTransactions(ctx context.Context, opts ...WalletTransactionsOption) (resp []wallet.Transaction, err error) {
-	var values url.Values
+	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}

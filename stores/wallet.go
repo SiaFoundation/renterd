@@ -93,17 +93,18 @@ func (s *SQLStore) Transactions(before, since time.Time, max int) ([]wallet.Tran
 	beforeX := int64(math.MaxInt64)
 	sinceX := int64(0)
 	if !before.IsZero() {
-		beforeX = before.UnixNano()
+		beforeX = before.Unix()
 	}
 	if !since.IsZero() {
-		sinceX = since.UnixNano()
+		sinceX = since.Unix()
 	}
 
 	var dbTxns []dbTransaction
-	err := s.db.Find(&dbTxns).
+	err := s.db.
 		Where("timestamp > ? AND timestamp < ?", sinceX, beforeX).
-		Limit(max).
 		Order("timestamp DESC").
+		Limit(max).
+		Find(&dbTxns).
 		Error
 	if err != nil {
 		return nil, err
