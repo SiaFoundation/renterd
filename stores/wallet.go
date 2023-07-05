@@ -98,6 +98,9 @@ func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]w
 	if !since.IsZero() {
 		sinceX = since.Unix()
 	}
+	if limit == 0 || limit == -1 {
+		limit = math.MaxInt64
+	}
 
 	var dbTxns []dbTransaction
 	err := s.db.Raw("SELECT * FROM transactions WHERE timestamp > ? AND timestamp < ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
