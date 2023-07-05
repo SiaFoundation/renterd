@@ -89,7 +89,7 @@ func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 }
 
 // Transactions implements wallet.SingleAddressStore.
-func (s *SQLStore) Transactions(before, since time.Time, max int) ([]wallet.Transaction, error) {
+func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error) {
 	beforeX := int64(math.MaxInt64)
 	sinceX := int64(0)
 	if !before.IsZero() {
@@ -103,7 +103,8 @@ func (s *SQLStore) Transactions(before, since time.Time, max int) ([]wallet.Tran
 	err := s.db.
 		Where("timestamp > ? AND timestamp < ?", sinceX, beforeX).
 		Order("timestamp DESC").
-		Limit(max).
+		Limit(limit).
+		Offset(offset).
 		Find(&dbTxns).
 		Error
 	if err != nil {
