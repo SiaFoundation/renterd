@@ -690,8 +690,8 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 		// relaunch non-overdrive uploads
 		if !done && resp.err != nil && !resp.req.overdrive {
 			if err := slab.launch(resp.req); err != nil {
-				u.mgr.logger.Errorf("download failed, failed to relaunch a sector upload req,with error %v", err)
-				break // fail the download
+				u.mgr.logger.Errorf("upload failed, failed to relaunch a sector upload req, with error %v", err)
+				break // fail the upload
 			}
 		}
 
