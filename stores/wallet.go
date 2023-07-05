@@ -100,12 +100,8 @@ func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]w
 	}
 
 	var dbTxns []dbTransaction
-	err := s.db.
-		Where("timestamp > ? AND timestamp < ?", sinceX, beforeX).
-		Order("timestamp DESC").
-		Offset(offset).
-		Limit(limit).
-		Find(&dbTxns).
+	err := s.db.Raw("SELECT * FROM transactions WHERE timestamp > ? AND timestamp < ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+		sinceX, beforeX, limit, offset).Scan(&dbTxns).
 		Error
 	if err != nil {
 		return nil, err
