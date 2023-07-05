@@ -709,6 +709,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// wait for the contract to be renewed
 	err = Retry(100, 100*time.Millisecond, func() error {
+		// fetch contracts
 		cms, err := cluster.Bus.Contracts(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -717,11 +718,26 @@ func TestUploadDownloadSpending(t *testing.T) {
 			t.Fatal("no contracts found")
 		}
 
+		// fetch contract set contracts
+		contracts, err := cluster.Bus.ContractSetContracts(context.Background(), testAutopilotConfig.Contracts.Set)
+		if err != nil {
+			t.Fatal(err)
+		}
+		currentSet := make(map[types.FileContractID]struct{})
+		for _, c := range contracts {
+			currentSet[c.ID] = struct{}{}
+		}
+
+		// assert all contracts are renewed and in the set
 		for _, cm := range cms {
 			if cm.RenewedFrom == (types.FileContractID{}) {
 				return errors.New("found contract that wasn't renewed")
 			}
+			if _, inset := currentSet[cm.ID]; !inset {
+				return errors.New("found renewed contract that wasn't part of the set")
+			}
 		}
+
 		return nil
 	})
 	if err != nil {
