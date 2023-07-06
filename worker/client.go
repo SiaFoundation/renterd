@@ -151,6 +151,7 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 
 // UploadObject uploads the data in r, creating an object at the given path.
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...APIUploadOption) (err error) {
+	path = strings.TrimPrefix(path, "/")
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
 	values := make(url.Values)
@@ -180,11 +181,15 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
-func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
-	path = strings.TrimLeft(path, "/")
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
+func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
+	values := url.Values{}
+	values.Set("prefix", url.QueryEscape(prefix))
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(limit))
+	path += "?" + values.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path), nil)
+	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -208,23 +213,30 @@ func (c *Client) object(ctx context.Context, path string, w io.Writer, entries *
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, path string) (entries []api.ObjectMetadata, err error) {
-	err = c.object(ctx, path, nil, &entries)
+func (c *Client) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
+	path = strings.TrimPrefix(path, "/")
+	err = c.object(ctx, path, prefix, offset, limit, nil, &entries)
 	return
 }
 
 // DownloadObject downloads the object at the given path, writing its data to
 // w.
 func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (err error) {
-	path = strings.TrimLeft(path, "/")
-	err = c.object(ctx, path, w, nil)
+	if strings.HasSuffix(path, "/") {
+		return errors.New("the given path is a directory, use ObjectEntries instead")
+	}
+
+	path = strings.TrimPrefix(path, "/")
+	err = c.object(ctx, path, "", 0, -1, w, nil)
 	return
 }
 
 // DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, path string) (err error) {
-	path = strings.TrimLeft(path, "/")
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s", path))
+func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
+	path = strings.TrimPrefix(path, "/")
+	values := url.Values{}
+	values.Set("batch", fmt.Sprint(batch))
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 
