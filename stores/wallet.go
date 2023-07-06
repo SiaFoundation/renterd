@@ -2,6 +2,7 @@ package stores
 
 import (
 	"bytes"
+	"math"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
@@ -88,11 +89,22 @@ func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 }
 
 // Transactions implements wallet.SingleAddressStore.
-func (s *SQLStore) Transactions(since time.Time, max int) ([]wallet.Transaction, error) {
+func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error) {
+	beforeX := int64(math.MaxInt64)
+	sinceX := int64(0)
+	if !before.IsZero() {
+		beforeX = before.Unix()
+	}
+	if !since.IsZero() {
+		sinceX = since.Unix()
+	}
+	if limit == 0 || limit == -1 {
+		limit = math.MaxInt64
+	}
+
 	var dbTxns []dbTransaction
-	err := s.db.Find(&dbTxns).
-		Where("timestamp > ?", since.UnixNano()).
-		Limit(max).
+	err := s.db.Raw("SELECT * FROM transactions WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+		sinceX, beforeX, limit, offset).Scan(&dbTxns).
 		Error
 	if err != nil {
 		return nil, err

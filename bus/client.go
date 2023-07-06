@@ -2,9 +2,12 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -147,8 +150,23 @@ func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput) (
 }
 
 // WalletTransactions returns all transactions relevant to the wallet.
-func (c *Client) WalletTransactions(ctx context.Context, since time.Time, max int) (resp []wallet.Transaction, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/wallet/transactions?since=%s&max=%d", api.ParamTime(since), max), &resp)
+func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Transaction, err error) {
+	c.c.Custom("GET", "/wallet/transactions", nil, &resp)
+
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	u, err := url.Parse(fmt.Sprintf("%v/wallet/transactions", c.c.BaseURL))
+	if err != nil {
+		panic(err)
+	}
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		panic(err)
+	}
+	err = c.do(req, &resp)
 	return
 }
 
@@ -657,4 +675,25 @@ func NewClient(addr, password string) *Client {
 		BaseURL:  addr,
 		Password: password,
 	}}
+}
+
+func (c *Client) do(req *http.Request, resp interface{}) error {
+	req.Header.Set("Content-Type", "application/json")
+	if c.c.Password != "" {
+		req.SetBasicAuth("", c.c.Password)
+	}
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer io.Copy(io.Discard, r.Body)
+	defer r.Body.Close()
+	if !(200 <= r.StatusCode && r.StatusCode < 300) {
+		err, _ := io.ReadAll(r.Body)
+		return errors.New(string(err))
+	}
+	if resp == nil {
+		return nil
+	}
+	return json.NewDecoder(r.Body).Decode(resp)
 }

@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1519,5 +1520,106 @@ func TestContractArchival(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWalletTransactions(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b := cluster.Bus
+
+	// Make sure we get transactions that are spread out over multiple seconds.
+	time.Sleep(time.Second)
+	if err := cluster.MineBlocks(1); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if err := cluster.MineBlocks(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get all transactions of the wallet.
+	allTxns, err := b.WalletTransactions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allTxns) < 5 {
+		t.Fatalf("expected at least 5 transactions, got %v", len(allTxns))
+	}
+	if !sort.SliceIsSorted(allTxns, func(i, j int) bool {
+		return allTxns[i].Timestamp.Unix() > allTxns[j].Timestamp.Unix()
+	}) {
+		t.Fatal("transactions are not sorted by timestamp")
+	}
+
+	// Get the transactions at an offset and compare.
+	txns, err := b.WalletTransactions(context.Background(), api.WalletTransactionsWithOffset(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(txns, allTxns[2:]) {
+		t.Fatal("transactions don't match")
+	}
+
+	// Find the first index that has a different timestamp than the first.
+	var txnIdx int
+	for i := 1; i < len(allTxns); i++ {
+		if allTxns[i].Timestamp.Unix() != allTxns[0].Timestamp.Unix() {
+			txnIdx = i
+			break
+		}
+	}
+	medianTxnTimestamp := allTxns[txnIdx].Timestamp
+
+	// Limit the number of transactions to 5.
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithLimit(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) != 5 {
+		t.Fatalf("expected exactly 5 transactions, got %v", len(txns))
+	}
+
+	// Fetch txns before and since median.
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithBefore(medianTxnTimestamp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) == 0 {
+		for _, txn := range allTxns {
+			fmt.Println(txn.Timestamp.Unix())
+		}
+		t.Fatal("expected at least 1 transaction before median timestamp", medianTxnTimestamp.Unix())
+	}
+	for _, txn := range txns {
+		if txn.Timestamp.Unix() >= medianTxnTimestamp.Unix() {
+			t.Fatal("expected only transactions before median timestamp")
+		}
+	}
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithSince(medianTxnTimestamp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) == 0 {
+		for _, txn := range allTxns {
+			fmt.Println(txn.Timestamp.Unix())
+		}
+		t.Fatal("expected at least 1 transaction after median timestamp")
+	}
+	for _, txn := range txns {
+		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
+			t.Fatal("expected only transactions after median timestamp", medianTxnTimestamp.Unix())
+		}
 	}
 }
