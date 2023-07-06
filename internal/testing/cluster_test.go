@@ -1589,7 +1589,7 @@ func TestWalletTransactions(t *testing.T) {
 		t.Fatal("expected at least 1 transaction before median timestamp", medianTxnTimestamp.Unix())
 	}
 	for _, txn := range txns {
-		if txn.Timestamp.Unix() > medianTxnTimestamp.Unix() {
+		if txn.Timestamp.Unix() >= medianTxnTimestamp.Unix() {
 			t.Fatal("expected only transactions before median timestamp")
 		}
 	}
