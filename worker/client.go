@@ -181,7 +181,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
-func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata, opts ...DownloadObjectOption) (err error) {
+func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata, opts ...api.DownloadObjectOption) (err error) {
 	values := url.Values{}
 	values.Set("prefix", url.QueryEscape(prefix))
 	values.Set("offset", fmt.Sprint(offset))
@@ -222,17 +222,9 @@ func (c *Client) ObjectEntries(ctx context.Context, path, prefix string, offset,
 	return
 }
 
-type DownloadObjectOption func(http.Header)
-
-func DownloadWithRange(offset, length uint64) DownloadObjectOption {
-	return func(h http.Header) {
-		h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
-	}
-}
-
 // DownloadObject downloads the object at the given path, writing its data to
 // w.
-func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, opts ...DownloadObjectOption) (err error) {
+func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, opts ...api.DownloadObjectOption) (err error) {
 	if strings.HasSuffix(path, "/") {
 		return errors.New("the given path is a directory, use ObjectEntries instead")
 	}
