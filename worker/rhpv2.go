@@ -238,7 +238,9 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 		defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
 
 		// verify claimed revision
-		if len(resp.Signatures) != 2 {
+		if resp.Revision.RevisionNumber == math.MaxUint64 {
+			return ErrContractFinalized
+		} else if len(resp.Signatures) != 2 {
 			return fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
 		} else if len(resp.Signatures[0].Signature) != 64 || len(resp.Signatures[1].Signature) != 64 {
 			return errors.New("signatures on claimed revision have wrong length")
@@ -250,8 +252,6 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 			return errors.New("host's signature on claimed revision is invalid")
 		} else if !resp.Acquired {
 			return ErrContractLocked
-		} else if resp.Revision.RevisionNumber == math.MaxUint64 {
-			return ErrContractFinalized
 		}
 		rev = rhpv2.ContractRevision{
 			Revision:   resp.Revision,
