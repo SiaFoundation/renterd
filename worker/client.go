@@ -181,7 +181,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
-func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata) (err error) {
+func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata, opts ...api.DownloadObjectOption) (err error) {
 	values := url.Values{}
 	values.Set("prefix", url.QueryEscape(prefix))
 	values.Set("offset", fmt.Sprint(offset))
@@ -194,13 +194,16 @@ func (c *Client) object(ctx context.Context, path, prefix string, offset, limit 
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	for _, opt := range opts {
+		opt(req.Header)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer io.Copy(io.Discard, resp.Body)
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
 		err, _ := io.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
@@ -221,13 +224,13 @@ func (c *Client) ObjectEntries(ctx context.Context, path, prefix string, offset,
 
 // DownloadObject downloads the object at the given path, writing its data to
 // w.
-func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string) (err error) {
+func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, opts ...api.DownloadObjectOption) (err error) {
 	if strings.HasSuffix(path, "/") {
 		return errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, "", 0, -1, w, nil)
+	err = c.object(ctx, path, "", 0, -1, w, nil, opts...)
 	return
 }
 

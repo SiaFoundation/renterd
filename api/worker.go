@@ -2,6 +2,8 @@ package api
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -162,4 +164,12 @@ type UploadStatsResponse struct {
 type UploaderStats struct {
 	HostKey                  types.PublicKey `json:"hostKey"`
 	AvgSectorUploadSpeedMBPS float64         `json:"avgSectorUploadSpeedMBPS"`
+}
+
+type DownloadObjectOption func(http.Header)
+
+func DownloadWithRange(offset, length uint64) DownloadObjectOption {
+	return func(h http.Header) {
+		h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
+	}
 }

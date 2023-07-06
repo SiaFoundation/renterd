@@ -510,6 +510,20 @@ func TestUploadDownloadBasic(t *testing.T) {
 	if !bytes.Equal(data, buffer.Bytes()) {
 		t.Fatal("unexpected")
 	}
+
+	// download again, 32 bytes at a time.
+	for i := uint64(0); i < 4; i++ {
+		offset := i * 32
+		var buffer bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buffer, name, api.DownloadWithRange(offset, 32)); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data[offset:offset+32], buffer.Bytes()) {
+			fmt.Println(data[offset : offset+32])
+			fmt.Println(buffer.Bytes())
+			t.Fatalf("mismatch for offset %v", offset)
+		}
+	}
 }
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
