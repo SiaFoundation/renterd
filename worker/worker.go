@@ -851,7 +851,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	path := strings.TrimPrefix(jc.PathParam("path"), "/")
+	path := jc.PathParam("path")
 	obj, entries, err := w.bus.Object(ctx, path, prefix, off, limit)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
@@ -925,9 +925,6 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
 
-	// fetch the path
-	path := strings.TrimPrefix(jc.PathParam("path"), "/")
-
 	// fetch the upload parameters
 	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
@@ -989,7 +986,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, path, up.ContractSet, object, used)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, object, used)) != nil {
 		return
 	}
 }
@@ -999,8 +996,7 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("batch", &batch) != nil {
 		return
 	}
-	path := strings.TrimPrefix(jc.PathParam("path"), "/")
-	err := w.bus.DeleteObject(jc.Request.Context(), path, batch)
+	err := w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path"), batch)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
