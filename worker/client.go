@@ -203,7 +203,7 @@ func (c *Client) object(ctx context.Context, path, prefix string, offset, limit 
 	}
 	defer io.Copy(io.Discard, resp.Body)
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
 		err, _ := io.ReadAll(resp.Body)
 		return errors.New(string(err))
 	}
