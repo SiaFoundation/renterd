@@ -273,8 +273,8 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 
 	// collect the response, responses might come in out of order so we keep
 	// them in a map and return what we can when we can
+	responses := make(map[int]*slabDownloadResponse)
 	var respIndex int
-	responseBuffer := make(map[int]*slabDownloadResponse)
 outer:
 	for {
 		select {
@@ -290,17 +290,18 @@ outer:
 				return resp.err
 			}
 
-			responseBuffer[resp.index] = resp
+			responses[resp.index] = resp
 			for {
-				if next, exists := responseBuffer[respIndex]; exists {
+				if next, exists := responses[respIndex]; exists {
 					slabs[respIndex].Decrypt(next.shards)
-					if err := slabs[respIndex].Recover(cw, next.shards); err != nil {
+					err := slabs[respIndex].Recover(cw, next.shards)
+					if err != nil {
 						mgr.logger.Errorf("failed to recover slab %v: %v", respIndex, err)
 						return err
 					}
 
 					next = nil
-					delete(responseBuffer, respIndex)
+					delete(responses, respIndex)
 					respIndex++
 
 					select {
