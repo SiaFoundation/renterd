@@ -617,12 +617,9 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 			}
 
 			var refund types.Currency
-			fmt.Println("expected cost", cost.String())
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 			cost, refund, err = RPCReadSector(ctx, t, w, pt, &payment, offset, length, root, true)
-			fmt.Println("reported cost", cost.String())
 			amount = cost.Sub(refund)
-			fmt.Println("amount", amount.String(), refund.String())
 			return err
 		})
 		return

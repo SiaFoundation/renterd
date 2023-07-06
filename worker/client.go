@@ -238,7 +238,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	}
 
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, "", 0, -1, w, nil)
+	err = c.object(ctx, path, "", 0, -1, w, nil, opts...)
 	return
 }
 
