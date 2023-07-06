@@ -152,9 +152,9 @@ func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput) (
 // WalletTransactionsOption is an option for the WalletTransactions method.
 type WalletTransactionsOption func(url.Values)
 
-func WalletTransactionsWithBefore(since time.Time) WalletTransactionsOption {
+func WalletTransactionsWithBefore(before time.Time) WalletTransactionsOption {
 	return func(q url.Values) {
-		q.Set("before", since.Format(time.RFC3339))
+		q.Set("before", before.Format(time.RFC3339))
 	}
 }
 
