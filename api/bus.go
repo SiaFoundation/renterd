@@ -2,7 +2,9 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
+	"net/url"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -190,6 +192,33 @@ type WalletPrepareRenewRequest struct {
 type WalletPrepareRenewResponse struct {
 	ToSign         []types.Hash256     `json:"toSign"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
+}
+
+// WalletTransactionsOption is an option for the WalletTransactions method.
+type WalletTransactionsOption func(url.Values)
+
+func WalletTransactionsWithBefore(before time.Time) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("before", before.Format(time.RFC3339))
+	}
+}
+
+func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("since", since.Format(time.RFC3339))
+	}
+}
+
+func WalletTransactionsWithLimit(limit int) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("limit", fmt.Sprint(limit))
+	}
+}
+
+func WalletTransactionsWithOffset(offset int) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("offset", fmt.Sprint(offset))
+	}
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.

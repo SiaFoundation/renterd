@@ -149,35 +149,8 @@ func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput) (
 	return c.BroadcastTransaction(ctx, append(parents, txn))
 }
 
-// WalletTransactionsOption is an option for the WalletTransactions method.
-type WalletTransactionsOption func(url.Values)
-
-func WalletTransactionsWithBefore(before time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("before", before.Format(time.RFC3339))
-	}
-}
-
-func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("since", since.Format(time.RFC3339))
-	}
-}
-
-func WalletTransactionsWithLimit(limit int) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("limit", fmt.Sprint(limit))
-	}
-}
-
-func WalletTransactionsWithOffset(offset int) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("offset", fmt.Sprint(offset))
-	}
-}
-
 // WalletTransactions returns all transactions relevant to the wallet.
-func (c *Client) WalletTransactions(ctx context.Context, opts ...WalletTransactionsOption) (resp []wallet.Transaction, err error) {
+func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Transaction, err error) {
 	c.c.Custom("GET", "/wallet/transactions", nil, &resp)
 
 	values := url.Values{}

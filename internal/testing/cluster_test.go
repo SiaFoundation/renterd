@@ -22,7 +22,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -1551,7 +1550,7 @@ func TestWalletTransactions(t *testing.T) {
 	}
 
 	// Get the transactions at an offset and compare.
-	txns, err := b.WalletTransactions(context.Background(), bus.WalletTransactionsWithOffset(2))
+	txns, err := b.WalletTransactions(context.Background(), api.WalletTransactionsWithOffset(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1570,7 +1569,7 @@ func TestWalletTransactions(t *testing.T) {
 	medianTxnTimestamp := allTxns[txnIdx].Timestamp
 
 	// Limit the number of transactions to 5.
-	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithLimit(5))
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithLimit(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1579,7 +1578,7 @@ func TestWalletTransactions(t *testing.T) {
 	}
 
 	// Fetch txns before and since median.
-	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithBefore(medianTxnTimestamp))
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithBefore(medianTxnTimestamp))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1594,7 +1593,7 @@ func TestWalletTransactions(t *testing.T) {
 			t.Fatal("expected only transactions before median timestamp")
 		}
 	}
-	txns, err = b.WalletTransactions(context.Background(), bus.WalletTransactionsWithSince(medianTxnTimestamp))
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithSince(medianTxnTimestamp))
 	if err != nil {
 		t.Fatal(err)
 	}
