@@ -611,7 +611,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 
 	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			cost, err := readSectorCost(pt)
+			cost, err := readSectorCost(pt, uint64(length))
 			if err != nil {
 				return err
 			}
@@ -665,9 +665,9 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
-func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
+func readSectorCost(pt rhpv3.HostPriceTable, length uint64) (types.Currency, error) {
 	rc := pt.BaseCost()
-	rc = rc.Add(pt.ReadSectorCost(rhpv2.SectorSize))
+	rc = rc.Add(pt.ReadSectorCost(length))
 	cost, _ := rc.Total()
 
 	// overestimate the cost by 5%
