@@ -237,7 +237,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(hostInfos, hostInfosUsable) {
-		t.Fatalf("result for 'usable' should match the result for '', got %+v want %+v", hostInfosUsable, hostInfos)
+		t.Fatal("result for 'usable' should match the result for ''")
 	}
 	hostInfosUnusable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
 	if err != nil {

@@ -110,15 +110,9 @@ type (
 		root   types.Hash256
 		hk     types.PublicKey
 
-		overdrive    bool
-		sectorIndex  int
-		responseChan *sectorResponseChan
-	}
-
-	sectorResponseChan struct {
-		ctx  context.Context
-		c    chan sectorDownloadResp
-		once sync.Once
+		overdrive   bool
+		sectorIndex int
+		resps       *sectorResponses
 	}
 
 	sectorDownloadResp struct {
@@ -127,6 +121,13 @@ type (
 		sectorIndex int
 		sector      []byte
 		err         error
+	}
+
+	sectorResponses struct {
+		mu        sync.Mutex
+		closed    bool
+		responses []*sectorDownloadResp
+		c         chan struct{} // signal that a new response is available
 	}
 
 	sectorInfo struct {
@@ -218,14 +219,10 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
-		// make sure everything cancels if the download is done
 		cancel()
-		// wait for all goroutines to finish and cleanup resources
-		go func() {
-			wg.Wait()
-			close(responseChan)
-			close(nextSlabChan)
-		}()
+		wg.Wait()
+		close(responseChan)
+		close(nextSlabChan)
 	}()
 
 	// launch a goroutine to launch consecutive slab downloads
@@ -774,7 +771,7 @@ func (d *downloader) execute(req *sectorDownloadReq) (err error) {
 }
 
 func (req *sectorDownloadReq) succeed(sector []byte) {
-	req.responseChan.trySend(sectorDownloadResp{
+	req.resps.Add(&sectorDownloadResp{
 		hk:          req.hk,
 		overdrive:   req.overdrive,
 		sectorIndex: req.sectorIndex,
@@ -783,7 +780,7 @@ func (req *sectorDownloadReq) succeed(sector []byte) {
 }
 
 func (req *sectorDownloadReq) fail(err error) {
-	req.responseChan.trySend(sectorDownloadResp{
+	req.resps.Add(&sectorDownloadResp{
 		err:       err,
 		hk:        req.hk,
 		overdrive: req.overdrive,
@@ -793,14 +790,13 @@ func (req *sectorDownloadReq) fail(err error) {
 func (req *sectorDownloadReq) done() bool {
 	select {
 	case <-req.ctx.Done():
-		req.responseChan.close()
 		return true
 	default:
 		return false
 	}
 }
 
-func (s *slabDownload) overdrive(ctx context.Context, respChan *sectorResponseChan) (resetTimer func()) {
+func (s *slabDownload) overdrive(ctx context.Context, resps *sectorResponses) (resetTimer func()) {
 	// overdrive is disabled
 	if s.mgr.overdriveTimeout == 0 {
 		return func() {}
@@ -853,7 +849,7 @@ func (s *slabDownload) overdrive(ctx context.Context, respChan *sectorResponseCh
 			case <-timer.C:
 				if canOverdrive(timeout()) {
 					for {
-						if req := s.nextRequest(ctx, respChan, true); req != nil {
+						if req := s.nextRequest(ctx, resps, true); req != nil {
 							if err := s.launch(req); err != nil {
 								continue // try the next request if this fails to launch
 							}
@@ -869,7 +865,7 @@ func (s *slabDownload) overdrive(ctx context.Context, respChan *sectorResponseCh
 	return
 }
 
-func (s *slabDownload) nextRequest(ctx context.Context, responseChan *sectorResponseChan, overdrive bool) *sectorDownloadReq {
+func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, overdrive bool) *sectorDownloadReq {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -912,9 +908,9 @@ func (s *slabDownload) nextRequest(ctx context.Context, responseChan *sectorResp
 		root:   sector.Root,
 		hk:     sector.Host,
 
-		overdrive:    overdrive,
-		sectorIndex:  sector.index,
-		responseChan: responseChan,
+		overdrive:   overdrive,
+		sectorIndex: sector.index,
+		resps:       resps,
 	}
 }
 
@@ -927,18 +923,18 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 	ctx, span := tracing.Tracer.Start(ctx, "downloadShards")
 	defer span.End()
 
-	// create the response channel
-	respChan := &sectorResponseChan{
-		c:   make(chan sectorDownloadResp),
-		ctx: ctx,
+	// create the responses queue
+	resps := &sectorResponses{
+		c: make(chan struct{}, 1),
 	}
+	defer resps.Close()
 
 	// launch overdrive
-	resetOverdrive := s.overdrive(ctx, respChan)
+	resetOverdrive := s.overdrive(ctx, resps)
 
 	// launch 'MinShard' requests
 	for i := 0; i < int(s.minShards); i++ {
-		req := s.nextRequest(ctx, respChan, false)
+		req := s.nextRequest(ctx, resps, false)
 		if err := s.launch(req); err != nil {
 			return nil, errors.New("no hosts available")
 		}
@@ -949,33 +945,38 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 	var next bool
 	var triggered bool
 	for s.inflight() > 0 && !done {
-		var resp sectorDownloadResp
 		select {
 		case <-s.mgr.stopChan:
 			return nil, errors.New("download stopped")
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case resp = <-respChan.c:
+		case <-resps.c:
+			resetOverdrive()
 		}
 
-		resetOverdrive()
-
-		done, next = s.receive(resp)
-		if !done && resp.err != nil {
-			for {
-				if req := s.nextRequest(ctx, respChan, true); req != nil {
-					if err := s.launch(req); err != nil {
-						continue // try the next request if this fails to launch
-					}
-				}
+		for {
+			resp := resps.Next()
+			if resp == nil {
 				break
 			}
-		}
-		if next && !triggered {
-			select {
-			case nextSlabTrigger <- struct{}{}:
-				triggered = true
-			default:
+
+			done, next = s.receive(*resp)
+			if !done && resp.err != nil {
+				for {
+					if req := s.nextRequest(ctx, resps, true); req != nil {
+						if err := s.launch(req); err != nil {
+							continue // try the next request if this fails to launch
+						}
+					}
+					break
+				}
+			}
+			if next && !triggered {
+				select {
+				case nextSlabTrigger <- struct{}{}:
+					triggered = true
+				default:
+				}
 			}
 		}
 	}
@@ -1156,19 +1157,36 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length uint64) []object.
 	return slabs
 }
 
-func (src *sectorResponseChan) trySend(resp sectorDownloadResp) {
+func (sr *sectorResponses) Add(resp *sectorDownloadResp) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	if sr.closed {
+		return
+	}
+	sr.responses = append(sr.responses, resp)
 	select {
-	case <-src.ctx.Done():
-		src.close()
+	case sr.c <- struct{}{}:
 	default:
-		select {
-		case <-src.ctx.Done():
-			src.close()
-		case src.c <- resp:
-		}
 	}
 }
 
-func (src *sectorResponseChan) close() {
-	src.once.Do(func() { close(src.c) })
+func (sr *sectorResponses) Close() error {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+
+	sr.closed = true
+	sr.responses = nil // clear responses
+	close(sr.c)
+	return nil
+}
+
+func (sr *sectorResponses) Next() *sectorDownloadResp {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	if len(sr.responses) == 0 {
+		return nil
+	}
+	resp := sr.responses[0]
+	sr.responses = sr.responses[1:]
+	return resp
 }
