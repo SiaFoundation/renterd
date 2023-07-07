@@ -79,7 +79,6 @@ type (
 		mgr *uploadManager
 
 		allowed          map[types.FileContractID]struct{}
-		nextSlabTrigger  chan struct{}
 		doneShardTrigger chan struct{}
 
 		mu      sync.Mutex
@@ -222,7 +221,7 @@ func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contract
 	}
 
 	// upload the shards
-	return upload.uploadShards(ctx, shards)
+	return upload.uploadShards(ctx, shards, nil)
 }
 
 func (mgr *uploadManager) Stats() uploadManagerStats {
@@ -285,8 +284,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 		return object.Object{}, err
 	}
 
+	// create the next slab channel
+	nextSlabChan := make(chan struct{}, 1)
+	defer close(nextSlabChan)
+
 	// create the response channel
 	respChan := make(chan slabUploadResponse)
+	defer close(respChan)
 
 	// collect the responses
 	var responses []slabUploadResponse
@@ -302,7 +306,7 @@ loop:
 			return object.Object{}, errors.New("manager was stopped")
 		case <-ctx.Done():
 			return object.Object{}, errors.New("upload timed out")
-		case <-u.nextSlabTrigger:
+		case nextSlabChan <- struct{}{}:
 			// read next slab's data
 			data := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(cr, size), data)
@@ -315,7 +319,7 @@ loop:
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, err
 			}
-			go u.uploadSlab(ctx, rs, data, length, slabIndex, respChan)
+			go u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
@@ -323,7 +327,6 @@ loop:
 			}
 			responses = append(responses, res)
 			if len(responses) == numSlabs {
-				close(respChan)
 				break loop
 			}
 		}
@@ -373,18 +376,15 @@ func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMet
 	}
 
 	// create upload
-	upload := &upload{
+	return &upload{
 		mgr: mgr,
 
 		allowed:          allowed,
-		nextSlabTrigger:  make(chan struct{}, 1),
 		doneShardTrigger: make(chan struct{}, 1),
 
 		ongoing: make([]slabID, 0),
 		used:    make(map[slabID]map[types.FileContractID]struct{}),
-	}
-	upload.nextSlabTrigger <- struct{}{} // trigger first read
-	return upload, nil
+	}, nil
 }
 
 func (mgr *uploadManager) numUploaders() int {
@@ -638,7 +638,7 @@ func (u *upload) canUseUploader(sID slabID, ul *uploader) bool {
 	return !used
 }
 
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse) {
+func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, nextSlabChan chan struct{}) {
 	// cancel any sector uploads once the slab is done.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -663,7 +663,7 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	resp.slab.Slab.Encrypt(shards)
 
 	// upload the shards
-	resp.slab.Slab.Shards, resp.err = u.uploadShards(ctx, shards)
+	resp.slab.Slab.Shards, resp.err = u.uploadShards(ctx, shards, nextSlabChan)
 
 	// send the response
 	select {
@@ -683,7 +683,7 @@ func (u *upload) markUsed(sID slabID, fcid types.FileContractID) {
 	u.used[sID][fcid] = struct{}{}
 }
 
-func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Sector, error) {
+func (u *upload) uploadShards(ctx context.Context, shards [][]byte, nextSlabChan chan struct{}) ([]object.Sector, error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "uploadShards")
 	defer span.End()
@@ -725,7 +725,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 		// try and trigger next slab
 		if next && !triggered {
 			select {
-			case u.nextSlabTrigger <- struct{}{}:
+			case <-nextSlabChan:
 				triggered = true
 			default:
 			}
@@ -752,7 +752,8 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 	// make sure next slab is triggered
 	if done && !triggered {
 		select {
-		case u.nextSlabTrigger <- struct{}{}:
+		case <-nextSlabChan:
+			triggered = true
 		default:
 		}
 	}
