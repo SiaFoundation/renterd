@@ -225,31 +225,30 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 		reasons = append(reasons, errContractExpired.Error())
 		renew = false
 		refresh = false
-	}
-
-	if c.Revision.RevisionNumber == math.MaxUint64 {
+	} else if c.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, errContractMaxRevisionNumber.Error())
 		renew = false
 		refresh = false
+	} else {
+		if isOutOfCollateral(c, s, renterFunds, bh) {
+			reasons = append(reasons, errContractOutOfCollateral.Error())
+			renew = false
+			refresh = true
+		}
+		if isOutOfFunds(cfg, s, c) {
+			reasons = append(reasons, errContractOutOfFunds.Error())
+			renew = false
+			refresh = true
+		}
+		if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
+			if secondHalf {
+				reasons = append(reasons, errContractUpForRenewal.Error()) // only unusable if in second half of renew window
+			}
+			renew = true
+			refresh = false
+		}
 	}
 
-	if isOutOfCollateral(c, s, renterFunds, bh) {
-		reasons = append(reasons, errContractOutOfCollateral.Error())
-		renew = false
-		refresh = true
-	}
-	if isOutOfFunds(cfg, s, c) {
-		reasons = append(reasons, errContractOutOfFunds.Error())
-		renew = false
-		refresh = true
-	}
-	if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
-		if secondHalf {
-			reasons = append(reasons, errContractUpForRenewal.Error()) // only unusable if in second half of renew window
-		}
-		renew = true
-		refresh = false
-	}
 	// redundant IP check - always perform this last since it will update
 	// the ipFilter.
 	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(c.HostIP, c.HostKey) {
