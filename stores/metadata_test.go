@@ -960,6 +960,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	expectedObjSlab1 := dbSlab{
 		DBContractSetID: 1,
+		Health:          1,
 		Key:             obj1Slab0Key,
 		MinShards:       1,
 		TotalShards:     1,
@@ -996,6 +997,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	expectedObjSlab2 := dbSlab{
 		DBContractSetID: 1,
+		Health:          1,
 		Key:             obj1Slab1Key,
 		MinShards:       2,
 		TotalShards:     1,
