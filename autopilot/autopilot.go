@@ -118,13 +118,13 @@ type Autopilot struct {
 
 // state holds a bunch of variables that are used by the autopilot and updated
 type state struct {
-	cs  api.ConsensusState
 	gs  api.GougingSettings
 	rs  api.RedundancySettings
 	cfg api.AutopilotConfig
 
-	fee    types.Currency
-	period uint64
+	address types.Address
+	fee     types.Currency
+	period  uint64
 }
 
 // workerPool contains all workers known to the autopilot.  Users can call
@@ -437,6 +437,12 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 		return fmt.Errorf("could not fetch fee, err: %v", err)
 	}
 
+	// fetch our wallet address
+	address, err := ap.bus.WalletAddress(ctx)
+	if err != nil {
+		return fmt.Errorf("could not fetch wallet address, err: %v", err)
+	}
+
 	// update current period if necessary
 	if cs.Synced {
 		if autopilot.CurrentPeriod == 0 {
@@ -460,13 +466,13 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	// update the state
 	ap.mu.Lock()
 	ap.state = state{
-		cs:  cs,
 		gs:  gs,
 		rs:  rs,
 		cfg: autopilot.Config,
 
-		fee:    fee,
-		period: autopilot.CurrentPeriod,
+		address: address,
+		fee:     fee,
+		period:  autopilot.CurrentPeriod,
 	}
 	ap.mu.Unlock()
 	return nil

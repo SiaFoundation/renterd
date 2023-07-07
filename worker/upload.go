@@ -447,39 +447,37 @@ loop:
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
 	// build map
 	c2m := make(map[types.FileContractID]api.ContractMetadata)
+	c2r := make(map[types.FileContractID]struct{})
 	for _, c := range contracts {
 		c2m[c.ID] = c
+		c2r[c.RenewedFrom] = struct{}{}
 	}
 
-	// purge the expired uploaders
-	var i int
+	// prune expired or renewed contracts
+	var refreshed []*uploader
 	for _, uploader := range mgr.uploaders {
-		if bh > uploader.endHeight {
+		_, renewed := c2r[uploader.fcid]
+		if renewed || bh > uploader.endHeight {
+			close(uploader.stopChan)
 			continue
 		}
+		refreshed = append(refreshed, uploader)
 		delete(c2m, uploader.fcid)
-		mgr.uploaders[i] = uploader
-		i++
 	}
-	for j := i; j < len(mgr.uploaders); j++ {
-		close(mgr.uploaders[j].stopChan)
-		mgr.uploaders[j] = nil
-	}
-	mgr.uploaders = mgr.uploaders[:i]
 
-	// add missing uploaders
+	// create new uploaders for missing contracts
 	for _, c := range c2m {
-		// create uploader
 		h := mgr.hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
 		uploader := newUploader(c, h)
-		mgr.uploaders = append(mgr.uploaders, uploader)
+		refreshed = append(refreshed, uploader)
 		go uploader.start(mgr.hp, mgr.rl)
 	}
 
 	// update blockheight
-	for _, u := range mgr.uploaders {
+	for _, u := range refreshed {
 		u.updateBlockHeight(bh)
 	}
+	mgr.uploaders = refreshed
 }
 
 func (mgr *uploadManager) tryRecomputeStats() {
@@ -690,7 +688,8 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte) ([]object.Se
 		// relaunch non-overdrive uploads
 		if !done && resp.err != nil && !resp.req.overdrive {
 			if err := slab.launch(resp.req); err != nil {
-				break // fail the download
+				u.mgr.logger.Errorf("upload to %v failed, failed to relaunch a sector upload req, with error %v", resp.req.fcid, err)
+				break // fail the upload
 			}
 		}
 
