@@ -552,6 +552,11 @@ func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err
 	return
 }
 
+// RecomputeHealth recomputes the cached health of all slabs.
+func (c *Client) RecomputeHealth(ctx context.Context) error {
+	return c.c.WithContext(ctx).POST("/slabs/recomputehealth", nil, nil)
+}
+
 // SlabsForMigration returns up to 'limit' slabs which require migration. A slab
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.

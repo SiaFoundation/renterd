@@ -130,6 +130,12 @@ func (m *migrator) performMigrations(p *workerPool, set string) {
 
 OUTER:
 	for {
+		// recompute health first.
+		if err := b.RecomputeHealth(ctx); err != nil {
+			m.logger.Errorf("failed to recompute cached health before migration", err)
+			return
+		}
+
 		// fetch slabs for migration
 		toMigrateNew, err := b.SlabsForMigration(ctx, m.healthCutoff, set, migratorBatchSize)
 		if err != nil {
