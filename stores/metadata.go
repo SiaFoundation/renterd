@@ -1150,8 +1150,8 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	}
 
 	if err := s.db.
-		Select("key, health").
-		Joins("JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
+		Select("slabs.key, slabs.health").
+		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
 		Model(&dbSlab{}).
 		Where("health <= ? AND cs.name = ?", healthCutoff, set).
 		Order("health ASC").
