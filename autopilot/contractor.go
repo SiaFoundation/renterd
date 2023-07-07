@@ -1236,6 +1236,9 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
 	}
 
+	if contract.EndHeight() < cs.BlockHeight {
+		fmt.Println("DEBUG PJ: contractor refreshContract", contract.EndHeight(), cs.BlockHeight)
+	}
 	// calculate the new collateral
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, settings)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, contract.EndHeight())

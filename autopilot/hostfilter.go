@@ -233,6 +233,9 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 		refresh = false
 	}
 
+	if c.EndHeight() < bh {
+		fmt.Println("DEBUG PJ: isUsableContract", c.EndHeight(), bh)
+	}
 	if isOutOfCollateral(c, s, renterFunds, bh) {
 		reasons = append(reasons, errContractOutOfCollateral.Error())
 		renew = false
