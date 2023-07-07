@@ -90,6 +90,7 @@ type (
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
+		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		Object(ctx context.Context, path string) (object.Object, error)
@@ -556,6 +557,18 @@ func (b *bus) contractsHandlerGET(jc jape.Context) {
 	cs, err := b.ms.Contracts(jc.Request.Context())
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
+	}
+}
+
+func (b *bus) contractsRenewedIDHandlerGET(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	md, err := b.ms.RenewedContract(jc.Request.Context(), id)
+	if jc.Check("faild to fetch renewed contract", err) == nil {
+		jc.Encode(md)
 	}
 }
 
@@ -1313,7 +1326,9 @@ func (b *bus) Handler() http.Handler {
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
 		"GET    /contracts":              b.contractsHandlerGET,
+		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
@@ -1327,7 +1342,6 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
-		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,

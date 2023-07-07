@@ -1154,15 +1154,15 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 		return api.ContractMetadata{}, false, errors.New("insufficient budget")
 	}
 
-	// calculate the host collateral
-	endHeight := endHeight(cfg, state.period)
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, settings)
-	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
-
 	// sanity check the endheight is not the same on renewals
+	endHeight := endHeight(cfg, state.period)
 	if endHeight == rev.EndHeight() {
 		return api.ContractMetadata{}, false, errors.New("renewal endheight is the same as the current contract endheight")
 	}
+
+	// calculate the host collateral
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, settings)
+	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
 
 	// renew the contract
 	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, newCollateral, settings.WindowSize)
