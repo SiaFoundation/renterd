@@ -210,19 +210,18 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	// create the cipher writer
 	cw := o.Key.Decrypt(w, offset)
 
-	// create response and trigger chan
-	nextSlabChan := make(chan struct{}, 1)
-	nextSlabChan <- struct{}{}
-	responseChan := make(chan *slabDownloadResponse)
+	// create next slab chan
+	nextSlabChan := make(chan struct{})
+	defer close(nextSlabChan)
 
-	// ensure channels are cleaned up properly
+	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
+	responseChan := make(chan *slabDownloadResponse)
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
 		cancel()
 		wg.Wait()
 		close(responseChan)
-		close(nextSlabChan)
 	}()
 
 	// launch a goroutine to launch consecutive slab downloads
@@ -259,11 +258,11 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				slabIndex++
 			}
 
-			// wait for the trigger to launch the next one
+			// block until we are ready for the next slab
 			select {
 			case <-ctx.Done():
 				return
-			case <-nextSlabChan:
+			case nextSlabChan <- struct{}{}:
 			}
 		}
 	}()
@@ -302,7 +301,7 @@ outer:
 					respIndex++
 
 					select {
-					case nextSlabChan <- struct{}{}:
+					case <-nextSlabChan:
 					default:
 					}
 
@@ -510,16 +509,10 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice obje
 	resp := &slabDownloadResponse{index: index}
 	resp.shards, resp.err = slab.downloadShards(ctx, nextSlabChan)
 
-	// check if we're done first
+	// send the response
 	select {
 	case <-ctx.Done():
-		return
-	default:
-		// if not try and send the response
-		select {
-		case <-ctx.Done():
-		case responseChan <- resp:
-		}
+	case responseChan <- resp:
 	}
 }
 
@@ -914,7 +907,7 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	}
 }
 
-func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan struct{}) ([][]byte, error) {
+func (s *slabDownload) downloadShards(ctx context.Context, nextSlabChan chan struct{}) ([][]byte, error) {
 	// cancel any sector downloads once the download is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -973,7 +966,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabTrigger chan 
 			}
 			if next && !triggered {
 				select {
-				case nextSlabTrigger <- struct{}{}:
+				case <-nextSlabChan:
 					triggered = true
 				default:
 				}
