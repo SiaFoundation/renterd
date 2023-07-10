@@ -460,7 +460,7 @@ func (mgr *uploadManager) renewUploader(u *uploader) {
 		for i := 0; i < len(mgr.uploaders); i++ {
 			if mgr.uploaders[i] == u {
 				mgr.uploaders = append(mgr.uploaders[:i], mgr.uploaders[i+1:]...)
-				go u.Stop()
+				u.Stop()
 				break
 			}
 		}
