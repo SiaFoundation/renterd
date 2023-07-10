@@ -193,7 +193,7 @@ func main() {
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", 10, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
 	flag.Uint64Var(&autopilotCfg.ScannerNumThreads, "autopilot.scannerNumThreads", 100, "number of threads that scan hosts")
-	flag.Uint64Var(&autopilotCfg.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", 2, "number of slabs that the autopilot migrates in parallel per worker")
+	flag.Uint64Var(&autopilotCfg.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", 1, "number of slabs that the autopilot migrates in parallel per worker")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable/disable the autopilot - can be overwritten using the RENTERD_AUTOPILOT_ENABLED environment variable")
 	flag.DurationVar(&nodeCfg.shutdownTimeout, "node.shutdownTimeout", 5*time.Minute, "the timeout applied to the node shutdown")
 	flag.Parse()
