@@ -531,12 +531,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	if jc.Check("could not get contract", err) != nil {
 		return
 	}
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
 	rk := w.deriveRenterKey(c.HostKey)
-	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	rev, err := w.FetchSignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
 	if jc.Check("could not fetch revision", err) != nil {
