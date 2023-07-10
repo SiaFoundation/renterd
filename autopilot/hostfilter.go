@@ -254,7 +254,7 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(c.HostIP, c.HostKey) {
 		reasons = append(reasons, errHostRedundantIP.Error())
 		renew = false
-		refresh = false
+		// NOTE: we don't set refresh to false to continue funding accounts for download
 	}
 
 	usable = len(reasons) == 0

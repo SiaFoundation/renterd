@@ -659,7 +659,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toRenew = append(toRenew, ci)
 		} else if refresh {
 			toRefresh = append(toRefresh, ci)
-		} else {
+		} else if usable {
 			toKeep = append(toKeep, ci.contract.ID)
 		}
 	}
