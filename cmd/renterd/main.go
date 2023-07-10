@@ -197,7 +197,7 @@ func main() {
 	flag.DurationVar(&nodeCfg.shutdownTimeout, "node.shutdownTimeout", 5*time.Minute, "the timeout applied to the node shutdown")
 	flag.Parse()
 
-	log.Println("renterd v0.3.0-beta")
+	log.Println("renterd v0.4.0-beta")
 	log.Println("Network", build.ConsensusNetworkName)
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
