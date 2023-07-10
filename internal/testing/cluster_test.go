@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"os"
 	"reflect"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -65,7 +68,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the worker and request the object.
-	err = w.DeleteObject(context.Background(), "/foo")
+	err = w.DeleteObject(context.Background(), "foo", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,6 +272,139 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
+// TestObjectEntries is an integration test that verifies objects are uploaded,
+// download and deleted from and to the paths we would expect. It is similar to
+// the TestObjectEntries unit test, but uses the worker and bus client to verify
+// paths are passed correctly.
+func TestObjectEntries(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload the following paths
+	uploads := []struct {
+		path string
+		size int
+	}{
+		{"/foo/bar", 1},
+		{"/foo/bat", 2},
+		{"/foo/baz/quux", 3},
+		{"/foo/baz/quuz", 4},
+		{"/gab/guub", 5},
+		{"/fileś/śpecial", 6}, // utf8
+		{"//double/", 7},
+		{"///triple", 8},
+	}
+
+	for _, upload := range uploads {
+		if upload.size == 0 {
+			if err := w.UploadObject(context.Background(), bytes.NewReader(nil), upload.path); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			data := make([]byte, upload.size)
+			frand.Read(data)
+			if err := w.UploadObject(context.Background(), bytes.NewReader(data), upload.path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	tests := []struct {
+		path   string
+		prefix string
+		want   []api.ObjectMetadata
+	}{
+		{"/", "", []api.ObjectMetadata{{Name: "//", Size: 15}, {Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
+		{"//", "", []api.ObjectMetadata{{Name: "///", Size: 8}, {Name: "//double/", Size: 7}}},
+		{"///", "", []api.ObjectMetadata{{Name: "///triple", Size: 8}}},
+		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/", Size: 7}}},
+		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
+		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5}}},
+		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6}}},
+
+		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}}},
+		{"/foo/", "fo", []api.ObjectMetadata{}},
+		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}}},
+		{"/gab/", "/guub", []api.ObjectMetadata{}},
+	}
+	for _, test := range tests {
+		// use the bus client
+		_, got, err := b.Object(context.Background(), test.path, test.prefix, 0, -1)
+		if err != nil {
+			t.Fatal(err, test.path)
+		}
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+		}
+		for offset := 0; offset < len(test.want); offset++ {
+			_, got, err := b.Object(context.Background(), test.path, test.prefix, offset, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0] != test.want[offset] {
+				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
+			}
+		}
+
+		// use the worker client
+		got, err = w.ObjectEntries(context.Background(), test.path, test.prefix, 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+		}
+		for _, entry := range got {
+			if !strings.HasSuffix(entry.Name, "/") {
+				if err := w.DownloadObject(context.Background(), io.Discard, entry.Name); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+
+	// delete all uploads
+	for _, upload := range uploads {
+		err = w.DeleteObject(context.Background(), upload.path, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert root dir is empty
+	if entries, err := w.ObjectEntries(context.Background(), "/", "", 0, -1); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Fatal("there should be no entries left", entries)
+	}
+}
+
 // TestUploadDownloadEmpty is an integration test that verifies empty objects
 // can be uploaded and download correctly.
 func TestUploadDownloadEmpty(t *testing.T) {
@@ -375,6 +511,20 @@ func TestUploadDownloadBasic(t *testing.T) {
 	if !bytes.Equal(data, buffer.Bytes()) {
 		t.Fatal("unexpected")
 	}
+
+	// download again, 32 bytes at a time.
+	for i := uint64(0); i < 4; i++ {
+		offset := i * 32
+		var buffer bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buffer, name, api.DownloadWithRange(offset, 32)); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data[offset:offset+32], buffer.Bytes()) {
+			fmt.Println(data[offset : offset+32])
+			fmt.Println(buffer.Bytes())
+			t.Fatalf("mismatch for offset %v", offset)
+		}
+	}
 }
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
@@ -427,7 +577,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), "")
+	entries, err := cluster.Worker.ObjectEntries(context.Background(), "", "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +604,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries from the worker for unexisting path
-	entries, err = cluster.Worker.ObjectEntries(context.Background(), "bar/")
+	entries, err = cluster.Worker.ObjectEntries(context.Background(), "bar/", "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +702,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 
 		// delete the object
-		if err := w.DeleteObject(context.Background(), name); err != nil {
+		if err := w.DeleteObject(context.Background(), name, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1386,5 +1536,106 @@ func TestContractArchival(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWalletTransactions(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b := cluster.Bus
+
+	// Make sure we get transactions that are spread out over multiple seconds.
+	time.Sleep(time.Second)
+	if err := cluster.MineBlocks(1); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if err := cluster.MineBlocks(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get all transactions of the wallet.
+	allTxns, err := b.WalletTransactions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allTxns) < 5 {
+		t.Fatalf("expected at least 5 transactions, got %v", len(allTxns))
+	}
+	if !sort.SliceIsSorted(allTxns, func(i, j int) bool {
+		return allTxns[i].Timestamp.Unix() > allTxns[j].Timestamp.Unix()
+	}) {
+		t.Fatal("transactions are not sorted by timestamp")
+	}
+
+	// Get the transactions at an offset and compare.
+	txns, err := b.WalletTransactions(context.Background(), api.WalletTransactionsWithOffset(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(txns, allTxns[2:]) {
+		t.Fatal("transactions don't match")
+	}
+
+	// Find the first index that has a different timestamp than the first.
+	var txnIdx int
+	for i := 1; i < len(allTxns); i++ {
+		if allTxns[i].Timestamp.Unix() != allTxns[0].Timestamp.Unix() {
+			txnIdx = i
+			break
+		}
+	}
+	medianTxnTimestamp := allTxns[txnIdx].Timestamp
+
+	// Limit the number of transactions to 5.
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithLimit(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) != 5 {
+		t.Fatalf("expected exactly 5 transactions, got %v", len(txns))
+	}
+
+	// Fetch txns before and since median.
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithBefore(medianTxnTimestamp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) == 0 {
+		for _, txn := range allTxns {
+			fmt.Println(txn.Timestamp.Unix())
+		}
+		t.Fatal("expected at least 1 transaction before median timestamp", medianTxnTimestamp.Unix())
+	}
+	for _, txn := range txns {
+		if txn.Timestamp.Unix() >= medianTxnTimestamp.Unix() {
+			t.Fatal("expected only transactions before median timestamp")
+		}
+	}
+	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithSince(medianTxnTimestamp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) == 0 {
+		for _, txn := range allTxns {
+			fmt.Println(txn.Timestamp.Unix())
+		}
+		t.Fatal("expected at least 1 transaction after median timestamp")
+	}
+	for _, txn := range txns {
+		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
+			t.Fatal("expected only transactions after median timestamp", medianTxnTimestamp.Unix())
+		}
 	}
 }

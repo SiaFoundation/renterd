@@ -635,11 +635,13 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 }
 
 func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
-	if limit <= -1 {
-		limit = math.MaxInt
-	}
+	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
+	}
+
+	if limit <= -1 {
+		limit = math.MaxInt
 	}
 
 	concat := func(a, b string) string {
@@ -649,23 +651,24 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 		return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 	}
 
-	// base query
-	query := s.db.Raw(fmt.Sprintf(`SELECT SUM(size) AS size, CASE slashindex WHEN 0 THEN %s ELSE %s END AS name
+	query := s.db.Raw(fmt.Sprintf(`
+SELECT
+	SUM(size) AS size,
+	CASE slashindex
+	WHEN 0 THEN %s
+	ELSE %s
+	END AS name
+FROM (
+	SELECT size, trimmed, INSTR(trimmed, "/") AS slashindex
 	FROM (
-		SELECT size, trimmed, INSTR(trimmed, ?) AS slashindex
-		FROM (
-			SELECT size, SUBSTR(object_id, ?) AS trimmed
-			FROM objects
-			WHERE object_id LIKE ?
-		) AS i
-	) AS m
-	GROUP BY name
-	LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, "/", utf8.RuneCountInString(path)+1, path+"%", limit, offset)
-
-	// apply prefix
-	if prefix != "" {
-		query = s.db.Raw(fmt.Sprintf("SELECT * FROM (?) AS i WHERE name LIKE %s", concat("?", "?")), query, path, prefix+"%")
-	}
+		SELECT size, SUBSTR(object_id, ?) AS trimmed
+		FROM objects
+		WHERE object_id LIKE ?
+	) AS i
+) AS m
+GROUP BY name
+HAVING name LIKE ? AND name != ?
+LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), path, limit, offset)
 
 	var metadata []api.ObjectMetadata
 	err := query.Scan(&metadata).Error
@@ -675,8 +678,8 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 	return metadata, nil
 }
 
-func (s *SQLStore) Object(ctx context.Context, key string) (object.Object, error) {
-	obj, err := s.object(ctx, key)
+func (s *SQLStore) Object(ctx context.Context, path string) (object.Object, error) {
+	obj, err := s.object(ctx, path)
 	if err != nil {
 		return object.Object{}, err
 	}
@@ -774,7 +777,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 	return fetchedContracts, nil
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, key, contractSet string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
@@ -796,7 +799,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key, contractSet string, o 
 
 		// Try to delete. We want to get rid of the object and its
 		// slices if it exists.
-		_, err := deleteObject(tx, key)
+		_, err := deleteObject(tx, path)
 		if err != nil {
 			return err
 		}
@@ -807,7 +810,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, key, contractSet string, o 
 			return err
 		}
 		obj := dbObject{
-			ObjectID: key,
+			ObjectID: path,
 			Key:      objKey,
 			Size:     o.Size(),
 		}
@@ -1174,7 +1177,7 @@ END AS health`).
 }
 
 // object retrieves a raw object from the store.
-func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
+func (s *SQLStore) object(ctx context.Context, path string) (rawObject, error) {
 	// NOTE: we LEFT JOIN here because empty objects are valid and need to be
 	// included in the result set, when we convert the rawObject before
 	// returning it we'll check for SlabID and/or SectorID being 0 and act
@@ -1187,14 +1190,14 @@ func (s *SQLStore) object(ctx context.Context, key string) (rawObject, error) {
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
-		Where("o.object_id = ?", key).
+		Where("o.object_id = ?", path).
 		Order("o.id ASC").
 		Order("sla.id ASC").
 		Order("sli.offset ASC").
 		Order("sec.id ASC").
 		Scan(&rows)
 
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
 		return nil, api.ErrObjectNotFound
 	}
 
@@ -1459,24 +1462,26 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func deleteObject(tx *gorm.DB, key string) (int64, error) {
-	tx = tx.Where(&dbObject{ObjectID: key}).Delete(&dbObject{})
+func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
+	tx = tx.Where(&dbObject{ObjectID: path}).Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
+	numDeleted = tx.RowsAffected
 	if err := pruneSlabs(tx); err != nil {
 		return 0, err
 	}
-	return tx.RowsAffected, nil
+	return
 }
 
-func deleteObjects(tx *gorm.DB, path string) (int64, error) {
+func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 	tx = tx.Exec("DELETE FROM objects WHERE object_id LIKE ?", path+"%")
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
+	numDeleted = tx.RowsAffected
 	if err := pruneSlabs(tx); err != nil {
 		return 0, err
 	}
-	return tx.RowsAffected, nil
+	return
 }
