@@ -1085,7 +1085,6 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"POST   /rhp/broadcast/:id":   w.rhpBroadcastHandler,
 		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
 		"POST   /rhp/scan":            w.rhpScanHandler,
 		"POST   /rhp/form":            w.rhpFormHandler,
@@ -1100,9 +1099,10 @@ func (w *worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
-		"GET    /objects/*path": w.objectsHandlerGET,
-		"PUT    /objects/*path": w.objectsHandlerPUT,
-		"DELETE /objects/*path": w.objectsHandlerDELETE,
+		"POST   /contract/:id/broadcast": w.rhpBroadcastHandler,
+		"GET    /objects/*path":          w.objectsHandlerGET,
+		"PUT    /objects/*path":          w.objectsHandlerPUT,
+		"DELETE /objects/*path":          w.objectsHandlerDELETE,
 	}))
 }
 
