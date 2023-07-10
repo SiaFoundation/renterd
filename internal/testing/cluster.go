@@ -813,14 +813,15 @@ func testWorkerCfg() node.WorkerConfig {
 
 func testApCfg() node.AutopilotConfig {
 	return node.AutopilotConfig{
-		ID:                       api.DefaultAutopilotID,
-		AccountsRefillInterval:   time.Second,
-		Heartbeat:                time.Second,
-		MigrationHealthCutoff:    0.99,
-		RevisionSubmissionBuffer: 0,
-		ScannerInterval:          time.Second,
-		ScannerBatchSize:         10,
-		ScannerNumThreads:        1,
-		ScannerMinRecentFailures: 5,
+		ID:                             api.DefaultAutopilotID,
+		AccountsRefillInterval:         time.Second,
+		Heartbeat:                      time.Second,
+		MigrationHealthCutoff:          0.99,
+		MigratorParallelSlabsPerWorker: 1,
+		RevisionSubmissionBuffer:       0,
+		ScannerInterval:                time.Second,
+		ScannerBatchSize:               10,
+		ScannerNumThreads:              1,
+		ScannerMinRecentFailures:       5,
 	}
 }
