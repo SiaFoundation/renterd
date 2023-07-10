@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -56,7 +57,7 @@ type (
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-		Transactions(since time.Time, max int) ([]wallet.Transaction, error)
+		Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
 
@@ -214,12 +215,16 @@ func (b *bus) walletAddressHandler(jc jape.Context) {
 }
 
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
-	var since time.Time
-	max := -1
-	if jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil || jc.DecodeForm("max", &max) != nil {
+	var before, since time.Time
+	offset := 0
+	limit := -1
+	if jc.DecodeForm("before", (*api.ParamTime)(&before)) != nil ||
+		jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil ||
+		jc.DecodeForm("offset", &offset) != nil ||
+		jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	txns, err := b.w.Transactions(since, max)
+	txns, err := b.w.Transactions(before, since, offset, limit)
 	if jc.Check("couldn't load transactions", err) == nil {
 		jc.Encode(txns)
 	}
@@ -1204,8 +1209,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 
 	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
-		api.SettingGouging:    api.DefaultGougingSettings,
-		api.SettingRedundancy: api.DefaultRedundancySettings,
+		api.SettingGouging:    build.DefaultGougingSettings,
+		api.SettingRedundancy: build.DefaultRedundancySettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
@@ -1224,7 +1229,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	} else if err := rs.Validate(); err != nil {
 		l.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
-		bytes, _ := json.Marshal(api.DefaultRedundancySettings)
+		bytes, _ := json.Marshal(build.DefaultRedundancySettings)
 		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
 			return nil, err
 		}
@@ -1238,9 +1243,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		return nil, err
 	} else if err := gs.Validate(); err != nil {
 		// compat: apply default EA gouging settings
-		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
-		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
-		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
+		gs.MinMaxEphemeralAccountBalance = build.DefaultGougingSettings.MinMaxEphemeralAccountBalance
+		gs.MinPriceTableValidity = build.DefaultGougingSettings.MinPriceTableValidity
+		gs.MinAccountExpiry = build.DefaultGougingSettings.MinAccountExpiry
 		if err := gs.Validate(); err == nil {
 			l.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
 			bytes, _ := json.Marshal(gs)
@@ -1249,7 +1254,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 			}
 		} else {
 			// compat: apply default host block leeway settings
-			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
+			gs.HostBlockHeightLeeway = build.DefaultGougingSettings.HostBlockHeightLeeway
 			if err := gs.Validate(); err == nil {
 				l.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
 				bytes, _ := json.Marshal(gs)
@@ -1258,7 +1263,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 				}
 			} else {
 				l.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
-				bytes, _ := json.Marshal(api.DefaultGougingSettings)
+				bytes, _ := json.Marshal(build.DefaultGougingSettings)
 				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
 					return nil, err
 				}
@@ -1271,7 +1276,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 	if err != nil {
 		return nil, err
 	}
-	b.accounts = newAccounts(accounts)
+	b.accounts = newAccounts(accounts, b.logger)
 	return b, nil
 }
 

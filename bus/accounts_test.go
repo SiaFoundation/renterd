@@ -7,11 +7,12 @@ import (
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 func TestAccountLocking(t *testing.T) {
-	accounts := newAccounts(nil)
+	accounts := newAccounts(nil, zap.NewNop().Sugar())
 
 	var accountID rhpv3.Account
 	frand.Read(accountID[:])

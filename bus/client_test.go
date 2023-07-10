@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.uber.org/zap"
@@ -54,7 +55,7 @@ func TestClient(t *testing.T) {
 	// fetch redundancy settings and assert they're configured to the default values
 	if rs, err := c.RedundancySettings(ctx); err != nil {
 		t.Fatal(err)
-	} else if rs.MinShards != api.DefaultRedundancySettings.MinShards || rs.TotalShards != api.DefaultRedundancySettings.TotalShards {
+	} else if rs.MinShards != build.DefaultRedundancySettings.MinShards || rs.TotalShards != build.DefaultRedundancySettings.TotalShards {
 		t.Fatal("unexpected redundancy settings", rs)
 	}
 }

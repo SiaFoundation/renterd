@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -59,20 +60,55 @@ var (
 	// when trying to use a renewed contract.
 	errMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
 
+	// errPriceTableExpired is returned by the host when the price table that
+	// corresponds to the id it was given is already expired and thus no longer
+	// valid.
+	errPriceTableExpired = errors.New("price table requested is expired")
+
+	// errPriceTableNotFound is returned by the host when it can not find a
+	// price table that corresponds with the id we sent it.
+	errPriceTableNotFound = errors.New("price table not found")
+
+	// errSectorNotFound is returned by the host when it can not find the
+	// requested sector.
+	errSectorNotFound = errors.New("sector not found")
+
 	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
 	// unsynced and has disabled its account manager.
 	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
-
-	// errTransportClosed is returned when using a transportV3 which was already
-	// closed.
-	errTransportClosed = errors.New("transport closed")
 )
+
+func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
+func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxExceeded) }
+func isClosedStream(err error) bool {
+	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
+}
+func isInsufficientFunds(err error) bool   { return isError(err, ErrInsufficientFunds) }
+func isPriceTableExpired(err error) bool   { return isError(err, errPriceTableExpired) }
+func isPriceTableNotFound(err error) bool  { return isError(err, errPriceTableNotFound) }
+func isSectorNotFound(err error) bool      { return isError(err, errSectorNotFound) }
+func isWithdrawalsInactive(err error) bool { return isError(err, errWithdrawalsInactive) }
+
+func isError(err error, target error) bool {
+	if err == nil {
+		return err == target
+	}
+	// compare error first
+	if errors.Is(err, target) {
+		return true
+	}
+	// then compare the string in case the error was returned by a host
+	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
+}
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
-	mu       sync.Mutex
-	refCount uint64
-	t        *rhpv3.Transport
+	refCount uint64 // locked by pool
+
+	mu         sync.Mutex
+	hostKey    types.PublicKey
+	siamuxAddr string
+	t          *rhpv3.Transport
 }
 
 type streamV3 struct {
@@ -86,32 +122,20 @@ func (s *streamV3) Close() error {
 	return s.Stream.Close()
 }
 
-// Close decrements the refcounter and closes the transport if the refcounter
-// reaches 0.
-func (t *transportV3) Close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Decrement refcounter.
-	t.refCount--
-
-	// Close the transport if the refcounter is zero.
-	if t.refCount == 0 {
-		err := t.t.Close()
-		t.t = nil
-		return err
-	}
-	return nil
-}
-
 // DialStream dials a new stream on the transport.
 func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
+	if t.t == nil {
+		start := time.Now()
+		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
+		if err != nil {
+			t.mu.Unlock()
+			return nil, fmt.Errorf("DialStream: could not dial transport: %w (%v)", err, time.Since(start))
+		}
+		t.t = newTransport
+	}
 	transport := t.t
 	t.mu.Unlock()
-	if transport == nil {
-		return nil, errTransportClosed
-	}
 
 	// Close the stream when the context is closed to unblock any reads or
 	// writes.
@@ -153,47 +177,28 @@ func newTransportPoolV3(w *worker) *transportPoolV3 {
 	}
 }
 
-func (p *transportPoolV3) newTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*transportV3, error) {
-	// Get or create a transport for the given siamux address.
-	p.mu.Lock()
-	t, found := p.pool[siamuxAddr]
-	if !found {
-		t = &transportV3{}
-		p.pool[siamuxAddr] = t
+func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
+	// Dial host.
+	conn, err := dial(ctx, siamuxAddr, hostKey)
+	if err != nil {
+		return nil, err
 	}
 
-	// Lock the transport and increment its refcounter.
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Unlock the pool now that the transport is locked.
-	p.mu.Unlock()
-
-	// Init the transport if necessary.
-	if t.t == nil {
-		conn, err := dial(ctx, siamuxAddr, hostKey)
-		if err != nil {
-			return nil, err
-		}
-
-		doneChan := make(chan struct{})
-		defer close(doneChan)
-		go func() {
-			select {
-			case <-doneChan:
-			case <-ctx.Done():
-				_ = conn.Close()
-			}
-		}()
-		t.t, err = rhpv3.NewRenterTransport(conn, hostKey)
-		if err != nil {
-			return nil, err
-		}
+	// Upgrade to rhpv3.Transport.
+	var t *rhpv3.Transport
+	done := make(chan struct{})
+	go func() {
+		t, err = rhpv3.NewRenterTransport(conn, hostKey)
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		conn.Close()
+		<-done
+		return nil, ctx.Err()
+	case <-done:
+		return t, err
 	}
-
-	// Increment the refcounter upon success.
-	t.refCount++
-	return t, nil
 }
 
 func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
@@ -202,12 +207,36 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 		p.recordInteractions(mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
-	t, err := p.newTransport(ctx, siamuxAddr, hostKey)
-	if err != nil {
-		return err
+
+	// Create or fetch transport.
+	p.mu.Lock()
+	t, found := p.pool[siamuxAddr]
+	if !found {
+		t = &transportV3{
+			hostKey:    hostKey,
+			siamuxAddr: siamuxAddr,
+		}
+		p.pool[siamuxAddr] = t
 	}
-	defer t.Close()
-	return fn(ctx, t)
+	t.refCount++
+	p.mu.Unlock()
+
+	// Execute function.
+	err = fn(ctx, t)
+
+	// Decrement refcounter again and clean up pool.
+	p.mu.Lock()
+	t.refCount--
+	if t.refCount == 0 {
+		// Cleanup
+		if t.t != nil {
+			_ = t.t.Close()
+			t.t = nil
+		}
+		delete(p.pool, siamuxAddr)
+	}
+	p.mu.Unlock()
+	return err
 }
 
 // FetchRevision tries to fetch a contract revision from the host. We pass in
@@ -258,9 +287,9 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 				// Fetch pt.
 				pt, err := h.priceTable(ctx, nil)
 				if err != nil {
-					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
+					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
-				cost = pt.LatestRevisionCost
+				cost = pt.LatestRevisionCost.Add(pt.UpdatePriceTableCost) // add cost of fetching the pricetable since we might need a new one and it's better to stay pessimistic
 				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
@@ -369,38 +398,6 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 	})
 }
 
-func isBalanceInsufficient(err error) bool {
-	return isError(err, errBalanceInsufficient)
-}
-
-func isBalanceMaxExceeded(err error) bool {
-	return isError(err, errBalanceMaxExceeded)
-}
-
-func isClosedStream(err error) bool {
-	return isError(err, mux.ErrClosedStream)
-}
-
-func isInsufficientFunds(err error) bool {
-	return isError(err, ErrInsufficientFunds)
-}
-
-func isWithdrawalsInactive(err error) bool {
-	return isError(err, errWithdrawalsInactive)
-}
-
-func isError(err error, target error) bool {
-	if err == nil {
-		return err == target
-	}
-	// compare error first
-	if errors.Is(err, target) {
-		return true
-	}
-	// then compare the string in case the error was returned by a host
-	return strings.Contains(err.Error(), target.Error())
-}
-
 type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
@@ -495,7 +492,11 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	if err != nil {
 		return err
 	}
-	defer a.bus.UnlockAccount(ctx, a.id, lockID)
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		a.bus.UnlockAccount(unlockCtx, a.id, lockID)
+		cancel()
+	}()
 
 	// return early if the account needs to sync
 	if account.RequiresSync {
@@ -525,7 +526,9 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 	}
 
 	// if an amount was returned, we withdraw it.
-	errAdd := a.bus.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
+	addCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	errAdd := a.bus.AddBalance(addCtx, a.id, a.host, new(big.Int).Neg(amt.Big()))
 	if errAdd != nil {
 		err = fmt.Errorf("%w; failed to add balance to account, error: %v", err, errAdd)
 	}
@@ -594,7 +597,7 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 	return pt.HostPriceTable, nil
 }
 
-func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	pt, err := h.priceTable(ctx, nil)
 	if err != nil {
 		return err
@@ -608,7 +611,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 
 	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			cost, err := readSectorCost(pt)
+			cost, err := readSectorCost(pt, uint64(length))
 			if err != nil {
 				return err
 			}
@@ -640,7 +643,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 		return types.Hash256{}, err
 	}
 	if rev.RevisionNumber == math.MaxUint64 {
-		return types.Hash256{}, errors.New("revision number has reached max")
+		return types.Hash256{}, fmt.Errorf("revision number has reached max, fcid %v", rev.ParentID)
 	}
 	payment, ok := rhpv3.PayByContract(&rev, expectedCost, h.acc.id, h.renterKey)
 	if !ok {
@@ -662,9 +665,9 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 }
 
 // readSectorCost returns an overestimate for the cost of reading a sector from a host
-func readSectorCost(pt rhpv3.HostPriceTable) (types.Currency, error) {
+func readSectorCost(pt rhpv3.HostPriceTable, length uint64) (types.Currency, error) {
 	rc := pt.BaseCost()
-	rc = rc.Add(pt.ReadSectorCost(rhpv2.SectorSize))
+	rc = rc.Add(pt.ReadSectorCost(length))
 	cost, _ := rc.Total()
 
 	// overestimate the cost by 5%
@@ -1060,7 +1063,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
+func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -1070,8 +1073,8 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
-	e.WriteUint64(length)
-	e.WriteUint64(offset)
+	e.WriteUint64(uint64(length))
+	e.WriteUint64(uint64(offset))
 	merkleRoot.EncodeTo(e)
 	e.Flush()
 

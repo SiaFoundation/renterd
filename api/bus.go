@@ -2,7 +2,9 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
+	"net/url"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -40,6 +42,10 @@ var (
 	// the database.
 	ErrObjectNotFound = errors.New("object not found")
 
+	// ErrObjectCorrupted is returned if we were unable to retrieve the object
+	// from the database.
+	ErrObjectCorrupted = errors.New("object corrupted")
+
 	// ErrContractSetNotFound is returned when a contract can't be retrieved
 	// from the database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
@@ -47,30 +53,6 @@ var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
-
-	// DefaultRedundancySettings define the default redundancy settings the bus
-	// is configured with on startup. These values can be adjusted using the
-	// settings API.
-	DefaultRedundancySettings = RedundancySettings{
-		MinShards:   10,
-		TotalShards: 30,
-	}
-
-	// DefaultGougingSettings define the default gouging settings the bus is
-	// configured with on startup. These values can be adjusted using the
-	// settings API.
-	DefaultGougingSettings = GougingSettings{
-		MinMaxCollateral:              types.Siacoins(10),                                  // at least up to 10 SC per contract
-		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                       // 1mS per RPC
-		MaxContractPrice:              types.Siacoins(15),                                  // 15 SC per contract
-		MaxDownloadPrice:              types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxUploadPrice:                types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxStoragePrice:               types.Siacoins(3000).Div64(1 << 40).Div64(144 * 30), // 3000 SC per TiB per month
-		HostBlockHeightLeeway:         6,                                                   // 6 blocks
-		MinPriceTableValidity:         5 * time.Minute,                                     // 5 minutes
-		MinAccountExpiry:              24 * time.Hour,                                      // 1 day
-		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
-	}
 )
 
 // ArchiveContractsRequest is the request type for the /contracts/archive endpoint.
@@ -211,6 +193,33 @@ type WalletPrepareRenewRequest struct {
 type WalletPrepareRenewResponse struct {
 	ToSign         []types.Hash256     `json:"toSign"`
 	TransactionSet []types.Transaction `json:"transactionSet"`
+}
+
+// WalletTransactionsOption is an option for the WalletTransactions method.
+type WalletTransactionsOption func(url.Values)
+
+func WalletTransactionsWithBefore(before time.Time) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("before", before.Format(time.RFC3339))
+	}
+}
+
+func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("since", since.Format(time.RFC3339))
+	}
+}
+
+func WalletTransactionsWithLimit(limit int) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("limit", fmt.Sprint(limit))
+	}
+}
+
+func WalletTransactionsWithOffset(offset int) WalletTransactionsOption {
+	return func(q url.Values) {
+		q.Set("offset", fmt.Sprint(offset))
+	}
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.

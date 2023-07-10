@@ -109,7 +109,7 @@ type Transaction struct {
 type SingleAddressStore interface {
 	Balance() (types.Currency, error)
 	UnspentSiacoinElements() ([]SiacoinElement, error)
-	Transactions(since time.Time, max int) ([]Transaction, error)
+	Transactions(before, since time.Time, offset, limit int) ([]Transaction, error)
 }
 
 // A TransactionPool contains transactions that have not yet been included in a
@@ -154,8 +154,8 @@ func (w *SingleAddressWallet) UnspentOutputs() ([]SiacoinElement, error) {
 
 // Transactions returns up to max transactions relevant to the wallet that have
 // a timestamp later than since.
-func (w *SingleAddressWallet) Transactions(since time.Time, max int) ([]Transaction, error) {
-	return w.store.Transactions(since, max)
+func (w *SingleAddressWallet) Transactions(before, since time.Time, offset, limit int) ([]Transaction, error) {
+	return w.store.Transactions(before, since, offset, limit)
 }
 
 // FundTransaction adds siacoin inputs worth at least the requested amount to
@@ -303,11 +303,19 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	// collect outputs that cover the total amount
 	var inputs []SiacoinElement
 	want := amount.Mul64(uint64(outputs))
+	var amtInUse, amtSameValue, amtNotMatured types.Currency
 	for _, sce := range utxos {
 		inUse := w.isOutputUsed(sce.ID) || inPool[sce.ID]
 		matured := cs.Index.Height >= sce.MaturityHeight
 		sameValue := sce.Value.Equals(amount)
-		if inUse || sameValue || !matured {
+		if inUse {
+			amtInUse = amtInUse.Add(sce.Value)
+			continue
+		} else if sameValue {
+			amtSameValue = amtSameValue.Add(sce.Value)
+			continue
+		} else if !matured {
+			amtNotMatured = amtNotMatured.Add(sce.Value)
 			continue
 		}
 
@@ -321,7 +329,8 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	// not enough outputs found
 	fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
 	if sumOut := SumOutputs(inputs); sumOut.Cmp(want.Add(fee)) < 0 {
-		return types.Transaction{}, nil, fmt.Errorf("%w: %v < %v + %v (inputs < needed + txnFee)", ErrInsufficientBalance, sumOut.String(), want.String(), fee.String())
+		return types.Transaction{}, nil, fmt.Errorf("%w: inputs %v < needed %v + txnFee %v (usable: %v, inUse: %v, sameValue: %v, notMatured: %v)",
+			ErrInsufficientBalance, sumOut.String(), want.String(), fee.String(), sumOut.String(), amtInUse.String(), amtSameValue.String(), amtNotMatured.String())
 	}
 
 	// set the miner fee

@@ -2,6 +2,8 @@ package api
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -147,6 +149,21 @@ type RHPRegistryUpdateRequest struct {
 	RegistryValue rhpv3.RegistryValue `json:"registryValue"`
 }
 
+// DownloadStatsResponse is the response type for the /stats/downloads endpoint.
+type DownloadStatsResponse struct {
+	AvgDownloadSpeedMBPS float64           `json:"avgDownloadSpeedMBPS"`
+	AvgOverdrivePct      float64           `json:"avgOverdrivePct"`
+	HealthyDownloaders   uint64            `json:"healthyDownloaders"`
+	NumDownloaders       uint64            `json:"numDownloaders"`
+	DownloadersStats     []DownloaderStats `json:"downloadersStats"`
+}
+
+type DownloaderStats struct {
+	AvgSectorDownloadSpeedMBPS float64         `json:"avgSectorDownloadSpeedMBPS"`
+	HostKey                    types.PublicKey `json:"hostKey"`
+	NumDownloads               uint64          `json:"numDownloads"`
+}
+
 // UploadStatsResponse is the response type for the /stats/uploads endpoint.
 type UploadStatsResponse struct {
 	AvgSlabUploadSpeedMBPS float64         `json:"avgSlabUploadSpeedMBPS"`
@@ -178,5 +195,13 @@ func UploadWithRedundancy(minShards, totalShards int) UploadOption {
 func UploadWithContractSet(set string) UploadOption {
 	return func(v url.Values) {
 		v.Set(QueryStringParamContractSet, set)
+	}
+}
+
+type DownloadObjectOption func(http.Header)
+
+func DownloadWithRange(offset, length uint64) DownloadObjectOption {
+	return func(h http.Header) {
+		h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
 	}
 }

@@ -3,9 +3,11 @@ package object
 import (
 	"bytes"
 	"crypto/cipher"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"io"
+	"math"
 
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
@@ -40,17 +42,25 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 // Encrypt returns a cipher.StreamReader that encrypts r with k.
 func (k EncryptionKey) Encrypt(r io.Reader) cipher.StreamReader {
 	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], make([]byte, 24))
-	return cipher.StreamReader{S: c, R: r}
+	rs := &rekeyStream{key: k.entropy[:], c: c}
+	return cipher.StreamReader{S: rs, R: r}
 }
 
 // Decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
 // specified offset.
-func (k EncryptionKey) Decrypt(w io.Writer, offset int64) cipher.StreamWriter {
-	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], make([]byte, 24))
+func (k EncryptionKey) Decrypt(w io.Writer, offset uint64) cipher.StreamWriter {
+	nonce64 := offset / (64 * math.MaxUint32)
+	offset %= 64 * math.MaxUint32
+
+	nonce := make([]byte, 24)
+	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
+	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce)
 	c.SetCounter(uint32(offset / 64))
+
 	var buf [64]byte
 	c.XORKeyStream(buf[:offset%64], buf[:offset%64])
-	return cipher.StreamWriter{S: c, W: w}
+	rs := &rekeyStream{key: k.entropy[:], c: c, counter: offset, nonce: nonce64}
+	return cipher.StreamWriter{S: rs, W: w}
 }
 
 // GenerateEncryptionKey returns a random encryption key.
@@ -120,4 +130,32 @@ func SplitSlabs(slabs []Slab, lengths []int) [][]SlabSlice {
 // with the specified length.
 func SingleSlabs(slabs []Slab, length int) []SlabSlice {
 	return SplitSlabs(slabs, []int{length})[0]
+}
+
+type rekeyStream struct {
+	key []byte
+	c   *chacha20.Cipher
+
+	counter uint64
+	nonce   uint64
+}
+
+func (rs *rekeyStream) XORKeyStream(dst, src []byte) {
+	rs.counter += uint64(len(src))
+	if rs.counter < 64*math.MaxUint32 {
+		rs.c.XORKeyStream(dst, src)
+		return
+	}
+	// counter overflow; xor remaining bytes, then increment nonce and xor again
+	rem := 64*math.MaxUint32 - (rs.counter - uint64(len(src)))
+	rs.counter -= 64 * math.MaxUint32
+	rs.c.XORKeyStream(dst[:rem], src[:rem])
+	// NOTE: we increment the last 8 bytes because XChaCha uses the
+	// first 16 bytes to derive a new key; leaving them alone means
+	// the key will be stable, which might be useful.
+	rs.nonce++
+	nonce := make([]byte, 24)
+	binary.LittleEndian.PutUint64(nonce[16:], rs.nonce)
+	rs.c, _ = chacha20.NewUnauthenticatedCipher(rs.key, nonce)
+	rs.c.XORKeyStream(dst[rem:], src[rem:])
 }

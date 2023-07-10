@@ -142,28 +142,6 @@ func (m metricCommon) IsSuccess() bool {
 	return isSuccessfulInteraction(m.err)
 }
 
-// MetricHostDial is a metric that contains the result of a dial attempt.
-type MetricHostDial struct {
-	metricCommon
-}
-
-func (m MetricHostDial) Result() interface{} {
-	cr := m.commonResult()
-	er := hostdb.ErrorResult{Error: errToStr(m.err)}
-	if m.err != nil {
-		return struct {
-			metricResultCommon
-			hostdb.ErrorResult
-		}{cr, er}
-	} else {
-		return struct {
-			metricResultCommon
-		}{cr}
-	}
-}
-
-func (m MetricHostDial) Type() string { return "dial" }
-
 // MetricPriceTableUpdate is a metric that contains the result of fetching a
 // price table.
 type MetricPriceTableUpdate struct {
