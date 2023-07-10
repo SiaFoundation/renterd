@@ -142,6 +142,7 @@ type Bus interface {
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
+	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 

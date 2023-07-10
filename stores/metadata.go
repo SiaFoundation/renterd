@@ -597,6 +597,22 @@ func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
 		Error
 }
 
+func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (_ api.ContractMetadata, err error) {
+	var contract dbContract
+
+	err = s.db.
+		Where(&dbContract{ContractCommon: ContractCommon{RenewedFrom: fileContractID(renewedFrom)}}).
+		Preload("Host").
+		Take(&contract).
+		Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = ErrContractNotFound
+		return
+	}
+
+	return contract.convert(), nil
+}
+
 func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt

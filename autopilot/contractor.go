@@ -1163,8 +1163,8 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 
 	// sanity check the endheight is not the same on renewals
 	endHeight := endHeight(cfg, state.period)
-	if endHeight == rev.EndHeight() {
-		return api.ContractMetadata{}, false, errors.New("renewal endheight is the same as the current contract endheight")
+	if endHeight <= rev.EndHeight() {
+		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
 	}
 
 	// calculate the host collateral

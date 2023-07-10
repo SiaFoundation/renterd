@@ -391,6 +391,12 @@ func (c *Client) AncestorContracts(ctx context.Context, fcid types.FileContractI
 	return
 }
 
+// RenewedContract returns the renewed contract for the given ID.
+func (c *Client) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (contract api.ContractMetadata, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/renewed/%s", renewedFrom), &contract)
+	return
+}
+
 // SetContractSet adds the given contracts to the given set.
 func (c *Client) SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)

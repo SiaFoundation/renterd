@@ -503,9 +503,15 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal("shouldn't return any slabs", len(slabs))
 	}
 
+	// Assert we can't fetch the renewed contract.
+	_, err = cs.RenewedContract(context.Background(), fcid1)
+	if !errors.Is(err, ErrContractNotFound) {
+		t.Fatal("unexpected")
+	}
+
 	// Renew it.
 	fcid1Renewed := types.FileContractID{2, 2, 2, 2, 2}
-	renewed := rhpv2.ContractRevision{
+	rev := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:         fcid1Renewed,
 			UnlockConditions: uc,
@@ -517,8 +523,17 @@ func TestRenewedContract(t *testing.T) {
 	}
 	newContractTotal := types.NewCurrency64(222)
 	newContractStartHeight := uint64(200)
-	if _, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid1); err != nil {
+	if _, err := cs.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1); err != nil {
 		t.Fatal(err)
+	}
+
+	// Assert we can fetch the renewed contract.
+	renewed, err := cs.RenewedContract(context.Background(), fcid1)
+	if err != nil {
+		t.Fatal("unexpected", err)
+	}
+	if renewed.ID != fcid1Renewed {
+		t.Fatal("unexpected")
 	}
 
 	// make sure the contract set was updated.
@@ -605,7 +620,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Renew it once more.
 	fcid3 := types.FileContractID{3, 3, 3, 3, 3}
-	renewed = rhpv2.ContractRevision{
+	rev = rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:         fcid3,
 			UnlockConditions: uc,
@@ -619,7 +634,7 @@ func TestRenewedContract(t *testing.T) {
 	newContractStartHeight = uint64(300)
 
 	// Assert the renewed contract is returned
-	renewedContract, err := cs.AddRenewedContract(ctx, renewed, newContractTotal, newContractStartHeight, fcid1Renewed)
+	renewedContract, err := cs.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1Renewed)
 	if err != nil {
 		t.Fatal(err)
 	}
