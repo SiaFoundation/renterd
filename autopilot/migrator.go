@@ -2,15 +2,22 @@ package autopilot
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
+)
+
+var (
+	alertMigrationID = frand.Entropy256() // constnt across restarts
 )
 
 const (
@@ -172,6 +179,14 @@ OUTER:
 
 		// log the updated list of slabs to migrate
 		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
+
+		// register an alert to notify users about ongoing migrations.
+		m.ap.alerts.Register(alerts.Alert{
+			ID:        alertMigrationID,
+			Severity:  alerts.SeverityInfo,
+			Message:   fmt.Sprintf("Migrating %d slabs", len(toMigrate)),
+			Timestamp: time.Now(),
+		})
 
 		// return if there are no slabs to migrate
 		if len(toMigrate) == 0 {

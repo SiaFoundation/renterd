@@ -15,6 +15,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
@@ -132,14 +133,15 @@ type (
 )
 
 type bus struct {
-	s   Syncer
-	cm  ChainManager
-	tp  TransactionPool
-	w   Wallet
-	hdb HostDB
-	as  AutopilotStore
-	ms  MetadataStore
-	ss  SettingStore
+	alerts *alerts.Manager
+	s      Syncer
+	cm     ChainManager
+	tp     TransactionPool
+	w      Wallet
+	hdb    HostDB
+	as     AutopilotStore
+	ms     MetadataStore
+	ss     SettingStore
 
 	eas EphemeralAccountStore
 
@@ -1001,6 +1003,21 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
+func (b *bus) handleGETAlerts(c jape.Context) {
+	c.Encode(b.alerts.Active())
+}
+
+func (b *bus) handlePOSTAlertsDismiss(c jape.Context) {
+	var ids []types.Hash256
+	if err := c.Decode(&ids); err != nil {
+		return
+	} else if len(ids) == 0 {
+		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+		return
+	}
+	b.alerts.Dismiss(ids...)
+}
+
 func (b *bus) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(b.accounts.Accounts())
 }
@@ -1190,6 +1207,7 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
+		alerts:        alerts.NewManager(),
 		s:             s,
 		cm:            cm,
 		tp:            tp,
@@ -1281,6 +1299,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
+		"GET    /alerts":                    b.handleGETAlerts,
+		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
 		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
