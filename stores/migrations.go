@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-gormigrate/gormigrate/v2"
@@ -142,6 +141,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00002_dropconstraintslabcsid",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00002_dropconstraintslabcsid(tx, logger)
+			},
+			Rollback: nil,
+		},
 	}
 
 	// Create migrator.
@@ -232,18 +238,30 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 	}
 
 	if fillSlabContractSetID {
-		// Compat code for databases that don't have the db_contract_set_id.
-		// Since we don't know what contract set a slab was uploaded with, we
-		// associate all slabs with the autopilot set.
-		logger.Info(ctx, "slabs table is missing 'db_contract_set_id' column - adding it and associating slabs with 'autopilot' set if set exists")
+		// Compat code for databases that don't have the db_contract_set_id. We
+		// have to assign all slabs to a contract set, if we only have one
+		// contract set we use that one but if we have 0 or more than 1 we
+		// create a migration set.
+		var sets []dbContractSet
+		if err := txn.Find(&sets).Error; err != nil {
+			return fmt.Errorf("failed to retrieve contract sets from the database: %w", err)
+		}
+
+		logFn := logger.Info
 		var cs dbContractSet
-		err := txn.Take(&cs, "name = ?", "autopilot").Error
-		if err == nil {
-			if err := txn.Exec("UPDATE slabs SET db_contract_set_id = ? WHERE slabs.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
-				return fmt.Errorf("failed to update slab contract set ID: %w", err)
+		if len(sets) != 1 {
+			cs = dbContractSet{Name: "migration-slab-contract-set-id"}
+			if err := txn.FirstOrCreate(&cs).Error; err != nil {
+				return fmt.Errorf("failed to create migration set: %w", err)
 			}
-		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("failed to fetch autopilot contract set: %w", err)
+			logFn = logger.Warn // warn to alert the user of the migration set
+		} else {
+			cs = sets[0]
+		}
+
+		logFn(ctx, fmt.Sprintf("slabs table is missing 'db_contract_set_id' column - adding it and associating slabs with the contract set '%s'", cs.Name))
+		if err := txn.Exec("UPDATE slabs SET db_contract_set_id = ? WHERE slabs.db_contract_set_id IS NULL", cs.ID).Error; err != nil {
+			return fmt.Errorf("failed to update slab contract set ID: %w", err)
 		}
 	}
 
@@ -253,6 +271,51 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 	}
 	if !m.HasIndex(&dbHostBlocklistEntryHost{}, "DBHostID") {
 		if err := m.CreateIndex(&dbHostBlocklistEntryHost{}, "DBHostID"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.Interface) error {
+	ctx := context.Background()
+	m := txn.Migrator()
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		fmt.Println("DISABLING constraints")
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Drop the constraint on DBContractSet.
+	if m.HasConstraint(&dbSlab{}, "DBContractSet") {
+		logger.Info(ctx, "migration 00002_dropconstraintslabcsid: dropping constraint on DBContractSet")
+		if err := m.DropConstraint(&dbSlab{}, "DBContractSet"); err != nil {
+			return fmt.Errorf("failed to drop constraint 'DBContractSet' from table 'slabs': %w", err)
+		}
+	}
+
+	// Perform auto migrations.
+	if err := txn.AutoMigrate(tables...); err != nil {
+		return err
+	}
+
+	// Add constraint back.
+	if !m.HasConstraint(&dbSlab{}, "DBContractSet") {
+		logger.Info(ctx, "migration 00002_dropconstraintslabcsid: adding constraint on DBContractSet")
+		if err := m.CreateConstraint(&dbSlab{}, "DBContractSet"); err != nil {
+			return fmt.Errorf("failed to add constraint 'DBContractSet' to table 'slabs': %w", err)
+		}
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
 			return err
 		}
 	}

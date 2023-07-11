@@ -28,8 +28,9 @@ const (
 )
 
 const (
-	SettingGouging    = "gouging"
-	SettingRedundancy = "redundancy"
+	SettingContractSet = "contractset"
+	SettingGouging     = "gouging"
+	SettingRedundancy  = "redundancy"
 )
 
 var (
@@ -318,6 +319,12 @@ type GougingParams struct {
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
 	TransactionFee     types.Currency
+}
+
+// ContractSetSetting contains the default contract set used by the worker for
+// uploads and migrations.
+type ContractSetSetting struct {
+	Default string `json:"default"`
 }
 
 // GougingSettings contain some price settings used in price gouging.

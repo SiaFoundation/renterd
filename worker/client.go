@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -145,8 +144,11 @@ func (c *Client) RHPUpdateRegistry(ctx context.Context, hostKey types.PublicKey,
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
-	return c.c.WithContext(ctx).POST("/slab/migrate", slab, nil)
+func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) error {
+	values := make(url.Values)
+	values.Set("contractset", set)
+
+	return c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, nil)
 }
 
 // DownloadStats returns the upload stats.
@@ -162,7 +164,7 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 }
 
 // UploadObject uploads the data in r, creating an object at the given path.
-func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...APIUploadOption) (err error) {
+func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error) {
 	path = strings.TrimPrefix(path, "/")
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
@@ -266,25 +268,6 @@ func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp
 func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account rhpv3.Account, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
 	return
-}
-
-// An APIUploadOption overrides an option on the PUT /objects/*key endpoint.
-type APIUploadOption func(url.Values)
-
-// UploadWithRedundancy sets the min and total shards that should be used for an
-// upload
-func UploadWithRedundancy(minShards, totalShards int) APIUploadOption {
-	return func(v url.Values) {
-		v.Set(queryStringParamMinShards, strconv.Itoa(minShards))
-		v.Set(queryStringParamTotalShards, strconv.Itoa(totalShards))
-	}
-}
-
-// UploadWithContractSet sets the contract set that should be used for an upload
-func UploadWithContractSet(set string) APIUploadOption {
-	return func(v url.Values) {
-		v.Set(queryStringParamContractSet, set)
-	}
 }
 
 // NewClient returns a client that communicates with a renterd worker server

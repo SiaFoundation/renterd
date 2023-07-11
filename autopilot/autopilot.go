@@ -81,7 +81,7 @@ type Worker interface {
 	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
-	MigrateSlab(ctx context.Context, s object.Slab) error
+	MigrateSlab(ctx context.Context, s object.Slab, set string) error
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (hostdb.HostPriceTable, error)
@@ -163,7 +163,7 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
+	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
 		"GET    /alerts":         ap.handleGETAlerts,
 		"POST   /alerts/dismiss": ap.handlePOSTAlertsDismiss,
 		"GET    /config":         ap.configHandlerGET,
@@ -528,15 +528,21 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 
 	// fetch the autopilot and update its config
+	var contractSetChanged bool
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
 	} else {
+		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
+			contractSetChanged = true
+		}
 		autopilot.Config = cfg
 	}
 
-	// update the autopilot
-	jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot))
+	// update the autopilot and interrupt migrations if necessary
+	if err := jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot)); err == nil && contractSetChanged {
+		ap.m.SignalMaintenanceFinished()
+	}
 }
 
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
@@ -555,7 +561,7 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 		alerts:  alerts.NewManager(),
 		id:      id,
 		bus:     bus,
-		logger:  logger.Sugar().Named("autopilot"),
+		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
 		workers: newWorkerPool(workers),
 
 		tickerDuration: heartbeat,

@@ -49,7 +49,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), "foo", "autopilot", object.Object{
+	err = b.AddObject(context.Background(), "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -100,7 +100,7 @@ func TestNewTestCluster(t *testing.T) {
 	if len(sets) != 1 {
 		t.Fatal("invalid number of setse", len(sets))
 	}
-	if sets[0] != "autopilot" {
+	if sets[0] != testAutopilotConfig.Contracts.Set {
 		t.Fatal("set name should be 'autopilot' but was", sets[0])
 	}
 
@@ -1431,7 +1431,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	}
 
 	// create a contract set with all 3 contracts
-	err = cluster.Bus.SetContractSet(context.Background(), "autopilot", []types.FileContractID{c.ID, c2.ID, c3.ID})
+	err = cluster.Bus.SetContractSet(context.Background(), testAutopilotConfig.Contracts.Set, []types.FileContractID{c.ID, c2.ID, c3.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

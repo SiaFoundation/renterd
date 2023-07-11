@@ -69,19 +69,17 @@ func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
 	m.migratingLastStart = time.Now()
 	m.mu.Unlock()
 
-	set := m.ap.State().cfg.Contracts.Set
-
 	m.ap.wg.Add(1)
 	go func() {
 		defer m.ap.wg.Done()
-		m.performMigrations(wp, set)
+		m.performMigrations(wp)
 		m.mu.Lock()
 		m.migrating = false
 		m.mu.Unlock()
 	}()
 }
 
-func (m *migrator) performMigrations(p *workerPool, set string) {
+func (m *migrator) performMigrations(p *workerPool) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
@@ -92,6 +90,7 @@ func (m *migrator) performMigrations(p *workerPool, set string) {
 		api.UnhealthySlab
 		slabIdx   int
 		batchSize int
+		set       string
 	}
 	jobs := make(chan job)
 	var wg sync.WaitGroup
@@ -120,7 +119,12 @@ func (m *migrator) performMigrations(p *workerPool, set string) {
 							m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 							continue
 						}
-						err = w.MigrateSlab(ctx, slab)
+						ap, err := b.Autopilot(ctx, m.ap.id)
+						if err != nil {
+							m.logger.Errorf("%v: failed to fetch autopilot settings for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
+							continue
+						}
+						err = w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
 						if err != nil {
 							m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 							continue
@@ -141,6 +145,13 @@ func (m *migrator) performMigrations(p *workerPool, set string) {
 
 OUTER:
 	for {
+		// fetch currently configured set
+		set := m.ap.State().cfg.Contracts.Set
+		if set == "" {
+			m.logger.Error("could not perform migrations, no contract set configured")
+			return
+		}
+
 		// fetch slabs for migration
 		toMigrateNew, err := b.SlabsForMigration(ctx, m.healthCutoff, set, migratorBatchSize)
 		if err != nil {
@@ -204,7 +215,7 @@ OUTER:
 			case <-m.signalMaintenanceFinished:
 				m.logger.Info("migrations interrupted - updating slabs for migration")
 				continue OUTER
-			case jobs <- job{slab, i, len(toMigrate)}:
+			case jobs <- job{slab, i, len(toMigrate), set}:
 			}
 		}
 	}

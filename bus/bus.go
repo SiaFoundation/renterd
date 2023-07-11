@@ -950,13 +950,28 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	ap, err := b.as.Autopilot(jc.Request.Context(), "autopilot")
-	if jc.Check("could not get autopilot config", err) != nil {
+	val, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
+	if err != nil && errors.Is(err, api.ErrSettingNotFound) {
+		// return the upload params without a contract set, if the user is
+		// specifying a contract set through the query string that's fine
+		jc.Encode(api.UploadParams{
+			ContractSet:   "",
+			CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
+			GougingParams: gp,
+		})
+		return
+	} else if err != nil {
+		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
 		return
 	}
 
+	var css api.ContractSetSetting
+	if err := json.Unmarshal([]byte(val), &css); err != nil {
+		b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
+	}
+
 	jc.Encode(api.UploadParams{
-		ContractSet:   ap.Config.Contracts.Set,
+		ContractSet:   css.Default,
 		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams: gp,
 	})

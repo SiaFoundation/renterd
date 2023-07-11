@@ -43,10 +43,6 @@ const (
 	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 20
 	lockingPriorityUpload                 = 1 // lowest
-
-	queryStringParamContractSet = "contractset"
-	queryStringParamMinShards   = "minshards"
-	queryStringParamTotalShards = "totalshards"
 )
 
 var privateSubnets []*net.IPNet
@@ -664,6 +660,8 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 
 func (w *worker) slabMigrateHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
+
+	// decode the slab
 	var slab object.Slab
 	if jc.Decode(&slab) != nil {
 		return
@@ -675,19 +673,31 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
+	// NOTE: migrations do not use the default contract set but instead require
+	// the user to specify the contract set through the query string parameter,
+	// this to avoid accidentally migration to the default set if the autopilot
+	// configuration is missing a contract set
+	up.ContractSet = ""
+
+	// decode the contract set from the query string
+	var contractset string
+	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
+	// cancel the migration if no contract set is specified
+	if up.ContractSet == "" {
+		jc.Error(fmt.Errorf("migrations require the contract set to be passed as a query string parameter; %w", api.ErrContractSetNotSpecified), http.StatusBadRequest)
+		return
+	}
+
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
 		w.logger.Errorf("migration cancelled, err: %v", api.ErrConsensusNotSynced)
 		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
-	}
-
-	// allow overriding contract set
-	var contractset string
-	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
-		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context
@@ -881,6 +891,20 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// decode the contract set from the query string
+	var contractset string
+	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
+	// cancel the upload if no contract set is specified
+	if up.ContractSet == "" {
+		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
+		return
+	}
+
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
 		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
@@ -890,22 +914,14 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// allow overriding the redundancy settings
 	rs := up.RedundancySettings
-	if jc.DecodeForm(queryStringParamMinShards, &rs.MinShards) != nil {
+	if jc.DecodeForm(api.QueryStringParamMinShards, &rs.MinShards) != nil {
 		return
 	}
-	if jc.DecodeForm(queryStringParamTotalShards, &rs.TotalShards) != nil {
+	if jc.DecodeForm(api.QueryStringParamTotalShards, &rs.TotalShards) != nil {
 		return
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
 		return
-	}
-
-	// allow overriding contract set
-	var contractset string
-	if jc.DecodeForm(queryStringParamContractSet, &contractset) != nil {
-		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// attach gouging checker to the context

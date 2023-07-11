@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -11,9 +13,19 @@ import (
 	"go.sia.tech/core/types"
 )
 
+const (
+	QueryStringParamContractSet = "contractset"
+	QueryStringParamMinShards   = "minshards"
+	QueryStringParamTotalShards = "totalshards"
+)
+
 // ErrConsensusNotSynced is returned by the worker API by endpoints that rely on
 // consensus and the consensus is not synced.
 var ErrConsensusNotSynced = errors.New("consensus is not synced")
+
+// ErrContractSetNotSpecified is returned by the worker API by endpoints that
+// need a contract set to be able to upload data.
+var ErrContractSetNotSpecified = errors.New("contract set is not specified")
 
 type AccountsLockHandlerRequest struct {
 	HostKey   types.PublicKey `json:"hostKey"`
@@ -164,6 +176,26 @@ type UploadStatsResponse struct {
 type UploaderStats struct {
 	HostKey                  types.PublicKey `json:"hostKey"`
 	AvgSectorUploadSpeedMBPS float64         `json:"avgSectorUploadSpeedMBPS"`
+}
+
+// An UploadOption overrides an option on the upload and migrate endpoints in
+// the worker.
+type UploadOption func(url.Values)
+
+// UploadWithRedundancy sets the min and total shards that should be used for an
+// upload
+func UploadWithRedundancy(minShards, totalShards int) UploadOption {
+	return func(v url.Values) {
+		v.Set(QueryStringParamMinShards, strconv.Itoa(minShards))
+		v.Set(QueryStringParamTotalShards, strconv.Itoa(totalShards))
+	}
+}
+
+// UploadWithContractSet sets the contract set that should be used for an upload
+func UploadWithContractSet(set string) UploadOption {
+	return func(v url.Values) {
+		v.Set(QueryStringParamContractSet, set)
+	}
 }
 
 type DownloadObjectOption func(http.Header)

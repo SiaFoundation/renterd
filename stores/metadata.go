@@ -89,8 +89,8 @@ type (
 
 	dbSlab struct {
 		Model
-		DBContractSetID uint          `gorm:"index"`
-		DBContractSet   dbContractSet `gorm:"constraint:OnDelete:SET NULL"`
+		DBContractSetID uint `gorm:"index"`
+		DBContractSet   dbContractSet
 
 		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
@@ -1043,6 +1043,9 @@ func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.S
 }
 
 func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) error {
+	ss.objectsMu.Lock()
+	defer ss.objectsMu.Unlock()
+
 	// sanity check the shards don't contain an empty root
 	for _, s := range s.Shards {
 		if s.Root == (types.Hash256{}) {

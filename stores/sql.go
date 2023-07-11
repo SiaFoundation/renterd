@@ -68,6 +68,7 @@ type (
 
 		spendingMu     sync.Mutex
 		interactionsMu sync.Mutex
+		objectsMu      sync.Mutex
 	}
 
 	revisionUpdate struct {
@@ -120,8 +121,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // same Dialector multiple times.
 func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
-		DisableNestedTransaction: true,   // disable nesting transactions
-		Logger:                   logger, // custom logger
+		Logger: logger, // custom logger
 	})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
@@ -387,7 +387,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	var err error
-	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second}
+	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second}
 	for i := 0; i < len(timeoutIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)
 		if err == nil {
