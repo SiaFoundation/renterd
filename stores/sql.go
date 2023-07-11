@@ -68,6 +68,7 @@ type (
 
 		spendingMu     sync.Mutex
 		interactionsMu sync.Mutex
+		objectsMu      sync.Mutex
 	}
 
 	revisionUpdate struct {
@@ -387,7 +388,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	var err error
-	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second}
+	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second}
 	for i := 0; i < len(timeoutIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)
 		if err == nil {
