@@ -174,6 +174,7 @@ func main() {
 	flag.DurationVar(&busCfg.UsedUTXOExpiry, "bus.usedUTXOExpiry", 24*time.Hour, "time after which a used UTXO that hasn't been included in a transaction becomes spendable again")
 
 	// worker
+	var unauthenticatedDownloads bool
 	flag.BoolVar(&workerCfg.AllowPrivateIPs, "worker.allowPrivateIPs", false, "allow hosts with private IPs")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.Uint64Var(&workerCfg.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", 5, "maximum number of active overdrive workers when downloading a slab")
@@ -184,6 +185,7 @@ func main() {
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
 	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
+	flag.BoolVar(&unauthenticatedDownloads, "worker.unauthenticatedDownloads", false, "if set to 'true', the worker will allow for downloading from the /objects endpoint without basic authentication. Can be overwritten using the RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS environment variable")
 
 	// autopilot
 	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
@@ -230,6 +232,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerCfg.apiPassword)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &workerCfg.enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &workerCfg.ID)
+	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &unauthenticatedDownloads)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &autopilotCfg.MigratorParallelSlabsPerWorker)
@@ -322,7 +325,7 @@ func main() {
 			}
 			shutdownFns = append(shutdownFns, shutdownFn)
 
-			mux.sub["/api/worker"] = treeMux{h: auth(w)}
+			mux.sub["/api/worker"] = treeMux{h: workerAuth(getAPIPassword(), unauthenticatedDownloads)(w)}
 			workerAddr := *apiAddr + "/api/worker"
 			workerPassword = getAPIPassword()
 			workers = append(workers, worker.NewClient(workerAddr, workerPassword))
@@ -451,4 +454,16 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 	}
 
 	return nil
+}
+
+func workerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
+				h.ServeHTTP(w, req)
+			} else {
+				jape.BasicAuth(password)(h).ServeHTTP(w, req)
+			}
+		})
+	}
 }
