@@ -121,8 +121,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // same Dialector multiple times.
 func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
-		DisableNestedTransaction: true,   // disable nesting transactions
-		Logger:                   logger, // custom logger
+		Logger: logger, // custom logger
 	})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
