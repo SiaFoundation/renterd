@@ -208,7 +208,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// create gouging checker
-	gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// prepare hosts for cache
 	hostInfos := make(map[types.PublicKey]hostInfo)
@@ -599,7 +599,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// use a new gouging checker for every contract
-		gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+		gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 		// set the host's block height to ours to disable the height check in
 		// the gouging checks, in certain edge cases the renter might unsync and
@@ -716,7 +716,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	lastStateUpdate := time.Now()
 
 	// prepare a gouging checker
-	gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// prepare an IP filter that contains all used hosts
 	f := newIPFilter(c.logger)
@@ -751,7 +751,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 				c.logger.Errorf("could not fetch consensus state, err: %v", err)
 			} else {
 				cs = css
-				gc = worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+				gc = worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 			}
 		}
 
@@ -1034,7 +1034,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	}
 
 	// create a gouging checker
-	gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// create list of candidate hosts
 	var candidates []hostdb.Host
