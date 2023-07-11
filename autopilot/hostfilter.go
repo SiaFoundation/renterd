@@ -216,29 +216,36 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 	return len(errs) == 0, newUnusableHostResult(errs, gougingBreakdown, scoreBreakdown)
 }
 
-// isUsableContract returns whether the given contract is usable and whether it
-// can be renewed, along with a list of reasons why it was deemed unusable.
-func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, refresh, renew bool, reasons []string) {
+// isUsableContract returns whether the given contract is
+// - usable -> can be used in the contract set
+// - recoverable -> can be usable in the contract set if it is refreshed/renewed
+// - refresh -> should be refreshed
+// - renew -> should be renewed
+func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
 	c, s := ci.contract, ci.settings
 
 	if bh > c.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
 		renew = false
 		refresh = false
+		recoverable = false
 	} else if c.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, errContractMaxRevisionNumber.Error())
 		renew = false
 		refresh = false
+		recoverable = false
 	} else {
 		if isOutOfCollateral(c, s, renterFunds, bh) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			renew = false
 			refresh = true
+			recoverable = true
 		}
 		if isOutOfFunds(cfg, s, c) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
 			renew = false
 			refresh = true
+			recoverable = true
 		}
 		if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
 			if secondHalf {
@@ -246,6 +253,7 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 			}
 			renew = true
 			refresh = false
+			recoverable = true
 		}
 	}
 
@@ -254,7 +262,9 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(c.HostIP, c.HostKey) {
 		reasons = append(reasons, errHostRedundantIP.Error())
 		renew = false
-		refresh = false
+		// NOTE: we don't set refresh to false or recoverable to true. We fund
+		// the contract but don't want to use it in the set.
+		recoverable = false
 	}
 
 	usable = len(reasons) == 0

@@ -2,15 +2,22 @@ package autopilot
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
+)
+
+var (
+	alertMigrationID = frand.Entropy256() // constnt across restarts
 )
 
 const (
@@ -21,6 +28,7 @@ type migrator struct {
 	ap                        *Autopilot
 	logger                    *zap.SugaredLogger
 	healthCutoff              float64
+	parallelSlabsPerWorker    uint64
 	signalMaintenanceFinished chan struct{}
 
 	mu                 sync.Mutex
@@ -28,11 +36,12 @@ type migrator struct {
 	migratingLastStart time.Time
 }
 
-func newMigrator(ap *Autopilot, healthCutoff float64) *migrator {
+func newMigrator(ap *Autopilot, healthCutoff float64, parallelSlabsPerWorker uint64) *migrator {
 	return &migrator{
 		ap:                        ap,
 		logger:                    ap.logger.Named("migrator"),
 		healthCutoff:              healthCutoff,
+		parallelSlabsPerWorker:    parallelSlabsPerWorker,
 		signalMaintenanceFinished: make(chan struct{}, 1),
 	}
 }
@@ -93,30 +102,32 @@ func (m *migrator) performMigrations(p *workerPool) {
 	// launch workers
 	p.withWorkers(func(workers []Worker) {
 		for _, w := range workers {
-			wg.Add(1)
-			go func(w Worker) {
-				defer wg.Done()
+			for i := uint64(0); i < m.parallelSlabsPerWorker; i++ {
+				wg.Add(1)
+				go func(w Worker) {
+					defer wg.Done()
 
-				id, err := w.ID(ctx)
-				if err != nil {
-					m.logger.Errorf("failed to fetch worker id: %v", err)
-					return
-				}
+					id, err := w.ID(ctx)
+					if err != nil {
+						m.logger.Errorf("failed to fetch worker id: %v", err)
+						return
+					}
 
-				for j := range jobs {
-					slab, err := b.Slab(ctx, j.Key)
-					if err != nil {
-						m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
-						continue
+					for j := range jobs {
+						slab, err := b.Slab(ctx, j.Key)
+						if err != nil {
+							m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
+							continue
+						}
+						err = w.MigrateSlab(ctx, slab)
+						if err != nil {
+							m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
+							continue
+						}
+						m.logger.Debugf("%v: successfully migrated slab '%v' (health: %v) %d/%d", id, j.Key, j.Health, j.slabIdx+1, j.batchSize)
 					}
-					err = w.MigrateSlab(ctx, slab, api.UploadWithContractSet(j.set))
-					if err != nil {
-						m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
-						continue
-					}
-					m.logger.Debugf("%v: successfully migrated slab '%v' (health: %v) %d/%d", id, j.Key, j.Health, j.slabIdx+1, j.batchSize)
-				}
-			}(w)
+				}(w)
+			}
 		}
 	})
 	var toMigrate []api.UnhealthySlab
@@ -178,6 +189,14 @@ OUTER:
 
 		// log the updated list of slabs to migrate
 		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
+
+		// register an alert to notify users about ongoing migrations.
+		m.ap.alerts.Register(alerts.Alert{
+			ID:        alertMigrationID,
+			Severity:  alerts.SeverityInfo,
+			Message:   fmt.Sprintf("Migrating %d slabs", len(toMigrate)),
+			Timestamp: time.Now(),
+		})
 
 		// return if there are no slabs to migrate
 		if len(toMigrate) == 0 {

@@ -15,6 +15,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
@@ -90,6 +91,7 @@ type (
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
+		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		Object(ctx context.Context, path string) (object.Object, error)
@@ -131,14 +133,15 @@ type (
 )
 
 type bus struct {
-	s   Syncer
-	cm  ChainManager
-	tp  TransactionPool
-	w   Wallet
-	hdb HostDB
-	as  AutopilotStore
-	ms  MetadataStore
-	ss  SettingStore
+	alerts *alerts.Manager
+	s      Syncer
+	cm     ChainManager
+	tp     TransactionPool
+	w      Wallet
+	hdb    HostDB
+	as     AutopilotStore
+	ms     MetadataStore
+	ss     SettingStore
 
 	eas EphemeralAccountStore
 
@@ -560,6 +563,18 @@ func (b *bus) contractsHandlerGET(jc jape.Context) {
 	cs, err := b.ms.Contracts(jc.Request.Context())
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
+	}
+}
+
+func (b *bus) contractsRenewedIDHandlerGET(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	md, err := b.ms.RenewedContract(jc.Request.Context(), id)
+	if jc.Check("faild to fetch renewed contract", err) == nil {
+		jc.Encode(md)
 	}
 }
 
@@ -1003,6 +1018,21 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
+func (b *bus) handleGETAlerts(c jape.Context) {
+	c.Encode(b.alerts.Active())
+}
+
+func (b *bus) handlePOSTAlertsDismiss(c jape.Context) {
+	var ids []types.Hash256
+	if err := c.Decode(&ids); err != nil {
+		return
+	} else if len(ids) == 0 {
+		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+		return
+	}
+	b.alerts.Dismiss(ids...)
+}
+
 func (b *bus) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(b.accounts.Accounts())
 }
@@ -1192,6 +1222,7 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
+		alerts:        alerts.NewManager(),
 		s:             s,
 		cm:            cm,
 		tp:            tp,
@@ -1283,6 +1314,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
+		"GET    /alerts":                    b.handleGETAlerts,
+		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
 		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
@@ -1332,7 +1365,9 @@ func (b *bus) Handler() http.Handler {
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
 		"GET    /contracts":              b.contractsHandlerGET,
+		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
@@ -1346,7 +1381,6 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
-		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,

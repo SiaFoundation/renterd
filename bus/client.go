@@ -16,6 +16,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
@@ -25,6 +26,17 @@ import (
 // A Client provides methods for interacting with a renterd API server.
 type Client struct {
 	c jape.Client
+}
+
+// Alerts fetches the active alerts from the bus.
+func (c *Client) Alerts() (alerts []alerts.Alert, err error) {
+	err = c.c.GET("/alerts", &alerts)
+	return
+}
+
+// DismissAlerts dimisses the alerts with the given IDs.
+func (c *Client) DismissAlerts(ids ...types.Hash256) error {
+	return c.c.POST("/alerts/dismiss", ids, nil)
 }
 
 // Autopilots returns all autopilots in the autopilots store.
@@ -388,6 +400,12 @@ func (c *Client) AncestorContracts(ctx context.Context, fcid types.FileContractI
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), fcid), &contracts)
+	return
+}
+
+// RenewedContract returns the renewed contract for the given ID.
+func (c *Client) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (contract api.ContractMetadata, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/renewed/%s", renewedFrom), &contract)
 	return
 }
 

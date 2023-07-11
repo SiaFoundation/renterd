@@ -198,7 +198,7 @@ func main() {
 	flag.DurationVar(&nodeCfg.shutdownTimeout, "node.shutdownTimeout", 5*time.Minute, "the timeout applied to the node shutdown")
 	flag.Parse()
 
-	log.Println("renterd v0.3.0-beta")
+	log.Println("renterd v0.4.0-beta")
 	log.Println("Network", build.ConsensusNetworkName)
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
@@ -232,6 +232,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_ID", &workerCfg.ID)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
+	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &autopilotCfg.MigratorParallelSlabsPerWorker)
 
 	// Init db dialector
 	if dbCfg.uri != "" {
