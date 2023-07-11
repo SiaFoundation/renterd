@@ -1024,7 +1024,7 @@ func (b *bus) handleGETAlerts(c jape.Context) {
 
 func (b *bus) handlePOSTAlertsDismiss(c jape.Context) {
 	var ids []types.Hash256
-	if err := c.Decode(&ids); err != nil {
+	if c.Decode(&ids) != nil {
 		return
 	} else if len(ids) == 0 {
 		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
