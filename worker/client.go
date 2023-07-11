@@ -144,11 +144,10 @@ func (c *Client) RHPUpdateRegistry(ctx context.Context, hostKey types.PublicKey,
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, opts ...api.UploadOption) error {
+func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) error {
 	values := make(url.Values)
-	for _, opt := range opts {
-		opt(values)
-	}
+	values.Set("contractset", set)
+
 	return c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, nil)
 }
 

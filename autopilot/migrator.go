@@ -119,7 +119,12 @@ func (m *migrator) performMigrations(p *workerPool) {
 							m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 							continue
 						}
-						err = w.MigrateSlab(ctx, slab)
+						ap, err := b.Autopilot(ctx, m.ap.id)
+						if err != nil {
+							m.logger.Errorf("%v: failed to fetch autopilot settings for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
+							continue
+						}
+						err = w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
 						if err != nil {
 							m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 							continue
