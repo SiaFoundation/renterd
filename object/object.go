@@ -72,8 +72,9 @@ func GenerateEncryptionKey() EncryptionKey {
 
 // An Object is a unit of data that has been stored on a host.
 type Object struct {
-	Key   EncryptionKey `json:"key"`
-	Slabs []SlabSlice   `json:"slabs"`
+	Key         EncryptionKey `json:"key"`
+	Slabs       []SlabSlice   `json:"slabs"`
+	PartialSlab *PartialSlab  `json:"partial_slab,omitempty"`
 }
 
 // NewObject returns a new Object with a random key.

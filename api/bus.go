@@ -241,7 +241,6 @@ type ObjectsResponse struct {
 type AddObjectRequest struct {
 	ContractSet   string                                   `json:"contractSet"`
 	Object        object.Object                            `json:"object"`
-	PartialSlab   *object.PartialSlab                      `json:"partialSlab"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
@@ -314,7 +313,7 @@ type AccountsAddBalanceRequest struct {
 }
 
 type PackedSlabsRequestGET struct {
-	LockingDuration time.Duration `json:"lockingDuration"`
+	LockingDuration ParamDuration `json:"lockingDuration"`
 	MinShards       uint8         `json:"minShards"`
 	TotalShards     uint8         `json:"totalShards"`
 	ContractSet     string        `json:"contractSet"`

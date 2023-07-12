@@ -148,7 +148,7 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []api.ObjectMetadata, error)
-	AddObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string, batch bool) error
 
 	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
@@ -938,7 +938,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	object, partialSlab, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.PartialUploads)
+	object, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.PartialUploads)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -956,7 +956,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, object, partialSlab, used)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, object, used)) != nil {
 		return
 	}
 
@@ -973,7 +973,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	for _, ps := range packedSlabs {
 		// upload packed slab.
-		object, _, err = w.uploadManager.Upload(ctx, bytes.NewReader(ps.Data), rs, contracts, up.CurrentHeight, false)
+		object, err = w.uploadManager.Upload(ctx, bytes.NewReader(ps.Data), rs, contracts, up.CurrentHeight, false)
 		if jc.Check("couldn't upload packed slab", err) != nil {
 			return
 		}

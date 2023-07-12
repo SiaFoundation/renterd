@@ -140,6 +140,7 @@ type (
 		SliceLength uint32
 
 		// slab
+		SlabBuffered  bool
 		SlabID        uint
 		SlabKey       []byte
 		SlabMinShards uint8
@@ -258,7 +259,7 @@ func (o dbObject) metadata() api.ObjectMetadata {
 	}
 }
 
-func (raw rawObject) convert() (obj object.Object, _ error) {
+func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 	if len(raw) == 0 {
 		return object.Object{}, errors.New("no slabs found")
 	}
@@ -292,9 +293,10 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 	}
 
 	// hydrate all slabs
+	var partialSlabSector *rawObjectSector
 	if len(filtered) > 0 {
 		for j, sector := range filtered {
-			if sector.SectorID == 0 {
+			if sector.SectorID == 0 && !sector.SlabBuffered {
 				return object.Object{}, api.ErrObjectCorrupted
 			}
 			if sector.SlabID != curr {
@@ -302,9 +304,30 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 					return object.Object{}, err
 				}
 			}
+			if sector.SlabBuffered {
+				partialSlabSector = &filtered[j]
+			}
 		}
-		if err := addSlab(len(raw), 0); err != nil {
+		if partialSlabSector == nil {
+			if err := addSlab(len(raw), 0); err != nil {
+				return object.Object{}, err
+			}
+		}
+	}
+
+	// fetch a potential partial slab from the buffer.
+	if partialSlabSector != nil {
+		var buffer dbSlabBuffer
+		err := tx.Joins("DBSlab").
+			Where(dbSlabBuffer{DBSlabID: partialSlabSector.SlabID}).
+			Take(&buffer).Error
+		if err != nil {
 			return object.Object{}, err
+		}
+		obj.PartialSlab = &object.PartialSlab{
+			MinShards:   buffer.DBSlab.MinShards,
+			TotalShards: buffer.DBSlab.TotalShards,
+			Data:        buffer.Data[partialSlabSector.SliceOffset:][:partialSlabSector.SliceLength],
 		}
 	}
 
@@ -677,11 +700,16 @@ LIMIT ? OFFSET ?`, sqlConcat(s.db, "?", "trimmed"), sqlConcat(s.db, "?", "substr
 }
 
 func (s *SQLStore) Object(ctx context.Context, path string) (object.Object, error) {
-	obj, err := s.object(ctx, path)
-	if err != nil {
-		return object.Object{}, err
-	}
-	return obj.convert()
+	var obj object.Object
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		o, err := s.object(ctx, tx, path)
+		if err != nil {
+			return err
+		}
+		obj, err = o.convert(tx)
+		return err
+	})
+	return obj, err
 }
 
 func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
@@ -798,7 +826,7 @@ func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew strin
 	return nil
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
@@ -905,6 +933,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		}
 
 		// Handle partial slab.
+		partialSlab := o.PartialSlab
 		if partialSlab == nil {
 			return nil
 		}
@@ -1200,19 +1229,20 @@ END AS health`).
 }
 
 // object retrieves a raw object from the store.
-func (s *SQLStore) object(ctx context.Context, path string) (rawObject, error) {
+func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string) (rawObject, error) {
 	// NOTE: we LEFT JOIN here because empty objects are valid and need to be
 	// included in the result set, when we convert the rawObject before
 	// returning it we'll check for SlabID and/or SectorID being 0 and act
 	// accordingly
 	var rows rawObject
-	tx := s.db.
-		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+	tx := txn.
+		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, bs.id IS NOT NULL AS SlabBuffered, sla.id as SlabID, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
+		Joins("LEFT JOIN buffered_slabs bs ON sla.id = bs.`db_slab_id`").
 		Where("o.object_id = ?", path).
 		Order("o.id ASC").
 		Order("sla.id ASC").

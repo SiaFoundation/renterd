@@ -91,7 +91,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -130,7 +130,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want2, nil, make(map[types.PublicKey]types.FileContractID)); err != nil {
+	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want2, make(map[types.PublicKey]types.FileContractID)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -487,7 +487,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := cs.UpdateObject(context.Background(), "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk:  fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -899,12 +899,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1063,7 +1063,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = db.Object(ctx, objID)
@@ -1141,7 +1141,7 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, testContractSet, obj, nil, ucs)
+		os.UpdateObject(ctx, o.path, testContractSet, obj, ucs)
 	}
 	tests := []struct {
 		path   string
@@ -1200,7 +1200,7 @@ func TestSearchObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, testContractSet, obj, nil, ucs)
+		os.UpdateObject(ctx, o.path, testContractSet, obj, ucs)
 	}
 	tests := []struct {
 		path string
@@ -1393,7 +1393,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1498,7 +1498,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1559,7 +1559,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1653,7 +1653,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1723,7 +1723,7 @@ func TestContractSectors(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1749,7 +1749,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1814,7 +1814,7 @@ func TestPutSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -2069,7 +2069,7 @@ func TestRenameObjects(t *testing.T) {
 	ctx := context.Background()
 	for _, path := range objects {
 		obj, ucs := newTestObject(1)
-		cs.UpdateObject(ctx, path, testContractSet, obj, nil, ucs)
+		cs.UpdateObject(ctx, path, testContractSet, obj, ucs)
 	}
 
 	// Try renaming objects that don't exist.
@@ -2165,7 +2165,7 @@ func TestObjectsStats(t *testing.T) {
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := cs.UpdateObject(context.Background(), key, testContractSet, obj, nil, contracts)
+		err := cs.UpdateObject(context.Background(), key, testContractSet, obj, contracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2262,13 +2262,13 @@ func TestPartialSlab(t *testing.T) {
 				Length: rhpv2.SectorSize,
 			},
 		},
+		PartialSlab: &object.PartialSlab{
+			MinShards:   1,
+			TotalShards: 2,
+			Data:        []byte{1, 2, 3, 4},
+		},
 	}
-	partialSlab := object.PartialSlab{
-		MinShards:   1,
-		TotalShards: 2,
-		Data:        []byte{1, 2, 3, 4},
-	}
-	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, &partialSlab, usedContracts)
+	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2283,7 +2283,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	// check the slice
 	storedSlice := storedObject.Slabs[1]
-	if storedSlice.Offset != 0 || storedSlice.Length != uint32(len(partialSlab.Data)) {
+	if storedSlice.Offset != 0 || storedSlice.Length != uint32(len(obj.PartialSlab.Data)) {
 		t.Fatalf("wrong offset/length: %v/%v", storedSlice.Offset, storedSlice.Length)
 	}
 	// check the slab
@@ -2300,22 +2300,39 @@ func TestPartialSlab(t *testing.T) {
 	expectedBuffer := dbSlabBuffer{
 		DBSlabID:    storedSlab.ID,
 		Complete:    false,
-		Data:        partialSlab.Data,
+		Data:        obj.PartialSlab.Data,
 		LockedUntil: 0,
 	}
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
 
+	// fetch the object. This should fetch the partial slab too.
+	fullObj, err := db.Object(context.Background(), "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fullObj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %v", len(fullObj.Slabs))
+	}
+	if fullObj.PartialSlab == nil {
+		t.Fatal("expected partial slab")
+	}
+	if !reflect.DeepEqual(*fullObj.PartialSlab, *obj.PartialSlab) {
+		t.Fatal("invalid partial slab", cmp.Diff(fullObj.PartialSlab, obj.PartialSlab))
+	}
+
 	// add another object with a partial slab. This should append to the buffer.
 	fullSlabSize := slabSize(1, 2)
-	obj2 := object.Object{Key: object.GenerateEncryptionKey()}
-	partialSlab2 := object.PartialSlab{
-		MinShards:   1,
-		TotalShards: 2,
-		Data:        frand.Bytes(int(fullSlabSize) - len(partialSlab.Data) - 1), // leave 1 byte
+	obj2 := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		PartialSlab: &object.PartialSlab{
+			MinShards:   1,
+			TotalShards: 2,
+			Data:        frand.Bytes(int(fullSlabSize) - len(obj.PartialSlab.Data) - 1), // leave 1 byte
+		},
 	}
-	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, &partialSlab2, usedContracts)
+	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2328,7 +2345,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	// check the slice
 	storedSlice2 := storedObject2.Slabs[0]
-	if storedSlice2.Offset != storedSlice.Length || storedSlice2.Length != uint32(len(partialSlab2.Data)) {
+	if storedSlice2.Offset != storedSlice.Length || storedSlice2.Length != uint32(len(obj2.PartialSlab.Data)) {
 		t.Fatalf("wrong offset/length: %v/%v", storedSlice2.Offset, storedSlice2.Length)
 	}
 	// check the slab
@@ -2341,19 +2358,21 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	buffer.Model = Model{}
-	expectedBuffer.Data = append(expectedBuffer.Data, partialSlab2.Data...)
+	expectedBuffer.Data = append(expectedBuffer.Data, obj2.PartialSlab.Data...)
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
 
 	// add one last object. This should fill the buffer and create a new slab.
-	obj3 := object.Object{Key: object.GenerateEncryptionKey()}
-	partialSlab3 := object.PartialSlab{
-		MinShards:   1,
-		TotalShards: 2,
-		Data:        []byte{5, 6}, // 1 byte more than fits in the slab
+	obj3 := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		PartialSlab: &object.PartialSlab{
+			MinShards:   1,
+			TotalShards: 2,
+			Data:        []byte{5, 6}, // 1 byte more than fits in the slab
+		},
 	}
-	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, &partialSlab3, usedContracts)
+	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2383,7 +2402,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	buffer.Model = Model{}
 	expectedBuffer.Complete = true // full now
-	expectedBuffer.Data = append(expectedBuffer.Data, partialSlab3.Data[0])
+	expectedBuffer.Data = append(expectedBuffer.Data, obj3.PartialSlab.Data[0])
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
@@ -2397,7 +2416,7 @@ func TestPartialSlab(t *testing.T) {
 	expectedBuffer2 := dbSlabBuffer{
 		DBSlabID:    storedSlab.ID + 1,
 		Complete:    false,
-		Data:        partialSlab3.Data[1:],
+		Data:        obj3.PartialSlab.Data[1:],
 		LockedUntil: 0,
 	}
 	if !reflect.DeepEqual(buffer2, expectedBuffer2) {
@@ -2406,7 +2425,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// fetch the buffer for uploading
 	now := time.Now().Unix()
-	buffers, err := db.packedSlabsForUpload(time.Hour, partialSlab.MinShards, partialSlab.TotalShards, testContractSet, 100)
+	buffers, err := db.packedSlabsForUpload(time.Hour, obj.PartialSlab.MinShards, obj.PartialSlab.TotalShards, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2425,7 +2444,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// try fetching it again. Should still be locked.
-	buffers, err = db.packedSlabsForUpload(time.Hour, partialSlab.MinShards, partialSlab.TotalShards, testContractSet, 100)
+	buffers, err = db.packedSlabsForUpload(time.Hour, obj.PartialSlab.MinShards, obj.PartialSlab.TotalShards, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

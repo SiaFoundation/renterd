@@ -97,7 +97,7 @@ type (
 		Object(ctx context.Context, path string) (object.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 		RemoveObjects(ctx context.Context, prefix string) error
 		RenameObject(ctx context.Context, from, to string) error
@@ -785,7 +785,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.PartialSlab, aor.UsedContracts)) // TODO
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts)) // TODO
 	}
 }
 
@@ -843,19 +843,19 @@ func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 	jc.Encode(info)
 }
 
-func (b *bus) packedSlabsHandlerGET(jc jape.Context) {
+func (b *bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
 	var psrg api.PackedSlabsRequestGET
 	if jc.Decode(&psrg) != nil {
 		return
 	}
-	slabs, err := b.ms.PackedSlabsForUpload(jc.Request.Context(), psrg.LockingDuration, psrg.MinShards, psrg.TotalShards, psrg.ContractSet, psrg.Limit)
+	slabs, err := b.ms.PackedSlabsForUpload(jc.Request.Context(), time.Duration(psrg.LockingDuration), psrg.MinShards, psrg.TotalShards, psrg.ContractSet, psrg.Limit)
 	if jc.Check("couldn't get packed slabs", err) != nil {
 		return
 	}
 	jc.Encode(slabs)
 }
 
-func (b *bus) packedSlabsHandlerPOST(jc jape.Context) {
+func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	var psrp api.PackedSlabsRequestPOST
 	if jc.Decode(&psrp) != nil {
 		return
@@ -1447,8 +1447,8 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
 
-		"GET    /packedslabs": b.packedSlabsHandlerGET,
-		"POST /packedslabs":   b.packedSlabsHandlerPOST,
+		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
+		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 
 		"POST   /slabs/migration": b.slabsMigrationHandlerPOST,
 		"GET    /slab/:key":       b.slabHandlerGET,
