@@ -100,6 +100,8 @@ type (
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 		RemoveObjects(ctx context.Context, prefix string) error
+		RenameObject(ctx context.Context, from, to string) error
+		RenameObjects(ctx context.Context, from, to string) error
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
@@ -784,6 +786,34 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
+	var orr api.ObjectsRenameRequest
+	if jc.Decode(&orr) != nil {
+		return
+	}
+	if orr.Mode == api.ObjectsRenameModeSingle {
+		// Single object rename.
+		if strings.HasSuffix(orr.From, "/") || strings.HasSuffix(orr.To, "/") {
+			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
+			return
+		}
+		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.From, orr.To))
+		return
+	} else if orr.Mode == api.ObjectsRenameModeMulti {
+		// Multi object rename.
+		if !strings.HasSuffix(orr.From, "/") || !strings.HasSuffix(orr.To, "/") {
+			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
+			return
+		}
+		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.From, orr.To))
+		return
+	} else {
+		// Invalid mode.
+		jc.Error(fmt.Errorf("invalid mode: %v", orr.Mode), http.StatusBadRequest)
+		return
+	}
+}
+
 func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	var batch bool
 	if jc.DecodeForm("batch", &batch) != nil {
@@ -1387,9 +1417,10 @@ func (b *bus) Handler() http.Handler {
 
 		"GET    /stats/objects": b.objectsStatshandlerGET,
 
-		"GET    /objects/*path": b.objectsHandlerGET,
-		"PUT    /objects/*path": b.objectsHandlerPUT,
-		"DELETE /objects/*path": b.objectsHandlerDELETE,
+		"GET    /objects/*path":  b.objectsHandlerGET,
+		"PUT    /objects/*path":  b.objectsHandlerPUT,
+		"DELETE /objects/*path":  b.objectsHandlerDELETE,
+		"POST   /objects/rename": b.objectsRenameHandlerPOST,
 
 		"POST   /slabs/migration": b.slabsMigrationHandlerPOST,
 		"GET    /slab/:key":       b.slabHandlerGET,
