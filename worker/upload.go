@@ -324,10 +324,10 @@ loop:
 				return object.Object{}, err
 			}
 			wg.Add(1)
-			go func() {
+			go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
 				u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
 				wg.Done()
-			}()
+			}(rs, data, length, slabIndex)
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
