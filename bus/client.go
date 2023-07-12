@@ -694,20 +694,19 @@ func (c *Client) ObjectsStats() (osr api.ObjectsStats, err error) {
 
 // RenameObject renames a single object.
 func (c *Client) RenameObject(ctx context.Context, from, to string) (err error) {
-	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
-		From: from,
-		To:   to,
-		Mode: api.ObjectsRenameModeSingle,
-	}, nil)
-	return
+	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeSingle)
 }
 
 // RenameObjects renames all objects with the prefix 'from' to the prefix 'to'.
 func (c *Client) RenameObjects(ctx context.Context, from, to string) (err error) {
+	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeMulti)
+}
+
+func (c *Client) renameObjects(ctx context.Context, from, to, mode string) (err error) {
 	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
 		From: from,
 		To:   to,
-		Mode: api.ObjectsRenameModeMulti,
+		Mode: mode,
 	}, nil)
 	return
 }
