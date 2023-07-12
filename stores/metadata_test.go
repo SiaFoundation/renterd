@@ -2047,6 +2047,87 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 }
 
+// TestRenameObjects is a unit test for RenameObject and RenameObjects.
+func TestRenameObjects(t *testing.T) {
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a few objects.
+	objects := []string{
+		"/fileś/1a",
+		"/fileś/2a",
+		"/fileś/3a",
+		"/fileś/dir/1b",
+		"/fileś/dir/2b",
+		"/fileś/dir/3b",
+		"/foo",
+		"/bar",
+		"/baz",
+	}
+	ctx := context.Background()
+	for _, path := range objects {
+		obj, ucs := newTestObject(1)
+		cs.UpdateObject(ctx, path, testContractSet, obj, nil, ucs)
+	}
+
+	// Try renaming objects that don't exist.
+	if err := cs.RenameObject(ctx, "/fileś", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
+		t.Fatal(err)
+	}
+	if err := cs.RenameObjects(ctx, "/fileś1", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
+		t.Fatal(err)
+	}
+
+	// Perform some renames.
+	if err := cs.RenameObjects(ctx, "/fileś/dir/", "/fileś/"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.RenameObject(ctx, "/foo", "/fileś/foo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.RenameObject(ctx, "/bar", "/fileś/bar"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.RenameObject(ctx, "/baz", "/fileś/baz"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Paths after.
+	objectsAfter := []string{
+		"/fileś/1a",
+		"/fileś/2a",
+		"/fileś/3a",
+		"/fileś/1b",
+		"/fileś/2b",
+		"/fileś/3b",
+		"/fileś/foo",
+		"/fileś/bar",
+		"/fileś/baz",
+	}
+	objectsAfterMap := make(map[string]struct{})
+	for _, path := range objectsAfter {
+		objectsAfterMap[path] = struct{}{}
+	}
+
+	// Assert that number of objects matches.
+	objs, err := cs.SearchObjects(ctx, "/", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != len(objectsAfter) {
+		t.Fatal("unexpected number of objects", len(objs), len(objectsAfter))
+	}
+
+	// Assert paths are correct.
+	for _, obj := range objs {
+		if _, exists := objectsAfterMap[obj.Name]; !exists {
+			t.Fatal("unexpected path", obj.Name)
+		}
+	}
+}
+
 // TestObjectsStats is a unit test for ObjectsStats.
 func TestObjectsStats(t *testing.T) {
 	cs, _, _, err := newTestSQLStore()

@@ -692,6 +692,26 @@ func (c *Client) ObjectsStats() (osr api.ObjectsStats, err error) {
 	return
 }
 
+// RenameObject renames a single object.
+func (c *Client) RenameObject(ctx context.Context, from, to string) (err error) {
+	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
+		From: from,
+		To:   to,
+		Mode: api.ObjectsRenameModeSingle,
+	}, nil)
+	return
+}
+
+// RenameObjects renames all objects with the prefix 'from' to the prefix 'to'.
+func (c *Client) RenameObjects(ctx context.Context, from, to string) (err error) {
+	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
+		From: from,
+		To:   to,
+		Mode: api.ObjectsRenameModeMulti,
+	}, nil)
+	return
+}
+
 // NewClient returns a client that communicates with a renterd store server
 // listening on the specified address.
 func NewClient(addr, password string) *Client {
