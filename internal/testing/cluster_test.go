@@ -62,7 +62,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{})
+	}, nil, map[types.PublicKey]types.FileContractID{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +556,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// prepare a file
-	data := make([]byte, 128) //rhpv2.SectorSize/12
+	data := make([]byte, 128)
 	if _, err := frand.Read(data); err != nil {
 		t.Fatal(err)
 	}

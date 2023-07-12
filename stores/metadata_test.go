@@ -2302,8 +2302,6 @@ func TestPartialSlab(t *testing.T) {
 		Complete:    false,
 		Data:        partialSlab.Data,
 		LockedUntil: 0,
-		MinShards:   partialSlab.MinShards,
-		TotalShards: partialSlab.TotalShards,
 	}
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
@@ -2401,8 +2399,6 @@ func TestPartialSlab(t *testing.T) {
 		Complete:    false,
 		Data:        partialSlab3.Data[1:],
 		LockedUntil: 0,
-		MinShards:   partialSlab.MinShards,
-		TotalShards: partialSlab.TotalShards,
 	}
 	if !reflect.DeepEqual(buffer2, expectedBuffer2) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer2, expectedBuffer2))
@@ -2410,7 +2406,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// fetch the buffer for uploading
 	now := time.Now().Unix()
-	buffers, err := db.packedSlabsForUpload(time.Hour, 100)
+	buffers, err := db.packedSlabsForUpload(time.Hour, partialSlab.MinShards, partialSlab.TotalShards, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2429,7 +2425,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// try fetching it again. Should still be locked.
-	buffers, err = db.packedSlabsForUpload(time.Hour, 100)
+	buffers, err = db.packedSlabsForUpload(time.Hour, partialSlab.MinShards, partialSlab.TotalShards, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2452,7 +2448,7 @@ func TestPartialSlab(t *testing.T) {
 			},
 		},
 	}
-	err = db.MarkPackedSlabsUploaded([]api.UploadedPackedSlab{packedSlab}, usedContracts)
+	err = db.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{packedSlab}, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}

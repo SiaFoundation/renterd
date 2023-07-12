@@ -109,8 +109,6 @@ type (
 		Complete    bool `gorm:"index"`
 		Data        []byte
 		LockedUntil int64 // unix timestamp
-		MinShards   uint8 `gorm:"index"`
-		TotalShards uint8 `gorm:"index"`
 	}
 
 	dbSector struct {
@@ -911,10 +909,13 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 			return nil
 		}
 
-		// Find a buffer that is not yet marked as complete where the MinShards
-		// and TotalShards match.
+		// Find a buffer that is not yet marked as complete.
 		var buffer dbSlabBuffer
-		err = tx.Preload("DBSlab").Where("complete = ? AND min_shards = ? AND total_shards = ?", false, partialSlab.MinShards, partialSlab.TotalShards).Take(&buffer).Error
+		err = tx.Joins("DBSlab").
+			Joins("DBSlab.DBContractSet").
+			Where("complete = ? AND DBSlab.min_shards = ? AND DBSlab.total_shards = ? AND DBSlab__DBContractSet.name = ?",
+				false, partialSlab.MinShards, partialSlab.TotalShards, contractSet).
+			Take(&buffer).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -994,8 +995,6 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 		return err
 	}
 	// Create a new buffer and slab.
-	// TODO: Eventually we want to create a buffer per contract set to make sure
-	// data is not packed into a contract set that it wasn't uploaded for.
 	return tx.Create(&dbSlabBuffer{
 		DBSlab: dbSlab{
 			DBContractSetID: contractSetID,
@@ -1013,8 +1012,6 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 		Complete:    false,
 		Data:        partialSlab.Data,
 		LockedUntil: 0,
-		MinShards:   partialSlab.MinShards,
-		TotalShards: partialSlab.TotalShards,
 	}).Error
 }
 
@@ -1255,11 +1252,18 @@ func (s *SQLStore) contracts(ctx context.Context, set string) ([]dbContract, err
 
 // packedSlabsForUpload retrieves up to 'limit' dbSlabBuffers that have their
 // 'Complete' flag set to true and locks them using the 'LockedUntil' field
-func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, limit int) ([]dbSlabBuffer, error) {
+func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]dbSlabBuffer, error) {
 	var buffers []dbSlabBuffer
 	now := time.Now().Unix()
-	err := s.db.Raw(`UPDATE buffered_slabs SET locked_until = ? WHERE id IN (
-		SELECT id FROM buffered_slabs WHERE complete = ? AND locked_until < ? LIMIT ?) RETURNING *`, now+int64(lockingDuration.Seconds()), true, now, limit).
+	err := s.db.Raw(`
+		UPDATE buffered_slabs SET locked_until = ? WHERE id IN (
+			SELECT buffered_slabs.id FROM buffered_slabs
+			INNER JOIN slabs sla ON sla.id = buffered_slabs.db_slab_id
+			INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
+			WHERE complete = ? AND locked_until < ? AND min_shards = ? AND total_shards = ? AND cs.name = ?
+			LIMIT ?)
+		RETURNING *`,
+		now+int64(lockingDuration.Seconds()), true, now, minShards, totalShards, set, limit).
 		Scan(&buffers).
 		Error
 	if err != nil {
@@ -1271,18 +1275,17 @@ func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, limit int
 // PackedSlabsForUpload returns up to 'limit' packed slabs that are ready for
 // uploading. They are locked for 'lockingDuration' time before being handed out
 // again.
-func (s *SQLStore) PackedSlabsForUpload(lockingDuration time.Duration, limit int) ([]api.PackedSlab, error) {
-	buffers, err := s.packedSlabsForUpload(lockingDuration, limit)
+// TODO: use set and redundancy
+func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error) {
+	buffers, err := s.packedSlabsForUpload(lockingDuration, minShards, totalShards, set, limit)
 	if err != nil {
 		return nil, err
 	}
 	slabs := make([]api.PackedSlab, len(buffers))
 	for i, buf := range buffers {
 		slabs[i] = api.PackedSlab{
-			BufferID:    buf.ID,
-			MinShards:   buf.MinShards,
-			TotalShards: buf.TotalShards,
-			Data:        buf.Data,
+			BufferID: buf.ID,
+			Data:     buf.Data,
 		}
 	}
 	return slabs, nil
@@ -1290,7 +1293,7 @@ func (s *SQLStore) PackedSlabsForUpload(lockingDuration time.Duration, limit int
 
 // MarkPackedSlabsUploaded marks the given slabs as uploaded and deletes them
 // from the buffer.
-func (s *SQLStore) MarkPackedSlabsUploaded(slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
 	// Sanity check input.
 	for _, ss := range slabs {
 		for _, shard := range ss.Shards {
@@ -1329,11 +1332,6 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 		Error
 	if err != nil {
 		return err
-	}
-
-	// sanity check slab
-	if len(slab.Shards) != int(buffer.TotalShards) {
-		return fmt.Errorf("invalid number of shards in slab %v, expected %v, got %v", slab.BufferID, buffer.TotalShards, len(slab.Shards))
 	}
 
 	// update the slab

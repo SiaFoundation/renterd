@@ -103,6 +103,9 @@ type (
 		RenameObject(ctx context.Context, from, to string) error
 		RenameObjects(ctx context.Context, from, to string) error
 
+		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
@@ -782,7 +785,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.PartialSlab, aor.UsedContracts)) // TODO
 	}
 }
 
@@ -838,6 +841,26 @@ func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 		return
 	}
 	jc.Encode(info)
+}
+
+func (b *bus) packedSlabsHandlerGET(jc jape.Context) {
+	var psrg api.PackedSlabsRequestGET
+	if jc.Decode(&psrg) != nil {
+		return
+	}
+	slabs, err := b.ms.PackedSlabsForUpload(jc.Request.Context(), psrg.LockingDuration, psrg.MinShards, psrg.TotalShards, psrg.ContractSet, psrg.Limit)
+	if jc.Check("couldn't get packed slabs", err) != nil {
+		return
+	}
+	jc.Encode(slabs)
+}
+
+func (b *bus) packedSlabsHandlerPOST(jc jape.Context) {
+	var psrp api.PackedSlabsRequestPOST
+	if jc.Decode(&psrp) != nil {
+		return
+	}
+	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
 }
 
 func (b *bus) slabHandlerGET(jc jape.Context) {
@@ -985,9 +1008,10 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		// return the upload params without a contract set, if the user is
 		// specifying a contract set through the query string that's fine
 		jc.Encode(api.UploadParams{
-			ContractSet:   "",
-			CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
-			GougingParams: gp,
+			ContractSet:    "",
+			CurrentHeight:  b.cm.TipState(jc.Request.Context()).Index.Height,
+			GougingParams:  gp,
+			PartialUploads: true, // TODO: set
 		})
 		return
 	} else if err != nil {
@@ -1001,9 +1025,10 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:   css.Default,
-		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
-		GougingParams: gp,
+		ContractSet:    css.Default,
+		CurrentHeight:  b.cm.TipState(jc.Request.Context()).Index.Height,
+		GougingParams:  gp,
+		PartialUploads: true, // TODO: set
 	})
 }
 
@@ -1421,6 +1446,9 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /objects/*path":  b.objectsHandlerPUT,
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+
+		"GET    /packedslabs": b.packedSlabsHandlerGET,
+		"POST /packedslabs":   b.packedSlabsHandlerPOST,
 
 		"POST   /slabs/migration": b.slabsMigrationHandlerPOST,
 		"GET    /slab/:key":       b.slabHandlerGET,

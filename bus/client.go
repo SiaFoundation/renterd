@@ -556,11 +556,12 @@ func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit 
 }
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContract map[types.PublicKey]types.FileContractID) (err error) {
 	path = strings.TrimPrefix(path, "/")
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
 		ContractSet:   contractSet,
 		Object:        o,
+		PartialSlab:   ps,
 		UsedContracts: usedContract,
 	})
 	return
@@ -683,6 +684,16 @@ func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 // contract with a given payout.
 func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (tax types.Currency, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/consensus/siafundfee/%s", api.ParamCurrency(payout)), &tax)
+	return
+}
+
+func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (slabs []api.PackedSlab, err error) {
+	err = c.c.WithContext(ctx).GET("/packedslabs", &slabs)
+	return
+}
+
+func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).POST("/packedslabs", &slabs, nil)
 	return
 }
 

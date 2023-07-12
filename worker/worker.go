@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -147,8 +148,11 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []api.ObjectMetadata, error)
-	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	AddObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string, batch bool) error
+
+	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+	PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 
 	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
@@ -934,7 +938,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	object, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight)
+	object, partialSlab, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.PartialUploads)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -952,8 +956,52 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, object, used)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, object, partialSlab, used)) != nil {
 		return
+	}
+
+	// if partial uploads are not enabled we are done.
+	if !up.PartialUploads {
+		return
+	}
+
+	// if partial uploads are enabled, check whether we have a full slab now
+	packedSlabs, err := w.bus.PackedSlabsForUpload(jc.Request.Context(), 5*time.Minute, uint8(rs.MinShards), uint8(rs.TotalShards), up.ContractSet, 2)
+	if jc.Check("couldn't fetch packed slabs from bus", err) != nil {
+		return
+	}
+
+	for _, ps := range packedSlabs {
+		// upload packed slab.
+		object, _, err = w.uploadManager.Upload(ctx, bytes.NewReader(ps.Data), rs, contracts, up.CurrentHeight, false)
+		if jc.Check("couldn't upload packed slab", err) != nil {
+			return
+		}
+		slab := object.Slabs[0]
+
+		// build used contracts map
+		h2c := make(map[types.PublicKey]types.FileContractID)
+		for _, c := range contracts {
+			h2c[c.HostKey] = c.ID
+		}
+		used := make(map[types.PublicKey]types.FileContractID)
+		for _, s := range object.Slabs {
+			for _, ss := range s.Shards {
+				used[ss.Host] = h2c[ss.Host]
+			}
+		}
+
+		// mark packed slab as uploaded.
+		err = w.bus.MarkPackedSlabsUploaded(jc.Request.Context(), []api.UploadedPackedSlab{
+			{
+				BufferID: ps.BufferID,
+				Key:      slab.Key,
+				Shards:   slab.Shards,
+			},
+		}, used)
+		if jc.Check("couldn't mark packed slabs uploaded", err) != nil {
+			return
+		}
 	}
 }
 
