@@ -193,7 +193,14 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	id := newID()
 
 	// calculate what slabs we need
-	slabs := slabsForDownload(o.Slabs, offset, length)
+	ss := o.Slabs
+	if o.PartialSlab != nil {
+		ss = append(ss, object.SlabSlice{
+			Offset: 0,
+			Length: uint32(len(o.PartialSlab.Data)),
+		})
+	}
+	slabs := slabsForDownload(ss, offset, length)
 	if len(slabs) == 0 {
 		return nil
 	}
@@ -235,6 +242,13 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		for {
 			if slabIndex < len(slabs) && atomic.LoadUint64(&concurrentSlabs) < maxConcurrentSlabsPerDownload {
 				next := slabs[slabIndex]
+
+				// check if the next slab is a partial slab.
+				if slabIndex == len(slabs)-1 && o.PartialSlab != nil {
+					responseChan <- &slabDownloadResponse{index: slabIndex}
+					slabIndex++
+					continue // handle partial slab separately
+				}
 
 				// check if we have enough downloaders
 				var available uint8
@@ -289,13 +303,23 @@ outer:
 			responses[resp.index] = resp
 			for {
 				if next, exists := responses[respIndex]; exists {
-					slabs[respIndex].Decrypt(next.shards)
-					err := slabs[respIndex].Recover(cw, next.shards)
-					if err != nil {
-						mgr.logger.Errorf("failed to recover slab %v: %v", respIndex, err)
-						return err
+					if next.index == len(slabs)-1 && o.PartialSlab != nil {
+						// Partial slab.
+						s := slabs[respIndex]
+						_, err = cw.Write(o.PartialSlab.Data[s.Offset:][:s.Length])
+						if err != nil {
+							mgr.logger.Errorf("failed to send partial slab", respIndex, err)
+							return err
+						}
+					} else {
+						// Regular slab.
+						slabs[respIndex].Decrypt(next.shards)
+						err := slabs[respIndex].Recover(cw, next.shards)
+						if err != nil {
+							mgr.logger.Errorf("failed to recover slab %v: %v", respIndex, err)
+							return err
+						}
 					}
-
 					next = nil
 					delete(responses, respIndex)
 					respIndex++

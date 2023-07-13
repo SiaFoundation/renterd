@@ -341,7 +341,6 @@ loop:
 				<-nextSlabChan // trigger next iteration
 			} else {
 				// Otherwise we upload it.
-				go u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
 				wg.Add(1)
 				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
 					u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)

@@ -575,7 +575,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// assert it matches
 	if !bytes.Equal(data, buffer.Bytes()) {
-		t.Fatal("unexpected")
+		t.Fatal("unexpected", len(data), buffer.Len())
 	}
 
 	// download again, 32 bytes at a time.

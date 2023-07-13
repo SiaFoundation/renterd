@@ -828,7 +828,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		jc.Encode(entries)
 		return
 	}
-	if len(obj.Slabs) == 0 {
+	if len(obj.Slabs) == 0 && obj.PartialSlab == nil {
 		return
 	}
 
