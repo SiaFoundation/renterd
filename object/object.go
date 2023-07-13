@@ -90,6 +90,9 @@ func (o Object) Size() int64 {
 	for _, ss := range o.Slabs {
 		n += int64(ss.Length)
 	}
+	if o.PartialSlab != nil {
+		n += int64(len(o.PartialSlab.Data))
+	}
 	return n
 }
 

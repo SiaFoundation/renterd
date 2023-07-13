@@ -91,6 +91,7 @@ type (
 		Model
 		DBContractSetID uint `gorm:"index"`
 		DBContractSet   dbContractSet
+		DBSlabBufferID  uint `gorm:"index;unique;default:NULL"`
 
 		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
@@ -103,8 +104,7 @@ type (
 	// TODO: add a hook that deletes a buffer if the slab is deleted
 	dbSlabBuffer struct {
 		Model
-		DBSlabID uint `gorm:"index;unique"`
-		DBSlab   dbSlab
+		DBSlab dbSlab
 
 		Complete    bool `gorm:"index"`
 		Data        []byte
@@ -319,7 +319,7 @@ func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 	if partialSlabSector != nil {
 		var buffer dbSlabBuffer
 		err := tx.Joins("DBSlab").
-			Where(dbSlabBuffer{DBSlabID: partialSlabSector.SlabID}).
+			Where("DBSlab__ID", partialSlabSector.SlabID).
 			Take(&buffer).Error
 		if err != nil {
 			return object.Object{}, err
@@ -962,7 +962,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		remainingSpace := slabSize - len(buffer.Data)
 		slice := dbSlice{
 			DBObjectID: obj.ID,
-			DBSlabID:   buffer.DBSlabID,
+			DBSlabID:   buffer.DBSlab.ID,
 			Offset:     uint32(len(buffer.Data)),
 		}
 		if remainingSpace <= len(partialSlab.Data) {
@@ -1242,7 +1242,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string) (rawOb
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
-		Joins("LEFT JOIN buffered_slabs bs ON sla.id = bs.`db_slab_id`").
+		Joins("LEFT JOIN buffered_slabs bs ON sla.db_slab_buffer_id = bs.`id`").
 		Where("o.object_id = ?", path).
 		Order("o.id ASC").
 		Order("sla.id ASC").
@@ -1288,7 +1288,7 @@ func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards
 	err := s.db.Raw(`
 		UPDATE buffered_slabs SET locked_until = ? WHERE id IN (
 			SELECT buffered_slabs.id FROM buffered_slabs
-			INNER JOIN slabs sla ON sla.id = buffered_slabs.db_slab_id
+			INNER JOIN slabs sla ON sla.db_slab_buffer_id = buffered_slabs.id
 			INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
 			WHERE complete = ? AND locked_until < ? AND min_shards = ? AND total_shards = ? AND cs.name = ?
 			LIMIT ?)
@@ -1349,18 +1349,10 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 }
 
 func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) error {
-	// fetch and delete buffer
-	var buffer dbSlabBuffer
-	err := tx.Where("id = ? AND complete = ?", slab.BufferID, true).
-		Take(&buffer).
-		Error
-	if err != nil {
-		return err
-	}
-	err = tx.Where("id", buffer.ID).
-		Delete(&dbSlabBuffer{}).
-		Error
-	if err != nil {
+	// find the slab
+	var sla dbSlab
+	if err := tx.Where("db_slab_buffer_id", slab.BufferID).
+		Take(&sla).Error; err != nil {
 		return err
 	}
 
@@ -1370,8 +1362,19 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 		return err
 	}
 	if err := tx.Model(&dbSlab{}).
-		Where("id", buffer.DBSlabID).
-		Update("key", key).Error; err != nil {
+		Where("id", sla.ID).
+		Updates(map[string]interface{}{
+			"key":               key,
+			"db_slab_buffer_id": nil,
+		}).Error; err != nil {
+		return err
+	}
+
+	// delete buffer
+	err = tx.Where("id", slab.BufferID).
+		Delete(&dbSlabBuffer{}).
+		Error
+	if err != nil {
 		return err
 	}
 
@@ -1383,7 +1386,7 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 			return fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
 		}
 		shards = append(shards, dbSector{
-			DBSlabID:   buffer.DBSlabID,
+			DBSlabID:   sla.ID,
 			LatestHost: publicKey(slab.Shards[i].Host),
 			Root:       slab.Shards[i].Root[:],
 			Contracts:  []dbContract{contract},
