@@ -289,8 +289,12 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	defer close(nextSlabChan)
 
 	// create the response channel
+	var wg sync.WaitGroup
 	respChan := make(chan slabUploadResponse)
-	defer close(respChan)
+	defer func() {
+		wg.Wait()
+		close(respChan)
+	}()
 
 	// collect the responses
 	var responses []slabUploadResponse
@@ -338,6 +342,11 @@ loop:
 			} else {
 				// Otherwise we upload it.
 				go u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
+				wg.Add(1)
+				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
+					u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
+					wg.Done()
+				}(rs, data, length, slabIndex)
 			}
 			slabIndex++
 		case res := <-respChan:
