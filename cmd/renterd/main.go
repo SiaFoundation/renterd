@@ -207,7 +207,8 @@ func main() {
 		log.Println("Build Date:", builddate)
 		return
 	} else if flag.Arg(0) == "seed" {
-		log.Println("Seed phrase:", wallet.NewSeedPhrase())
+		log.Println("Seed phrase:")
+		fmt.Println(wallet.NewSeedPhrase())
 		return
 	}
 
