@@ -269,34 +269,40 @@ func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 		return object.Object{}, err
 	}
 
-	// create a helper function to add a slab and update the state
-	slabs := make([]object.SlabSlice, 0, len(raw))
-	curr := raw[0].SlabID
-	var start int
-	addSlab := func(end int, id uint) error {
-		if slab, err := raw[start:end].toSlabSlice(); err != nil {
-			return err
-		} else {
-			slabs = append(slabs, slab)
-			curr = id
-			start = end
-		}
-		return nil
-	}
-
-	// filter out slabs without slab ID - this is expected for an empty object
-	filtered := raw[:0]
-	for _, sector := range raw {
-		if sector.SlabID != 0 {
+	// filter out slabs without slab ID and buffered slabs - this is expected
+	// for an empty object or objects that end with a partial slab.
+	var filtered rawObject
+	var partialSlabSector *rawObjectSector
+	for i, sector := range raw {
+		if sector.SlabID != 0 && !sector.SlabBuffered {
 			filtered = append(filtered, sector)
+		} else if sector.SlabBuffered {
+			partialSlabSector = &raw[i]
 		}
 	}
 
 	// hydrate all slabs
-	var partialSlabSector *rawObjectSector
+	slabs := make([]object.SlabSlice, 0, len(filtered))
 	if len(filtered) > 0 {
+		curr := filtered[0].SlabID
+		var start int
+		// create a helper function to add a slab and update the state
+		addSlab := func(end int, id uint) error {
+			if filtered[start].SlabBuffered {
+				return nil // ignore partial slabs
+			}
+			if slab, err := filtered[start:end].toSlabSlice(); err != nil {
+				return err
+			} else {
+				slabs = append(slabs, slab)
+				curr = id
+				start = end
+			}
+			return nil
+		}
+
 		for j, sector := range filtered {
-			if sector.SectorID == 0 && !sector.SlabBuffered {
+			if sector.SectorID == 0 {
 				return object.Object{}, api.ErrObjectCorrupted
 			}
 			if sector.SlabID != curr {
@@ -304,14 +310,9 @@ func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 					return object.Object{}, err
 				}
 			}
-			if sector.SlabBuffered {
-				partialSlabSector = &filtered[j]
-			}
 		}
-		if partialSlabSector == nil {
-			if err := addSlab(len(raw), 0); err != nil {
-				return object.Object{}, err
-			}
+		if err := addSlab(len(filtered), 0); err != nil {
+			return object.Object{}, err
 		}
 	}
 
