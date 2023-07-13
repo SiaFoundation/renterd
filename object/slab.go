@@ -32,6 +32,18 @@ type PartialSlab struct {
 	Data        []byte `json:"data"`
 }
 
+func (ps *PartialSlab) Encrypt(key EncryptionKey) [][]byte {
+	slab := Slab{
+		Key:       key,
+		MinShards: ps.MinShards,
+		Shards:    make([]Sector, ps.TotalShards),
+	}
+	encodedShards := make([][]byte, ps.TotalShards)
+	slab.Encode(ps.Data, encodedShards)
+	slab.Encrypt(encodedShards)
+	return encodedShards
+}
+
 // NewSlab returns a new slab for the shards.
 func NewSlab(minShards uint8) Slab {
 	return Slab{

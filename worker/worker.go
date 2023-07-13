@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -938,7 +937,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	object, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.PartialUploads)
+	obj, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.PartialUploads)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -949,14 +948,14 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		h2c[c.HostKey] = c.ID
 	}
 	used := make(map[types.PublicKey]types.FileContractID)
-	for _, s := range object.Slabs {
+	for _, s := range obj.Slabs {
 		for _, ss := range s.Shards {
 			used[ss.Host] = h2c[ss.Host]
 		}
 	}
 
 	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, object, used)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, obj, used)) != nil {
 		return
 	}
 
@@ -973,11 +972,22 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	for _, ps := range packedSlabs {
 		// upload packed slab.
-		object, err = w.uploadManager.Upload(ctx, bytes.NewReader(ps.Data), rs, contracts, up.CurrentHeight, false)
+		key := object.GenerateEncryptionKey()
+		shards := (&object.PartialSlab{
+			MinShards:   uint8(rs.MinShards),
+			TotalShards: uint8(rs.TotalShards),
+			Data:        ps.Data,
+		}).Encrypt(key)
+
+		sectors, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
 		if jc.Check("couldn't upload packed slab", err) != nil {
 			return
 		}
-		slab := object.Slabs[0]
+		slab := object.Slab{
+			Key:       key,
+			MinShards: uint8(rs.MinShards),
+			Shards:    sectors,
+		}
 
 		// build used contracts map
 		h2c := make(map[types.PublicKey]types.FileContractID)
@@ -985,10 +995,8 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			h2c[c.HostKey] = c.ID
 		}
 		used := make(map[types.PublicKey]types.FileContractID)
-		for _, s := range object.Slabs {
-			for _, ss := range s.Shards {
-				used[ss.Host] = h2c[ss.Host]
-			}
+		for _, ss := range slab.Shards {
+			used[ss.Host] = h2c[ss.Host]
 		}
 
 		// mark packed slab as uploaded.
@@ -996,7 +1004,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			{
 				BufferID: ps.BufferID,
 				Key:      slab.Key,
-				Shards:   slab.Shards,
+				Shards:   sectors,
 			},
 		}, used)
 		if jc.Check("couldn't mark packed slabs uploaded", err) != nil {

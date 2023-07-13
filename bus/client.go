@@ -698,7 +698,10 @@ func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.
 }
 
 func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).POST("/slabbuffer/done", &slabs, nil)
+	err = c.c.WithContext(ctx).POST("/slabbuffer/done", api.PackedSlabsRequestPOST{
+		Slabs:         slabs,
+		UsedContracts: usedContracts,
+	}, nil)
 	return
 }
 
