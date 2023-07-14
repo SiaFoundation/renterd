@@ -89,9 +89,9 @@ type (
 
 	dbSlab struct {
 		Model
-		DBContractSetID uint `gorm:"index"`
-		DBContractSet   dbContractSet
-		DBSlabBufferID  uint `gorm:"index;unique;default:NULL"`
+		DBContractSetID  uint `gorm:"index"`
+		DBContractSet    dbContractSet
+		DBBufferedSlabID uint `gorm:"index;unique;default:NULL"`
 
 		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
@@ -101,7 +101,7 @@ type (
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
-	dbSlabBuffer struct {
+	dbBufferedSlab struct {
 		Model
 		DBSlab dbSlab
 
@@ -173,7 +173,7 @@ func (dbSector) TableName() string { return "sectors" }
 func (dbSlab) TableName() string { return "slabs" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbSlabBuffer) TableName() string { return "buffered_slabs" }
+func (dbBufferedSlab) TableName() string { return "buffered_slabs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlice) TableName() string { return "slices" }
@@ -317,7 +317,7 @@ func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 
 	// fetch a potential partial slab from the buffer.
 	if partialSlabSector != nil {
-		var buffer dbSlabBuffer
+		var buffer dbBufferedSlab
 		err := tx.Joins("DBSlab").
 			Where("DBSlab__ID", partialSlabSector.SlabID).
 			Take(&buffer).Error
@@ -939,7 +939,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		}
 
 		// Find a buffer that is not yet marked as complete.
-		var buffer dbSlabBuffer
+		var buffer dbBufferedSlab
 		err = tx.Joins("DBSlab").
 			Joins("DBSlab.DBContractSet").
 			Where("complete = ? AND DBSlab.min_shards = ? AND DBSlab.total_shards = ? AND DBSlab__DBContractSet.name = ?",
@@ -983,7 +983,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 
 		// Update buffer.
 		buffer.Complete = len(buffer.Data) == slabSize
-		err = tx.Model(&dbSlabBuffer{}).
+		err = tx.Model(&dbBufferedSlab{}).
 			Where("ID", buffer.ID).
 			Updates(map[string]interface{}{
 				"complete": buffer.Complete,
@@ -1024,7 +1024,7 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 		return err
 	}
 	// Create a new buffer and slab.
-	return tx.Create(&dbSlabBuffer{
+	return tx.Create(&dbBufferedSlab{
 		DBSlab: dbSlab{
 			DBContractSetID: contractSetID,
 			Key:             key, // random placeholder key
@@ -1242,7 +1242,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string) (rawOb
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
-		Joins("LEFT JOIN buffered_slabs bs ON sla.db_slab_buffer_id = bs.`id`").
+		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
 		Where("o.object_id = ?", path).
 		Order("sli.id ASC").
 		Order("sec.id ASC").
@@ -1278,15 +1278,15 @@ func (s *SQLStore) contracts(ctx context.Context, set string) ([]dbContract, err
 	return cs.Contracts, nil
 }
 
-// packedSlabsForUpload retrieves up to 'limit' dbSlabBuffers that have their
+// packedSlabsForUpload retrieves up to 'limit' dbBufferedSlab that have their
 // 'Complete' flag set to true and locks them using the 'LockedUntil' field
-func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]dbSlabBuffer, error) {
-	var buffers []dbSlabBuffer
+func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]dbBufferedSlab, error) {
+	var buffers []dbBufferedSlab
 	now := time.Now().Unix()
 	err := s.db.Raw(`
 		UPDATE buffered_slabs SET locked_until = ? WHERE id IN (
 			SELECT buffered_slabs.id FROM buffered_slabs
-			INNER JOIN slabs sla ON sla.db_slab_buffer_id = buffered_slabs.id
+			INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
 			INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
 			WHERE complete = ? AND locked_until < ? AND min_shards = ? AND total_shards = ? AND cs.name = ?
 			LIMIT ?)
@@ -1349,7 +1349,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) error {
 	// find the slab
 	var sla dbSlab
-	if err := tx.Where("db_slab_buffer_id", slab.BufferID).
+	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
 		Take(&sla).Error; err != nil {
 		return err
 	}
@@ -1362,15 +1362,15 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	if err := tx.Model(&dbSlab{}).
 		Where("id", sla.ID).
 		Updates(map[string]interface{}{
-			"key":               key,
-			"db_slab_buffer_id": nil,
+			"key":                 key,
+			"db_buffered_slab_id": nil,
 		}).Error; err != nil {
 		return err
 	}
 
 	// delete buffer
 	err = tx.Where("id", slab.BufferID).
-		Delete(&dbSlabBuffer{}).
+		Delete(&dbBufferedSlab{}).
 		Error
 	if err != nil {
 		return err

@@ -2292,12 +2292,12 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check the buffer
-	var buffer dbSlabBuffer
-	if err := db.db.Take(&buffer, "id = ?", storedSlab.DBSlabBufferID).Error; err != nil {
+	var buffer dbBufferedSlab
+	if err := db.db.Take(&buffer, "id = ?", storedSlab.DBBufferedSlabID).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer.Model = Model{}
-	expectedBuffer := dbSlabBuffer{
+	expectedBuffer := dbBufferedSlab{
 		DBSlab:      dbSlab{},
 		Complete:    false,
 		Data:        obj.PartialSlab.Data,
@@ -2410,12 +2410,12 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// check the new buffer
-	var buffer2 dbSlabBuffer
+	var buffer2 dbBufferedSlab
 	if err := db.db.Joins("DBSlab").Take(&buffer2, "DBSlab.ID = ?", storedSlab.ID+1).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer2.Model = Model{}
-	expectedBuffer2 := dbSlabBuffer{
+	expectedBuffer2 := dbBufferedSlab{
 		Complete:    false,
 		Data:        obj3.PartialSlab.Data[1:],
 		LockedUntil: 0,

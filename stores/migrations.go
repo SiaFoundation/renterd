@@ -19,7 +19,7 @@ var (
 		&dbSlab{},
 		&dbSector{},
 		&dbSlice{},
-		&dbSlabBuffer{},
+		&dbBufferedSlab{},
 
 		// bus.HostDB tables
 		&dbAnnouncement{},
@@ -178,7 +178,10 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initSchema(tx *gorm.DB) error {
-	return tx.AutoMigrate(tables...)
+	if err := tx.AutoMigrate(tables...); err != nil {
+		return fmt.Errorf("failed to init schema: %w", err)
+	}
+	return nil
 }
 
 // performMigration00001_gormigrate performs the first migration before
@@ -338,16 +341,16 @@ func performMigration00003_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 		}
 	}
 
-	if m.HasColumn(&dbSlabBuffer{}, "db_slab_id") {
+	if m.HasColumn(&dbBufferedSlab{}, "db_slab_id") {
 		// Drop buffered slabs since the schema has changed and the table was
 		// unused so far.
-		if err := m.DropColumn(&dbSlabBuffer{}, "db_slab_id"); err != nil {
+		if err := m.DropColumn(&dbBufferedSlab{}, "db_slab_id"); err != nil {
 			return fmt.Errorf("failed to drop column 'db_slab_id' from table 'buffered_slabs': %w", err)
 		}
 	}
 	// Use AutoMigrate to add column to create buffered_slabs and add column to
 	// slabs.
-	if err := m.AutoMigrate(&dbSlabBuffer{}, &dbSlab{}); err != nil {
+	if err := m.AutoMigrate(&dbBufferedSlab{}, &dbSlab{}); err != nil {
 		return fmt.Errorf("failed to auto migrate buffered_slabs and slabs: %w", err)
 	}
 
