@@ -1003,32 +1003,39 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
+	var contractSet string
 	val, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
-	if err != nil && errors.Is(err, api.ErrSettingNotFound) {
-		// return the upload params without a contract set, if the user is
-		// specifying a contract set through the query string that's fine
-		jc.Encode(api.UploadParams{
-			ContractSet:    "",
-			CurrentHeight:  b.cm.TipState(jc.Request.Context()).Index.Height,
-			GougingParams:  gp,
-			PartialUploads: true, // TODO: set
-		})
-		return
-	} else if err != nil {
+	if err == nil {
+		var css api.ContractSetSetting
+		if err := json.Unmarshal([]byte(val), &css); err != nil {
+			b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
+			return
+		}
+		contractSet = css.Default
+	} else if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
 		return
 	}
 
-	var css api.ContractSetSetting
-	if err := json.Unmarshal([]byte(val), &css); err != nil {
-		b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
+	var partialUploads bool
+	val, err = b.ss.Setting(jc.Request.Context(), api.SettingPartialUpload)
+	if err == nil {
+		var pus api.PartialUploadSettings
+		if err := json.Unmarshal([]byte(val), &pus); err != nil {
+			b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
+			return
+		}
+		partialUploads = pus.Enabled
+	} else if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
+		return
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:    css.Default,
+		ContractSet:    contractSet,
 		CurrentHeight:  b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams:  gp,
-		PartialUploads: true, // TODO: set
+		PartialUploads: partialUploads,
 	})
 }
 
@@ -1295,8 +1302,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 
 	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
-		api.SettingGouging:    build.DefaultGougingSettings,
-		api.SettingRedundancy: build.DefaultRedundancySettings,
+		api.SettingGouging:       build.DefaultGougingSettings,
+		api.SettingRedundancy:    build.DefaultRedundancySettings,
+		api.SettingPartialUpload: build.DefaultPartialUploadSettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {

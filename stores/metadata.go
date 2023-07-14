@@ -1245,7 +1245,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string) (rawOb
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_slab_buffer_id = bs.`id`").
 		Where("o.object_id = ?", path).
-		Order("		sli.id ASC").
+		Order("sli.id ASC").
 		Order("sec.id ASC").
 		Scan(&rows)
 

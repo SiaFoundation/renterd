@@ -31,9 +31,10 @@ const (
 )
 
 const (
-	SettingContractSet = "contractset"
-	SettingGouging     = "gouging"
-	SettingRedundancy  = "redundancy"
+	SettingContractSet   = "contractset"
+	SettingGouging       = "gouging"
+	SettingRedundancy    = "redundancy"
+	SettingPartialUpload = "partialupload"
 )
 
 var (
@@ -410,6 +411,10 @@ type SearchHostsRequest struct {
 	UsabilityMode   string            `json:"usabilityMode"`
 	AddressContains string            `json:"addressContains"`
 	KeyIn           []types.PublicKey `json:"keyIn"`
+}
+
+type PartialUploadSettings struct {
+	Enabled bool `json:"enabled"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
