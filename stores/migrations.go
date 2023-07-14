@@ -148,6 +148,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00003_dropconstraintslabcsid",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00003_uploadPacking(tx, logger)
+			},
+			Rollback: nil,
+		},
 	}
 
 	// Create migrator.
@@ -273,6 +280,23 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 		if err := m.CreateIndex(&dbHostBlocklistEntryHost{}, "DBHostID"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func performMigration00003_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
+	m := txn.Migrator()
+	if m.HasTable("buffered_slabs") {
+		// Drop buffered slabs since the schema has changed and the table was
+		// unused so far.
+		if err := m.DropTable("buffered_slabs"); err != nil {
+			return err
+		}
+	}
+	// Use AutoMigrate to add column to create buffered_slabs and add column to
+	// slabs.
+	if err := m.AutoMigrate(&dbSlabBuffer{}, &dbSlab{}); err != nil {
+		return err
 	}
 	return nil
 }

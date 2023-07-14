@@ -101,7 +101,6 @@ type (
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
-	// TODO: add a hook that deletes a buffer if the slab is deleted
 	dbSlabBuffer struct {
 		Model
 		DBSlab dbSlab
