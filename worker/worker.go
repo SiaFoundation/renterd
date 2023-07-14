@@ -937,7 +937,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	obj, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.PartialUploads)
+	obj, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -960,7 +960,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// if partial uploads are not enabled we are done.
-	if !up.PartialUploads {
+	if !up.UploadPacking {
 		return
 	}
 

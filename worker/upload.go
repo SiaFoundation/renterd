@@ -260,7 +260,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, partialUpload bool) (_ object.Object, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool) (_ object.Object, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -330,8 +330,8 @@ loop:
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, err
 			}
-			if partialUpload && errors.Is(err, io.ErrUnexpectedEOF) {
-				// If partialUpload is true, we return the partial slab without
+			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
+				// If uploadPacking is true, we return the partial slab without
 				// uploading.
 				partialSlab = &object.PartialSlab{
 					MinShards:   uint8(rs.MinShards),

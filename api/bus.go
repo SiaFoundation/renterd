@@ -34,7 +34,7 @@ const (
 	SettingContractSet   = "contractset"
 	SettingGouging       = "gouging"
 	SettingRedundancy    = "redundancy"
-	SettingPartialUpload = "partialupload"
+	SettingUploadPacking = "uploadpacking"
 )
 
 var (
@@ -328,9 +328,9 @@ type PackedSlabsRequestPOST struct {
 
 // UploadParams contains the metadata needed by a worker to upload an object.
 type UploadParams struct {
-	CurrentHeight  uint64
-	ContractSet    string
-	PartialUploads bool
+	CurrentHeight uint64
+	ContractSet   string
+	UploadPacking bool
 	GougingParams
 }
 
@@ -413,7 +413,7 @@ type SearchHostsRequest struct {
 	KeyIn           []types.PublicKey `json:"keyIn"`
 }
 
-type PartialUploadSettings struct {
+type UploadPackingSettings struct {
 	Enabled bool `json:"enabled"`
 }
 

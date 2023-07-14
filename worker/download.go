@@ -195,6 +195,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	// calculate what slabs we need
 	ss := o.Slabs
 	if o.PartialSlab != nil {
+		// add fake slab for partial slab
 		ss = append(ss, object.SlabSlice{
 			Offset: 0,
 			Length: uint32(len(o.PartialSlab.Data)),
@@ -204,6 +205,9 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	if len(slabs) == 0 {
 		return nil
 	}
+
+	// check whether the last slab is the partial slab
+	lastSlabPartial := slabs[len(slabs)-1].Slab.Shards == nil
 
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
@@ -244,7 +248,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				next := slabs[slabIndex]
 
 				// check if the next slab is a partial slab.
-				if slabIndex == len(slabs)-1 && o.PartialSlab != nil {
+				if slabIndex == len(slabs)-1 && lastSlabPartial {
 					responseChan <- &slabDownloadResponse{index: slabIndex}
 					slabIndex++
 					continue // handle partial slab separately
@@ -303,7 +307,7 @@ outer:
 			responses[resp.index] = resp
 			for {
 				if next, exists := responses[respIndex]; exists {
-					if next.index == len(slabs)-1 && o.PartialSlab != nil {
+					if next.index == len(slabs)-1 && lastSlabPartial {
 						// Partial slab.
 						s := slabs[respIndex]
 						_, err = cw.Write(o.PartialSlab.Data[s.Offset:][:s.Length])
@@ -1153,7 +1157,7 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length uint64) []object.
 
 	firstOffset := offset
 	for i, ss := range slabs {
-		if firstOffset <= uint64(ss.Length) {
+		if firstOffset < uint64(ss.Length) {
 			slabs = slabs[i:]
 			break
 		}

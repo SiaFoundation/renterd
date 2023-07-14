@@ -35,9 +35,9 @@ var (
 		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
 	}
 
-	// DefaultPartialUploadSettings define the default partial upload settings
+	// DefaultUploadPackingSettings define the default upload packing settings
 	// the bus is configured with on startup.
-	DefaultPartialUploadSettings = api.PartialUploadSettings{
+	DefaultUploadPackingSettings = api.UploadPackingSettings{
 		Enabled: false,
 	}
 

@@ -1017,25 +1017,25 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	var partialUploads bool
-	val, err = b.ss.Setting(jc.Request.Context(), api.SettingPartialUpload)
+	var uploadPacking bool
+	val, err = b.ss.Setting(jc.Request.Context(), api.SettingUploadPacking)
 	if err == nil {
-		var pus api.PartialUploadSettings
+		var pus api.UploadPackingSettings
 		if err := json.Unmarshal([]byte(val), &pus); err != nil {
 			b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
 			return
 		}
-		partialUploads = pus.Enabled
+		uploadPacking = pus.Enabled
 	} else if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
 		return
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:    contractSet,
-		CurrentHeight:  b.cm.TipState(jc.Request.Context()).Index.Height,
-		GougingParams:  gp,
-		PartialUploads: partialUploads,
+		ContractSet:   contractSet,
+		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
+		GougingParams: gp,
+		UploadPacking: uploadPacking,
 	})
 }
 
@@ -1304,7 +1304,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 	for key, value := range map[string]interface{}{
 		api.SettingGouging:       build.DefaultGougingSettings,
 		api.SettingRedundancy:    build.DefaultRedundancySettings,
-		api.SettingPartialUpload: build.DefaultPartialUploadSettings,
+		api.SettingUploadPacking: build.DefaultUploadPackingSettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {

@@ -2323,7 +2323,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// add another object with a partial slab. This should append to the buffer.
-	fullSlabSize := slabSize(1, 2)
+	fullSlabSize := bufferedSlabSize(1)
 	obj2 := object.Object{
 		Key: object.GenerateEncryptionKey(),
 		PartialSlab: &object.PartialSlab{

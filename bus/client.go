@@ -508,6 +508,11 @@ func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, e
 	return
 }
 
+func (c *Client) UploadPackingSettings(ctx context.Context) (ups api.UploadPackingSettings, err error) {
+	err = c.Setting(ctx, api.SettingUploadPacking, &ups)
+	return
+}
+
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
 	err = c.Setting(ctx, api.SettingRedundancy, &rs)

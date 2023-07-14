@@ -953,7 +953,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		}
 
 		// We have a buffer. Sanity check it.
-		slabSize := slabSize(partialSlab.MinShards, partialSlab.TotalShards)
+		slabSize := bufferedSlabSize(partialSlab.MinShards)
 		if len(buffer.Data) >= slabSize {
 			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
 		}
@@ -1005,8 +1005,8 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 	})
 }
 
-func slabSize(minShards, totalShards uint8) int {
-	return int(rhpv2.SectorSize) * int(totalShards) / int(minShards)
+func bufferedSlabSize(minShards uint8) int {
+	return int(rhpv2.SectorSize) * int(minShards)
 }
 
 func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab object.PartialSlab) error {
@@ -1016,7 +1016,7 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 	if partialSlab.MinShards > partialSlab.TotalShards {
 		return fmt.Errorf("min shards must be less than or equal to total shards: %v > %v", partialSlab.MinShards, partialSlab.TotalShards)
 	}
-	if slabSize := int(rhpv2.SectorSize) * int(partialSlab.TotalShards) / int(partialSlab.MinShards); len(partialSlab.Data) >= slabSize {
+	if slabSize := int(rhpv2.SectorSize) * int(partialSlab.MinShards); len(partialSlab.Data) >= slabSize {
 		return fmt.Errorf("partial slab data size must be less than %v to count as a partial slab: %v", slabSize, len(partialSlab.Data))
 	}
 	key, err := object.GenerateEncryptionKey().MarshalText()
