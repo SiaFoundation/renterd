@@ -16,10 +16,10 @@ var (
 		&dbContract{},
 		&dbContractSet{},
 		&dbObject{},
+		&dbBufferedSlab{},
 		&dbSlab{},
 		&dbSector{},
 		&dbSlice{},
-		&dbBufferedSlab{},
 
 		// bus.HostDB tables
 		&dbAnnouncement{},
