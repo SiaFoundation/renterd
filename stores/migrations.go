@@ -284,30 +284,12 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 	return nil
 }
 
-func performMigration00003_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
-	m := txn.Migrator()
-	if m.HasTable("buffered_slabs") {
-		// Drop buffered slabs since the schema has changed and the table was
-		// unused so far.
-		if err := m.DropTable("buffered_slabs"); err != nil {
-			return err
-		}
-	}
-	// Use AutoMigrate to add column to create buffered_slabs and add column to
-	// slabs.
-	if err := m.AutoMigrate(&dbSlabBuffer{}, &dbSlab{}); err != nil {
-		return err
-	}
-	return nil
-}
-
 func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.Interface) error {
 	ctx := context.Background()
 	m := txn.Migrator()
 
 	// Disable foreign keys in SQLite to avoid issues with updating constraints.
 	if isSQLite(txn) {
-		fmt.Println("DISABLING constraints")
 		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
 			return err
 		}
@@ -332,6 +314,41 @@ func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.I
 		if err := m.CreateConstraint(&dbSlab{}, "DBContractSet"); err != nil {
 			return fmt.Errorf("failed to add constraint 'DBContractSet' to table 'slabs': %w", err)
 		}
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func performMigration00003_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
+	m := txn.Migrator()
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	if m.HasColumn(&dbSlabBuffer{}, "db_slab_id") {
+		// Drop buffered slabs since the schema has changed and the table was
+		// unused so far.
+		if err := m.DropColumn(&dbSlabBuffer{}, "db_slab_id"); err != nil {
+			return fmt.Errorf("failed to drop column 'db_slab_id' from table 'buffered_slabs': %w", err)
+		}
+	}
+	// Use AutoMigrate to add column to create buffered_slabs and add column to
+	// slabs.
+	if err := m.AutoMigrate(&dbSlabBuffer{}, &dbSlab{}); err != nil {
+		return fmt.Errorf("failed to auto migrate buffered_slabs and slabs: %w", err)
 	}
 
 	// Enable foreign keys again.
