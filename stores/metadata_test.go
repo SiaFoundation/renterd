@@ -2441,6 +2441,8 @@ func TestPartialSlab(t *testing.T) {
 	}
 	completedBuffer.LockedUntil = 0
 	completedBuffer.Model = Model{}
+	completedBuffer.LockID = 0
+	buffer.LockID = 0
 	if !reflect.DeepEqual(completedBuffer, buffer) {
 		t.Fatal("invalid buffer", cmp.Diff(completedBuffer, buffer))
 	}

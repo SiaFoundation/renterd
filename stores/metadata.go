@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
+	"lukechampine.com/frand"
 )
 
 var (
@@ -107,6 +108,7 @@ type (
 
 		Complete    bool `gorm:"index"`
 		Data        []byte
+		LockID      int64 `gorm:"column:lock_id"`
 		LockedUntil int64 // unix timestamp
 	}
 
@@ -1281,20 +1283,22 @@ func (s *SQLStore) contracts(ctx context.Context, set string) ([]dbContract, err
 // packedSlabsForUpload retrieves up to 'limit' dbBufferedSlab that have their
 // 'Complete' flag set to true and locks them using the 'LockedUntil' field
 func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]dbBufferedSlab, error) {
-	var buffers []dbBufferedSlab
 	now := time.Now().Unix()
-	err := s.db.Raw(`
-		UPDATE buffered_slabs SET locked_until = ? WHERE id IN (
+	lockID := int64(frand.Uint64n(math.MaxInt64))
+	err := s.db.Exec(`
+		UPDATE buffered_slabs SET locked_until = ?, lock_id = ? WHERE id IN (
 			SELECT buffered_slabs.id FROM buffered_slabs
 			INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
 			INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
 			WHERE complete = ? AND locked_until < ? AND min_shards = ? AND total_shards = ? AND cs.name = ?
-			LIMIT ?)
-		RETURNING *`,
-		now+int64(lockingDuration.Seconds()), true, now, minShards, totalShards, set, limit).
-		Scan(&buffers).
+			LIMIT ?)`,
+		now+int64(lockingDuration.Seconds()), lockID, true, now, minShards, totalShards, set, limit).
 		Error
 	if err != nil {
+		return nil, err
+	}
+	var buffers []dbBufferedSlab
+	if err := s.db.Find(&buffers, "lock_id = ?", lockID).Error; err != nil {
 		return nil, err
 	}
 	return buffers, nil
