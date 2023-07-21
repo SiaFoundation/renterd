@@ -671,12 +671,12 @@ func readSectorCost(pt rhpv3.HostPriceTable, length uint64) (types.Currency, err
 	rc = rc.Add(pt.ReadSectorCost(length))
 	cost, _ := rc.Total()
 
-	// overestimate the cost by 5%
-	cost, overflow := cost.Mul64WithOverflow(21)
+	// overestimate the cost by 10%
+	cost, overflow := cost.Mul64WithOverflow(11)
 	if overflow {
 		return types.ZeroCurrency, errors.New("overflow occurred while adding leeway to read sector cost")
 	}
-	return cost.Div64(20), nil
+	return cost.Div64(10), nil
 }
 
 // uploadSectorCost returns an overestimate for the cost of uploading a sector
@@ -686,12 +686,12 @@ func uploadSectorCost(pt rhpv3.HostPriceTable, windowEnd uint64) (cost, collater
 	rc = rc.Add(pt.AppendSectorCost(windowEnd - pt.HostBlockHeight))
 	cost, collateral = rc.Total()
 
-	// overestimate the cost by 5%
-	cost, overflow := cost.Mul64WithOverflow(21)
+	// overestimate the cost by 10%
+	cost, overflow := cost.Mul64WithOverflow(11)
 	if overflow {
 		return types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, errors.New("overflow occurred while adding leeway to read sector cost")
 	}
-	return cost.Div64(20), collateral, rc.Storage, nil
+	return cost.Div64(10), collateral, rc.Storage, nil
 }
 
 // priceTableValidityLeeway is the number of time before the actual expiry of a
