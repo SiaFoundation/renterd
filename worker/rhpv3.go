@@ -668,12 +668,15 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 // padBandwitdh pads the bandwidth to the next multiple of 1460 bytes.  1460
 // bytes is the maximum size of a TCP packet when using IPv4.
 func padBandwidth(pt rhpv3.HostPriceTable, rc rhpv3.ResourceCost) rhpv3.ResourceCost {
+	padCost := func(cost, paddingSize types.Currency) types.Currency {
+		if paddingSize.IsZero() {
+			return cost // might happen if bandwidth is free
+		}
+		return cost.Add(paddingSize).Sub(types.NewCurrency64(1)).Div(paddingSize).Mul(paddingSize)
+	}
 	minPacketSize := uint64(1460)
 	minIngress := pt.UploadBandwidthCost.Mul64(minPacketSize)
 	minEgress := pt.DownloadBandwidthCost.Mul64(minPacketSize)
-	padCost := func(cost, paddingSize types.Currency) types.Currency {
-		return cost.Add(paddingSize).Sub(types.NewCurrency64(1)).Div(paddingSize).Mul(paddingSize)
-	}
 	rc.Ingress = padCost(rc.Ingress, minIngress)
 	rc.Egress = padCost(rc.Egress, minEgress)
 	return rc
