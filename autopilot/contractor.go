@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/montanaflynn/stats"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -992,23 +993,31 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// to match the allowance. The lowest scoring host of these new hosts will
 	// be used as a baseline for determining whether our existing contracts are
 	// worthwhile.
+	var lowestScores []float64
 	buffer := 50
-	candidates, scores, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	for i := 0; i < 5; i++ {
+		candidates, scores, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+		if err != nil {
+			return 0, err
+		}
+		if len(candidates) == 0 {
+			c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
+			return math.SmallestNonzeroFloat64, nil
+		}
+
+		// Find the minimum score that a host is allowed to have to be considered
+		// good for upload.
+		lowestScore := math.MaxFloat64
+		for _, score := range scores {
+			if score < lowestScore {
+				lowestScore = score
+			}
+		}
+		lowestScores = append(lowestScores, lowestScore)
+	}
+	lowestScore, err := stats.Float64Data(lowestScores).Median()
 	if err != nil {
 		return 0, err
-	}
-	if len(candidates) == 0 {
-		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return math.SmallestNonzeroFloat64, nil
-	}
-
-	// Find the minimum score that a host is allowed to have to be considered
-	// good for upload.
-	lowestScore := math.MaxFloat64
-	for _, score := range scores {
-		if score < lowestScore {
-			lowestScore = score
-		}
 	}
 	minScore := lowestScore / minAllowedScoreLeeway
 	c.logger.Infow("finished computing minScore",
