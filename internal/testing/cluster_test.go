@@ -355,7 +355,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		_, got, err := b.Object(context.Background(), test.path, test.prefix, 0, -1)
+		_, got, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix))
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
@@ -363,7 +363,7 @@ func TestObjectEntries(t *testing.T) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			_, got, err := b.Object(context.Background(), test.path, test.prefix, offset, 1)
+			_, got, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -652,7 +652,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "file" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", "file", 0, -1)
+	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("file"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +661,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "fileś" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", "foo", 0, -1)
+	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("foo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -864,7 +864,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 
 			// Should be registered in bus.
-			_, entries, err := cluster.Bus.Object(context.Background(), "", "", 0, -1)
+			_, entries, err := cluster.Bus.Object(context.Background(), "")
 			if err != nil {
 				t.Fatal(err)
 			}
