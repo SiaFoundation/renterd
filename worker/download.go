@@ -998,6 +998,9 @@ func (s *slabDownload) downloadSpeed() int64 {
 	completedShards := len(s.sectors)
 	bytes := completedShards * rhpv2.SectorSize
 	ms := time.Since(s.created).Milliseconds()
+	if ms == 0 {
+		ms = 1 // avoid division by zero
+	}
 	return int64(bytes) / ms
 }
 
