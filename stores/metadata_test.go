@@ -2482,6 +2482,97 @@ func TestPartialSlab(t *testing.T) {
 	}
 }
 
+func TestRemoveObject(t *testing.T) {
+	// create a store
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a host and contract
+	hks, err := db.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hks[0],
+							Root: types.Hash256{1},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := db.UpdateObject(context.Background(), "obj", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+		hks[0]: fcids[0],
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the entry in our join table
+	var css []dbContractSector
+	if err := db.db.Find(&css).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(css) != 1 {
+		t.Fatal("table should contain one entry", len(css))
+	}
+
+	// remove the object and assert the join table is empty
+	if err := db.RemoveObject(context.Background(), "obj"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.db.Model(&dbContractSector{}).Find(&css).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(css) != 0 {
+		t.Fatal("table should be empty", len(css))
+	}
+
+	// assert we have one deleted sector
+	var deleted []dbDeletedSector
+	if err := db.db.Find(&deleted).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 1 {
+		t.Fatal("table should contain one entry", len(deleted))
+	}
+	var dcs []dbContractDeletedSector
+	if err := db.db.Model(&dbContractDeletedSector{}).Find(&dcs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(dcs) != 1 {
+		t.Fatal("table should contain one entry", len(dcs))
+	}
+
+	// delete the contract
+	if err := db.db.Where(&dbContract{ContractCommon: ContractCommon{FCID: fileContractID(fcids[0])}}).Delete(&dbContract{}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the delete cascaded to deleted contract sectors
+	if err := db.db.Model(&dbContractDeletedSector{}).Find(&dcs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(dcs) != 0 {
+		t.Fatal("table should be empty", len(dcs))
+	}
+}
+
 // dbObject retrieves a dbObject from the store.
 func (s *SQLStore) dbObject(key string) (dbObject, error) {
 	var obj dbObject

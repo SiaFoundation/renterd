@@ -123,10 +123,24 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 	}
 
+	dbDeletedSector struct {
+		Model
+
+		Root      []byte       `gorm:"index;NOT NULL;size:32"`
+		Contracts []dbContract `gorm:"many2many:contract_deleted_sectors;constraint:OnDelete:CASCADE"`
+	}
+
 	// dbContractSector is a join table between dbContract and dbSector.
 	dbContractSector struct {
 		DBContractID uint `gorm:"primaryKey"`
 		DBSectorID   uint `gorm:"primaryKey"`
+	}
+
+	// dbContractDeletedSector is a join table between dbContract and
+	// dbDeletedSector.
+	dbContractDeletedSector struct {
+		DBDeletedSectorID uint `gorm:"primaryKey"`
+		DBContractID      uint `gorm:"primaryKey"`
 	}
 
 	// rawObject is used for hydration and is made up of one or many raw sectors.
@@ -170,6 +184,12 @@ func (dbObject) TableName() string { return "objects" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbDeletedSector) TableName() string { return "deleted_sectors" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbContractDeletedSector) TableName() string { return "contract_deleted_sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlab) TableName() string { return "slabs" }
@@ -751,28 +771,53 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 }
 
 func pruneSlabs(tx *gorm.DB) error {
-	var ids []uint
-
+	// fetch dangling slabs
+	var slabIds []uint
 	if err := tx.
-		Raw("SELECT sla.id FROM slabs sla LEFT JOIN slices sli ON sli.db_slab_id = sla.id WHERE sli.db_object_id IS NULL").
-		Scan(&ids).
+		Model(&dbSlab{}).
+		Joins("LEFT JOIN slices ON slices.db_slab_id = slabs.id").
+		Where("slices.db_object_id IS NULL").
+		Select("slabs.id").
+		Scan(&slabIds).
 		Error; err != nil {
 		return err
 	}
 
-	// TODO: to support contract pruning we need to copy these deleted sectors
-	// to a separate table so we know what sectors to remove from which
-	// contracts
+	// nothing to do
+	if len(slabIds) == 0 {
+		return nil
+	}
 
+	// fetch slab sectors
+	var sectors []dbSector
 	if err := tx.
-		Exec("DELETE FROM sectors WHERE db_slab_id IN (?)", ids).
+		Model(&dbSector{}).
+		Preload("Contracts").
+		Where("db_slab_id IN (?)", slabIds).
+		Find(&sectors).
 		Error; err != nil {
 		return err
 	}
 
-	return tx.
-		Exec("DELETE FROM slabs WHERE id IN (?)", ids).
-		Error
+	// create deleted sectors
+	var deleted []dbDeletedSector
+	for _, sector := range sectors {
+		deleted = append(deleted, dbDeletedSector{
+			Root:      sector.Root,
+			Contracts: sector.Contracts,
+		})
+	}
+	if err := tx.Create(&deleted).Error; err != nil {
+		return err
+	}
+
+	// delete sectors
+	if err := tx.Delete(&sectors).Error; err != nil {
+		return err
+	}
+
+	// delete slabs
+	return tx.Delete(&dbSlab{}, slabIds).Error
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.FileContractID) (map[types.PublicKey]dbContract, error) {
@@ -1508,11 +1553,11 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
 func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
-	tx = tx.Where(&dbObject{ObjectID: path}).Delete(&dbObject{})
-	if tx.Error != nil {
-		return 0, tx.Error
+	res := tx.Where(&dbObject{ObjectID: path}).Delete(&dbObject{})
+	if res.Error != nil {
+		return 0, res.Error
 	}
-	numDeleted = tx.RowsAffected
+	numDeleted = res.RowsAffected
 	if err := pruneSlabs(tx); err != nil {
 		return 0, err
 	}
@@ -1520,11 +1565,11 @@ func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 }
 
 func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE object_id LIKE ?", path+"%")
-	if tx.Error != nil {
-		return 0, tx.Error
+	res := tx.Exec("DELETE FROM objects WHERE object_id LIKE ?", path+"%")
+	if res.Error != nil {
+		return 0, res.Error
 	}
-	numDeleted = tx.RowsAffected
+	numDeleted = res.RowsAffected
 	if err := pruneSlabs(tx); err != nil {
 		return 0, err
 	}

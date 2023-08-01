@@ -20,6 +20,7 @@ var (
 		&dbSector{},
 		&dbSlice{},
 		&dbSlabBuffer{},
+		dbDeletedSector{},
 
 		// bus.HostDB tables
 		&dbAnnouncement{},
