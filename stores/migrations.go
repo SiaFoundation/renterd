@@ -148,6 +148,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00003_dropconstraintslabshards",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00003_dropconstraintslabshards(tx, logger)
+			},
+			Rollback: nil,
+		},
 	}
 
 	// Create migrator.
@@ -307,6 +314,51 @@ func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.I
 		logger.Info(ctx, "migration 00002_dropconstraintslabcsid: adding constraint on DBContractSet")
 		if err := m.CreateConstraint(&dbSlab{}, "DBContractSet"); err != nil {
 			return fmt.Errorf("failed to add constraint 'DBContractSet' to table 'slabs': %w", err)
+		}
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func performMigration00003_dropconstraintslabshards(txn *gorm.DB, logger glogger.Interface) error {
+	ctx := context.Background()
+	m := txn.Migrator()
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		fmt.Println("DISABLING constraints")
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Drop the constraint on Shards.
+	if m.HasConstraint(&dbSlab{}, "Shards") {
+		logger.Info(ctx, "migration 00003_dropconstraintslabshards: dropping constraint on Shards")
+		if err := m.DropConstraint(&dbSlab{}, "Shards"); err != nil {
+			return fmt.Errorf("failed to drop constraint 'Shards' from table 'slabs': %w", err)
+		}
+	}
+
+	// Perform auto migrations.
+	if err := txn.AutoMigrate(tables...); err != nil {
+		return err
+	}
+
+	// Add constraint back.
+	if !m.HasConstraint(&dbSlab{}, "Shards") {
+		logger.Info(ctx, "migration 00003_dropconstraintslabshards: adding constraint on Shards")
+		if err := m.CreateConstraint(&dbSlab{}, "Shards"); err != nil {
+			return fmt.Errorf("failed to add constraint 'Shards' to table 'slabs': %w", err)
 		}
 	}
 
