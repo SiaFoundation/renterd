@@ -97,7 +97,7 @@ type (
 		TotalShards uint8
 
 		Slices []dbSlice
-		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
+		Shards []dbSector
 	}
 
 	// TODO: add a hook that deletes a buffer if the slab is deleted
@@ -751,9 +751,28 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 }
 
 func pruneSlabs(tx *gorm.DB) error {
-	return tx.Exec(`DELETE FROM slabs WHERE slabs.id IN (SELECT * FROM (SELECT sla.id FROM slabs sla
-		LEFT JOIN slices sli ON sli.db_slab_id  = sla.id
-		WHERE db_object_id IS NULL) toDelete)`).Error
+	var ids []uint
+
+	if err := tx.
+		Raw("SELECT sla.id FROM slabs sla LEFT JOIN slices sli ON sli.db_slab_id = sla.id WHERE sli.db_object_id IS NULL").
+		Scan(&ids).
+		Error; err != nil {
+		return err
+	}
+
+	// TODO: to support contract pruning we need to copy these deleted sectors
+	// to a separate table so we know what sectors to remove from which
+	// contracts
+
+	if err := tx.
+		Exec("DELETE FROM sectors WHERE db_slab_id IN (?)", ids).
+		Error; err != nil {
+		return err
+	}
+
+	return tx.
+		Exec("DELETE FROM slabs WHERE id IN (?)", ids).
+		Error
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.FileContractID) (map[types.PublicKey]dbContract, error) {

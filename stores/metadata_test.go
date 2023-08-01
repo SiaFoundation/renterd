@@ -1753,15 +1753,20 @@ func TestContractSectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Check the join table. Should contain one entry.
+	if err := db.db.Find(&css).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(css) != 1 {
+		t.Fatal("table should contain one entry", len(css))
+	}
+
 	// Delete the object.
 	if err := db.RemoveObject(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	}
 
-	// Delete the sector.
-	if err := db.db.Delete(&dbSector{Model: Model{ID: 1}}).Error; err != nil {
-		t.Fatal(err)
-	}
+	// Check the join table. Should be empty.
 	if err := db.db.Find(&css).Error; err != nil {
 		t.Fatal(err)
 	}
