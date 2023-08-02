@@ -1109,7 +1109,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 	})
 }
 
-func (s *SQLStore) RecomputeHealth(ctx context.Context) error {
+func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 	healthQuery := s.db.Raw(`
 SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 THEN

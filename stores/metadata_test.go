@@ -495,7 +495,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// no slabs should be unhealthy.
-	if err := cs.RecomputeHealth(context.Background()); err != nil {
+	if err := cs.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err := cs.UnhealthySlabs(context.Background(), 0.99, "test", 10)
@@ -534,7 +534,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// slab should still be in good shape.
-	if err := cs.RecomputeHealth(context.Background()); err != nil {
+	if err := cs.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err = cs.UnhealthySlabs(context.Background(), 0.99, "test", 10)
@@ -1396,7 +1396,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
@@ -1417,7 +1417,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal("slabs are not returned in the correct order")
 	}
 
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err = db.UnhealthySlabs(ctx, 0.49, testContractSet, -1)
@@ -1437,7 +1437,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// Fetch unhealthy slabs again but for different contract set.
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err = db.UnhealthySlabs(ctx, 0.49, "foo", -1)
@@ -1505,7 +1505,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
@@ -1569,7 +1569,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	}
 
 	// assert it's healthy
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
@@ -1586,7 +1586,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err = db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
@@ -1672,7 +1672,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	slabs, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
@@ -1881,7 +1881,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there is only one
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	toMigrate, err := db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
@@ -1940,7 +1940,7 @@ func TestPutSlab(t *testing.T) {
 	}
 
 	// fetch slabs for migration and assert there are none left
-	if err := db.RecomputeHealth(context.Background()); err != nil {
+	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	toMigrate, err = db.UnhealthySlabs(ctx, 0.99, testContractSet, -1)

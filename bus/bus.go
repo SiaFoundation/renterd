@@ -102,7 +102,7 @@ type (
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
-		RecomputeHealth(ctx context.Context) error
+		RefreshHealth(ctx context.Context) error
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) error
 	}
@@ -819,8 +819,8 @@ func (b *bus) slabHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) slabsRecomputeHealthHandlerPOST(jc jape.Context) {
-	jc.Check("failed to recompute health", b.ms.RecomputeHealth(jc.Request.Context()))
+func (b *bus) slabsRefreshHealthHandlerPOST(jc jape.Context) {
+	jc.Check("failed to recompute health", b.ms.RefreshHealth(jc.Request.Context()))
 }
 
 func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
@@ -1347,10 +1347,10 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /objects/*path": b.objectsHandlerPUT,
 		"DELETE /objects/*path": b.objectsHandlerDELETE,
 
-		"POST   /slabs/migration":       b.slabsMigrationHandlerPOST,
-		"POST   /slabs/recomputehealth": b.slabsRecomputeHealthHandlerPOST,
-		"GET    /slab/:key":             b.slabHandlerGET,
-		"PUT    /slab":                  b.slabHandlerPUT,
+		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
+		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
+		"GET    /slab/:key":           b.slabHandlerGET,
+		"PUT    /slab":                b.slabHandlerPUT,
 
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,

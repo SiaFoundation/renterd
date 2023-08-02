@@ -266,9 +266,11 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 }
 
 func performMigration00002_healthcache(txn *gorm.DB, logger glogger.Interface) error {
-	logger.Info(context.Background(), "performing migration 00002_healthcheck")
-	if err := txn.Migrator().AddColumn(&dbSlab{}, "health"); err != nil {
-		return err
+	logger.Info(context.Background(), "performing migration 00002_healthcache")
+	if !txn.Migrator().HasColumn(&dbSlab{}, "health") {
+		if err := txn.Migrator().AddColumn(&dbSlab{}, "health"); err != nil {
+			return err
+		}
 	}
 	logger.Info(context.Background(), "migration 00002_healthcheck complete")
 	return nil
