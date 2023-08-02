@@ -322,7 +322,7 @@ func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 	if partialSlabSector != nil {
 		var buffer dbBufferedSlab
 		err := tx.Joins("DBSlab").
-			Where("DBSlab__ID", partialSlabSector.SlabID).
+			Where("DBSlab.id", partialSlabSector.SlabID).
 			Take(&buffer).Error
 		if err != nil {
 			return object.Object{}, err
