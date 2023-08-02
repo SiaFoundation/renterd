@@ -690,6 +690,7 @@ func TestAncestorsContracts(t *testing.T) {
 			HostKey:     hk,
 			RenewedTo:   fcids[len(fcids)-1-i],
 			StartHeight: 2,
+			Size:        4096,
 			WindowStart: 400,
 			WindowEnd:   500,
 		}) {
@@ -2609,6 +2610,26 @@ func TestPrunableData(t *testing.T) {
 		t.Fatal("unexpected amount of prunable data", n)
 	}
 	if n := prunableData(&fcids[1]); n != 0 {
+		t.Fatal("expected no prunable data", n)
+	}
+
+	// remove the second object
+	if err := db.RemoveObject(context.Background(), "obj_2"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's now two sectors that can be pruned
+	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+		t.Fatal("unexpected amount of prunable data", n)
+	}
+
+	// archive all contracts
+	if err := db.ArchiveAllContracts(context.Background(), t.Name()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's no data to be pruned
+	if n := prunableData(nil); n != 0 {
 		t.Fatal("expected no prunable data", n)
 	}
 }

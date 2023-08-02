@@ -561,7 +561,7 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error) {
 	err = s.db.
 		Raw(`
-SELECT SUM(i.prunable)
+SELECT IFNULL(SUM(prunable), 0)
 FROM (
     SELECT ABS(c.size - COUNT(cs.db_sector_id) * ?) as prunable
     FROM contracts c
@@ -576,14 +576,11 @@ FROM (
 func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileContractID) (prunable int64, err error) {
 	err = s.db.
 		Raw(`
-SELECT SUM(prunable)
-FROM (
-    SELECT ABS(c.size - COUNT(cs.db_sector_id) * ?) as prunable
-    FROM contracts c
-    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-	WHERE c.fcid = ?
-    GROUP BY c.id
-) as i`, rhpv2.SectorSize, fileContractID(id)).
+SELECT IFNULL(ABS(c.size - COUNT(cs.db_sector_id) * ?), 0) as prunable
+FROM contracts c
+LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+WHERE c.fcid = ?
+`, rhpv2.SectorSize, fileContractID(id)).
 		Scan(&prunable).
 		Error
 	return

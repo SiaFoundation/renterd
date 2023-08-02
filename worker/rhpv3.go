@@ -1291,8 +1291,8 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	}
 
 	// finalize the program with a new revision.
-	newRevision := rev
-	newValid, newMissed, err := updateRevisionOutputs(newRevision, types.ZeroCurrency, collateral)
+	newRevision := *rev
+	newValid, newMissed, err := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
 	if err != nil {
 		return types.Hash256{}, types.ZeroCurrency, err
 	}
@@ -1301,7 +1301,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	newRevision.FileMerkleRoot = executeResp.NewMerkleRoot
 
 	finalizeReq := rhpv3.RPCFinalizeProgramRequest{
-		Signature:         renterKey.SignHash(hashRevision(*newRevision)),
+		Signature:         renterKey.SignHash(hashRevision(newRevision)),
 		ValidProofValues:  newValid,
 		MissedProofValues: newMissed,
 		RevisionNumber:    newRevision.RevisionNumber,
@@ -1328,6 +1328,8 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		err = errFinalise
 		return
 	}
+
+	*rev = newRevision
 	return
 }
 
