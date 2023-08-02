@@ -336,6 +336,6 @@ func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) e
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00002_healthcheck complete")
+	logger.Info(context.Background(), "migration 00003_healthcheck complete")
 	return nil
 }
