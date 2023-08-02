@@ -671,7 +671,7 @@ func (b *bus) contractPrunableDataHandlerGET(jc jape.Context) {
 	}
 
 	n, err := b.ms.PrunableDataForContract(jc.Request.Context(), id)
-	if errors.Is(err, api.ErrObjectNotFound) {
+	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
