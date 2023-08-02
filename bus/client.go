@@ -550,14 +550,12 @@ func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit in
 	return
 }
 
-// Object returns the object at the given path with the given prefix, or, if
-// path ends in '/', the entries under that path.
-func (c *Client) Object(ctx context.Context, path, prefix string, offset, limit int) (o object.Object, entries []api.ObjectMetadata, err error) {
+func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o object.Object, entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
 	values := url.Values{}
-	values.Set("prefix", url.QueryEscape(prefix))
-	values.Set("offset", fmt.Sprint(offset))
-	values.Set("limit", fmt.Sprint(limit))
+	for _, opt := range opts {
+		opt(values)
+	}
 	path += "?" + values.Encode()
 	var or api.ObjectsResponse
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &or)

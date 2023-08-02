@@ -355,7 +355,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		_, got, err := b.Object(context.Background(), test.path, test.prefix, 0, -1)
+		_, got, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix))
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
@@ -363,7 +363,7 @@ func TestObjectEntries(t *testing.T) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			_, got, err := b.Object(context.Background(), test.path, test.prefix, offset, 1)
+			_, got, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -591,6 +591,47 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatalf("mismatch for offset %v", offset)
 		}
 	}
+
+	// fetch the contracts.
+	contracts, err := cluster.Bus.Contracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// broadcast the revision for each contract and assert the revision height
+	// is 0.
+	for _, c := range contracts {
+		if c.RevisionHeight != 0 {
+			t.Fatal("revision height should be 0")
+		}
+		if err := w.RHPBroadcast(context.Background(), c.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// mine a block to get the revisions mined.
+	if err := cluster.MineBlocks(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// check the revision height was updated.
+	err = Retry(100, 100*time.Millisecond, func() error {
+		// fetch the contracts.
+		contracts, err := cluster.Bus.Contracts(context.Background())
+		if err != nil {
+			return err
+		}
+		// assert the revision height was updated.
+		for _, c := range contracts {
+			if c.RevisionHeight == 0 {
+				return errors.New("revision height should be > 0")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
@@ -652,7 +693,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "file" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", "file", 0, -1)
+	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("file"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +702,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "fileś" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", "foo", 0, -1)
+	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("foo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -864,7 +905,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 
 			// Should be registered in bus.
-			_, entries, err := cluster.Bus.Object(context.Background(), "", "", 0, -1)
+			_, entries, err := cluster.Bus.Object(context.Background(), "")
 			if err != nil {
 				t.Fatal(err)
 			}

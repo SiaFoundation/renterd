@@ -135,6 +135,7 @@ type Bus interface {
 
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
+	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
@@ -146,7 +147,7 @@ type Bus interface {
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(ctx context.Context, path, prefix string, offset, limit int) (object.Object, []api.ObjectMetadata, error)
+	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (object.Object, []api.ObjectMetadata, error)
 	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string, batch bool) error
 
@@ -154,6 +155,7 @@ type Bus interface {
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
+	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
@@ -241,7 +243,7 @@ type worker struct {
 	logger          *zap.SugaredLogger
 }
 
-func dial(ctx context.Context, hostIP string, hostKey types.PublicKey) (net.Conn, error) {
+func dial(ctx context.Context, hostIP string) (net.Conn, error) {
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
 	return conn, err
 }
@@ -252,7 +254,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 		w.recordInteractions(mr.interactions())
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
-	conn, err := dial(ctx, hostIP, hostKey)
+	conn, err := dial(ctx, hostIP)
 	if err != nil {
 		return err
 	}
@@ -514,6 +516,52 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		Contract:       contract,
 		TransactionSet: txnSet,
 	})
+}
+
+func (w *worker) rhpBroadcastHandler(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// Fetch contract from bus.
+	ctx := jc.Request.Context()
+	c, err := w.bus.Contract(ctx, fcid)
+	if jc.Check("could not get contract", err) != nil {
+		return
+	}
+	rk := w.deriveRenterKey(c.HostKey)
+
+	rev, err := w.FetchSignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
+	if jc.Check("could not fetch revision", err) != nil {
+		return
+	}
+	// Create txn with revision.
+	txn := types.Transaction{
+		FileContractRevisions: []types.FileContractRevision{rev.Revision},
+		Signatures:            rev.Signatures[:],
+	}
+	// Fund the txn. We pass 0 here since we only need the wallet to fund
+	// the fee.
+	toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency)
+	if jc.Check("failed to fund transaction", err) != nil {
+		return
+	}
+	// Sign the txn.
+	err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
+		WholeTransaction: true,
+	})
+	if jc.Check("failed to sign transaction", err) != nil {
+		_ = w.bus.WalletDiscard(ctx, txn)
+		return
+	}
+	// Broadcast the txn.
+	txnSet := append(parents, txn)
+	err = w.bus.BroadcastTransaction(ctx, txnSet)
+	if jc.Check("failed to broadcast transaction", err) != nil {
+		_ = w.bus.WalletDiscard(ctx, txn)
+		return
+	}
 }
 
 func (w *worker) rhpRenewHandler(jc jape.Context) {
@@ -812,7 +860,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	path := jc.PathParam("path")
-	obj, entries, err := w.bus.Object(ctx, path, prefix, off, limit)
+	obj, entries, err := w.bus.Object(ctx, path, api.ObjectsWithPrefix(prefix), api.ObjectsWithOffset(off), api.ObjectsWithLimit(limit))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1074,15 +1122,16 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
-		"POST   /rhp/scan":            w.rhpScanHandler,
-		"POST   /rhp/form":            w.rhpFormHandler,
-		"POST   /rhp/renew":           w.rhpRenewHandler,
-		"POST   /rhp/fund":            w.rhpFundHandler,
-		"POST   /rhp/sync":            w.rhpSyncHandler,
-		"POST   /rhp/pricetable":      w.rhpPriceTableHandler,
-		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
-		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
+		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
+		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
+		"POST   /rhp/scan":                   w.rhpScanHandler,
+		"POST   /rhp/form":                   w.rhpFormHandler,
+		"POST   /rhp/renew":                  w.rhpRenewHandler,
+		"POST   /rhp/fund":                   w.rhpFundHandler,
+		"POST   /rhp/sync":                   w.rhpSyncHandler,
+		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
+		"POST   /rhp/registry/read":          w.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update":        w.rhpRegistryUpdateHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,

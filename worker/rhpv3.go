@@ -180,7 +180,7 @@ func newTransportPoolV3(w *worker) *transportPoolV3 {
 
 func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
 	// Dial host.
-	conn, err := dial(ctx, siamuxAddr, hostKey)
+	conn, err := dial(ctx, siamuxAddr)
 	if err != nil {
 		return nil, err
 	}

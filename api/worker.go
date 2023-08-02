@@ -205,3 +205,23 @@ func DownloadWithRange(offset, length uint64) DownloadObjectOption {
 		h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
 	}
 }
+
+type ObjectsOption func(url.Values)
+
+func ObjectsWithPrefix(prefix string) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("prefix", url.QueryEscape(prefix))
+	}
+}
+
+func ObjectsWithOffset(offset int) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("offset", fmt.Sprint(offset))
+	}
+}
+
+func ObjectsWithLimit(limit int) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("limit", fmt.Sprint(limit))
+	}
+}
