@@ -1302,11 +1302,13 @@ func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards
 	lockID := int64(frand.Uint64n(math.MaxInt64))
 	err := s.db.Exec(`
 		UPDATE buffered_slabs SET locked_until = ?, lock_id = ? WHERE id IN (
-			SELECT buffered_slabs.id FROM buffered_slabs
-			INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
-			INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
-			WHERE complete = ? AND locked_until < ? AND min_shards = ? AND total_shards = ? AND cs.name = ?
-			LIMIT ?)`,
+			SELECT * FROM (
+				SELECT buffered_slabs.id FROM buffered_slabs
+				INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
+				INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
+				WHERE complete = ? AND locked_until < ? AND min_shards = ? AND total_shards = ? AND cs.name = ?
+				LIMIT ?)
+			)`,
 		now+int64(lockingDuration.Seconds()), lockID, true, now, minShards, totalShards, set, limit).
 		Error
 	if err != nil {
