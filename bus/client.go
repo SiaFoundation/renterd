@@ -468,6 +468,20 @@ func (c *Client) ReleaseContract(ctx context.Context, fcid types.FileContractID,
 	return
 }
 
+// PrunableData returns the amount of data that can be pruned from all
+// contracts.
+func (c *Client) PrunableData(ctx context.Context) (prunable int64, err error) {
+	err = c.c.WithContext(ctx).GET("/contracts/prunable", &prunable)
+	return
+}
+
+// PrunableDataForContract returns the amount of data that can be pruned from
+// the contract with given id.
+func (c *Client) PrunableDataForContract(ctx context.Context, fcid types.FileContractID) (prunable int64, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/prunable", fcid), &prunable)
+	return
+}
+
 // RecommendedFee returns the recommended fee for a txn.
 func (c *Client) RecommendedFee(ctx context.Context) (fee types.Currency, err error) {
 	err = c.c.WithContext(ctx).GET("/txpool/recommendedfee", &fee)

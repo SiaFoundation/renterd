@@ -452,7 +452,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Overwrite the old contract with the new one.
-		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
 		newContract.Model = oldContract.Model
 		err = tx.Save(&newContract).Error
 		if err != nil {
@@ -556,6 +556,39 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 		Scan(&sets).
 		Error
 	return sets, err
+}
+
+func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error) {
+	err = s.db.
+		Debug().
+		Raw(`
+SELECT SUM(i.prunable)
+FROM (
+    SELECT ABS(c.size - COUNT(cs.db_sector_id) * ?) as prunable
+    FROM contracts c
+    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+    GROUP BY c.id
+) as i`, rhpv2.SectorSize).
+		Scan(&prunable).
+		Error
+	return
+}
+
+func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileContractID) (prunable int64, err error) {
+	err = s.db.
+		Debug().
+		Raw(`
+SELECT SUM(prunable)
+FROM (
+    SELECT ABS(c.size - COUNT(cs.db_sector_id) * ?) as prunable
+    FROM contracts c
+    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+	WHERE c.fcid = ?
+    GROUP BY c.id
+) as i`, rhpv2.SectorSize, fileContractID(id)).
+		Scan(&prunable).
+		Error
+	return
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
@@ -1420,7 +1453,7 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 	return
 }
 
-func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd uint64) dbContract {
+func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64) dbContract {
 	return dbContract{
 		HostID: hostID,
 
@@ -1430,7 +1463,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
-			Size:           0,
+			Size:           size,
 			StartHeight:    startHeight,
 			WindowStart:    windowStart,
 			WindowEnd:      windowEnd,
@@ -1455,7 +1488,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, 0)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error

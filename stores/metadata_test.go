@@ -2512,6 +2512,107 @@ func TestPartialSlab(t *testing.T) {
 	}
 }
 
+func TestPrunableData(t *testing.T) {
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// define a helper function to fetch the amount of prunable data, either for
+	// all contracts or the given fcid
+	prunableData := func(fcid *types.FileContractID) (n int64) {
+		t.Helper()
+
+		var err error
+		if fcid != nil {
+			n, err = db.PrunableDataForContract(context.Background(), *fcid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		} else {
+			n, err = db.PrunableData(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+
+	// create hosts
+	hks, err := db.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create contracts
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object to both contracts
+	for i := 0; i < 2; i++ {
+		if err := db.UpdateObject(context.Background(), fmt.Sprintf("obj_%d", i+1), testContractSet, object.Object{
+			Key: object.GenerateEncryptionKey(),
+			Slabs: []object.SlabSlice{
+				{
+					Slab: object.Slab{
+						Key:       object.GenerateEncryptionKey(),
+						MinShards: 1,
+						Shards: []object.Sector{
+							{
+								Host: hks[i],
+								Root: types.Hash256{byte(i)},
+							},
+						},
+					},
+				},
+			},
+		}, nil, map[types.PublicKey]types.FileContractID{
+			hks[i]: fcids[i],
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
+			{
+				ContractID:     fcids[i],
+				RevisionNumber: 1,
+				Size:           rhpv2.SectorSize,
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert there's two objects
+	s, err := db.ObjectsStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.NumObjects != 2 {
+		t.Fatal("expected 2 objects", s.NumObjects)
+	}
+
+	// assert there's no data to be pruned
+	if n := prunableData(nil); n != 0 {
+		t.Fatal("expected no prunable data", n)
+	}
+
+	// remove the first object
+	if err := db.RemoveObject(context.Background(), "obj_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's one sector that can be pruned and assert it's from fcid 1
+	if n := prunableData(nil); n != rhpv2.SectorSize {
+		t.Fatal("unexpected amount of prunable data", n)
+	}
+	if n := prunableData(&fcids[1]); n != 0 {
+		t.Fatal("expected no prunable data", n)
+	}
+}
+
 // dbObject retrieves a dbObject from the store.
 func (s *SQLStore) dbObject(key string) (dbObject, error) {
 	var obj dbObject
