@@ -21,6 +21,7 @@ type Sector struct {
 // be used for each Slab, and should not be the same key used for the parent
 // Object.
 type Slab struct {
+	Health    float64       `json:"health"`
 	Key       EncryptionKey `json:"key"`
 	MinShards uint8         `json:"minShards"`
 	Shards    []Sector      `json:"shards"`
