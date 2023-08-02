@@ -875,6 +875,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
+					Health:    1,
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
@@ -889,6 +890,7 @@ func TestSQLMetadataStore(t *testing.T) {
 			},
 			{
 				Slab: object.Slab{
+					Health:    1,
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 2,
 					Shards: []object.Sector{
