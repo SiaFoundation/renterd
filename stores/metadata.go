@@ -144,6 +144,7 @@ type (
 
 		// slab
 		SlabID        uint
+		SlabHealth    float64
 		SlabKey       []byte
 		SlabMinShards uint8
 
@@ -340,6 +341,7 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	}
 
 	// hydrate all fields
+	slice.Slab.Health = raw[0].SlabHealth
 	slice.Slab.Shards = sectors
 	slice.Slab.MinShards = raw[0].SlabMinShards
 	slice.Offset = raw[0].SliceOffset
@@ -1225,7 +1227,7 @@ func (s *SQLStore) object(ctx context.Context, path string) (rawObject, error) {
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
@@ -1237,7 +1239,6 @@ func (s *SQLStore) object(ctx context.Context, path string) (rawObject, error) {
 		Order("sli.offset ASC").
 		Order("sec.id ASC").
 		Scan(&rows)
-
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
 		return nil, api.ErrObjectNotFound
 	}
