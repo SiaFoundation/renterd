@@ -148,6 +148,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00003_healthcache",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00003_healthcache(tx, logger)
+			},
+			Rollback: nil,
+		},
 	}
 
 	// Create migrator.
@@ -319,5 +326,16 @@ func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.I
 			return err
 		}
 	}
+	return nil
+}
+
+func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00003_healthcache")
+	if !txn.Migrator().HasColumn(&dbSlab{}, "health") {
+		if err := txn.Migrator().AddColumn(&dbSlab{}, "health"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00003_healthcheck complete")
 	return nil
 }

@@ -68,6 +68,7 @@ type Bus interface {
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// objects
+	RefreshHealth(ctx context.Context) error
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 
