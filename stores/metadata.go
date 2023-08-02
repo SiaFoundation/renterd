@@ -94,7 +94,8 @@ type (
 		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;unique;default:NULL"`
 
-		Key         []byte `gorm:"unique;NOT NULL;size:68"` // json string
+		Health      float64 `gorm:"index; default:1.0; NOT NULL"`
+		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8
 		TotalShards uint8
 
@@ -1178,6 +1179,33 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 	})
 }
 
+func (s *SQLStore) RefreshHealth(ctx context.Context) error {
+	healthQuery := s.db.Raw(`
+SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
+THEN
+    CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+    THEN -1
+    ELSE 1
+    END
+ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+END AS health
+FROM slabs
+INNER JOIN sectors s ON s.db_slab_id = slabs.id
+LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
+LEFT JOIN contracts c ON se.db_contract_id = c.id
+LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
+LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+GROUP BY slabs.id
+`)
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		if isSQLite(s.db) {
+			return s.db.Exec("UPDATE slabs SET health = (SELECT health FROM (?) WHERE slabs.id = id)", healthQuery).Error
+		} else {
+			return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health", healthQuery).Error
+		}
+	})
+}
+
 // UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
 // in the given contract set. These slabs need to be migrated to good contracts
 // so they are restored to full health.
@@ -1192,23 +1220,10 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	}
 
 	if err := s.db.
-		Select(`slabs.Key, slabs.db_contract_set_id,
-CASE WHEN (slabs.min_shards = slabs.total_shards)
-THEN
-    CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
-    THEN -1
-    ELSE 1
-    END
-ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-END AS health`).
+		Select("slabs.key, slabs.health").
+		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
 		Model(&dbSlab{}).
-		Joins("INNER JOIN sectors s ON s.db_slab_id = slabs.id").
-		Joins("LEFT JOIN contract_sectors se ON s.id = se.db_sector_id").
-		Joins("LEFT JOIN contracts c ON se.db_contract_id = c.id").
-		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id").
-		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-		Group("slabs.id").
-		Having("health <= ? AND slabs.db_contract_set_id = (SELECT id FROM contract_sets cs WHERE cs.name = ?)", healthCutoff, set).
+		Where("health <= ? AND cs.name = ?", healthCutoff, set).
 		Order("health ASC").
 		Limit(limit).
 		Find(&rows).

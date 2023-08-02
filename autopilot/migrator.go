@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	alertMigrationID = frand.Entropy256() // constnt across restarts
+	alertMigrationID = frand.Entropy256() // constant across restarts
 )
 
 const (
@@ -151,6 +151,20 @@ OUTER:
 			m.logger.Error("could not perform migrations, no contract set configured")
 			return
 		}
+
+		// recompute health.
+		start := time.Now()
+		if err := b.RefreshHealth(ctx); err != nil {
+			m.ap.alerts.Register(alerts.Alert{
+				ID:        frand.Entropy256(),
+				Severity:  alerts.SeverityCritical,
+				Message:   fmt.Sprintf("migrations interrupted - failed to refresh cached slab health: %v", err),
+				Timestamp: time.Now(),
+			})
+			m.logger.Errorf("failed to recompute cached health before migration", err)
+			return
+		}
+		m.logger.Debugf("recomputed slab health in %v", time.Since(start))
 
 		// fetch slabs for migration
 		toMigrateNew, err := b.SlabsForMigration(ctx, m.healthCutoff, set, migratorBatchSize)

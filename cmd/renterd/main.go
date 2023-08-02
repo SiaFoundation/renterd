@@ -149,10 +149,12 @@ func main() {
 	}
 	autopilotCfg.RevisionSubmissionBuffer = api.BlocksPerDay
 	// node
+	var customLogPath string
 	apiAddr := flag.String("http", build.DefaultAPIAddress, "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
 	tracingEnabled := flag.Bool("tracing-enabled", false, "Enables tracing through OpenTelemetry. If RENTERD_TRACING_ENABLED is set, it overwrites the CLI flag's value. Tracing can be configured using the standard OpenTelemetry environment variables. https://github.com/open-telemetry/opentelemetry-specification/blob/v1.8.0/specification/protocol/exporter.md")
 	tracingServiceInstanceId := flag.String("tracing-service-instance-id", "cluster", "ID of the service instance used for tracing. If RENTERD_TRACING_SERVICE_INSTANCE_ID is set, it overwrites the CLI flag's value.")
+	flag.StringVar(&customLogPath, "log-path", "", "Overwrites the default log location on disk. Alternatively RENTERD_LOG_PATH can be used")
 
 	// db
 	flag.StringVar(&dbCfg.uri, "db.uri", "", "URI of the database to use for the bus - can be overwritten using RENTERD_DB_URI environment variable")
@@ -213,6 +215,8 @@ func main() {
 	}
 
 	// Overwrite flags from environment if set.
+	parseEnvVar("RENTERD_LOG_PATH", &customLogPath)
+
 	parseEnvVar("RENTERD_TRACING_ENABLED", tracingEnabled)
 	parseEnvVar("RENTERD_TRACING_SERVICE_INSTANCE_ID", tracingServiceInstanceId)
 
@@ -294,6 +298,9 @@ func main() {
 
 	// Create logger.
 	renterdLog := filepath.Join(*dir, "renterd.log")
+	if customLogPath != "" {
+		renterdLog = customLogPath
+	}
 	logger, closeFn, err := node.NewLogger(renterdLog)
 	if err != nil {
 		log.Fatal("failed to create logger", err)

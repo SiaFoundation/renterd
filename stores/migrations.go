@@ -149,11 +149,17 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Rollback: nil,
 		},
 		{
-			ID: "00003_dropconstraintslabcsid",
+			ID: "00003_healthcache",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00003_uploadPacking(tx, logger)
+				return performMigration00003_healthcache(tx, logger)
 			},
 			Rollback: nil,
+		},
+		{
+			ID: "00004_uploadPacking",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00004_uploadPacking(tx, logger)
+			},
 		},
 	}
 
@@ -331,7 +337,18 @@ func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.I
 	return nil
 }
 
-func performMigration00003_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00003_healthcache")
+	if !txn.Migrator().HasColumn(&dbSlab{}, "health") {
+		if err := txn.Migrator().AddColumn(&dbSlab{}, "health"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00003_healthcheck complete")
+	return nil
+}
+
+func performMigration00004_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
 	m := txn.Migrator()
 
 	// Disable foreign keys in SQLite to avoid issues with updating constraints.
