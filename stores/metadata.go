@@ -952,11 +952,21 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		}
 
 		// Find a buffer that is not yet marked as complete.
-		var buffer dbBufferedSlab
-		err = tx.Joins("DBSlab").
+		// NOTE: We don't need to fetch the data of the buffer since we are just
+		// going to append to it. Instead we omit the data and select the length
+		// of the data.
+		var buffer struct {
+			dbBufferedSlab
+			Length int
+		}
+		err = tx.
+			Model(&dbBufferedSlab{}).
+			Joins("DBSlab").
 			Joins("DBSlab.DBContractSet").
 			Where("complete = ? AND DBSlab.min_shards = ? AND DBSlab.total_shards = ? AND DBSlab__DBContractSet.name = ?",
 				false, partialSlab.MinShards, partialSlab.TotalShards, contractSet).
+			Omit("data").
+			Select("buffered_slabs.*, length(buffered_slabs.data) AS Length").
 			Take(&buffer).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -967,16 +977,16 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 
 		// We have a buffer. Sanity check it.
 		slabSize := bufferedSlabSize(partialSlab.MinShards)
-		if len(buffer.Data) >= slabSize {
+		if buffer.Length >= slabSize {
 			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
 		}
 
 		// Create the slice.
-		remainingSpace := slabSize - len(buffer.Data)
+		remainingSpace := slabSize - buffer.Length
 		slice := dbSlice{
 			DBObjectID: obj.ID,
 			DBSlabID:   buffer.DBSlab.ID,
-			Offset:     uint32(len(buffer.Data)),
+			Offset:     uint32(buffer.Length),
 		}
 		if remainingSpace <= len(partialSlab.Data) {
 			slice.Length = uint32(remainingSpace)
@@ -992,7 +1002,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		overflow := partialSlab.Data[slice.Length:]
 
 		// Update buffer.
-		buffer.Complete = len(buffer.Data)+len(toAppend) == slabSize
+		buffer.Complete = buffer.Length+len(toAppend) == slabSize
 		err = tx.Model(&dbBufferedSlab{}).
 			Where("ID", buffer.ID).
 			Updates(map[string]interface{}{
