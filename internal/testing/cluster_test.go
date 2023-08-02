@@ -591,6 +591,47 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatalf("mismatch for offset %v", offset)
 		}
 	}
+
+	// fetch the contracts.
+	contracts, err := cluster.Bus.Contracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// broadcast the revision for each contract and assert the revision height
+	// is 0.
+	for _, c := range contracts {
+		if c.RevisionHeight != 0 {
+			t.Fatal("revision height should be 0")
+		}
+		if err := w.RHPBroadcast(context.Background(), c.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// mine a block to get the revisions mined.
+	if err := cluster.MineBlocks(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// check the revision height was updated.
+	err = Retry(100, 100*time.Millisecond, func() error {
+		// fetch the contracts.
+		contracts, err := cluster.Bus.Contracts(context.Background())
+		if err != nil {
+			return err
+		}
+		// assert the revision height was updated.
+		for _, c := range contracts {
+			if c.RevisionHeight == 0 {
+				return errors.New("revision height should be > 0")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
