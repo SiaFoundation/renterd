@@ -155,6 +155,12 @@ OUTER:
 		// recompute health.
 		start := time.Now()
 		if err := b.RefreshHealth(ctx); err != nil {
+			m.ap.alerts.Register(alerts.Alert{
+				ID:        frand.Entropy256(),
+				Severity:  alerts.SeverityCritical,
+				Message:   fmt.Sprintf("migrations interrupted - failed to refresh cached slab health: %v", err),
+				Timestamp: time.Now(),
+			})
 			m.logger.Errorf("failed to recompute cached health before migration", err)
 			return
 		}
