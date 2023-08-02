@@ -194,8 +194,10 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure spending records are flushed
-	time.Sleep(testBusFlushInterval * 2)
+	// shut down the worker, ensuring spending records get flushed
+	if err := cluster.ShutdownWorker(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	// assert prunable data is 0
 	if n, err := b.PrunableData(context.Background()); err != nil {
@@ -205,7 +207,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// delete the object
-	if err := w.DeleteObject(context.Background(), "obj", false); err != nil {
+	if err := b.DeleteObject(context.Background(), "obj", false); err != nil {
 		t.Fatal(err)
 	}
 
