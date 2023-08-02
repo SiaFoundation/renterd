@@ -560,7 +560,6 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 
 func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error) {
 	err = s.db.
-		Debug().
 		Raw(`
 SELECT SUM(i.prunable)
 FROM (
@@ -576,7 +575,6 @@ FROM (
 
 func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileContractID) (prunable int64, err error) {
 	err = s.db.
-		Debug().
 		Raw(`
 SELECT SUM(prunable)
 FROM (
