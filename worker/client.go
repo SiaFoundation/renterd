@@ -33,7 +33,7 @@ func (c *Client) ID(ctx context.Context) (id string, err error) {
 
 // RHPBroadcast broadcasts the latest revision for a contract.
 func (c *Client) RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", fcid), nil, nil)
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/broadcast", fcid), nil, nil)
 	return
 }
 

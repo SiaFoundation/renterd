@@ -1085,24 +1085,24 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"GET    /rhp/contracts":       w.rhpContractsHandlerGET,
-		"POST   /rhp/scan":            w.rhpScanHandler,
-		"POST   /rhp/form":            w.rhpFormHandler,
-		"POST   /rhp/renew":           w.rhpRenewHandler,
-		"POST   /rhp/fund":            w.rhpFundHandler,
-		"POST   /rhp/sync":            w.rhpSyncHandler,
-		"POST   /rhp/pricetable":      w.rhpPriceTableHandler,
-		"POST   /rhp/registry/read":   w.rhpRegistryReadHandler,
-		"POST   /rhp/registry/update": w.rhpRegistryUpdateHandler,
+		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
+		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
+		"POST   /rhp/scan":                   w.rhpScanHandler,
+		"POST   /rhp/form":                   w.rhpFormHandler,
+		"POST   /rhp/renew":                  w.rhpRenewHandler,
+		"POST   /rhp/fund":                   w.rhpFundHandler,
+		"POST   /rhp/sync":                   w.rhpSyncHandler,
+		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
+		"POST   /rhp/registry/read":          w.rhpRegistryReadHandler,
+		"POST   /rhp/registry/update":        w.rhpRegistryUpdateHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
-		"POST   /contract/:id/broadcast": w.rhpBroadcastHandler,
-		"GET    /objects/*path":          w.objectsHandlerGET,
-		"PUT    /objects/*path":          w.objectsHandlerPUT,
-		"DELETE /objects/*path":          w.objectsHandlerDELETE,
+		"GET    /objects/*path": w.objectsHandlerGET,
+		"PUT    /objects/*path": w.objectsHandlerPUT,
+		"DELETE /objects/*path": w.objectsHandlerDELETE,
 	}))
 }
 
