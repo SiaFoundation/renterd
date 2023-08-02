@@ -41,8 +41,8 @@ var (
 	// yet because it has been set too recently.
 	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
 
-	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
-	// the database.
+	// ErrOBjectNotFound is returned when an object can't be retrieved from the
+	// database.
 	ErrObjectNotFound = errors.New("object not found")
 
 	// ErrObjectCorrupted is returned if we were unable to retrieve the object
@@ -53,7 +53,7 @@ var (
 	// the database.
 	ErrContractNotFound = errors.New("couldn't find contract")
 
-	// ErrContractSetNotFound is returned when a contract can't be retrieved
+	// ErrContractSetNotFound is returned when a contract set can't be retrieved
 	// from the database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
 
