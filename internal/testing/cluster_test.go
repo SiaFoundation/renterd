@@ -49,7 +49,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), "foo", "autopilot", object.Object{
+	err = b.AddObject(context.Background(), "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -100,7 +100,7 @@ func TestNewTestCluster(t *testing.T) {
 	if len(sets) != 1 {
 		t.Fatal("invalid number of setse", len(sets))
 	}
-	if sets[0] != "autopilot" {
+	if sets[0] != testAutopilotConfig.Contracts.Set {
 		t.Fatal("set name should be 'autopilot' but was", sets[0])
 	}
 
@@ -402,6 +402,72 @@ func TestObjectEntries(t *testing.T) {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("there should be no entries left", entries)
+	}
+}
+
+// TestObjectsRename tests renaming objects and downloading them afterwards.
+func TestObjectsRename(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// upload the following paths
+	uploads := []string{
+		"/foo/bar",
+		"/foo/bat",
+		"/foo/baz",
+		"/foo/baz/quuz",
+	}
+	for _, path := range uploads {
+		if err := w.UploadObject(context.Background(), bytes.NewReader(nil), path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// rename
+	if err := b.RenameObjects(context.Background(), "/foo/", "/"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RenameObject(context.Background(), "/baz/quuz", "/quuz"); err != nil {
+		t.Fatal(err)
+	}
+
+	// try to download the files
+	for _, path := range []string{
+		"/bar",
+		"/bat",
+		"/baz",
+		"/quuz",
+	} {
+		buf := bytes.NewBuffer(nil)
+		if err := w.DownloadObject(context.Background(), buf, path); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -1431,7 +1497,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	}
 
 	// create a contract set with all 3 contracts
-	err = cluster.Bus.SetContractSet(context.Background(), "autopilot", []types.FileContractID{c.ID, c2.ID, c3.ID})
+	err = cluster.Bus.SetContractSet(context.Background(), testAutopilotConfig.Contracts.Set, []types.FileContractID{c.ID, c2.ID, c3.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

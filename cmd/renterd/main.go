@@ -149,10 +149,12 @@ func main() {
 	}
 	autopilotCfg.RevisionSubmissionBuffer = api.BlocksPerDay
 	// node
+	var customLogPath string
 	apiAddr := flag.String("http", build.DefaultAPIAddress, "address to serve API on")
 	dir := flag.String("dir", ".", "directory to store node state in")
 	tracingEnabled := flag.Bool("tracing-enabled", false, "Enables tracing through OpenTelemetry. If RENTERD_TRACING_ENABLED is set, it overwrites the CLI flag's value. Tracing can be configured using the standard OpenTelemetry environment variables. https://github.com/open-telemetry/opentelemetry-specification/blob/v1.8.0/specification/protocol/exporter.md")
 	tracingServiceInstanceId := flag.String("tracing-service-instance-id", "cluster", "ID of the service instance used for tracing. If RENTERD_TRACING_SERVICE_INSTANCE_ID is set, it overwrites the CLI flag's value.")
+	flag.StringVar(&customLogPath, "log-path", "", "Overwrites the default log location on disk. Alternatively RENTERD_LOG_PATH can be used")
 
 	// db
 	flag.StringVar(&dbCfg.uri, "db.uri", "", "URI of the database to use for the bus - can be overwritten using RENTERD_DB_URI environment variable")
@@ -174,6 +176,7 @@ func main() {
 	flag.DurationVar(&busCfg.UsedUTXOExpiry, "bus.usedUTXOExpiry", 24*time.Hour, "time after which a used UTXO that hasn't been included in a transaction becomes spendable again")
 
 	// worker
+	var unauthenticatedDownloads bool
 	flag.BoolVar(&workerCfg.AllowPrivateIPs, "worker.allowPrivateIPs", false, "allow hosts with private IPs")
 	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
 	flag.Uint64Var(&workerCfg.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", 5, "maximum number of active overdrive workers when downloading a slab")
@@ -183,7 +186,8 @@ func main() {
 	flag.DurationVar(&workerCfg.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", 3*time.Second, "timeout applied to slab uploads that decides when we start overdriving")
 	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
-	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using RENTERD_WORKER_REMOTE_ADDRS environment variable")
+	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
+	flag.BoolVar(&unauthenticatedDownloads, "worker.unauthenticatedDownloads", false, "if set to 'true', the worker will allow for downloading from the /objects endpoint without basic authentication. Can be overwritten using the RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS environment variable")
 
 	// autopilot
 	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
@@ -193,22 +197,26 @@ func main() {
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", 10, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
 	flag.Uint64Var(&autopilotCfg.ScannerNumThreads, "autopilot.scannerNumThreads", 100, "number of threads that scan hosts")
+	flag.Uint64Var(&autopilotCfg.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", 1, "number of slabs that the autopilot migrates in parallel per worker. Can be overwritten using the RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER environment variable")
 	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable/disable the autopilot - can be overwritten using the RENTERD_AUTOPILOT_ENABLED environment variable")
 	flag.DurationVar(&nodeCfg.shutdownTimeout, "node.shutdownTimeout", 5*time.Minute, "the timeout applied to the node shutdown")
 	flag.Parse()
 
-	log.Println("renterd v0.3.0-beta")
+	log.Println("renterd v0.4.0-beta")
 	log.Println("Network", build.ConsensusNetworkName)
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
 		log.Println("Build Date:", builddate)
 		return
 	} else if flag.Arg(0) == "seed" {
-		log.Println("Seed phrase:", wallet.NewSeedPhrase())
+		log.Println("Seed phrase:")
+		fmt.Println(wallet.NewSeedPhrase())
 		return
 	}
 
 	// Overwrite flags from environment if set.
+	parseEnvVar("RENTERD_LOG_PATH", &customLogPath)
+
 	parseEnvVar("RENTERD_TRACING_ENABLED", tracingEnabled)
 	parseEnvVar("RENTERD_TRACING_SERVICE_INSTANCE_ID", tracingServiceInstanceId)
 
@@ -229,8 +237,10 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerCfg.apiPassword)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &workerCfg.enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &workerCfg.ID)
+	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &unauthenticatedDownloads)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
+	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &autopilotCfg.MigratorParallelSlabsPerWorker)
 
 	// Init db dialector
 	if dbCfg.uri != "" {
@@ -288,6 +298,9 @@ func main() {
 
 	// Create logger.
 	renterdLog := filepath.Join(*dir, "renterd.log")
+	if customLogPath != "" {
+		renterdLog = customLogPath
+	}
 	logger, closeFn, err := node.NewLogger(renterdLog)
 	if err != nil {
 		log.Fatal("failed to create logger", err)
@@ -320,7 +333,7 @@ func main() {
 			}
 			shutdownFns = append(shutdownFns, shutdownFn)
 
-			mux.sub["/api/worker"] = treeMux{h: auth(w)}
+			mux.sub["/api/worker"] = treeMux{h: workerAuth(getAPIPassword(), unauthenticatedDownloads)(w)}
 			workerAddr := *apiAddr + "/api/worker"
 			workerPassword = getAPIPassword()
 			workers = append(workers, worker.NewClient(workerAddr, workerPassword))
@@ -449,4 +462,16 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 	}
 
 	return nil
+}
+
+func workerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
+				h.ServeHTTP(w, req)
+			} else {
+				jape.BasicAuth(password)(h).ServeHTTP(w, req)
+			}
+		})
+	}
 }

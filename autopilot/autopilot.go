@@ -14,6 +14,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
@@ -81,7 +82,7 @@ type Worker interface {
 	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
-	MigrateSlab(ctx context.Context, s object.Slab) error
+	MigrateSlab(ctx context.Context, s object.Slab, set string) error
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (hostdb.HostPriceTable, error)
@@ -102,10 +103,11 @@ type Autopilot struct {
 	synced     bool
 	state      state
 
-	a *accounts
-	c *contractor
-	m *migrator
-	s *scanner
+	alerts *alerts.Manager
+	a      *accounts
+	c      *contractor
+	m      *migrator
+	s      *scanner
 
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
@@ -162,13 +164,15 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("autopilot", map[string]jape.Handler{
-		"GET    /config":        ap.configHandlerGET,
-		"PUT    /config":        ap.configHandlerPUT,
-		"POST   /debug/trigger": ap.triggerHandlerPOST,
-		"POST   /hosts":         ap.hostsHandlerPOST,
-		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"GET    /status":        ap.statusHandlerGET,
+	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
+		"GET    /alerts":         ap.handleGETAlerts,
+		"POST   /alerts/dismiss": ap.handlePOSTAlertsDismiss,
+		"GET    /config":         ap.configHandlerGET,
+		"PUT    /config":         ap.configHandlerPUT,
+		"POST   /debug/trigger":  ap.triggerHandlerPOST,
+		"POST   /hosts":          ap.hostsHandlerPOST,
+		"GET    /host/:hostKey":  ap.hostHandlerGET,
+		"GET    /status":         ap.statusHandlerGET,
 	}))
 }
 
@@ -488,6 +492,21 @@ func (ap *Autopilot) isStopped() bool {
 	}
 }
 
+func (ap *Autopilot) handleGETAlerts(c jape.Context) {
+	c.Encode(ap.alerts.Active())
+}
+
+func (ap *Autopilot) handlePOSTAlertsDismiss(c jape.Context) {
+	var ids []types.Hash256
+	if c.Decode(&ids) != nil {
+		return
+	} else if len(ids) == 0 {
+		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+		return
+	}
+	ap.alerts.Dismiss(ids...)
+}
+
 func (ap *Autopilot) configHandlerGET(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
@@ -510,15 +529,21 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	}
 
 	// fetch the autopilot and update its config
+	var contractSetChanged bool
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
 	} else {
+		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
+			contractSetChanged = true
+		}
 		autopilot.Config = cfg
 	}
 
-	// update the autopilot
-	jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot))
+	// update the autopilot and interrupt migrations if necessary
+	if err := jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot)); err == nil && contractSetChanged {
+		ap.m.SignalMaintenanceFinished()
+	}
 }
 
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
@@ -532,11 +557,12 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer uint64) (*Autopilot, error) {
+func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64) (*Autopilot, error) {
 	ap := &Autopilot{
+		alerts:  alerts.NewManager(),
 		id:      id,
 		bus:     bus,
-		logger:  logger.Sugar().Named("autopilot"),
+		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
 		workers: newWorkerPool(workers),
 
 		tickerDuration: heartbeat,
@@ -556,7 +582,7 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 
 	ap.s = scanner
 	ap.c = newContractor(ap, revisionSubmissionBuffer)
-	ap.m = newMigrator(ap, migrationHealthCutoff)
+	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
 	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
 
 	return ap, nil

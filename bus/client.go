@@ -16,6 +16,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
@@ -25,6 +26,17 @@ import (
 // A Client provides methods for interacting with a renterd API server.
 type Client struct {
 	c jape.Client
+}
+
+// Alerts fetches the active alerts from the bus.
+func (c *Client) Alerts() (alerts []alerts.Alert, err error) {
+	err = c.c.GET("/alerts", &alerts)
+	return
+}
+
+// DismissAlerts dimisses the alerts with the given IDs.
+func (c *Client) DismissAlerts(ids ...types.Hash256) error {
+	return c.c.POST("/alerts/dismiss", ids, nil)
 }
 
 // Autopilots returns all autopilots in the autopilots store.
@@ -391,6 +403,12 @@ func (c *Client) AncestorContracts(ctx context.Context, fcid types.FileContractI
 	return
 }
 
+// RenewedContract returns the renewed contract for the given ID.
+func (c *Client) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (contract api.ContractMetadata, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/renewed/%s", renewedFrom), &contract)
+	return
+}
+
 // SetContractSet adds the given contracts to the given set.
 func (c *Client) SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)
@@ -476,6 +494,12 @@ func (c *Client) UpdateSetting(ctx context.Context, key string, value interface{
 // DeleteSetting will delete the setting with given key.
 func (c *Client) DeleteSetting(ctx context.Context, key string) error {
 	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/setting/%s", key))
+}
+
+// ContractSetSettings returns the contract set settings.
+func (c *Client) ContractSetSettings(ctx context.Context) (gs api.ContractSetSetting, err error) {
+	err = c.Setting(ctx, api.SettingContractSet, &gs)
+	return
 }
 
 // GougingSettings returns the gouging settings.
@@ -670,6 +694,25 @@ func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (ta
 // ObjectsStats returns information about the number of objects and their size.
 func (c *Client) ObjectsStats() (osr api.ObjectsStats, err error) {
 	err = c.c.GET("/stats/objects", &osr)
+	return
+}
+
+// RenameObject renames a single object.
+func (c *Client) RenameObject(ctx context.Context, from, to string) (err error) {
+	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeSingle)
+}
+
+// RenameObjects renames all objects with the prefix 'from' to the prefix 'to'.
+func (c *Client) RenameObjects(ctx context.Context, from, to string) (err error) {
+	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeMulti)
+}
+
+func (c *Client) renameObjects(ctx context.Context, from, to, mode string) (err error) {
+	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
+		From: from,
+		To:   to,
+		Mode: mode,
+	}, nil)
 	return
 }
 

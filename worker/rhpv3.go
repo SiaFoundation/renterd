@@ -84,6 +84,7 @@ func isClosedStream(err error) bool {
 	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
 }
 func isInsufficientFunds(err error) bool   { return isError(err, ErrInsufficientFunds) }
+func isMaxRevisionReached(err error) bool  { return isError(err, errMaxRevisionReached) }
 func isPriceTableExpired(err error) bool   { return isError(err, errPriceTableExpired) }
 func isPriceTableNotFound(err error) bool  { return isError(err, errPriceTableNotFound) }
 func isSectorNotFound(err error) bool      { return isError(err, errSectorNotFound) }

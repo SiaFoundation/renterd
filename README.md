@@ -1,4 +1,4 @@
-# [![Sia](https://sia.tech/banners/sia-banner-expanded-renterd.png)](http://sia.tech)
+# [![Sia](https://sia.tech/assets/banners/sia-banner-expanded-renterd.png)](http://sia.tech)
 
 [![GoDoc](https://godoc.org/go.sia.tech/renterd?status.svg)](https://godoc.org/go.sia.tech/renterd)
 
@@ -110,6 +110,29 @@ The autopilot will not perform any tasks until it is configured. An example conf
 	}
 }
 ```
+
+## Contract Set
+
+The contract set settings on the bus allow specifying a default contract set.
+This contract set will be returned by the `bus` through the upload parameters,
+and decides what contracts data is upload or migrated to by default. This
+setting does not have a default value, it can be updated using the settings API:
+
+- `GET /api/bus/setting/contractset`
+- `PUT /api/bus/setting/contractset`
+
+```json
+{
+        "default": "autopilot"
+}
+```
+
+In most cases the default set should match the set from your autopilot
+configuration in order for migrations to work properly. The contract set can be
+overriden by passing it as a query string parameter to the worker's upload and
+migrate endpoints.
+
+- `PUT /api/worker/objects/foo?contractset=foo`
 
 ## Redundancy
 

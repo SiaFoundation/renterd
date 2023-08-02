@@ -22,14 +22,18 @@ const (
 	ContractArchivalReasonRemoved    = "removed"
 	ContractArchivalReasonRenewed    = "renewed"
 
+	ObjectsRenameModeSingle = "single"
+	ObjectsRenameModeMulti  = "multi"
+
 	UsabilityFilterModeAll      = "all"
 	UsabilityFilterModeUsable   = "usable"
 	UsabilityFilterModeUnusable = "unusable"
 )
 
 const (
-	SettingGouging    = "gouging"
-	SettingRedundancy = "redundancy"
+	SettingContractSet = "contractset"
+	SettingGouging     = "gouging"
+	SettingRedundancy  = "redundancy"
 )
 
 var (
@@ -123,6 +127,12 @@ type HostsRemoveRequest struct {
 type ObjectMetadata struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
+}
+
+type ObjectsRenameRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Mode string `json:"mode"`
 }
 
 // ObjectsStats is the response type for the /stats/objects endpoint.
@@ -318,6 +328,12 @@ type GougingParams struct {
 	GougingSettings    GougingSettings
 	RedundancySettings RedundancySettings
 	TransactionFee     types.Currency
+}
+
+// ContractSetSetting contains the default contract set used by the worker for
+// uploads and migrations.
+type ContractSetSetting struct {
+	Default string `json:"default"`
 }
 
 // GougingSettings contain some price settings used in price gouging.

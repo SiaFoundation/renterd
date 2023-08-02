@@ -36,7 +36,7 @@ func TestAutopilotStore(t *testing.T) {
 			Upload:   rhpv2.SectorSize * 500,
 			Storage:  rhpv2.SectorSize * 5e3,
 
-			Set: "autopilot",
+			Set: testContractSet,
 		},
 		Hosts: api.HostsConfig{
 			MaxDowntimeHours:  10,
@@ -104,7 +104,7 @@ var testAutopilotConfig = api.AutopilotConfig{
 		Upload:   rhpv2.SectorSize * 500,
 		Storage:  rhpv2.SectorSize * 5e3,
 
-		Set: "autopilot",
+		Set: testContractSet,
 	},
 	Hosts: api.HostsConfig{
 		MaxDowntimeHours:  10,

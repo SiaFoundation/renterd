@@ -15,6 +15,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
@@ -90,6 +91,7 @@ type (
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
+		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		Object(ctx context.Context, path string) (object.Object, error)
@@ -98,6 +100,8 @@ type (
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 		RemoveObjects(ctx context.Context, prefix string) error
+		RenameObject(ctx context.Context, from, to string) error
+		RenameObjects(ctx context.Context, from, to string) error
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
 
@@ -132,14 +136,15 @@ type (
 )
 
 type bus struct {
-	s   Syncer
-	cm  ChainManager
-	tp  TransactionPool
-	w   Wallet
-	hdb HostDB
-	as  AutopilotStore
-	ms  MetadataStore
-	ss  SettingStore
+	alerts *alerts.Manager
+	s      Syncer
+	cm     ChainManager
+	tp     TransactionPool
+	w      Wallet
+	hdb    HostDB
+	as     AutopilotStore
+	ms     MetadataStore
+	ss     SettingStore
 
 	eas EphemeralAccountStore
 
@@ -564,6 +569,18 @@ func (b *bus) contractsHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractsRenewedIDHandlerGET(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	md, err := b.ms.RenewedContract(jc.Request.Context(), id)
+	if jc.Check("faild to fetch renewed contract", err) == nil {
+		jc.Encode(md)
+	}
+}
+
 func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 	var toArchive api.ArchiveContractsRequest
 	if jc.Decode(&toArchive) != nil {
@@ -770,6 +787,34 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
+	var orr api.ObjectsRenameRequest
+	if jc.Decode(&orr) != nil {
+		return
+	}
+	if orr.Mode == api.ObjectsRenameModeSingle {
+		// Single object rename.
+		if strings.HasSuffix(orr.From, "/") || strings.HasSuffix(orr.To, "/") {
+			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
+			return
+		}
+		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.From, orr.To))
+		return
+	} else if orr.Mode == api.ObjectsRenameModeMulti {
+		// Multi object rename.
+		if !strings.HasSuffix(orr.From, "/") || !strings.HasSuffix(orr.To, "/") {
+			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
+			return
+		}
+		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.From, orr.To))
+		return
+	} else {
+		// Invalid mode.
+		jc.Error(fmt.Errorf("invalid mode: %v", orr.Mode), http.StatusBadRequest)
+		return
+	}
+}
+
 func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	var batch bool
 	if jc.DecodeForm("batch", &batch) != nil {
@@ -940,13 +985,28 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	ap, err := b.as.Autopilot(jc.Request.Context(), "autopilot")
-	if jc.Check("could not get autopilot config", err) != nil {
+	val, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
+	if err != nil && errors.Is(err, api.ErrSettingNotFound) {
+		// return the upload params without a contract set, if the user is
+		// specifying a contract set through the query string that's fine
+		jc.Encode(api.UploadParams{
+			ContractSet:   "",
+			CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
+			GougingParams: gp,
+		})
+		return
+	} else if err != nil {
+		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
 		return
 	}
 
+	var css api.ContractSetSetting
+	if err := json.Unmarshal([]byte(val), &css); err != nil {
+		b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
+	}
+
 	jc.Encode(api.UploadParams{
-		ContractSet:   ap.Config.Contracts.Set,
+		ContractSet:   css.Default,
 		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams: gp,
 	})
@@ -991,6 +1051,21 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		RedundancySettings: rs,
 		TransactionFee:     b.tp.RecommendedFee(),
 	}, nil
+}
+
+func (b *bus) handleGETAlerts(c jape.Context) {
+	c.Encode(b.alerts.Active())
+}
+
+func (b *bus) handlePOSTAlertsDismiss(c jape.Context) {
+	var ids []types.Hash256
+	if c.Decode(&ids) != nil {
+		return
+	} else if len(ids) == 0 {
+		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+		return
+	}
+	b.alerts.Dismiss(ids...)
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
@@ -1182,6 +1257,7 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
+		alerts:        alerts.NewManager(),
 		s:             s,
 		cm:            cm,
 		tp:            tp,
@@ -1273,6 +1349,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
+		"GET    /alerts":                    b.handleGETAlerts,
+		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
 		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
@@ -1322,7 +1400,9 @@ func (b *bus) Handler() http.Handler {
 		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
 
 		"GET    /contracts":              b.contractsHandlerGET,
+		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
@@ -1336,16 +1416,16 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
-		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
 
 		"GET    /stats/objects": b.objectsStatshandlerGET,
 
-		"GET    /objects/*path": b.objectsHandlerGET,
-		"PUT    /objects/*path": b.objectsHandlerPUT,
-		"DELETE /objects/*path": b.objectsHandlerDELETE,
+		"GET    /objects/*path":  b.objectsHandlerGET,
+		"PUT    /objects/*path":  b.objectsHandlerPUT,
+		"DELETE /objects/*path":  b.objectsHandlerDELETE,
+		"POST   /objects/rename": b.objectsRenameHandlerPOST,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,

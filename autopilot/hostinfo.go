@@ -47,7 +47,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	minScore := c.cachedMinScore
 	c.mu.Unlock()
 
-	gc := worker.NewGougingChecker(gs, rs, cs, fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(gs, cs, fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight

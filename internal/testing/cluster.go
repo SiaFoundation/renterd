@@ -30,6 +30,7 @@ import (
 
 const (
 	testBusFlushInterval = 100 * time.Millisecond
+	testContractSet      = "testset"
 	testPersistInterval  = 2 * time.Second
 	latestHardforkHeight = 50 // foundation hardfork height in testing
 )
@@ -48,12 +49,16 @@ var (
 			Upload:   rhpv2.SectorSize * 500,
 			Storage:  rhpv2.SectorSize * 5e3,
 
-			Set: "autopilot",
+			Set: testContractSet,
 		},
 		Hosts: api.HostsConfig{
 			MaxDowntimeHours:  10,
 			AllowRedundantIPs: true, // allow for integration tests by default
 		},
+	}
+
+	testContractSetSettings = api.ContractSetSetting{
+		Default: testContractSet,
 	}
 
 	testGougingSettings = api.GougingSettings{
@@ -344,6 +349,10 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		return nil, err
 	}
 	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
+	if err != nil {
+		return nil, err
+	}
+	err = busClient.UpdateSetting(context.Background(), api.SettingContractSet, testContractSetSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -813,14 +822,15 @@ func testWorkerCfg() node.WorkerConfig {
 
 func testApCfg() node.AutopilotConfig {
 	return node.AutopilotConfig{
-		ID:                       api.DefaultAutopilotID,
-		AccountsRefillInterval:   time.Second,
-		Heartbeat:                time.Second,
-		MigrationHealthCutoff:    0.99,
-		RevisionSubmissionBuffer: 0,
-		ScannerInterval:          time.Second,
-		ScannerBatchSize:         10,
-		ScannerNumThreads:        1,
-		ScannerMinRecentFailures: 5,
+		ID:                             api.DefaultAutopilotID,
+		AccountsRefillInterval:         time.Second,
+		Heartbeat:                      time.Second,
+		MigrationHealthCutoff:          0.99,
+		MigratorParallelSlabsPerWorker: 1,
+		RevisionSubmissionBuffer:       0,
+		ScannerInterval:                time.Second,
+		ScannerBatchSize:               10,
+		ScannerNumThreads:              1,
+		ScannerMinRecentFailures:       5,
 	}
 }

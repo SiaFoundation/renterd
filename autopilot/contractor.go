@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/montanaflynn/stats"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -87,14 +88,16 @@ type (
 	}
 
 	contractInfo struct {
-		contract api.Contract
-		settings rhpv2.HostSettings
-		usable   bool
+		contract    api.Contract
+		settings    rhpv2.HostSettings
+		recoverable bool
+		usable      bool
 	}
 
 	renewal struct {
 		from types.FileContractID
 		to   types.FileContractID
+		ci   contractInfo
 	}
 )
 
@@ -206,7 +209,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// create gouging checker
-	gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// prepare hosts for cache
 	hostInfos := make(map[types.PublicKey]hostInfo)
@@ -276,7 +279,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		var toKeep []contractInfo
 		renewed, toKeep = c.runContractRenewals(ctx, w, toRenew, &remaining, uint64(limit))
 		for _, ri := range renewed {
-			updatedSet = append(updatedSet, ri.to)
+			if ri.ci.usable || ri.ci.recoverable {
+				updatedSet = append(updatedSet, ri.to)
+			}
 			contractData[ri.to] = contractData[ri.from]
 		}
 		for _, ci := range toKeep {
@@ -290,7 +295,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	} else {
 		for _, ri := range refreshed {
-			updatedSet = append(updatedSet, ri.to)
+			if ri.ci.usable || ri.ci.recoverable {
+				updatedSet = append(updatedSet, ri.to)
+			}
 			contractData[ri.to] = contractData[ri.from]
 		}
 	}
@@ -593,7 +600,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// use a new gouging checker for every contract
-		gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+		gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 		// set the host's block height to ours to disable the height check in
 		// the gouging checks, in certain edge cases the renter might unsync and
@@ -642,8 +649,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, refresh, renew, reasons := isUsableContract(state.cfg, ci, cs.BlockHeight, renterFunds, f)
+		usable, recoverable, refresh, renew, reasons := isUsableContract(state.cfg, ci, cs.BlockHeight, renterFunds, f)
 		ci.usable = usable
+		ci.recoverable = recoverable
 		if !usable {
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
@@ -659,7 +667,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toRenew = append(toRenew, ci)
 		} else if refresh {
 			toRefresh = append(toRefresh, ci)
-		} else {
+		} else if usable {
 			toKeep = append(toKeep, ci.contract.ID)
 		}
 	}
@@ -709,7 +717,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	lastStateUpdate := time.Now()
 
 	// prepare a gouging checker
-	gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// prepare an IP filter that contains all used hosts
 	f := newIPFilter(c.logger)
@@ -744,7 +752,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 				c.logger.Errorf("could not fetch consensus state, err: %v", err)
 			} else {
 				cs = css
-				gc = worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+				gc = worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 			}
 		}
 
@@ -807,7 +815,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 
 		renewed, proceed, err := c.renewContract(ctx, w, ci, budget)
 		if err == nil {
-			renewals = append(renewals, renewal{from: ci.contract.ID, to: renewed.ID})
+			renewals = append(renewals, renewal{from: ci.contract.ID, to: renewed.ID, ci: ci})
 			nRenewed++
 		} else if ci.usable {
 			toKeep = append(toKeep, ci)
@@ -847,7 +855,7 @@ func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, toRefre
 
 		renewed, proceed, err := c.refreshContract(ctx, w, ci, budget)
 		if err == nil {
-			refreshed = append(refreshed, renewal{from: ci.contract.ID, to: renewed.ID})
+			refreshed = append(refreshed, renewal{from: ci.contract.ID, to: renewed.ID, ci: ci})
 		}
 		if !proceed {
 			break
@@ -985,23 +993,31 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// to match the allowance. The lowest scoring host of these new hosts will
 	// be used as a baseline for determining whether our existing contracts are
 	// worthwhile.
+	var lowestScores []float64
 	buffer := 50
-	candidates, scores, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	for i := 0; i < 5; i++ {
+		candidates, scores, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
+		if err != nil {
+			return 0, err
+		}
+		if len(candidates) == 0 {
+			c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
+			return math.SmallestNonzeroFloat64, nil
+		}
+
+		// Find the minimum score that a host is allowed to have to be considered
+		// good for upload.
+		lowestScore := math.MaxFloat64
+		for _, score := range scores {
+			if score < lowestScore {
+				lowestScore = score
+			}
+		}
+		lowestScores = append(lowestScores, lowestScore)
+	}
+	lowestScore, err := stats.Float64Data(lowestScores).Median()
 	if err != nil {
 		return 0, err
-	}
-	if len(candidates) == 0 {
-		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return math.SmallestNonzeroFloat64, nil
-	}
-
-	// Find the minimum score that a host is allowed to have to be considered
-	// good for upload.
-	lowestScore := math.MaxFloat64
-	for _, score := range scores {
-		if score < lowestScore {
-			lowestScore = score
-		}
 	}
 	minScore := lowestScore / minAllowedScoreLeeway
 	c.logger.Infow("finished computing minScore",
@@ -1027,7 +1043,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	}
 
 	// create a gouging checker
-	gc := worker.NewGougingChecker(state.gs, state.rs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// create list of candidate hosts
 	var candidates []hostdb.Host
@@ -1154,15 +1170,15 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 		return api.ContractMetadata{}, false, errors.New("insufficient budget")
 	}
 
-	// calculate the host collateral
+	// sanity check the endheight is not the same on renewals
 	endHeight := endHeight(cfg, state.period)
+	if endHeight <= rev.EndHeight() {
+		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
+	}
+
+	// calculate the host collateral
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, settings)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
-
-	// sanity check the endheight is not the same on renewals
-	if endHeight == rev.EndHeight() {
-		return api.ContractMetadata{}, false, errors.New("renewal endheight is the same as the current contract endheight")
-	}
 
 	// renew the contract
 	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, newCollateral, settings.WindowSize)

@@ -89,8 +89,8 @@ type (
 
 	dbSlab struct {
 		Model
-		DBContractSetID uint          `gorm:"index"`
-		DBContractSet   dbContractSet `gorm:"constraint:OnDelete:SET NULL"`
+		DBContractSetID uint `gorm:"index"`
+		DBContractSet   dbContractSet
 
 		Health      float64 `gorm:"index; default:1.0; NOT NULL"`
 		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string
@@ -598,6 +598,22 @@ func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
 		Error
 }
 
+func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (_ api.ContractMetadata, err error) {
+	var contract dbContract
+
+	err = s.db.
+		Where(&dbContract{ContractCommon: ContractCommon{RenewedFrom: fileContractID(renewedFrom)}}).
+		Preload("Host").
+		Take(&contract).
+		Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = ErrContractNotFound
+		return
+	}
+
+	return contract.convert(), nil
+}
+
 func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -619,6 +635,13 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 	return metadata, nil
 }
 
+func sqlConcat(db *gorm.DB, a, b string) string {
+	if isSQLite(db) {
+		return fmt.Sprintf("%s || %s", a, b)
+	}
+	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+}
+
 func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -627,13 +650,6 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 
 	if limit <= -1 {
 		limit = math.MaxInt
-	}
-
-	concat := func(a, b string) string {
-		if isSQLite(s.db) {
-			return fmt.Sprintf("%s || %s", a, b)
-		}
-		return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 	}
 
 	query := s.db.Raw(fmt.Sprintf(`
@@ -653,7 +669,7 @@ FROM (
 ) AS m
 GROUP BY name
 HAVING name LIKE ? AND name != ?
-LIMIT ? OFFSET ?`, concat("?", "trimmed"), concat("?", "substr(trimmed, 1, slashindex)")), path, path, utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), path, limit, offset)
+LIMIT ? OFFSET ?`, sqlConcat(s.db, "?", "trimmed"), sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")), path, path, utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), path, limit, offset)
 
 	var metadata []api.ObjectMetadata
 	err := query.Scan(&metadata).Error
@@ -760,6 +776,29 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 		fetchedContracts[hostForFCID[types.FileContractID(c.FCID)]] = c
 	}
 	return fetchedContracts, nil
+}
+
+func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string) error {
+	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ?`, keyNew, keyOld)
+	if tx.Error != nil {
+		return tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
+	}
+	return nil
+}
+
+func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string) error {
+	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ?",
+		prefixNew, utf8.RuneCountInString(prefixOld)+1, prefixOld+"%")
+	if tx.Error != nil {
+		return tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
+	}
+	return nil
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, partialSlab *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error {
@@ -1028,6 +1067,9 @@ func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.S
 }
 
 func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) error {
+	ss.objectsMu.Lock()
+	defer ss.objectsMu.Unlock()
+
 	// sanity check the shards don't contain an empty root
 	for _, s := range s.Shards {
 		if s.Root == (types.Hash256{}) {
