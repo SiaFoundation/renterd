@@ -16,12 +16,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var (
-	// ErrContractNotFound is returned when a contract can't be retrieved from
-	// the database.
-	ErrContractNotFound = errors.New("couldn't find contract")
-)
-
 type (
 	dbArchivedContract struct {
 		Model
@@ -574,6 +568,10 @@ FROM (
 }
 
 func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileContractID) (prunable int64, err error) {
+	if !s.isKnownContract(id) {
+		return 0, api.ErrContractNotFound
+	}
+
 	err = s.db.
 		Raw(`
 SELECT IFNULL(ABS(c.size - COUNT(cs.db_sector_id) * ?), 0) as prunable
@@ -635,7 +633,7 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 		Take(&contract).
 		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = ErrContractNotFound
+		err = api.ErrContractNotFound
 		return
 	}
 
@@ -1416,7 +1414,7 @@ func contract(tx *gorm.DB, id fileContractID) (contract dbContract, err error) {
 		Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = ErrContractNotFound
+		err = api.ErrContractNotFound
 	}
 	return
 }

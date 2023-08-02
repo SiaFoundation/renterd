@@ -671,6 +671,10 @@ func (b *bus) contractPrunableDataHandlerGET(jc jape.Context) {
 	}
 
 	n, err := b.ms.PrunableDataForContract(jc.Request.Context(), id)
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
 	if jc.Check("failed to fetch prunable data for contract", err) == nil {
 		jc.Encode(n)
 	}

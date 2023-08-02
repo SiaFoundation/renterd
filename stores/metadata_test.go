@@ -217,7 +217,7 @@ func TestSQLContractStore(t *testing.T) {
 	// Look it up. Should fail.
 	ctx := context.Background()
 	_, err = cs.Contract(ctx, c.ID())
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
 	contracts, err := cs.Contracts(ctx)
@@ -310,7 +310,7 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Look it up. Should fail.
 	_, err = cs.Contract(ctx, c.ID())
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
 	contracts, err = cs.Contracts(ctx)
@@ -508,7 +508,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Assert we can't fetch the renewed contract.
 	_, err = cs.RenewedContract(context.Background(), fcid1)
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal("unexpected")
 	}
 
@@ -562,7 +562,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Contract should be gone from active contracts.
 	_, err = cs.Contract(ctx, fcid1)
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
 
@@ -2631,6 +2631,12 @@ func TestPrunableData(t *testing.T) {
 	// assert there's no data to be pruned
 	if n := prunableData(nil); n != 0 {
 		t.Fatal("expected no prunable data", n)
+	}
+
+	// assert passing a non-existent fcid returns an error
+	_, err = db.PrunableDataForContract(context.Background(), types.FileContractID{9})
+	if err != api.ErrContractNotFound {
+		t.Fatal(err)
 	}
 }
 
