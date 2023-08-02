@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"lukechampine.com/frand"
 )
 
@@ -667,6 +668,13 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
+func sqlAppend(db *gorm.DB, column, toAppend interface{}) clause.Expr {
+	if isSQLite(db) {
+		return gorm.Expr(fmt.Sprintf("%s || ?", column), toAppend)
+	}
+	return gorm.Expr(fmt.Sprintf("CONCAT(%s, ?)", column), toAppend)
+}
+
 func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -980,19 +988,16 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		}
 
 		// Add the data to the buffer and remember the overflowing data.
-		var overflow []byte
-		buffer.Data = append(buffer.Data, partialSlab.Data...)
-		if len(buffer.Data) > slabSize {
-			buffer.Data, overflow = buffer.Data[:slabSize], buffer.Data[slabSize:]
-		}
+		toAppend := partialSlab.Data[:slice.Length]
+		overflow := partialSlab.Data[slice.Length:]
 
 		// Update buffer.
-		buffer.Complete = len(buffer.Data) == slabSize
+		buffer.Complete = len(buffer.Data)+len(toAppend) == slabSize
 		err = tx.Model(&dbBufferedSlab{}).
 			Where("ID", buffer.ID).
 			Updates(map[string]interface{}{
 				"complete": buffer.Complete,
-				"data":     buffer.Data,
+				"data":     sqlAppend(s.db, "data", toAppend),
 			}).Error
 		if err != nil {
 			return err
