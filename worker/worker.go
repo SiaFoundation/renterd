@@ -1060,12 +1060,13 @@ func (w *worker) handleGETAlerts(c jape.Context) {
 	c.Encode(w.alerts.Active())
 }
 
-func (w *worker) handlePOSTAlertsDismiss(c jape.Context) {
+func (w *worker) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
-	if err := c.Decode(&ids); err != nil {
+	if jc.Decode(&ids) != nil {
 		return
-	} else if len(ids) == 0 {
-		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+	}
+	if len(ids) == 0 {
+		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
 		return
 	}
 	w.alerts.Dismiss(ids...)
