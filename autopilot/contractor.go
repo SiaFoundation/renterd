@@ -277,7 +277,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	var renewed []renewal
 	if limit > 0 {
 		var toKeep []contractInfo
-		renewed, toKeep = c.runContractRenewals(ctx, w, toRenew, &remaining, uint64(limit))
+		renewed, toKeep = c.runContractRenewals(ctx, w, toRenew, &remaining, limit)
 		for _, ri := range renewed {
 			if ri.ci.usable || ri.ci.recoverable {
 				updatedSet = append(updatedSet, ri.to)
@@ -781,7 +781,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	return formed, nil
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit uint64) (renewals []renewal, toKeep []contractInfo) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []contractInfo) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
 	defer span.End()
 
@@ -795,36 +795,45 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 		c.logger.Debugw(
 			"contracts renewals completed",
 			"renewals", len(renewals),
+			"tokeep", len(toKeep),
 			"budget", budget,
 		)
 	}()
 
-	var nRenewed uint64
-	for _, ci := range toRenew {
-		// TODO: keep track of consecutive failures and break at some point
+	var i int
+	for i = 0; i < len(toRenew); i++ {
+		// check if the autopilot is stopped
+		if c.ap.isStopped() {
+			return
+		}
 
 		// limit the number of contracts to renew
-		if nRenewed >= limit {
+		if len(renewals)+len(toKeep) >= limit {
 			break
 		}
 
-		// break if the autopilot is stopped
-		if c.ap.isStopped() {
-			break
-		}
-
-		renewed, proceed, err := c.renewContract(ctx, w, ci, budget)
+		// renew and add if it succeeds or if its usable
+		renewed, proceed, err := c.renewContract(ctx, w, toRenew[i], budget)
 		if err == nil {
-			renewals = append(renewals, renewal{from: ci.contract.ID, to: renewed.ID, ci: ci})
-			nRenewed++
-		} else if ci.usable {
-			toKeep = append(toKeep, ci)
-			nRenewed++
+			renewals = append(renewals, renewal{from: toRenew[i].contract.ID, to: renewed.ID, ci: toRenew[i]})
+		} else if toRenew[i].usable {
+			toKeep = append(toKeep, toRenew[i])
 		}
+
+		// break if we don't want to proceed
 		if !proceed {
 			break
 		}
 	}
+
+	// loop through the remaining renewals and add them to the keep list if
+	// they're usable and we have 'limit' left
+	for j := i; j < len(toRenew); j++ {
+		if len(renewals)+len(toKeep) < limit && toRenew[j].usable {
+			toKeep = append(toKeep, toRenew[j])
+		}
+	}
+
 	return renewals, toKeep
 }
 
