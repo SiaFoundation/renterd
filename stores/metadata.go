@@ -955,19 +955,20 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		// NOTE: We don't need to fetch the data of the buffer since we are just
 		// going to append to it. Instead we omit the data and select the length
 		// of the data.
-		var buffer struct {
-			dbBufferedSlab
+		var bufferInfo struct {
+			ID     uint
+			SlabID uint
 			Length int
 		}
 		err = tx.
-			Model(&dbBufferedSlab{}).
-			Joins("DBSlab").
-			Joins("DBSlab.DBContractSet").
-			Where("complete = ? AND DBSlab.min_shards = ? AND DBSlab.total_shards = ? AND DBSlab__DBContractSet.name = ?",
+			Table("buffered_slabs").
+			Select("buffered_slabs.id AS ID, sla.id AS SlabID, length(CAST(buffered_slabs.data AS BLOB)) AS Length").
+			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id").
+			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id").
+			Where("buffered_slabs.complete = ? AND sla.min_shards = ? AND sla.total_shards = ? AND cs.name = ?",
 				false, partialSlab.MinShards, partialSlab.TotalShards, contractSet).
-			Omit("data").
-			Select("buffered_slabs.*, length(buffered_slabs.data) AS Length").
-			Take(&buffer).Error
+			Take(&bufferInfo).
+			Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -977,16 +978,16 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 
 		// We have a buffer. Sanity check it.
 		slabSize := bufferedSlabSize(partialSlab.MinShards)
-		if buffer.Length >= slabSize {
-			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
+		if bufferInfo.Length >= slabSize {
+			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", bufferInfo.ID)
 		}
 
 		// Create the slice.
-		remainingSpace := slabSize - buffer.Length
+		remainingSpace := slabSize - bufferInfo.Length
 		slice := dbSlice{
 			DBObjectID: obj.ID,
-			DBSlabID:   buffer.DBSlab.ID,
-			Offset:     uint32(buffer.Length),
+			DBSlabID:   bufferInfo.SlabID,
+			Offset:     uint32(bufferInfo.Length),
 		}
 		if remainingSpace <= len(partialSlab.Data) {
 			slice.Length = uint32(remainingSpace)
@@ -1002,11 +1003,10 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		overflow := partialSlab.Data[slice.Length:]
 
 		// Update buffer.
-		buffer.Complete = buffer.Length+len(toAppend) == slabSize
 		err = tx.Model(&dbBufferedSlab{}).
-			Where("ID", buffer.ID).
+			Where("ID", bufferInfo.ID).
 			Updates(map[string]interface{}{
-				"complete": buffer.Complete,
+				"complete": bufferInfo.Length+len(toAppend) == slabSize,
 				"data":     sqlAppend(s.db, "data", toAppend),
 			}).Error
 		if err != nil {
