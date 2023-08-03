@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,7 +15,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"lukechampine.com/frand"
 )
 
@@ -109,7 +109,8 @@ type (
 		DBSlab dbSlab
 
 		Complete    bool `gorm:"index"`
-		Data        []byte
+		Path        string
+		Size        int64
 		LockID      int64 `gorm:"column:lock_id"`
 		LockedUntil int64 // unix timestamp
 	}
@@ -329,10 +330,20 @@ func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 		if err != nil {
 			return object.Object{}, err
 		}
+		file, err := os.Open(buffer.Path)
+		if err != nil {
+			return object.Object{}, err
+		}
+		defer file.Close()
+		data := make([]byte, partialSlabSector.SliceLength)
+		_, err = file.ReadAt(data, int64(partialSlabSector.SliceOffset))
+		if err != nil {
+			return object.Object{}, err
+		}
 		obj.PartialSlab = &object.PartialSlab{
 			MinShards:   buffer.DBSlab.MinShards,
 			TotalShards: buffer.DBSlab.TotalShards,
-			Data:        buffer.Data[partialSlabSector.SliceOffset:][:partialSlabSector.SliceLength],
+			Data:        data,
 		}
 	}
 
@@ -668,13 +679,6 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
-func sqlAppend(db *gorm.DB, column, toAppend interface{}) clause.Expr {
-	if isSQLite(db) {
-		return gorm.Expr(fmt.Sprintf("%s || ?", column), toAppend)
-	}
-	return gorm.Expr(fmt.Sprintf("CONCAT(%s, ?)", column), toAppend)
-}
-
 func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -840,6 +844,9 @@ func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew strin
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
+	s.objectsMu.Lock()
+	defer s.objectsMu.Unlock()
+
 	// Sanity check input.
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
@@ -955,25 +962,20 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		// NOTE: We don't need to fetch the data of the buffer since we are just
 		// going to append to it. Instead we omit the data and select the length
 		// of the data.
-		var bufferInfo struct {
+		var buffer struct {
 			ID     uint
+			Path   string
 			SlabID uint
-			Length int
-		}
-		sqlBinaryType := func() string {
-			if isSQLite(s.db) {
-				return "BLOB"
-			}
-			return "BINARY"
+			Size   int64
 		}
 		err = tx.
 			Table("buffered_slabs").
-			Select(fmt.Sprintf("buffered_slabs.id AS ID, sla.id AS SlabID, length(CAST(buffered_slabs.data AS %s)) AS Length", sqlBinaryType())).
+			Select("buffered_slabs.id AS ID, buffered_slabs.size AS Size, buffered_slabs.path AS Path, sla.id AS SlabID").
 			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id AND sla.min_shards = ? AND sla.total_shards = ?", partialSlab.MinShards, partialSlab.TotalShards).
 			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id AND cs.name = ?", contractSet).
 			Where("buffered_slabs.complete = ?",
 				false).
-			Take(&bufferInfo).
+			Take(&buffer).
 			Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -984,18 +986,18 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 
 		// We have a buffer. Sanity check it.
 		slabSize := bufferedSlabSize(partialSlab.MinShards)
-		if bufferInfo.Length >= slabSize {
-			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", bufferInfo.ID)
+		if buffer.Size >= int64(slabSize) {
+			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
 		}
 
 		// Create the slice.
-		remainingSpace := slabSize - bufferInfo.Length
+		remainingSpace := int64(slabSize) - buffer.Size
 		slice := dbSlice{
 			DBObjectID: obj.ID,
-			DBSlabID:   bufferInfo.SlabID,
-			Offset:     uint32(bufferInfo.Length),
+			DBSlabID:   buffer.SlabID,
+			Offset:     uint32(buffer.Size),
 		}
-		if remainingSpace <= len(partialSlab.Data) {
+		if remainingSpace <= int64(len(partialSlab.Data)) {
 			slice.Length = uint32(remainingSpace)
 		} else {
 			slice.Length = uint32(len(partialSlab.Data))
@@ -1008,12 +1010,26 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		toAppend := partialSlab.Data[:slice.Length]
 		overflow := partialSlab.Data[slice.Length:]
 
+		// Append to buffer.
+		file, err := os.OpenFile(buffer.Path, os.O_WRONLY, 0600)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		_, err = file.WriteAt(toAppend, buffer.Size)
+		if err != nil {
+			return err
+		}
+		if err := file.Sync(); err != nil {
+			return err
+		}
+
 		// Update buffer.
 		err = tx.Model(&dbBufferedSlab{}).
-			Where("ID", bufferInfo.ID).
+			Where("ID", buffer.ID).
 			Updates(map[string]interface{}{
-				"complete": bufferInfo.Length+len(toAppend) == slabSize,
-				"data":     sqlAppend(s.db, "data", toAppend),
+				"complete": buffer.Size+int64(len(toAppend)) == int64(slabSize),
+				"size":     buffer.Size + int64(len(toAppend)),
 			}).Error
 		if err != nil {
 			return err
@@ -1050,6 +1066,16 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 		return err
 	}
 	// Create a new buffer and slab.
+	path := fmt.Sprintf("buffer-%v", key)
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(partialSlab.Data)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 	return tx.Create(&dbBufferedSlab{
 		DBSlab: dbSlab{
 			DBContractSetID: contractSetID,
@@ -1065,7 +1091,8 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 			},
 		},
 		Complete:    false,
-		Data:        partialSlab.Data,
+		Size:        int64(len(partialSlab.Data)),
+		Path:        path,
 		LockedUntil: 0,
 	}).Error
 }
@@ -1347,7 +1374,6 @@ func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards
 // PackedSlabsForUpload returns up to 'limit' packed slabs that are ready for
 // uploading. They are locked for 'lockingDuration' time before being handed out
 // again.
-// TODO: use set and redundancy
 func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error) {
 	buffers, err := s.packedSlabsForUpload(lockingDuration, minShards, totalShards, set, limit)
 	if err != nil {
@@ -1355,9 +1381,13 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	}
 	slabs := make([]api.PackedSlab, len(buffers))
 	for i, buf := range buffers {
+		data, err := os.ReadFile(buf.Path)
+		if err != nil {
+			return nil, err
+		}
 		slabs[i] = api.PackedSlab{
 			BufferID: buf.ID,
-			Data:     buf.Data,
+			Data:     data,
 		}
 	}
 	return slabs, nil
@@ -1413,10 +1443,17 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	}
 
 	// delete buffer
+	var buffer dbBufferedSlab
+	if err := tx.Take(&buffer, "id = ?", slab.BufferID).Error; err != nil {
+		return err
+	}
 	err = tx.Where("id", slab.BufferID).
 		Delete(&dbBufferedSlab{}).
 		Error
 	if err != nil {
+		return err
+	}
+	if err := os.Remove(buffer.Path); err != nil {
 		return err
 	}
 

@@ -2339,7 +2339,8 @@ func TestPartialSlab(t *testing.T) {
 	expectedBuffer := dbBufferedSlab{
 		DBSlab:      dbSlab{},
 		Complete:    false,
-		Data:        obj.PartialSlab.Data,
+		Path:        fmt.Sprintf("buffer-%v", storedSlab.Key),
+		Size:        4,
 		LockedUntil: 0,
 	}
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
@@ -2397,7 +2398,8 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	buffer.Model = Model{}
-	expectedBuffer.Data = append(expectedBuffer.Data, obj2.PartialSlab.Data...)
+	//expectedBuffer.Data = append(expectedBuffer.Data, obj2.PartialSlab.Data...)
+	expectedBuffer.Size = 4194303
 	buffer.DBSlab = dbSlab{} // exclude from comparison
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
@@ -2442,7 +2444,8 @@ func TestPartialSlab(t *testing.T) {
 	}
 	buffer.Model = Model{}
 	expectedBuffer.Complete = true // full now
-	expectedBuffer.Data = append(expectedBuffer.Data, obj3.PartialSlab.Data[0])
+	//expectedBuffer.Data = append(expectedBuffer.Data, obj3.PartialSlab.Data[0])
+	expectedBuffer.Size = 4194304
 	buffer.DBSlab = dbSlab{} // exclude from comparison
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
@@ -2456,10 +2459,11 @@ func TestPartialSlab(t *testing.T) {
 	buffer2.Model = Model{}
 	expectedBuffer2 := dbBufferedSlab{
 		Complete:    false,
-		Data:        obj3.PartialSlab.Data[1:],
+		Size:        1,
 		LockedUntil: 0,
 	}
 	buffer2.DBSlab = dbSlab{} // exclude from comparison
+	buffer2.Path = ""         // don't check path
 	if !reflect.DeepEqual(buffer2, expectedBuffer2) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer2, expectedBuffer2))
 	}
