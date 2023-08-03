@@ -590,6 +590,31 @@ SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
 	return
 }
 
+func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
+	if !s.isKnownContract(id) {
+		return nil, api.ErrContractNotFound
+	}
+
+	var dbRoots []hash256
+	if err = s.db.
+		Debug().
+		Raw(`
+SELECT sec.root
+FROM contracts c
+INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+INNER JOIN sectors sec ON cs.db_sector_id = sec.id
+WHERE c.fcid = ?
+`, fileContractID(id)).
+		Scan(&dbRoots).
+		Error; err == nil {
+		for _, r := range dbRoots {
+			roots = append(roots, *(*types.Hash256)(&r))
+		}
+	}
+
+	return
+}
+
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
 	fcids := make([]fileContractID, len(contractIds))
 	for i, fcid := range contractIds {

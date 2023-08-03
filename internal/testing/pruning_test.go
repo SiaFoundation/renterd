@@ -174,6 +174,15 @@ func TestSectorPruning(t *testing.T) {
 		}
 	}()
 
+	hasRoot := func(roots []types.Hash256, root types.Hash256) bool {
+		for _, r := range roots {
+			if r == root {
+				return true
+			}
+		}
+		return false
+	}
+
 	// convenience variables
 	cfg := testAutopilotConfig
 	w := cluster.Worker
@@ -190,12 +199,55 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// create a contracts dict
+	c, err := b.Contracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	contracts := make(map[types.PublicKey]api.ContractMetadata)
+	for _, contract := range c {
+		contracts[contract.HostKey] = contract
+	}
+
 	// add an object
 	if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), "obj"); err != nil {
 		t.Fatal(err)
 	}
 
+	// fetch the object and for every shard fetch the contract sectors and compare them
+	obj, _, err := b.Object(context.Background(), "obj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obj.Slabs) == 0 {
+		t.Fatal("expected at least one slab")
+	}
+	for _, shard := range obj.Slabs[0].Shards {
+		contract, ok := contracts[shard.Host]
+		if !ok {
+			t.Fatal("could not find contract for host")
+		}
+		roots, err := w.RHPContractRoots(context.Background(), contract.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasRoot(roots, shard.Root) {
+			t.Fatal("root not found in contract", len(roots), shard.Host, shard.Root)
+		}
+
+		roots, err = b.ContractRoots(context.Background(), contract.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasRoot(roots, shard.Root) {
+			t.Fatal("root not found in database", len(roots), roots, shard.Host, shard.Root)
+		}
+	}
+
 	// shut down the worker, ensuring spending records get flushed
+	//
+	// NOTE: recording spending updates the cached contract fields which are
+	// used when calculating prunable data
 	if err := cluster.ShutdownWorker(context.Background()); err != nil {
 		t.Fatal(err)
 	}
