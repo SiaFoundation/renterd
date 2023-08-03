@@ -1184,6 +1184,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	// sanity check the endheight is not the same on renewals
 	endHeight := endHeight(cfg, state.period)
 	if endHeight <= rev.EndHeight() {
+		c.logger.Debugw("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", state.period, "bh", cs.BlockHeight)
 		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
 	}
 
