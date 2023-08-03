@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -260,4 +261,255 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 		return nil
 	})
 	return rev, err
+}
+
+func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration, indices []uint64) error {
+	// escape early if no indices are given
+	if len(indices) == 0 {
+		return nil
+	}
+
+	// sort in descending order so that we can use 'range'
+	sort.Slice(indices, func(i, j int) bool {
+		return indices[i] > indices[j]
+	})
+
+	// delete the roots
+	return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		req := &rhpv2.RPCLockRequest{
+			ContractID: contractID,
+			Signature:  t.SignChallenge(renterKey),
+			Timeout:    uint64(time.Minute.Milliseconds()),
+		}
+
+		// execute lock RPC
+		var lockResp rhpv2.RPCLockResponse
+		if err := t.Call(rhpv2.RPCLockID, req, &lockResp); err != nil {
+			return err
+		}
+		t.SetChallenge(lockResp.NewChallenge)
+
+		// extract the revision
+		rev := rhpv2.ContractRevision{
+			Revision:   lockResp.Revision,
+			Signatures: [2]types.TransactionSignature{lockResp.Signatures[0], lockResp.Signatures[1]},
+		}
+
+		// defer unlock RPC
+		defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
+
+		// execute settings RPC
+		var settingsResp rhpv2.RPCSettingsResponse
+		if err := t.Call(rhpv2.RPCSettingsID, nil, &settingsResp); err != nil {
+			return err
+		}
+		var settings rhpv2.HostSettings
+		if err := json.Unmarshal(settingsResp.Settings, &settings); err != nil {
+			return fmt.Errorf("couldn't unmarshal json: %w", err)
+		}
+
+		// build a set of actions that move the sectors we want to delete
+		// towards the end of the contract, preparing them to be trimmed off
+		var actions []rhpv2.RPCWriteAction
+		cIndex := rev.NumSectors() - 1
+		for _, rIndex := range indices {
+			if cIndex != rIndex {
+				actions = append(actions, rhpv2.RPCWriteAction{
+					Type: rhpv2.RPCWriteActionSwap,
+					A:    uint64(cIndex),
+					B:    uint64(rIndex),
+				})
+			}
+			cIndex--
+		}
+		actions = append(actions, rhpv2.RPCWriteAction{
+			Type: rhpv2.RPCWriteActionTrim,
+			A:    uint64(len(indices)),
+		})
+
+		// check funds
+		price := rhpv2.RPCDeleteCost(settings, len(indices))
+		if rev.RenterFunds().Cmp(price) < 0 {
+			return ErrInsufficientFunds
+		}
+
+		// update the revision number
+		rev.Revision.RevisionNumber++
+		if rev.Revision.RevisionNumber == math.MaxUint64 {
+			return ErrContractFinalized
+		}
+
+		// update the revision filesize
+		rev.Revision.Filesize -= rhpv2.SectorSize * actions[len(actions)-1].A
+
+		// update the revision outputs
+		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, price, types.ZeroCurrency)
+		if err != nil {
+			return err
+		}
+
+		// TODO: add batching
+
+		// create request
+		wReq := &rhpv2.RPCWriteRequest{
+			Actions:     actions,
+			MerkleProof: true,
+
+			RevisionNumber:    rev.Revision.RevisionNumber,
+			ValidProofValues:  newValid,
+			MissedProofValues: newMissed,
+		}
+
+		// send request and read merkle proof
+		var merkleResp rhpv2.RPCWriteMerkleProof
+		if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
+			return err
+		} else if err := t.ReadResponse(&merkleResp, 4096); err != nil {
+			return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
+		}
+
+		// verify proof
+		proofHashes := merkleResp.OldSubtreeHashes
+		leafHashes := merkleResp.OldLeafHashes
+		oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
+		if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, rev.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, nil) {
+			err := ErrInvalidMerkleProof
+			t.WriteResponseErr(err)
+			return err
+		}
+
+		// update merkle root
+		copy(rev.Revision.FileMerkleRoot[:], newRoot[:])
+
+		// build the write response
+		revisionHash := hashRevision(rev.Revision)
+		renterSig := &rhpv2.RPCWriteResponse{
+			Signature: renterKey.SignHash(revisionHash),
+		}
+
+		// exchange signatures
+		var hostSig rhpv2.RPCWriteResponse
+		if err := t.WriteResponse(renterSig); err != nil {
+			return fmt.Errorf("couldn't write signature response: %w", err)
+		} else if err := t.ReadResponse(&hostSig, 4096); err != nil {
+			return fmt.Errorf("couldn't read signature response, err: %v", err)
+		}
+
+		// verify the host signature
+		if !hostKey.VerifyHash(revisionHash, hostSig.Signature) {
+			return errors.New("host's signature is invalid")
+		}
+		rev.Signatures[0].Signature = renterSig.Signature[:]
+		rev.Signatures[1].Signature = hostSig.Signature[:]
+
+		// TODO: record contract spending (?)
+		return nil
+	})
+}
+
+func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) ([]types.Hash256, error) {
+	var roots []types.Hash256
+	if err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		req := &rhpv2.RPCLockRequest{
+			ContractID: contractID,
+			Signature:  t.SignChallenge(renterKey),
+			Timeout:    uint64(time.Minute.Milliseconds()),
+		}
+
+		// execute lock RPC
+		var lockResp rhpv2.RPCLockResponse
+		if err := t.Call(rhpv2.RPCLockID, req, &lockResp); err != nil {
+			return err
+		}
+		t.SetChallenge(lockResp.NewChallenge)
+
+		// extract the revision
+		rev := rhpv2.ContractRevision{
+			Revision:   lockResp.Revision,
+			Signatures: [2]types.TransactionSignature{lockResp.Signatures[0], lockResp.Signatures[1]},
+		}
+
+		// defer unlock RPC
+		defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
+
+		// execute settings RPC
+		var settingsResp rhpv2.RPCSettingsResponse
+		if err := t.Call(rhpv2.RPCSettingsID, nil, &settingsResp); err != nil {
+			return err
+		}
+		var settings rhpv2.HostSettings
+		if err := json.Unmarshal(settingsResp.Settings, &settings); err != nil {
+			return fmt.Errorf("couldn't unmarshal json: %w", err)
+		}
+
+		// download the full set of SectorRoots
+		numsectors := rev.NumSectors()
+		for offset := uint64(0); offset < numsectors; {
+			n := batchSizeFetchSectors
+			if offset+n > numsectors {
+				n = numsectors - offset
+			}
+
+			// check funds
+			price := rhpv2.RPCSectorRootsCost(settings, n)
+			if rev.RenterFunds().Cmp(price) < 0 {
+				return ErrInsufficientFunds
+			}
+
+			// update the revision number
+			rev.Revision.RevisionNumber++
+			if rev.Revision.RevisionNumber == math.MaxUint64 {
+				return ErrContractFinalized
+			}
+
+			// update the revision outputs
+			newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, price, types.ZeroCurrency)
+			if err != nil {
+				return err
+			}
+
+			// build the sector roots request
+			revisionHash := hashRevision(rev.Revision)
+			req := &rhpv2.RPCSectorRootsRequest{
+				RootOffset: uint64(offset),
+				NumRoots:   uint64(n),
+
+				RevisionNumber:    rev.Revision.RevisionNumber,
+				ValidProofValues:  newValid,
+				MissedProofValues: newMissed,
+				Signature:         renterKey.SignHash(revisionHash),
+			}
+
+			// execute the sector roots RPC
+			var rootsResp rhpv2.RPCSectorRootsResponse
+			if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
+				return err
+			} else if err := t.ReadResponse(&rootsResp, uint64(4096+32*n)); err != nil {
+				return fmt.Errorf("couldn't read sector roots response: %w", err)
+			}
+
+			// verify the host signature
+			if !hostKey.VerifyHash(revisionHash, rootsResp.Signature) {
+				return errors.New("host's signature is invalid")
+			}
+			rev.Signatures[0].Signature = req.Signature[:]
+			rev.Signatures[1].Signature = rootsResp.Signature[:]
+
+			// verify the proof
+			if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
+				return ErrInvalidMerkleProof
+			}
+
+			// append roots
+			roots = append(roots, rootsResp.SectorRoots...)
+			offset += n
+
+			// TODO: record contract spending (?)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return roots, nil
 }

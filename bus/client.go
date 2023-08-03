@@ -482,6 +482,13 @@ func (c *Client) PrunableDataForContract(ctx context.Context, fcid types.FileCon
 	return
 }
 
+// SectorRootsForContract returns the roots of the sectors for the contract with
+// given id.
+func (c *Client) SectorRootsForContract(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", fcid), &roots)
+	return
+}
+
 // RecommendedFee returns the recommended fee for a txn.
 func (c *Client) RecommendedFee(ctx context.Context) (fee types.Currency, err error) {
 	err = c.c.WithContext(ctx).GET("/txpool/recommendedfee", &fee)

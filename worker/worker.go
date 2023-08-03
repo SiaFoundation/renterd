@@ -35,6 +35,9 @@ import (
 )
 
 const (
+	batchSizeDeleteSectors = uint64(500000) // ~16MiB of roots
+	batchSizeFetchSectors  = uint64(130000) // ~4MiB of roots
+
 	defaultRevisionFetchTimeout = 30 * time.Second
 
 	lockingPriorityActiveContractRevision = 100 // highest
@@ -141,6 +144,9 @@ type Bus interface {
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+
+	PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
+	SectorRootsForContract(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 
@@ -561,6 +567,95 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	if jc.Check("failed to broadcast transaction", err) != nil {
 		_ = w.bus.WalletDiscard(ctx, txn)
 		return
+	}
+}
+
+func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
+	// decode fcid
+	var id types.FileContractID
+	// if jc.DecodeParam("id", &id) != nil {
+	// 	return
+	// }
+
+	// check if there's prunable data for the contract
+	ctx := jc.Request.Context()
+	n, err := w.bus.PrunableDataForContract(ctx, id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch prunable data for contract", err) != nil {
+		return
+	} else if n == 0 {
+		jc.Encode(n)
+		return
+	}
+
+	// fetch the contract from the bus
+	c, err := w.bus.Contract(ctx, id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// fetch the roots from the host
+	renterKey := w.deriveRenterKey(c.HostKey)
+	got, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, time.Minute)
+	if jc.Check("couldn't fetch contract roots from host", err) != nil {
+		return
+	}
+
+	// fetch the roots from the bus
+	roots, err := w.bus.SectorRootsForContract(ctx, id)
+	if jc.Check("couldn't fetch contract roots from database", err) != nil {
+		return
+	}
+	keep := make(map[types.Hash256]struct{})
+	for _, root := range roots {
+		keep[root] = struct{}{}
+	}
+
+	// collect indices for roots we want to prune
+	var toDelete []uint64
+	for i, root := range got {
+		if _, wanted := keep[root]; wanted {
+			delete(keep, root) // prevent duplicates
+			continue
+		}
+
+		toDelete = append(toDelete, uint64(i))
+	}
+
+	// delete the roots from the contract
+	err = w.DeleteContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, time.Minute, toDelete)
+	if jc.Check("couldn't delete sectors", err) == nil {
+		jc.Encode(len(toDelete) * rhpv2.SectorSize)
+	}
+}
+
+func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
+	// decode fcid
+	var id types.FileContractID
+	// if jc.DecodeParam("id", &id) != nil {
+	// 	return
+	// }
+
+	// fetch the contract from the bus
+	ctx := jc.Request.Context()
+	c, err := w.bus.Contract(ctx, id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// fetch the roots from the host
+	renterKey := w.deriveRenterKey(c.HostKey)
+	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, time.Minute)
+	if jc.Check("couldn't fetch contract roots from host", err) == nil {
+		jc.Encode(roots)
 	}
 }
 
@@ -1124,6 +1219,8 @@ func (w *worker) Handler() http.Handler {
 
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
+		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
+		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
 		"POST   /rhp/form":                   w.rhpFormHandler,
 		"POST   /rhp/renew":                  w.rhpRenewHandler,

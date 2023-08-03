@@ -195,6 +195,9 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// shut down the worker, ensuring spending records get flushed
+	//
+	// NOTE: recording spending updates the cached contract fields which are
+	// used when calculating prunable data
 	if err := cluster.ShutdownWorker(context.Background()); err != nil {
 		t.Fatal(err)
 	}
