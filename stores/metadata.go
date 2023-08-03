@@ -1567,6 +1567,9 @@ func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 		return 0, tx.Error
 	}
 	numDeleted = tx.RowsAffected
+	if numDeleted == 0 {
+		return 0, nil // nothing to prune if no object was deleted
+	}
 	if err := pruneSlabs(tx); err != nil {
 		return 0, err
 	}
