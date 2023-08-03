@@ -90,8 +90,8 @@ type (
 	contractInfo struct {
 		contract    api.Contract
 		settings    rhpv2.HostSettings
-		recoverable bool
 		usable      bool
+		recoverable bool
 	}
 
 	renewal struct {
@@ -661,6 +661,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"reasons", reasons,
 				"refresh", refresh,
 				"renew", renew,
+				"recoverable", recoverable,
 			)
 		}
 		if renew {
@@ -855,17 +856,18 @@ func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, toRefre
 	}()
 
 	for _, ci := range toRefresh {
-		// TODO: keep track of consecutive failures and break at some point
-
-		// break if the autopilot is stopped
+		// check if the autopilot is stopped
 		if c.ap.isStopped() {
-			break
+			return
 		}
 
+		// refresh and add if it succeeds
 		renewed, proceed, err := c.refreshContract(ctx, w, ci, budget)
 		if err == nil {
 			refreshed = append(refreshed, renewal{from: ci.contract.ID, to: renewed.ID, ci: ci})
 		}
+
+		// break if we don't want to proceed
 		if !proceed {
 			break
 		}
