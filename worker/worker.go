@@ -729,7 +729,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	// decode the contract set from the query string
 	var contractset string
-	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
 	} else if contractset != "" {
 		up.ContractSet = contractset
@@ -941,7 +941,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// decode the contract set from the query string
 	var contractset string
-	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
 	} else if contractset != "" {
 		up.ContractSet = contractset
@@ -962,10 +962,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// allow overriding the redundancy settings
 	rs := up.RedundancySettings
-	if jc.DecodeForm(api.QueryStringParamMinShards, &rs.MinShards) != nil {
+	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
 		return
 	}
-	if jc.DecodeForm(api.QueryStringParamTotalShards, &rs.TotalShards) != nil {
+	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
 		return
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {

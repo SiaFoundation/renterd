@@ -13,12 +13,6 @@ import (
 	"go.sia.tech/core/types"
 )
 
-const (
-	QueryStringParamContractSet = "contractset"
-	QueryStringParamMinShards   = "minshards"
-	QueryStringParamTotalShards = "totalshards"
-)
-
 // ErrConsensusNotSynced is returned by the worker API by endpoints that rely on
 // consensus and the consensus is not synced.
 var ErrConsensusNotSynced = errors.New("consensus is not synced")
@@ -186,15 +180,15 @@ type UploadOption func(url.Values)
 // upload
 func UploadWithRedundancy(minShards, totalShards int) UploadOption {
 	return func(v url.Values) {
-		v.Set(QueryStringParamMinShards, strconv.Itoa(minShards))
-		v.Set(QueryStringParamTotalShards, strconv.Itoa(totalShards))
+		v.Set("minshards", strconv.Itoa(minShards))
+		v.Set("totalshards", strconv.Itoa(totalShards))
 	}
 }
 
 // UploadWithContractSet sets the contract set that should be used for an upload
 func UploadWithContractSet(set string) UploadOption {
 	return func(v url.Values) {
-		v.Set(QueryStringParamContractSet, set)
+		v.Set("contractset", set)
 	}
 }
 
