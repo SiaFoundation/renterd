@@ -653,7 +653,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		ci.usable = usable
 		ci.recoverable = recoverable
 		if !usable {
-			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow(
 				"unusable contract",
 				"hk", hk,
@@ -664,6 +663,10 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 				"recoverable", recoverable,
 			)
 		}
+		if len(reasons) > 0 {
+			toStopUsing[fcid] = strings.Join(reasons, ",")
+		}
+
 		if renew {
 			toRenew = append(toRenew, ci)
 		} else if refresh {
