@@ -97,8 +97,8 @@ type (
 
 		Health      float64 `gorm:"index; default:1.0; NOT NULL"`
 		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string
-		MinShards   uint8
-		TotalShards uint8
+		MinShards   uint8   `gorm:"index"`
+		TotalShards uint8   `gorm:"index"`
 
 		Slices []dbSlice
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
@@ -969,10 +969,10 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		err = tx.
 			Table("buffered_slabs").
 			Select(fmt.Sprintf("buffered_slabs.id AS ID, sla.id AS SlabID, length(CAST(buffered_slabs.data AS %s)) AS Length", sqlBinaryType())).
-			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id").
-			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id").
-			Where("buffered_slabs.complete = ? AND sla.min_shards = ? AND sla.total_shards = ? AND cs.name = ?",
-				false, partialSlab.MinShards, partialSlab.TotalShards, contractSet).
+			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id AND sla.min_shards = ? AND sla.total_shards = ?", partialSlab.MinShards, partialSlab.TotalShards).
+			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id AND cs.name = ?", contractSet).
+			Where("buffered_slabs.complete = ?",
+				false).
 			Take(&bufferInfo).
 			Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
