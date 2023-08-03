@@ -224,6 +224,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
 	c, s := ci.contract, ci.settings
 
+	usable = true
 	if bh > c.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
 		usable = false
