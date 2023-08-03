@@ -960,9 +960,15 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 			SlabID uint
 			Length int
 		}
+		sqlBinaryType := func() string {
+			if isSQLite(s.db) {
+				return "BLOB"
+			}
+			return "BINARY"
+		}
 		err = tx.
 			Table("buffered_slabs").
-			Select("buffered_slabs.id AS ID, sla.id AS SlabID, length(CAST(buffered_slabs.data AS BLOB)) AS Length").
+			Select(fmt.Sprintf("buffered_slabs.id AS ID, sla.id AS SlabID, length(CAST(buffered_slabs.data AS %s)) AS Length", sqlBinaryType())).
 			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id").
 			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id").
 			Where("buffered_slabs.complete = ? AND sla.min_shards = ? AND sla.total_shards = ? AND cs.name = ?",
