@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -623,7 +624,8 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 
 	var objects []dbObject
 	err := s.db.Model(&dbObject{}).
-		Where("object_id LIKE ?", "%"+substring+"%").
+		Select("*, INSTR(object_id, ?) AS pos", substring).
+		Where("pos > 0").
 		Offset(offset).
 		Limit(limit).
 		Find(&objects).Error
@@ -642,6 +644,11 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 		return fmt.Sprintf("%s || %s", a, b)
 	}
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+}
+
+func sqlHasPrefix(col, prefix string) clause.Expr {
+	query := fmt.Sprintf("%s LIKE ? AND SUBSTR(%s, 1, ?) = ?", col, col)
+	return gorm.Expr(query, prefix+"%", utf8.RuneCountInString(prefix), prefix)
 }
 
 func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
@@ -666,12 +673,22 @@ FROM (
 	FROM (
 		SELECT size, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
-		WHERE object_id LIKE ?
+		WHERE ?
 	) AS i
 ) AS m
 GROUP BY name
 HAVING name LIKE ? AND name != ?
-LIMIT ? OFFSET ?`, sqlConcat(s.db, "?", "trimmed"), sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")), path, path, utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), path, limit, offset)
+LIMIT ? OFFSET ?`,
+		sqlConcat(s.db, "?", "trimmed"),
+		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")),
+		path,
+		path,
+		utf8.RuneCountInString(path)+1,
+		sqlHasPrefix("object_id", path),
+		fmt.Sprintf("%s%s", path, prefix+"%"),
+		path,
+		limit,
+		offset)
 
 	var metadata []api.ObjectMetadata
 	err := query.Scan(&metadata).Error
@@ -792,8 +809,8 @@ func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string) erro
 }
 
 func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string) error {
-	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ?",
-		prefixNew, utf8.RuneCountInString(prefixOld)+1, prefixOld+"%")
+	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE ?",
+		prefixNew, utf8.RuneCountInString(prefixOld)+1, sqlHasPrefix("object_id", prefixOld))
 	if tx.Error != nil {
 		return tx.Error
 	}
@@ -1517,7 +1534,7 @@ func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 }
 
 func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE object_id LIKE ?", path+"%")
+	tx = tx.Exec("DELETE FROM objects WHERE ?", sqlHasPrefix("object_id", path))
 	if tx.Error != nil {
 		return 0, tx.Error
 	}

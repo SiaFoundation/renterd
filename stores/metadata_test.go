@@ -1206,6 +1206,7 @@ func TestSearchObjects(t *testing.T) {
 		{"/foo/baz/quux", 3},
 		{"/foo/baz/quuz", 4},
 		{"/gab/guub", 5},
+		{"/FOO/bar", 6}, // test case sensitivity
 	}
 	ctx := context.Background()
 	for _, o := range objects {
@@ -1218,7 +1219,7 @@ func TestSearchObjects(t *testing.T) {
 		path string
 		want []api.ObjectMetadata
 	}{
-		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
+		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}, {Name: "/FOO/bar", Size: 6}}},
 		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
 		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
 		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
@@ -2098,6 +2099,8 @@ func TestRenameObjects(t *testing.T) {
 		"/fileś/1a",
 		"/fileś/2a",
 		"/fileś/3a",
+		"/fileś/CASE",
+		"/fileś/case",
 		"/fileś/dir/1b",
 		"/fileś/dir/2b",
 		"/fileś/dir/3b",
@@ -2132,6 +2135,12 @@ func TestRenameObjects(t *testing.T) {
 	if err := cs.RenameObject(ctx, "/baz", "/fileś/baz"); err != nil {
 		t.Fatal(err)
 	}
+	if err := cs.RenameObjects(ctx, "/fileś/case", "/fileś/case1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.RenameObjects(ctx, "/fileś/CASE", "/fileś/case2"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Paths after.
 	objectsAfter := []string{
@@ -2144,6 +2153,8 @@ func TestRenameObjects(t *testing.T) {
 		"/fileś/foo",
 		"/fileś/bar",
 		"/fileś/baz",
+		"/fileś/case1",
+		"/fileś/case2",
 	}
 	objectsAfterMap := make(map[string]struct{})
 	for _, path := range objectsAfter {
