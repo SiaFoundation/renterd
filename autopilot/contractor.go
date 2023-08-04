@@ -15,13 +15,17 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
+
+var alertRenewalFailedID = frand.Entropy256()
 
 const (
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
@@ -374,6 +378,7 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 	// log added and removed contracts
 	var added []types.FileContractID
 	var removed []types.FileContractID
+	removedReasons := make(map[string]string)
 	for _, contract := range oldSet {
 		_, exists := updated[contract.ID]
 		_, renewed := updated[renewalsFromTo[contract.ID]]
@@ -383,6 +388,7 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 			if !ok {
 				reason = "unknown"
 			}
+			removedReasons[contract.ID.String()] = reason
 			c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
 		}
 	}
@@ -419,7 +425,20 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 		"added", len(added),
 		"removed", len(removed),
 	)
-	return len(added)+len(removed) > 0
+	hasChanged := len(added)+len(removed) > 0
+	if hasChanged {
+		c.ap.alerts.Register(alerts.Alert{
+			ID:       frand.Entropy256(),
+			Severity: alerts.SeverityInfo,
+			Message:  fmt.Sprintf("The contract set has changed: %v contracts added and %v removed", len(added), len(removed)),
+			Data: map[string]any{
+				"additions": added,
+				"removals":  removedReasons,
+			},
+			Timestamp: time.Now(),
+		})
+	}
+	return hasChanged
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
@@ -826,6 +845,16 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 
 		// break if we don't want to proceed
 		if !proceed {
+			c.ap.alerts.Register(alerts.Alert{
+				ID:       alertRenewalFailedID,
+				Severity: alerts.SeverityCritical,
+				Message:  fmt.Sprintf("Contract renewals were interrupted due to latest error: %v", err),
+				Data: map[string]interface{}{
+					"contractID": toRenew[i].contract.ID.String(),
+					"hostKey":    toRenew[i].contract.HostKey.String(),
+				},
+				Timestamp: time.Now(),
+			})
 			break
 		}
 	}
