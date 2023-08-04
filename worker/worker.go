@@ -573,9 +573,9 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	// decode fcid
 	var id types.FileContractID
-	// if jc.DecodeParam("id", &id) != nil {
-	// 	return
-	// }
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
 
 	// check if there's prunable data for the contract
 	ctx := jc.Request.Context()

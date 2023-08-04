@@ -251,6 +251,7 @@ func TestSQLContractStore(t *testing.T) {
 			FundAccount: types.ZeroCurrency,
 		},
 		TotalCost: totalCost,
+		Size:      c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
 		t.Fatal("contract mismatch")
@@ -440,7 +441,6 @@ func TestContractRoots(t *testing.T) {
 	if len(roots) != 1 || roots[0] != root {
 		t.Fatal("unexpected", roots)
 	}
-
 }
 
 // TestRenewContract is a test for AddRenewedContract.
@@ -549,6 +549,14 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// mock recording of spending records to ensure the cached fields get updated
+	if err := cs.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
+		{ContractID: fcid1, RevisionNumber: 1, Size: rhpv2.SectorSize},
+		{ContractID: fcid2, RevisionNumber: 1, Size: rhpv2.SectorSize},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// no slabs should be unhealthy.
 	if err := cs.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
@@ -632,6 +640,7 @@ func TestRenewedContract(t *testing.T) {
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
 		RenewedFrom: fcid1,
+		Size:        rhpv2.SectorSize,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
 			Downloads:   types.ZeroCurrency,
@@ -665,10 +674,11 @@ func TestRenewedContract(t *testing.T) {
 			TotalCost:      currency(oldContractTotal),
 			ProofHeight:    0,
 			RevisionHeight: 0,
-			RevisionNumber: "0",
+			RevisionNumber: "1",
 			StartHeight:    100,
 			WindowStart:    2,
 			WindowEnd:      3,
+			Size:           rhpv2.SectorSize,
 
 			UploadSpending:      zeroCurrency,
 			DownloadSpending:    zeroCurrency,
@@ -749,7 +759,7 @@ func TestAncestorsContracts(t *testing.T) {
 			WindowStart: 400,
 			WindowEnd:   500,
 		}) {
-			t.Fatal("wrong contract", i)
+			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
 }
@@ -1057,6 +1067,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							StartHeight:    startHeight1,
 							WindowStart:    400,
 							WindowEnd:      500,
+							Size:           4096,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
@@ -1093,6 +1104,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							StartHeight:    startHeight2,
 							WindowStart:    400,
 							WindowEnd:      500,
+							Size:           4096,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,

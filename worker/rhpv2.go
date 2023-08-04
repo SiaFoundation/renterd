@@ -407,9 +407,8 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 	})
 }
 
-func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) ([]types.Hash256, error) {
-	var roots []types.Hash256
-	if err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (roots []types.Hash256, err error) {
+	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		req := &rhpv2.RPCLockRequest{
 			ContractID: contractID,
 			Signature:  t.SignChallenge(renterKey),
@@ -504,12 +503,9 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 			roots = append(roots, rootsResp.SectorRoots...)
 			offset += n
 
-			// TODO: record contract spending (?)
+			// TODO: record contract spending
 		}
-
 		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return roots, nil
+	})
+	return
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -263,10 +264,10 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert prunable data is not 0
+	// assert amount of prunable data
 	if n, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n == 0 {
-		t.Fatal("expected prunable data", n)
+	} else if n != rhpv2.SectorSize*3 {
+		t.Fatal("unexpected prunable data", n)
 	}
 }

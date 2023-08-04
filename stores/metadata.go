@@ -448,7 +448,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Overwrite the old contract with the new one.
-		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
 		newContract.Model = oldContract.Model
 		err = tx.Save(&newContract).Error
 		if err != nil {
@@ -559,11 +559,13 @@ func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error)
 		Raw(`
 SELECT IFNULL(SUM(prunable), 0)
 FROM (
-    SELECT ABS(c.size - COUNT(cs.db_sector_id) * ?) as prunable
-    FROM contracts c
-    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-    GROUP BY c.id
-) as i`, rhpv2.SectorSize).
+    SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+        SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * ?, 0) as bytes
+        FROM contracts c
+        LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+        GROUP BY c.id
+	) as i
+) as j`, rhpv2.SectorSize).
 		Scan(&prunable).
 		Error
 	return
@@ -576,10 +578,12 @@ func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileCon
 
 	err = s.db.
 		Raw(`
-SELECT IFNULL(ABS(c.size - COUNT(cs.db_sector_id) * ?), 0) as prunable
-FROM contracts c
-LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-WHERE c.fcid = ?
+SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+    SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * 4194304, 0) as bytes
+    FROM contracts c
+    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+    WHERE c.fcid = ?
+) as i
 `, rhpv2.SectorSize, fileContractID(id)).
 		Scan(&prunable).
 		Error
@@ -1507,7 +1511,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, 0)
+	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error
