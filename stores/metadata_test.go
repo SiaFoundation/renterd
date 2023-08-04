@@ -706,7 +706,7 @@ func TestAncestorsContracts(t *testing.T) {
 			WindowStart: 400,
 			WindowEnd:   500,
 		}) {
-			t.Fatal("wrong contract", i)
+			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
 }
