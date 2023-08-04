@@ -1147,6 +1147,7 @@ func TestObjectEntries(t *testing.T) {
 		{"/foo/baz/quuz", 4},
 		{"/gab/guub", 5},
 		{"/fileś/śpecial", 6}, // utf8
+		{"/FOO/bar", 7},
 	}
 	ctx := context.Background()
 	for _, o := range objects {
@@ -1160,13 +1161,14 @@ func TestObjectEntries(t *testing.T) {
 		prefix string
 		want   []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
+		{"/", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7}, {Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
 		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/", Size: 7}}},
 		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
 		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5}}},
 		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6}}},
 
 		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}}},
+		{"/", "F", []api.ObjectMetadata{{Name: "/FOO/", Size: 7}}},
 		{"/foo/", "fo", []api.ObjectMetadata{}},
 		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}}},
 		{"/gab/", "/guub", []api.ObjectMetadata{}},

@@ -677,7 +677,7 @@ FROM (
 	) AS i
 ) AS m
 GROUP BY name
-HAVING name LIKE ? AND name != ?
+HAVING ? AND name != ?
 LIMIT ? OFFSET ?`,
 		sqlConcat(s.db, "?", "trimmed"),
 		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")),
@@ -685,7 +685,7 @@ LIMIT ? OFFSET ?`,
 		path,
 		utf8.RuneCountInString(path)+1,
 		sqlHasPrefix("object_id", path),
-		fmt.Sprintf("%s%s", path, prefix+"%"),
+		sqlHasPrefix("name", path+prefix),
 		path,
 		limit,
 		offset)
