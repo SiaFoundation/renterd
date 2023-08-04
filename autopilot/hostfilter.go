@@ -224,50 +224,51 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
 	c, s := ci.contract, ci.settings
 
+	usable = true
 	if bh > c.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
-		renew = false
-		refresh = false
+		usable = false
 		recoverable = false
+		refresh = false
+		renew = false
 	} else if c.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, errContractMaxRevisionNumber.Error())
-		renew = false
-		refresh = false
+		usable = false
 		recoverable = false
+		refresh = false
+		renew = false
 	} else {
 		if isOutOfCollateral(c, s, renterFunds, bh) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
-			renew = false
-			refresh = true
+			usable = false
 			recoverable = true
+			refresh = true
+			renew = false
 		}
 		if isOutOfFunds(cfg, s, c) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
-			renew = false
-			refresh = true
+			usable = false
 			recoverable = true
+			refresh = true
+			renew = false
 		}
 		if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
-			if secondHalf {
-				reasons = append(reasons, errContractUpForRenewal.Error()) // only unusable if in second half of renew window
-			}
-			renew = true
-			refresh = false
+			reasons = append(reasons, fmt.Errorf("%w; second half: %t", errContractUpForRenewal, secondHalf).Error())
+			usable = usable && !secondHalf // only unusable if in second half of renew window
 			recoverable = true
+			refresh = false
+			renew = true
 		}
 	}
 
-	// redundant IP check - always perform this last since it will update
-	// the ipFilter.
-	if !cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(c.HostIP, c.HostKey) {
+	// IP check should be last since it modifies the filter
+	if !cfg.Hosts.AllowRedundantIPs && (usable || recoverable) && f.isRedundantIP(c.HostIP, c.HostKey) {
 		reasons = append(reasons, errHostRedundantIP.Error())
-		renew = false
-		// NOTE: we don't set refresh to false or recoverable to true. We fund
-		// the contract but don't want to use it in the set.
-		recoverable = false
+		usable = false
+		recoverable = false // do not use in the contract set, but keep it around for downloads
+		renew = false       // do not renew, but allow refreshes so the contracts stays funded
 	}
 
-	usable = len(reasons) == 0
 	return
 }
 
