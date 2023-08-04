@@ -10,7 +10,7 @@ import (
 
 // TestSQLSettingStore tests the bus.SettingStore methods on the SQLSettingStore.
 func TestSQLSettingStore(t *testing.T) {
-	ss, _, _, err := newTestSQLStore()
+	ss, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

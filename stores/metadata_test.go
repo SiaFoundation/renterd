@@ -36,7 +36,7 @@ func generateMultisigUC(m, n uint64, salt string) types.UnlockConditions {
 // TestObjectBasic tests the hydration of raw objects works when we fetch
 // objects from the metadata store.
 func TestObjectBasic(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestObjectBasic(t *testing.T) {
 
 // TestSQLContractStore tests SQLContractStore functionality.
 func TestSQLContractStore(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestSQLContractStore(t *testing.T) {
 
 func TestContractsForHost(t *testing.T) {
 	// create a SQL store
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestContractsForHost(t *testing.T) {
 
 // TestRenewContract is a test for AddRenewedContract.
 func TestRenewedContract(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -654,7 +654,7 @@ func TestRenewedContract(t *testing.T) {
 // TestAncestorsContracts verifies that AncestorContracts returns the right
 // ancestors in the correct order.
 func TestAncestorsContracts(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestAncestorsContracts(t *testing.T) {
 }
 
 func TestArchiveContracts(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,7 +840,7 @@ func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.C
 
 // TestSQLMetadataStore tests basic MetadataStore functionality.
 func TestSQLMetadataStore(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1133,7 +1133,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 // TestObjectEntries is a test for the ObjectEntries method.
 func TestObjectEntries(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
+	os, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1193,7 +1193,7 @@ func TestObjectEntries(t *testing.T) {
 
 // TestSearchObjects is a test for the SearchObjects method.
 func TestSearchObjects(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
+	os, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1246,7 +1246,7 @@ func TestSearchObjects(t *testing.T) {
 // TestUnhealthySlabs tests the functionality of UnhealthySlabs.
 func TestUnhealthySlabs(t *testing.T) {
 	// create db
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1470,7 +1470,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 func TestUnhealthySlabsNegHealth(t *testing.T) {
 	// create db
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1538,7 +1538,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 func TestUnhealthySlabsNoContracts(t *testing.T) {
 	// create db
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1620,7 +1620,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 // TestUnhealthySlabs tests the functionality of UnhealthySlabs on slabs that
 // don't have any redundancy.
 func TestUnhealthySlabsNoRedundancy(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1713,7 +1713,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 // TestContractSectors is a test for the contract_sectors join table. It
 // verifies that deleting contracts or sectors also cleans up the join table.
 func TestContractSectors(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1805,7 +1805,7 @@ func TestContractSectors(t *testing.T) {
 
 // TestPutSlab verifies the functionality of PutSlab.
 func TestPutSlab(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2011,7 +2011,7 @@ func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileCont
 
 // TestRecordContractSpending tests RecordContractSpending.
 func TestRecordContractSpending(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2088,7 +2088,7 @@ func TestRecordContractSpending(t *testing.T) {
 
 // TestRenameObjects is a unit test for RenameObject and RenameObjects.
 func TestRenameObjects(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2169,7 +2169,7 @@ func TestRenameObjects(t *testing.T) {
 
 // TestObjectsStats is a unit test for ObjectsStats.
 func TestObjectsStats(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2255,7 +2255,7 @@ func TestObjectsStats(t *testing.T) {
 }
 
 func TestPartialSlab(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2335,11 +2335,14 @@ func TestPartialSlab(t *testing.T) {
 	if err := db.db.Take(&buffer, "id = ?", storedSlab.DBBufferedSlabID).Error; err != nil {
 		t.Fatal(err)
 	}
+	if buffer.Filename == "" {
+		t.Fatal("empty filename")
+	}
 	buffer.Model = Model{}
 	expectedBuffer := dbBufferedSlab{
 		DBSlab:      dbSlab{},
 		Complete:    false,
-		Path:        fmt.Sprintf("buffer-%v", storedSlab.Key),
+		Filename:    buffer.Filename, // use from buffer since it's random
 		Size:        4,
 		LockedUntil: 0,
 	}
@@ -2461,9 +2464,9 @@ func TestPartialSlab(t *testing.T) {
 		Complete:    false,
 		Size:        1,
 		LockedUntil: 0,
+		Filename:    buffer2.Filename,
 	}
 	buffer2.DBSlab = dbSlab{} // exclude from comparison
-	buffer2.Path = ""         // don't check path
 	if !reflect.DeepEqual(buffer2, expectedBuffer2) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer2, expectedBuffer2))
 	}

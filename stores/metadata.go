@@ -2,10 +2,12 @@ package stores
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -109,7 +111,7 @@ type (
 		DBSlab dbSlab
 
 		Complete    bool `gorm:"index"`
-		Path        string
+		Filename    string
 		Size        int64
 		LockID      int64 `gorm:"column:lock_id"`
 		LockedUntil int64 // unix timestamp
@@ -264,7 +266,7 @@ func (o dbObject) metadata() api.ObjectMetadata {
 	}
 }
 
-func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
+func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (obj object.Object, _ error) {
 	if len(raw) == 0 {
 		return object.Object{}, errors.New("no slabs found")
 	}
@@ -330,7 +332,7 @@ func (raw rawObject) convert(tx *gorm.DB) (obj object.Object, _ error) {
 		if err != nil {
 			return object.Object{}, err
 		}
-		file, err := os.Open(buffer.Path)
+		file, err := os.Open(filepath.Join(partialSlabDir, buffer.Filename))
 		if err != nil {
 			return object.Object{}, err
 		}
@@ -723,7 +725,7 @@ func (s *SQLStore) Object(ctx context.Context, path string) (object.Object, erro
 		if err != nil {
 			return err
 		}
-		obj, err = o.convert(tx)
+		obj, err = o.convert(tx, s.partialSlabDir)
 		return err
 	})
 	return obj, err
@@ -963,14 +965,14 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		// going to append to it. Instead we omit the data and select the length
 		// of the data.
 		var buffer struct {
-			ID     uint
-			Path   string
-			SlabID uint
-			Size   int64
+			ID       uint
+			Filename string
+			SlabID   uint
+			Size     int64
 		}
 		err = tx.
 			Table("buffered_slabs").
-			Select("buffered_slabs.id AS ID, buffered_slabs.size AS Size, buffered_slabs.path AS Path, sla.id AS SlabID").
+			Select("buffered_slabs.id AS ID, buffered_slabs.size AS Size, buffered_slabs.filename AS Filename, sla.id AS SlabID").
 			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id AND sla.min_shards = ? AND sla.total_shards = ?", partialSlab.MinShards, partialSlab.TotalShards).
 			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id AND cs.name = ?", contractSet).
 			Where("buffered_slabs.complete = ?",
@@ -981,7 +983,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 			return err
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
 			// No buffer found, create a new one.
-			return createSlabBuffer(tx, obj.ID, cs.ID, *partialSlab)
+			return createSlabBuffer(tx, obj.ID, cs.ID, *partialSlab, s.partialSlabDir)
 		}
 
 		// We have a buffer. Sanity check it.
@@ -1011,7 +1013,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		overflow := partialSlab.Data[slice.Length:]
 
 		// Append to buffer.
-		file, err := os.OpenFile(buffer.Path, os.O_WRONLY, 0600)
+		file, err := os.OpenFile(filepath.Join(s.partialSlabDir, buffer.Filename), os.O_WRONLY, 0600)
 		if err != nil {
 			return err
 		}
@@ -1043,7 +1045,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		// Otherwise, create a new buffer with a new slab and slice.
 		overflowSlab := *partialSlab
 		overflowSlab.Data = overflow
-		return createSlabBuffer(tx, obj.ID, cs.ID, overflowSlab)
+		return createSlabBuffer(tx, obj.ID, cs.ID, overflowSlab, s.partialSlabDir)
 	})
 }
 
@@ -1051,7 +1053,7 @@ func bufferedSlabSize(minShards uint8) int {
 	return int(rhpv2.SectorSize) * int(minShards)
 }
 
-func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab object.PartialSlab) error {
+func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab object.PartialSlab, partialSlabDir string) error {
 	if partialSlab.TotalShards == 0 || partialSlab.MinShards == 0 {
 		return fmt.Errorf("min shards and total shards must be greater than 0: %v, %v", partialSlab.MinShards, partialSlab.TotalShards)
 	}
@@ -1066,8 +1068,9 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 		return err
 	}
 	// Create a new buffer and slab.
-	path := fmt.Sprintf("buffer-%v", key)
-	file, err := os.Create(path)
+	identifier := frand.Entropy256()
+	fileName := hex.EncodeToString(identifier[:])
+	file, err := os.Create(filepath.Join(partialSlabDir, fileName))
 	if err != nil {
 		return err
 	}
@@ -1092,7 +1095,7 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 		},
 		Complete:    false,
 		Size:        int64(len(partialSlab.Data)),
-		Path:        path,
+		Filename:    fileName,
 		LockedUntil: 0,
 	}).Error
 }
@@ -1381,7 +1384,7 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	}
 	slabs := make([]api.PackedSlab, len(buffers))
 	for i, buf := range buffers {
-		data, err := os.ReadFile(buf.Path)
+		data, err := os.ReadFile(filepath.Join(s.partialSlabDir, buf.Filename))
 		if err != nil {
 			return nil, err
 		}
@@ -1412,7 +1415,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			return err
 		}
 		for _, slab := range slabs {
-			if err := markPackedSlabUploaded(tx, slab, contracts); err != nil {
+			if err := markPackedSlabUploaded(tx, slab, contracts, s.partialSlabDir); err != nil {
 				return err
 			}
 		}
@@ -1420,7 +1423,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	})
 }
 
-func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) error {
+func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract, partialSlabDir string) error {
 	// find the slab
 	var sla dbSlab
 	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
@@ -1453,7 +1456,7 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(buffer.Path); err != nil {
+	if err := os.Remove(filepath.Join(partialSlabDir, buffer.Filename)); err != nil {
 		return err
 	}
 

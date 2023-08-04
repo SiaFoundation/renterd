@@ -33,8 +33,9 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		db     *gorm.DB
-		logger glogger.Interface
+		db             *gorm.DB
+		logger         glogger.Interface
+		partialSlabDir string
 
 		// Persistence buffer - related fields.
 		lastSave               time.Time
@@ -119,7 +120,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	db, err := gorm.Open(conn, &gorm.Config{
 		Logger: logger, // custom logger
 	})
@@ -172,6 +173,7 @@ func NewSQLStore(conn gorm.Dialector, migrate bool, persistInterval time.Duratio
 		logger:             logger,
 		knownContracts:     isOurContract,
 		lastSave:           time.Now(),
+		partialSlabDir:     partialSlabDir,
 		persistInterval:    persistInterval,
 		hasAllowlist:       allowlistCnt > 0,
 		hasBlocklist:       blocklistCnt > 0,
