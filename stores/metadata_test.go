@@ -251,6 +251,7 @@ func TestSQLContractStore(t *testing.T) {
 			FundAccount: types.ZeroCurrency,
 		},
 		TotalCost: totalCost,
+		Size:      c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
 		t.Fatal("contract mismatch")
@@ -1014,6 +1015,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							StartHeight:    startHeight1,
 							WindowStart:    400,
 							WindowEnd:      500,
+							Size:           4096,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
@@ -1050,6 +1052,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							StartHeight:    startHeight2,
 							WindowStart:    400,
 							WindowEnd:      500,
+							Size:           4096,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
