@@ -73,7 +73,7 @@ type (
 		Model
 
 		Key      []byte
-		ObjectID string    `gorm:"index;unique"`
+		ObjectID string    `gorm:"index;unique;size:4096"`
 		Slabs    []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
 		Size     int64
 	}

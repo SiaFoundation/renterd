@@ -178,7 +178,15 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initSchema(tx *gorm.DB) error {
-	return tx.AutoMigrate(tables...)
+	err := tx.AutoMigrate(tables...)
+	if err != nil {
+		return err
+	}
+	// Change the object_id colum to use case sensitive collation.
+	if !isSQLite(tx) {
+		return tx.Exec("ALTER TABLE objects MODIFY object_id CHARACTER SET utf8mb4 COLLATE utf8mb4_bin").Error
+	}
+	return nil
 }
 
 // performMigration00001_gormigrate performs the first migration before
