@@ -482,9 +482,9 @@ func (c *Client) PrunableDataForContract(ctx context.Context, fcid types.FileCon
 	return
 }
 
-// SectorRootsForContract returns the roots of the sectors for the contract with
-// given id.
-func (c *Client) SectorRootsForContract(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
+// ContractRoots returns the roots of the sectors for the contract with given
+// id.
+func (c *Client) ContractRoots(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", fcid), &roots)
 	return
 }

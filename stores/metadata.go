@@ -586,21 +586,28 @@ WHERE c.fcid = ?
 	return
 }
 
-func (s *SQLStore) SectorRootsForContract(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
+func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
 	if !s.isKnownContract(id) {
 		return nil, api.ErrContractNotFound
 	}
 
-	err = s.db.
+	var dbRoots []hash256
+	if err = s.db.
+		Debug().
 		Raw(`
 SELECT sec.root
 FROM contracts c
 INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
 INNER JOIN sectors sec ON cs.db_sector_id = sec.id
 WHERE c.fcid = ?
-`, rhpv2.SectorSize, fileContractID(id)).
-		Scan(&roots).
-		Error
+`, fileContractID(id)).
+		Scan(&dbRoots).
+		Error; err == nil {
+		for _, r := range dbRoots {
+			roots = append(roots, *(*types.Hash256)(&r))
+		}
+	}
+
 	return
 }
 

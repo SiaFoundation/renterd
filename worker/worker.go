@@ -139,6 +139,7 @@ type Bus interface {
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
@@ -146,7 +147,6 @@ type Bus interface {
 	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
 	PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
-	SectorRootsForContract(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 
@@ -607,7 +607,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	}
 
 	// fetch the roots from the bus
-	roots, err := w.bus.SectorRootsForContract(ctx, id)
+	roots, err := w.bus.ContractRoots(ctx, id)
 	if jc.Check("couldn't fetch contract roots from database", err) != nil {
 		return
 	}
@@ -637,9 +637,9 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	// decode fcid
 	var id types.FileContractID
-	// if jc.DecodeParam("id", &id) != nil {
-	// 	return
-	// }
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
 
 	// fetch the contract from the bus
 	ctx := jc.Request.Context()

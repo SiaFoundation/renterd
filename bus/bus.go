@@ -86,6 +86,7 @@ type (
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
@@ -96,7 +97,6 @@ type (
 
 		PrunableData(ctx context.Context) (int64, error)
 		PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
-		SectorRootsForContract(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 
 		Object(ctx context.Context, path string) (object.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
@@ -746,7 +746,7 @@ func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	roots, err := b.ms.SectorRootsForContract(jc.Request.Context(), id)
+	roots, err := b.ms.ContractRoots(jc.Request.Context(), id)
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
 		jc.Encode(roots)
 	}

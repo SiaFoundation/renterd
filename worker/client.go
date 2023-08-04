@@ -56,7 +56,7 @@ func (c *Client) RHPPruneContract(ctx context.Context, fcid types.FileContractID
 
 // RHPContractRoots fetches the roots of the contract with given id.
 func (c *Client) RHPContractRoots(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/roots", fcid), nil, &roots)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/roots", fcid), &roots)
 	return
 }
 
