@@ -121,6 +121,9 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
 func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
+	}
 	db, err := gorm.Open(conn, &gorm.Config{
 		Logger: logger, // custom logger
 	})
