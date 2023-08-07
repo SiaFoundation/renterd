@@ -37,6 +37,8 @@ type (
 		Uploads     types.Currency `json:"uploads"`
 		Downloads   types.Currency `json:"downloads"`
 		FundAccount types.Currency `json:"fundAccount"`
+		Deletions   types.Currency `json:"deletions"`
+		SectorRoots types.Currency `json:"sectorRoots"`
 	}
 
 	ContractSpendingRecord struct {
@@ -69,6 +71,8 @@ func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 	z.Uploads = x.Uploads.Add(y.Uploads)
 	z.Downloads = x.Downloads.Add(y.Downloads)
 	z.FundAccount = x.FundAccount.Add(y.FundAccount)
+	z.Deletions = x.Deletions.Add(y.Deletions)
+	z.SectorRoots = x.SectorRoots.Add(y.SectorRoots)
 	return
 }
 

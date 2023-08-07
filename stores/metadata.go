@@ -53,6 +53,8 @@ type (
 		UploadSpending      currency
 		DownloadSpending    currency
 		FundAccountSpending currency
+		DeleteSpending      currency
+		ListSpending        currency
 	}
 
 	dbContractSet struct {
@@ -197,6 +199,8 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 			Uploads:     types.Currency(c.UploadSpending),
 			Downloads:   types.Currency(c.DownloadSpending),
 			FundAccount: types.Currency(c.FundAccountSpending),
+			Deletions:   types.Currency(c.DeleteSpending),
+			SectorRoots: types.Currency(c.ListSpending),
 		},
 	}
 }
@@ -217,6 +221,8 @@ func (c dbContract) convert() api.ContractMetadata {
 			Uploads:     types.Currency(c.UploadSpending),
 			Downloads:   types.Currency(c.DownloadSpending),
 			FundAccount: types.Currency(c.FundAccountSpending),
+			Deletions:   types.Currency(c.DeleteSpending),
+			SectorRoots: types.Currency(c.ListSpending),
 		},
 		ProofHeight:    c.ProofHeight,
 		RevisionHeight: c.RevisionHeight,
@@ -783,6 +789,12 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			}
 			if !newSpending.FundAccount.IsZero() {
 				updates["fund_account_spending"] = currency(types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount))
+			}
+			if !newSpending.Deletions.IsZero() {
+				updates["delete_spending"] = currency(types.Currency(contract.DeleteSpending).Add(newSpending.Deletions))
+			}
+			if !newSpending.SectorRoots.IsZero() {
+				updates["list_spending"] = currency(types.Currency(contract.ListSpending).Add(newSpending.SectorRoots))
 			}
 			updates["revision_number"] = latestRevision[fcid]
 			updates["size"] = latestSize[fcid]
@@ -1494,6 +1506,8 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 			UploadSpending:      zeroCurrency,
 			DownloadSpending:    zeroCurrency,
 			FundAccountSpending: zeroCurrency,
+			DeleteSpending:      zeroCurrency,
+			ListSpending:        zeroCurrency,
 		},
 	}
 }
