@@ -190,18 +190,6 @@ func (ap *Autopilot) Run() error {
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
 
-	// block until the autopilot is configured
-	if !ap.blockUntilConfigured() {
-		ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
-		return nil
-	}
-
-	// block until consensus is synced
-	if !ap.blockUntilSynced() {
-		ap.logger.Error("autopilot stopped before consensus was synced")
-		return nil
-	}
-
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
 	for {
@@ -210,6 +198,28 @@ func (ap *Autopilot) Run() error {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
 			defer span.End()
+
+			// initiate a host scan - no need to be synced or configured for scanning
+			ap.s.tryUpdateTimeout()
+			ap.s.tryPerformHostScan(ctx, w, forceScan)
+
+			// block until the autopilot is configured
+			if !ap.blockUntilConfigured(ap.ticker.C) {
+				if !ap.isStopped() {
+					return
+				}
+				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
+				return
+			}
+
+			// block until consensus is synced
+			if !ap.blockUntilSynced(ap.ticker.C) {
+				if !ap.isStopped() {
+					return
+				}
+				ap.logger.Error("autopilot stopped before consensus was synced")
+				return
+			}
 
 			// Trace/Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ctx)
@@ -231,10 +241,6 @@ func (ap *Autopilot) Run() error {
 				ap.logger.Errorf("failed to update state, err: %v", err)
 				return
 			}
-
-			// initiate a host scan
-			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ctx, w, forceScan)
 
 			// do not continue if we are not synced
 			if !ap.isSynced() {
@@ -329,7 +335,7 @@ func (ap *Autopilot) Uptime() (dur time.Duration) {
 	return
 }
 
-func (ap *Autopilot) blockUntilConfigured() bool {
+func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -363,7 +369,7 @@ func (ap *Autopilot) blockUntilConfigured() bool {
 	}
 }
 
-func (ap *Autopilot) blockUntilSynced() bool {
+func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
