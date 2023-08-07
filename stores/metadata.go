@@ -625,8 +625,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 
 	var objects []dbObject
 	err := s.db.Model(&dbObject{}).
-		Select("*, INSTR(object_id, ?) AS pos", substring).
-		Where("pos > 0").
+		Select("*, INSTR(object_id, ?) AS pos WHERE pos > 0", substring).
 		Offset(offset).
 		Limit(limit).
 		Find(&objects).Error
@@ -696,7 +695,7 @@ LIMIT ? OFFSET ?`,
 	if err != nil {
 		return nil, err
 	}
-	// Sort results outside of query to get consist ordering across dbs.
+	// Sort results outside of query to get consistent ordering across dbs.
 	sort.Slice(metadata, func(i, j int) bool {
 		return metadata[i].Name < metadata[j].Name
 	})
