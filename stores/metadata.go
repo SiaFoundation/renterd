@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -674,12 +675,10 @@ FROM (
 		SELECT size, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
 		WHERE ?
-		ORDER BY id ASC
 	) AS i
 ) AS m
 GROUP BY name
 HAVING ? AND name != ?
-ORDER BY name ASC
 LIMIT ? OFFSET ?`,
 		sqlConcat(s.db, "?", "trimmed"),
 		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")),
@@ -697,6 +696,10 @@ LIMIT ? OFFSET ?`,
 	if err != nil {
 		return nil, err
 	}
+	// Sort results outside of query to get consist ordering across dbs.
+	sort.Slice(metadata, func(i, j int) bool {
+		return metadata[i].Name < metadata[j].Name
+	})
 	return metadata, nil
 }
 
