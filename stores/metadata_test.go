@@ -973,8 +973,8 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj, obj1) {
-		t.Fatal("object mismatch")
+	if !reflect.DeepEqual(fullObj.Object, obj1) {
+		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
 	expectedObjSlab1 := dbSlab{
@@ -1082,7 +1082,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj, obj1) {
+	if !reflect.DeepEqual(fullObj.Object, obj1) {
 		t.Fatal("object mismatch")
 	}
 
@@ -1338,15 +1338,15 @@ func TestObjectEntries(t *testing.T) {
 		prefix string
 		want   []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
-		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/", Size: 7}}},
-		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
-		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5}}},
-		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6}}},
+		{"/", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
+		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
 
-		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}}},
+		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
 		{"/foo/", "fo", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}}},
+		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
 	}
 	for _, test := range tests {
@@ -1396,10 +1396,10 @@ func TestSearchObjects(t *testing.T) {
 		path string
 		want []api.ObjectMetadata
 	}{
-		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
-		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
-		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
-		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
+		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
 		got, err := os.SearchObjects(ctx, test.path, 0, -1)
