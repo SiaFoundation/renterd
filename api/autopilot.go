@@ -104,6 +104,7 @@ type (
 	HostHandlerResponse struct {
 		Host hostdb.Host `json:"host"`
 
+		IsChecked        bool                 `json:"isChecked"`
 		Gouging          bool                 `json:"gouging"`
 		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
 		Score            float64              `json:"score"`

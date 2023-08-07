@@ -56,6 +56,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	return api.HostHandlerResponse{
 		Host: host.Host,
 
+		IsChecked:        true,
 		Gouging:          unusableResult.gougingBreakdown.Gouging(),
 		GougingBreakdown: unusableResult.gougingBreakdown,
 		Score:            unusableResult.scoreBreakdown.Score(),
@@ -110,6 +111,14 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 		for _, host := range hosts {
 			hi, cached := hostInfo[host.PublicKey]
 			if !cached {
+				// when the filterMode is "all" we include uncached hosts and
+				// set IsChecked = false.
+				if usabilityMode == api.UsabilityFilterModeAll {
+					hostInfos = append(hostInfos, api.HostHandlerResponse{
+						IsChecked: false,
+						Host:      host,
+					})
+				}
 				continue
 			}
 			if !keep(hi.Usable) {
@@ -118,6 +127,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 			hostInfos = append(hostInfos, api.HostHandlerResponse{
 				Host: host,
 
+				IsChecked:        true,
 				Gouging:          hi.UnusableResult.gougingBreakdown.Gouging(),
 				GougingBreakdown: hi.UnusableResult.gougingBreakdown,
 				Score:            hi.UnusableResult.scoreBreakdown.Score(),
