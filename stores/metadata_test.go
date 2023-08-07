@@ -1141,7 +1141,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// add hosts and contracts
-	hks, err := db.addTestHosts(3)
+	hks, err := db.addTestHosts(5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1176,6 +1176,10 @@ func TestObjectHealth(t *testing.T) {
 							Host: hks[2],
 							Root: types.Hash256{3},
 						},
+						{
+							Host: hks[3],
+							Root: types.Hash256{4},
+						},
 					},
 				},
 			},
@@ -1185,16 +1189,20 @@ func TestObjectHealth(t *testing.T) {
 					MinShards: 1,
 					Shards: []object.Sector{
 						{
-							Host: hks[0],
-							Root: types.Hash256{4},
-						},
-						{
 							Host: hks[1],
 							Root: types.Hash256{5},
 						},
 						{
 							Host: hks[2],
 							Root: types.Hash256{6},
+						},
+						{
+							Host: hks[3],
+							Root: types.Hash256{7},
+						},
+						{
+							Host: hks[4],
+							Root: types.Hash256{8},
 						},
 					},
 				},
@@ -1207,6 +1215,8 @@ func TestObjectHealth(t *testing.T) {
 		hks[0]: fcids[0],
 		hks[1]: fcids[1],
 		hks[2]: fcids[2],
+		hks[3]: fcids[3],
+		hks[4]: fcids[4],
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1225,18 +1235,19 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// update contract to impact the object's health
-	if err := db.SetContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[1]}); err != nil {
+	if err := db.SetContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3], fcids[4]}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	expectedHealth := float64(2) / float64(3)
 
 	// assert health
 	object, err = db.Object(context.Background(), "/foo")
 	if err != nil {
 		t.Fatal(err)
-	} else if object.Health != .5 {
+	} else if object.Health != expectedHealth {
 		t.Fatal("wrong health", object.Health)
 	}
 
@@ -1246,7 +1257,7 @@ func TestObjectHealth(t *testing.T) {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("wrong number of entries", len(entries))
-	} else if entries[0].Health != .5 {
+	} else if entries[0].Health != expectedHealth {
 		t.Fatal("wrong health", entries[0].Health)
 	}
 
@@ -1256,8 +1267,29 @@ func TestObjectHealth(t *testing.T) {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("wrong number of entries", len(entries))
-	} else if entries[0].Health != .5 {
+	} else if entries[0].Health != expectedHealth {
 		t.Fatal("wrong health", entries[0].Health)
+	}
+
+	// update contract set again to make sure the 2nd slab has even worse health
+	if err := db.SetContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expectedHealth = float64(1) / float64(3)
+
+	// assert health is the min. health of the slabs
+	object, err = db.Object(context.Background(), "/foo")
+	if err != nil {
+		t.Fatal(err)
+	} else if object.Health != expectedHealth {
+		t.Fatal("wrong health", object.Health)
+	} else if object.Slabs[0].Health <= expectedHealth {
+		t.Fatal("wrong health", object.Slabs[0].Health)
+	} else if object.Slabs[1].Health != expectedHealth {
+		t.Fatal("wrong health", object.Slabs[1].Health)
 	}
 }
 
