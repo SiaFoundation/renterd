@@ -94,7 +94,7 @@ type (
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
-		Object(ctx context.Context, path string) (object.Object, error)
+		Object(ctx context.Context, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
@@ -103,7 +103,7 @@ type (
 		RenameObject(ctx context.Context, from, to string) error
 		RenameObjects(ctx context.Context, from, to string) error
 
-		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
+		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
@@ -781,7 +781,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 }
 
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
-	var aor api.AddObjectRequest
+	var aor api.ObjectAddRequest
 	if jc.Decode(&aor) == nil {
 		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
 	}

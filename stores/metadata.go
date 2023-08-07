@@ -136,7 +136,9 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
-		ObjectKey []byte
+		ObjectKey  []byte
+		ObjectName string
+		ObjectSize int64
 
 		// slice
 		SliceOffset uint32
@@ -255,24 +257,19 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	return
 }
 
-func (o dbObject) metadata() api.ObjectMetadata {
-	return api.ObjectMetadata{
-		Name: o.ObjectID,
-		Size: o.Size,
-	}
-}
-
-func (raw rawObject) convert() (obj object.Object, _ error) {
+func (raw rawObject) convert() (obj api.Object, _ error) {
 	if len(raw) == 0 {
-		return object.Object{}, errors.New("no slabs found")
+		return api.Object{}, errors.New("no slabs found")
 	}
 
-	// unmarshal key
-	if err := obj.Key.UnmarshalText(raw[0].ObjectKey); err != nil {
-		return object.Object{}, err
+	// parse object key
+	var key object.EncryptionKey
+	if err := key.UnmarshalText(raw[0].ObjectKey); err != nil {
+		return api.Object{}, err
 	}
 
-	// create a helper function to add a slab and update the state
+	// create a helper function to add a slab and find the object's health
+	minHealth := math.MaxFloat64
 	slabs := make([]object.SlabSlice, 0, len(raw))
 	curr := raw[0].SlabID
 	var start int
@@ -283,6 +280,11 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 			slabs = append(slabs, slab)
 			curr = id
 			start = end
+
+			// update health
+			if slab.Slab.Health < minHealth {
+				minHealth = slab.Slab.Health
+			}
 		}
 		return nil
 	}
@@ -299,22 +301,33 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 	if len(filtered) > 0 {
 		for j, sector := range filtered {
 			if sector.SectorID == 0 {
-				return object.Object{}, api.ErrObjectCorrupted
+				return api.Object{}, api.ErrObjectCorrupted
 			}
 			if sector.SlabID != curr {
 				if err := addSlab(j, sector.SlabID); err != nil {
-					return object.Object{}, err
+					return api.Object{}, err
 				}
 			}
 		}
 		if err := addSlab(len(raw), 0); err != nil {
-			return object.Object{}, err
+			return api.Object{}, err
 		}
+	} else {
+		minHealth = 1 // empty object
 	}
 
-	// hydrate all fields
-	obj.Slabs = slabs
-	return obj, nil
+	// return object
+	return api.Object{
+		ObjectMetadata: api.ObjectMetadata{
+			Name:   raw[0].ObjectName,
+			Size:   raw[0].ObjectSize,
+			Health: minHealth,
+		},
+		Object: object.Object{
+			Key:   key,
+			Slabs: slabs,
+		},
+	}, nil
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -352,8 +365,8 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 // ObjectsStats returns some info related to the objects stored in the store. To
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
-func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
-	var resp api.ObjectsStats
+func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
+	var resp api.ObjectsStatsResponse
 	return resp, s.db.Transaction(func(tx *gorm.DB) error {
 		// Number of objects.
 		err := tx.
@@ -621,20 +634,23 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 		limit = math.MaxInt
 	}
 
-	var objects []dbObject
-	err := s.db.Model(&dbObject{}).
-		Where("object_id LIKE ?", "%"+substring+"%").
+	var objects []api.ObjectMetadata
+	err := s.db.
+		Select("o.object_id as name, o.size as size, MIN(sla.health) as health").
+		Model(&dbObject{}).
+		Table("objects o").
+		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+		Where("o.object_id LIKE ?", "%"+substring+"%").
+		Group("o.object_id").
 		Offset(offset).
 		Limit(limit).
-		Find(&objects).Error
+		Scan(&objects).Error
 	if err != nil {
 		return nil, err
 	}
-	metadata := make([]api.ObjectMetadata, len(objects))
-	for i, entry := range objects {
-		metadata[i] = entry.metadata()
-	}
-	return metadata, nil
+
+	return objects, nil
 }
 
 func sqlConcat(db *gorm.DB, a, b string) string {
@@ -660,13 +676,17 @@ SELECT
 	CASE slashindex
 	WHEN 0 THEN %s
 	ELSE %s
-	END AS name
+	END AS name,
+	MIN(health) as health
 FROM (
-	SELECT size, trimmed, INSTR(trimmed, "/") AS slashindex
+	SELECT size, health, trimmed, INSTR(trimmed, "/") AS slashindex
 	FROM (
-		SELECT size, SUBSTR(object_id, ?) AS trimmed
+		SELECT size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
+		LEFT JOIN slices ON objects.id = slices.db_object_id
+		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
 		WHERE object_id LIKE ?
+		GROUP BY object_id
 	) AS i
 ) AS m
 GROUP BY name
@@ -681,10 +701,10 @@ LIMIT ? OFFSET ?`, sqlConcat(s.db, "?", "trimmed"), sqlConcat(s.db, "?", "substr
 	return metadata, nil
 }
 
-func (s *SQLStore) Object(ctx context.Context, path string) (object.Object, error) {
+func (s *SQLStore) Object(ctx context.Context, path string) (api.Object, error) {
 	obj, err := s.object(ctx, path)
 	if err != nil {
-		return object.Object{}, err
+		return api.Object{}, err
 	}
 	return obj.convert()
 }
@@ -838,7 +858,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		obj := dbObject{
 			ObjectID: path,
 			Key:      objKey,
-			Size:     o.Size(),
+			Size:     o.TotalSize(),
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -1227,7 +1247,7 @@ func (s *SQLStore) object(ctx context.Context, path string) (rawObject, error) {
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
