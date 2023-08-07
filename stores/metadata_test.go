@@ -105,8 +105,8 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatal("object mismatch", cmp.Diff(got, want))
+	if !reflect.DeepEqual(got.Object, want) {
+		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
 	}
 
 	// delete a sector
@@ -141,8 +141,8 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got2, want2) {
-		t.Fatal("object mismatch", cmp.Diff(got2, want2))
+	if !reflect.DeepEqual(got2.Object, want2) {
+		t.Fatal("object mismatch", cmp.Diff(got2.Object, want2))
 	}
 }
 
