@@ -625,7 +625,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 
 	var objects []dbObject
 	err := s.db.Model(&dbObject{}).
-		Select("*, INSTR(object_id, ?) AS pos WHERE pos > 0", substring).
+		Where("INSTR(object_id, ?) > 0", substring).
 		Offset(offset).
 		Limit(limit).
 		Find(&objects).Error
