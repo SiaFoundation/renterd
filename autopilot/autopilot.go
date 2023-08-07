@@ -183,7 +183,7 @@ func (ap *Autopilot) Run() error {
 	}
 	ap.runningSince = time.Now()
 	ap.stopChan = make(chan struct{})
-	ap.triggerChan = make(chan bool)
+	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
 	ap.wg.Add(1)
