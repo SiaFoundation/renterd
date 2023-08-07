@@ -679,6 +679,7 @@ FROM (
 ) AS m
 GROUP BY name
 HAVING ? AND name != ?
+ORDER BY name ASC
 LIMIT ? OFFSET ?`,
 		sqlConcat(s.db, "?", "trimmed"),
 		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")),
