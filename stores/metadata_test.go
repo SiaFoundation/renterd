@@ -1156,7 +1156,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// add an object with 2 slabs
-	obj := object.Object{
+	add := object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -1210,8 +1210,7 @@ func TestObjectHealth(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "/foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), "/foo", testContractSet, add, nil, map[types.PublicKey]types.FileContractID{
 		hks[0]: fcids[0],
 		hks[1]: fcids[1],
 		hks[2]: fcids[2],
@@ -1227,11 +1226,11 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health
-	object, err := db.Object(context.Background(), "/foo")
+	obj, err := db.Object(context.Background(), "/foo")
 	if err != nil {
 		t.Fatal(err)
-	} else if object.Health != 1 {
-		t.Fatal("wrong health", object.Health)
+	} else if obj.Health != 1 {
+		t.Fatal("wrong health", obj.Health)
 	}
 
 	// update contract to impact the object's health
@@ -1244,11 +1243,11 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth := float64(2) / float64(3)
 
 	// assert health
-	object, err = db.Object(context.Background(), "/foo")
+	obj, err = db.Object(context.Background(), "/foo")
 	if err != nil {
 		t.Fatal(err)
-	} else if object.Health != expectedHealth {
-		t.Fatal("wrong health", object.Health)
+	} else if obj.Health != expectedHealth {
+		t.Fatal("wrong health", obj.Health)
 	}
 
 	// assert health is returned correctly by ObjectEntries
@@ -1281,15 +1280,32 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth = float64(1) / float64(3)
 
 	// assert health is the min. health of the slabs
-	object, err = db.Object(context.Background(), "/foo")
+	obj, err = db.Object(context.Background(), "/foo")
 	if err != nil {
 		t.Fatal(err)
-	} else if object.Health != expectedHealth {
-		t.Fatal("wrong health", object.Health)
-	} else if object.Slabs[0].Health <= expectedHealth {
-		t.Fatal("wrong health", object.Slabs[0].Health)
-	} else if object.Slabs[1].Health != expectedHealth {
-		t.Fatal("wrong health", object.Slabs[1].Health)
+	} else if obj.Health != expectedHealth {
+		t.Fatal("wrong health", obj.Health)
+	} else if obj.Slabs[0].Health <= expectedHealth {
+		t.Fatal("wrong health", obj.Slabs[0].Health)
+	} else if obj.Slabs[1].Health != expectedHealth {
+		t.Fatal("wrong health", obj.Slabs[1].Health)
+	}
+
+	// add an empty object
+	add = object.Object{
+		Key:   object.GenerateEncryptionKey(),
+		Slabs: nil,
+	}
+	if err := db.UpdateObject(context.Background(), "/bar", testContractSet, add, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the health is 1
+	obj, err = db.Object(context.Background(), "/bar")
+	if err != nil {
+		t.Fatal(err)
+	} else if obj.Health != 1 {
+		t.Fatal("wrong health", obj.Health)
 	}
 }
 
