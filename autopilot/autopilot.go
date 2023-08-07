@@ -183,7 +183,7 @@ func (ap *Autopilot) Run() error {
 	}
 	ap.runningSince = time.Now()
 	ap.stopChan = make(chan struct{})
-	ap.triggerChan = make(chan bool, 1)
+	ap.triggerChan = make(chan bool)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
 	ap.wg.Add(1)
@@ -342,12 +342,6 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 	var once sync.Once
 
 	for {
-		select {
-		case <-ap.stopChan:
-			return false
-		case <-ticker.C:
-		}
-
 		// try and fetch the config
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		_, err := ap.bus.Autopilot(ctx, api.DefaultAutopilotID)
@@ -356,10 +350,18 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 		// if the config was not found, or we were unable to fetch it, keep blocking
 		if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
 			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
-			continue
 		} else if err != nil {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
-			continue
+		}
+		if err != nil {
+			select {
+			case <-ap.stopChan:
+				return false
+			case <-interrupt:
+				return false
+			case <-ticker.C:
+				continue
+			}
 		}
 
 		ap.mu.Lock()
@@ -374,12 +376,6 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ap.stopChan:
-			return false
-		case <-ticker.C:
-		}
-
 		// try and fetch consensus
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		cs, err := ap.bus.ConsensusState(ctx)
@@ -388,9 +384,16 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 		// if an error occurred, or if we're not synced, we continue
 		if err != nil {
 			ap.logger.Errorf("failed to get consensus state, err: %v", err)
-			continue
-		} else if !cs.Synced {
-			continue
+		}
+		if err != nil || !cs.Synced {
+			select {
+			case <-ap.stopChan:
+				return false
+			case <-interrupt:
+				return false
+			case <-ticker.C:
+				continue
+			}
 		}
 
 		ap.mu.Lock()
