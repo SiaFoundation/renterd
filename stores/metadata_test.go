@@ -2701,6 +2701,10 @@ func TestPrunableData(t *testing.T) {
 	// assert there's now two sectors that can be pruned
 	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
 		t.Fatal("unexpected amount of prunable data", n)
+	} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
+		t.Fatal("unexpected amount of prunable data", n)
+	} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
+		t.Fatal("unexpected amount of prunable data", n)
 	}
 
 	// archive all contracts

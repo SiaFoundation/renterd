@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -244,13 +245,19 @@ func TestSectorPruning(t *testing.T) {
 		}
 	}
 
-	// shut down the worker, ensuring spending records get flushed
-	//
-	// NOTE: recording spending updates the cached contract fields which are
-	// used when calculating prunable data
-	if err := cluster.ShutdownWorker(context.Background()); err != nil {
+	// reboot the cluster to ensure pending records get flushed
+	cluster2, err := cluster.Reboot(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := cluster2.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	b = cluster2.Bus
+	w = cluster2.Worker
 
 	// assert prunable data is 0
 	if n, err := b.PrunableData(context.Background()); err != nil {
@@ -269,5 +276,40 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal(err)
 	} else if n != rhpv2.SectorSize*3 {
 		t.Fatal("unexpected prunable data", n)
+	}
+
+	// prune all contracts
+	for _, shard := range obj.Slabs[0].Shards {
+		if n, err := w.RHPPruneContract(context.Background(), contracts[shard.Host].ID); err != nil {
+			t.Fatal(err)
+		} else if n != rhpv2.SectorSize {
+			t.Fatal("unexpected pruned data", n)
+		}
+	}
+
+	// assert spending records were updated and prunable data is 0
+	if err = Retry(10, testBusFlushInterval, func() error {
+		if n, err := b.PrunableData(context.Background()); err != nil {
+			t.Fatal(err)
+		} else if n != 0 {
+			return fmt.Errorf("unexpected prunable data: %d", n)
+		}
+
+		for _, shard := range obj.Slabs[0].Shards {
+			c, err := b.Contract(context.Background(), contracts[shard.Host].ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Spending.SectorRoots.IsZero() {
+				return errors.New("spending record not updated")
+			}
+			if c.Spending.Deletions.IsZero() {
+				return errors.New("spending record not updated")
+			}
+		}
+
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

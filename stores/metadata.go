@@ -585,7 +585,7 @@ func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileCon
 	err = s.db.
 		Raw(`
 SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-    SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * 4194304, 0) as bytes
+    SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * ?, 0) as bytes
     FROM contracts c
     LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
     WHERE c.fcid = ?
