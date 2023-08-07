@@ -184,7 +184,7 @@ func initSchema(tx *gorm.DB) error {
 	}
 	// Change the object_id colum to use case sensitive collation.
 	if !isSQLite(tx) {
-		return tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		return tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 	}
 	return nil
 }

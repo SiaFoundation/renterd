@@ -65,7 +65,7 @@ type (
 	dbContractSet struct {
 		Model
 
-		Name      string       `gorm:"unique;index"`
+		Name      string       `gorm:"unique;index:length:255;"`
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
