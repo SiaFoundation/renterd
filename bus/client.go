@@ -536,7 +536,7 @@ func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit in
 	return
 }
 
-func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o object.Object, entries []api.ObjectMetadata, err error) {
+func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o api.Object, entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
 	values := url.Values{}
 	for _, opt := range opts {
@@ -556,7 +556,7 @@ func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOpt
 // AddObject stores the provided object under the given path.
 func (c *Client) AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
 	path = strings.TrimPrefix(path, "/")
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
 		ContractSet:   contractSet,
 		Object:        o,
 		UsedContracts: usedContract,
@@ -690,7 +690,7 @@ func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (ta
 }
 
 // ObjectsStats returns information about the number of objects and their size.
-func (c *Client) ObjectsStats() (osr api.ObjectsStats, err error) {
+func (c *Client) ObjectsStats() (osr api.ObjectsStatsResponse, err error) {
 	err = c.c.GET("/stats/objects", &osr)
 	return
 }

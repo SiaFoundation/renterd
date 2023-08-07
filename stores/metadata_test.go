@@ -948,7 +948,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	expectedObj := dbObject{
 		ObjectID: objID,
 		Key:      obj1Key,
-		Size:     obj1.Size(),
+		Size:     obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID: 1,
@@ -1128,6 +1128,136 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 	if err := countCheck(0, 0, 0, 0); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestObjectHealth verifies the object's health is returned correctly by all
+// methods that return the object's metadata.
+func TestObjectHealth(t *testing.T) {
+	// create db
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts and contracts
+	hks, err := db.addTestHosts(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// all contracts are good
+	if err := db.SetContractSet(context.Background(), testContractSet, fcids); err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object with 2 slabs
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hks[0],
+							Root: types.Hash256{1},
+						},
+						{
+							Host: hks[1],
+							Root: types.Hash256{2},
+						},
+						{
+							Host: hks[2],
+							Root: types.Hash256{3},
+						},
+					},
+				},
+			},
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hks[0],
+							Root: types.Hash256{4},
+						},
+						{
+							Host: hks[1],
+							Root: types.Hash256{5},
+						},
+						{
+							Host: hks[2],
+							Root: types.Hash256{6},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	if err := db.UpdateObject(ctx, "/foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+		hks[0]: fcids[0],
+		hks[1]: fcids[1],
+		hks[2]: fcids[2],
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// refresh health
+	if err := db.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert health
+	object, err := db.Object(context.Background(), "/foo")
+	if err != nil {
+		t.Fatal(err)
+	} else if object.Health != 1 {
+		t.Fatal("wrong health", object.Health)
+	}
+
+	// update contract to impact the object's health
+	if err := db.SetContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[1]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert health
+	object, err = db.Object(context.Background(), "/foo")
+	if err != nil {
+		t.Fatal(err)
+	} else if object.Health != .5 {
+		t.Fatal("wrong health", object.Health)
+	}
+
+	// assert health is returned correctly by ObjectEntries
+	entries, err := db.ObjectEntries(context.Background(), "/", "", 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 1 {
+		t.Fatal("wrong number of entries", len(entries))
+	} else if entries[0].Health != .5 {
+		t.Fatal("wrong health", entries[0].Health)
+	}
+
+	// assert health is returned correctly by SearchObject
+	entries, err = db.SearchObjects(context.Background(), "foo", 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 1 {
+		t.Fatal("wrong number of entries", len(entries))
+	} else if entries[0].Health != .5 {
+		t.Fatal("wrong health", entries[0].Health)
 	}
 }
 
@@ -2179,7 +2309,7 @@ func TestObjectsStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(info, api.ObjectsStats{}) {
+	if !reflect.DeepEqual(info, api.ObjectsStatsResponse{}) {
 		t.Fatal("unexpected stats", info)
 	}
 
@@ -2188,7 +2318,7 @@ func TestObjectsStats(t *testing.T) {
 	var sectorsSize uint64
 	for i := 0; i < 2; i++ {
 		obj, contracts := newTestObject(1)
-		objectsSize += uint64(obj.Size())
+		objectsSize += uint64(obj.TotalSize())
 		for _, slab := range obj.Slabs {
 			sectorsSize += uint64(len(slab.Shards) * rhpv2.SectorSize)
 		}
