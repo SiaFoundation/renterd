@@ -674,6 +674,7 @@ FROM (
 		SELECT size, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
 		WHERE ?
+		ORDER BY id ASC
 	) AS i
 ) AS m
 GROUP BY name
