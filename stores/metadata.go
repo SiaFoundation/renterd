@@ -677,7 +677,7 @@ SELECT
 	WHEN 0 THEN %s
 	ELSE %s
 	END AS name,
-	health
+	MIN(health) as health
 FROM (
 	SELECT size, health, trimmed, INSTR(trimmed, "/") AS slashindex
 	FROM (
