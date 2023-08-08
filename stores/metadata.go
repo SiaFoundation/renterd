@@ -720,14 +720,10 @@ FROM (
 	FROM (
 		SELECT size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
-<<<<<<< HEAD
-		WHERE ?
-=======
 		LEFT JOIN slices ON objects.id = slices.db_object_id
 		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-		WHERE object_id LIKE ?
+		WHERE ?
 		GROUP BY object_id
->>>>>>> master
 	) AS i
 ) AS m
 GROUP BY name
