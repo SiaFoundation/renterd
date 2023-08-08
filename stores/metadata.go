@@ -566,7 +566,7 @@ func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error)
 SELECT IFNULL(SUM(prunable), 0)
 FROM (
     SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-        SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * ?, 0) as bytes
+        SELECT IFNULL(SUM(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
         FROM contracts c
         LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
         GROUP BY c.id
