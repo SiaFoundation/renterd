@@ -673,7 +673,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Where("INSTR(object_id, ?) > 0", substring).
+		Where("INSTR(o.object_id, ?) > 0", substring).
 		Group("o.object_id").
 		Offset(offset).
 		Limit(limit).
