@@ -49,7 +49,7 @@ func TestNewTestCluster(t *testing.T) {
 	w := cluster.Worker
 
 	// Check wallet info is sane after startup.
-	wi, err := b.WalletInfo(context.Background())
+	wi, err := b.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,11 +59,11 @@ func TestNewTestCluster(t *testing.T) {
 	if wi.Confirmed.IsZero() {
 		t.Fatal("wallet confirmed balance should not be zero")
 	}
-	if wi.Spendable.IsZero() {
-		t.Fatal("wallet spendable balance should not be zero")
+	if !wi.Spendable.Equals(wi.Confirmed) {
+		t.Fatal("wallet spendable balance should match confirmed")
 	}
 	if wi.Address == (types.Address{}) {
-		t.Fatal("wallet addresses should not be nil")
+		t.Fatal("wallet address should be set")
 	}
 
 	// Try talking to the bus API by adding an object.

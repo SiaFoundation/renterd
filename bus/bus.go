@@ -1393,8 +1393,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
 
 		"GET    /wallet":               b.walletHandler,
-		"GET    /wallet/balance":       b.walletBalanceHandler,
-		"GET    /wallet/address":       b.walletAddressHandler,
+		"GET    /wallet/balance":       b.walletBalanceHandler, // deprecated
+		"GET    /wallet/address":       b.walletAddressHandler, // deprecated
 		"GET    /wallet/transactions":  b.walletTransactionsHandler,
 		"GET    /wallet/outputs":       b.walletOutputsHandler,
 		"POST   /wallet/fund":          b.walletFundHandler,

@@ -105,8 +105,8 @@ func (c *Client) BroadcastTransaction(ctx context.Context, txns []types.Transact
 	return c.c.WithContext(ctx).POST("/txpool/broadcast", txns, nil)
 }
 
-// WalletInfo calls the /wallet endpoint on the bus.
-func (c *Client) WalletInfo(ctx context.Context) (resp api.WalletResponse, err error) {
+// Wallet calls the /wallet endpoint on the bus.
+func (c *Client) Wallet(ctx context.Context) (resp api.WalletResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet", &resp)
 	return
 }

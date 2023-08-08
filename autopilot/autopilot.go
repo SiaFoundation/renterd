@@ -34,8 +34,7 @@ type Bus interface {
 	UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error
 
 	// wallet
-	WalletAddress(ctx context.Context) (types.Address, error)
-	WalletBalance(ctx context.Context) (types.Currency, error)
+	Wallet(ctx context.Context) (api.WalletResponse, error)
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
@@ -442,10 +441,11 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	}
 
 	// fetch our wallet address
-	address, err := ap.bus.WalletAddress(ctx)
+	wi, err := ap.bus.Wallet(ctx)
 	if err != nil {
 		return fmt.Errorf("could not fetch wallet address, err: %v", err)
 	}
+	address := wi.Address
 
 	// update current period if necessary
 	if cs.Synced {
