@@ -94,7 +94,10 @@ type (
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
-		Object(ctx context.Context, path string) (object.Object, error)
+		PrunableData(ctx context.Context) (int64, error)
+		PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
+
+		Object(ctx context.Context, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
@@ -103,7 +106,7 @@ type (
 		RenameObject(ctx context.Context, from, to string) error
 		RenameObjects(ctx context.Context, from, to string) error
 
-		ObjectsStats(ctx context.Context) (api.ObjectsStats, error)
+		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
@@ -654,6 +657,29 @@ func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
+	n, err := b.ms.PrunableData(jc.Request.Context())
+	if jc.Check("failed to fetch prunable data", err) == nil {
+		jc.Encode(n)
+	}
+}
+
+func (b *bus) contractPrunableDataHandlerGET(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	n, err := b.ms.PrunableDataForContract(jc.Request.Context(), id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if jc.Check("failed to fetch prunable data for contract", err) == nil {
+		jc.Encode(n)
+	}
+}
+
 func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
@@ -781,7 +807,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 }
 
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
-	var aor api.AddObjectRequest
+	var aor api.ObjectAddRequest
 	if jc.Decode(&aor) == nil {
 		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
 	}
@@ -1402,6 +1428,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
@@ -1415,6 +1442,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
+		"GET    /contract/:id/prunable":  b.contractPrunableDataHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,

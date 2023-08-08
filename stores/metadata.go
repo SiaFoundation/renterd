@@ -18,12 +18,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var (
-	// ErrContractNotFound is returned when a contract can't be retrieved from
-	// the database.
-	ErrContractNotFound = errors.New("couldn't find contract")
-)
-
 type (
 	dbArchivedContract struct {
 		Model
@@ -138,7 +132,9 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
-		ObjectKey []byte
+		ObjectKey  []byte
+		ObjectName string
+		ObjectSize int64
 
 		// slice
 		SliceOffset uint32
@@ -257,24 +253,19 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	return
 }
 
-func (o dbObject) metadata() api.ObjectMetadata {
-	return api.ObjectMetadata{
-		Name: o.ObjectID,
-		Size: o.Size,
-	}
-}
-
-func (raw rawObject) convert() (obj object.Object, _ error) {
+func (raw rawObject) convert() (obj api.Object, _ error) {
 	if len(raw) == 0 {
-		return object.Object{}, errors.New("no slabs found")
+		return api.Object{}, errors.New("no slabs found")
 	}
 
-	// unmarshal key
-	if err := obj.Key.UnmarshalText(raw[0].ObjectKey); err != nil {
-		return object.Object{}, err
+	// parse object key
+	var key object.EncryptionKey
+	if err := key.UnmarshalText(raw[0].ObjectKey); err != nil {
+		return api.Object{}, err
 	}
 
-	// create a helper function to add a slab and update the state
+	// create a helper function to add a slab and find the object's health
+	minHealth := math.MaxFloat64
 	slabs := make([]object.SlabSlice, 0, len(raw))
 	curr := raw[0].SlabID
 	var start int
@@ -285,6 +276,11 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 			slabs = append(slabs, slab)
 			curr = id
 			start = end
+
+			// update health
+			if slab.Slab.Health < minHealth {
+				minHealth = slab.Slab.Health
+			}
 		}
 		return nil
 	}
@@ -301,22 +297,33 @@ func (raw rawObject) convert() (obj object.Object, _ error) {
 	if len(filtered) > 0 {
 		for j, sector := range filtered {
 			if sector.SectorID == 0 {
-				return object.Object{}, api.ErrObjectCorrupted
+				return api.Object{}, api.ErrObjectCorrupted
 			}
 			if sector.SlabID != curr {
 				if err := addSlab(j, sector.SlabID); err != nil {
-					return object.Object{}, err
+					return api.Object{}, err
 				}
 			}
 		}
 		if err := addSlab(len(raw), 0); err != nil {
-			return object.Object{}, err
+			return api.Object{}, err
 		}
+	} else {
+		minHealth = 1 // empty object
 	}
 
-	// hydrate all fields
-	obj.Slabs = slabs
-	return obj, nil
+	// return object
+	return api.Object{
+		ObjectMetadata: api.ObjectMetadata{
+			Name:   raw[0].ObjectName,
+			Size:   raw[0].ObjectSize,
+			Health: minHealth,
+		},
+		Object: object.Object{
+			Key:   key,
+			Slabs: slabs,
+		},
+	}, nil
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -354,8 +361,8 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 // ObjectsStats returns some info related to the objects stored in the store. To
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
-func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStats, error) {
-	var resp api.ObjectsStats
+func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
+	var resp api.ObjectsStatsResponse
 	return resp, s.db.Transaction(func(tx *gorm.DB) error {
 		// Number of objects.
 		err := tx.
@@ -456,7 +463,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Overwrite the old contract with the new one.
-		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
 		newContract.Model = oldContract.Model
 		err = tx.Save(&newContract).Error
 		if err != nil {
@@ -562,6 +569,42 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 	return sets, err
 }
 
+func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error) {
+	err = s.db.
+		Raw(`
+SELECT IFNULL(SUM(prunable), 0)
+FROM (
+    SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+        SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * ?, 0) as bytes
+        FROM contracts c
+        LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+        GROUP BY c.id
+	) as i
+) as j`, rhpv2.SectorSize).
+		Scan(&prunable).
+		Error
+	return
+}
+
+func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileContractID) (prunable int64, err error) {
+	if !s.isKnownContract(id) {
+		return 0, api.ErrContractNotFound
+	}
+
+	err = s.db.
+		Raw(`
+SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+    SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * 4194304, 0) as bytes
+    FROM contracts c
+    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+    WHERE c.fcid = ?
+) as i
+`, rhpv2.SectorSize, fileContractID(id)).
+		Scan(&prunable).
+		Error
+	return
+}
+
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
 	fcids := make([]fileContractID, len(contractIds))
 	for i, fcid := range contractIds {
@@ -611,7 +654,7 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 		Take(&contract).
 		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = ErrContractNotFound
+		err = api.ErrContractNotFound
 		return
 	}
 
@@ -623,20 +666,23 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 		limit = math.MaxInt
 	}
 
-	var objects []dbObject
-	err := s.db.Model(&dbObject{}).
+	var objects []api.ObjectMetadata
+	err := s.db.
+		Select("o.object_id as name, o.size as size, MIN(sla.health) as health").
+		Model(&dbObject{}).
+		Table("objects o").
+		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Where("INSTR(object_id, ?) > 0", substring).
+		Group("o.object_id").
 		Offset(offset).
 		Limit(limit).
-		Find(&objects).Error
+		Scan(&objects).Error
 	if err != nil {
 		return nil, err
 	}
-	metadata := make([]api.ObjectMetadata, len(objects))
-	for i, entry := range objects {
-		metadata[i] = entry.metadata()
-	}
-	return metadata, nil
+
+	return objects, nil
 }
 
 func sqlConcat(db *gorm.DB, a, b string) string {
@@ -667,13 +713,21 @@ SELECT
 	CASE slashindex
 	WHEN 0 THEN %s
 	ELSE %s
-	END AS name
+	END AS name,
+	MIN(health) as health
 FROM (
-	SELECT size, trimmed, INSTR(trimmed, "/") AS slashindex
+	SELECT size, health, trimmed, INSTR(trimmed, "/") AS slashindex
 	FROM (
-		SELECT size, SUBSTR(object_id, ?) AS trimmed
+		SELECT size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
+<<<<<<< HEAD
 		WHERE ?
+=======
+		LEFT JOIN slices ON objects.id = slices.db_object_id
+		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
+		WHERE object_id LIKE ?
+		GROUP BY object_id
+>>>>>>> master
 	) AS i
 ) AS m
 GROUP BY name
@@ -702,10 +756,10 @@ LIMIT ? OFFSET ?`,
 	return metadata, nil
 }
 
-func (s *SQLStore) Object(ctx context.Context, path string) (object.Object, error) {
+func (s *SQLStore) Object(ctx context.Context, path string) (api.Object, error) {
 	obj, err := s.object(ctx, path)
 	if err != nil {
-		return object.Object{}, err
+		return api.Object{}, err
 	}
 	return obj.convert()
 }
@@ -859,7 +913,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		obj := dbObject{
 			ObjectID: path,
 			Key:      objKey,
-			Size:     o.Size(),
+			Size:     o.TotalSize(),
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -1248,7 +1302,7 @@ func (s *SQLStore) object(ctx context.Context, path string) (rawObject, error) {
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.key as ObjectKey, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
@@ -1410,7 +1464,7 @@ func contract(tx *gorm.DB, id fileContractID) (contract dbContract, err error) {
 		Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = ErrContractNotFound
+		err = api.ErrContractNotFound
 	}
 	return
 }
@@ -1442,7 +1496,7 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 	return
 }
 
-func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd uint64) dbContract {
+func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64) dbContract {
 	return dbContract{
 		HostID: hostID,
 
@@ -1452,7 +1506,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
-			Size:           0,
+			Size:           size,
 			StartHeight:    startHeight,
 			WindowStart:    windowStart,
 			WindowEnd:      windowEnd,
@@ -1477,7 +1531,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error

@@ -653,7 +653,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 
 	var cost types.Currency
 	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		root, cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, rev, &payment, sector)
+		root, cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, &rev, &payment, sector)
 		return err
 	})
 	if err != nil {
@@ -1195,7 +1195,7 @@ func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentM
 	}, nil
 }
 
-func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
+func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 
 	// sanity check revision first
@@ -1292,7 +1292,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	}
 
 	// finalize the program with a new revision.
-	newRevision := rev
+	newRevision := *rev
 	newValid, newMissed, err := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
 	if err != nil {
 		return types.Hash256{}, types.ZeroCurrency, err
@@ -1329,6 +1329,8 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 		err = errFinalise
 		return
 	}
+
+	*rev = newRevision
 	return
 }
 

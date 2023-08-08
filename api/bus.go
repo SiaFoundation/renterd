@@ -41,15 +41,19 @@ var (
 	// yet because it has been set too recently.
 	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
 
-	// ErrOBjectNotFound is returned if get is unable to retrieve an object from
-	// the database.
+	// ErrOBjectNotFound is returned when an object can't be retrieved from the
+	// database.
 	ErrObjectNotFound = errors.New("object not found")
 
 	// ErrObjectCorrupted is returned if we were unable to retrieve the object
 	// from the database.
 	ErrObjectCorrupted = errors.New("object corrupted")
 
-	// ErrContractSetNotFound is returned when a contract can't be retrieved
+	// ErrContractNotFound is returned when a contract can't be retrieved from
+	// the database.
+	ErrContractNotFound = errors.New("couldn't find contract")
+
+	// ErrContractSetNotFound is returned when a contract set can't be retrieved
 	// from the database.
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
 
@@ -124,19 +128,41 @@ type HostsRemoveRequest struct {
 	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
 }
 
-type ObjectMetadata struct {
-	Name string `json:"name"`
-	Size int64  `json:"size"`
+// Object wraps an object.Object with its metadata.
+type Object struct {
+	ObjectMetadata
+	object.Object
 }
 
+// ObjectMetadata contains various metadata about an object.
+type ObjectMetadata struct {
+	Name   string  `json:"name"`
+	Size   int64   `json:"size"`
+	Health float64 `json:"health"`
+}
+
+// ObjectAddRequest is the request type for the /object/*key endpoint.
+type ObjectAddRequest struct {
+	ContractSet   string                                   `json:"contractSet"`
+	Object        object.Object                            `json:"object"`
+	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+}
+
+// ObjectsResponse is the response type for the /objects endpoint.
+type ObjectsResponse struct {
+	Entries []ObjectMetadata `json:"entries,omitempty"`
+	Object  *Object          `json:"object,omitempty"`
+}
+
+// ObjectsRenameRequest is the request type for the /objects/rename endpoint.
 type ObjectsRenameRequest struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Mode string `json:"mode"`
 }
 
-// ObjectsStats is the response type for the /stats/objects endpoint.
-type ObjectsStats struct {
+// ObjectsStatsResponse is the response type for the /stats/objects endpoint.
+type ObjectsStatsResponse struct {
 	NumObjects        uint64 `json:"numObjects"`        // number of objects
 	TotalObjectsSize  uint64 `json:"totalObjectsSize"`  // size of all objects
 	TotalSectorsSize  uint64 `json:"totalSectorsSize"`  // uploaded size of all objects
@@ -229,19 +255,6 @@ func WalletTransactionsWithOffset(offset int) WalletTransactionsOption {
 	return func(q url.Values) {
 		q.Set("offset", fmt.Sprint(offset))
 	}
-}
-
-// ObjectsResponse is the response type for the /objects endpoint.
-type ObjectsResponse struct {
-	Entries []ObjectMetadata `json:"entries,omitempty"`
-	Object  *object.Object   `json:"object,omitempty"`
-}
-
-// AddObjectRequest is the request type for the /object/*key endpoint.
-type AddObjectRequest struct {
-	ContractSet   string                                   `json:"contractSet"`
-	Object        object.Object                            `json:"object"`
-	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
 // MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
