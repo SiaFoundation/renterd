@@ -94,6 +94,9 @@ type (
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
+		PrunableData(ctx context.Context) (int64, error)
+		PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
+
 		Object(ctx context.Context, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
@@ -651,6 +654,29 @@ func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	err := b.contractLocks.KeepAlive(id, req.LockID, time.Duration(req.Duration))
 	if jc.Check("failed to extend lock duration", err) != nil {
 		return
+	}
+}
+
+func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
+	n, err := b.ms.PrunableData(jc.Request.Context())
+	if jc.Check("failed to fetch prunable data", err) == nil {
+		jc.Encode(n)
+	}
+}
+
+func (b *bus) contractPrunableDataHandlerGET(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	n, err := b.ms.PrunableDataForContract(jc.Request.Context(), id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if jc.Check("failed to fetch prunable data for contract", err) == nil {
+		jc.Encode(n)
 	}
 }
 
@@ -1402,6 +1428,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
 		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
@@ -1415,6 +1442,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
+		"GET    /contract/:id/prunable":  b.contractPrunableDataHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
