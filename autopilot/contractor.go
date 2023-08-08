@@ -25,7 +25,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-var alertRenewalFailedID = frand.Entropy256()
+var alertRenewalFailedID = frand.Entropy256() // constant until restarted
 
 const (
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
