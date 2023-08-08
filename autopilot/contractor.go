@@ -25,7 +25,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-var alertRenewalFailedID = frand.Entropy256() // constant until restarted
+var (
+	alertLowBalanceID    = frand.Entropy256() // constant until restarted
+	alertRenewalFailedID = frand.Entropy256() // constant until restarted
+)
 
 const (
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
@@ -452,18 +455,45 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	c.logger.Info("performing wallet maintenance")
 	b := c.ap.bus
 	l := c.logger
+	state := c.ap.State()
 
 	// no contracts - nothing to do
-	cfg := c.ap.State().cfg
-	if cfg.Contracts.Amount == 0 {
+	if state.cfg.Contracts.Amount == 0 {
 		l.Warn("wallet maintenance skipped, no contracts wanted")
 		return nil
 	}
 
 	// no allowance - nothing to do
-	if cfg.Contracts.Allowance.IsZero() {
+	if state.cfg.Contracts.Allowance.IsZero() {
 		l.Warn("wallet maintenance skipped, no allowance set")
 		return nil
+	}
+
+	// not enough balance - nothing to do
+	wallet, err := b.Wallet(ctx)
+	if err != nil {
+		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
+		return err
+	}
+	balance := wallet.Spendable
+
+	// register an alert if the wallet balance is low
+	min, max := initialContractFundingMinMax(state.cfg)
+	if balance.Cmp(max) <= 0 {
+		severity := alerts.SeverityWarning
+		if balance.Cmp(min) < 0 {
+			severity = alerts.SeverityCritical
+		}
+		c.ap.alerts.Register(alerts.Alert{
+			ID:       alertLowBalanceID,
+			Severity: severity,
+			Message:  "wallet is low on funds",
+			Data: map[string]any{
+				"address": state.address,
+				"balance": balance,
+			},
+			Timestamp: time.Now(),
+		})
 	}
 
 	// pending maintenance transaction - nothing to do
@@ -483,26 +513,20 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if uint64(len(available)) >= cfg.Contracts.Amount {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), cfg.Contracts.Amount)
+	if uint64(len(available)) >= state.cfg.Contracts.Amount {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), state.cfg.Contracts.Amount)
 		return nil
 	}
 
-	// not enough balance - nothing to do
-	wi, err := b.Wallet(ctx)
-	if err != nil {
-		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
-		return err
-	}
-	balance := wi.Spendable
-	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
+	// not enough balance to redistribute outputs - nothing to do
+	amount := state.cfg.Contracts.Allowance.Div64(state.cfg.Contracts.Amount)
 	outputs := balance.Div(amount).Big().Uint64()
 	if outputs < 2 {
 		l.Warnf("wallet maintenance skipped, wallet has insufficient balance %v", balance)
 		return err
 	}
-	if outputs > cfg.Contracts.Amount {
-		outputs = cfg.Contracts.Amount
+	if outputs > state.cfg.Contracts.Amount {
+		outputs = state.cfg.Contracts.Amount
 	}
 
 	// redistribute outputs
