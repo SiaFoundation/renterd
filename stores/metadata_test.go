@@ -105,8 +105,8 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatal("object mismatch", cmp.Diff(got, want))
+	if !reflect.DeepEqual(got.Object, want) {
+		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
 	}
 
 	// delete a sector
@@ -141,8 +141,8 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got2, want2) {
-		t.Fatal("object mismatch", cmp.Diff(got2, want2))
+	if !reflect.DeepEqual(got2.Object, want2) {
+		t.Fatal("object mismatch", cmp.Diff(got2.Object, want2))
 	}
 }
 
@@ -1012,7 +1012,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	expectedObj := dbObject{
 		ObjectID: objID,
 		Key:      obj1Key,
-		Size:     obj1.Size(),
+		Size:     obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID: 1,
@@ -1037,8 +1037,8 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj, obj1) {
-		t.Fatal("object mismatch")
+	if !reflect.DeepEqual(fullObj.Object, obj1) {
+		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
 	expectedObjSlab1 := dbSlab{
@@ -1148,7 +1148,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj, obj1) {
+	if !reflect.DeepEqual(fullObj.Object, obj1) {
 		t.Fatal("object mismatch")
 	}
 
@@ -1197,6 +1197,184 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 }
 
+// TestObjectHealth verifies the object's health is returned correctly by all
+// methods that return the object's metadata.
+func TestObjectHealth(t *testing.T) {
+	// create db
+	db, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts and contracts
+	hks, err := db.addTestHosts(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// all contracts are good
+	if err := db.SetContractSet(context.Background(), testContractSet, fcids); err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object with 2 slabs
+	add := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hks[0],
+							Root: types.Hash256{1},
+						},
+						{
+							Host: hks[1],
+							Root: types.Hash256{2},
+						},
+						{
+							Host: hks[2],
+							Root: types.Hash256{3},
+						},
+						{
+							Host: hks[3],
+							Root: types.Hash256{4},
+						},
+					},
+				},
+			},
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hks[1],
+							Root: types.Hash256{5},
+						},
+						{
+							Host: hks[2],
+							Root: types.Hash256{6},
+						},
+						{
+							Host: hks[3],
+							Root: types.Hash256{7},
+						},
+						{
+							Host: hks[4],
+							Root: types.Hash256{8},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := db.UpdateObject(context.Background(), "/foo", testContractSet, add, nil, map[types.PublicKey]types.FileContractID{
+		hks[0]: fcids[0],
+		hks[1]: fcids[1],
+		hks[2]: fcids[2],
+		hks[3]: fcids[3],
+		hks[4]: fcids[4],
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// refresh health
+	if err := db.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert health
+	obj, err := db.Object(context.Background(), "/foo")
+	if err != nil {
+		t.Fatal(err)
+	} else if obj.Health != 1 {
+		t.Fatal("wrong health", obj.Health)
+	}
+
+	// update contract to impact the object's health
+	if err := db.SetContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3], fcids[4]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expectedHealth := float64(2) / float64(3)
+
+	// assert health
+	obj, err = db.Object(context.Background(), "/foo")
+	if err != nil {
+		t.Fatal(err)
+	} else if obj.Health != expectedHealth {
+		t.Fatal("wrong health", obj.Health)
+	}
+
+	// assert health is returned correctly by ObjectEntries
+	entries, err := db.ObjectEntries(context.Background(), "/", "", 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 1 {
+		t.Fatal("wrong number of entries", len(entries))
+	} else if entries[0].Health != expectedHealth {
+		t.Fatal("wrong health", entries[0].Health)
+	}
+
+	// assert health is returned correctly by SearchObject
+	entries, err = db.SearchObjects(context.Background(), "foo", 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 1 {
+		t.Fatal("wrong number of entries", len(entries))
+	} else if entries[0].Health != expectedHealth {
+		t.Fatal("wrong health", entries[0].Health)
+	}
+
+	// update contract set again to make sure the 2nd slab has even worse health
+	if err := db.SetContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expectedHealth = float64(1) / float64(3)
+
+	// assert health is the min. health of the slabs
+	obj, err = db.Object(context.Background(), "/foo")
+	if err != nil {
+		t.Fatal(err)
+	} else if obj.Health != expectedHealth {
+		t.Fatal("wrong health", obj.Health)
+	} else if obj.Slabs[0].Health <= expectedHealth {
+		t.Fatal("wrong health", obj.Slabs[0].Health)
+	} else if obj.Slabs[1].Health != expectedHealth {
+		t.Fatal("wrong health", obj.Slabs[1].Health)
+	}
+
+	// add an empty object
+	add = object.Object{
+		Key:   object.GenerateEncryptionKey(),
+		Slabs: nil,
+	}
+	if err := db.UpdateObject(context.Background(), "/bar", testContractSet, add, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the health is 1
+	obj, err = db.Object(context.Background(), "/bar")
+	if err != nil {
+		t.Fatal(err)
+	} else if obj.Health != 1 {
+		t.Fatal("wrong health", obj.Health)
+	}
+}
+
 // TestObjectEntries is a test for the ObjectEntries method.
 func TestObjectEntries(t *testing.T) {
 	os, _, _, err := newTestSQLStore()
@@ -1226,15 +1404,15 @@ func TestObjectEntries(t *testing.T) {
 		prefix string
 		want   []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
-		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/", Size: 7}}},
-		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
-		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5}}},
-		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6}}},
+		{"/", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
+		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
 
-		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}}},
+		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
 		{"/foo/", "fo", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}}},
+		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
 	}
 	for _, test := range tests {
@@ -1284,10 +1462,10 @@ func TestSearchObjects(t *testing.T) {
 		path string
 		want []api.ObjectMetadata
 	}{
-		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
-		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
-		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
-		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}, {Name: "/gab/guub", Size: 5}}},
+		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
 		got, err := os.SearchObjects(ctx, test.path, 0, -1)
@@ -2245,7 +2423,7 @@ func TestObjectsStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(info, api.ObjectsStats{}) {
+	if !reflect.DeepEqual(info, api.ObjectsStatsResponse{}) {
 		t.Fatal("unexpected stats", info)
 	}
 
@@ -2254,7 +2432,7 @@ func TestObjectsStats(t *testing.T) {
 	var sectorsSize uint64
 	for i := 0; i < 2; i++ {
 		obj, contracts := newTestObject(1)
-		objectsSize += uint64(obj.Size())
+		objectsSize += uint64(obj.TotalSize())
 		for _, slab := range obj.Slabs {
 			sectorsSize += uint64(len(slab.Shards) * rhpv2.SectorSize)
 		}
@@ -2596,17 +2774,13 @@ func TestPrunableData(t *testing.T) {
 		var err error
 		if fcid != nil {
 			n, err = db.PrunableDataForContract(context.Background(), *fcid)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return
 		} else {
 			n, err = db.PrunableData(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
-			return
 		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
 
 	// create hosts
