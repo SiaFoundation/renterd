@@ -177,8 +177,9 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 						Severity: alerts.SeverityError,
 						Message:  fmt.Sprintf("failed to refill account: %v", err),
 						Data: map[string]interface{}{
-							"account": accountID.String(),
-							"host":    contract.HostKey.String(),
+							"accountID":  accountID.String(),
+							"contractID": contract.ID.String(),
+							"hostKey":    contract.HostKey.String(),
 						},
 						Timestamp: time.Now(),
 					})
