@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type (
@@ -691,11 +690,6 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
-func sqlHasPrefix(col, prefix string) clause.Expr {
-	query := fmt.Sprintf("%s LIKE ? AND SUBSTR(%s, 1, ?) = ?", col, col)
-	return gorm.Expr(query, prefix+"%", utf8.RuneCountInString(prefix), prefix)
-}
-
 func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -721,12 +715,12 @@ FROM (
 		FROM objects
 		LEFT JOIN slices ON objects.id = slices.db_object_id
 		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-		WHERE ?
+		WHERE SUBSTR(object_id, 1, ?) = ?
 		GROUP BY object_id
 	) AS i
 ) AS m
 GROUP BY name
-HAVING ? AND name != ?
+HAVING SUBSTR(name, 1, ?) = ? AND name != ?
 ORDER BY name ASC
 LIMIT ? OFFSET ?`,
 		sqlConcat(s.db, "?", "trimmed"),
@@ -734,8 +728,10 @@ LIMIT ? OFFSET ?`,
 		path,
 		path,
 		utf8.RuneCountInString(path)+1,
-		sqlHasPrefix("object_id", path),
-		sqlHasPrefix("name", path+prefix),
+		utf8.RuneCountInString(path),
+		path,
+		utf8.RuneCountInString(path+prefix),
+		path+prefix,
 		path,
 		limit,
 		offset)
@@ -859,8 +855,8 @@ func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string) erro
 }
 
 func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string) error {
-	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE ?",
-		prefixNew, utf8.RuneCountInString(prefixOld)+1, sqlHasPrefix("object_id", prefixOld))
+	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
+		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
 	if tx.Error != nil {
 		return tx.Error
 	}
@@ -1584,7 +1580,7 @@ func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 }
 
 func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE ?", sqlHasPrefix("object_id", path))
+	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(path), path)
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
