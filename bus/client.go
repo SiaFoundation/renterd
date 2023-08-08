@@ -105,6 +105,12 @@ func (c *Client) BroadcastTransaction(ctx context.Context, txns []types.Transact
 	return c.c.WithContext(ctx).POST("/txpool/broadcast", txns, nil)
 }
 
+// WalletInfo calls the /wallet endpoint on the bus.
+func (c *Client) WalletInfo(ctx context.Context) (resp api.WalletResponse, err error) {
+	err = c.c.WithContext(ctx).GET("/wallet", &resp)
+	return
+}
+
 // WalletBalance returns the current wallet balance.
 func (c *Client) WalletBalance(ctx context.Context) (bal types.Currency, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/balance", &bal)

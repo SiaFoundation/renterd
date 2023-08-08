@@ -48,6 +48,24 @@ func TestNewTestCluster(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 
+	// Check wallet info is sane after startup.
+	wi, err := b.WalletInfo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wi.ScanHeight == 0 {
+		t.Fatal("wallet scan height should not be 0")
+	}
+	if wi.Confirmed.IsZero() {
+		t.Fatal("wallet confirmed balance should not be zero")
+	}
+	if wi.Spendable.IsZero() {
+		t.Fatal("wallet spendable balance should not be zero")
+	}
+	if wi.Address == (types.Address{}) {
+		t.Fatal("wallet addresses should not be nil")
+	}
+
 	// Try talking to the bus API by adding an object.
 	err = b.AddObject(context.Background(), "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),

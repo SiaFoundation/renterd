@@ -1392,7 +1392,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
 		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
 
-		"GET    /wallet":               b.walletBalanceHandler,
+		"GET    /wallet":               b.walletHandler,
 		"GET    /wallet/balance":       b.walletBalanceHandler,
 		"GET    /wallet/address":       b.walletAddressHandler,
 		"GET    /wallet/transactions":  b.walletTransactionsHandler,
