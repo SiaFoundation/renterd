@@ -58,7 +58,7 @@ type (
 	dbContractSet struct {
 		Model
 
-		Name      string       `gorm:"unique;index"`
+		Name      string       `gorm:"unique;index:length:255;"`
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
@@ -666,12 +666,12 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 
 	var objects []api.ObjectMetadata
 	err := s.db.
-		Select("o.object_id as name, o.size as size, MIN(sla.health) as health").
+		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Where("o.object_id LIKE ?", "%"+substring+"%").
+		Where("INSTR(o.object_id, ?) > 0", substring).
 		Group("o.object_id").
 		Offset(offset).
 		Limit(limit).
@@ -711,17 +711,30 @@ SELECT
 FROM (
 	SELECT size, health, trimmed, INSTR(trimmed, "/") AS slashindex
 	FROM (
-		SELECT size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
+		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
 		LEFT JOIN slices ON objects.id = slices.db_object_id
 		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-		WHERE object_id LIKE ?
+		WHERE SUBSTR(object_id, 1, ?) = ?
 		GROUP BY object_id
 	) AS i
 ) AS m
 GROUP BY name
-HAVING name LIKE ? AND name != ?
-LIMIT ? OFFSET ?`, sqlConcat(s.db, "?", "trimmed"), sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")), path, path, utf8.RuneCountInString(path)+1, path+"%", fmt.Sprintf("%s%s", path, prefix+"%"), path, limit, offset)
+HAVING SUBSTR(name, 1, ?) = ? AND name != ?
+ORDER BY name ASC
+LIMIT ? OFFSET ?`,
+		sqlConcat(s.db, "?", "trimmed"),
+		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")),
+		path,
+		path,
+		utf8.RuneCountInString(path)+1,
+		utf8.RuneCountInString(path),
+		path,
+		utf8.RuneCountInString(path+prefix),
+		path+prefix,
+		path,
+		limit,
+		offset)
 
 	var metadata []api.ObjectMetadata
 	err := query.Scan(&metadata).Error
@@ -842,8 +855,8 @@ func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string) erro
 }
 
 func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string) error {
-	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ?",
-		prefixNew, utf8.RuneCountInString(prefixOld)+1, prefixOld+"%")
+	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
+		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
 	if tx.Error != nil {
 		return tx.Error
 	}
@@ -1567,7 +1580,7 @@ func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 }
 
 func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE object_id LIKE ?", path+"%")
+	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(path), path)
 	if tx.Error != nil {
 		return 0, tx.Error
 	}

@@ -319,6 +319,7 @@ func TestObjectEntries(t *testing.T) {
 		{"/fileś/śpecial", 6}, // utf8
 		{"//double/", 7},
 		{"///triple", 8},
+		{"/FOO/bar", 9}, // test case sensitivity
 	}
 
 	for _, upload := range uploads {
@@ -340,10 +341,11 @@ func TestObjectEntries(t *testing.T) {
 		prefix string
 		want   []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
 		{"//", "", []api.ObjectMetadata{{Name: "///", Size: 8, Health: 1}, {Name: "//double/", Size: 7, Health: 1}}},
 		{"///", "", []api.ObjectMetadata{{Name: "///triple", Size: 8, Health: 1}}},
 		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
+		{"/FOO/", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 9, Health: 1}}},
 		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
 		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
 		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
