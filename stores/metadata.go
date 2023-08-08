@@ -668,7 +668,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 
 	var objects []api.ObjectMetadata
 	err := s.db.
-		Select("o.object_id as name, o.size as size, MIN(sla.health) as health").
+		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
