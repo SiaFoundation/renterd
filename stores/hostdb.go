@@ -751,13 +751,6 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 			isScan := interaction.Type == hostdb.InteractionTypeScan
 			isPriceTableUpdate := interaction.Type == hostdb.InteractionTypePriceTableUpdate
 
-			dbInteractions = append(dbInteractions, dbInteraction{
-				Host:      publicKey(interaction.Host),
-				Result:    interaction.Result,
-				Success:   interaction.Success,
-				Timestamp: interaction.Timestamp.UTC(),
-				Type:      interaction.Type,
-			})
 			lastScan := time.Unix(0, host.LastScan)
 			if interaction.Success {
 				host.SuccessfulInteractions++
@@ -806,6 +799,14 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 							Valid: true,
 						}
 					}
+
+					// only extract the metric result of the scan to not persist
+					// the pricetable and host settings.
+					var err error
+					interaction.Result, err = extractCommonMetric(interaction.Result)
+					if err != nil {
+						return err
+					}
 				}
 			}
 			// NOTE: a host's uptime or downtime is only updated by scans, we do
@@ -822,7 +823,24 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 					Time:  ptr.PriceTable.Expiry,
 					Valid: ptr.PriceTable.Expiry != time.Time{},
 				}
+
+				// only extract the metric result of the price table update to
+				// not persist the pricetable.
+				var err error
+				interaction.Result, err = extractCommonMetric(interaction.Result)
+				if err != nil {
+					return err
+				}
 			}
+
+			// Add interaction.
+			dbInteractions = append(dbInteractions, dbInteraction{
+				Host:      publicKey(interaction.Host),
+				Result:    interaction.Result,
+				Success:   interaction.Success,
+				Timestamp: interaction.Timestamp.UTC(),
+				Type:      interaction.Type,
+			})
 
 			// Save to map again.
 			hostMap[host.PublicKey] = host
@@ -947,6 +965,14 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 		blocked = true
 	}
 	return
+}
+
+func extractCommonMetric(result json.RawMessage) (json.RawMessage, error) {
+	var mrc hostdb.MetricResultCommon
+	if err := json.Unmarshal(result, &mrc); err != nil {
+		return nil, err
+	}
+	return json.Marshal(mrc)
 }
 
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {

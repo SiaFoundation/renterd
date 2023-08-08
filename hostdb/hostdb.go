@@ -28,6 +28,12 @@ type ErrorResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+type MetricResultCommon struct {
+	Address   string        `json:"address"`
+	Timestamp time.Time     `json:"timestamp"`
+	Elapsed   time.Duration `json:"elapsed"`
+}
+
 type ScanResult struct {
 	ErrorResult
 	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
