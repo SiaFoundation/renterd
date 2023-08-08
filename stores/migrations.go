@@ -356,13 +356,12 @@ func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) e
 }
 
 func performMigration00004_objectID_collation(txn *gorm.DB, logger glogger.Interface) error {
-	if isSQLite(txn) {
-		return nil // nothing to do
-	}
 	logger.Info(context.Background(), "performing migration 00004_objectID_collation")
-	err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-	if err != nil {
-		return err
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return err
+		}
 	}
 	logger.Info(context.Background(), "migration 00004_objectID_collation complete")
 	return nil
