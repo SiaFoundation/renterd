@@ -53,8 +53,9 @@ type (
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
 		Address() types.Address
-		Balance() (types.Currency, error)
+		Balance() (spendable, confirmed types.Currency, _ error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error)
+		Height() uint64
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
 		ReleaseInputs(txn types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
@@ -208,8 +209,22 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	}
 }
 
+func (b *bus) walletHandler(jc jape.Context) {
+	address := b.w.Address()
+	spendable, confirmed, err := b.w.Balance()
+	if jc.Check("couldn't fetch wallet balance", err) != nil {
+		return
+	}
+	jc.Encode(api.WalletResponse{
+		ScanHeight: b.w.Height(),
+		Address:    address,
+		Confirmed:  confirmed,
+		Spendable:  spendable,
+	})
+}
+
 func (b *bus) walletBalanceHandler(jc jape.Context) {
-	balance, err := b.w.Balance()
+	_, balance, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
@@ -1377,6 +1392,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
 		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
 
+		"GET    /wallet":               b.walletBalanceHandler,
 		"GET    /wallet/balance":       b.walletBalanceHandler,
 		"GET    /wallet/address":       b.walletAddressHandler,
 		"GET    /wallet/transactions":  b.walletTransactionsHandler,
