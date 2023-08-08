@@ -469,7 +469,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		return nil
 	}
 
-	// not enough balance - nothing to do
+	// fetch wallet balance
 	wallet, err := b.Wallet(ctx)
 	if err != nil {
 		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
@@ -477,7 +477,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	}
 	balance := wallet.Spendable
 
-	// register an alert if the wallet balance is low
+	// register an alert if balance is low
 	min, max := initialContractFundingMinMax(state.cfg)
 	if balance.Cmp(max) <= 0 {
 		severity := alerts.SeverityWarning
