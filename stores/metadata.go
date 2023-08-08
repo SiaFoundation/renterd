@@ -554,7 +554,6 @@ func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (
 
 	var dbRoots []hash256
 	if err = s.db.
-		Debug().
 		Raw(`
 SELECT sec.root
 FROM contracts c
