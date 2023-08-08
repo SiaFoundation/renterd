@@ -147,6 +147,8 @@ func (w *SingleAddressWallet) Balance() (spendable, confirmed types.Currency, _ 
 	if err != nil {
 		return types.Currency{}, types.Currency{}, err
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	for _, sce := range sces {
 		if !w.isOutputUsed(sce.ID) {
 			spendable = spendable.Add(sce.Value)
