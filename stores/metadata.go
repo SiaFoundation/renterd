@@ -711,7 +711,7 @@ SELECT
 FROM (
 	SELECT size, health, trimmed, INSTR(trimmed, "/") AS slashindex
 	FROM (
-		SELECT size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
+		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
 		LEFT JOIN slices ON objects.id = slices.db_object_id
 		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
