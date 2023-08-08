@@ -20,12 +20,6 @@ import (
 	"lukechampine.com/frand"
 )
 
-var (
-	// ErrContractNotFound is returned when a contract can't be retrieved from
-	// the database.
-	ErrContractNotFound = errors.New("couldn't find contract")
-)
-
 type (
 	dbArchivedContract struct {
 		Model
@@ -511,7 +505,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Overwrite the old contract with the new one.
-		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
 		newContract.Model = oldContract.Model
 		err = tx.Save(&newContract).Error
 		if err != nil {
@@ -617,6 +611,42 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 	return sets, err
 }
 
+func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error) {
+	err = s.db.
+		Raw(`
+SELECT IFNULL(SUM(prunable), 0)
+FROM (
+    SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+        SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * ?, 0) as bytes
+        FROM contracts c
+        LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+        GROUP BY c.id
+	) as i
+) as j`, rhpv2.SectorSize).
+		Scan(&prunable).
+		Error
+	return
+}
+
+func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileContractID) (prunable int64, err error) {
+	if !s.isKnownContract(id) {
+		return 0, api.ErrContractNotFound
+	}
+
+	err = s.db.
+		Raw(`
+SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+    SELECT IFNULL(c.size - COUNT(cs.db_sector_id) * 4194304, 0) as bytes
+    FROM contracts c
+    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+    WHERE c.fcid = ?
+) as i
+`, rhpv2.SectorSize, fileContractID(id)).
+		Scan(&prunable).
+		Error
+	return
+}
+
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
 	fcids := make([]fileContractID, len(contractIds))
 	for i, fcid := range contractIds {
@@ -666,7 +696,7 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 		Take(&contract).
 		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = ErrContractNotFound
+		err = api.ErrContractNotFound
 		return
 	}
 
@@ -1513,7 +1543,7 @@ func contract(tx *gorm.DB, id fileContractID) (contract dbContract, err error) {
 		Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = ErrContractNotFound
+		err = api.ErrContractNotFound
 	}
 	return
 }
@@ -1545,7 +1575,7 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 	return
 }
 
-func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd uint64) dbContract {
+func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64) dbContract {
 	return dbContract{
 		HostID: hostID,
 
@@ -1555,7 +1585,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
-			Size:           0,
+			Size:           size,
 			StartHeight:    startHeight,
 			WindowStart:    windowStart,
 			WindowEnd:      windowEnd,
@@ -1580,7 +1610,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd)
+	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error

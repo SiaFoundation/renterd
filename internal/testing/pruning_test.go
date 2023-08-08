@@ -1,12 +1,14 @@
 package testing
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -153,5 +155,67 @@ func TestHostPruning(t *testing.T) {
 	ap.Config.Hosts.MaxDowntimeHours = 99 * 365 * 24 // allowed max
 	if err = b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSectorPruning(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// convenience variables
+	cfg := testAutopilotConfig
+	w := cluster.Worker
+	b := cluster.Bus
+
+	// add hosts
+	_, err = cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait until we have accounts
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object
+	if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), "obj"); err != nil {
+		t.Fatal(err)
+	}
+
+	// shut down the worker, ensuring spending records get flushed
+	if err := cluster.ShutdownWorker(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert prunable data is 0
+	if n, err := b.PrunableData(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal("expected 0 prunable data", n)
+	}
+
+	// delete the object
+	if err := b.DeleteObject(context.Background(), "obj", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert amount of prunable data
+	if n, err := b.PrunableData(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if n != rhpv2.SectorSize*3 {
+		t.Fatal("unexpected prunable data", n)
 	}
 }

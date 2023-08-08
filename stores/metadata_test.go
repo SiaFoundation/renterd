@@ -219,7 +219,7 @@ func TestSQLContractStore(t *testing.T) {
 	// Look it up. Should fail.
 	ctx := context.Background()
 	_, err = cs.Contract(ctx, c.ID())
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
 	contracts, err := cs.Contracts(ctx)
@@ -251,6 +251,7 @@ func TestSQLContractStore(t *testing.T) {
 			FundAccount: types.ZeroCurrency,
 		},
 		TotalCost: totalCost,
+		Size:      c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
 		t.Fatal("contract mismatch")
@@ -312,7 +313,7 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Look it up. Should fail.
 	_, err = cs.Contract(ctx, c.ID())
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
 	contracts, err = cs.Contracts(ctx)
@@ -496,6 +497,14 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// mock recording of spending records to ensure the cached fields get updated
+	if err := cs.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
+		{ContractID: fcid1, RevisionNumber: 1, Size: rhpv2.SectorSize},
+		{ContractID: fcid2, RevisionNumber: 1, Size: rhpv2.SectorSize},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// no slabs should be unhealthy.
 	if err := cs.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
@@ -510,7 +519,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Assert we can't fetch the renewed contract.
 	_, err = cs.RenewedContract(context.Background(), fcid1)
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal("unexpected")
 	}
 
@@ -564,7 +573,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Contract should be gone from active contracts.
 	_, err = cs.Contract(ctx, fcid1)
-	if !errors.Is(err, ErrContractNotFound) {
+	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
 
@@ -579,6 +588,7 @@ func TestRenewedContract(t *testing.T) {
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
 		RenewedFrom: fcid1,
+		Size:        rhpv2.SectorSize,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
 			Downloads:   types.ZeroCurrency,
@@ -612,10 +622,11 @@ func TestRenewedContract(t *testing.T) {
 			TotalCost:      currency(oldContractTotal),
 			ProofHeight:    0,
 			RevisionHeight: 0,
-			RevisionNumber: "0",
+			RevisionNumber: "1",
 			StartHeight:    100,
 			WindowStart:    2,
 			WindowEnd:      3,
+			Size:           rhpv2.SectorSize,
 
 			UploadSpending:      zeroCurrency,
 			DownloadSpending:    zeroCurrency,
@@ -692,10 +703,11 @@ func TestAncestorsContracts(t *testing.T) {
 			HostKey:     hk,
 			RenewedTo:   fcids[len(fcids)-1-i],
 			StartHeight: 2,
+			Size:        4096,
 			WindowStart: 400,
 			WindowEnd:   500,
 		}) {
-			t.Fatal("wrong contract", i)
+			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
 }
@@ -1003,6 +1015,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							StartHeight:    startHeight1,
 							WindowStart:    400,
 							WindowEnd:      500,
+							Size:           4096,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
@@ -1039,6 +1052,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							StartHeight:    startHeight2,
 							WindowStart:    400,
 							WindowEnd:      500,
+							Size:           4096,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
@@ -2717,6 +2731,129 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if sectors[3].LatestHost != publicKey(packedSlab.Shards[1].Host) || sectors[3].DBSlabID != storedSlab.ID || !bytes.Equal(sectors[3].Root, packedSlab.Shards[1].Root[:]) {
 		t.Fatal("invalid sector", sectors[3])
+	}
+}
+
+func TestPrunableData(t *testing.T) {
+	db, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// define a helper function to fetch the amount of prunable data, either for
+	// all contracts or the given fcid
+	prunableData := func(fcid *types.FileContractID) (n int64) {
+		t.Helper()
+
+		var err error
+		if fcid != nil {
+			n, err = db.PrunableDataForContract(context.Background(), *fcid)
+		} else {
+			n, err = db.PrunableData(context.Background())
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	// create hosts
+	hks, err := db.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create contracts
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object to both contracts
+	for i := 0; i < 2; i++ {
+		if err := db.UpdateObject(context.Background(), fmt.Sprintf("obj_%d", i+1), testContractSet, object.Object{
+			Key: object.GenerateEncryptionKey(),
+			Slabs: []object.SlabSlice{
+				{
+					Slab: object.Slab{
+						Key:       object.GenerateEncryptionKey(),
+						MinShards: 1,
+						Shards: []object.Sector{
+							{
+								Host: hks[i],
+								Root: types.Hash256{byte(i)},
+							},
+						},
+					},
+				},
+			},
+		}, map[types.PublicKey]types.FileContractID{
+			hks[i]: fcids[i],
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
+			{
+				ContractID:     fcids[i],
+				RevisionNumber: 1,
+				Size:           rhpv2.SectorSize,
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert there's two objects
+	s, err := db.ObjectsStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.NumObjects != 2 {
+		t.Fatal("expected 2 objects", s.NumObjects)
+	}
+
+	// assert there's no data to be pruned
+	if n := prunableData(nil); n != 0 {
+		t.Fatal("expected no prunable data", n)
+	}
+
+	// remove the first object
+	if err := db.RemoveObject(context.Background(), "obj_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's one sector that can be pruned and assert it's from fcid 1
+	if n := prunableData(nil); n != rhpv2.SectorSize {
+		t.Fatal("unexpected amount of prunable data", n)
+	}
+	if n := prunableData(&fcids[1]); n != 0 {
+		t.Fatal("expected no prunable data", n)
+	}
+
+	// remove the second object
+	if err := db.RemoveObject(context.Background(), "obj_2"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's now two sectors that can be pruned
+	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+		t.Fatal("unexpected amount of prunable data", n)
+	}
+
+	// archive all contracts
+	if err := db.ArchiveAllContracts(context.Background(), t.Name()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's no data to be pruned
+	if n := prunableData(nil); n != 0 {
+		t.Fatal("expected no prunable data", n)
+	}
+
+	// assert passing a non-existent fcid returns an error
+	_, err = db.PrunableDataForContract(context.Background(), types.FileContractID{9})
+	if err != api.ErrContractNotFound {
+		t.Fatal(err)
 	}
 }
 
