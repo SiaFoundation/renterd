@@ -358,13 +358,14 @@ func performMigration00004_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 		}
 	}
 
-	if m.HasColumn(&dbBufferedSlab{}, "db_slab_id") {
+	if m.HasTable(&dbBufferedSlab{}) {
 		// Drop buffered slabs since the schema has changed and the table was
 		// unused so far.
-		if err := m.DropColumn(&dbBufferedSlab{}, "db_slab_id"); err != nil {
-			return fmt.Errorf("failed to drop column 'db_slab_id' from table 'buffered_slabs': %w", err)
+		if err := m.DropTable(&dbBufferedSlab{}); err != nil {
+			return fmt.Errorf("failed to drop table 'buffered_slabs': %w", err)
 		}
 	}
+
 	// Use AutoMigrate to add column to create buffered_slabs and add column to
 	// slabs.
 	if err := m.AutoMigrate(&dbBufferedSlab{}, &dbSlab{}); err != nil {
