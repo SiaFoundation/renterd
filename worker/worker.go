@@ -147,7 +147,7 @@ type Bus interface {
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (object.Object, []api.ObjectMetadata, error)
+	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.Object, []api.ObjectMetadata, error)
 	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string, batch bool) error
 
@@ -729,7 +729,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	// decode the contract set from the query string
 	var contractset string
-	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
 	} else if contractset != "" {
 		up.ContractSet = contractset
@@ -890,19 +890,19 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// Read call. We can improve on this to some degree by buffering, but
 	// without knowing the exact ranges being requested, this will always be
 	// suboptimal. Thus, sadly, we have to roll our own range support.
-	ranges, err := http_range.ParseRange(jc.Request.Header.Get("Range"), obj.Size())
+	ranges, err := http_range.ParseRange(jc.Request.Header.Get("Range"), obj.Size)
 	if err != nil {
 		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
 	var offset int64
-	length := obj.Size()
+	length := obj.Size
 	status := http.StatusOK
 	if len(ranges) > 0 {
 		status = http.StatusPartialContent
-		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(obj.Size()))
+		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(obj.Size))
 		offset, length = ranges[0].Start, ranges[0].Length
-		if offset < 0 || length < 0 || offset+length > obj.Size() {
+		if offset < 0 || length < 0 || offset+length > obj.Size {
 			jc.Error(fmt.Errorf("invalid range: %v %v", offset, length), http.StatusRequestedRangeNotSatisfiable)
 			return
 		}
@@ -924,7 +924,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// download the object
-	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, obj, uint64(offset), uint64(length), contracts)) != nil {
+	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, obj.Object, uint64(offset), uint64(length), contracts)) != nil {
 		return
 	}
 }
@@ -941,7 +941,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// decode the contract set from the query string
 	var contractset string
-	if jc.DecodeForm(api.QueryStringParamContractSet, &contractset) != nil {
+	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
 	} else if contractset != "" {
 		up.ContractSet = contractset
@@ -962,10 +962,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// allow overriding the redundancy settings
 	rs := up.RedundancySettings
-	if jc.DecodeForm(api.QueryStringParamMinShards, &rs.MinShards) != nil {
+	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
 		return
 	}
-	if jc.DecodeForm(api.QueryStringParamTotalShards, &rs.TotalShards) != nil {
+	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
 		return
 	}
 	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
@@ -1060,12 +1060,13 @@ func (w *worker) handleGETAlerts(c jape.Context) {
 	c.Encode(w.alerts.Active())
 }
 
-func (w *worker) handlePOSTAlertsDismiss(c jape.Context) {
+func (w *worker) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
-	if err := c.Decode(&ids); err != nil {
+	if jc.Decode(&ids) != nil {
 		return
-	} else if len(ids) == 0 {
-		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+	}
+	if len(ids) == 0 {
+		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
 		return
 	}
 	w.alerts.Dismiss(ids...)
