@@ -97,10 +97,8 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	mu         sync.Mutex
-	configured bool
-	synced     bool
-	state      state
+	mu    sync.Mutex
+	state state
 
 	alerts *alerts.Manager
 	a      *accounts
@@ -242,12 +240,6 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// do not continue if we are not synced
-			if !ap.isSynced() {
-				ap.logger.Debug("iteration interrupted, consensus not synced")
-				return
-			}
-
 			// perform wallet maintenance
 			err = ap.c.performWalletMaintenance(ctx)
 			if err != nil {
@@ -363,10 +355,6 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 				continue
 			}
 		}
-
-		ap.mu.Lock()
-		ap.configured = true
-		ap.mu.Unlock()
 		return true
 	}
 }
@@ -395,24 +383,8 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 				continue
 			}
 		}
-
-		ap.mu.Lock()
-		ap.synced = true
-		ap.mu.Unlock()
 		return true
 	}
-}
-
-func (ap *Autopilot) isConfigured() bool {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-	return ap.configured
-}
-
-func (ap *Autopilot) isSynced() bool {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-	return ap.synced
 }
 
 func (ap *Autopilot) isRunning() bool {
@@ -613,12 +585,10 @@ func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
 	jc.Encode(api.AutopilotStatusResponse{
-		Configured:         ap.isConfigured(),
 		Migrating:          migrating,
 		MigratingLastStart: api.ParamTime(mLastStart),
 		Scanning:           scanning,
 		ScanningLastStart:  api.ParamTime(sLastStart),
-		Synced:             ap.isSynced(),
 		UptimeMS:           api.ParamDuration(ap.Uptime()),
 	})
 }
