@@ -1400,6 +1400,7 @@ func TestObjectEntries(t *testing.T) {
 		{"/foo/baz/quuz", 4},
 		{"/gab/guub", 5},
 		{"/fileś/śpecial", 6}, // utf8
+		{"/FOO/bar", 7},
 	}
 	ctx := context.Background()
 	for _, o := range objects {
@@ -1413,13 +1414,14 @@ func TestObjectEntries(t *testing.T) {
 		prefix string
 		want   []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
 		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
 		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
 		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
 		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
 
 		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
+		{"/", "F", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}}},
 		{"/foo/", "fo", []api.ObjectMetadata{}},
 		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
@@ -1459,6 +1461,7 @@ func TestSearchObjects(t *testing.T) {
 		{"/foo/baz/quux", 3},
 		{"/foo/baz/quuz", 4},
 		{"/gab/guub", 5},
+		{"/FOO/bar", 6}, // test case sensitivity
 	}
 	ctx := context.Background()
 	for _, o := range objects {
@@ -1471,7 +1474,7 @@ func TestSearchObjects(t *testing.T) {
 		path string
 		want []api.ObjectMetadata
 	}{
-		{"/", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
 		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
 		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
 		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
@@ -2353,6 +2356,8 @@ func TestRenameObjects(t *testing.T) {
 		"/fileś/1a",
 		"/fileś/2a",
 		"/fileś/3a",
+		"/fileś/CASE",
+		"/fileś/case",
 		"/fileś/dir/1b",
 		"/fileś/dir/2b",
 		"/fileś/dir/3b",
@@ -2387,6 +2392,12 @@ func TestRenameObjects(t *testing.T) {
 	if err := cs.RenameObject(ctx, "/baz", "/fileś/baz"); err != nil {
 		t.Fatal(err)
 	}
+	if err := cs.RenameObjects(ctx, "/fileś/case", "/fileś/case1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.RenameObjects(ctx, "/fileś/CASE", "/fileś/case2"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Paths after.
 	objectsAfter := []string{
@@ -2399,6 +2410,8 @@ func TestRenameObjects(t *testing.T) {
 		"/fileś/foo",
 		"/fileś/bar",
 		"/fileś/baz",
+		"/fileś/case1",
+		"/fileś/case2",
 	}
 	objectsAfterMap := make(map[string]struct{})
 	for _, path := range objectsAfter {
@@ -2874,6 +2887,10 @@ func TestPrunableData(t *testing.T) {
 
 	// assert there's now two sectors that can be pruned
 	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+		t.Fatal("unexpected amount of prunable data", n)
+	} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
+		t.Fatal("unexpected amount of prunable data", n)
+	} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
 		t.Fatal("unexpected amount of prunable data", n)
 	}
 

@@ -107,8 +107,8 @@ type Transaction struct {
 // A SingleAddressStore stores the state of a single-address wallet.
 // Implementations are assumed to be thread safe.
 type SingleAddressStore interface {
-	Balance() (types.Currency, error)
-	UnspentSiacoinElements() ([]SiacoinElement, error)
+	Height() uint64
+	UnspentSiacoinElements(matured bool) ([]SiacoinElement, error)
 	Transactions(before, since time.Time, offset, limit int) ([]Transaction, error)
 }
 
@@ -142,14 +142,30 @@ func (w *SingleAddressWallet) Address() types.Address {
 }
 
 // Balance returns the balance of the wallet.
-func (w *SingleAddressWallet) Balance() (types.Currency, error) {
-	return w.store.Balance()
+func (w *SingleAddressWallet) Balance() (spendable, confirmed types.Currency, _ error) {
+	sces, err := w.store.UnspentSiacoinElements(true)
+	if err != nil {
+		return types.Currency{}, types.Currency{}, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, sce := range sces {
+		if !w.isOutputUsed(sce.ID) {
+			spendable = spendable.Add(sce.Value)
+		}
+		confirmed = confirmed.Add(sce.Value)
+	}
+	return
+}
+
+func (w *SingleAddressWallet) Height() uint64 {
+	return w.store.Height()
 }
 
 // UnspentOutputs returns the set of unspent Siacoin outputs controlled by the
 // wallet.
 func (w *SingleAddressWallet) UnspentOutputs() ([]SiacoinElement, error) {
-	return w.store.UnspentSiacoinElements()
+	return w.store.UnspentSiacoinElements(false)
 }
 
 // Transactions returns up to max transactions relevant to the wallet that have
@@ -177,7 +193,7 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 		}
 	}
 
-	utxos, err := w.store.UnspentSiacoinElements()
+	utxos, err := w.store.UnspentSiacoinElements(false)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +294,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	}
 
 	// fetch unspent transaction outputs
-	utxos, err := w.store.UnspentSiacoinElements()
+	utxos, err := w.store.UnspentSiacoinElements(false)
 	if err != nil {
 		return types.Transaction{}, nil, err
 	}

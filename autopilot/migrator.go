@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	alertMigrationID = frand.Entropy256() // constant across restarts
+	alertMigrationID = frand.Entropy256() // constant until restarted
 )
 
 const (
