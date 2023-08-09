@@ -391,13 +391,26 @@ func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 		}
 	}
 
-	// Use AutoMigrate to add column to create buffered_slabs and add column to
-	// slabs.
-	if err := m.CreateTable(&dbBufferedSlab{}); err != nil {
+	// Use AutoMigrate to recreate buffered_slabs.
+	if err := m.AutoMigrate(&dbBufferedSlab{}); err != nil {
 		return fmt.Errorf("failed to create table 'buffered_slabs': %w", err)
 	}
-	if err := m.AutoMigrate(&dbSlab{}); err != nil {
-		return fmt.Errorf("failed to auto migrate 'slabs' table: %w", err)
+
+	// MIgrate slabs.
+	if !m.HasIndex(&dbSlab{}, "MinShards") {
+		if err := m.CreateIndex(&dbSlab{}, "MinShards"); err != nil {
+			return fmt.Errorf("failed to create index 'MinShards' on table 'slabs': %w", err)
+		}
+	}
+	if !m.HasIndex(&dbSlab{}, "TotalShards") {
+		if err := m.CreateIndex(&dbSlab{}, "TotalShards"); err != nil {
+			return fmt.Errorf("failed to create index 'TotalShards' on table 'slabs': %w", err)
+		}
+	}
+	if !m.HasColumn(&dbSlab{}, "db_buffered_slab_id") {
+		if err := m.AddColumn(&dbSlab{}, "db_buffered_slab_id"); err != nil {
+			return fmt.Errorf("failed to create column 'db_buffered_slab_id' on table 'slabs': %w", err)
+		}
 	}
 
 	// Enable foreign keys again.
