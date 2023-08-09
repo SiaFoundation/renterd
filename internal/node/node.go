@@ -249,7 +249,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, sqlStoreDir, true, cfg.PersistInterval, walletAddr, sqlLogger)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, sqlStoreDir, true, cfg.PersistInterval, walletAddr, 0, sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	}

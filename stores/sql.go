@@ -37,6 +37,8 @@ type (
 		logger         glogger.Interface
 		partialSlabDir string
 
+		bufferedSlabCompletionThreshold int64
+
 		// Persistence buffer - related fields.
 		lastSave               time.Time
 		persistInterval        time.Duration
@@ -120,7 +122,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}

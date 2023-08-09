@@ -1145,7 +1145,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		err = tx.Model(&dbBufferedSlab{}).
 			Where("ID", buffer.ID).
 			Updates(map[string]interface{}{
-				"complete": buffer.Size+int64(len(toAppend)) == int64(slabSize),
+				"complete": buffer.Size+int64(len(toAppend)) >= int64(slabSize)-s.bufferedSlabCompletionThreshold,
 				"size":     buffer.Size + int64(len(toAppend)),
 			}).Error
 		if err != nil {
