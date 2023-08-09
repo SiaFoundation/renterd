@@ -1139,7 +1139,7 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 	}
 	// Create a new buffer and slab.
 	identifier := frand.Entropy256()
-	fileName := hex.EncodeToString(identifier[:])
+	fileName := fmt.Sprintf("%v:%v-%v", partialSlab.MinShards, partialSlab.TotalShards, hex.EncodeToString(identifier[:]))
 	file, err := os.Create(filepath.Join(partialSlabDir, fileName))
 	if err != nil {
 		return err
