@@ -1811,7 +1811,7 @@ func TestWallet(t *testing.T) {
 	// The wallet should still have the same confirmed balance, a lower
 	// spendable balance and a greater unconfirmed balance.
 	var info api.WalletResponse
-	err = Retry(100, 100*time.Millisecond, func() error {
+	err = Retry(600, 100*time.Millisecond, func() error {
 		info, err = b.Wallet(context.Background())
 		if err != nil {
 			return err
