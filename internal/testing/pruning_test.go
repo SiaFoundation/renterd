@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -176,8 +177,19 @@ func TestSectorPruning(t *testing.T) {
 		}
 	}()
 
+	// add a helper to check whether a root is in a given slice
+	hasRoot := func(roots []types.Hash256, root types.Hash256) bool {
+		for _, r := range roots {
+			if r == root {
+				return true
+			}
+		}
+		return false
+	}
+
 	// convenience variables
 	cfg := testAutopilotConfig
+	rs := testRedundancySettings
 	w := cluster.Worker
 	b := cluster.Bus
 
@@ -192,15 +204,57 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add an object
-	if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), "obj"); err != nil {
+	// create a contracts dict
+	contracts, err := b.Contracts(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	// shut down the worker, ensuring spending records get flushed
-	if err := cluster.ShutdownWorker(context.Background()); err != nil {
+	// add several objects
+	for i := 0; i < 10; i++ {
+		filename := fmt.Sprintf("obj_%d", i)
+		if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// compare database against roots returned by the host
+	var n int
+	for _, c := range contracts {
+		dbRoots, err := b.ContractRoots(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cRoots, err := w.RHPContractRoots(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(dbRoots) != len(cRoots) {
+			t.Fatal("unexpected number of roots", dbRoots, cRoots)
+		}
+		for _, root := range dbRoots {
+			if !hasRoot(cRoots, root) {
+				t.Fatal("missing root", dbRoots, cRoots)
+			}
+		}
+		n += len(cRoots)
+	}
+	if n != rs.TotalShards*10 {
+		t.Fatal("unexpected number of roots", n)
+	}
+
+	// reboot the cluster to ensure spending records get flushed
+	// Restart cluster to have worker fetch the account from the bus again.
+	cluster2, err := cluster.Reboot(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := cluster2.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b = cluster2.Bus
 
 	// assert prunable data is 0
 	if n, err := b.PrunableData(context.Background()); err != nil {
@@ -209,15 +263,18 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal("expected 0 prunable data", n)
 	}
 
-	// delete the object
-	if err := b.DeleteObject(context.Background(), "obj", false); err != nil {
-		t.Fatal(err)
+	// delete a random number of objects
+	for i := 0; i < 10; i += 2 {
+		filename := fmt.Sprintf("obj_%d", i)
+		if err := b.DeleteObject(context.Background(), filename, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// assert amount of prunable data
 	if n, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != rhpv2.SectorSize*3 {
+	} else if n != int64(5)*int64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 }

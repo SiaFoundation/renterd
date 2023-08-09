@@ -35,6 +35,8 @@ import (
 )
 
 const (
+	batchSizeFetchSectors = uint64(130000) // ~4MiB of roots
+
 	defaultRevisionFetchTimeout = 30 * time.Second
 
 	lockingPriorityActiveContractRevision = 100 // highest
@@ -136,6 +138,7 @@ type Bus interface {
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
@@ -564,6 +567,31 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	if jc.Check("failed to broadcast transaction", err) != nil {
 		_ = w.bus.WalletDiscard(ctx, txn)
 		return
+	}
+}
+
+func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
+	// decode fcid
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	// fetch the contract from the bus
+	ctx := jc.Request.Context()
+	c, err := w.bus.Contract(ctx, id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// fetch the roots from the host
+	renterKey := w.deriveRenterKey(c.HostKey)
+	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, c.RevisionNumber, time.Minute)
+	if jc.Check("couldn't fetch contract roots from host", err) == nil {
+		jc.Encode(roots)
 	}
 }
 
@@ -1181,6 +1209,7 @@ func (w *worker) Handler() http.Handler {
 
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
+		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
 		"POST   /rhp/form":                   w.rhpFormHandler,
 		"POST   /rhp/renew":                  w.rhpRenewHandler,

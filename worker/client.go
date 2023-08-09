@@ -48,6 +48,12 @@ func (c *Client) RHPBroadcast(ctx context.Context, fcid types.FileContractID) (e
 	return
 }
 
+// RHPContractRoots fetches the roots of the contract with given id.
+func (c *Client) RHPContractRoots(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/roots", fcid), &roots)
+	return
+}
+
 // RHPScan scans a host, returning its current settings.
 func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/rhp/scan", api.RHPScanRequest{

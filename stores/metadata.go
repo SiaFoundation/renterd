@@ -591,6 +591,30 @@ func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.C
 	return contract.convert(), nil
 }
 
+func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
+	if !s.isKnownContract(id) {
+		return nil, api.ErrContractNotFound
+	}
+
+	var dbRoots []hash256
+	if err = s.db.
+		Raw(`
+SELECT sec.root
+FROM contracts c
+INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+INNER JOIN sectors sec ON cs.db_sector_id = sec.id
+WHERE c.fcid = ?
+`, fileContractID(id)).
+		Scan(&dbRoots).
+		Error; err == nil {
+		for _, r := range dbRoots {
+			roots = append(roots, *(*types.Hash256)(&r))
+		}
+	}
+
+	return
+}
+
 func (s *SQLStore) ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error) {
 	dbContracts, err := s.contracts(ctx, set)
 	if err != nil {
