@@ -122,14 +122,8 @@ type metricCommon struct {
 	err       error
 }
 
-type metricResultCommon struct {
-	Address   string        `json:"address"`
-	Timestamp time.Time     `json:"timestamp"`
-	Elapsed   time.Duration `json:"elapsed"`
-}
-
-func (m metricCommon) commonResult() metricResultCommon {
-	return metricResultCommon{
+func (m metricCommon) commonResult() hostdb.MetricResultCommon {
+	return hostdb.MetricResultCommon{
 		Address:   m.address,
 		Timestamp: m.timestamp,
 		Elapsed:   m.elapsed,
@@ -154,12 +148,12 @@ func (m MetricPriceTableUpdate) Result() interface{} {
 	er := hostdb.ErrorResult{Error: errToStr(m.err)}
 	if m.err != nil {
 		return struct {
-			metricResultCommon
+			hostdb.MetricResultCommon
 			hostdb.ErrorResult
 		}{cr, er}
 	} else {
 		return struct {
-			metricResultCommon
+			hostdb.MetricResultCommon
 			hostdb.PriceTableUpdateResult
 		}{cr, hostdb.PriceTableUpdateResult{ErrorResult: er, PriceTable: m.pt}}
 	}
@@ -181,12 +175,12 @@ func (m MetricHostScan) Result() interface{} {
 	er := hostdb.ErrorResult{Error: errToStr(m.err)}
 	if m.err != nil {
 		return struct {
-			metricResultCommon
+			hostdb.MetricResultCommon
 			hostdb.ErrorResult
 		}{cr, er}
 	} else {
 		return struct {
-			metricResultCommon
+			hostdb.MetricResultCommon
 			hostdb.ScanResult
 		}{cr, hostdb.ScanResult{ErrorResult: er, PriceTable: m.pt, Settings: m.settings}}
 	}

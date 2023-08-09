@@ -51,27 +51,25 @@ func (dbSiacoinElement) TableName() string { return "siacoin_elements" }
 // TableName implements the gorm.Tabler interface.
 func (dbTransaction) TableName() string { return "transactions" }
 
-// Balance implements wallet.SingleAddressStore.
-func (s *SQLStore) Balance() (types.Currency, error) {
+func (s *SQLStore) Height() uint64 {
+	s.persistMu.Lock()
+	height := s.chainIndex.Height
+	s.persistMu.Unlock()
+	return height
+}
+
+// UnspentSiacoinElements implements wallet.SingleAddressStore.
+func (s *SQLStore) UnspentSiacoinElements(matured bool) ([]wallet.SiacoinElement, error) {
 	s.persistMu.Lock()
 	height := s.chainIndex.Height
 	s.persistMu.Unlock()
 
+	tx := s.db
 	var elems []dbSiacoinElement
-	if err := s.db.Find(&elems).Where("maturity_height < ?", height).Error; err != nil {
-		return types.ZeroCurrency, err
+	if matured {
+		tx = tx.Where("maturity_height < ?", height)
 	}
-	var balance types.Currency
-	for _, sce := range elems {
-		balance = balance.Add(types.Currency(sce.Value))
-	}
-	return balance, nil
-}
-
-// UnspentSiacoinElements implements wallet.SingleAddressStore.
-func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
-	var elems []dbSiacoinElement
-	if err := s.db.Find(&elems).Error; err != nil {
+	if err := tx.Find(&elems).Error; err != nil {
 		return nil, err
 	}
 	utxo := make([]wallet.SiacoinElement, len(elems))

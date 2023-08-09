@@ -156,9 +156,16 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Rollback: nil,
 		},
 		{
-			ID: "00004_uploadPacking",
+			ID: "00004_objectID_collation",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00004_uploadPacking(tx, logger)
+				return performMigration00004_objectID_collation(tx, logger)
+			},
+			Rollback: nil,
+		},
+		{
+			ID: "00005_uploadPacking",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00005_uploadPacking(tx, logger)
 			},
 		},
 	}
@@ -184,8 +191,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initSchema(tx *gorm.DB) error {
-	if err := tx.AutoMigrate(tables...); err != nil {
+	err := tx.AutoMigrate(tables...)
+	if err != nil {
 		return fmt.Errorf("failed to init schema: %w", err)
+	}
+	// Change the object_id colum to use case sensitive collation.
+	if !isSQLite(tx) {
+		return tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 	}
 	return nil
 }
@@ -348,7 +360,20 @@ func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) e
 	return nil
 }
 
-func performMigration00004_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00004_objectID_collation(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00004_objectID_collation")
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00004_objectID_collation complete")
+	return nil
+}
+
+func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration performMigration00005_uploadPacking")
 	m := txn.Migrator()
 
 	// Disable foreign keys in SQLite to avoid issues with updating constraints.
@@ -381,5 +406,6 @@ func performMigration00004_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 			return err
 		}
 	}
+	logger.Info(context.Background(), "migration performMigration00005_uploadPacking complete")
 	return nil
 }

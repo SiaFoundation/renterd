@@ -400,6 +400,13 @@ type GougingSettings struct {
 	MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
 }
 
+type WalletResponse struct {
+	ScanHeight uint64         `json:"scanHeight"`
+	Address    types.Address  `json:"address"`
+	Spendable  types.Currency `json:"spendable"`
+	Confirmed  types.Currency `json:"confirmed"`
+}
+
 // Validate returns an error if the gouging settings are not considered valid.
 func (gs GougingSettings) Validate() error {
 	if gs.HostBlockHeightLeeway < 3 {
