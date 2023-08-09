@@ -477,7 +477,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	// fetch consensus state
 	cs, err := c.ap.bus.ConsensusState(ctx)
 	if err != nil {
-		l.Warn("wallet maintenance skipped, fetching consensus state failed with err: %v", err)
+		l.Warnf("wallet maintenance skipped, fetching consensus state failed with err: %v", err)
 		return err
 	}
 	bh := cs.BlockHeight
@@ -485,7 +485,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	// fetch wallet balance
 	wallet, err := b.Wallet(ctx)
 	if err != nil {
-		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
+		l.Warnf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
 		return err
 	}
 	balance := wallet.Confirmed
