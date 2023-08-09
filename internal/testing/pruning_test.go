@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"lukechampine.com/frand"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -263,8 +262,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// delete a random number of objects
-	toDelete := frand.Uint64n(10)
-	for i := 0; i < int(toDelete); i++ {
+	for i := 0; i < 10; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
 		if err := b.DeleteObject(context.Background(), filename, false); err != nil {
 			t.Fatal(err)
@@ -274,7 +272,7 @@ func TestSectorPruning(t *testing.T) {
 	// assert amount of prunable data
 	if n, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != int64(toDelete)*int64(rs.TotalShards)*rhpv2.SectorSize {
+	} else if n != int64(5)*int64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 }
