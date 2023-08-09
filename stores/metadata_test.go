@@ -391,6 +391,58 @@ func TestContractsForHost(t *testing.T) {
 	}
 }
 
+// TestContractRoots tests the ContractRoots function on the store.
+func TestContractRoots(t *testing.T) {
+	// create a SQL store
+	cs, _, _, err := newTestSQLStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract
+	hks, err := cs.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := cs.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object
+	root := types.Hash256{1}
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hks[0],
+							Root: root,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// add the object.
+	if err := cs.UpdateObject(context.Background(), t.Name(), testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0]}); err != nil {
+		t.Fatal(err)
+	}
+
+	roots, err := cs.ContractRoots(context.Background(), fcids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0] != root {
+		t.Fatal("unexpected", roots)
+	}
+}
+
 // TestRenewContract is a test for AddRenewedContract.
 func TestRenewedContract(t *testing.T) {
 	cs, _, _, err := newTestSQLStore()

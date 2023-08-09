@@ -87,6 +87,7 @@ type (
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
@@ -751,6 +752,18 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
+	}
+}
+
+func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	roots, err := b.ms.ContractRoots(jc.Request.Context(), id)
+	if jc.Check("couldn't fetch contract sectors", err) == nil {
+		jc.Encode(roots)
 	}
 }
 
@@ -1459,6 +1472,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/prunable":  b.contractPrunableDataHandlerGET,
+		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
