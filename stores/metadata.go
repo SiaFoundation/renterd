@@ -443,6 +443,27 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		}
 		resp.TotalSectorsSize = sectorSizes.SectorsSize
 		resp.TotalUploadedSize = sectorSizes.UploadedSize
+
+		// Slab buffer info.
+		var bufferedSlabs []dbBufferedSlab
+		err = tx.Model(&dbBufferedSlab{}).
+			Joins("DBSlab").
+			Joins("DBSlab.DBContractSet").
+			Find(&bufferedSlabs).
+			Error
+		if err != nil {
+			return err
+		}
+		for _, buf := range bufferedSlabs {
+			resp.SlabBuffers = append(resp.SlabBuffers, api.SlabBuffer{
+				ContractSet: buf.DBSlab.DBContractSet.Name,
+				Complete:    buf.Complete,
+				Filename:    buf.Filename,
+				Size:        buf.Size,
+				MaxSize:     int64(bufferedSlabSize(buf.DBSlab.MinShards)),
+				Locked:      buf.LockedUntil > time.Now().Unix(),
+			})
+		}
 		return nil
 	})
 }
