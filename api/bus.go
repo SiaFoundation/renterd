@@ -388,10 +388,11 @@ type GougingSettings struct {
 }
 
 type WalletResponse struct {
-	ScanHeight uint64         `json:"scanHeight"`
-	Address    types.Address  `json:"address"`
-	Spendable  types.Currency `json:"spendable"`
-	Confirmed  types.Currency `json:"confirmed"`
+	ScanHeight  uint64         `json:"scanHeight"`
+	Address     types.Address  `json:"address"`
+	Spendable   types.Currency `json:"spendable"`
+	Confirmed   types.Currency `json:"confirmed"`
+	Unconfirmed types.Currency `json:"unconfirmed"`
 }
 
 // Validate returns an error if the gouging settings are not considered valid.

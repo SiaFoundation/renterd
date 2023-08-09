@@ -48,24 +48,6 @@ func TestNewTestCluster(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 
-	// Check wallet info is sane after startup.
-	wi, err := b.Wallet(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if wi.ScanHeight == 0 {
-		t.Fatal("wallet scan height should not be 0")
-	}
-	if wi.Confirmed.IsZero() {
-		t.Fatal("wallet confirmed balance should not be zero")
-	}
-	if !wi.Spendable.Equals(wi.Confirmed) {
-		t.Fatal("wallet spendable balance should match confirmed")
-	}
-	if wi.Address == (types.Address{}) {
-		t.Fatal("wallet address should be set")
-	}
-
 	// Try talking to the bus API by adding an object.
 	err = b.AddObject(context.Background(), "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -1764,5 +1746,91 @@ func TestWalletTransactions(t *testing.T) {
 		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
 			t.Fatal("expected only transactions after median timestamp", medianTxnTimestamp.Unix())
 		}
+	}
+}
+
+func TestWallet(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b := cluster.Bus
+
+	// Check wallet info is sane after startup.
+	initialInfo, err := b.Wallet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialInfo.ScanHeight == 0 {
+		t.Fatal("wallet scan height should not be 0")
+	}
+	if initialInfo.Confirmed.IsZero() {
+		t.Fatal("wallet confirmed balance should not be zero")
+	}
+	if !initialInfo.Spendable.Equals(initialInfo.Confirmed) {
+		t.Fatal("wallet spendable balance should match confirmed")
+	}
+	if !initialInfo.Unconfirmed.IsZero() {
+		t.Fatal("wallet unconfirmed balance should be zero")
+	}
+	if initialInfo.Address == (types.Address{}) {
+		t.Fatal("wallet address should be set")
+	}
+
+	// Send 1 SC to an address outside our wallet. We manually do this to be in
+	// control of the miner fees.
+	sendAmt := types.HastingsPerSiacoin
+	minerFee := types.NewCurrency64(1)
+	txn := types.Transaction{
+		SiacoinOutputs: []types.SiacoinOutput{
+			{Value: sendAmt, Address: types.VoidAddress},
+		},
+		MinerFees: []types.Currency{minerFee},
+	}
+	toSign, parents, err := b.WalletFund(context.Background(), &txn, txn.SiacoinOutputs[0].Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.WalletSign(context.Background(), &txn, toSign, types.CoveredFields{WholeTransaction: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BroadcastTransaction(context.Background(), append(parents, txn)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The wallet should still have the same confirmed balance, a lower
+	// spendable balance and a greater unconfirmed balance.
+	info, err := b.Wallet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Confirmed.Equals(initialInfo.Confirmed) {
+		t.Fatal("wallet confirmed balance should not be zero", info.Confirmed, initialInfo.Confirmed)
+	}
+	if info.Spendable.Cmp(initialInfo.Spendable) >= 0 {
+		t.Fatal("wallet spendable balance should be lower than before", info.Spendable, initialInfo.Spendable)
+	}
+	if info.Unconfirmed.Cmp(initialInfo.Unconfirmed) < 0 {
+		t.Fatal("wallet unconfirmed balance should be greater than before", info.Unconfirmed, initialInfo.Unconfirmed)
+	}
+
+	// The diffs of the spendable balance and unconfirmed balance should add up
+	// to the amount of money sent as well as the miner fees used.
+	spendableDiff := initialInfo.Spendable.Sub(info.Spendable)
+	unconfirmedDiff := info.Unconfirmed
+	withdrawnAmt := spendableDiff.Sub(unconfirmedDiff)
+	expectedWithdrawnAmt := sendAmt.Add(minerFee)
+	if !withdrawnAmt.Equals(expectedWithdrawnAmt) {
+		t.Fatal("withdrawn amt doesn't match expectation", withdrawnAmt.ExactString(), expectedWithdrawnAmt.ExactString())
 	}
 }

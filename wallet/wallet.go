@@ -1,6 +1,7 @@
 package wallet
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
@@ -11,7 +12,9 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -121,6 +124,7 @@ type TransactionPool interface {
 // A SingleAddressWallet is a hot wallet that manages the outputs controlled by
 // a single address.
 type SingleAddressWallet struct {
+	log            *zap.SugaredLogger
 	priv           types.PrivateKey
 	addr           types.Address
 	store          SingleAddressStore
@@ -129,6 +133,15 @@ type SingleAddressWallet struct {
 	// for building transactions
 	mu       sync.Mutex
 	lastUsed map[types.Hash256]time.Time
+	// tpoolTxns maps a transaction set ID to the transactions in that set
+	tpoolTxns map[types.Hash256][]Transaction
+	// tpoolUtxos maps a siacoin output ID to its corresponding siacoin
+	// element. It is used to track siacoin outputs that are currently in
+	// the transaction pool.
+	tpoolUtxos map[types.SiacoinOutputID]SiacoinElement
+	// tpoolSpent is a set of siacoin output IDs that are currently in the
+	// transaction pool.
+	tpoolSpent map[types.SiacoinOutputID]bool
 }
 
 // PrivateKey returns the private key of the wallet.
@@ -142,10 +155,10 @@ func (w *SingleAddressWallet) Address() types.Address {
 }
 
 // Balance returns the balance of the wallet.
-func (w *SingleAddressWallet) Balance() (spendable, confirmed types.Currency, _ error) {
+func (w *SingleAddressWallet) Balance() (spendable, confirmed, unconfirmed types.Currency, _ error) {
 	sces, err := w.store.UnspentSiacoinElements(true)
 	if err != nil {
-		return types.Currency{}, types.Currency{}, err
+		return types.Currency{}, types.Currency{}, types.Currency{}, err
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -154,6 +167,9 @@ func (w *SingleAddressWallet) Balance() (spendable, confirmed types.Currency, _ 
 			spendable = spendable.Add(sce.Value)
 		}
 		confirmed = confirmed.Add(sce.Value)
+	}
+	for _, sco := range w.tpoolUtxos {
+		unconfirmed = unconfirmed.Add(sco.Value)
 	}
 	return
 }
@@ -383,6 +399,101 @@ func (w *SingleAddressWallet) isOutputUsed(id types.Hash256) bool {
 	return time.Since(lastUsed) <= w.usedUTXOExpiry
 }
 
+// ReceiveUpdatedUnconfirmedTransactions implements modules.TransactionPoolSubscriber.
+func (w *SingleAddressWallet) ReceiveUpdatedUnconfirmedTransactions(diff *modules.TransactionPoolDiff) {
+	siacoinOutputs := make(map[types.SiacoinOutputID]SiacoinElement)
+	utxos, err := w.store.UnspentSiacoinElements(false)
+	if err != nil {
+		return
+	}
+	for _, output := range utxos {
+		siacoinOutputs[types.SiacoinOutputID(output.ID)] = output
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for id, output := range w.tpoolUtxos {
+		siacoinOutputs[id] = output
+	}
+
+	for _, txnsetID := range diff.RevertedTransactions {
+		txns, ok := w.tpoolTxns[types.Hash256(txnsetID)]
+		if !ok {
+			continue
+		}
+		for _, txn := range txns {
+			for _, sci := range txn.Raw.SiacoinInputs {
+				delete(w.tpoolSpent, sci.ParentID)
+			}
+			for i := range txn.Raw.SiacoinOutputs {
+				delete(w.tpoolUtxos, txn.Raw.SiacoinOutputID(i))
+			}
+		}
+		delete(w.tpoolTxns, types.Hash256(txnsetID))
+	}
+
+	currentHeight := w.store.Height()
+
+	for _, txnset := range diff.AppliedTransactions {
+		var relevantTxns []Transaction
+
+	txnLoop:
+		for _, stxn := range txnset.Transactions {
+			var relevant bool
+			var txn types.Transaction
+			convertToCore(stxn, &txn)
+			processed := Transaction{
+				ID: txn.ID(),
+				Index: types.ChainIndex{
+					Height: currentHeight + 1,
+				},
+				Raw:       txn,
+				Timestamp: time.Now(),
+			}
+			for _, sci := range txn.SiacoinInputs {
+				if sci.UnlockConditions.UnlockHash() != w.addr {
+					continue
+				}
+				relevant = true
+				w.tpoolSpent[sci.ParentID] = true
+
+				output, ok := siacoinOutputs[sci.ParentID]
+				if !ok {
+					// note: happens during deep reorgs. Possibly a race
+					// condition in siad. Log and skip.
+					w.log.Debug("tpool transaction unknown utxo", zap.Stringer("outputID", sci.ParentID), zap.Stringer("txnID", txn.ID()))
+					continue txnLoop
+				}
+				processed.Outflow = processed.Outflow.Add(output.Value)
+			}
+
+			for i, sco := range txn.SiacoinOutputs {
+				if sco.Address != w.addr {
+					continue
+				}
+				relevant = true
+				outputID := txn.SiacoinOutputID(i)
+				processed.Inflow = processed.Inflow.Add(sco.Value)
+				sce := SiacoinElement{
+					ID:            types.Hash256(outputID),
+					SiacoinOutput: sco,
+				}
+				siacoinOutputs[outputID] = sce
+				w.tpoolUtxos[outputID] = sce
+			}
+
+			if relevant {
+				relevantTxns = append(relevantTxns, processed)
+			}
+		}
+
+		if len(relevantTxns) != 0 {
+			w.tpoolTxns[types.Hash256(txnset.ID)] = relevantTxns
+		}
+	}
+}
+
 // SumOutputs returns the total value of the supplied outputs.
 func SumOutputs(outputs []SiacoinElement) (sum types.Currency) {
 	for _, o := range outputs {
@@ -392,12 +503,27 @@ func SumOutputs(outputs []SiacoinElement) (sum types.Currency) {
 }
 
 // NewSingleAddressWallet returns a new SingleAddressWallet using the provided private key and store.
-func NewSingleAddressWallet(priv types.PrivateKey, store SingleAddressStore, usedUTXOExpiry time.Duration) *SingleAddressWallet {
+func NewSingleAddressWallet(priv types.PrivateKey, store SingleAddressStore, usedUTXOExpiry time.Duration, log *zap.SugaredLogger) *SingleAddressWallet {
 	return &SingleAddressWallet{
 		priv:           priv,
 		addr:           StandardAddress(priv.PublicKey()),
 		store:          store,
 		lastUsed:       make(map[types.Hash256]time.Time),
 		usedUTXOExpiry: usedUTXOExpiry,
+		tpoolTxns:      make(map[types.Hash256][]Transaction),
+		tpoolUtxos:     make(map[types.SiacoinOutputID]SiacoinElement),
+		tpoolSpent:     make(map[types.SiacoinOutputID]bool),
+		log:            log.Named("wallet"),
+	}
+}
+
+// convertToCore converts a siad type to an equivalent core type.
+func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
+	var buf bytes.Buffer
+	siad.MarshalSia(&buf)
+	d := types.NewBufDecoder(buf.Bytes())
+	core.DecodeFrom(d)
+	if d.Err() != nil {
+		panic(d.Err())
 	}
 }
