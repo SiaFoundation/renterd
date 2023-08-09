@@ -45,6 +45,7 @@ const (
 	lockingPriorityPriceTable             = 60
 	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 20
+	lockingPriorityPruning                = 10
 	lockingPriorityUpload                 = 1 // lowest
 )
 
@@ -590,6 +591,13 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		return
 	}
 
+	// attach gouging checker
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	ctx = WithGougingChecker(ctx, w.bus, gp)
+
 	// fetch the contract from the bus
 	c, err := w.bus.Contract(ctx, id)
 	if errors.Is(err, api.ErrContractNotFound) {
@@ -599,37 +607,44 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// fetch the roots from the host
-	renterKey := w.deriveRenterKey(c.HostKey)
-	got, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, c.RevisionNumber, time.Minute)
-	if jc.Check("couldn't fetch contract roots from host", err) != nil {
-		return
-	}
+	// convenience variables
+	hk := c.HostKey
+	hostIP := c.HostIP
+	hostAddr := c.SiamuxAddr
 
-	// fetch the roots from the bus
-	roots, err := w.bus.ContractRoots(ctx, id)
-	if jc.Check("couldn't fetch contract roots from database", err) != nil {
-		return
-	}
-	keep := make(map[types.Hash256]struct{})
-	for _, root := range roots {
-		keep[root] = struct{}{}
-	}
-
-	// collect indices for roots we want to prune
+	// prune sectors from contracts
 	var toDelete []uint64
-	for i, root := range got {
-		if _, wanted := keep[root]; wanted {
-			delete(keep, root) // prevent duplicates
-			continue
+	if jc.Check("couldn't prune contract", w.withRevision(ctx, defaultRevisionFetchTimeout, id, hk, hostAddr, lockingPriorityPruning, 0, func(rev types.FileContractRevision) error {
+		// fetch the roots from the host
+		renterKey := w.deriveRenterKey(c.HostKey)
+		got, err := w.FetchContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber, time.Minute)
+		if err != nil {
+			return err
 		}
 
-		toDelete = append(toDelete, uint64(i))
-	}
+		// fetch the roots from the bus
+		roots, err := w.bus.ContractRoots(ctx, id)
+		if err != nil {
+			return err
+		}
+		keep := make(map[types.Hash256]struct{})
+		for _, root := range roots {
+			keep[root] = struct{}{}
+		}
 
-	// delete the roots from the contract
-	err = w.DeleteContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, time.Minute, toDelete)
-	if jc.Check("couldn't delete sectors", err) == nil {
+		// collect indices for roots we want to prune
+		for i, root := range got {
+			if _, wanted := keep[root]; wanted {
+				delete(keep, root) // prevent duplicates
+				continue
+			}
+
+			toDelete = append(toDelete, uint64(i))
+		}
+
+		// delete the roots from the contract
+		return w.DeleteContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber+1, time.Minute, toDelete)
+	})) == nil {
 		jc.Encode(len(toDelete) * rhpv2.SectorSize)
 	}
 }

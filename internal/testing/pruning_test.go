@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -193,6 +194,8 @@ func TestSectorPruning(t *testing.T) {
 	w := cluster.Worker
 	b := cluster.Bus
 
+	numObjects := 10
+
 	// add hosts
 	_, err = cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
 	if err != nil {
@@ -211,7 +214,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// add several objects
-	for i := 0; i < 10; i++ {
+	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
 		if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename); err != nil {
 			t.Fatal(err)
@@ -239,7 +242,7 @@ func TestSectorPruning(t *testing.T) {
 		}
 		n += len(cRoots)
 	}
-	if n != rs.TotalShards*10 {
+	if n != rs.TotalShards*numObjects {
 		t.Fatal("unexpected number of roots", n)
 	}
 
@@ -265,7 +268,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// delete every other object
-	for i := 0; i < 10; i += 2 {
+	for i := 0; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
 		if err := b.DeleteObject(context.Background(), filename, false); err != nil {
 			t.Fatal(err)
@@ -275,7 +278,7 @@ func TestSectorPruning(t *testing.T) {
 	// assert amount of prunable data
 	if n, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != int64(5)*int64(rs.TotalShards)*rhpv2.SectorSize {
+	} else if n != int64(math.Ceil(float64(numObjects)/2))*int64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 
