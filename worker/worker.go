@@ -586,7 +586,7 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 
 	// fetch the roots from the host
 	renterKey := w.deriveRenterKey(c.HostKey)
-	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, time.Minute)
+	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, c.RevisionNumber, time.Minute)
 	if jc.Check("couldn't fetch contract roots from host", err) == nil {
 		jc.Encode(roots)
 	}
