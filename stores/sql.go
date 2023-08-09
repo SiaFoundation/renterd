@@ -174,18 +174,19 @@ func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persi
 	}
 
 	ss := &SQLStore{
-		db:                 db,
-		logger:             logger,
-		knownContracts:     isOurContract,
-		lastSave:           time.Now(),
-		partialSlabDir:     partialSlabDir,
-		persistInterval:    persistInterval,
-		hasAllowlist:       allowlistCnt > 0,
-		hasBlocklist:       blocklistCnt > 0,
-		settings:           make(map[string]string),
-		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
-		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:    make(map[types.FileContractID]uint64),
+		db:                              db,
+		logger:                          logger,
+		knownContracts:                  isOurContract,
+		lastSave:                        time.Now(),
+		partialSlabDir:                  partialSlabDir,
+		persistInterval:                 persistInterval,
+		hasAllowlist:                    allowlistCnt > 0,
+		hasBlocklist:                    blocklistCnt > 0,
+		settings:                        make(map[string]string),
+		unappliedHostKeys:               make(map[types.PublicKey]struct{}),
+		unappliedRevisions:              make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:                 make(map[types.FileContractID]uint64),
+		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
 
 		walletAddress: walletAddress,
 		chainIndex: types.ChainIndex{
