@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"lukechampine.com/frand"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -46,6 +45,7 @@ func TestHostPruning(t *testing.T) {
 	// create a helper function that records n failed interactions
 	now := time.Now()
 	recordFailedInteractions := func(n int, hk types.PublicKey) {
+		t.Helper()
 		his := make([]hostdb.Interaction, n)
 		for i := 0; i < n; i++ {
 			now = now.Add(time.Hour).Add(time.Minute) // 1m leeway
@@ -63,6 +63,7 @@ func TestHostPruning(t *testing.T) {
 
 	// create a helper function that waits for an autopilot loop to finish
 	waitForAutopilotLoop := func() {
+		t.Helper()
 		var nTriggered int
 		if err := Retry(10, 500*time.Millisecond, func() error {
 			if triggered, err := a.Trigger(true); err != nil {
@@ -263,8 +264,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// delete a random number of objects
-	toDelete := frand.Uint64n(10)
-	for i := 0; i < int(toDelete); i++ {
+	for i := 0; i < 10; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
 		if err := b.DeleteObject(context.Background(), filename, false); err != nil {
 			t.Fatal(err)
@@ -274,7 +274,7 @@ func TestSectorPruning(t *testing.T) {
 	// assert amount of prunable data
 	if n, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != int64(toDelete)*int64(rs.TotalShards)*rhpv2.SectorSize {
+	} else if n != int64(5)*int64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 }

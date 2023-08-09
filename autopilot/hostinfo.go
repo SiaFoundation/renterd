@@ -55,13 +55,14 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host.Host, minScore, storedData)
 	return api.HostHandlerResponse{
 		Host: host.Host,
-
-		Gouging:          unusableResult.gougingBreakdown.Gouging(),
-		GougingBreakdown: unusableResult.gougingBreakdown,
-		Score:            unusableResult.scoreBreakdown.Score(),
-		ScoreBreakdown:   unusableResult.scoreBreakdown,
-		Usable:           isUsable,
-		UnusableReasons:  unusableResult.reasons(),
+		Checks: &api.HostHandlerResponseChecks{
+			Gouging:          unusableResult.gougingBreakdown.Gouging(),
+			GougingBreakdown: unusableResult.gougingBreakdown,
+			Score:            unusableResult.scoreBreakdown.Score(),
+			ScoreBreakdown:   unusableResult.scoreBreakdown,
+			Usable:           isUsable,
+			UnusableReasons:  unusableResult.reasons(),
+		},
 	}, nil
 }
 
@@ -110,6 +111,13 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 		for _, host := range hosts {
 			hi, cached := hostInfo[host.PublicKey]
 			if !cached {
+				// when the filterMode is "all" we include uncached hosts and
+				// set IsChecked = false.
+				if usabilityMode == api.UsabilityFilterModeAll {
+					hostInfos = append(hostInfos, api.HostHandlerResponse{
+						Host: host,
+					})
+				}
 				continue
 			}
 			if !keep(hi.Usable) {
@@ -117,13 +125,14 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 			}
 			hostInfos = append(hostInfos, api.HostHandlerResponse{
 				Host: host,
-
-				Gouging:          hi.UnusableResult.gougingBreakdown.Gouging(),
-				GougingBreakdown: hi.UnusableResult.gougingBreakdown,
-				Score:            hi.UnusableResult.scoreBreakdown.Score(),
-				ScoreBreakdown:   hi.UnusableResult.scoreBreakdown,
-				Usable:           hi.Usable,
-				UnusableReasons:  hi.UnusableResult.reasons(),
+				Checks: &api.HostHandlerResponseChecks{
+					Gouging:          hi.UnusableResult.gougingBreakdown.Gouging(),
+					GougingBreakdown: hi.UnusableResult.gougingBreakdown,
+					Score:            hi.UnusableResult.scoreBreakdown.Score(),
+					ScoreBreakdown:   hi.UnusableResult.scoreBreakdown,
+					Usable:           hi.Usable,
+					UnusableReasons:  hi.UnusableResult.reasons(),
+				},
 			})
 			if wanted > 0 && len(hostInfos) == wanted {
 				return hostInfos, nil // we're done.
