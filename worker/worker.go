@@ -645,7 +645,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		// delete the roots from the contract
 		return w.DeleteContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber+1, time.Minute, toDelete)
 	})) == nil {
-		jc.Encode(len(toDelete) * rhpv2.SectorSize)
+		jc.Encode(int64(len(toDelete) * rhpv2.SectorSize))
 	}
 }
 
