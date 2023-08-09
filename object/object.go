@@ -72,8 +72,9 @@ func GenerateEncryptionKey() EncryptionKey {
 
 // An Object is a unit of data that has been stored on a host.
 type Object struct {
-	Key   EncryptionKey `json:"key"`
-	Slabs []SlabSlice   `json:"slabs"`
+	Key         EncryptionKey `json:"key"`
+	Slabs       []SlabSlice   `json:"slabs"`
+	PartialSlab *PartialSlab  `json:"partial_slab,omitempty"`
 }
 
 // NewObject returns a new Object with a random key.
@@ -88,6 +89,9 @@ func (o Object) TotalSize() int64 {
 	var n int64
 	for _, ss := range o.Slabs {
 		n += int64(ss.Length)
+	}
+	if o.PartialSlab != nil {
+		n += int64(len(o.PartialSlab.Data))
 	}
 	return n
 }

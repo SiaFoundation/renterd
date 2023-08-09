@@ -11,7 +11,7 @@ import (
 )
 
 func TestAutopilotStore(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,7 +36,7 @@ func generateMultisigUC(m, n uint64, salt string) types.UnlockConditions {
 // TestObjectBasic tests the hydration of raw objects works when we fetch
 // objects from the metadata store.
 func TestObjectBasic(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -132,7 +132,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want2, nil, make(map[types.PublicKey]types.FileContractID)); err != nil {
+	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want2, make(map[types.PublicKey]types.FileContractID)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,7 +148,7 @@ func TestObjectBasic(t *testing.T) {
 
 // TestSQLContractStore tests SQLContractStore functionality.
 func TestSQLContractStore(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestSQLContractStore(t *testing.T) {
 
 func TestContractsForHost(t *testing.T) {
 	// create a SQL store
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,9 +391,61 @@ func TestContractsForHost(t *testing.T) {
 	}
 }
 
+// TestContractRoots tests the ContractRoots function on the store.
+func TestContractRoots(t *testing.T) {
+	// create a SQL store
+	cs, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract
+	hks, err := cs.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := cs.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add an object
+	root := types.Hash256{1}
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					Key:       object.GenerateEncryptionKey(),
+					MinShards: 1,
+					Shards: []object.Sector{
+						{
+							Host: hks[0],
+							Root: root,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// add the object.
+	if err := cs.UpdateObject(context.Background(), t.Name(), testContractSet, obj, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0]}); err != nil {
+		t.Fatal(err)
+	}
+
+	roots, err := cs.ContractRoots(context.Background(), fcids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0] != root {
+		t.Fatal("unexpected", roots)
+	}
+}
+
 // TestRenewContract is a test for AddRenewedContract.
 func TestRenewedContract(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +542,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := cs.UpdateObject(context.Background(), "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk:  fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -665,7 +717,7 @@ func TestRenewedContract(t *testing.T) {
 // TestAncestorsContracts verifies that AncestorContracts returns the right
 // ancestors in the correct order.
 func TestAncestorsContracts(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +765,7 @@ func TestAncestorsContracts(t *testing.T) {
 }
 
 func TestArchiveContracts(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -852,7 +904,7 @@ func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.C
 
 // TestSQLMetadataStore tests basic MetadataStore functionality.
 func TestSQLMetadataStore(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -921,12 +973,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1089,7 +1141,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, nil, usedHosts); err != nil {
+	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = db.Object(ctx, objID)
@@ -1149,7 +1201,7 @@ func TestSQLMetadataStore(t *testing.T) {
 // methods that return the object's metadata.
 func TestObjectHealth(t *testing.T) {
 	// create db
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1224,7 +1276,7 @@ func TestObjectHealth(t *testing.T) {
 		},
 	}
 
-	if err := db.UpdateObject(context.Background(), "/foo", testContractSet, add, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), "/foo", testContractSet, add, map[types.PublicKey]types.FileContractID{
 		hks[0]: fcids[0],
 		hks[1]: fcids[1],
 		hks[2]: fcids[2],
@@ -1310,7 +1362,7 @@ func TestObjectHealth(t *testing.T) {
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: nil,
 	}
-	if err := db.UpdateObject(context.Background(), "/bar", testContractSet, add, nil, nil); err != nil {
+	if err := db.UpdateObject(context.Background(), "/bar", testContractSet, add, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1325,7 +1377,7 @@ func TestObjectHealth(t *testing.T) {
 
 // TestObjectEntries is a test for the ObjectEntries method.
 func TestObjectEntries(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
+	os, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1346,7 +1398,7 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, testContractSet, obj, nil, ucs)
+		os.UpdateObject(ctx, o.path, testContractSet, obj, ucs)
 	}
 	tests := []struct {
 		path   string
@@ -1387,7 +1439,7 @@ func TestObjectEntries(t *testing.T) {
 
 // TestSearchObjects is a test for the SearchObjects method.
 func TestSearchObjects(t *testing.T) {
-	os, _, _, err := newTestSQLStore()
+	os, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1407,7 +1459,7 @@ func TestSearchObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, testContractSet, obj, nil, ucs)
+		os.UpdateObject(ctx, o.path, testContractSet, obj, ucs)
 	}
 	tests := []struct {
 		path string
@@ -1441,7 +1493,7 @@ func TestSearchObjects(t *testing.T) {
 // TestUnhealthySlabs tests the functionality of UnhealthySlabs.
 func TestUnhealthySlabs(t *testing.T) {
 	// create db
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1600,7 +1652,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1665,7 +1717,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 func TestUnhealthySlabsNegHealth(t *testing.T) {
 	// create db
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1714,7 +1766,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1733,7 +1785,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 func TestUnhealthySlabsNoContracts(t *testing.T) {
 	// create db
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1778,7 +1830,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1815,7 +1867,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 // TestUnhealthySlabs tests the functionality of UnhealthySlabs on slabs that
 // don't have any redundancy.
 func TestUnhealthySlabsNoRedundancy(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1878,7 +1930,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
@@ -1908,7 +1960,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 // TestContractSectors is a test for the contract_sectors join table. It
 // verifies that deleting contracts or sectors also cleans up the join table.
 func TestContractSectors(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1951,7 +2003,7 @@ func TestContractSectors(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1977,7 +2029,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, usedContracts); err != nil {
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2000,7 +2052,7 @@ func TestContractSectors(t *testing.T) {
 
 // TestPutSlab verifies the functionality of PutSlab.
 func TestPutSlab(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2042,7 +2094,7 @@ func TestPutSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, nil, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 	}); err != nil {
@@ -2206,7 +2258,7 @@ func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileCont
 
 // TestRecordContractSpending tests RecordContractSpending.
 func TestRecordContractSpending(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2283,7 +2335,7 @@ func TestRecordContractSpending(t *testing.T) {
 
 // TestRenameObjects is a unit test for RenameObject and RenameObjects.
 func TestRenameObjects(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2305,7 +2357,7 @@ func TestRenameObjects(t *testing.T) {
 	ctx := context.Background()
 	for _, path := range objects {
 		obj, ucs := newTestObject(1)
-		cs.UpdateObject(ctx, path, testContractSet, obj, nil, ucs)
+		cs.UpdateObject(ctx, path, testContractSet, obj, ucs)
 	}
 
 	// Try renaming objects that don't exist.
@@ -2374,7 +2426,7 @@ func TestRenameObjects(t *testing.T) {
 
 // TestObjectsStats is a unit test for ObjectsStats.
 func TestObjectsStats(t *testing.T) {
-	cs, _, _, err := newTestSQLStore()
+	cs, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2409,7 +2461,7 @@ func TestObjectsStats(t *testing.T) {
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := cs.UpdateObject(context.Background(), key, testContractSet, obj, nil, contracts)
+		err := cs.UpdateObject(context.Background(), key, testContractSet, obj, contracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2460,7 +2512,7 @@ func TestObjectsStats(t *testing.T) {
 }
 
 func TestPartialSlab(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2506,13 +2558,13 @@ func TestPartialSlab(t *testing.T) {
 				Length: rhpv2.SectorSize,
 			},
 		},
+		PartialSlab: &object.PartialSlab{
+			MinShards:   1,
+			TotalShards: 2,
+			Data:        []byte{1, 2, 3, 4},
+		},
 	}
-	partialSlab := object.PartialSlab{
-		MinShards:   1,
-		TotalShards: 2,
-		Data:        []byte{1, 2, 3, 4},
-	}
-	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, &partialSlab, usedContracts)
+	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2527,7 +2579,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	// check the slice
 	storedSlice := storedObject.Slabs[1]
-	if storedSlice.Offset != 0 || storedSlice.Length != uint32(len(partialSlab.Data)) {
+	if storedSlice.Offset != 0 || storedSlice.Length != uint32(len(obj.PartialSlab.Data)) {
 		t.Fatalf("wrong offset/length: %v/%v", storedSlice.Offset, storedSlice.Length)
 	}
 	// check the slab
@@ -2536,32 +2588,51 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check the buffer
-	var buffer dbSlabBuffer
-	if err := db.db.Take(&buffer, "db_slab_id = ?", storedSlab.ID).Error; err != nil {
+	var buffer dbBufferedSlab
+	if err := db.db.Take(&buffer, "id = ?", storedSlab.DBBufferedSlabID).Error; err != nil {
 		t.Fatal(err)
 	}
+	if buffer.Filename == "" {
+		t.Fatal("empty filename")
+	}
 	buffer.Model = Model{}
-	expectedBuffer := dbSlabBuffer{
-		DBSlabID:    storedSlab.ID,
+	expectedBuffer := dbBufferedSlab{
+		DBSlab:      dbSlab{},
 		Complete:    false,
-		Data:        partialSlab.Data,
+		Filename:    buffer.Filename, // use from buffer since it's random
+		Size:        4,
 		LockedUntil: 0,
-		MinShards:   partialSlab.MinShards,
-		TotalShards: partialSlab.TotalShards,
 	}
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
 
-	// add another object with a partial slab. This should append to the buffer.
-	fullSlabSize := slabSize(1, 2)
-	obj2 := object.Object{Key: object.GenerateEncryptionKey()}
-	partialSlab2 := object.PartialSlab{
-		MinShards:   1,
-		TotalShards: 2,
-		Data:        frand.Bytes(int(fullSlabSize) - len(partialSlab.Data) - 1), // leave 1 byte
+	// fetch the object. This should fetch the partial slab too.
+	fullObj, err := db.Object(context.Background(), "key")
+	if err != nil {
+		t.Fatal(err)
 	}
-	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, &partialSlab2, usedContracts)
+	if len(fullObj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %v", len(fullObj.Slabs))
+	}
+	if fullObj.PartialSlab == nil {
+		t.Fatal("expected partial slab")
+	}
+	if !reflect.DeepEqual(*fullObj.PartialSlab, *obj.PartialSlab) {
+		t.Fatal("invalid partial slab", cmp.Diff(fullObj.PartialSlab, obj.PartialSlab))
+	}
+
+	// add another object with a partial slab. This should append to the buffer.
+	fullSlabSize := bufferedSlabSize(1)
+	obj2 := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		PartialSlab: &object.PartialSlab{
+			MinShards:   1,
+			TotalShards: 2,
+			Data:        frand.Bytes(int(fullSlabSize) - len(obj.PartialSlab.Data) - 1), // leave 1 byte
+		},
+	}
+	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2574,7 +2645,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	// check the slice
 	storedSlice2 := storedObject2.Slabs[0]
-	if storedSlice2.Offset != storedSlice.Length || storedSlice2.Length != uint32(len(partialSlab2.Data)) {
+	if storedSlice2.Offset != storedSlice.Length || storedSlice2.Length != uint32(len(obj2.PartialSlab.Data)) {
 		t.Fatalf("wrong offset/length: %v/%v", storedSlice2.Offset, storedSlice2.Length)
 	}
 	// check the slab
@@ -2583,23 +2654,26 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check the buffer
-	if err := db.db.Take(&buffer, "db_slab_id = ?", storedSlab.ID).Error; err != nil {
+	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.ID = ?", storedSlab.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer.Model = Model{}
-	expectedBuffer.Data = append(expectedBuffer.Data, partialSlab2.Data...)
+	expectedBuffer.Size = 4194303
+	buffer.DBSlab = dbSlab{} // exclude from comparison
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
 
 	// add one last object. This should fill the buffer and create a new slab.
-	obj3 := object.Object{Key: object.GenerateEncryptionKey()}
-	partialSlab3 := object.PartialSlab{
-		MinShards:   1,
-		TotalShards: 2,
-		Data:        []byte{5, 6}, // 1 byte more than fits in the slab
+	obj3 := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		PartialSlab: &object.PartialSlab{
+			MinShards:   1,
+			TotalShards: 2,
+			Data:        []byte{5, 6}, // 1 byte more than fits in the slab
+		},
 	}
-	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, &partialSlab3, usedContracts)
+	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2624,37 +2698,37 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check the buffer
-	if err := db.db.Take(&buffer, "db_slab_id = ?", storedSlab.ID).Error; err != nil {
+	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.ID = ?", storedSlab.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer.Model = Model{}
 	expectedBuffer.Complete = true // full now
-	expectedBuffer.Data = append(expectedBuffer.Data, partialSlab3.Data[0])
+	expectedBuffer.Size = 4194304
+	buffer.DBSlab = dbSlab{} // exclude from comparison
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
 
 	// check the new buffer
-	var buffer2 dbSlabBuffer
-	if err := db.db.Take(&buffer2, "db_slab_id = ?", storedSlab.ID+1).Error; err != nil {
+	var buffer2 dbBufferedSlab
+	if err := db.db.Joins("DBSlab").Take(&buffer2, "DBSlab.ID = ?", storedSlab.ID+1).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer2.Model = Model{}
-	expectedBuffer2 := dbSlabBuffer{
-		DBSlabID:    storedSlab.ID + 1,
+	expectedBuffer2 := dbBufferedSlab{
 		Complete:    false,
-		Data:        partialSlab3.Data[1:],
+		Size:        1,
 		LockedUntil: 0,
-		MinShards:   partialSlab.MinShards,
-		TotalShards: partialSlab.TotalShards,
+		Filename:    buffer2.Filename,
 	}
+	buffer2.DBSlab = dbSlab{} // exclude from comparison
 	if !reflect.DeepEqual(buffer2, expectedBuffer2) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer2, expectedBuffer2))
 	}
 
 	// fetch the buffer for uploading
 	now := time.Now().Unix()
-	buffers, err := db.packedSlabsForUpload(time.Hour, 100)
+	buffers, err := db.packedSlabsForUpload(time.Hour, obj.PartialSlab.MinShards, obj.PartialSlab.TotalShards, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2668,12 +2742,14 @@ func TestPartialSlab(t *testing.T) {
 	}
 	completedBuffer.LockedUntil = 0
 	completedBuffer.Model = Model{}
+	completedBuffer.LockID = 0
+	buffer.LockID = 0
 	if !reflect.DeepEqual(completedBuffer, buffer) {
 		t.Fatal("invalid buffer", cmp.Diff(completedBuffer, buffer))
 	}
 
 	// try fetching it again. Should still be locked.
-	buffers, err = db.packedSlabsForUpload(time.Hour, 100)
+	buffers, err = db.packedSlabsForUpload(time.Hour, obj.PartialSlab.MinShards, obj.PartialSlab.TotalShards, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2696,7 +2772,7 @@ func TestPartialSlab(t *testing.T) {
 			},
 		},
 	}
-	err = db.MarkPackedSlabsUploaded([]api.UploadedPackedSlab{packedSlab}, usedContracts)
+	err = db.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{packedSlab}, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2722,7 +2798,7 @@ func TestPartialSlab(t *testing.T) {
 }
 
 func TestPrunableData(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2774,7 +2850,7 @@ func TestPrunableData(t *testing.T) {
 					},
 				},
 			},
-		}, nil, map[types.PublicKey]types.FileContractID{
+		}, map[types.PublicKey]types.FileContractID{
 			hks[i]: fcids[i],
 		}); err != nil {
 			t.Fatal(err)
