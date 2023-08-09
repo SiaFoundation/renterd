@@ -535,6 +535,11 @@ func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, e
 	return
 }
 
+func (c *Client) UploadPackingSettings(ctx context.Context) (ups api.UploadPackingSettings, err error) {
+	err = c.Setting(ctx, api.SettingUploadPacking, &ups)
+	return
+}
+
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
 	err = c.Setting(ctx, api.SettingRedundancy, &rs)
@@ -713,6 +718,25 @@ func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 // contract with a given payout.
 func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (tax types.Currency, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/consensus/siafundfee/%s", api.ParamCurrency(payout)), &tax)
+	return
+}
+
+func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (slabs []api.PackedSlab, err error) {
+	err = c.c.WithContext(ctx).POST("/slabbuffer/fetch", api.PackedSlabsRequestGET{
+		LockingDuration: api.ParamDuration(lockingDuration),
+		MinShards:       minShards,
+		TotalShards:     totalShards,
+		ContractSet:     set,
+		Limit:           limit,
+	}, &slabs)
+	return
+}
+
+func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).POST("/slabbuffer/done", api.PackedSlabsRequestPOST{
+		Slabs:         slabs,
+		UsedContracts: usedContracts,
+	}, nil)
 	return
 }
 

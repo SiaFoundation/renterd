@@ -260,7 +260,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64) (_ object.Object, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool) (_ object.Object, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -303,6 +303,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 
 	// prepare slab size
 	size := int64(rs.MinShards) * rhpv2.SectorSize
+	var partialSlab *object.PartialSlab
 loop:
 	for {
 		select {
@@ -319,15 +320,33 @@ loop:
 					break loop
 				}
 				numSlabs = slabIndex
+				if partialSlab != nil {
+					numSlabs-- // don't wait on partial slab
+				}
+				if len(responses) == numSlabs {
+					break loop
+				}
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, err
 			}
-			wg.Add(1)
-			go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
-				u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
-				wg.Done()
-			}(rs, data, length, slabIndex)
+			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
+				// If uploadPacking is true, we return the partial slab without
+				// uploading.
+				partialSlab = &object.PartialSlab{
+					MinShards:   uint8(rs.MinShards),
+					TotalShards: uint8(rs.TotalShards),
+					Data:        data[:length],
+				}
+				<-nextSlabChan // trigger next iteration
+			} else {
+				// Otherwise we upload it.
+				wg.Add(1)
+				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
+					u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
+					wg.Done()
+				}(rs, data, length, slabIndex)
+			}
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
@@ -349,6 +368,7 @@ loop:
 	for _, resp := range responses {
 		o.Slabs = append(o.Slabs, resp.slab)
 	}
+	o.PartialSlab = partialSlab
 	return o, nil
 }
 

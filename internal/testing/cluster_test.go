@@ -48,6 +48,15 @@ func TestNewTestCluster(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 
+	// Upload packing should be disabled by default.
+	ups, err := b.UploadPackingSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ups.Enabled {
+		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
+	}
+
 	// Check wallet info is sane after startup.
 	wi, err := b.Wallet(context.Background())
 	if err != nil {
@@ -570,7 +579,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// prepare a file
-	data := make([]byte, 128) //rhpv2.SectorSize/12
+	data := make([]byte, 128)
 	if _, err := frand.Read(data); err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +598,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// assert it matches
 	if !bytes.Equal(data, buffer.Bytes()) {
-		t.Fatal("unexpected")
+		t.Fatal("unexpected", len(data), buffer.Len())
 	}
 
 	// download again, 32 bytes at a time.
@@ -1758,5 +1767,142 @@ func TestWalletTransactions(t *testing.T) {
 		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
 			t.Fatal("expected only transactions after median timestamp", medianTxnTimestamp.Unix())
 		}
+	}
+}
+
+func TestUploadPacking(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// Enable upload packing.
+	err = b.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare 3 files which are all smaller than a slab but together make up
+	// for 2 full slabs.
+	slabSize := rhpv2.SectorSize * rs.MinShards
+	totalDataSize := 2 * slabSize
+	data1 := make([]byte, (totalDataSize-(slabSize-256))/2)
+	data2 := make([]byte, slabSize-256) // large partial slab
+	data3 := make([]byte, (totalDataSize-(slabSize-256))/2)
+	frand.Read(data1)
+	frand.Read(data2)
+	frand.Read(data3)
+
+	// declare helpers
+	download := func(name string, data []byte, offset, length uint64) {
+		t.Helper()
+		var buffer bytes.Buffer
+		if err := w.DownloadObject(context.Background(), &buffer, name,
+			api.DownloadWithRange(offset, length)); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data[offset:offset+length], buffer.Bytes()) {
+			t.Fatal("unexpected", len(data), buffer.Len())
+		}
+	}
+	uploadDownload := func(name string, data []byte) {
+		t.Helper()
+		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+			t.Fatal(err)
+		}
+		download(name, data, 0, uint64(len(data)))
+	}
+
+	// upload file 1 and download it.
+	uploadDownload("file1", data1)
+
+	// download it 32 bytes at a time.
+	for i := uint64(0); i < 4; i++ {
+		download("file1", data1, 32*i, 32)
+	}
+
+	// upload file 2 and download it.
+	uploadDownload("file2", data2)
+
+	// file 1 should still be available.
+	for i := uint64(0); i < 4; i++ {
+		download("file1", data1, 32*i, 32)
+	}
+
+	// upload file 3 and download it.
+	uploadDownload("file3", data3)
+
+	// file 1 should still be available.
+	for i := uint64(0); i < 4; i++ {
+		download("file1", data1, 32*i, 32)
+	}
+
+	// file 2 should still be available. Download each half separately.
+	download("file2", data2, 0, uint64(len(data2)))
+	download("file2", data2, 0, uint64(len(data2))/2)
+	download("file2", data2, uint64(len(data2))/2, uint64(len(data2))/2)
+
+	// download file 3 32 bytes at a time as well.
+	for i := uint64(0); i < 4; i++ {
+		download("file3", data3, 32*i, 32)
+	}
+
+	// upload 2 more files which are half a slab each to test filling up a slab
+	// exactly.
+	data4 := make([]byte, slabSize/2)
+	data5 := make([]byte, slabSize/2)
+	uploadDownload("file4", data4)
+	uploadDownload("file5", data5)
+	download("file4", data4, 0, uint64(len(data4)))
+
+	// check the object stats
+	os, err := b.ObjectsStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.NumObjects != 5 {
+		t.Fatal("expected 5 objects, got", os.NumObjects)
+	}
+	totalObjectSize := uint64(3 * slabSize)
+	totalRedundantSize := totalObjectSize * uint64(rs.TotalShards) / uint64(rs.MinShards)
+	if os.TotalObjectsSize != totalObjectSize {
+		t.Fatalf("expected totalObjectSize of %v, got %v", totalObjectSize, os.TotalObjectsSize)
+	}
+	if os.TotalSectorsSize != uint64(totalRedundantSize) {
+		t.Errorf("expected totalSectorSize of %v, got %v", totalRedundantSize, os.TotalSectorsSize)
+	}
+	if os.TotalUploadedSize != uint64(totalRedundantSize) {
+		t.Errorf("expected totalUploadedSize of %v, got %v", totalRedundantSize, os.TotalUploadedSize)
 	}
 }

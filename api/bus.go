@@ -31,9 +31,10 @@ const (
 )
 
 const (
-	SettingContractSet = "contractset"
-	SettingGouging     = "gouging"
-	SettingRedundancy  = "redundancy"
+	SettingContractSet   = "contractset"
+	SettingGouging       = "gouging"
+	SettingRedundancy    = "redundancy"
+	SettingUploadPacking = "uploadpacking"
 )
 
 var (
@@ -265,10 +266,8 @@ type MigrationSlabsRequest struct {
 }
 
 type PackedSlab struct {
-	BufferID    uint   `json:"bufferID"`
-	MinShards   uint8  `json:"minShards"`
-	TotalShards uint8  `json:"totalShards"`
-	Data        []byte `json:"data"`
+	BufferID uint   `json:"bufferID"`
+	Data     []byte `json:"data"`
 }
 
 type UploadedPackedSlab struct {
@@ -327,10 +326,24 @@ type AccountsAddBalanceRequest struct {
 	Amount  *big.Int        `json:"amount"`
 }
 
+type PackedSlabsRequestGET struct {
+	LockingDuration ParamDuration `json:"lockingDuration"`
+	MinShards       uint8         `json:"minShards"`
+	TotalShards     uint8         `json:"totalShards"`
+	ContractSet     string        `json:"contractSet"`
+	Limit           int           `json:"limit"`
+}
+
+type PackedSlabsRequestPOST struct {
+	Slabs         []UploadedPackedSlab                     `json:"slabs"`
+	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+}
+
 // UploadParams contains the metadata needed by a worker to upload an object.
 type UploadParams struct {
 	CurrentHeight uint64
 	ContractSet   string
+	UploadPacking bool
 	GougingParams
 }
 
@@ -418,6 +431,10 @@ type SearchHostsRequest struct {
 	UsabilityMode   string            `json:"usabilityMode"`
 	AddressContains string            `json:"addressContains"`
 	KeyIn           []types.PublicKey `json:"keyIn"`
+}
+
+type UploadPackingSettings struct {
+	Enabled bool `json:"enabled"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
