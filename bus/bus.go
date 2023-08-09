@@ -102,11 +102,14 @@ type (
 		Object(ctx context.Context, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, ps *object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 		RemoveObjects(ctx context.Context, prefix string) error
 		RenameObject(ctx context.Context, from, to string) error
 		RenameObjects(ctx context.Context, from, to string) error
+
+		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
@@ -837,7 +840,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.ObjectAddRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, nil, aor.UsedContracts)) // TODO
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts)) // TODO
 	}
 }
 
@@ -893,6 +896,38 @@ func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 		return
 	}
 	jc.Encode(info)
+}
+
+func (b *bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
+	var psrg api.PackedSlabsRequestGET
+	if jc.Decode(&psrg) != nil {
+		return
+	}
+	if psrg.MinShards == 0 || psrg.TotalShards == 0 {
+		jc.Error(fmt.Errorf("min_shards and total_shards must be non-zero"), http.StatusBadRequest)
+		return
+	}
+	if psrg.LockingDuration == 0 {
+		jc.Error(fmt.Errorf("locking_duration must be non-zero"), http.StatusBadRequest)
+		return
+	}
+	if psrg.ContractSet == "" {
+		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	}
+	slabs, err := b.ms.PackedSlabsForUpload(jc.Request.Context(), time.Duration(psrg.LockingDuration), psrg.MinShards, psrg.TotalShards, psrg.ContractSet, psrg.Limit)
+	if jc.Check("couldn't get packed slabs", err) != nil {
+		return
+	}
+	jc.Encode(slabs)
+}
+
+func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
+	var psrp api.PackedSlabsRequestPOST
+	if jc.Decode(&psrp) != nil {
+		return
+	}
+	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
 }
 
 func (b *bus) slabHandlerGET(jc jape.Context) {
@@ -1039,30 +1074,29 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	val, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
-	if err != nil && errors.Is(err, api.ErrSettingNotFound) {
-		// return the upload params without a contract set, if the user is
-		// specifying a contract set through the query string that's fine
-		jc.Encode(api.UploadParams{
-			ContractSet:   "",
-			CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
-			GougingParams: gp,
-		})
-		return
-	} else if err != nil {
+	var contractSet string
+	var css api.ContractSetSetting
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingContractSet, &css); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
 		return
+	} else if err == nil {
+		contractSet = css.Default
 	}
 
-	var css api.ContractSetSetting
-	if err := json.Unmarshal([]byte(val), &css); err != nil {
-		b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
+	var uploadPacking bool
+	var pus api.UploadPackingSettings
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
+		return
+	} else if err == nil {
+		uploadPacking = pus.Enabled
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:   css.Default,
+		ContractSet:   contractSet,
 		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
 		GougingParams: gp,
+		UploadPacking: uploadPacking,
 	})
 }
 
@@ -1329,8 +1363,9 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 
 	// Load default settings if the setting is not already set.
 	for key, value := range map[string]interface{}{
-		api.SettingGouging:    build.DefaultGougingSettings,
-		api.SettingRedundancy: build.DefaultRedundancySettings,
+		api.SettingGouging:       build.DefaultGougingSettings,
+		api.SettingRedundancy:    build.DefaultRedundancySettings,
+		api.SettingUploadPacking: build.DefaultUploadPackingSettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
@@ -1485,6 +1520,9 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
 
+		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
+		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
@@ -1503,4 +1541,13 @@ func (b *bus) Handler() http.Handler {
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
+}
+
+func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
+	if val, err := b.ss.Setting(ctx, key); err != nil {
+		return fmt.Errorf("could not get contract set settings: %w", err)
+	} else if err := json.Unmarshal([]byte(val), &value); err != nil {
+		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
+	}
+	return nil
 }

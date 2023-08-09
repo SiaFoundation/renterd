@@ -22,11 +22,11 @@ const (
 )
 
 // newTestSQLStore creates a new SQLStore for testing.
-func newTestSQLStore() (*SQLStore, string, modules.ConsensusChangeID, error) {
+func newTestSQLStore(dir string) (*SQLStore, string, modules.ConsensusChangeID, error) {
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	conn := NewEphemeralSQLiteConnection(dbName)
 	walletAddrs := types.Address(frand.Entropy256())
-	sqlStore, ccid, err := NewSQLStore(conn, true, time.Second, walletAddrs, newTestLogger())
+	sqlStore, ccid, err := NewSQLStore(conn, dir, true, time.Second, walletAddrs, newTestLogger())
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}
@@ -56,7 +56,7 @@ func newTestLogger() logger.Interface {
 
 // TestConsensusReset is a unit test for ResetConsensusSubscription.
 func TestConsensusReset(t *testing.T) {
-	db, _, ccid, err := newTestSQLStore()
+	db, _, ccid, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
