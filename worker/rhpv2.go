@@ -277,13 +277,14 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 		}
 		t.SetChallenge(lockResp.NewChallenge)
 		revision := lockResp.Revision
+		sigs := lockResp.Signatures
 
 		// defer unlock RPC
 		defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
 
 		// sanity check the signature
 		var sig types.Signature
-		copy(sig[:], lockResp.Signatures[0].Signature)
+		copy(sig[:], sigs[0].Signature)
 		if !renterKey.PublicKey().VerifyHash(hashRevision(revision), sig) {
 			return fmt.Errorf("unexpected renter signature on revision host revision")
 		}
@@ -297,7 +298,7 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 		// extract the revision
 		rev := rhpv2.ContractRevision{
 			Revision:   revision,
-			Signatures: [2]types.TransactionSignature{lockResp.Signatures[0], lockResp.Signatures[1]},
+			Signatures: [2]types.TransactionSignature{sigs[0], sigs[1]},
 		}
 
 		// execute settings RPC
