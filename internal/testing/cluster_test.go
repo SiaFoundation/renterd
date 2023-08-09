@@ -273,17 +273,11 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.Configured {
-		t.Fatal("autopilot should be configured")
-	}
 	if time.Time(status.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
 	}
 	if time.Time(status.ScanningLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a scan")
-	}
-	if !status.Synced {
-		t.Fatal("autopilot should be synced")
 	}
 	if status.UptimeMS == 0 {
 		t.Fatal("uptime should be set")

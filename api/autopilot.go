@@ -91,12 +91,10 @@ type (
 	// AutopilotStatusResponse is the response type for the /autopilot/status
 	// endpoint.
 	AutopilotStatusResponse struct {
-		Configured         bool          `json:"configured"`
 		Migrating          bool          `json:"migrating"`
 		MigratingLastStart ParamTime     `json:"migratingLastStart"`
 		Scanning           bool          `json:"scanning"`
 		ScanningLastStart  ParamTime     `json:"scanningLastStart"`
-		Synced             bool          `json:"synced"`
 		UptimeMS           ParamDuration `json:"uptimeMS"`
 	}
 

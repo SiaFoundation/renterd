@@ -44,6 +44,7 @@ func TestHostPruning(t *testing.T) {
 	// create a helper function that records n failed interactions
 	now := time.Now()
 	recordFailedInteractions := func(n int, hk types.PublicKey) {
+		t.Helper()
 		his := make([]hostdb.Interaction, n)
 		for i := 0; i < n; i++ {
 			now = now.Add(time.Hour).Add(time.Minute) // 1m leeway
@@ -61,6 +62,7 @@ func TestHostPruning(t *testing.T) {
 
 	// create a helper function that waits for an autopilot loop to finish
 	waitForAutopilotLoop := func() {
+		t.Helper()
 		var nTriggered int
 		if err := Retry(10, 500*time.Millisecond, func() error {
 			if triggered, err := a.Trigger(true); err != nil {

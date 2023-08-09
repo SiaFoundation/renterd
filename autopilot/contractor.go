@@ -118,7 +118,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	defer span.End()
 
 	// skip contract maintenance if we're stopped or not synced
-	if c.ap.isStopped() || !c.ap.isSynced() {
+	if c.ap.isStopped() {
 		return false, nil
 	}
 	c.logger.Info("performing contract maintenance")
@@ -445,7 +445,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	ctx, span := tracing.Tracer.Start(ctx, "contractor.performWalletMaintenance")
 	defer span.End()
 
-	if c.ap.isStopped() || !c.ap.isSynced() {
+	if c.ap.isStopped() {
 		return nil // skip contract maintenance if we're not synced
 	}
 
