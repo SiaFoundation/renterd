@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -89,7 +90,7 @@ type (
 		Model
 		DBContractSetID  uint `gorm:"index"`
 		DBContractSet    dbContractSet
-		DBBufferedSlabID uint `gorm:"index;unique;default:NULL"`
+		DBBufferedSlabID sql.NullInt32 `gorm:"index"`
 
 		Health      float64 `gorm:"index; default:1.0; NOT NULL"`
 		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string

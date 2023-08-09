@@ -393,8 +393,11 @@ func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 
 	// Use AutoMigrate to add column to create buffered_slabs and add column to
 	// slabs.
-	if err := m.AutoMigrate(&dbBufferedSlab{}, &dbSlab{}); err != nil {
-		return fmt.Errorf("failed to auto migrate buffered_slabs and slabs: %w", err)
+	if err := m.CreateTable(&dbBufferedSlab{}); err != nil {
+		return fmt.Errorf("failed to create table 'buffered_slabs': %w", err)
+	}
+	if err := m.AutoMigrate(&dbSlab{}); err != nil {
+		return fmt.Errorf("failed to auto migrate 'slabs' table: %w", err)
 	}
 
 	// Enable foreign keys again.
