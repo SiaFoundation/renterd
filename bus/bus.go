@@ -875,6 +875,18 @@ func (b *bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
 	if jc.Decode(&psrg) != nil {
 		return
 	}
+	if psrg.MinShards == 0 || psrg.TotalShards == 0 {
+		jc.Error(fmt.Errorf("min_shards and total_shards must be non-zero"), http.StatusBadRequest)
+		return
+	}
+	if psrg.LockingDuration == 0 {
+		jc.Error(fmt.Errorf("locking_duration must be non-zero"), http.StatusBadRequest)
+		return
+	}
+	if psrg.ContractSet == "" {
+		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	}
 	slabs, err := b.ms.PackedSlabsForUpload(jc.Request.Context(), time.Duration(psrg.LockingDuration), psrg.MinShards, psrg.TotalShards, psrg.ContractSet, psrg.Limit)
 	if jc.Check("couldn't get packed slabs", err) != nil {
 		return
@@ -1035,31 +1047,21 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	}
 
 	var contractSet string
-	val, err := b.ss.Setting(jc.Request.Context(), api.SettingContractSet)
-	if err == nil {
-		var css api.ContractSetSetting
-		if err := json.Unmarshal([]byte(val), &css); err != nil {
-			b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
-			return
-		}
-		contractSet = css.Default
-	} else if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+	var css api.ContractSetSetting
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingContractSet, &css); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
 		return
+	} else if err == nil {
+		contractSet = css.Default
 	}
 
 	var uploadPacking bool
-	val, err = b.ss.Setting(jc.Request.Context(), api.SettingUploadPacking)
-	if err == nil {
-		var pus api.UploadPackingSettings
-		if err := json.Unmarshal([]byte(val), &pus); err != nil {
-			b.logger.Panicf("failed to unmarshal contract set settings '%s': %v", val, err)
-			return
-		}
-		uploadPacking = pus.Enabled
-	} else if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
+	var pus api.UploadPackingSettings
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
 		return
+	} else if err == nil {
+		uploadPacking = pus.Enabled
 	}
 
 	jc.Encode(api.UploadParams{
@@ -1509,4 +1511,13 @@ func (b *bus) Handler() http.Handler {
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
+}
+
+func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
+	if val, err := b.ss.Setting(ctx, key); err != nil {
+		return fmt.Errorf("could not get contract set settings: %w", err)
+	} else if err := json.Unmarshal([]byte(val), &value); err != nil {
+		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
+	}
+	return nil
 }

@@ -1131,11 +1131,11 @@ func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab obj
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 	_, err = file.Write(partialSlab.Data)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 	return tx.Create(&dbBufferedSlab{
 		DBSlab: dbSlab{
 			DBContractSetID: contractSetID,
@@ -1507,13 +1507,12 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	if err := tx.Take(&buffer, "id = ?", slab.BufferID).Error; err != nil {
 		return err
 	}
-	err = tx.Where("id", slab.BufferID).
-		Delete(&dbBufferedSlab{}).
+	err = tx.Delete(&buffer).
 		Error
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(partialSlabDir, buffer.Filename)); err != nil {
+	if err := os.Remove(filepath.Join(partialSlabDir, buffer.Filename)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 

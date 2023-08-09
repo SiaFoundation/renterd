@@ -2593,7 +2593,6 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	buffer.Model = Model{}
-	//expectedBuffer.Data = append(expectedBuffer.Data, obj2.PartialSlab.Data...)
 	expectedBuffer.Size = 4194303
 	buffer.DBSlab = dbSlab{} // exclude from comparison
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
@@ -2639,7 +2638,6 @@ func TestPartialSlab(t *testing.T) {
 	}
 	buffer.Model = Model{}
 	expectedBuffer.Complete = true // full now
-	//expectedBuffer.Data = append(expectedBuffer.Data, obj3.PartialSlab.Data[0])
 	expectedBuffer.Size = 4194304
 	buffer.DBSlab = dbSlab{} // exclude from comparison
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
