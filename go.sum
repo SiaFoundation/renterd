@@ -390,6 +390,8 @@ go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be h1:fKfwYsCF5ua3Z/NNdLU+4s
 go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be/go.mod h1:D17UWSn99SEfQnEaR9G9n6Kz9+BwqMoUgZ6Cl424LsQ=
 go.sia.tech/hostd v0.1.0 h1:0pAw+LV2h03eVYoNg4XydQKOJ9t2sPzPLrSteTV70aE=
 go.sia.tech/hostd v0.1.0/go.mod h1:vpMMjiEmGkDZ0TplBmMgHEfsystWSOWbog+crlPS0ls=
+go.sia.tech/hostd v0.1.4 h1:r6PSo8ed0hmxjf4pvFQfRCfGk/DVRd/R/T9K9B0JhJ4=
+go.sia.tech/hostd v0.1.4/go.mod h1:o+Z9ZGJZRY31MvRNXyyAlmBHjjiTE/3TgAB4pCHgr2c=
 go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb h1:yLDEqkqC19E/HgBoq2Uhw9oH3SMNRyeRjZ7Ep4dPKR8=
 go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb/go.mod h1:4QqmBB+t3W7cNplXPj++ZqpoUb2PeiS66RLpXmEGap4=
 go.sia.tech/mux v1.2.0 h1:ofa1Us9mdymBbGMY2XH/lSpY8itFsKIo/Aq8zwe+GHU=
