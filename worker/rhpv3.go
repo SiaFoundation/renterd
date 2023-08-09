@@ -619,7 +619,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 
 			var refund types.Currency
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
-			cost, refund, err = RPCReadSector(ctx, t, w, pt, &payment, offset, length, root, true)
+			cost, refund, err = RPCReadSector(ctx, t, w, pt, &payment, offset, length, root)
 			amount = cost.Sub(refund)
 			return err
 		})
@@ -667,6 +667,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 
 // padBandwitdh pads the bandwidth to the next multiple of 1460 bytes.  1460
 // bytes is the maximum size of a TCP packet when using IPv4.
+// TODO: once hostd becomes the only host implementation we can simplify this.
 func padBandwidth(pt rhpv3.HostPriceTable, rc rhpv3.ResourceCost) rhpv3.ResourceCost {
 	padCost := func(cost, paddingSize types.Currency) types.Currency {
 		if paddingSize.IsZero() {
@@ -676,7 +677,7 @@ func padBandwidth(pt rhpv3.HostPriceTable, rc rhpv3.ResourceCost) rhpv3.Resource
 	}
 	minPacketSize := uint64(1460)
 	minIngress := pt.UploadBandwidthCost.Mul64(minPacketSize)
-	minEgress := pt.DownloadBandwidthCost.Mul64(minPacketSize)
+	minEgress := pt.DownloadBandwidthCost.Mul64(3 * minPacketSize)
 	rc.Ingress = padCost(rc.Ingress, minIngress)
 	rc.Egress = padCost(rc.Egress, minEgress)
 	return rc
@@ -1083,7 +1084,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 }
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256, merkleProof bool) (cost, refund types.Currency, err error) {
+func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
 	defer wrapErr(&err, "ReadSector")
 	s, err := t.DialStream(ctx)
 	if err != nil {

@@ -34,8 +34,7 @@ type Bus interface {
 	UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error
 
 	// wallet
-	WalletAddress(ctx context.Context) (types.Address, error)
-	WalletBalance(ctx context.Context) (types.Currency, error)
+	Wallet(ctx context.Context) (api.WalletResponse, error)
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
@@ -97,10 +96,8 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	mu         sync.Mutex
-	configured bool
-	synced     bool
-	state      state
+	mu    sync.Mutex
+	state state
 
 	alerts *alerts.Manager
 	a      *accounts
@@ -190,18 +187,6 @@ func (ap *Autopilot) Run() error {
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
 
-	// block until the autopilot is configured
-	if !ap.blockUntilConfigured() {
-		ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
-		return nil
-	}
-
-	// block until consensus is synced
-	if !ap.blockUntilSynced() {
-		ap.logger.Error("autopilot stopped before consensus was synced")
-		return nil
-	}
-
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
 	for {
@@ -210,6 +195,28 @@ func (ap *Autopilot) Run() error {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
 			defer span.End()
+
+			// initiate a host scan - no need to be synced or configured for scanning
+			ap.s.tryUpdateTimeout()
+			ap.s.tryPerformHostScan(ctx, w, forceScan)
+
+			// block until the autopilot is configured
+			if !ap.blockUntilConfigured(ap.ticker.C) {
+				if !ap.isStopped() {
+					return
+				}
+				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
+				return
+			}
+
+			// block until consensus is synced
+			if !ap.blockUntilSynced(ap.ticker.C) {
+				if !ap.isStopped() {
+					return
+				}
+				ap.logger.Error("autopilot stopped before consensus was synced")
+				return
+			}
 
 			// Trace/Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ctx)
@@ -229,16 +236,6 @@ func (ap *Autopilot) Run() error {
 			err = ap.updateState(ctx)
 			if err != nil {
 				ap.logger.Errorf("failed to update state, err: %v", err)
-				return
-			}
-
-			// initiate a host scan
-			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ctx, w, forceScan)
-
-			// do not continue if we are not synced
-			if !ap.isSynced() {
-				ap.logger.Debug("iteration interrupted, consensus not synced")
 				return
 			}
 
@@ -329,19 +326,13 @@ func (ap *Autopilot) Uptime() (dur time.Duration) {
 	return
 }
 
-func (ap *Autopilot) blockUntilConfigured() bool {
+func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	var once sync.Once
 
 	for {
-		select {
-		case <-ap.stopChan:
-			return false
-		case <-ticker.C:
-		}
-
 		// try and fetch the config
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		_, err := ap.bus.Autopilot(ctx, api.DefaultAutopilotID)
@@ -350,30 +341,28 @@ func (ap *Autopilot) blockUntilConfigured() bool {
 		// if the config was not found, or we were unable to fetch it, keep blocking
 		if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
 			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
-			continue
 		} else if err != nil {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
-			continue
 		}
-
-		ap.mu.Lock()
-		ap.configured = true
-		ap.mu.Unlock()
+		if err != nil {
+			select {
+			case <-ap.stopChan:
+				return false
+			case <-interrupt:
+				return false
+			case <-ticker.C:
+				continue
+			}
+		}
 		return true
 	}
 }
 
-func (ap *Autopilot) blockUntilSynced() bool {
+func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ap.stopChan:
-			return false
-		case <-ticker.C:
-		}
-
 		// try and fetch consensus
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		cs, err := ap.bus.ConsensusState(ctx)
@@ -382,28 +371,19 @@ func (ap *Autopilot) blockUntilSynced() bool {
 		// if an error occurred, or if we're not synced, we continue
 		if err != nil {
 			ap.logger.Errorf("failed to get consensus state, err: %v", err)
-			continue
-		} else if !cs.Synced {
-			continue
 		}
-
-		ap.mu.Lock()
-		ap.synced = true
-		ap.mu.Unlock()
+		if err != nil || !cs.Synced {
+			select {
+			case <-ap.stopChan:
+				return false
+			case <-interrupt:
+				return false
+			case <-ticker.C:
+				continue
+			}
+		}
 		return true
 	}
-}
-
-func (ap *Autopilot) isConfigured() bool {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-	return ap.configured
-}
-
-func (ap *Autopilot) isSynced() bool {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-	return ap.synced
 }
 
 func (ap *Autopilot) isRunning() bool {
@@ -442,10 +422,11 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	}
 
 	// fetch our wallet address
-	address, err := ap.bus.WalletAddress(ctx)
+	wi, err := ap.bus.Wallet(ctx)
 	if err != nil {
 		return fmt.Errorf("could not fetch wallet address, err: %v", err)
 	}
+	address := wi.Address
 
 	// update current period if necessary
 	if cs.Synced {
@@ -604,12 +585,10 @@ func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
 	jc.Encode(api.AutopilotStatusResponse{
-		Configured:         ap.isConfigured(),
 		Migrating:          migrating,
 		MigratingLastStart: api.ParamTime(mLastStart),
 		Scanning:           scanning,
 		ScanningLastStart:  api.ParamTime(sLastStart),
-		Synced:             ap.isSynced(),
 		UptimeMS:           api.ParamDuration(ap.Uptime()),
 	})
 }

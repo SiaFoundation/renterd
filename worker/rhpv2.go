@@ -432,7 +432,7 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 	})
 }
 
-func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (roots []types.Hash256, err error) {
+func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration) (roots []types.Hash256, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		req := &rhpv2.RPCLockRequest{
 			ContractID: contractID,
@@ -446,15 +446,30 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 			return err
 		}
 		t.SetChallenge(lockResp.NewChallenge)
-
-		// extract the revision
-		rev := rhpv2.ContractRevision{
-			Revision:   lockResp.Revision,
-			Signatures: [2]types.TransactionSignature{lockResp.Signatures[0], lockResp.Signatures[1]},
-		}
+		revision := lockResp.Revision
+		sigs := lockResp.Signatures
 
 		// defer unlock RPC
 		defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
+
+		// sanity check the signature
+		var sig types.Signature
+		copy(sig[:], sigs[0].Signature)
+		if !renterKey.PublicKey().VerifyHash(hashRevision(revision), sig) {
+			return fmt.Errorf("unexpected renter signature on revision host revision")
+		}
+
+		// sanity check the revision number is not lower than our last known
+		// revision number, host might be slipping us an outdated revision
+		if revision.RevisionNumber < lastKnownRevisionNumber {
+			return fmt.Errorf("unexpected revision number, %v!=%v", revision.RevisionNumber, lastKnownRevisionNumber)
+		}
+
+		// extract the revision
+		rev := rhpv2.ContractRevision{
+			Revision:   revision,
+			Signatures: [2]types.TransactionSignature{sigs[0], sigs[1]},
+		}
 
 		// execute settings RPC
 		var settingsResp rhpv2.RPCSettingsResponse

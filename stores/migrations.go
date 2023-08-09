@@ -156,9 +156,16 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Rollback: nil,
 		},
 		{
-			ID: "00004_contractspending",
+			ID: "00004_objectID_collation",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00004_contractspending(tx, logger)
+				return performMigration00004_objectID_collation(tx, logger)
+			},
+			Rollback: nil,
+		},
+		{
+			ID: "00005_contractspending",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00005_contractspending(tx, logger)
 			},
 			Rollback: nil,
 		},
@@ -185,7 +192,15 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initSchema(tx *gorm.DB) error {
-	return tx.AutoMigrate(tables...)
+	err := tx.AutoMigrate(tables...)
+	if err != nil {
+		return err
+	}
+	// Change the object_id colum to use case sensitive collation.
+	if !isSQLite(tx) {
+		return tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+	}
+	return nil
 }
 
 // performMigration00001_gormigrate performs the first migration before
@@ -347,8 +362,20 @@ func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) e
 	return nil
 }
 
-func performMigration00004_contractspending(txn *gorm.DB, logger glogger.Interface) error {
-	logger.Info(context.Background(), "performing migration 00004_contractspending")
+func performMigration00004_objectID_collation(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00004_objectID_collation")
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00004_objectID_collation complete")
+	return nil
+}
+
+func performMigration00005_contractspending(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00005_contractspending")
 	if !txn.Migrator().HasColumn(&dbContract{}, "delete_spending") {
 		if err := txn.Migrator().AddColumn(&dbContract{}, "delete_spending"); err != nil {
 			return err
@@ -359,6 +386,6 @@ func performMigration00004_contractspending(txn *gorm.DB, logger glogger.Interfa
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00004_contractspending complete")
+	logger.Info(context.Background(), "migration 00005_contractspending complete")
 	return nil
 }

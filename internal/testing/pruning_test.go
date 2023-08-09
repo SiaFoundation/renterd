@@ -45,6 +45,7 @@ func TestHostPruning(t *testing.T) {
 	// create a helper function that records n failed interactions
 	now := time.Now()
 	recordFailedInteractions := func(n int, hk types.PublicKey) {
+		t.Helper()
 		his := make([]hostdb.Interaction, n)
 		for i := 0; i < n; i++ {
 			now = now.Add(time.Hour).Add(time.Minute) // 1m leeway
@@ -62,6 +63,7 @@ func TestHostPruning(t *testing.T) {
 
 	// create a helper function that waits for an autopilot loop to finish
 	waitForAutopilotLoop := func() {
+		t.Helper()
 		var nTriggered int
 		if err := Retry(10, 500*time.Millisecond, func() error {
 			if triggered, err := a.Trigger(true); err != nil {
@@ -175,6 +177,7 @@ func TestSectorPruning(t *testing.T) {
 		}
 	}()
 
+	// add a helper to check whether a root is in a given slice
 	hasRoot := func(roots []types.Hash256, root types.Hash256) bool {
 		for _, r := range roots {
 			if r == root {
@@ -186,6 +189,7 @@ func TestSectorPruning(t *testing.T) {
 
 	// convenience variables
 	cfg := testAutopilotConfig
+	rs := testRedundancySettings
 	w := cluster.Worker
 	b := cluster.Bus
 
@@ -201,51 +205,46 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// create a contracts dict
-	c, err := b.Contracts(context.Background())
+	contracts, err := b.Contracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	contracts := make(map[types.PublicKey]api.ContractMetadata)
-	for _, contract := range c {
-		contracts[contract.HostKey] = contract
-	}
 
-	// add an object
-	if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), "obj"); err != nil {
-		t.Fatal(err)
-	}
-
-	// fetch the object and for every shard fetch the contract sectors and compare them
-	obj, _, err := b.Object(context.Background(), "obj")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(obj.Slabs) == 0 {
-		t.Fatal("expected at least one slab")
-	}
-	for _, shard := range obj.Slabs[0].Shards {
-		contract, ok := contracts[shard.Host]
-		if !ok {
-			t.Fatal("could not find contract for host")
+	// add several objects
+	for i := 0; i < 10; i++ {
+		filename := fmt.Sprintf("obj_%d", i)
+		if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename); err != nil {
+			t.Fatal(err)
 		}
-		roots, err := w.RHPContractRoots(context.Background(), contract.ID)
+	}
+
+	// compare database against roots returned by the host
+	var n int
+	for _, c := range contracts {
+		dbRoots, err := b.ContractRoots(context.Background(), c.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !hasRoot(roots, shard.Root) {
-			t.Fatal("root not found in contract", len(roots), shard.Host, shard.Root)
-		}
-
-		roots, err = b.ContractRoots(context.Background(), contract.ID)
+		cRoots, err := w.RHPContractRoots(context.Background(), c.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !hasRoot(roots, shard.Root) {
-			t.Fatal("root not found in database", len(roots), roots, shard.Host, shard.Root)
+		if len(dbRoots) != len(cRoots) {
+			t.Fatal("unexpected number of roots", dbRoots, cRoots)
 		}
+		for _, root := range dbRoots {
+			if !hasRoot(cRoots, root) {
+				t.Fatal("missing root", dbRoots, cRoots)
+			}
+		}
+		n += len(cRoots)
+	}
+	if n != rs.TotalShards*10 {
+		t.Fatal("unexpected number of roots", n)
 	}
 
-	// reboot the cluster to ensure pending records get flushed
+	// reboot the cluster to ensure spending records get flushed
+	// Restart cluster to have worker fetch the account from the bus again.
 	cluster2, err := cluster.Reboot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +254,6 @@ func TestSectorPruning(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-
 	b = cluster2.Bus
 	w = cluster2.Worker
 
@@ -266,24 +264,25 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal("expected 0 prunable data", n)
 	}
 
-	// delete the object
-	if err := b.DeleteObject(context.Background(), "obj", false); err != nil {
-		t.Fatal(err)
+	// delete every other object
+	for i := 0; i < 10; i += 2 {
+		filename := fmt.Sprintf("obj_%d", i)
+		if err := b.DeleteObject(context.Background(), filename, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// assert amount of prunable data
 	if n, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != rhpv2.SectorSize*3 {
+	} else if n != int64(5)*int64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 
 	// prune all contracts
-	for _, shard := range obj.Slabs[0].Shards {
-		if n, err := w.RHPPruneContract(context.Background(), contracts[shard.Host].ID); err != nil {
+	for _, c := range contracts {
+		if _, err := w.RHPPruneContract(context.Background(), c.ID); err != nil {
 			t.Fatal(err)
-		} else if n != rhpv2.SectorSize {
-			t.Fatal("unexpected pruned data", n)
 		}
 	}
 
@@ -294,22 +293,22 @@ func TestSectorPruning(t *testing.T) {
 		} else if n != 0 {
 			return fmt.Errorf("unexpected prunable data: %d", n)
 		}
-
-		for _, shard := range obj.Slabs[0].Shards {
-			c, err := b.Contract(context.Background(), contracts[shard.Host].ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if c.Spending.SectorRoots.IsZero() {
-				return errors.New("spending record not updated")
-			}
-			if c.Spending.Deletions.IsZero() {
-				return errors.New("spending record not updated")
-			}
-		}
-
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+
+	// assert spending was updated
+	for _, c := range contracts {
+		c, err := b.Contract(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Spending.SectorRoots.IsZero() {
+			t.Fatal("spending record not updated")
+		}
+		if c.Spending.Deletions.IsZero() {
+			t.Fatal("spending record not updated")
+		}
 	}
 }

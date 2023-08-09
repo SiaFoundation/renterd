@@ -48,6 +48,24 @@ func TestNewTestCluster(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 
+	// Check wallet info is sane after startup.
+	wi, err := b.Wallet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wi.ScanHeight == 0 {
+		t.Fatal("wallet scan height should not be 0")
+	}
+	if wi.Confirmed.IsZero() {
+		t.Fatal("wallet confirmed balance should not be zero")
+	}
+	if !wi.Spendable.Equals(wi.Confirmed) {
+		t.Fatal("wallet spendable balance should match confirmed")
+	}
+	if wi.Address == (types.Address{}) {
+		t.Fatal("wallet address should be set")
+	}
+
 	// Try talking to the bus API by adding an object.
 	err = b.AddObject(context.Background(), "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -196,17 +214,17 @@ func TestNewTestCluster(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if hi.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+		if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
-		if hi.Score == 0 {
+		if hi.Checks.Score == 0 {
 			t.Fatal("score shouldn't be 0")
 		}
-		if !hi.Usable {
+		if !hi.Checks.Usable {
 			t.Fatal("host should be usable")
 		}
-		if len(hi.UnusableReasons) != 0 {
+		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
 		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
@@ -218,17 +236,17 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, hi := range hostInfos {
-		if hi.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+		if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
-		if hi.Score == 0 {
+		if hi.Checks.Score == 0 {
 			t.Fatal("score shouldn't be 0")
 		}
-		if !hi.Usable {
+		if !hi.Checks.Usable {
 			t.Fatal("host should be usable")
 		}
-		if len(hi.UnusableReasons) != 0 {
+		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
 		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
@@ -255,17 +273,11 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.Configured {
-		t.Fatal("autopilot should be configured")
-	}
 	if time.Time(status.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
 	}
 	if time.Time(status.ScanningLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a scan")
-	}
-	if !status.Synced {
-		t.Fatal("autopilot should be synced")
 	}
 	if status.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
@@ -319,6 +331,7 @@ func TestObjectEntries(t *testing.T) {
 		{"/fileś/śpecial", 6}, // utf8
 		{"//double/", 7},
 		{"///triple", 8},
+		{"/FOO/bar", 9}, // test case sensitivity
 	}
 
 	for _, upload := range uploads {
@@ -340,17 +353,18 @@ func TestObjectEntries(t *testing.T) {
 		prefix string
 		want   []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "//", Size: 15}, {Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}, {Name: "/gab/", Size: 5}}},
-		{"//", "", []api.ObjectMetadata{{Name: "///", Size: 8}, {Name: "//double/", Size: 7}}},
-		{"///", "", []api.ObjectMetadata{{Name: "///triple", Size: 8}}},
-		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1}, {Name: "/foo/bat", Size: 2}, {Name: "/foo/baz/", Size: 7}}},
-		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}, {Name: "/foo/baz/quuz", Size: 4}}},
-		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5}}},
-		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6}}},
+		{"/", "", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"//", "", []api.ObjectMetadata{{Name: "///", Size: 8, Health: 1}, {Name: "//double/", Size: 7, Health: 1}}},
+		{"///", "", []api.ObjectMetadata{{Name: "///triple", Size: 8, Health: 1}}},
+		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
+		{"/FOO/", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 9, Health: 1}}},
+		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
 
-		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6}, {Name: "/foo/", Size: 10}}},
+		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
 		{"/foo/", "fo", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3}}},
+		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
 	}
 	for _, test := range tests {
