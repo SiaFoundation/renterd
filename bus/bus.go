@@ -269,6 +269,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	}
 	txn := wfr.Transaction
 	if len(txn.MinerFees) == 0 {
+		// if no fees are specified, we add some
 		fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
 		txn.MinerFees = []types.Currency{fee}
 	}
