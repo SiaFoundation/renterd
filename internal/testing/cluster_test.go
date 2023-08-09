@@ -1810,18 +1810,25 @@ func TestWallet(t *testing.T) {
 
 	// The wallet should still have the same confirmed balance, a lower
 	// spendable balance and a greater unconfirmed balance.
-	info, err := b.Wallet(context.Background())
+	var info api.WalletResponse
+	err = Retry(100, 100*time.Millisecond, func() error {
+		info, err = b.Wallet(context.Background())
+		if err != nil {
+			return err
+		}
+		if !info.Confirmed.Equals(initialInfo.Confirmed) {
+			return fmt.Errorf("wallet confirmed balance should not be zero: %v %v", info.Confirmed, initialInfo.Confirmed)
+		}
+		if info.Spendable.Cmp(initialInfo.Spendable) >= 0 {
+			return fmt.Errorf("wallet spendable balance should be lower than before: %v %v", info.Spendable, initialInfo.Spendable)
+		}
+		if info.Unconfirmed.Cmp(initialInfo.Unconfirmed) < 0 {
+			return fmt.Errorf("wallet unconfirmed balance should be greater than before: %v %v", info.Unconfirmed, initialInfo.Unconfirmed)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !info.Confirmed.Equals(initialInfo.Confirmed) {
-		t.Fatal("wallet confirmed balance should not be zero", info.Confirmed, initialInfo.Confirmed)
-	}
-	if info.Spendable.Cmp(initialInfo.Spendable) >= 0 {
-		t.Fatal("wallet spendable balance should be lower than before", info.Spendable, initialInfo.Spendable)
-	}
-	if info.Unconfirmed.Cmp(initialInfo.Unconfirmed) < 0 {
-		t.Fatal("wallet unconfirmed balance should be greater than before", info.Unconfirmed, initialInfo.Unconfirmed)
 	}
 
 	// The diffs of the spendable balance and unconfirmed balance should add up
