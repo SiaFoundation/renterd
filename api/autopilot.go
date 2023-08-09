@@ -98,16 +98,19 @@ type (
 		UptimeMS           ParamDuration `json:"uptimeMS"`
 	}
 
-	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
-	HostHandlerResponse struct {
-		Host hostdb.Host `json:"host"`
-
+	HostHandlerResponseChecks struct {
 		Gouging          bool                 `json:"gouging"`
 		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
 		Score            float64              `json:"score"`
 		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
 		Usable           bool                 `json:"usable"`
 		UnusableReasons  []string             `json:"unusableReasons"`
+	}
+
+	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
+	HostHandlerResponse struct {
+		Host   hostdb.Host                `json:"host"`
+		Checks *HostHandlerResponseChecks `json:"checks,omitempty"`
 	}
 
 	HostGougingBreakdown struct {

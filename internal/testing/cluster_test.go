@@ -214,17 +214,17 @@ func TestNewTestCluster(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if hi.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+		if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
-		if hi.Score == 0 {
+		if hi.Checks.Score == 0 {
 			t.Fatal("score shouldn't be 0")
 		}
-		if !hi.Usable {
+		if !hi.Checks.Usable {
 			t.Fatal("host should be usable")
 		}
-		if len(hi.UnusableReasons) != 0 {
+		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
 		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
@@ -236,17 +236,17 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, hi := range hostInfos {
-		if hi.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.ScoreBreakdown, "", "  ")
+		if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
-		if hi.Score == 0 {
+		if hi.Checks.Score == 0 {
 			t.Fatal("score shouldn't be 0")
 		}
-		if !hi.Usable {
+		if !hi.Checks.Usable {
 			t.Fatal("host should be usable")
 		}
-		if len(hi.UnusableReasons) != 0 {
+		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
 		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
