@@ -413,7 +413,7 @@ func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 				return fmt.Errorf("failed to create column 'db_buffered_slab_id' on table 'slabs': %w", err)
 			}
 		}
-	} else if err := m.AutoMigrate(&dbBufferedSlab{}, &dbSlab{}); err != nil {
+	} else if err := m.AutoMigrate(&dbSlab{}); err != nil {
 		return fmt.Errorf("failed to migrate table 'slabs': %w", err)
 	}
 
