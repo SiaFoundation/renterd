@@ -57,24 +57,6 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
 	}
 
-	// Check wallet info is sane after startup.
-	wi, err := b.Wallet(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if wi.ScanHeight == 0 {
-		t.Fatal("wallet scan height should not be 0")
-	}
-	if wi.Confirmed.IsZero() {
-		t.Fatal("wallet confirmed balance should not be zero")
-	}
-	if !wi.Spendable.Equals(wi.Confirmed) {
-		t.Fatal("wallet spendable balance should match confirmed")
-	}
-	if wi.Address == (types.Address{}) {
-		t.Fatal("wallet address should be set")
-	}
-
 	// Try talking to the bus API by adding an object.
 	err = b.AddObject(context.Background(), "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -1904,5 +1886,91 @@ func TestUploadPacking(t *testing.T) {
 	}
 	if os.TotalUploadedSize != uint64(totalRedundantSize) {
 		t.Errorf("expected totalUploadedSize of %v, got %v", totalRedundantSize, os.TotalUploadedSize)
+	}
+}
+
+func TestWallet(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b := cluster.Bus
+
+	// Check wallet info is sane after startup.
+	initialInfo, err := b.Wallet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialInfo.ScanHeight == 0 {
+		t.Fatal("wallet scan height should not be 0")
+	}
+	if initialInfo.Confirmed.IsZero() {
+		t.Fatal("wallet confirmed balance should not be zero")
+	}
+	if !initialInfo.Spendable.Equals(initialInfo.Confirmed) {
+		t.Fatal("wallet spendable balance should match confirmed")
+	}
+	if !initialInfo.Unconfirmed.IsZero() {
+		t.Fatal("wallet unconfirmed balance should be zero")
+	}
+	if initialInfo.Address == (types.Address{}) {
+		t.Fatal("wallet address should be set")
+	}
+
+	// Send 1 SC to an address outside our wallet. We manually do this to be in
+	// control of the miner fees.
+	sendAmt := types.HastingsPerSiacoin
+	minerFee := types.NewCurrency64(1)
+	txn := types.Transaction{
+		SiacoinOutputs: []types.SiacoinOutput{
+			{Value: sendAmt, Address: types.VoidAddress},
+		},
+		MinerFees: []types.Currency{minerFee},
+	}
+	toSign, parents, err := b.WalletFund(context.Background(), &txn, txn.SiacoinOutputs[0].Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.WalletSign(context.Background(), &txn, toSign, types.CoveredFields{WholeTransaction: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BroadcastTransaction(context.Background(), append(parents, txn)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The wallet should still have the same confirmed balance, a lower
+	// spendable balance and a greater unconfirmed balance.
+	var info api.WalletResponse
+	err = Retry(600, 100*time.Millisecond, func() error {
+		info, err = b.Wallet(context.Background())
+		if err != nil {
+			return err
+		}
+		if !info.Confirmed.Equals(initialInfo.Confirmed) {
+			return fmt.Errorf("wallet confirmed balance should not have changed: %v %v", info.Confirmed, initialInfo.Confirmed)
+		}
+		// The diffs of the spendable balance and unconfirmed balance should add up
+		// to the amount of money sent as well as the miner fees used.
+		spendableDiff := initialInfo.Spendable.Sub(info.Spendable)
+		unconfirmedDiff := info.Unconfirmed
+		withdrawnAmt := spendableDiff.Sub(unconfirmedDiff)
+		expectedWithdrawnAmt := sendAmt.Add(minerFee)
+		if !withdrawnAmt.Equals(expectedWithdrawnAmt) {
+			return fmt.Errorf("withdrawn amt doesn't match expectation: %v %v", withdrawnAmt.ExactString(), expectedWithdrawnAmt.ExactString())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

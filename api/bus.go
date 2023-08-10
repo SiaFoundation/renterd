@@ -90,6 +90,12 @@ type ContractsIDAddRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
+// UploadsAddSectorRequest is the request type for the /uploads/:id endpoint.
+type UploadsAddSectorRequest struct {
+	ContractID types.FileContractID `json:"contractID"`
+	Root       types.Hash256        `json:"root"`
+}
+
 // ContractsIDRenewedRequest is the request type for the /contract/:id/renewed
 // endpoint.
 type ContractsIDRenewedRequest struct {
@@ -401,10 +407,11 @@ type GougingSettings struct {
 }
 
 type WalletResponse struct {
-	ScanHeight uint64         `json:"scanHeight"`
-	Address    types.Address  `json:"address"`
-	Spendable  types.Currency `json:"spendable"`
-	Confirmed  types.Currency `json:"confirmed"`
+	ScanHeight  uint64         `json:"scanHeight"`
+	Address     types.Address  `json:"address"`
+	Spendable   types.Currency `json:"spendable"`
+	Confirmed   types.Currency `json:"confirmed"`
+	Unconfirmed types.Currency `json:"unconfirmed"`
 }
 
 // Validate returns an error if the gouging settings are not considered valid.

@@ -272,7 +272,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		}
 	}()
 
-	w := wallet.NewSingleAddressWallet(seed, sqlStore, cfg.UsedUTXOExpiry)
+	w := wallet.NewSingleAddressWallet(seed, sqlStore, cfg.UsedUTXOExpiry, zap.NewNop().Sugar())
+	tp.TransactionPoolSubscribe(w)
 
 	if m := cfg.Miner; m != nil {
 		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {

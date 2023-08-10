@@ -129,27 +129,14 @@ func (c *Client) WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElemen
 	return
 }
 
-// estimatedSiacoinTxnSize estimates the txn size of a siacoin txn without file
-// contract given its number of outputs.
-func estimatedSiacoinTxnSize(nOutputs uint64) uint64 {
-	return 1000 + 60*nOutputs
-}
-
 // SendSiacoins is a helper method that sends siacoins to the given outputs.
 func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput) (err error) {
-	fee, err := c.RecommendedFee(ctx)
-	if err != nil {
-		return err
-	}
-	fee = fee.Mul64(estimatedSiacoinTxnSize(uint64(len(scos))))
-
 	var value types.Currency
 	for _, sco := range scos {
 		value = value.Add(sco.Value)
 	}
 	txn := types.Transaction{
 		SiacoinOutputs: scos,
-		MinerFees:      []types.Currency{fee},
 	}
 	toSign, parents, err := c.WalletFund(ctx, &txn, value)
 	if err != nil {
@@ -737,6 +724,21 @@ func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Upload
 		Slabs:         slabs,
 		UsedContracts: usedContracts,
 	}, nil)
+	return
+}
+
+// AddUploadedSector signals the bus a sector was uploaded under a given contract ID.
+func (c *Client) AddUploadedSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/uploads/%s", uID), api.UploadsAddSectorRequest{
+		ContractID: id,
+		Root:       root,
+	}, nil)
+	return
+}
+
+// MarkUploadFinished marks the given upload as finished.
+func (c *Client) MarkUploadFinished(ctx context.Context, uID api.UploadID) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/uploads/%s", uID))
 	return
 }
 

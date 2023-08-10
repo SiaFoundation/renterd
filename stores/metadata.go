@@ -91,7 +91,7 @@ type (
 		Model
 		DBContractSetID  uint `gorm:"index"`
 		DBContractSet    dbContractSet
-		DBBufferedSlabID uint `gorm:"index;unique;default:NULL"`
+		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
 		Health      float64 `gorm:"index; default:1.0; NOT NULL"`
 		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string

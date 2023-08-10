@@ -53,7 +53,7 @@ type (
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
 		Address() types.Address
-		Balance() (spendable, confirmed types.Currency, _ error)
+		Balance() (spendable, confirmed, unconfirmed types.Currency, _ error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error)
 		Height() uint64
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
@@ -159,6 +159,7 @@ type bus struct {
 	logger        *zap.SugaredLogger
 	accounts      *accounts
 	contractLocks *contractLocks
+	sectorsCache  *uploadedSectorsCache
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -218,20 +219,21 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 
 func (b *bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
-	spendable, confirmed, err := b.w.Balance()
+	spendable, confirmed, unconfirmed, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
 	jc.Encode(api.WalletResponse{
-		ScanHeight: b.w.Height(),
-		Address:    address,
-		Confirmed:  confirmed,
-		Spendable:  spendable,
+		ScanHeight:  b.w.Height(),
+		Address:     address,
+		Confirmed:   confirmed,
+		Spendable:   spendable,
+		Unconfirmed: unconfirmed,
 	})
 }
 
 func (b *bus) walletBalanceHandler(jc jape.Context) {
-	_, balance, err := b.w.Balance()
+	_, balance, _, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
@@ -271,8 +273,11 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		return
 	}
 	txn := wfr.Transaction
-	fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
-	txn.MinerFees = []types.Currency{fee}
+	if len(txn.MinerFees) == 0 {
+		// if no fees are specified, we add some
+		fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
+		txn.MinerFees = []types.Currency{fee}
+	}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -766,7 +771,7 @@ func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
 
 	roots, err := b.ms.ContractRoots(jc.Request.Context(), id)
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
-		jc.Encode(roots)
+		jc.Encode(append(roots, b.sectorsCache.cachedSectors(id)...))
 	}
 }
 
@@ -1342,6 +1347,25 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
 }
 
+func (b *bus) uploadHandlerPOST(jc jape.Context) {
+	var id api.UploadID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.UploadsAddSectorRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	b.sectorsCache.addUploadedSector(id, req.ContractID, req.Root)
+}
+
+func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
+	var id api.UploadID
+	if jc.DecodeParam("id", &id) == nil {
+		b.sectorsCache.finishUpload(id)
+	}
+}
+
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
@@ -1356,6 +1380,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		ss:            ss,
 		eas:           eas,
 		contractLocks: newContractLocks(),
+		sectorsCache:  newUploadedSectorsCache(),
 		logger:        l.Sugar().Named("bus"),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
@@ -1510,15 +1535,13 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
-		"POST /search/hosts":   b.searchHostsHandlerPOST,
-		"GET  /search/objects": b.searchObjectsHandlerGET,
-
-		"GET    /stats/objects": b.objectsStatshandlerGET,
-
 		"GET    /objects/*path":  b.objectsHandlerGET,
 		"PUT    /objects/*path":  b.objectsHandlerPUT,
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+
+		"GET    /params/upload":  b.paramsHandlerUploadGET,
+		"GET    /params/gouging": b.paramsHandlerGougingGET,
 
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
@@ -1528,13 +1551,18 @@ func (b *bus) Handler() http.Handler {
 		"GET    /slab/:key":           b.slabHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
 
+		"POST /search/hosts":   b.searchHostsHandlerPOST,
+		"GET  /search/objects": b.searchObjectsHandlerGET,
+
+		"GET    /stats/objects": b.objectsStatshandlerGET,
+
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
-		"GET    /params/upload":  b.paramsHandlerUploadGET,
-		"GET    /params/gouging": b.paramsHandlerGougingGET,
+		"POST /upload/:id":          b.uploadHandlerPOST,
+		"POST /upload/:id/finished": b.uploadFinishedHandlerDELETE,
 	}))
 }
 

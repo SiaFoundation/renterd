@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -31,6 +33,9 @@ type (
 
 	// A SlabID uniquely identifies a slab.
 	SlabID uint
+
+	// UploadID identifies an ongoing upload.
+	UploadID [8]byte
 )
 
 // String implements fmt.Stringer.
@@ -134,4 +139,27 @@ func (sid *SlabID) LoadString(s string) (err error) {
 // String encodes the SlabID as a string.
 func (sid SlabID) String() string {
 	return fmt.Sprint(uint8(sid))
+}
+
+// String implements fmt.Stringer.
+func (uID UploadID) String() string {
+	return hex.EncodeToString(uID[:])
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (uID UploadID) MarshalText() ([]byte, error) {
+	return []byte(uID.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (uID *UploadID) UnmarshalText(b []byte) error {
+	b, err := hex.DecodeString(string(b))
+	if err != nil {
+		return err
+	} else if len(b) != 8 {
+		return errors.New("invalid length")
+	}
+
+	copy(uID[:], b)
+	return nil
 }

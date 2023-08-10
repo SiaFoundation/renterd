@@ -37,6 +37,12 @@ var (
 		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
 	}
 
+	// DefaultUploadPackingSettings define the default upload packing settings
+	// the bus is configured with on startup.
+	DefaultUploadPackingSettings = api.UploadPackingSettings{
+		Enabled: false,
+	}
+
 	// DefaultRedundancySettings define the default redundancy settings the bus
 	// is configured with on startup. These values can be adjusted using the
 	// settings API.
