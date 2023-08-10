@@ -31,7 +31,8 @@ func (s *SQLStore) insertTestAnnouncement(hk types.PublicKey, a hostdb.Announcem
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
-	hdb, dbName, ccid, err := newTestSQLStore()
+	dir := t.TempDir()
+	hdb, dbName, ccid, err := newTestSQLStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hdb2, ccid, err := NewSQLStore(conn2, false, time.Second, types.Address{}, nil)
+	hdb2, ccid, err := NewSQLStore(conn2, dir, false, time.Second, types.Address{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestSQLHostDB(t *testing.T) {
 
 // TestRecordInteractions is a test for RecordInteractions.
 func TestRecordInteractions(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, setti
 
 // TestSQLHosts tests the Hosts method of the SQLHostDB type.
 func TestSQLHosts(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +376,7 @@ func TestSQLHosts(t *testing.T) {
 
 // TestSearchHosts is a unit test for SearchHosts.
 func TestSearchHosts(t *testing.T) {
-	db, _, _, err := newTestSQLStore()
+	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +412,7 @@ func TestSearchHosts(t *testing.T) {
 
 // TestRecordScan is a test for recording scans.
 func TestRecordScan(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +537,7 @@ func TestRecordScan(t *testing.T) {
 }
 
 func TestRemoveHosts(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,7 +642,7 @@ func TestRemoveHosts(t *testing.T) {
 
 // TestInsertAnnouncements is a test for insertAnnouncements.
 func TestInsertAnnouncements(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +727,7 @@ func TestInsertAnnouncements(t *testing.T) {
 }
 
 func TestSQLHostAllowlist(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -900,7 +901,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 }
 
 func TestSQLHostBlocklist(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1147,7 +1148,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 }
 
 func TestSQLHostBlocklistBasic(t *testing.T) {
-	hdb, _, _, err := newTestSQLStore()
+	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

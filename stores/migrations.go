@@ -16,10 +16,10 @@ var (
 		&dbContract{},
 		&dbContractSet{},
 		&dbObject{},
+		&dbBufferedSlab{},
 		&dbSlab{},
 		&dbSector{},
 		&dbSlice{},
-		&dbSlabBuffer{},
 
 		// bus.HostDB tables
 		&dbAnnouncement{},
@@ -163,9 +163,16 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Rollback: nil,
 		},
 		{
-			ID: "00005_contractspending",
+			ID: "00005_uploadPacking",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00005_contractspending(tx, logger)
+				return performMigration00005_uploadPacking(tx, logger)
+			},
+			Rollback: nil,
+		},
+		{
+			ID: "00006_contractspending",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00006_contractspending(tx, logger)
 			},
 			Rollback: nil,
 		},
@@ -194,7 +201,7 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 func initSchema(tx *gorm.DB) error {
 	err := tx.AutoMigrate(tables...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init schema: %w", err)
 	}
 	// Change the object_id colum to use case sensitive collation.
 	if !isSQLite(tx) {
@@ -312,7 +319,6 @@ func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.I
 
 	// Disable foreign keys in SQLite to avoid issues with updating constraints.
 	if isSQLite(txn) {
-		fmt.Println("DISABLING constraints")
 		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
 			return err
 		}
@@ -374,8 +380,47 @@ func performMigration00004_objectID_collation(txn *gorm.DB, logger glogger.Inter
 	return nil
 }
 
-func performMigration00005_contractspending(txn *gorm.DB, logger glogger.Interface) error {
-	logger.Info(context.Background(), "performing migration 00005_contractspending")
+func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration performMigration00005_uploadPacking")
+	m := txn.Migrator()
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	if m.HasTable(&dbBufferedSlab{}) {
+		// Drop buffered slabs since the schema has changed and the table was
+		// unused so far.
+		if err := m.DropTable(&dbBufferedSlab{}); err != nil {
+			return fmt.Errorf("failed to drop table 'buffered_slabs': %w", err)
+		}
+	}
+
+	// Use AutoMigrate to add column to create buffered_slabs and add column to
+	// slabs.
+	if err := m.AutoMigrate(&dbBufferedSlab{}, &dbSlab{}); err != nil {
+		return fmt.Errorf("failed to auto migrate buffered_slabs and slabs: %w", err)
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration performMigration00005_uploadPacking complete")
+	return nil
+}
+
+func performMigration00006_contractspending(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00006_contractspending")
+
 	if !txn.Migrator().HasColumn(&dbContract{}, "delete_spending") {
 		if err := txn.Migrator().AddColumn(&dbContract{}, "delete_spending"); err != nil {
 			return err
@@ -386,6 +431,7 @@ func performMigration00005_contractspending(txn *gorm.DB, logger glogger.Interfa
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00005_contractspending complete")
+
+	logger.Info(context.Background(), "migration 00006_contractspending complete")
 	return nil
 }

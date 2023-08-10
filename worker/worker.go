@@ -158,6 +158,9 @@ type Bus interface {
 	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string, batch bool) error
 
+	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+	PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+
 	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
 
@@ -982,7 +985,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		jc.Encode(entries)
 		return
 	}
-	if len(obj.Slabs) == 0 {
+	if len(obj.Slabs) == 0 && obj.PartialSlab == nil {
 		return
 	}
 
@@ -1092,7 +1095,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	object, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight)
+	obj, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -1103,15 +1106,68 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		h2c[c.HostKey] = c.ID
 	}
 	used := make(map[types.PublicKey]types.FileContractID)
-	for _, s := range object.Slabs {
+	for _, s := range obj.Slabs {
 		for _, ss := range s.Shards {
 			used[ss.Host] = h2c[ss.Host]
 		}
 	}
 
 	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, object, used)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, obj, used)) != nil {
 		return
+	}
+
+	// if partial uploads are not enabled we are done.
+	if !up.UploadPacking {
+		return
+	}
+
+	// if partial uploads are enabled, check whether we have a full slab now
+	packedSlabs, err := w.bus.PackedSlabsForUpload(jc.Request.Context(), 5*time.Minute, uint8(rs.MinShards), uint8(rs.TotalShards), up.ContractSet, 2)
+	if jc.Check("couldn't fetch packed slabs from bus", err) != nil {
+		return
+	}
+
+	for _, ps := range packedSlabs {
+		// upload packed slab.
+		key := object.GenerateEncryptionKey()
+		shards := (&object.PartialSlab{
+			MinShards:   uint8(rs.MinShards),
+			TotalShards: uint8(rs.TotalShards),
+			Data:        ps.Data,
+		}).Encrypt(key)
+
+		sectors, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
+		if jc.Check("couldn't upload packed slab", err) != nil {
+			return
+		}
+		slab := object.Slab{
+			Key:       key,
+			MinShards: uint8(rs.MinShards),
+			Shards:    sectors,
+		}
+
+		// build used contracts map
+		h2c := make(map[types.PublicKey]types.FileContractID)
+		for _, c := range contracts {
+			h2c[c.HostKey] = c.ID
+		}
+		used := make(map[types.PublicKey]types.FileContractID)
+		for _, ss := range slab.Shards {
+			used[ss.Host] = h2c[ss.Host]
+		}
+
+		// mark packed slab as uploaded.
+		err = w.bus.MarkPackedSlabsUploaded(jc.Request.Context(), []api.UploadedPackedSlab{
+			{
+				BufferID: ps.BufferID,
+				Key:      slab.Key,
+				Shards:   sectors,
+			},
+		}, used)
+		if jc.Check("couldn't mark packed slabs uploaded", err) != nil {
+			return
+		}
 	}
 }
 
