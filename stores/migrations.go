@@ -167,6 +167,14 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00005_uploadPacking(tx, logger)
 			},
+			Rollback: nil,
+		},
+		{
+			ID: "00006_contractspending",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00006_contractspending(tx, logger)
+			},
+			Rollback: nil,
 		},
 	}
 
@@ -407,5 +415,21 @@ func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 		}
 	}
 	logger.Info(context.Background(), "migration performMigration00005_uploadPacking complete")
+	return nil
+}
+
+func performMigration00006_contractspending(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00006_contractspending")
+	if !txn.Migrator().HasColumn(&dbContract{}, "delete_spending") {
+		if err := txn.Migrator().AddColumn(&dbContract{}, "delete_spending"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasColumn(&dbContract{}, "list_spending") {
+		if err := txn.Migrator().AddColumn(&dbContract{}, "list_spending"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00006_contractspending complete")
 	return nil
 }
