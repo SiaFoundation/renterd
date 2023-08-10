@@ -193,7 +193,7 @@ func main() {
 	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 30*time.Minute, "interval at which autopilot loop runs")
 	flag.Float64Var(&autopilotCfg.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", 0.75, "health threshold below which slabs are migrated to new hosts")
-	flag.DurationVar(&autopilotCfg.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", 24*time.Hour, "interval at which the autopilot broadcasts contract revisions to be mined - can be overwritten using the REVISION_BROADCAST_INTERVAL environment variable")
+	flag.DurationVar(&autopilotCfg.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", 24*time.Hour, "interval at which the autopilot broadcasts contract revisions to be mined - can be overwritten using the REVISION_BROADCAST_INTERVAL environment variable - setting it to 0 will disable this feature")
 	flag.Uint64Var(&autopilotCfg.ScannerBatchSize, "autopilot.scannerBatchSize", 1000, "size of the batch with which hosts are scanned")
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", 10, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
