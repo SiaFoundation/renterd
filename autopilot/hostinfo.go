@@ -117,6 +117,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 					hostInfos = append(hostInfos, api.HostHandlerResponse{
 						Host: host,
 					})
+					keptHosts++
 				}
 				continue
 			}
