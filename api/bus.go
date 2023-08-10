@@ -90,6 +90,12 @@ type ContractsIDAddRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
+// UploadsAddSectorRequest is the request type for the /uploads/:id endpoint.
+type UploadsAddSectorRequest struct {
+	ContractID types.FileContractID `json:"contractID"`
+	Root       types.Hash256        `json:"root"`
+}
+
 // ContractsIDRenewedRequest is the request type for the /contract/:id/renewed
 // endpoint.
 type ContractsIDRenewedRequest struct {

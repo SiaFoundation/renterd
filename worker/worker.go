@@ -160,6 +160,9 @@ type Bus interface {
 	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
 
+	AddUploadedSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
+	MarkUploadFinished(ctx context.Context, uID api.UploadID) error
+
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)

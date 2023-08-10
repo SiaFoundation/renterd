@@ -727,6 +727,21 @@ func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Upload
 	return
 }
 
+// AddUploadedSector signals the bus a sector was uploaded under a given contract ID.
+func (c *Client) AddUploadedSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/uploads/%s", uID), api.UploadsAddSectorRequest{
+		ContractID: id,
+		Root:       root,
+	}, nil)
+	return
+}
+
+// MarkUploadFinished marks the given upload as finished.
+func (c *Client) MarkUploadFinished(ctx context.Context, uID api.UploadID) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/uploads/%s", uID))
+	return
+}
+
 // ObjectsStats returns information about the number of objects and their size.
 func (c *Client) ObjectsStats() (osr api.ObjectsStatsResponse, err error) {
 	err = c.c.GET("/stats/objects", &osr)
