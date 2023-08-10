@@ -25,7 +25,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-var alertRenewalFailedID = frand.Entropy256() // constant until restarted
+var (
+	alertLowBalanceID    = frand.Entropy256() // constant until restarted
+	alertRenewalFailedID = frand.Entropy256() // constant until restarted
+)
 
 const (
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
@@ -450,11 +453,16 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	}
 
 	c.logger.Info("performing wallet maintenance")
+
+	// convenience variables
 	b := c.ap.bus
 	l := c.logger
+	state := c.ap.State()
+	cfg := state.cfg
+	period := state.period
+	renewWindow := cfg.Contracts.RenewWindow
 
 	// no contracts - nothing to do
-	cfg := c.ap.State().cfg
 	if cfg.Contracts.Amount == 0 {
 		l.Warn("wallet maintenance skipped, no contracts wanted")
 		return nil
@@ -464,6 +472,44 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	if cfg.Contracts.Allowance.IsZero() {
 		l.Warn("wallet maintenance skipped, no allowance set")
 		return nil
+	}
+
+	// fetch consensus state
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		l.Warnf("wallet maintenance skipped, fetching consensus state failed with err: %v", err)
+		return err
+	}
+	bh := cs.BlockHeight
+
+	// fetch wallet balance
+	wallet, err := b.Wallet(ctx)
+	if err != nil {
+		l.Warnf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
+		return err
+	}
+	balance := wallet.Confirmed
+
+	// register an alert if balance is low
+	if balance.Cmp(cfg.Contracts.Allowance) < 0 {
+		// increase severity as we progress through renew window
+		severity := alerts.SeverityInfo
+		if bh+renewWindow/2 >= endHeight(cfg, period) {
+			severity = alerts.SeverityCritical
+		} else if bh+renewWindow >= endHeight(cfg, period) {
+			severity = alerts.SeverityWarning
+		}
+
+		c.ap.alerts.Register(alerts.Alert{
+			ID:       alertLowBalanceID,
+			Severity: severity,
+			Message:  "wallet is low on funds",
+			Data: map[string]any{
+				"address": state.address,
+				"balance": balance,
+			},
+			Timestamp: time.Now(),
+		})
 	}
 
 	// pending maintenance transaction - nothing to do
@@ -488,13 +534,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		return nil
 	}
 
-	// not enough balance - nothing to do
-	wi, err := b.Wallet(ctx)
-	if err != nil {
-		l.Errorf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
-		return err
-	}
-	balance := wi.Spendable
+	// not enough balance to redistribute outputs - nothing to do
 	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
 	outputs := balance.Div(amount).Big().Uint64()
 	if outputs < 2 {
@@ -1229,7 +1269,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, newCollateral, settings.WindowSize)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
-		if containsError(err, wallet.ErrInsufficientBalance) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1317,7 +1357,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	newRevision, _, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, newCollateral, settings.WindowSize)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
-		if containsError(err, wallet.ErrInsufficientBalance) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1389,7 +1429,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		if containsError(err, wallet.ErrInsufficientBalance) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err

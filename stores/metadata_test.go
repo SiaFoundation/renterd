@@ -550,9 +550,16 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// mock recording of spending records to ensure the cached fields get updated
+	spending := api.ContractSpending{
+		Uploads:     types.Siacoins(1),
+		Downloads:   types.Siacoins(2),
+		FundAccount: types.Siacoins(3),
+		Deletions:   types.Siacoins(4),
+		SectorRoots: types.Siacoins(5),
+	}
 	if err := cs.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
-		{ContractID: fcid1, RevisionNumber: 1, Size: rhpv2.SectorSize},
-		{ContractID: fcid2, RevisionNumber: 1, Size: rhpv2.SectorSize},
+		{ContractID: fcid1, RevisionNumber: 1, Size: rhpv2.SectorSize, ContractSpending: spending},
+		{ContractID: fcid2, RevisionNumber: 1, Size: rhpv2.SectorSize, ContractSpending: spending},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -680,9 +687,11 @@ func TestRenewedContract(t *testing.T) {
 			WindowEnd:      3,
 			Size:           rhpv2.SectorSize,
 
-			UploadSpending:      zeroCurrency,
-			DownloadSpending:    zeroCurrency,
-			FundAccountSpending: zeroCurrency,
+			UploadSpending:      currency(types.Siacoins(1)),
+			DownloadSpending:    currency(types.Siacoins(2)),
+			FundAccountSpending: currency(types.Siacoins(3)),
+			DeleteSpending:      currency(types.Siacoins(4)),
+			ListSpending:        currency(types.Siacoins(5)),
 		},
 	}
 	if !reflect.DeepEqual(ac, expectedContract) {
@@ -2290,6 +2299,8 @@ func TestRecordContractSpending(t *testing.T) {
 		Uploads:     types.Siacoins(1),
 		Downloads:   types.Siacoins(2),
 		FundAccount: types.Siacoins(3),
+		Deletions:   types.Siacoins(4),
+		SectorRoots: types.Siacoins(5),
 	}
 	err = cs.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
 		// non-existent contract
@@ -2310,7 +2321,7 @@ func TestRecordContractSpending(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cm2.Spending != expectedSpending {
-		t.Fatal("invalid spending")
+		t.Fatal("invalid spending", cm2.Spending, expectedSpending)
 	}
 
 	// Record the same spending again.
