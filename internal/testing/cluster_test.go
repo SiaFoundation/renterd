@@ -1957,27 +1957,20 @@ func TestWallet(t *testing.T) {
 			return err
 		}
 		if !info.Confirmed.Equals(initialInfo.Confirmed) {
-			return fmt.Errorf("wallet confirmed balance should not be zero: %v %v", info.Confirmed, initialInfo.Confirmed)
+			return fmt.Errorf("wallet confirmed balance should not have changed: %v %v", info.Confirmed, initialInfo.Confirmed)
 		}
-		if info.Spendable.Cmp(initialInfo.Spendable) >= 0 {
-			return fmt.Errorf("wallet spendable balance should be lower than before: %v %v", info.Spendable, initialInfo.Spendable)
-		}
-		if info.Unconfirmed.Cmp(initialInfo.Unconfirmed) < 0 {
-			return fmt.Errorf("wallet unconfirmed balance should be greater than before: %v %v", info.Unconfirmed, initialInfo.Unconfirmed)
+		// The diffs of the spendable balance and unconfirmed balance should add up
+		// to the amount of money sent as well as the miner fees used.
+		spendableDiff := initialInfo.Spendable.Sub(info.Spendable)
+		unconfirmedDiff := info.Unconfirmed
+		withdrawnAmt := spendableDiff.Sub(unconfirmedDiff)
+		expectedWithdrawnAmt := sendAmt.Add(minerFee)
+		if !withdrawnAmt.Equals(expectedWithdrawnAmt) {
+			return fmt.Errorf("withdrawn amt doesn't match expectation: %v %v", withdrawnAmt.ExactString(), expectedWithdrawnAmt.ExactString())
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// The diffs of the spendable balance and unconfirmed balance should add up
-	// to the amount of money sent as well as the miner fees used.
-	spendableDiff := initialInfo.Spendable.Sub(info.Spendable)
-	unconfirmedDiff := info.Unconfirmed
-	withdrawnAmt := spendableDiff.Sub(unconfirmedDiff)
-	expectedWithdrawnAmt := sendAmt.Add(minerFee)
-	if !withdrawnAmt.Equals(expectedWithdrawnAmt) {
-		t.Fatal("withdrawn amt doesn't match expectation", withdrawnAmt.ExactString(), expectedWithdrawnAmt.ExactString())
 	}
 }
