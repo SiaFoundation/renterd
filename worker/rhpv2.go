@@ -339,9 +339,10 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 		}
 
 		// defer a function that records spending if necessary
+		var recordSpending bool
 		var totalCost types.Currency
 		defer func() {
-			if !totalCost.IsZero() {
+			if recordSpending {
 				w.contractSpendingRecorder.Record(contractID, rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: totalCost})
 			}
 		}()
@@ -376,10 +377,10 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			}
 
 			// update the revision number
-			rev.Revision.RevisionNumber++
 			if rev.Revision.RevisionNumber == math.MaxUint64 {
 				return ErrContractFinalized
 			}
+			rev.Revision.RevisionNumber++
 
 			// update the revision filesize
 			rev.Revision.Filesize -= rhpv2.SectorSize * actions[len(actions)-1].A
@@ -444,6 +445,7 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 
 			// update total cost
 			totalCost = totalCost.Add(cost)
+			recordSpending = true
 		}
 		return nil
 	})
