@@ -80,8 +80,10 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		maintenanceTxnID         types.TransactionID
-		revisionSubmissionBuffer uint64
+		maintenanceTxnID          types.TransactionID
+		revisionBroadcastInterval time.Duration
+		revisionLastBroadcast     map[types.FileContractID]time.Time
+		revisionSubmissionBuffer  uint64
 
 		mu               sync.Mutex
 		cachedHostInfo   map[types.PublicKey]hostInfo
@@ -108,11 +110,13 @@ type (
 	}
 )
 
-func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64) *contractor {
+func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
 	return &contractor{
-		ap:                       ap,
-		logger:                   ap.logger.Named("contractor"),
-		revisionSubmissionBuffer: revisionSubmissionBuffer,
+		ap:                        ap,
+		logger:                    ap.logger.Named("contractor"),
+		revisionBroadcastInterval: revisionBroadcastInterval,
+		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
+		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 	}
 }
 
@@ -172,6 +176,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	contracts := resp.Contracts
 	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
+
+	// run revision broadcast
+	c.runRevisionBroadcast(ctx, w, contracts)
 
 	// sort contracts by their size
 	sort.Slice(contracts, func(i, j int) bool {
@@ -843,6 +850,43 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	}
 
 	return formed, nil
+}
+
+func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, contracts []api.Contract) {
+	if c.revisionBroadcastInterval == 0 {
+		return // not enabled
+	}
+
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		c.logger.Warnf("revision broadcast failed to fetch blockHeight: %v", err)
+		return
+	}
+	bh := cs.BlockHeight
+
+	contractMap := make(map[types.FileContractID]struct{})
+	for _, contract := range contracts {
+		contractMap[contract.ID] = struct{}{}
+		timeSinceRevisionHeight := 10 * time.Minute * time.Duration(bh-contract.RevisionNumber)
+		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
+		if timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval {
+			continue // nothing to do
+		}
+		c.revisionLastBroadcast[contract.ID] = time.Now()
+		if err := w.RHPBroadcast(ctx, contract.ID); err != nil {
+			c.logger.Warnw(fmt.Sprintf("failed to broadcast contract revision: %v", err),
+				"hk", contract.HostKey,
+				"fcid", contract.ID)
+			continue
+		}
+	}
+
+	// remove contracts from revisionLastBroadcast that were not in contractMap.
+	for contractID := range c.revisionLastBroadcast {
+		if _, ok := contractMap[contractID]; !ok {
+			delete(c.revisionLastBroadcast, contractID)
+		}
+	}
 }
 
 func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []contractInfo) {
