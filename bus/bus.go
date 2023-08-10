@@ -53,7 +53,7 @@ type (
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
 		Address() types.Address
-		Balance() (spendable, confirmed types.Currency, _ error)
+		Balance() (spendable, confirmed, unconfirmed types.Currency, _ error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error)
 		Height() uint64
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
@@ -218,20 +218,21 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 
 func (b *bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
-	spendable, confirmed, err := b.w.Balance()
+	spendable, confirmed, unconfirmed, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
 	jc.Encode(api.WalletResponse{
-		ScanHeight: b.w.Height(),
-		Address:    address,
-		Confirmed:  confirmed,
-		Spendable:  spendable,
+		ScanHeight:  b.w.Height(),
+		Address:     address,
+		Confirmed:   confirmed,
+		Spendable:   spendable,
+		Unconfirmed: unconfirmed,
 	})
 }
 
 func (b *bus) walletBalanceHandler(jc jape.Context) {
-	_, balance, err := b.w.Balance()
+	_, balance, _, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
@@ -271,8 +272,11 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		return
 	}
 	txn := wfr.Transaction
-	fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
-	txn.MinerFees = []types.Currency{fee}
+	if len(txn.MinerFees) == 0 {
+		// if no fees are specified, we add some
+		fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
+		txn.MinerFees = []types.Currency{fee}
+	}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
