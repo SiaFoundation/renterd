@@ -8,6 +8,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/wallet"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -50,7 +51,7 @@ func TestWalletRedistribute(t *testing.T) {
 		0,
 	}
 	s := &mockStore{utxos: []wallet.SiacoinElement{utxo}}
-	w := wallet.NewSingleAddressWallet(priv, s, 0)
+	w := wallet.NewSingleAddressWallet(priv, s, 0, zap.NewNop().Sugar())
 
 	numOutputsWithValue := func(v types.Currency) (c uint64) {
 		utxos, _ := w.UnspentOutputs()
