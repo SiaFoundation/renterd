@@ -2546,6 +2546,46 @@ func TestPartialSlab(t *testing.T) {
 		hk2: fcid2,
 	}
 
+	// helper function to assert buffer stats returned by ObjectsStats.
+	assertBuffer := func(name string, size int64, complete, locked bool) {
+		t.Helper()
+		os, err := db.ObjectsStats(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(os.SlabBuffers) == 0 {
+			t.Fatal("no buffers")
+		}
+		var buf api.SlabBuffer
+		for _, b := range os.SlabBuffers {
+			if b.Filename == name {
+				buf = b
+				break
+			}
+		}
+		if buf == (api.SlabBuffer{}) {
+			t.Fatal("buffer not found for name", name)
+		}
+		if buf.ContractSet != testContractSet {
+			t.Fatal("wrong contract set", buf.ContractSet, testContractSet)
+		}
+		if buf.Filename != name {
+			t.Fatal("wrong filename", buf.Filename, name)
+		}
+		if buf.MaxSize != int64(bufferedSlabSize(1)) {
+			t.Fatal("wrong max size", buf.MaxSize, bufferedSlabSize(1))
+		}
+		if buf.Size != size {
+			t.Fatal("wrong size", buf.Size, size)
+		}
+		if buf.Complete != complete {
+			t.Fatal("wrong complete", buf.Complete, complete)
+		}
+		if buf.Locked != locked {
+			t.Fatal("wrong locked", buf.Locked, locked)
+		}
+	}
+
 	// create an object. It has 1 slab with 2 sectors and a partial slab.
 	obj := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -2617,6 +2657,7 @@ func TestPartialSlab(t *testing.T) {
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
+	assertBuffer(buffer.Filename, 4, false, false)
 
 	// fetch the object. This should fetch the partial slab too.
 	fullObj, err := db.Object(context.Background(), "key")
@@ -2674,6 +2715,7 @@ func TestPartialSlab(t *testing.T) {
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
+	assertBuffer(buffer.Filename, 4194303, false, false)
 
 	// add one last object. This should fill the buffer and create a new slab.
 	obj3 := object.Object{
@@ -2719,6 +2761,7 @@ func TestPartialSlab(t *testing.T) {
 	if !reflect.DeepEqual(buffer, expectedBuffer) {
 		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
 	}
+	assertBuffer(buffer.Filename, 4194304, true, false)
 
 	// check the new buffer
 	var buffer2 dbBufferedSlab
@@ -2746,6 +2789,9 @@ func TestPartialSlab(t *testing.T) {
 	if len(buffers) != 1 {
 		t.Fatal("expected 1 buffer to be returned", len(buffers))
 	}
+	assertBuffer(buffer.Filename, 4194304, true, true)
+	assertBuffer(buffer2.Filename, 1, false, false)
+
 	completedBuffer := buffers[0]
 	completedBufferID := completedBuffer.ID
 	if completedBuffer.LockedUntil < now+int64(time.Hour.Seconds()) {
@@ -2787,6 +2833,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertBuffer(buffer2.Filename, 1, false, false)
 
 	// buffer should be gone now.
 	if err := db.db.Take(&buffer, "id = ?", completedBufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
