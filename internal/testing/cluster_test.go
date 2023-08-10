@@ -273,6 +273,9 @@ func TestNewTestCluster(t *testing.T) {
 	if status.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
 	}
+	if !status.Configured {
+		t.Fatal("autopilot should be configured")
+	}
 }
 
 // TestObjectEntries is an integration test that verifies objects are uploaded,
