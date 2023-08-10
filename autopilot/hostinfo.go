@@ -117,6 +117,10 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 					hostInfos = append(hostInfos, api.HostHandlerResponse{
 						Host: host,
 					})
+					if wanted > 0 && len(hostInfos) == wanted {
+						return hostInfos, nil // we're done.
+					}
+					keptHosts++
 				}
 				continue
 			}
