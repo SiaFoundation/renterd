@@ -1358,7 +1358,7 @@ GROUP BY slabs.id
 `)
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		if isSQLite(s.db) {
-			return s.db.Exec("UPDATE slabs SET health = (SELECT health FROM (?) WHERE slabs.id = id)", healthQuery).Error
+			return s.db.Exec("UPDATE slabs SET health = COALESCE((SELECT health FROM (?) WHERE slabs.id = id), 1)", healthQuery).Error
 		} else {
 			return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health", healthQuery).Error
 		}
