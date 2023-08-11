@@ -97,6 +97,8 @@ func (usc *uploadingSectorsCache) finishUpload(uID api.UploadID) {
 func (usc *uploadingSectorsCache) trackUpload(uID api.UploadID) error {
 	usc.mu.Lock()
 	defer usc.mu.Unlock()
+
+	// check if upload already exists
 	if _, exists := usc.uploads[uID]; exists {
 		return fmt.Errorf("%w; id '%v'", api.ErrUploadAlreadyExists, uID)
 	}
