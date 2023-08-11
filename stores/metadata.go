@@ -413,26 +413,20 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	var resp api.ObjectsStatsResponse
 	return resp, s.db.Transaction(func(tx *gorm.DB) error {
 		// Number of objects.
+		var objInfo struct {
+			NumObjects       uint64
+			TotalObjectsSize uint64
+		}
 		err := tx.
 			Model(&dbObject{}).
-			Select("COUNT(*)").
-			Scan(&resp.NumObjects).
+			Select("COUNT(*) AS NumObjects, SUM(size) AS TotalObjectsSize").
+			Scan(&objInfo).
 			Error
 		if err != nil {
 			return err
 		}
-
-		// Size of objects.
-		if resp.NumObjects > 0 {
-			err = tx.
-				Model(&dbSlice{}).
-				Select("COALESCE(SUM(length), 0)").
-				Scan(&resp.TotalObjectsSize).
-				Error
-			if err != nil {
-				return err
-			}
-		}
+		resp.NumObjects = objInfo.NumObjects
+		resp.TotalObjectsSize = objInfo.TotalObjectsSize
 
 		// Size of sectors
 		var sectorSizes struct {
