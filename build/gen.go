@@ -1,8 +1,5 @@
 //go:build ignore
 
-// This script generates meta.go which contains version info for the hostd binary. It can be run with `go generate`.
-//
-//go:generate -command go run gen.go
 package main
 
 import (
