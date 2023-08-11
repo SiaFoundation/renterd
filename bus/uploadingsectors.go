@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -63,7 +64,7 @@ func (usc *uploadingSectorsCache) addUploadingSector(uID api.UploadID, fcid type
 		return nil
 	}
 
-	return api.ErrUnknownUpload
+	return fmt.Errorf("%w; id '%v'", api.ErrUnknownUpload, uID)
 }
 
 func (usc *uploadingSectorsCache) sectors(fcid types.FileContractID) (roots []types.Hash256) {
@@ -97,7 +98,7 @@ func (usc *uploadingSectorsCache) trackUpload(uID api.UploadID) error {
 	usc.mu.Lock()
 	defer usc.mu.Unlock()
 	if _, exists := usc.uploads[uID]; exists {
-		return api.ErrUploadAlreadyExists
+		return fmt.Errorf("%w; id '%v'", api.ErrUploadAlreadyExists, uID)
 	}
 
 	usc.uploads[uID] = &ongoingUpload{
