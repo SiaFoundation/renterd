@@ -24,5 +24,9 @@ func (t treeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-	t.h.ServeHTTP(w, req)
+	if t.h != nil {
+		t.h.ServeHTTP(w, req)
+		return
+	}
+	http.NotFound(w, req)
 }
