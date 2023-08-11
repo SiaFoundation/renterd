@@ -34,9 +34,6 @@ jobs:
         uses: golangci/golangci-lint-action@v3
         with:
           args: --timeout=30m
-      - name: Generate
-        shell: bash
-        run: go generate ./...
       - name: Test
         uses: n8maninger/action-golang-test@v1
         with:
