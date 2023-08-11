@@ -309,9 +309,11 @@ func main() {
 
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getSeed(), logger)
+		b, runFn, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getSeed(), logger)
 		if err != nil {
 			log.Fatal("failed to create bus, err: ", err)
+		} else if err := runFn(); err != nil {
+			log.Fatal("failed to start the bus", err)
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 
@@ -327,9 +329,11 @@ func main() {
 	workerAddrs, workerPassword := workerCfg.remoteAddrs, workerCfg.apiPassword
 	if workerAddrs == "" {
 		if workerCfg.enabled {
-			w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getSeed(), logger)
+			w, runFn, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getSeed(), logger)
 			if err != nil {
 				log.Fatal("failed to create worker", err)
+			} else if err := runFn(); err != nil {
+				log.Fatal("failed to start the worker", err)
 			}
 			shutdownFns = append(shutdownFns, shutdownFn)
 
@@ -388,7 +392,7 @@ func main() {
 		log.Println("Shutting down...")
 		shutdownFns = append(shutdownFns, srv.Shutdown)
 	case err := <-autopilotErr:
-		log.Fatalln("Fatal autopilot error:", err)
+		log.Fatal("Fatal autopilot error:", err)
 	}
 
 	// Shut down the autopilot first, then the rest of the services in reverse order.

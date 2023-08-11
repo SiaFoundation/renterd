@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	ConsensusNetworkName  = "Testnet-Zen"
+	ConsensusNetworkName  = "Zen Testnet"
 	DefaultAPIAddress     = "localhost:9880"
 	DefaultGatewayAddress = ":9881"
 )

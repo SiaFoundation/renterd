@@ -71,6 +71,12 @@ type AccountHandlerPOST struct {
 	HostKey types.PublicKey `json:"hostKey"`
 }
 
+// BusStateResponse is the response type for the /bus/state endpoint.
+type BusStateResponse struct {
+	StartTime time.Time `json:"startTime"`
+	BuildState
+}
+
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
 	BlockHeight   uint64    `json:"blockHeight"`

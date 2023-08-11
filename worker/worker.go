@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
@@ -247,6 +249,9 @@ type worker struct {
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
+
+	mu        sync.Mutex
+	startTime time.Time
 }
 
 func dial(ctx context.Context, hostIP string) (net.Conn, error) {
@@ -1165,6 +1170,20 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 	jc.Encode(account)
 }
 
+func (w *worker) stateHandlerGET(jc jape.Context) {
+	jc.Encode(api.WorkerStateResponse{
+		ID:        w.id,
+		StartTime: w.StartTime(),
+		BuildState: api.BuildState{
+			Network:   build.ConsensusNetworkName,
+			Version:   build.Version(),
+			Commit:    build.Commit(),
+			OS:        runtime.GOOS,
+			BuildTime: build.BuildTime(),
+		},
+	})
+}
+
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
@@ -1226,7 +1245,20 @@ func (w *worker) Handler() http.Handler {
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
+
+		"GET    /state": w.stateHandlerGET,
 	}))
+}
+
+func (w *worker) Run() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.startTime.IsZero() {
+		return errors.New("worker already running")
+	}
+	w.startTime = time.Now()
+	return nil
 }
 
 // Shutdown shuts down the worker.
@@ -1246,7 +1278,19 @@ func (w *worker) Shutdown(_ context.Context) error {
 
 	// Stop the uploader.
 	w.uploadManager.Stop()
+
+	// Reset start time.
+	w.mu.Lock()
+	w.startTime = time.Time{}
+	w.mu.Unlock()
 	return nil
+}
+
+// StartTime returns the time at which the worker was started.
+func (w *worker) StartTime() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.startTime
 }
 
 type contractLock struct {

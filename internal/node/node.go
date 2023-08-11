@@ -68,7 +68,10 @@ type AutopilotConfig struct {
 	MigratorParallelSlabsPerWorker uint64
 }
 
-type ShutdownFn = func(context.Context) error
+type (
+	RunFn      = func() error
+	ShutdownFn = func(context.Context) error
+)
 
 func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	var buf bytes.Buffer
@@ -201,24 +204,24 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 	return parents, nil
 }
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	g, err := gateway.New(cfg.GatewayAddr, cfg.Bootstrap, gatewayDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	cs, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
 	select {
 	case err := <-errCh:
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	default:
 		go func() {
@@ -229,11 +232,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 	tpoolDir := filepath.Join(dir, "transactionpool")
 	if err := os.MkdirAll(tpoolDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	tp, err := transactionpool.New(cs, g, tpoolDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// If no DB dialector was provided, use SQLite.
@@ -241,7 +244,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	if dbConn == nil {
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
@@ -251,7 +254,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	sqlStore, ccid, err := stores.NewSQLStore(dbConn, sqlStoreDir, true, cfg.PersistInterval, walletAddr, sqlLogger)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	cancelSubscribe := make(chan struct{})
@@ -277,14 +280,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 	if m := cfg.Miner; m != nil {
 		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		tp.TransactionPoolSubscribe(m)
 	}
 
 	b, err := bus.New(syncer{g, tp}, chainManager{cs: cs, network: cfg.Network}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
@@ -300,20 +303,20 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			sqlStore.Close(),
 		})
 	}
-	return b.Handler(), shutdownFn, nil
+	return b.Handler(), b.Run, shutdownFn, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
 	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.AllowPrivateIPs, l)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return w.Handler(), w.Shutdown, nil
+	return w.Handler(), w.Run, w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {
 	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer, cfg.MigratorParallelSlabsPerWorker)
 	if err != nil {
 		return nil, nil, nil, err

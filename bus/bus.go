@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -159,6 +161,9 @@ type bus struct {
 	logger        *zap.SugaredLogger
 	accounts      *accounts
 	contractLocks *contractLocks
+
+	mu        sync.Mutex
+	startTime time.Time
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -1346,6 +1351,19 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
 }
 
+func (b *bus) stateHandlerGET(jc jape.Context) {
+	jc.Encode(api.BusStateResponse{
+		StartTime: b.StartTime(),
+		BuildState: api.BuildState{
+			Network:   build.ConsensusNetworkName,
+			Version:   build.Version(),
+			Commit:    build.Commit(),
+			OS:        runtime.GOOS,
+			BuildTime: build.BuildTime(),
+		},
+	})
+}
+
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
@@ -1537,14 +1555,38 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
+		"GET    /state": b.stateHandlerGET,
+
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 	}))
 }
 
+// Run starts the bus.
+func (b *bus) Run() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.startTime.IsZero() {
+		return errors.New("bus already running")
+	}
+	b.startTime = time.Now()
+	return nil
+}
+
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
+	// Reset start time.
+	b.mu.Lock()
+	b.startTime = time.Time{}
+	b.mu.Unlock()
+
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
+}
+
+func (b *bus) StartTime() time.Time {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.startTime
 }
 
 func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
