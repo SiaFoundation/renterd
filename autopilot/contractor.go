@@ -178,7 +178,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
 
 	// run revision broadcast
-	c.runRevisionBroadcast(ctx, w, contracts)
+	c.runRevisionBroadcast(ctx, w, contracts, currentSet)
 
 	// sort contracts by their size
 	sort.Slice(contracts, func(i, j int) bool {
@@ -852,7 +852,11 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	return formed, nil
 }
 
-func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, contracts []api.Contract) {
+// runRevisionBroadcast broadcasts contract revisions from the current set of
+// contracts. Since we are migrating away from all contracts not in the set and
+// are not uploading to those contracts anyway, we only worry about contracts in
+// the set.
+func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allContracts []api.Contract, setContracts []api.ContractMetadata) {
 	if c.revisionBroadcastInterval == 0 {
 		return // not enabled
 	}
@@ -864,11 +868,9 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, contrac
 	}
 	bh := cs.BlockHeight
 
-	contractMap := make(map[types.FileContractID]struct{})
 	successful, failed := 0, 0
-	for _, contract := range contracts {
+	for _, contract := range setContracts {
 		// check whether broadcasting is necessary
-		contractMap[contract.ID] = struct{}{}
 		timeSinceRevisionHeight := 10 * time.Minute * time.Duration(bh-contract.RevisionNumber)
 		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
 		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval {
@@ -891,16 +893,20 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, contrac
 		}
 		successful++
 	}
+	c.logger.Infow("revision broadcast completed",
+		"successful", successful,
+		"failed", failed)
 
-	// remove contracts from revisionLastBroadcast that were not in contractMap.
+	// prune revisionLastBroadcast
+	contractMap := make(map[types.FileContractID]struct{})
+	for _, contract := range allContracts {
+		contractMap[contract.ID] = struct{}{}
+	}
 	for contractID := range c.revisionLastBroadcast {
 		if _, ok := contractMap[contractID]; !ok {
 			delete(c.revisionLastBroadcast, contractID)
 		}
 	}
-	c.logger.Infow("revision broadcast completed",
-		"successful", successful,
-		"failed", failed)
 }
 
 func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []contractInfo) {
