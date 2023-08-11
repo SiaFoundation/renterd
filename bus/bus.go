@@ -101,6 +101,7 @@ type (
 
 		Object(ctx context.Context, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
+		ObjectsBySlab(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
@@ -934,6 +935,18 @@ func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
 }
 
+func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+	objects, err := b.ms.ObjectsBySlab(jc.Request.Context(), key)
+	if jc.Check("couldn't get objects slab", err) != nil {
+		return
+	}
+	jc.Encode(objects)
+}
+
 func (b *bus) slabHandlerGET(jc jape.Context) {
 	var key object.EncryptionKey
 	if jc.DecodeParam("key", &key) != nil {
@@ -1531,6 +1544,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
+		"GET    /slabobjects/:key":    b.slabObjectsHandlerGET,
 
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
