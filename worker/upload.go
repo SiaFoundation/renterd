@@ -216,11 +216,11 @@ func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
 
 func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, bh uint64) ([]object.Sector, error) {
 	// initiate the upload
-	upload, finishFn, err := mgr.newUpload(len(shards), contracts, bh)
+	upload, finishFn, err := mgr.newUpload(ctx, len(shards), contracts, bh)
 	if err != nil {
 		return nil, err
 	}
-	defer finishFn()
+	defer finishFn(ctx)
 
 	// upload the shards
 	return upload.uploadShards(ctx, shards, nil)
@@ -281,11 +281,11 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	cr := o.Encrypt(r)
 
 	// create the upload
-	u, finishFn, err := mgr.newUpload(rs.TotalShards, contracts, bh)
+	u, finishFn, err := mgr.newUpload(ctx, rs.TotalShards, contracts, bh)
 	if err != nil {
 		return object.Object{}, err
 	}
-	defer finishFn()
+	defer finishFn(ctx)
 
 	// create the next slab channel
 	nextSlabChan := make(chan struct{}, 1)
@@ -388,7 +388,7 @@ func (mgr *uploadManager) launch(req *sectorUploadReq) error {
 	return nil
 }
 
-func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMetadata, bh uint64) (*upload, func(), error) {
+func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contracts []api.ContractMetadata, bh uint64) (*upload, func(context.Context), error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
@@ -397,7 +397,7 @@ func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMet
 
 	// check if we have enough contracts
 	if len(contracts) < totalShards {
-		return nil, func() {}, errNotEnoughContracts
+		return nil, func(_ context.Context) {}, errNotEnoughContracts
 	}
 
 	// create allowed map
@@ -406,17 +406,17 @@ func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMet
 		allowed[c.ID] = struct{}{}
 	}
 
-	// create an upload ID
-	var id api.UploadID
-	frand.Read(id[:])
+	// track the upload in the bus
+	id := api.NewUploadID()
+	if err := mgr.b.TrackUpload(ctx, id); err != nil {
+		mgr.logger.Errorf("failed to track upload '%v', err: %v", id, err)
+	}
 
-	// create a function that marks the upload as finished
-	finishFn := func() {
-		mCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := mgr.b.MarkUploadFinished(mCtx, id); err != nil {
+	// create a finish function to finish the upload
+	finishFn := func(ctx context.Context) {
+		if err := mgr.b.FinishUpload(ctx, id); err != nil {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", id, err)
 		}
-		cancel()
 	}
 
 	// create upload
@@ -924,6 +924,11 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	span := trace.SpanFromContext(req.ctx)
 	span.AddEvent("execute")
 
+	// update the bus
+	if err := u.mgr.b.AddUploadingSector(req.ctx, req.upload.id, fcid, rhpv2.SectorRoot(req.sector)); err != nil {
+		return types.Hash256{}, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
+	}
+
 	// upload the sector
 	start := time.Now()
 	root, err := host.UploadSector(req.ctx, req.sector, rev)
@@ -936,13 +941,6 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
 	span.RecordError(err)
 	span.End()
-
-	// update bus
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if err := u.mgr.b.AddUploadedSector(ctx, req.upload.id, fcid, root); err != nil {
-		u.mgr.logger.Errorf("failed to add uploaded sector to contract %v, err: %v", fcid, err)
-	}
-	cancel()
 
 	return root, nil
 }

@@ -1,0 +1,108 @@
+package bus
+
+import (
+	"sync"
+	"time"
+
+	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
+)
+
+const (
+	// cacheExpiry is the amount of time after which an upload is pruned from
+	// the cache, since the workers are expected to finish their uploads this is
+	// there to prevent leaking memory, which is why it's set at 24h
+	cacheExpiry = 24 * time.Hour
+)
+
+type (
+	uploadingSectorsCache struct {
+		mu      sync.Mutex
+		uploads map[api.UploadID]*ongoingUpload
+	}
+
+	ongoingUpload struct {
+		mu              sync.Mutex
+		started         time.Time
+		contractSectors map[types.FileContractID][]types.Hash256
+	}
+)
+
+func newUploadingSectorsCache() *uploadingSectorsCache {
+	return &uploadingSectorsCache{
+		uploads: make(map[api.UploadID]*ongoingUpload),
+	}
+}
+
+func (ou *ongoingUpload) addSector(fcid types.FileContractID, root types.Hash256) {
+	ou.mu.Lock()
+	defer ou.mu.Unlock()
+	ou.contractSectors[fcid] = append(ou.contractSectors[fcid], root)
+}
+
+func (ou *ongoingUpload) sectors(fcid types.FileContractID) (roots []types.Hash256) {
+	ou.mu.Lock()
+	defer ou.mu.Unlock()
+	if sectors, exists := ou.contractSectors[fcid]; exists && time.Since(ou.started) < cacheExpiry {
+		roots = append(roots, sectors...)
+	}
+	return
+}
+
+func (usc *uploadingSectorsCache) addUploadingSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error {
+	defer usc.pruneExpiredUploads()
+
+	// fetch ongoing upload
+	usc.mu.Lock()
+	ongoing, exists := usc.uploads[uID]
+	usc.mu.Unlock()
+
+	// add sector if upload exists
+	if exists {
+		ongoing.addSector(fcid, root)
+		return nil
+	}
+
+	return api.ErrUnknownUpload
+}
+
+func (usc *uploadingSectorsCache) sectors(fcid types.FileContractID) (roots []types.Hash256) {
+	usc.mu.Lock()
+	uploads := usc.uploads
+	usc.mu.Unlock()
+
+	for _, ongoing := range uploads {
+		roots = append(roots, ongoing.sectors(fcid)...)
+	}
+	return
+}
+
+func (usc *uploadingSectorsCache) pruneExpiredUploads() {
+	usc.mu.Lock()
+	defer usc.mu.Unlock()
+	for uID, ongoing := range usc.uploads {
+		if time.Since(ongoing.started) > cacheExpiry {
+			delete(usc.uploads, uID)
+		}
+	}
+}
+
+func (usc *uploadingSectorsCache) finishUpload(uID api.UploadID) {
+	usc.mu.Lock()
+	defer usc.mu.Unlock()
+	delete(usc.uploads, uID)
+}
+
+func (usc *uploadingSectorsCache) trackUpload(uID api.UploadID) error {
+	usc.mu.Lock()
+	defer usc.mu.Unlock()
+	if _, exists := usc.uploads[uID]; exists {
+		return api.ErrUploadAlreadyExists
+	}
+
+	usc.uploads[uID] = &ongoingUpload{
+		started:         time.Now(),
+		contractSectors: make(map[types.FileContractID][]types.Hash256),
+	}
+	return nil
+}
