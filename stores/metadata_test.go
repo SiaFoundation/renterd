@@ -2958,3 +2958,76 @@ func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
 	}
 	return slab, nil
 }
+
+func TestObjectsBySlab(t *testing.T) {
+	db, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create a host
+	hks, err := db.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// create a contract
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+	usedContracts := map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+	}
+
+	// create a slab.
+	slab := object.Slab{
+		Health:    1.0,
+		Key:       object.GenerateEncryptionKey(),
+		MinShards: 1,
+		Shards: []object.Sector{
+			{
+				Host: hk1,
+				Root: types.Hash256{1},
+			},
+		},
+	}
+
+	// Add 3 objects that all reference the slab.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab:   slab,
+				Offset: 1,
+				Length: 0, // incremented later
+			},
+		},
+	}
+	for _, name := range []string{"obj1", "obj2", "obj3"} {
+		obj.Slabs[0].Length++
+		err = db.UpdateObject(context.Background(), name, testContractSet, obj, usedContracts)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch the objects by slab.
+	objs, err := db.ObjectsBySlab(context.Background(), slab.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"obj1", "obj2", "obj3"} {
+		if objs[i].Name != name {
+			t.Fatal("unexpected object name", objs[i].Name, name)
+		}
+		if objs[i].Size != int64(i)+1 {
+			t.Fatal("unexpected object size", objs[i].Size, i+1)
+		}
+		if objs[i].Health != 1.0 {
+			t.Fatal("unexpected object health", objs[i].Health)
+		}
+	}
+}
