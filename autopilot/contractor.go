@@ -865,20 +865,31 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, contrac
 	bh := cs.BlockHeight
 
 	contractMap := make(map[types.FileContractID]struct{})
+	successful, failed := 0, 0
 	for _, contract := range contracts {
+		// check whether broadcasting is necessary
 		contractMap[contract.ID] = struct{}{}
 		timeSinceRevisionHeight := 10 * time.Minute * time.Duration(bh-contract.RevisionNumber)
 		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
-		if timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval {
+		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval {
 			continue // nothing to do
 		}
+
+		// remember that we tried to broadcast this contract now
 		c.revisionLastBroadcast[contract.ID] = time.Now()
-		if err := w.RHPBroadcast(ctx, contract.ID); err != nil {
+
+		// broadcast revision
+		err := w.RHPBroadcast(ctx, contract.ID)
+		if err != nil && strings.Contains(err.Error(), "transaction has a file contract with an outdated revision number") {
+			continue // don't log - revision was already broadcasted
+		} else if err != nil {
 			c.logger.Warnw(fmt.Sprintf("failed to broadcast contract revision: %v", err),
 				"hk", contract.HostKey,
 				"fcid", contract.ID)
+			failed++
 			continue
 		}
+		successful++
 	}
 
 	// remove contracts from revisionLastBroadcast that were not in contractMap.
@@ -887,6 +898,9 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, contrac
 			delete(c.revisionLastBroadcast, contractID)
 		}
 	}
+	c.logger.Infow("revision broadcast completed",
+		"successful", successful,
+		"failed", failed)
 }
 
 func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []contractInfo) {
