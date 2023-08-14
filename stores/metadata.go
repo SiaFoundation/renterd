@@ -1507,7 +1507,7 @@ func (s *SQLStore) ObjectsBySlab(ctx context.Context, slabKey object.EncryptionK
 		return nil, err
 	}
 	err = s.db.Raw(`
-	SELECT o.object_id as Name, o.size as Size, sla.health as Health
+	SELECT o.object_id as Name, o.size as Size, sla.health as Health, sla.key
 	FROM slabs sla
 	LEFT JOIN slices sli ON sli.db_slab_id = sla.id
 	INNER JOIN objects o ON o.id = sli.db_object_id
