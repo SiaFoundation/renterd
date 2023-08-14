@@ -58,7 +58,6 @@ type (
 	WebHookRegisterRequest struct {
 		URL string `json:"url"`
 	}
-
 	WebHookRegisterResponse struct {
 		ID types.Hash256 `json:"id"`
 	}
@@ -140,14 +139,18 @@ func (m *Manager) broadcastWebhookAction(action interface{}) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
 	defer cancel()
+	var wg sync.WaitGroup
 	for _, hook := range hooks {
+		wg.Add(1)
 		go func(hook *WebHook) {
+			defer wg.Done()
 			err := sendWebhookAction(ctx, hook.url, action)
 			if err != nil {
 				// TODO: log
 			}
 		}(hook)
 	}
+	wg.Wait()
 }
 
 func sendWebhookAction(ctx context.Context, url string, action interface{}) error {
@@ -272,5 +275,6 @@ func (m *Manager) Active() []Alert {
 func NewManager() *Manager {
 	return &Manager{
 		alerts: make(map[types.Hash256]Alert),
+		hooks:  make(map[types.Hash256]*WebHook),
 	}
 }
