@@ -757,6 +757,12 @@ func (c *Client) ObjectsStats() (osr api.ObjectsStatsResponse, err error) {
 	return
 }
 
+// SlabBuffers returns information about the number of objects and their size.
+func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
+	err = c.c.GET("/slabbuffers", &buffers)
+	return
+}
+
 // RenameObject renames a single object.
 func (c *Client) RenameObject(ctx context.Context, from, to string) (err error) {
 	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeSingle)
