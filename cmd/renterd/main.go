@@ -292,7 +292,6 @@ func main() {
 
 	auth := jape.BasicAuth(getAPIPassword())
 	mux := treeMux{
-		h:   renterd.Handler(),
 		sub: make(map[string]treeMux),
 	}
 
@@ -320,6 +319,9 @@ func main() {
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = *apiAddr + "/api/bus"
 		busPassword = getAPIPassword()
+
+		// only serve the UI if a bus is created
+		mux.h = renterd.Handler()
 	} else {
 		fmt.Println("connecting to remote bus at", busAddr)
 	}

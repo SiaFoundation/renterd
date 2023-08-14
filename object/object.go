@@ -74,7 +74,7 @@ func GenerateEncryptionKey() EncryptionKey {
 type Object struct {
 	Key         EncryptionKey `json:"key"`
 	Slabs       []SlabSlice   `json:"slabs"`
-	PartialSlab *PartialSlab  `json:"partial_slab,omitempty"`
+	PartialSlab *PartialSlab  `json:"partialSlab,omitempty"`
 }
 
 // NewObject returns a new Object with a random key.

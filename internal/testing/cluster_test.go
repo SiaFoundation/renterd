@@ -1827,6 +1827,30 @@ func TestUploadPacking(t *testing.T) {
 			t.Fatal(err)
 		}
 		download(name, data, 0, uint64(len(data)))
+		obj, _, err := b.Object(context.Background(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if obj.Size != int64(len(data)) {
+			t.Fatal("unexpected size after upload", obj.Size, len(data))
+		}
+		entries, err := w.ObjectEntries(context.Background(), "/", "", 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, entry := range entries {
+			if entry.Name == "/"+name {
+				if entry.Size != int64(len(data)) {
+					t.Fatal("unexpected size after upload", entry.Size, len(data))
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("object not found in list", name, entries)
+		}
 	}
 
 	// upload file 1 and download it.
