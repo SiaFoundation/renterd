@@ -2546,18 +2546,18 @@ func TestPartialSlab(t *testing.T) {
 		hk2: fcid2,
 	}
 
-	// helper function to assert buffer stats returned by ObjectsStats.
+	// helper function to assert buffer stats returned by SlabBuffers.
 	assertBuffer := func(name string, size int64, complete, locked bool) {
 		t.Helper()
-		os, err := db.ObjectsStats(context.Background())
+		buffers, err := db.SlabBuffers(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(os.SlabBuffers) == 0 {
+		if len(buffers) == 0 {
 			t.Fatal("no buffers")
 		}
 		var buf api.SlabBuffer
-		for _, b := range os.SlabBuffers {
+		for _, b := range buffers {
 			if b.Filename == name {
 				buf = b
 				break

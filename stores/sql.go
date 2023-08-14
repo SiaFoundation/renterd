@@ -172,6 +172,9 @@ func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persi
 	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
 		isOurContract[types.FileContractID(fcid)] = struct{}{}
 	}
+	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("slabBufferCompletionThreshold must be between 0 and 4MiB")
+	}
 
 	ss := &SQLStore{
 		db:                              db,

@@ -2051,25 +2051,29 @@ func TestSlabBufferStats(t *testing.T) {
 	if os.TotalUploadedSize != 0 {
 		t.Fatal("expected totalUploadedSize of 0, got", os.TotalUploadedSize)
 	}
-	if len(os.SlabBuffers) != 1 {
-		t.Fatal("expected 1 slab buffer, got", len(os.SlabBuffers))
+	buffers, err := b.SlabBuffers()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if os.SlabBuffers[0].ContractSet != testContractSet {
-		t.Fatalf("expected slab buffer contract set of %v, got %v", testContractSet, os.SlabBuffers[0].ContractSet)
+	if len(buffers) != 1 {
+		t.Fatal("expected 1 slab buffer, got", len(buffers))
 	}
-	if os.SlabBuffers[0].Size != int64(len(data1)) {
-		t.Fatalf("expected slab buffer size of %v, got %v", len(data1), os.SlabBuffers[0].Size)
+	if buffers[0].ContractSet != testContractSet {
+		t.Fatalf("expected slab buffer contract set of %v, got %v", testContractSet, buffers[0].ContractSet)
 	}
-	if os.SlabBuffers[0].MaxSize != int64(slabSize) {
-		t.Fatalf("expected slab buffer max size of %v, got %v", slabSize, os.SlabBuffers[0].MaxSize)
+	if buffers[0].Size != int64(len(data1)) {
+		t.Fatalf("expected slab buffer size of %v, got %v", len(data1), buffers[0].Size)
 	}
-	if os.SlabBuffers[0].Complete {
+	if buffers[0].MaxSize != int64(slabSize) {
+		t.Fatalf("expected slab buffer max size of %v, got %v", slabSize, buffers[0].MaxSize)
+	}
+	if buffers[0].Complete {
 		t.Fatal("expected slab buffer to be incomplete")
 	}
-	if os.SlabBuffers[0].Filename == "" {
+	if buffers[0].Filename == "" {
 		t.Fatal("expected slab buffer to have a filename")
 	}
-	if os.SlabBuffers[0].Locked {
+	if buffers[0].Locked {
 		t.Fatal("expected slab buffer to be unlocked")
 	}
 
@@ -2094,7 +2098,11 @@ func TestSlabBufferStats(t *testing.T) {
 	if os.TotalUploadedSize != 3*rhpv2.SectorSize {
 		t.Fatalf("expected totalUploadedSize of %v, got %v", 3*rhpv2.SectorSize, os.TotalUploadedSize)
 	}
-	if len(os.SlabBuffers) != 0 {
-		t.Fatal("expected 0 slab buffers, got", len(os.SlabBuffers))
+	buffers, err = b.SlabBuffers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buffers) != 0 {
+		t.Fatal("expected 0 slab buffers, got", len(buffers))
 	}
 }

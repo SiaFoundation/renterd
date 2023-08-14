@@ -164,11 +164,10 @@ type ObjectsRenameRequest struct {
 
 // ObjectsStatsResponse is the response type for the /stats/objects endpoint.
 type ObjectsStatsResponse struct {
-	SlabBuffers       []SlabBuffer `json:"slabBuffers,omitempty"` // slab buffers
-	NumObjects        uint64       `json:"numObjects"`            // number of objects
-	TotalObjectsSize  uint64       `json:"totalObjectsSize"`      // size of all objects
-	TotalSectorsSize  uint64       `json:"totalSectorsSize"`      // uploaded size of all objects
-	TotalUploadedSize uint64       `json:"totalUploadedSize"`     // uploaded size of all objects including redundant sectors
+	NumObjects        uint64 `json:"numObjects"`        // number of objects
+	TotalObjectsSize  uint64 `json:"totalObjectsSize"`  // size of all objects
+	TotalSectorsSize  uint64 `json:"totalSectorsSize"`  // uploaded size of all objects
+	TotalUploadedSize uint64 `json:"totalUploadedSize"` // uploaded size of all objects including redundant sectors
 }
 
 type SlabBuffer struct {

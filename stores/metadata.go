@@ -449,29 +449,33 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		}
 		resp.TotalSectorsSize = sectorSizes.SectorsSize
 		resp.TotalUploadedSize = sectorSizes.UploadedSize
-
-		// Slab buffer info.
-		var bufferedSlabs []dbBufferedSlab
-		err = tx.Model(&dbBufferedSlab{}).
-			Joins("DBSlab").
-			Joins("DBSlab.DBContractSet").
-			Find(&bufferedSlabs).
-			Error
-		if err != nil {
-			return err
-		}
-		for _, buf := range bufferedSlabs {
-			resp.SlabBuffers = append(resp.SlabBuffers, api.SlabBuffer{
-				ContractSet: buf.DBSlab.DBContractSet.Name,
-				Complete:    buf.Complete,
-				Filename:    buf.Filename,
-				Size:        buf.Size,
-				MaxSize:     int64(bufferedSlabSize(buf.DBSlab.MinShards)),
-				Locked:      buf.LockedUntil > time.Now().Unix(),
-			})
-		}
 		return nil
 	})
+}
+
+func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
+	// Slab buffer info.
+	var bufferedSlabs []dbBufferedSlab
+	err := s.db.Model(&dbBufferedSlab{}).
+		Joins("DBSlab").
+		Joins("DBSlab.DBContractSet").
+		Find(&bufferedSlabs).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	var buffers []api.SlabBuffer
+	for _, buf := range bufferedSlabs {
+		buffers = append(buffers, api.SlabBuffer{
+			ContractSet: buf.DBSlab.DBContractSet.Name,
+			Complete:    buf.Complete,
+			Filename:    buf.Filename,
+			Size:        buf.Size,
+			MaxSize:     int64(bufferedSlabSize(buf.DBSlab.MinShards)),
+			Locked:      buf.LockedUntil > time.Now().Unix(),
+		})
+	}
+	return buffers, nil
 }
 
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
