@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"lukechampine.com/frand"
 )
 
 type (
@@ -37,6 +38,11 @@ type (
 	// UploadID identifies an ongoing upload.
 	UploadID [8]byte
 )
+
+func NewUploadID() (uID UploadID) {
+	frand.Read(uID[:])
+	return
+}
 
 // String implements fmt.Stringer.
 func (c ParamCurrency) String() string { return types.Currency(c).ExactString() }

@@ -355,11 +355,14 @@ func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contrac
 	return
 }
 
-// ContractRoots returns the roots of the sectors for the contract with given
-// id.
-func (c *Client) ContractRoots(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", fcid), &roots)
-	return
+// ContractRoots returns the sector roots, as well as the ones that are still
+// uploading, for the contract with given id.
+func (c *Client) ContractRoots(ctx context.Context, fcid types.FileContractID) (roots, uploading []types.Hash256, err error) {
+	var resp api.ContractRootsResponse
+	if err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", fcid), &resp); err != nil {
+		return
+	}
+	return resp.Roots, resp.Uploading, nil
 }
 
 // ContractSets returns the contract sets of the bus.
@@ -727,18 +730,24 @@ func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Upload
 	return
 }
 
-// AddUploadedSector signals the bus a sector was uploaded under a given contract ID.
-func (c *Client) AddUploadedSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/uploads/%s", uID), api.UploadsAddSectorRequest{
+// TrackUpload tracks the upload with given id in the bus.
+func (c *Client) TrackUpload(ctx context.Context, uID api.UploadID) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/upload/%s", uID), nil, nil)
+	return
+}
+
+// AddUploadingSector adds the given sector to the upload with given id.
+func (c *Client) AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/upload/%s/sector", uID), api.UploadSectorRequest{
 		ContractID: id,
 		Root:       root,
 	}, nil)
 	return
 }
 
-// MarkUploadFinished marks the given upload as finished.
-func (c *Client) MarkUploadFinished(ctx context.Context, uID api.UploadID) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/uploads/%s", uID))
+// FinishUpload marks the given upload as finished.
+func (c *Client) FinishUpload(ctx context.Context, uID api.UploadID) (err error) {
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/upload/%s", uID))
 	return
 }
 
