@@ -1175,7 +1175,7 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 		ID:        w.id,
 		StartTime: w.StartTime(),
 		BuildState: api.BuildState{
-			Network:   build.ConsensusNetworkName,
+			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
