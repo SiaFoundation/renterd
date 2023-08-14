@@ -1928,6 +1928,9 @@ func TestUploadPacking(t *testing.T) {
 	if len(objs) != 2 {
 		t.Fatal("expected 2 objects", len(objs))
 	}
+	sort.Slice(objs, func(i, j int) bool {
+		return objs[i].Name < objs[j].Name // make result deterministic
+	})
 	if objs[0].Name != "/file1" {
 		t.Fatal("expected file1", objs[0].Name)
 	} else if objs[1].Name != "/file2" {
