@@ -1140,6 +1140,36 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
+func (w *worker) handleAlertsWebhooksPOST(jc jape.Context) {
+	var req alerts.WebHookRegisterRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	id, err := w.alerts.AddWebhook(req.URL)
+	if err != nil {
+		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(alerts.WebHookRegisterResponse{
+		ID: id,
+	})
+}
+
+func (w *worker) handleAlertsWebhooksDELETE(jc jape.Context) {
+	var id types.Hash256
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	if !w.alerts.DeleteWebhook(id) {
+		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
+		return
+	}
+}
+
+func (w *worker) handleAlertsWebhooksGET(jc jape.Context) {
+	jc.Encode(w.alerts.ListWebhooks())
+}
+
 func (w *worker) handleGETAlerts(c jape.Context) {
 	c.Encode(w.alerts.Active())
 }
@@ -1202,8 +1232,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /alerts":           w.handleGETAlerts,
-		"POST   /alerts/dismiss":   w.handlePOSTAlertsDismiss,
+		"GET    /alerts":             w.handleGETAlerts,
+		"POST   /alerts/dismiss":     w.handlePOSTAlertsDismiss,
+		"GET    /alerts/webhooks":    w.handleAlertsWebhooksGET,
+		"POST   /alerts/webhooks":    w.handleAlertsWebhooksPOST,
+		"DELETE /alerts/webhook/:id": w.handleAlertsWebhooksDELETE,
+
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 

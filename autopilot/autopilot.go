@@ -161,14 +161,18 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
-		"GET    /alerts":         ap.handleGETAlerts,
-		"POST   /alerts/dismiss": ap.handlePOSTAlertsDismiss,
-		"GET    /config":         ap.configHandlerGET,
-		"PUT    /config":         ap.configHandlerPUT,
-		"POST   /debug/trigger":  ap.triggerHandlerPOST,
-		"POST   /hosts":          ap.hostsHandlerPOST,
-		"GET    /host/:hostKey":  ap.hostHandlerGET,
-		"GET    /status":         ap.statusHandlerGET,
+		"GET    /alerts":             ap.handleGETAlerts,
+		"POST   /alerts/dismiss":     ap.handlePOSTAlertsDismiss,
+		"GET    /alerts/webhooks":    ap.handleAlertsWebhooksGET,
+		"POST   /alerts/webhooks":    ap.handleAlertsWebhooksPOST,
+		"DELETE /alerts/webhook/:id": ap.handleAlertsWebhooksDELETE,
+
+		"GET    /config":        ap.configHandlerGET,
+		"PUT    /config":        ap.configHandlerPUT,
+		"POST   /debug/trigger": ap.triggerHandlerPOST,
+		"POST   /hosts":         ap.hostsHandlerPOST,
+		"GET    /host/:hostKey": ap.hostHandlerGET,
+		"GET    /status":        ap.statusHandlerGET,
 	}))
 }
 
@@ -470,6 +474,36 @@ func (ap *Autopilot) isStopped() bool {
 	default:
 		return false
 	}
+}
+
+func (ap *Autopilot) handleAlertsWebhooksPOST(jc jape.Context) {
+	var req alerts.WebHookRegisterRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	id, err := ap.alerts.AddWebhook(req.URL)
+	if err != nil {
+		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(alerts.WebHookRegisterResponse{
+		ID: id,
+	})
+}
+
+func (ap *Autopilot) handleAlertsWebhooksDELETE(jc jape.Context) {
+	var id types.Hash256
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	if !ap.alerts.DeleteWebhook(id) {
+		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
+		return
+	}
+}
+
+func (ap *Autopilot) handleAlertsWebhooksGET(jc jape.Context) {
+	jc.Encode(ap.alerts.ListWebhooks())
 }
 
 func (ap *Autopilot) handleGETAlerts(c jape.Context) {

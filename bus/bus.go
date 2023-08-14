@@ -1484,7 +1484,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /alerts":             b.handleGETAlerts,
 		"POST   /alerts/dismiss":     b.handlePOSTAlertsDismiss,
 		"GET    /alerts/webhooks":    b.handleAlertsWebhooksGET,
-		"POST    /alerts/webhooks":   b.handleAlertsWebhooksPOST,
+		"POST   /alerts/webhooks":    b.handleAlertsWebhooksPOST,
 		"DELETE /alerts/webhook/:id": b.handleAlertsWebhooksDELETE,
 
 		"GET    /accounts":                  b.accountsHandlerGET,
