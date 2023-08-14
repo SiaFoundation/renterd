@@ -54,7 +54,7 @@ func (c *Client) DeleteAlertHook(ctx context.Context, id types.Hash256) error {
 }
 
 // AlertHooks returns all alert hooks currently registered.
-func (c *Client) AlertHooks(ctx context.Context) (hooks []alerts.Alert, err error) {
+func (c *Client) AlertHooks(ctx context.Context) (hooks []alerts.WebHook, err error) {
 	err = c.c.WithContext(ctx).GET("/alerts/webhooks", &hooks)
 	return
 }
