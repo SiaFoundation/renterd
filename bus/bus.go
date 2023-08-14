@@ -1366,7 +1366,7 @@ func (b *bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	b.uploadingSectors.addUploadingSector(id, req.ContractID, req.Root)
+	jc.Check("failed to add sector", b.uploadingSectors.addUploadingSector(id, req.ContractID, req.Root))
 }
 
 func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {

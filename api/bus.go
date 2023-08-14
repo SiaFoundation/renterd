@@ -113,7 +113,7 @@ type ContractsIDRenewedRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
-// ContractRootsResponse is the responser type for the /contract/:id/roots
+// ContractRootsResponse is the response type for the /contract/:id/roots
 // endpoint.
 type ContractRootsResponse struct {
 	Roots     []types.Hash256 `json:"roots"`
