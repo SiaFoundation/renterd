@@ -110,6 +110,7 @@ type (
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
@@ -894,6 +895,14 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", err)
 }
 
+func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
+	buffers, err := b.ms.SlabBuffers(jc.Request.Context())
+	if jc.Check("couldn't get slab buffers info", err) != nil {
+		return
+	}
+	jc.Encode(buffers)
+}
+
 func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 	info, err := b.ms.ObjectsStats(jc.Request.Context())
 	if jc.Check("couldn't get objects stats", err) != nil {
@@ -1524,6 +1533,7 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
 
+		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 

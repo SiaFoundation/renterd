@@ -447,6 +447,31 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	})
 }
 
+func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
+	// Slab buffer info.
+	var bufferedSlabs []dbBufferedSlab
+	err := s.db.Model(&dbBufferedSlab{}).
+		Joins("DBSlab").
+		Joins("DBSlab.DBContractSet").
+		Find(&bufferedSlabs).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	var buffers []api.SlabBuffer
+	for _, buf := range bufferedSlabs {
+		buffers = append(buffers, api.SlabBuffer{
+			ContractSet: buf.DBSlab.DBContractSet.Name,
+			Complete:    buf.Complete,
+			Filename:    buf.Filename,
+			Size:        buf.Size,
+			MaxSize:     int64(bufferedSlabSize(buf.DBSlab.MinShards)),
+			Locked:      buf.LockedUntil > time.Now().Unix(),
+		})
+	}
+	return buffers, nil
+}
+
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
 	var added dbContract
 	if err = s.retryTransaction(func(tx *gorm.DB) error {
@@ -1130,7 +1155,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		err = tx.Model(&dbBufferedSlab{}).
 			Where("ID", buffer.ID).
 			Updates(map[string]interface{}{
-				"complete": buffer.Size+int64(len(toAppend)) == int64(slabSize),
+				"complete": buffer.Size+int64(len(toAppend)) >= int64(slabSize)-s.bufferedSlabCompletionThreshold,
 				"size":     buffer.Size + int64(len(toAppend)),
 			}).Error
 		if err != nil {

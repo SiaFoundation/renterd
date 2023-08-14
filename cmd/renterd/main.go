@@ -174,6 +174,7 @@ func main() {
 	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
 	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
 	flag.DurationVar(&busCfg.UsedUTXOExpiry, "bus.usedUTXOExpiry", 24*time.Hour, "time after which a used UTXO that hasn't been included in a transaction becomes spendable again")
+	flag.Int64Var(&busCfg.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", 1<<12, "number of remaining bytes in a slab buffer before it is uploaded - can be overwritten using the RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD environment variable")
 
 	// worker
 	var unauthenticatedDownloads bool
@@ -223,6 +224,7 @@ func main() {
 	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &busCfg.remoteAddr)
 	parseEnvVar("RENTERD_BUS_API_PASSWORD", &busCfg.apiPassword)
 	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &busCfg.GatewayAddr)
+	parseEnvVar("RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD", &busCfg.SlabBufferCompletionThreshold)
 
 	parseEnvVar("RENTERD_DB_URI", &dbCfg.uri)
 	parseEnvVar("RENTERD_DB_USER", &dbCfg.user)
