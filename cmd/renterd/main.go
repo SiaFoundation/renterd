@@ -159,20 +159,23 @@ func main() {
 	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
 
 	for _, flag := range []struct {
+		input    string
 		name     string
 		env      string
 		insecure bool
 	}{
-		{"db.password", "RENTERD_DB_PASSWORD", true},
-		{"bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
-		{"bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
-		{"worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
-		{"worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
+		{dbCfg.password, "db.password", "RENTERD_DB_PASSWORD", true},
+		{busCfg.apiPassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
+		{busCfg.remoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
+		{workerCfg.apiPassword, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
+		{workerCfg.remoteAddrs, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
 	} {
-		if flag.insecure {
-			log.Printf("WARNING: usage of CLI flag '%s' is considered insecure and will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
-		} else {
-			log.Printf("WARNING: CLI flag '%s' will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
+		if flag.input != "" {
+			if flag.insecure {
+				log.Printf("WARNING: usage of CLI flag '%s' is considered insecure and will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
+			} else {
+				log.Printf("WARNING: CLI flag '%s' will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
+			}
 		}
 	}
 
