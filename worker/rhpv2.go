@@ -264,10 +264,10 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 	return rev, err
 }
 
-func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration, indices []uint64) error {
+func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration, indices []uint64) (int64, error) {
 	// escape early if no indices are given
 	if len(indices) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	// sort in descending order so that we can use 'range'
@@ -290,7 +290,8 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 	}
 
 	// delete the roots
-	return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+	var deleted int64
+	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		req := &rhpv2.RPCLockRequest{
 			ContractID: contractID,
 			Signature:  t.SignChallenge(renterKey),
@@ -446,9 +447,11 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			// update total cost
 			totalCost = totalCost.Add(cost)
 			recordSpending = true
+			deleted += int64(len(batch))
 		}
 		return nil
 	})
+	return deleted, err
 }
 
 func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration) (roots []types.Hash256, err error) {

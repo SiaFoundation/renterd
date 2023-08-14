@@ -620,8 +620,9 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	hostAddr := c.SiamuxAddr
 
 	// prune sectors from contracts
+	var deleted int64
 	var toDelete []uint64
-	if jc.Check("couldn't prune contract", w.withRevision(ctx, defaultRevisionFetchTimeout, id, hk, hostAddr, lockingPriorityPruning, 0, func(rev types.FileContractRevision) error {
+	err = w.withRevision(ctx, defaultRevisionFetchTimeout, id, hk, hostAddr, lockingPriorityPruning, 0, func(rev types.FileContractRevision) error {
 		// fetch the roots from the host
 		renterKey := w.deriveRenterKey(c.HostKey)
 		got, err := w.FetchContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber, time.Minute)
@@ -630,12 +631,12 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		}
 
 		// fetch the roots from the bus
-		roots, err := w.bus.ContractRoots(ctx, id)
+		roots, pending, err := w.bus.ContractRoots(ctx, id)
 		if err != nil {
 			return err
 		}
 		keep := make(map[types.Hash256]struct{})
-		for _, root := range roots {
+		for _, root := range append(roots, pending...) {
 			keep[root] = struct{}{}
 		}
 
@@ -650,10 +651,18 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		}
 
 		// delete the roots from the contract
-		return w.DeleteContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber+1, time.Minute, toDelete)
-	})) == nil {
-		jc.Encode(int64(len(toDelete) * rhpv2.SectorSize))
+		n, err := w.DeleteContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber+1, time.Minute, toDelete)
+		deleted += n
+		return err
+	})
+
+	if err != nil {
+		err = fmt.Errorf("%w; couldn't prune all sectors, deleted %d/%d", err, deleted, len(toDelete))
+		jc.Error(err, http.StatusInternalServerError)
+		return
 	}
+
+	jc.Encode(deleted * rhpv2.SectorSize)
 }
 
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
