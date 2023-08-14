@@ -1518,12 +1518,12 @@ func (s *SQLStore) ObjectsBySlab(ctx context.Context, slabKey object.EncryptionK
 	`
 	} else {
 		query = `
-	SELECT o.object_id as Name, ANY_VALUE(o.size) as Size, ANY_VALUE(sla.health) as Health, ANY_VALUE(sla.key) as key
+	SELECT o.object_id as Name, ANY_VALUE(o.size) as Size, ANY_VALUE(sla.health) as Health, ANY_VALUE(sla.key) as slabKey
 	FROM slabs sla
 	LEFT JOIN slices sli ON sli.db_slab_id = sla.id
 	INNER JOIN objects o ON o.id = sli.db_object_id
 	GROUP BY o.object_id
-	HAVING key = ?
+	HAVING slabKey = ?
 	`
 	}
 	err = s.db.Raw(query, key).
