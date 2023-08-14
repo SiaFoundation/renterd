@@ -1154,16 +1154,46 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *bus) handleGETAlerts(c jape.Context) {
-	c.Encode(b.alerts.Active())
+func (b *bus) handleAlertsWebhooksPOST(jc jape.Context) {
+	var req alerts.WebHookRegisterRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	id, err := b.alerts.AddWebhook(req.URL)
+	if err != nil {
+		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(alerts.WebHookRegisterResponse{
+		ID: id,
+	})
 }
 
-func (b *bus) handlePOSTAlertsDismiss(c jape.Context) {
+func (b *bus) handleAlertsWebhooksDELETE(jc jape.Context) {
+	var id types.Hash256
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	if !b.alerts.DeleteWebhook(id) {
+		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
+		return
+	}
+}
+
+func (b *bus) handleAlertsWebhooksGET(jc jape.Context) {
+	jc.Encode(b.alerts.ListWebhooks())
+}
+
+func (b *bus) handleGETAlerts(jc jape.Context) {
+	jc.Encode(b.alerts.Active())
+}
+
+func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
-	if c.Decode(&ids) != nil {
+	if jc.Decode(&ids) != nil {
 		return
 	} else if len(ids) == 0 {
-		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
 		return
 	}
 	b.alerts.Dismiss(ids...)
@@ -1451,8 +1481,12 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /alerts":                    b.handleGETAlerts,
-		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
+		"GET    /alerts":             b.handleGETAlerts,
+		"POST   /alerts/dismiss":     b.handlePOSTAlertsDismiss,
+		"GET    /alerts/webhooks":    b.handleAlertsWebhooksGET,
+		"POST    /alerts/webhooks":   b.handleAlertsWebhooksPOST,
+		"DELETE /alerts/webhook/:id": b.handleAlertsWebhooksDELETE,
+
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
 		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
