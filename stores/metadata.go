@@ -1506,14 +1506,27 @@ func (s *SQLStore) ObjectsBySlab(ctx context.Context, slabKey object.EncryptionK
 	if err != nil {
 		return nil, err
 	}
-	err = s.db.Raw(`
-	SELECT o.object_id as Name, MAX(o.size) as Size, MIN(sla.health) as Health, sla.key
+	var query string
+	if isSQLite(s.db) {
+		query = `
+	SELECT o.object_id as Name, o.size as Size, sla.health as Health
 	FROM slabs sla
 	LEFT JOIN slices sli ON sli.db_slab_id = sla.id
 	INNER JOIN objects o ON o.id = sli.db_object_id
 	GROUP BY o.object_id
 	HAVING sla.key = ?
-	`, key).
+	`
+	} else {
+		query = `
+	SELECT o.object_id as Name, ANY_VALUE(o.size) as Size, ANY_VALUE(sla.health) as Health, ANY_VALUE(sla.key) as key
+	FROM slabs sla
+	LEFT JOIN slices sli ON sli.db_slab_id = sla.id
+	INNER JOIN objects o ON o.id = sli.db_object_id
+	GROUP BY o.object_id
+	HAVING key = ?
+	`
+	}
+	err = s.db.Raw(query, key).
 		Scan(&objs).
 		Error
 	if err != nil {
