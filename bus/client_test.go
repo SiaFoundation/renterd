@@ -23,7 +23,7 @@ func TestClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	c, serveFn, runFn, shutdownFn, err := newTestClient(t.TempDir())
+	c, serveFn, shutdownFn, err := newTestClient(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,6 @@ func TestClient(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	go runFn()
 	go serveFn()
 
 	// assert setting 'foo' is not found
@@ -61,23 +60,23 @@ func TestClient(t *testing.T) {
 	}
 }
 
-func newTestClient(dir string) (*bus.Client, func() error, func() error, func(context.Context) error, error) {
+func newTestClient(dir string) (*bus.Client, func() error, func(context.Context) error, error) {
 	// create listener
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// create client
 	client := bus.NewClient("http://"+l.Addr().String(), "test")
-	b, runFn, cleanup, err := node.NewBus(node.BusConfig{
+	b, cleanup, err := node.NewBus(node.BusConfig{
 		Bootstrap:      false,
 		GatewayAddr:    "127.0.0.1:0",
 		Miner:          node.NewMiner(client),
 		UsedUTXOExpiry: time.Minute,
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// create server
@@ -95,5 +94,5 @@ func newTestClient(dir string) (*bus.Client, func() error, func() error, func(co
 		server.Shutdown(ctx)
 		return cleanup(ctx)
 	}
-	return client, serveFn, runFn, shutdownFn, nil
+	return client, serveFn, shutdownFn, nil
 }

@@ -1388,6 +1388,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		eas:           eas,
 		contractLocks: newContractLocks(),
 		logger:        l.Sugar().Named("bus"),
+
+		startTime: time.Now(),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
@@ -1570,17 +1572,6 @@ func (b *bus) Handler() http.Handler {
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 	}))
-}
-
-// Run starts the bus.
-func (b *bus) Run() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if !b.startTime.IsZero() {
-		return errors.New("bus already running")
-	}
-	b.startTime = time.Now()
-	return nil
 }
 
 // Shutdown shuts down the bus.

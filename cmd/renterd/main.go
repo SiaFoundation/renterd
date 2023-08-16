@@ -310,11 +310,9 @@ func main() {
 
 	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
 	if busAddr == "" {
-		b, runFn, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getSeed(), logger)
+		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getSeed(), logger)
 		if err != nil {
 			log.Fatal("failed to create bus, err: ", err)
-		} else if err := runFn(); err != nil {
-			log.Fatal("failed to start the bus", err)
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 

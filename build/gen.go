@@ -54,7 +54,8 @@ func Version() string {
 // BuildTime returns the time at which the binary was built.
 func BuildTime() time.Time {
 	return time.Unix(buildTime, 0)
-}`))
+}
+`))
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
 func (t *gitTime) UnmarshalJSON(buf []byte) error {

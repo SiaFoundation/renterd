@@ -254,7 +254,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	busCfg.Miner = node.NewMiner(busClient)
 
 	// Create bus.
-	b, bStartFn, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +331,6 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	cluster.wg.Add(1)
 	go func() {
 		_ = aStartFn()
-		_ = bStartFn
 		_ = wStartFn()
 		cluster.wg.Done()
 	}()
