@@ -2959,7 +2959,7 @@ func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
 	return slab, nil
 }
 
-func TestObjectsBySlab(t *testing.T) {
+func TestObjectsBySlabKey(t *testing.T) {
 	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -3015,7 +3015,7 @@ func TestObjectsBySlab(t *testing.T) {
 	}
 
 	// Fetch the objects by slab.
-	objs, err := db.ObjectsBySlab(context.Background(), slab.Key)
+	objs, err := db.ObjectsBySlabKey(context.Background(), slab.Key)
 	if err != nil {
 		t.Fatal(err)
 	}

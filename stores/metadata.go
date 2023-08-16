@@ -1496,7 +1496,7 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	return slabs, nil
 }
 
-func (s *SQLStore) ObjectsBySlab(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
+func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
 	var objs []struct {
 		Name   string
 		Size   int64
@@ -1509,21 +1509,21 @@ func (s *SQLStore) ObjectsBySlab(ctx context.Context, slabKey object.EncryptionK
 	var query string
 	if isSQLite(s.db) {
 		query = `
-	SELECT o.object_id as Name, o.size as Size, sla.health as Health
-	FROM slabs sla
-	LEFT JOIN slices sli ON sli.db_slab_id = sla.id
-	INNER JOIN objects o ON o.id = sli.db_object_id
-	GROUP BY o.object_id
-	HAVING sla.key = ?
+SELECT o.object_id as Name, o.size as Size, sla.health as Health
+FROM slabs sla
+LEFT JOIN slices sli ON sli.db_slab_id = sla.id
+INNER JOIN objects o ON o.id = sli.db_object_id
+GROUP BY o.object_id
+HAVING sla.key = ?
 	`
 	} else {
 		query = `
-	SELECT o.object_id as Name, ANY_VALUE(o.size) as Size, ANY_VALUE(sla.health) as Health, ANY_VALUE(sla.key) as slabKey
-	FROM slabs sla
-	LEFT JOIN slices sli ON sli.db_slab_id = sla.id
-	INNER JOIN objects o ON o.id = sli.db_object_id
-	GROUP BY o.object_id
-	HAVING slabKey = ?
+SELECT o.object_id as Name, ANY_VALUE(o.size) as Size, ANY_VALUE(sla.health) as Health, ANY_VALUE(sla.key) as slabKey
+FROM slabs sla
+LEFT JOIN slices sli ON sli.db_slab_id = sla.id
+INNER JOIN objects o ON o.id = sli.db_object_id
+GROUP BY o.object_id
+HAVING slabKey = ?
 	`
 	}
 	err = s.db.Raw(query, key).

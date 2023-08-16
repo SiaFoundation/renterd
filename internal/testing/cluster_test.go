@@ -1915,13 +1915,13 @@ func TestUploadPacking(t *testing.T) {
 		t.Errorf("expected totalUploadedSize of %v, got %v", totalRedundantSize, os.TotalUploadedSize)
 	}
 
-	// ObjectsBySlab should return 2 objects for the slab of file1 since file1
+	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
 	// and file2 share the same slab.
 	file1, _, err := b.Object(context.Background(), "file1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs, err := b.ObjectsBySlab(context.Background(), file1.Slabs[0].Key)
+	objs, err := b.ObjectsBySlabKey(context.Background(), file1.Slabs[0].Key)
 	if err != nil {
 		t.Fatal(err)
 	}
