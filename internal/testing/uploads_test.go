@@ -138,7 +138,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 		}
 
 		// expect all sectors to be uploaded at one point
-		if n != 0 {
+		if n != rs.TotalShards {
 			return fmt.Errorf("expected %v uploading sectors, got %v", rs.TotalShards, n)
 		}
 		return nil
