@@ -61,6 +61,14 @@ var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
+
+	// ErrUploadAlreadyExists is returned when starting an upload with an id
+	// that's already in use.
+	ErrUploadAlreadyExists = errors.New("upload already exists")
+
+	// ErrUnknownUpload is returned when adding sectors for an upload id that's
+	// not known.
+	ErrUnknownUpload = errors.New("unknown upload")
 )
 
 // ArchiveContractsRequest is the request type for the /contracts/archive endpoint.
@@ -96,6 +104,12 @@ type ContractsIDAddRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
+// UploadSectorRequest is the request type for the /upload/:id/sector endpoint.
+type UploadSectorRequest struct {
+	ContractID types.FileContractID `json:"contractID"`
+	Root       types.Hash256        `json:"root"`
+}
+
 // ContractsIDRenewedRequest is the request type for the /contract/:id/renewed
 // endpoint.
 type ContractsIDRenewedRequest struct {
@@ -103,6 +117,13 @@ type ContractsIDRenewedRequest struct {
 	RenewedFrom types.FileContractID   `json:"renewedFrom"`
 	StartHeight uint64                 `json:"startHeight"`
 	TotalCost   types.Currency         `json:"totalCost"`
+}
+
+// ContractRootsResponse is the response type for the /contract/:id/roots
+// endpoint.
+type ContractRootsResponse struct {
+	Roots     []types.Hash256 `json:"roots"`
+	Uploading []types.Hash256 `json:"uploading"`
 }
 
 // ContractAcquireRequest is the request type for the /contract/acquire

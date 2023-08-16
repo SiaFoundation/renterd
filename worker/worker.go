@@ -140,7 +140,7 @@ type Bus interface {
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
+	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
@@ -161,6 +161,10 @@ type Bus interface {
 
 	Accounts(ctx context.Context) ([]api.Account, error)
 	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
+
+	TrackUpload(ctx context.Context, uID api.UploadID) error
+	AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
+	FinishUpload(ctx context.Context, uID api.UploadID) error
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
