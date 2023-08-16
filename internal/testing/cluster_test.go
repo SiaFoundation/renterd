@@ -1990,7 +1990,7 @@ func TestWallet(t *testing.T) {
 		// to the amount of money sent as well as the miner fees used.
 		spendableDiff := wallet.Spendable.Sub(updated.Spendable)
 		if updated.Unconfirmed.Cmp(spendableDiff) > 0 {
-			t.Fatal("unconfirmed balance can't be greater than the difference in spendable balance here")
+			t.Fatalf("unconfirmed balance can't be greater than the difference in spendable balance here, confirmed %v->%v unconfirmed %v->%v spendable %v->%v fee %v", wallet.Confirmed, updated.Confirmed, wallet.Unconfirmed, updated.Unconfirmed, wallet.Spendable, updated.Spendable, minerFee)
 		}
 		withdrawnAmt := spendableDiff.Sub(updated.Unconfirmed)
 		expectedWithdrawnAmt := sendAmt.Add(minerFee)
