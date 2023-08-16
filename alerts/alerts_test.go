@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"go.sia.tech/core/types"
 )
 
@@ -99,9 +100,7 @@ func TestWebhooks(t *testing.T) {
 	if len(registeredAlerts) != 1 {
 		t.Fatal("wrong number of registered alerts")
 	} else if !reflect.DeepEqual(registeredAlerts[0], a) {
-		fmt.Println(registeredAlerts[0])
-		fmt.Println(a)
-		t.Fatal("wrong registered alert")
+		t.Fatal("wrong registered alert", cmp.Diff(registeredAlerts[0], a))
 	}
 	if len(dismissedAlerts) != 1 {
 		t.Fatal("wrong number of dismissed alerts")
