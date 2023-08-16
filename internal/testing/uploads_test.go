@@ -9,23 +9,19 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
 	"lukechampine.com/frand"
 )
 
 type blockedReader struct {
-	rs        api.RedundancySettings
-	read      int
+	remaining int
 	data      *bytes.Buffer
-	blockChan chan struct{}
 	readChan  chan struct{}
+	blockChan chan struct{}
 }
 
-func newBlockedReader(rs api.RedundancySettings) *blockedReader {
-	data := make([]byte, rhpv2.SectorSize*rs.MinShards)
-	frand.Read(data)
+func newBlockedReader(data []byte) *blockedReader {
 	return &blockedReader{
-		rs:        rs,
+		remaining: len(data),
 		data:      bytes.NewBuffer(data),
 		blockChan: make(chan struct{}),
 		readChan:  make(chan struct{}),
@@ -40,7 +36,7 @@ func (r *blockedReader) Read(buf []byte) (n int, err error) {
 	}
 
 	n, err = r.data.Read(buf)
-	if r.read += n; n > 0 && r.read == r.rs.MinShards*rhpv2.SectorSize {
+	if r.remaining -= n; err == nil && r.remaining <= 0 {
 		close(r.readChan)
 	}
 	return
@@ -74,8 +70,12 @@ func TestUploadingSectorsCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// generate some random data
+	data := make([]byte, rhpv2.SectorSize*rs.MinShards)
+	frand.Read(data)
+
 	// upload an object using our custom reader
-	br := newBlockedReader(rs)
+	br := newBlockedReader(data)
 	go func() {
 		err = w.UploadObject(context.Background(), br, t.Name())
 		if err != nil {
