@@ -44,12 +44,13 @@ type WorkerConfig struct {
 }
 
 type BusConfig struct {
-	Bootstrap       bool
-	GatewayAddr     string
-	Network         *consensus.Network
-	Miner           *Miner
-	PersistInterval time.Duration
-	UsedUTXOExpiry  time.Duration
+	Bootstrap                     bool
+	GatewayAddr                   string
+	Network                       *consensus.Network
+	Miner                         *Miner
+	PersistInterval               time.Duration
+	UsedUTXOExpiry                time.Duration
+	SlabBufferCompletionThreshold int64
 
 	DBLoggerConfig stores.LoggerConfig
 	DBDialector    gorm.Dialector
@@ -249,7 +250,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, sqlStoreDir, true, cfg.PersistInterval, walletAddr, sqlLogger)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, sqlStoreDir, true, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	}

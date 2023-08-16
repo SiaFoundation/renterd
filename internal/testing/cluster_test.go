@@ -273,6 +273,9 @@ func TestNewTestCluster(t *testing.T) {
 	if status.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
 	}
+	if !status.Configured {
+		t.Fatal("autopilot should be configured")
+	}
 }
 
 // TestObjectEntries is an integration test that verifies objects are uploaded,
@@ -1824,6 +1827,30 @@ func TestUploadPacking(t *testing.T) {
 			t.Fatal(err)
 		}
 		download(name, data, 0, uint64(len(data)))
+		obj, _, err := b.Object(context.Background(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if obj.Size != int64(len(data)) {
+			t.Fatal("unexpected size after upload", obj.Size, len(data))
+		}
+		entries, err := w.ObjectEntries(context.Background(), "/", "", 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, entry := range entries {
+			if entry.Name == "/"+name {
+				if entry.Size != int64(len(data)) {
+					t.Fatal("unexpected size after upload", entry.Size, len(data))
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("object not found in list", name, entries)
+		}
 	}
 
 	// upload file 1 and download it.
@@ -1972,5 +1999,137 @@ func TestWallet(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSlabBufferStats(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	busCfg := testBusCfg()
+	threshold := 1 << 12 // 4 KiB
+	busCfg.SlabBufferCompletionThreshold = int64(threshold)
+	cluster, err := newTestClusterCustom(t.TempDir(), "", true, types.GeneratePrivateKey(), busCfg, testWorkerCfg(), testApCfg(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	rs := testRedundancySettings
+
+	// Enable upload packing.
+	err = b.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for accounts to be funded
+	if _, err := cluster.WaitForAccounts(); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare 3 files which are all smaller than a slab but together make up
+	// for 2 full slabs.
+	slabSize := rhpv2.SectorSize * rs.MinShards
+	data1 := make([]byte, (slabSize - threshold - 1))
+	data2 := make([]byte, 1)
+	frand.Read(data1)
+	frand.Read(data2)
+
+	// upload the first file - buffer should still be incomplete after this
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data1), "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// check the object stats
+	os, err := b.ObjectsStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.NumObjects != 1 {
+		t.Fatal("expected 1 object, got", os.NumObjects)
+	}
+	if os.TotalObjectsSize != uint64(len(data1)) {
+		t.Fatalf("expected totalObjectSize of %v, got %v", len(data1), os.TotalObjectsSize)
+	}
+	if os.TotalSectorsSize != 0 {
+		t.Fatal("expected totalSectorSize of 0, got", os.TotalSectorsSize)
+	}
+	if os.TotalUploadedSize != 0 {
+		t.Fatal("expected totalUploadedSize of 0, got", os.TotalUploadedSize)
+	}
+	buffers, err := b.SlabBuffers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buffers) != 1 {
+		t.Fatal("expected 1 slab buffer, got", len(buffers))
+	}
+	if buffers[0].ContractSet != testContractSet {
+		t.Fatalf("expected slab buffer contract set of %v, got %v", testContractSet, buffers[0].ContractSet)
+	}
+	if buffers[0].Size != int64(len(data1)) {
+		t.Fatalf("expected slab buffer size of %v, got %v", len(data1), buffers[0].Size)
+	}
+	if buffers[0].MaxSize != int64(slabSize) {
+		t.Fatalf("expected slab buffer max size of %v, got %v", slabSize, buffers[0].MaxSize)
+	}
+	if buffers[0].Complete {
+		t.Fatal("expected slab buffer to be incomplete")
+	}
+	if buffers[0].Filename == "" {
+		t.Fatal("expected slab buffer to have a filename")
+	}
+	if buffers[0].Locked {
+		t.Fatal("expected slab buffer to be unlocked")
+	}
+
+	// upload the second file - this should fill the buffer
+	if err := w.UploadObject(context.Background(), bytes.NewReader(data2), "2"); err != nil {
+		t.Fatal(err)
+	}
+
+	os, err = b.ObjectsStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.NumObjects != 2 {
+		t.Fatal("expected 1 object, got", os.NumObjects)
+	}
+	if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
+		t.Fatalf("expected totalObjectSize of %v, got %v", len(data1)+len(data2), os.TotalObjectsSize)
+	}
+	if os.TotalSectorsSize != 3*rhpv2.SectorSize {
+		t.Fatalf("expected totalSectorSize of %v, got %v", 3*rhpv2.SectorSize, os.TotalSectorsSize)
+	}
+	if os.TotalUploadedSize != 3*rhpv2.SectorSize {
+		t.Fatalf("expected totalUploadedSize of %v, got %v", 3*rhpv2.SectorSize, os.TotalUploadedSize)
+	}
+	buffers, err = b.SlabBuffers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buffers) != 0 {
+		t.Fatal("expected 0 slab buffers, got", len(buffers))
 	}
 }

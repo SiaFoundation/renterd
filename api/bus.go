@@ -113,7 +113,7 @@ type ContractsIDRenewedRequest struct {
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
-// ContractRootsResponse is the responser type for the /contract/:id/roots
+// ContractRootsResponse is the response type for the /contract/:id/roots
 // endpoint.
 type ContractRootsResponse struct {
 	Roots     []types.Hash256 `json:"roots"`
@@ -189,6 +189,15 @@ type ObjectsStatsResponse struct {
 	TotalObjectsSize  uint64 `json:"totalObjectsSize"`  // size of all objects
 	TotalSectorsSize  uint64 `json:"totalSectorsSize"`  // uploaded size of all objects
 	TotalUploadedSize uint64 `json:"totalUploadedSize"` // uploaded size of all objects including redundant sectors
+}
+
+type SlabBuffer struct {
+	ContractSet string `json:"contractSet"` // contract set that be buffer will be uploaded to
+	Complete    bool   `json:"complete"`    // whether the slab buffer is complete and ready to upload
+	Filename    string `json:"filename"`    // name of the buffer on disk
+	Size        int64  `json:"size"`        // size of the buffer
+	MaxSize     int64  `json:"maxSize"`     // maximum size of the buffer
+	Locked      bool   `json:"locked"`      // whether the slab buffer is locked for uploading
 }
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.

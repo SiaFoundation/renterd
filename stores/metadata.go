@@ -413,26 +413,20 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	var resp api.ObjectsStatsResponse
 	return resp, s.db.Transaction(func(tx *gorm.DB) error {
 		// Number of objects.
+		var objInfo struct {
+			NumObjects       uint64
+			TotalObjectsSize uint64
+		}
 		err := tx.
 			Model(&dbObject{}).
-			Select("COUNT(*)").
-			Scan(&resp.NumObjects).
+			Select("COUNT(*) AS NumObjects, SUM(size) AS TotalObjectsSize").
+			Scan(&objInfo).
 			Error
 		if err != nil {
 			return err
 		}
-
-		// Size of objects.
-		if resp.NumObjects > 0 {
-			err = tx.
-				Model(&dbSlice{}).
-				Select("COALESCE(SUM(length), 0)").
-				Scan(&resp.TotalObjectsSize).
-				Error
-			if err != nil {
-				return err
-			}
-		}
+		resp.NumObjects = objInfo.NumObjects
+		resp.TotalObjectsSize = objInfo.TotalObjectsSize
 
 		// Size of sectors
 		var sectorSizes struct {
@@ -451,6 +445,31 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		resp.TotalUploadedSize = sectorSizes.UploadedSize
 		return nil
 	})
+}
+
+func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
+	// Slab buffer info.
+	var bufferedSlabs []dbBufferedSlab
+	err := s.db.Model(&dbBufferedSlab{}).
+		Joins("DBSlab").
+		Joins("DBSlab.DBContractSet").
+		Find(&bufferedSlabs).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	var buffers []api.SlabBuffer
+	for _, buf := range bufferedSlabs {
+		buffers = append(buffers, api.SlabBuffer{
+			ContractSet: buf.DBSlab.DBContractSet.Name,
+			Complete:    buf.Complete,
+			Filename:    buf.Filename,
+			Size:        buf.Size,
+			MaxSize:     int64(bufferedSlabSize(buf.DBSlab.MinShards)),
+			Locked:      buf.LockedUntil > time.Now().Unix(),
+		})
+	}
+	return buffers, nil
 }
 
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
@@ -1136,7 +1155,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		err = tx.Model(&dbBufferedSlab{}).
 			Where("ID", buffer.ID).
 			Updates(map[string]interface{}{
-				"complete": buffer.Size+int64(len(toAppend)) == int64(slabSize),
+				"complete": buffer.Size+int64(len(toAppend)) >= int64(slabSize)-s.bufferedSlabCompletionThreshold,
 				"size":     buffer.Size + int64(len(toAppend)),
 			}).Error
 		if err != nil {
@@ -1358,7 +1377,7 @@ GROUP BY slabs.id
 `)
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		if isSQLite(s.db) {
-			return s.db.Exec("UPDATE slabs SET health = (SELECT health FROM (?) WHERE slabs.id = id)", healthQuery).Error
+			return s.db.Exec("UPDATE slabs SET health = COALESCE((SELECT health FROM (?) WHERE slabs.id = id), 1)", healthQuery).Error
 		} else {
 			return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health", healthQuery).Error
 		}

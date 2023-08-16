@@ -335,7 +335,7 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 	for {
 		// try and fetch the config
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_, err := ap.bus.Autopilot(ctx, api.DefaultAutopilotID)
+		_, err := ap.bus.Autopilot(ctx, ap.id)
 		cancel()
 
 		// if the config was not found, or we were unable to fetch it, keep blocking
@@ -584,7 +584,13 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
+	_, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
+	if err != nil && !strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
 	jc.Encode(api.AutopilotStatusResponse{
+		Configured:         err == nil,
 		Migrating:          migrating,
 		MigratingLastStart: api.ParamTime(mLastStart),
 		Scanning:           scanning,

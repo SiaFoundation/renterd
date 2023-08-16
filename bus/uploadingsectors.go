@@ -51,8 +51,6 @@ func (ou *ongoingUpload) sectors(fcid types.FileContractID) (roots []types.Hash2
 }
 
 func (usc *uploadingSectorsCache) addUploadingSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error {
-	defer usc.pruneExpiredUploads()
-
 	// fetch ongoing upload
 	usc.mu.Lock()
 	ongoing, exists := usc.uploads[uID]
@@ -78,20 +76,17 @@ func (usc *uploadingSectorsCache) sectors(fcid types.FileContractID) (roots []ty
 	return
 }
 
-func (usc *uploadingSectorsCache) pruneExpiredUploads() {
+func (usc *uploadingSectorsCache) finishUpload(uID api.UploadID) {
 	usc.mu.Lock()
 	defer usc.mu.Unlock()
+	delete(usc.uploads, uID)
+
+	// prune expired uploads
 	for uID, ongoing := range usc.uploads {
 		if time.Since(ongoing.started) > cacheExpiry {
 			delete(usc.uploads, uID)
 		}
 	}
-}
-
-func (usc *uploadingSectorsCache) finishUpload(uID api.UploadID) {
-	usc.mu.Lock()
-	defer usc.mu.Unlock()
-	delete(usc.uploads, uID)
 }
 
 func (usc *uploadingSectorsCache) trackUpload(uID api.UploadID) error {
