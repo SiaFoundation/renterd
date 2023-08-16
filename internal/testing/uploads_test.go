@@ -108,6 +108,8 @@ func TestUploadingSectorsCache(t *testing.T) {
 			pending[c.ID] = uploading
 			n += len(uploading)
 		}
+
+		// expect all sectors to be uploading at one point
 		if n != rs.TotalShards {
 			return fmt.Errorf("expected %v uploading sectors, got %v", rs.TotalShards, n)
 		}
@@ -124,7 +126,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	if err := Retry(10, time.Second, func() error {
 		var n int
 		for _, c := range contracts {
-			roots, pending, err := b.ContractRoots(context.Background(), c.ID)
+			roots, _, err := b.ContractRoots(context.Background(), c.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,8 +134,10 @@ func TestUploadingSectorsCache(t *testing.T) {
 			for _, root := range roots {
 				uploaded[c.ID][root] = struct{}{}
 			}
-			n += len(pending)
+			n += len(roots)
 		}
+
+		// expect all sectors to be uploaded at one point
 		if n != 0 {
 			return fmt.Errorf("expected %v uploading sectors, got %v", rs.TotalShards, n)
 		}
