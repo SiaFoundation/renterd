@@ -733,6 +733,12 @@ func (c *Client) ObjectsStats() (osr api.ObjectsStatsResponse, err error) {
 	return
 }
 
+// SlabBuffers returns information about the number of objects and their size.
+func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
+	err = c.c.GET("/slabbuffers", &buffers)
+	return
+}
+
 // State returns the current state of the bus.
 func (c *Client) State() (state api.BusStateResponse, err error) {
 	err = c.c.GET("/state", &state)

@@ -37,6 +37,8 @@ type (
 		logger         glogger.Interface
 		partialSlabDir string
 
+		bufferedSlabCompletionThreshold int64
+
 		// Persistence buffer - related fields.
 		lastSave               time.Time
 		persistInterval        time.Duration
@@ -120,7 +122,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
@@ -170,20 +172,24 @@ func NewSQLStore(conn gorm.Dialector, partialSlabDir string, migrate bool, persi
 	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
 		isOurContract[types.FileContractID(fcid)] = struct{}{}
 	}
+	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("slabBufferCompletionThreshold must be between 0 and 4MiB")
+	}
 
 	ss := &SQLStore{
-		db:                 db,
-		logger:             logger,
-		knownContracts:     isOurContract,
-		lastSave:           time.Now(),
-		partialSlabDir:     partialSlabDir,
-		persistInterval:    persistInterval,
-		hasAllowlist:       allowlistCnt > 0,
-		hasBlocklist:       blocklistCnt > 0,
-		settings:           make(map[string]string),
-		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
-		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:    make(map[types.FileContractID]uint64),
+		db:                              db,
+		logger:                          logger,
+		knownContracts:                  isOurContract,
+		lastSave:                        time.Now(),
+		partialSlabDir:                  partialSlabDir,
+		persistInterval:                 persistInterval,
+		hasAllowlist:                    allowlistCnt > 0,
+		hasBlocklist:                    blocklistCnt > 0,
+		settings:                        make(map[string]string),
+		unappliedHostKeys:               make(map[types.PublicKey]struct{}),
+		unappliedRevisions:              make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:                 make(map[types.FileContractID]uint64),
+		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
 
 		walletAddress: walletAddress,
 		chainIndex: types.ChainIndex{

@@ -176,6 +176,15 @@ type ObjectsStatsResponse struct {
 	TotalUploadedSize uint64 `json:"totalUploadedSize"` // uploaded size of all objects including redundant sectors
 }
 
+type SlabBuffer struct {
+	ContractSet string `json:"contractSet"` // contract set that be buffer will be uploaded to
+	Complete    bool   `json:"complete"`    // whether the slab buffer is complete and ready to upload
+	Filename    string `json:"filename"`    // name of the buffer on disk
+	Size        int64  `json:"size"`        // size of the buffer
+	MaxSize     int64  `json:"maxSize"`     // maximum size of the buffer
+	Locked      bool   `json:"locked"`      // whether the slab buffer is locked for uploading
+}
+
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
 	Transaction types.Transaction `json:"transaction"`
