@@ -892,6 +892,7 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 				"hk", contract.HostKey,
 				"fcid", contract.ID)
 			failed++
+			delete(c.revisionLastBroadcast, contract.ID) // reset to try again
 			continue
 		}
 		successful++
