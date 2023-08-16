@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -100,6 +101,7 @@ type Autopilot struct {
 	state state
 
 	alerts *alerts.Manager
+	hooks  *webhooks.Webhooks
 	a      *accounts
 	c      *contractor
 	m      *migrator
@@ -161,11 +163,12 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
-		"GET    /alerts":             ap.handleGETAlerts,
-		"POST   /alerts/dismiss":     ap.handlePOSTAlertsDismiss,
-		"GET    /alerts/webhooks":    ap.handleAlertsWebhooksGET,
-		"POST   /alerts/webhooks":    ap.handleAlertsWebhooksPOST,
-		"DELETE /alerts/webhook/:id": ap.handleAlertsWebhooksDELETE,
+		"GET    /alerts":         ap.handleGETAlerts,
+		"POST   /alerts/dismiss": ap.handlePOSTAlertsDismiss,
+
+		"GET    /webhooks":    ap.handleAlertsWebhooksGET,
+		"POST   /webhooks":    ap.handleAlertsWebhooksPOST,
+		"DELETE /webhook/:id": ap.handleAlertsWebhooksDELETE,
 
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
@@ -477,16 +480,16 @@ func (ap *Autopilot) isStopped() bool {
 }
 
 func (ap *Autopilot) handleAlertsWebhooksPOST(jc jape.Context) {
-	var req alerts.WebHookRegisterRequest
+	var req webhooks.WebHookRegisterRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	id, err := ap.alerts.AddWebhook(req.URL)
+	id, err := ap.hooks.Register(req.URL, req.Event)
 	if err != nil {
 		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(alerts.WebHookRegisterResponse{
+	jc.Encode(webhooks.WebHookRegisterResponse{
 		ID: id,
 	})
 }
@@ -496,14 +499,14 @@ func (ap *Autopilot) handleAlertsWebhooksDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	if !ap.alerts.DeleteWebhook(id) {
+	if !ap.hooks.Delete(id) {
 		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
 		return
 	}
 }
 
 func (ap *Autopilot) handleAlertsWebhooksGET(jc jape.Context) {
-	jc.Encode(ap.alerts.ListWebhooks())
+	jc.Encode(ap.hooks.List())
 }
 
 func (ap *Autopilot) handleGETAlerts(c jape.Context) {
@@ -573,7 +576,6 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 // New initializes an Autopilot.
 func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64) (*Autopilot, error) {
 	ap := &Autopilot{
-		alerts:  alerts.NewManager(),
 		id:      id,
 		bus:     bus,
 		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
@@ -581,6 +583,8 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 
 		tickerDuration: heartbeat,
 	}
+	ap.hooks = webhooks.New(ap.logger)
+	ap.alerts = alerts.NewManager(ap.hooks)
 	scanner, err := newScanner(
 		ap,
 		scannerBatchSize,

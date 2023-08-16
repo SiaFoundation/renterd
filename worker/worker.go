@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
@@ -225,6 +226,7 @@ type hostProvider interface {
 // a renterd system.
 type worker struct {
 	alerts          *alerts.Manager
+	hooks           *webhooks.Webhooks
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
@@ -1141,16 +1143,16 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 }
 
 func (w *worker) handleAlertsWebhooksPOST(jc jape.Context) {
-	var req alerts.WebHookRegisterRequest
+	var req webhooks.WebHookRegisterRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	id, err := w.alerts.AddWebhook(req.URL)
+	id, err := w.hooks.Register(req.URL, req.Event)
 	if err != nil {
 		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(alerts.WebHookRegisterResponse{
+	jc.Encode(webhooks.WebHookRegisterResponse{
 		ID: id,
 	})
 }
@@ -1160,14 +1162,14 @@ func (w *worker) handleAlertsWebhooksDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	if !w.alerts.DeleteWebhook(id) {
+	if !w.hooks.Delete(id) {
 		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
 		return
 	}
 }
 
 func (w *worker) handleAlertsWebhooksGET(jc jape.Context) {
-	jc.Encode(w.alerts.ListWebhooks())
+	jc.Encode(w.hooks.List())
 }
 
 func (w *worker) handleGETAlerts(c jape.Context) {
@@ -1211,7 +1213,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	}
 
 	w := &worker{
-		alerts:                  alerts.NewManager(),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
@@ -1220,6 +1221,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		busFlushInterval:        busFlushInterval,
 		logger:                  l.Sugar().Named("worker").Named(id),
 	}
+	w.hooks = webhooks.New(w.logger)
+	w.alerts = alerts.NewManager(w.hooks)
 	w.initTransportPool()
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
@@ -1232,11 +1235,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /alerts":             w.handleGETAlerts,
-		"POST   /alerts/dismiss":     w.handlePOSTAlertsDismiss,
-		"GET    /alerts/webhooks":    w.handleAlertsWebhooksGET,
-		"POST   /alerts/webhooks":    w.handleAlertsWebhooksPOST,
-		"DELETE /alerts/webhook/:id": w.handleAlertsWebhooksDELETE,
+		"GET    /alerts":         w.handleGETAlerts,
+		"POST   /alerts/dismiss": w.handlePOSTAlertsDismiss,
+
+		"GET    /webhooks":    w.handleAlertsWebhooksGET,
+		"POST   /webhooks":    w.handleAlertsWebhooksPOST,
+		"DELETE /webhook/:id": w.handleAlertsWebhooksDELETE,
 
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,

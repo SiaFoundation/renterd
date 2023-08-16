@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -146,6 +147,7 @@ type (
 
 type bus struct {
 	alerts *alerts.Manager
+	hooks  *webhooks.Webhooks
 	s      Syncer
 	cm     ChainManager
 	tp     TransactionPool
@@ -1155,16 +1157,16 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleAlertsWebhooksPOST(jc jape.Context) {
-	var req alerts.WebHookRegisterRequest
+	var req webhooks.WebHookRegisterRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	id, err := b.alerts.AddWebhook(req.URL)
+	id, err := b.hooks.Register(req.URL, req.Event)
 	if err != nil {
 		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(alerts.WebHookRegisterResponse{
+	jc.Encode(webhooks.WebHookRegisterResponse{
 		ID: id,
 	})
 }
@@ -1174,14 +1176,14 @@ func (b *bus) handleAlertsWebhooksDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	if !b.alerts.DeleteWebhook(id) {
+	if !b.hooks.Delete(id) {
 		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
 		return
 	}
 }
 
 func (b *bus) handleAlertsWebhooksGET(jc jape.Context) {
-	jc.Encode(b.alerts.ListWebhooks())
+	jc.Encode(b.hooks.List())
 }
 
 func (b *bus) handleGETAlerts(jc jape.Context) {
@@ -1388,7 +1390,6 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
-		alerts:        alerts.NewManager(),
 		s:             s,
 		cm:            cm,
 		tp:            tp,
@@ -1401,6 +1402,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		contractLocks: newContractLocks(),
 		logger:        l.Sugar().Named("bus"),
 	}
+	b.hooks = webhooks.New(b.logger)
+	b.alerts = alerts.NewManager(b.hooks)
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
 
@@ -1481,11 +1484,12 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /alerts":             b.handleGETAlerts,
-		"POST   /alerts/dismiss":     b.handlePOSTAlertsDismiss,
-		"GET    /alerts/webhooks":    b.handleAlertsWebhooksGET,
-		"POST   /alerts/webhooks":    b.handleAlertsWebhooksPOST,
-		"DELETE /alerts/webhook/:id": b.handleAlertsWebhooksDELETE,
+		"GET    /alerts":         b.handleGETAlerts,
+		"POST   /alerts/dismiss": b.handlePOSTAlertsDismiss,
+
+		"GET    /webhooks":    b.handleAlertsWebhooksGET,
+		"POST   /webhooks":    b.handleAlertsWebhooksPOST,
+		"DELETE /webhook/:id": b.handleAlertsWebhooksDELETE,
 
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
