@@ -31,6 +31,9 @@ var (
 )
 
 const (
+	// targetBlockTime is the average block time of the Sia network
+	targetBlockTime = 10 * time.Minute
+
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
@@ -871,7 +874,7 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 	successful, failed := 0, 0
 	for _, contract := range setContracts {
 		// check whether broadcasting is necessary
-		timeSinceRevisionHeight := 10 * time.Minute * time.Duration(bh-contract.RevisionNumber)
+		timeSinceRevisionHeight := targetBlockTime * time.Duration(bh-contract.RevisionHeight)
 		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
 		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval {
 			continue // nothing to do
