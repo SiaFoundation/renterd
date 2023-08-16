@@ -43,7 +43,7 @@ func (c *Client) DismissAlerts(ids ...types.Hash256) error {
 // RegisterAlertHook registers a new alert hook for the given URL.
 func (c *Client) RegisterAlertHook(ctx context.Context, url string, event webhooks.Event) (types.Hash256, error) {
 	var resp webhooks.WebHookRegisterResponse
-	err := c.c.WithContext(ctx).POST("/alerts/webhooks", webhooks.WebHookRegisterRequest{
+	err := c.c.WithContext(ctx).POST("/webhooks", webhooks.WebHookRegisterRequest{
 		Event: event,
 		URL:   url,
 	}, &resp)
@@ -52,12 +52,12 @@ func (c *Client) RegisterAlertHook(ctx context.Context, url string, event webhoo
 
 // DeleteAlertHook deletes the alert hook with the given ID.
 func (c *Client) DeleteAlertHook(ctx context.Context, id types.Hash256) error {
-	return c.c.DELETE(fmt.Sprintf("/alerts/webhook/%s", id))
+	return c.c.DELETE(fmt.Sprintf("/webhook/%s", id))
 }
 
 // AlertHooks returns all alert hooks currently registered.
 func (c *Client) AlertHooks(ctx context.Context) (hooks []webhooks.WebHook, err error) {
-	err = c.c.WithContext(ctx).GET("/alerts/webhooks", &hooks)
+	err = c.c.WithContext(ctx).GET("/webhooks", &hooks)
 	return
 }
 
