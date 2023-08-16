@@ -1914,6 +1914,28 @@ func TestUploadPacking(t *testing.T) {
 	if os.TotalUploadedSize != uint64(totalRedundantSize) {
 		t.Errorf("expected totalUploadedSize of %v, got %v", totalRedundantSize, os.TotalUploadedSize)
 	}
+
+	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
+	// and file2 share the same slab.
+	file1, _, err := b.Object(context.Background(), "file1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs, err := b.ObjectsBySlabKey(context.Background(), file1.Slabs[0].Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 2 {
+		t.Fatal("expected 2 objects", len(objs))
+	}
+	sort.Slice(objs, func(i, j int) bool {
+		return objs[i].Name < objs[j].Name // make result deterministic
+	})
+	if objs[0].Name != "/file1" {
+		t.Fatal("expected file1", objs[0].Name)
+	} else if objs[1].Name != "/file2" {
+		t.Fatal("expected file2", objs[1].Name)
+	}
 }
 
 func TestWallet(t *testing.T) {
