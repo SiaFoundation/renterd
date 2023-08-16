@@ -157,9 +157,10 @@ type bus struct {
 
 	eas EphemeralAccountStore
 
-	logger        *zap.SugaredLogger
-	accounts      *accounts
-	contractLocks *contractLocks
+	logger           *zap.SugaredLogger
+	accounts         *accounts
+	contractLocks    *contractLocks
+	uploadingSectors *uploadingSectorsCache
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -771,7 +772,10 @@ func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
 
 	roots, err := b.ms.ContractRoots(jc.Request.Context(), id)
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
-		jc.Encode(roots)
+		jc.Encode(api.ContractRootsResponse{
+			Roots:     roots,
+			Uploading: b.uploadingSectors.sectors(id),
+		})
 	}
 }
 
@@ -1355,21 +1359,48 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
 }
 
+func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
+	var id api.UploadID
+	if jc.DecodeParam("id", &id) == nil {
+		jc.Check("failed to track upload", b.uploadingSectors.trackUpload(id))
+	}
+}
+
+func (b *bus) uploadAddSectorHandlerPOST(jc jape.Context) {
+	var id api.UploadID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.UploadSectorRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	jc.Check("failed to add sector", b.uploadingSectors.addUploadingSector(id, req.ContractID, req.Root))
+}
+
+func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
+	var id api.UploadID
+	if jc.DecodeParam("id", &id) == nil {
+		b.uploadingSectors.finishUpload(id)
+	}
+}
+
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
-		alerts:        alerts.NewManager(),
-		s:             s,
-		cm:            cm,
-		tp:            tp,
-		w:             w,
-		hdb:           hdb,
-		as:            as,
-		ms:            ms,
-		ss:            ss,
-		eas:           eas,
-		contractLocks: newContractLocks(),
-		logger:        l.Sugar().Named("bus"),
+		alerts:           alerts.NewManager(),
+		s:                s,
+		cm:               cm,
+		tp:               tp,
+		w:                w,
+		hdb:              hdb,
+		as:               as,
+		ms:               ms,
+		ss:               ss,
+		eas:              eas,
+		contractLocks:    newContractLocks(),
+		uploadingSectors: newUploadingSectorsCache(),
+		logger:           l.Sugar().Named("bus"),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
@@ -1523,15 +1554,13 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
-		"POST /search/hosts":   b.searchHostsHandlerPOST,
-		"GET  /search/objects": b.searchObjectsHandlerGET,
-
-		"GET    /stats/objects": b.objectsStatshandlerGET,
-
 		"GET    /objects/*path":  b.objectsHandlerGET,
 		"PUT    /objects/*path":  b.objectsHandlerPUT,
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+
+		"GET    /params/upload":  b.paramsHandlerUploadGET,
+		"GET    /params/gouging": b.paramsHandlerGougingGET,
 
 		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
@@ -1542,13 +1571,19 @@ func (b *bus) Handler() http.Handler {
 		"GET    /slab/:key":           b.slabHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
 
+		"POST /search/hosts":   b.searchHostsHandlerPOST,
+		"GET  /search/objects": b.searchObjectsHandlerGET,
+
+		"GET    /stats/objects": b.objectsStatshandlerGET,
+
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
-		"GET    /params/upload":  b.paramsHandlerUploadGET,
-		"GET    /params/gouging": b.paramsHandlerGougingGET,
+		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
+		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
+		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 	}))
 }
 
