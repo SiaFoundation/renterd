@@ -1955,23 +1955,23 @@ func TestWallet(t *testing.T) {
 	b := cluster.Bus
 
 	// Check wallet info is sane after startup.
-	initialInfo, err := b.Wallet(context.Background())
+	wallet, err := b.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialInfo.ScanHeight == 0 {
+	if wallet.ScanHeight == 0 {
 		t.Fatal("wallet scan height should not be 0")
 	}
-	if initialInfo.Confirmed.IsZero() {
+	if wallet.Confirmed.IsZero() {
 		t.Fatal("wallet confirmed balance should not be zero")
 	}
-	if !initialInfo.Spendable.Equals(initialInfo.Confirmed) {
+	if !wallet.Spendable.Equals(wallet.Confirmed) {
 		t.Fatal("wallet spendable balance should match confirmed")
 	}
-	if !initialInfo.Unconfirmed.IsZero() {
+	if !wallet.Unconfirmed.IsZero() {
 		t.Fatal("wallet unconfirmed balance should be zero")
 	}
-	if initialInfo.Address == (types.Address{}) {
+	if wallet.Address == (types.Address{}) {
 		t.Fatal("wallet address should be set")
 	}
 
@@ -1999,23 +1999,25 @@ func TestWallet(t *testing.T) {
 
 	// The wallet should still have the same confirmed balance, a lower
 	// spendable balance and a greater unconfirmed balance.
-	var info api.WalletResponse
 	err = Retry(600, 100*time.Millisecond, func() error {
-		info, err = b.Wallet(context.Background())
+		updated, err := b.Wallet(context.Background())
 		if err != nil {
 			return err
 		}
-		if !info.Confirmed.Equals(initialInfo.Confirmed) {
-			return fmt.Errorf("wallet confirmed balance should not have changed: %v %v", info.Confirmed, initialInfo.Confirmed)
+		if !updated.Confirmed.Equals(wallet.Confirmed) {
+			return fmt.Errorf("wallet confirmed balance should not have changed: %v %v", updated.Confirmed, wallet.Confirmed)
 		}
+
 		// The diffs of the spendable balance and unconfirmed balance should add up
 		// to the amount of money sent as well as the miner fees used.
-		spendableDiff := initialInfo.Spendable.Sub(info.Spendable)
-		unconfirmedDiff := info.Unconfirmed
-		withdrawnAmt := spendableDiff.Sub(unconfirmedDiff)
+		spendableDiff := wallet.Spendable.Sub(updated.Spendable)
+		if updated.Unconfirmed.Cmp(spendableDiff) > 0 {
+			t.Fatalf("unconfirmed balance can't be greater than the difference in spendable balance here, confirmed %v->%v unconfirmed %v->%v spendable %v->%v fee %v", wallet.Confirmed, updated.Confirmed, wallet.Unconfirmed, updated.Unconfirmed, wallet.Spendable, updated.Spendable, minerFee)
+		}
+		withdrawnAmt := spendableDiff.Sub(updated.Unconfirmed)
 		expectedWithdrawnAmt := sendAmt.Add(minerFee)
 		if !withdrawnAmt.Equals(expectedWithdrawnAmt) {
-			return fmt.Errorf("withdrawn amt doesn't match expectation: %v %v", withdrawnAmt.ExactString(), expectedWithdrawnAmt.ExactString())
+			return fmt.Errorf("withdrawn amount doesn't match expectation: %v!=%v", withdrawnAmt.ExactString(), expectedWithdrawnAmt.ExactString())
 		}
 		return nil
 	})
