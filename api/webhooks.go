@@ -1,17 +1,8 @@
 package api
 
-type Webhook struct {
-	Event  string `json:"event"`
-	Module string `json:"module"`
-	URL    string `json:"url"`
-}
-
-type WebhookQueueInfo struct {
-	URL  string `json:"url"`
-	Size int    `json:"size"`
-}
+import "go.sia.tech/renterd/webhooks"
 
 type WebHookResponse struct {
-	Webhooks []Webhook          `json:"webhooks"`
-	Queues   []WebhookQueueInfo `json:"queues"`
+	Webhooks []webhooks.Webhook          `json:"webhooks"`
+	Queues   []webhooks.WebhookQueueInfo `json:"queues"`
 }

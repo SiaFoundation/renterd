@@ -10,12 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 )
 
 type Broadcaster interface {
-	Broadcast(action Action)
+	BroadcastAction(ctx context.Context, action Action) error
 }
 
 const (
@@ -28,6 +27,11 @@ type (
 		Module string `json:"module"`
 		Event  string `json:"event"`
 		URL    string `json:"url"`
+	}
+
+	WebhookQueueInfo struct {
+		URL  string `json:"url"`
+		Size int    `json:"size"`
 	}
 
 	// Action describes an event that has been triggered.
@@ -96,21 +100,21 @@ func (w *Manager) Delete(wh Webhook) bool {
 	return exists
 }
 
-func (w *Manager) Info() ([]api.Webhook, []api.WebhookQueueInfo) {
+func (w *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	var hooks []api.Webhook
+	var hooks []Webhook
 	for _, hook := range w.webhooks {
-		hooks = append(hooks, api.Webhook{
+		hooks = append(hooks, Webhook{
 			Event:  hook.Event,
 			Module: hook.Module,
 			URL:    hook.URL,
 		})
 	}
-	var queueInfos []api.WebhookQueueInfo
+	var queueInfos []WebhookQueueInfo
 	for _, queue := range w.queues {
 		queue.mu.Lock()
-		queueInfos = append(queueInfos, api.WebhookQueueInfo{
+		queueInfos = append(queueInfos, WebhookQueueInfo{
 			URL:  queue.url,
 			Size: len(queue.actions),
 		})
@@ -123,7 +127,7 @@ func (a Action) String() string {
 	return a.Module + "." + a.Event
 }
 
-func (w *Manager) Broadcast(action Action) {
+func (w *Manager) BroadcastAction(_ context.Context, action Action) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, hook := range w.webhooks {
@@ -155,6 +159,7 @@ func (w *Manager) Broadcast(action Action) {
 		}
 		queue.mu.Unlock()
 	}
+	return nil
 }
 
 func (q *actionQueue) dequeue() {

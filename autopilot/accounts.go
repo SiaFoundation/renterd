@@ -172,7 +172,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 				// handle registering alert.
 				alertID := types.HashBytes(append(alertAccountRefillID[:], accountID[:]...))
 				if err != nil && inSet {
-					a.ap.alerts.Register(alerts.Alert{
+					a.ap.alerts.Register(ctx, alerts.Alert{
 						ID:       alertID,
 						Severity: alerts.SeverityError,
 						Message:  fmt.Sprintf("failed to refill account: %v", err),
@@ -184,7 +184,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 						Timestamp: time.Now(),
 					})
 				} else {
-					a.ap.alerts.Dismiss(alertID)
+					a.ap.alerts.Dismiss(ctx, alertID)
 				}
 				a.markRefillDone(workerID, contract.HostKey)
 				cancel()

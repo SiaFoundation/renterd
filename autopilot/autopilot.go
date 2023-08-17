@@ -26,6 +26,8 @@ import (
 )
 
 type Bus interface {
+	webhooks.Broadcaster
+
 	// Accounts
 	Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error)
 	Accounts(ctx context.Context) (accounts []api.Account, err error)
@@ -101,7 +103,6 @@ type Autopilot struct {
 	state state
 
 	alerts *alerts.Manager
-	hooks  *webhooks.Manager
 	a      *accounts
 	c      *contractor
 	m      *migrator
@@ -172,10 +173,6 @@ func (ap *Autopilot) Handler() http.Handler {
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /status":        ap.statusHandlerGET,
-
-		"GET    /webhooks":    ap.webhookHandlerGet(),
-		"POST   /webhooks":    ap.webhookHandlerPost(),
-		"DELETE /webhook/:id": ap.webhookHandlerDelete(),
 	}))
 }
 
@@ -302,7 +299,6 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 		close(ap.triggerChan)
 		ap.wg.Wait()
 		ap.runningSince = time.Time{}
-		ap.hooks.Close()
 	}
 	return nil
 }
@@ -484,15 +480,15 @@ func (ap *Autopilot) handleGETAlerts(c jape.Context) {
 	c.Encode(ap.alerts.Active())
 }
 
-func (ap *Autopilot) handlePOSTAlertsDismiss(c jape.Context) {
+func (ap *Autopilot) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
-	if c.Decode(&ids) != nil {
+	if jc.Decode(&ids) != nil {
 		return
 	} else if len(ids) == 0 {
-		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
 		return
 	}
-	ap.alerts.Dismiss(ids...)
+	ap.alerts.Dismiss(jc.Request.Context(), ids...)
 }
 
 func (ap *Autopilot) configHandlerGET(jc jape.Context) {
@@ -547,6 +543,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 // New initializes an Autopilot.
 func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64) (*Autopilot, error) {
 	ap := &Autopilot{
+		alerts:  alerts.NewManager(bus),
 		id:      id,
 		bus:     bus,
 		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
@@ -554,8 +551,6 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 
 		tickerDuration: heartbeat,
 	}
-	ap.hooks = webhooks.NewManager(ap.logger)
-	ap.alerts = alerts.NewManager(ap.hooks)
 	scanner, err := newScanner(
 		ap,
 		scannerBatchSize,
@@ -618,45 +613,4 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(hosts)
-}
-
-func (a *Autopilot) webhookHandlerDelete() jape.Handler {
-	return func(jc jape.Context) {
-		var wh webhooks.Webhook
-		if jc.Decode(&wh) != nil {
-			return
-		}
-		if !a.hooks.Delete(wh) {
-			jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
-			return
-		}
-	}
-}
-
-func (a *Autopilot) webhookHandlerGet() jape.Handler {
-	return func(jc jape.Context) {
-		webhooks, queueInfos := a.hooks.Info()
-		jc.Encode(api.WebHookResponse{
-			Queues:   queueInfos,
-			Webhooks: webhooks,
-		})
-	}
-}
-
-func (a *Autopilot) webhookHandlerPost() jape.Handler {
-	return func(jc jape.Context) {
-		var req api.Webhook
-		if jc.Decode(&req) != nil {
-			return
-		}
-		err := a.hooks.Register(webhooks.Webhook{
-			Event:  req.Event,
-			Module: req.Module,
-			URL:    req.URL,
-		})
-		if err != nil {
-			jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
-			return
-		}
-	}
 }

@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -98,7 +99,7 @@ func (s *Severity) UnmarshalJSON(b []byte) error {
 }
 
 // Register registers a new alert with the manager
-func (m *Manager) Register(a Alert) {
+func (m *Manager) Register(ctx context.Context, a Alert) {
 	if a.ID == (types.Hash256{}) {
 		panic("cannot register alert with empty ID") // developer error
 	} else if a.Timestamp.IsZero() {
@@ -109,7 +110,7 @@ func (m *Manager) Register(a Alert) {
 	m.alerts[a.ID] = a
 	m.mu.Unlock()
 
-	m.webhookBroadcaster.Broadcast(webhooks.Action{
+	m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
 		Module:  webhookModule,
 		Event:   webhookEventRegister,
 		Payload: a,
@@ -117,14 +118,14 @@ func (m *Manager) Register(a Alert) {
 }
 
 // Dismiss removes the alerts with the given IDs.
-func (m *Manager) Dismiss(ids ...types.Hash256) {
+func (m *Manager) Dismiss(ctx context.Context, ids ...types.Hash256) {
 	m.mu.Lock()
 	for _, id := range ids {
 		delete(m.alerts, id)
 	}
 	m.mu.Unlock()
 
-	m.webhookBroadcaster.Broadcast(webhooks.Action{
+	m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
 		Module:  webhookModule,
 		Event:   webhookEventDismiss,
 		Payload: ids,

@@ -155,7 +155,7 @@ OUTER:
 		// recompute health.
 		start := time.Now()
 		if err := b.RefreshHealth(ctx); err != nil {
-			m.ap.alerts.Register(alerts.Alert{
+			m.ap.alerts.Register(ctx, alerts.Alert{
 				ID:        frand.Entropy256(),
 				Severity:  alerts.SeverityCritical,
 				Message:   fmt.Sprintf("migrations interrupted - failed to refresh cached slab health: %v", err),
@@ -210,7 +210,7 @@ OUTER:
 		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
 
 		// register an alert to notify users about ongoing migrations.
-		m.ap.alerts.Register(alerts.Alert{
+		m.ap.alerts.Register(ctx, alerts.Alert{
 			ID:        alertMigrationID,
 			Severity:  alerts.SeverityInfo,
 			Message:   fmt.Sprintf("Migrating %d slabs", len(toMigrate)),

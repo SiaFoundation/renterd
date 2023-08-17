@@ -1172,7 +1172,7 @@ func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
 		return
 	}
-	b.alerts.Dismiss(ids...)
+	b.alerts.Dismiss(jc.Request.Context(), ids...)
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
@@ -1387,44 +1387,46 @@ func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	}
 }
 
-func (b *bus) webhookHandlerDelete() jape.Handler {
-	return func(jc jape.Context) {
-		var wh webhooks.Webhook
-		if jc.Decode(&wh) != nil {
-			return
-		}
-		if !b.hooks.Delete(wh) {
-			jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
-			return
-		}
+func (b *bus) webhookActionHandlerPost(jc jape.Context) {
+	var action webhooks.Action
+	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
+		return
+	}
+	b.hooks.BroadcastAction(jc.Request.Context(), action)
+}
+
+func (b *bus) webhookHandlerDelete(jc jape.Context) {
+	var wh webhooks.Webhook
+	if jc.Decode(&wh) != nil {
+		return
+	}
+	if !b.hooks.Delete(wh) {
+		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
+		return
 	}
 }
 
-func (b *bus) webhookHandlerGet() jape.Handler {
-	return func(jc jape.Context) {
-		webhooks, queueInfos := b.hooks.Info()
-		jc.Encode(api.WebHookResponse{
-			Queues:   queueInfos,
-			Webhooks: webhooks,
-		})
-	}
+func (b *bus) webhookHandlerGet(jc jape.Context) {
+	webhooks, queueInfos := b.hooks.Info()
+	jc.Encode(api.WebHookResponse{
+		Queues:   queueInfos,
+		Webhooks: webhooks,
+	})
 }
 
-func (b *bus) webhookHandlerPost() jape.Handler {
-	return func(jc jape.Context) {
-		var req api.Webhook
-		if jc.Decode(&req) != nil {
-			return
-		}
-		err := b.hooks.Register(webhooks.Webhook{
-			Event:  req.Event,
-			Module: req.Module,
-			URL:    req.URL,
-		})
-		if err != nil {
-			jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
-			return
-		}
+func (b *bus) webhookHandlerPost(jc jape.Context) {
+	var req webhooks.Webhook
+	if jc.Decode(&req) != nil {
+		return
+	}
+	err := b.hooks.Register(webhooks.Webhook{
+		Event:  req.Event,
+		Module: req.Module,
+		URL:    req.URL,
+	})
+	if err != nil {
+		jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
+		return
 	}
 }
 
@@ -1630,9 +1632,10 @@ func (b *bus) Handler() http.Handler {
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 
-		"GET    /webhooks":    b.webhookHandlerGet(),
-		"POST   /webhooks":    b.webhookHandlerPost(),
-		"DELETE /webhook/:id": b.webhookHandlerDelete(),
+		"GET    /webhooks":        b.webhookHandlerGet,
+		"POST   /webhooks":        b.webhookHandlerPost,
+		"POST   /webhooks/action": b.webhookActionHandlerPost,
+		"DELETE /webhook/:id":     b.webhookHandlerDelete,
 	}))
 }
 

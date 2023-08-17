@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -52,8 +53,8 @@ func TestWebhooks(t *testing.T) {
 		Severity:  SeverityWarning,
 		Timestamp: time.Unix(0, 0),
 	}
-	alerts.Register(a)
-	alerts.Dismiss(types.Hash256{1})
+	alerts.Register(context.Background(), a)
+	alerts.Dismiss(context.Background(), types.Hash256{1})
 
 	// list hooks
 	hooks, _ := mgr.Info()
@@ -77,7 +78,7 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// perform an action that should not trigger the endpoint
-	alerts.Register(Alert{
+	alerts.Register(context.Background(), Alert{
 		ID:        types.Hash256{2},
 		Severity:  SeverityWarning,
 		Timestamp: time.Now(),

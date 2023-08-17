@@ -430,7 +430,7 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 	)
 	hasChanged := len(added)+len(removed) > 0
 	if hasChanged {
-		c.ap.alerts.Register(alerts.Alert{
+		c.ap.alerts.Register(context.Background(), alerts.Alert{
 			ID:       frand.Entropy256(),
 			Severity: alerts.SeverityInfo,
 			Message:  fmt.Sprintf("The contract set has changed: %v contracts added and %v removed", len(added), len(removed)),
@@ -500,7 +500,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 			severity = alerts.SeverityWarning
 		}
 
-		c.ap.alerts.Register(alerts.Alert{
+		c.ap.alerts.Register(context.Background(), alerts.Alert{
 			ID:       alertLowBalanceID,
 			Severity: severity,
 			Message:  "wallet is low on funds",
@@ -886,7 +886,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 
 		// break if we don't want to proceed
 		if !proceed {
-			c.ap.alerts.Register(alerts.Alert{
+			c.ap.alerts.Register(context.Background(), alerts.Alert{
 				ID:       alertRenewalFailedID,
 				Severity: alerts.SeverityCritical,
 				Message:  fmt.Sprintf("Contract renewals were interrupted due to latest error: %v", err),

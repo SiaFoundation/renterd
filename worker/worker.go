@@ -130,6 +130,7 @@ type ContractLocker interface {
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	consensusState
+	webhooks.Broadcaster
 
 	AccountStore
 	ContractLocker
@@ -230,7 +231,6 @@ type hostProvider interface {
 // a renterd system.
 type worker struct {
 	alerts          *alerts.Manager
-	hooks           *webhooks.Manager
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
@@ -1138,47 +1138,6 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (w *worker) webhookHandlerDelete() jape.Handler {
-	return func(jc jape.Context) {
-		var wh webhooks.Webhook
-		if jc.Decode(&wh) != nil {
-			return
-		}
-		if !w.hooks.Delete(wh) {
-			jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
-			return
-		}
-	}
-}
-
-func (w *worker) webhookHandlerGet() jape.Handler {
-	return func(jc jape.Context) {
-		webhooks, queueInfos := w.hooks.Info()
-		jc.Encode(api.WebHookResponse{
-			Queues:   queueInfos,
-			Webhooks: webhooks,
-		})
-	}
-}
-
-func (w *worker) webhookHandlerPost() jape.Handler {
-	return func(jc jape.Context) {
-		var req api.Webhook
-		if jc.Decode(&req) != nil {
-			return
-		}
-		err := w.hooks.Register(webhooks.Webhook{
-			Event:  req.Event,
-			Module: req.Module,
-			URL:    req.URL,
-		})
-		if err != nil {
-			jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
-			return
-		}
-	}
-}
-
 func preparePayment(accountKey types.PrivateKey, amt types.Currency, blockHeight uint64) rhpv3.PayByEphemeralAccountRequest {
 	return rhpv3.PayByEphemeralAccount(rhpv3.Account(accountKey.PublicKey()), amt, blockHeight+6, accountKey) // 1 hour valid
 }
@@ -1200,7 +1159,7 @@ func (w *worker) handlePOSTAlertsDismiss(jc jape.Context) {
 		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
 		return
 	}
-	w.alerts.Dismiss(ids...)
+	w.alerts.Dismiss(jc.Request.Context(), ids...)
 }
 
 func (w *worker) accountHandlerGET(jc jape.Context) {
@@ -1228,6 +1187,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	}
 
 	w := &worker{
+		alerts:                  alerts.NewManager(b),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
@@ -1236,8 +1196,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		busFlushInterval:        busFlushInterval,
 		logger:                  l.Sugar().Named("worker").Named(id),
 	}
-	w.hooks = webhooks.NewManager(w.logger)
-	w.alerts = alerts.NewManager(w.hooks)
 	w.initTransportPool()
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
@@ -1275,10 +1233,6 @@ func (w *worker) Handler() http.Handler {
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
-
-		"GET    /webhooks":    w.webhookHandlerGet(),
-		"POST   /webhooks":    w.webhookHandlerPost(),
-		"DELETE /webhook/:id": w.webhookHandlerDelete(),
 	}))
 }
 
@@ -1290,9 +1244,6 @@ func (w *worker) Shutdown(_ context.Context) error {
 		w.flushInteractions()
 	}
 	w.interactionsMu.Unlock()
-
-	// Stop webhooks.
-	w.hooks.Close()
 
 	// Stop contract spending recorder.
 	w.contractSpendingRecorder.Stop()
