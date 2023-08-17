@@ -31,6 +31,9 @@ var (
 )
 
 const (
+	// targetBlockTime is the average block time of the Sia network
+	targetBlockTime = 10 * time.Minute
+
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
 	// contract.
@@ -80,8 +83,10 @@ type (
 		ap     *Autopilot
 		logger *zap.SugaredLogger
 
-		maintenanceTxnID         types.TransactionID
-		revisionSubmissionBuffer uint64
+		maintenanceTxnID          types.TransactionID
+		revisionBroadcastInterval time.Duration
+		revisionLastBroadcast     map[types.FileContractID]time.Time
+		revisionSubmissionBuffer  uint64
 
 		mu               sync.Mutex
 		cachedHostInfo   map[types.PublicKey]hostInfo
@@ -108,11 +113,13 @@ type (
 	}
 )
 
-func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64) *contractor {
+func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
 	return &contractor{
-		ap:                       ap,
-		logger:                   ap.logger.Named("contractor"),
-		revisionSubmissionBuffer: revisionSubmissionBuffer,
+		ap:                        ap,
+		logger:                    ap.logger.Named("contractor"),
+		revisionBroadcastInterval: revisionBroadcastInterval,
+		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
+		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 	}
 }
 
@@ -172,6 +179,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	contracts := resp.Contracts
 	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
+
+	// run revision broadcast
+	c.runRevisionBroadcast(ctx, w, contracts, currentSet)
 
 	// sort contracts by their size
 	sort.Slice(contracts, func(i, j int) bool {
@@ -843,6 +853,64 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	}
 
 	return formed, nil
+}
+
+// runRevisionBroadcast broadcasts contract revisions from the current set of
+// contracts. Since we are migrating away from all contracts not in the set and
+// are not uploading to those contracts anyway, we only worry about contracts in
+// the set.
+func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allContracts []api.Contract, setContracts []api.ContractMetadata) {
+	if c.revisionBroadcastInterval == 0 {
+		return // not enabled
+	}
+
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		c.logger.Warnf("revision broadcast failed to fetch blockHeight: %v", err)
+		return
+	}
+	bh := cs.BlockHeight
+
+	successful, failed := 0, 0
+	for _, contract := range setContracts {
+		// check whether broadcasting is necessary
+		timeSinceRevisionHeight := targetBlockTime * time.Duration(bh-contract.RevisionHeight)
+		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
+		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval {
+			continue // nothing to do
+		}
+
+		// remember that we tried to broadcast this contract now
+		c.revisionLastBroadcast[contract.ID] = time.Now()
+
+		// broadcast revision
+		err := w.RHPBroadcast(ctx, contract.ID)
+		if err != nil && strings.Contains(err.Error(), "transaction has a file contract with an outdated revision number") {
+			continue // don't log - revision was already broadcasted
+		} else if err != nil {
+			c.logger.Warnw(fmt.Sprintf("failed to broadcast contract revision: %v", err),
+				"hk", contract.HostKey,
+				"fcid", contract.ID)
+			failed++
+			delete(c.revisionLastBroadcast, contract.ID) // reset to try again
+			continue
+		}
+		successful++
+	}
+	c.logger.Infow("revision broadcast completed",
+		"successful", successful,
+		"failed", failed)
+
+	// prune revisionLastBroadcast
+	contractMap := make(map[types.FileContractID]struct{})
+	for _, contract := range allContracts {
+		contractMap[contract.ID] = struct{}{}
+	}
+	for contractID := range c.revisionLastBroadcast {
+		if _, ok := contractMap[contractID]; !ok {
+			delete(c.revisionLastBroadcast, contractID)
+		}
+	}
 }
 
 func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []contractInfo) {
