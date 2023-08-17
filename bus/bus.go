@@ -1387,6 +1387,47 @@ func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	}
 }
 
+func (b *bus) webhookHandlerDelete() jape.Handler {
+	return func(jc jape.Context) {
+		var wh webhooks.Webhook
+		if jc.Decode(&wh) != nil {
+			return
+		}
+		if !b.hooks.Delete(wh) {
+			jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
+			return
+		}
+	}
+}
+
+func (b *bus) webhookHandlerGet() jape.Handler {
+	return func(jc jape.Context) {
+		webhooks, queueInfos := b.hooks.Info()
+		jc.Encode(api.WebHookResponse{
+			Queues:   queueInfos,
+			Webhooks: webhooks,
+		})
+	}
+}
+
+func (b *bus) webhookHandlerPost() jape.Handler {
+	return func(jc jape.Context) {
+		var req api.Webhook
+		if jc.Decode(&req) != nil {
+			return
+		}
+		err := b.hooks.Register(webhooks.Webhook{
+			Event:  req.Event,
+			Module: req.Module,
+			URL:    req.URL,
+		})
+		if err != nil {
+			jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
@@ -1589,9 +1630,9 @@ func (b *bus) Handler() http.Handler {
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 
-		"GET    /webhooks":    b.hooks.HandlerInfo(),
-		"POST   /webhooks":    b.hooks.HandlerAdd(),
-		"DELETE /webhook/:id": b.hooks.HandlerDelete(),
+		"GET    /webhooks":    b.webhookHandlerGet(),
+		"POST   /webhooks":    b.webhookHandlerPost(),
+		"DELETE /webhook/:id": b.webhookHandlerDelete(),
 	}))
 }
 

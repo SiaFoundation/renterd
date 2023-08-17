@@ -173,9 +173,9 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /status":        ap.statusHandlerGET,
 
-		"GET    /webhooks":    ap.hooks.HandlerInfo(),
-		"POST   /webhooks":    ap.hooks.HandlerAdd(),
-		"DELETE /webhook/:id": ap.hooks.HandlerDelete(),
+		"GET    /webhooks":    ap.webhookHandlerGet(),
+		"POST   /webhooks":    ap.webhookHandlerPost(),
+		"DELETE /webhook/:id": ap.webhookHandlerDelete(),
 	}))
 }
 
@@ -618,4 +618,45 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(hosts)
+}
+
+func (a *Autopilot) webhookHandlerDelete() jape.Handler {
+	return func(jc jape.Context) {
+		var wh webhooks.Webhook
+		if jc.Decode(&wh) != nil {
+			return
+		}
+		if !a.hooks.Delete(wh) {
+			jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
+			return
+		}
+	}
+}
+
+func (a *Autopilot) webhookHandlerGet() jape.Handler {
+	return func(jc jape.Context) {
+		webhooks, queueInfos := a.hooks.Info()
+		jc.Encode(api.WebHookResponse{
+			Queues:   queueInfos,
+			Webhooks: webhooks,
+		})
+	}
+}
+
+func (a *Autopilot) webhookHandlerPost() jape.Handler {
+	return func(jc jape.Context) {
+		var req api.Webhook
+		if jc.Decode(&req) != nil {
+			return
+		}
+		err := a.hooks.Register(webhooks.Webhook{
+			Event:  req.Event,
+			Module: req.Module,
+			URL:    req.URL,
+		})
+		if err != nil {
+			jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
+			return
+		}
+	}
 }

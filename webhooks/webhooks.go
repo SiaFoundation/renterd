@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 )
@@ -220,45 +219,4 @@ func sendEvent(ctx context.Context, url string, action Action) error {
 		return fmt.Errorf("Webhook returned unexpected status %v: %v", resp.StatusCode, string(errStr))
 	}
 	return nil
-}
-
-func (w *Manager) HandlerDelete() jape.Handler {
-	return func(jc jape.Context) {
-		var wh Webhook
-		if jc.Decode(&wh) != nil {
-			return
-		}
-		if !w.Delete(wh) {
-			jc.Error(fmt.Errorf("Webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
-			return
-		}
-	}
-}
-
-func (w *Manager) HandlerInfo() jape.Handler {
-	return func(jc jape.Context) {
-		webhooks, queueInfos := w.Info()
-		jc.Encode(api.WebHookResponse{
-			Queues:   queueInfos,
-			Webhooks: webhooks,
-		})
-	}
-}
-
-func (w *Manager) HandlerAdd() jape.Handler {
-	return func(jc jape.Context) {
-		var req api.Webhook
-		if jc.Decode(&req) != nil {
-			return
-		}
-		err := w.Register(Webhook{
-			Event:  req.Event,
-			Module: req.Module,
-			URL:    req.URL,
-		})
-		if err != nil {
-			jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
-			return
-		}
-	}
 }
