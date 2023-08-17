@@ -123,6 +123,9 @@ func (m *Manager) Dismiss(ctx context.Context, ids ...types.Hash256) {
 	for _, id := range ids {
 		delete(m.alerts, id)
 	}
+	if len(m.alerts) == 0 {
+		m.alerts = make(map[types.Hash256]Alert) // reclaim memory
+	}
 	m.mu.Unlock()
 
 	m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{

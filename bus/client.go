@@ -575,6 +575,12 @@ func (c *Client) SearchHosts(ctx context.Context, filterMode string, addressCont
 	return
 }
 
+// ObjectsBySlabKey returns all objects that reference a given slab.
+func (c *Client) ObjectsBySlabKey(ctx context.Context, key object.EncryptionKey) (objects []api.ObjectMetadata, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%v/objects", key), &objects)
+	return
+}
+
 // SearchObjects returns all objects that contains a sub-string in their key.
 func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	values := url.Values{}

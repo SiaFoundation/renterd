@@ -1521,6 +1521,53 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	return slabs, nil
 }
 
+func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
+	var objs []struct {
+		Name   string
+		Size   int64
+		Health float64
+	}
+	key, err := slabKey.MarshalText()
+	if err != nil {
+		return nil, err
+	}
+	var query string
+	if isSQLite(s.db) {
+		query = `
+SELECT o.object_id as Name, o.size as Size, sla.health as Health
+FROM slabs sla
+LEFT JOIN slices sli ON sli.db_slab_id = sla.id
+INNER JOIN objects o ON o.id = sli.db_object_id
+GROUP BY o.object_id
+HAVING sla.key = ?
+	`
+	} else {
+		query = `
+SELECT o.object_id as Name, ANY_VALUE(o.size) as Size, ANY_VALUE(sla.health) as Health, ANY_VALUE(sla.key) as slabKey
+FROM slabs sla
+LEFT JOIN slices sli ON sli.db_slab_id = sla.id
+INNER JOIN objects o ON o.id = sli.db_object_id
+GROUP BY o.object_id
+HAVING slabKey = ?
+	`
+	}
+	err = s.db.Raw(query, key).
+		Scan(&objs).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	metadata := make([]api.ObjectMetadata, len(objs))
+	for i, obj := range objs {
+		metadata[i] = api.ObjectMetadata{
+			Name:   obj.Name,
+			Size:   obj.Size,
+			Health: obj.Health,
+		}
+	}
+	return metadata, nil
+}
+
 // MarkPackedSlabsUploaded marks the given slabs as uploaded and deletes them
 // from the buffer.
 func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error {

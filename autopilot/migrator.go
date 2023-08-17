@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -126,10 +127,20 @@ func (m *migrator) performMigrations(p *workerPool) {
 						}
 						err = w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
 						if err != nil {
-							m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
+							errMsg := fmt.Sprintf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
+							m.ap.alerts.Register(alerts.Alert{
+								ID:       types.HashBytes([]byte(slab.Key.String())),
+								Severity: alerts.SeverityCritical,
+								Message:  errMsg,
+								Data: map[string]interface{}{
+									"key": slab.Key.String(),
+								},
+								Timestamp: time.Now(),
+							})
+							m.logger.Errorf(errMsg)
 							continue
 						}
-						m.logger.Debugf("%v: successfully migrated slab '%v' (health: %v) %d/%d", id, j.Key, j.Health, j.slabIdx+1, j.batchSize)
+						m.logger.Debugf("%v: successfully migrated slab (health: %v) %d/%d", id, j.Health, j.slabIdx+1, j.batchSize)
 					}
 				}(w)
 			}
