@@ -128,7 +128,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 						err = w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
 						if err != nil {
 							errMsg := fmt.Sprintf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
-							m.ap.alerts.Register(alerts.Alert{
+							m.ap.alerts.Register(ctx, alerts.Alert{
 								ID:       types.HashBytes([]byte(slab.Key.String())),
 								Severity: alerts.SeverityCritical,
 								Message:  errMsg,
