@@ -34,7 +34,7 @@ type (
 	// Action describes an event that has been triggered.
 	Action struct {
 		Module  string      `json:"module"`
-		ID      string      `json:"id"`
+		Event   string      `json:"event"`
 		Payload interface{} `json:"payload,omitempty"`
 	}
 )
@@ -76,7 +76,7 @@ func (w *Manager) Register(wh Webhook) error {
 
 	// Test URL.
 	err := sendEvent(ctx, wh.URL, Action{
-		ID: WebhookEventPing,
+		Event: WebhookEventPing,
 	})
 	if err != nil {
 		return err
@@ -121,7 +121,7 @@ func (w *Manager) Info() ([]api.Webhook, []api.WebhookQueueInfo) {
 }
 
 func (a Action) String() string {
-	return a.Module + "." + a.ID
+	return a.Module + "." + a.Event
 }
 
 func (w *Manager) Broadcast(action Action) {
@@ -147,6 +147,7 @@ func (w *Manager) Broadcast(action Action) {
 		queue.mu.Lock()
 		queue.actions = append(queue.actions, action)
 		if !queue.isDequeueing {
+			queue.isDequeueing = true
 			w.wg.Add(1)
 			go func() {
 				queue.dequeue()
@@ -163,6 +164,7 @@ func (q *actionQueue) dequeue() {
 		if len(q.actions) == 0 {
 			q.isDequeueing = false
 			q.mu.Unlock()
+			return
 		}
 		next := q.actions[0]
 		q.actions = q.actions[1:]
@@ -180,7 +182,7 @@ func (w Webhook) Matches(action Action) bool {
 	if w.Module != action.Module {
 		return false
 	}
-	return w.Event == "" || w.Event == action.ID
+	return w.Event == "" || w.Event == action.Event
 }
 
 func NewManager(logger *zap.SugaredLogger) *Manager {

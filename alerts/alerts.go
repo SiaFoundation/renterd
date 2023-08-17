@@ -111,7 +111,7 @@ func (m *Manager) Register(a Alert) {
 
 	m.webhookBroadcaster.Broadcast(webhooks.Action{
 		Module:  webhookModule,
-		ID:      webhookEventRegister,
+		Event:   webhookEventRegister,
 		Payload: a,
 	})
 }
@@ -126,7 +126,7 @@ func (m *Manager) Dismiss(ids ...types.Hash256) {
 
 	m.webhookBroadcaster.Broadcast(webhooks.Action{
 		Module:  webhookModule,
-		ID:      webhookEventDismiss,
+		Event:   webhookEventDismiss,
 		Payload: ids,
 	})
 }

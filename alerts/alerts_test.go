@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,12 +20,15 @@ func TestWebhooks(t *testing.T) {
 
 	mux := http.NewServeMux()
 	var events []webhooks.Action
+	var mu sync.Mutex
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		var event webhooks.Action
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			t.Fatal(err)
 		}
+		mu.Lock()
 		events = append(events, event)
+		mu.Unlock()
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -80,15 +84,26 @@ func TestWebhooks(t *testing.T) {
 	})
 
 	// check events
+	for i := 0; i < 10; i++ {
+		mu.Lock()
+		nEvents := len(events)
+		mu.Unlock()
+		if nEvents != 3 {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(events) != 3 {
-		t.Fatal("wrong number of hits", len(events))
+		t.Fatal("wrong number of events", len(events))
 	}
 	assertEvent := func(event webhooks.Action, module, id string, hasPayload bool) {
 		t.Helper()
 		if event.Module != module {
 			t.Fatal("wrong event module", event.Module, module)
-		} else if event.ID != id {
-			t.Fatal("wrong event id", event.ID, id)
+		} else if event.Event != id {
+			t.Fatal("wrong event id", event.Event, id)
 		} else if hasPayload && event.Payload == nil {
 			t.Fatal("missing payload")
 		}
