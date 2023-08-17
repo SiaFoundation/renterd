@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
-	"go.sia.tech/core/types"
+	"go.sia.tech/jape"
+	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
+
+type Broadcaster interface {
+	Broadcast(action Action)
+}
 
 const (
 	webhookTimeout   = 10 * time.Second
@@ -22,105 +25,79 @@ const (
 )
 
 type (
-	WebHookRegisterRequest struct {
-		Event Event  `json:"event"`
-		URL   string `json:"url"`
-	}
-	WebHookRegisterResponse struct {
-		ID types.Hash256 `json:"id"`
+	Webhook struct {
+		Module string `json:"module"`
+		Event  string `json:"event"`
+		URL    string `json:"url"`
 	}
 
-	WebHook struct {
-		ID    types.Hash256 `json:"id"`
-		Event Event         `json:"event"`
-		URL   string        `json:"url"`
-	}
-
-	registeredHook struct {
-		Event
-		url string
-	}
-
-	Event struct {
+	// Action describes an event that has been triggered.
+	Action struct {
 		Module  string      `json:"module"`
 		ID      string      `json:"id"`
 		Payload interface{} `json:"payload,omitempty"`
 	}
 )
 
-type Webhooks struct {
-	mu     sync.Mutex
-	hooks  map[types.Hash256]*registeredHook
+type Manager struct {
 	logger *zap.SugaredLogger
+
+	mu       sync.Mutex
+	webhooks map[string]Webhook
 }
 
-func (w *Webhooks) Register(url string, event Event) (types.Hash256, error) {
+func (w Webhook) String() string {
+	return fmt.Sprintf("%v.%v.%v", w.URL, w.Module, w.Event)
+}
+
+func (w *Manager) Register(wh Webhook) error {
 	ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
 	defer cancel()
 
 	// Test URL.
-	err := sendEvent(ctx, url, Event{
+	err := sendEvent(ctx, wh.URL, Action{
 		ID: WebhookEventPing,
 	})
 	if err != nil {
-		return types.Hash256{}, err
+		return err
 	}
 
 	// Add webhook.
-	id := frand.Entropy256()
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.hooks[id] = &registeredHook{
-		Event: event,
-		url:   url,
-	}
-	return id, nil
+	w.webhooks[wh.String()] = wh
+	return nil
 }
 
-func (w *Webhooks) Delete(id types.Hash256) bool {
+func (w *Manager) Delete(wh Webhook) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, exists := w.hooks[id]
-	delete(w.hooks, id)
+	_, exists := w.webhooks[wh.String()]
+	delete(w.webhooks, wh.String())
 	return exists
 }
 
-func (w *Webhooks) List() []WebHook {
+func (w *Manager) List() []Webhook {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	var hooks []WebHook
-	for id, hook := range w.hooks {
-		hooks = append(hooks, WebHook{
-			ID:    id,
+	var hooks []Webhook
+	for _, hook := range w.webhooks {
+		hooks = append(hooks, Webhook{
 			Event: hook.Event,
-			URL:   hook.url,
+			URL:   hook.URL,
 		})
 	}
 	return hooks
 }
 
-func (e Event) String() string {
-	return e.Module + "." + e.ID
+func (a Action) String() string {
+	return a.Module + "." + a.ID
 }
 
-func (e *Event) LoadString(s string) error {
-	parts := strings.SplitN(s, ".", 2)
-	if len(parts) == 0 {
-		return fmt.Errorf("invalid event string %v", s)
-	} else if len(parts) == 1 {
-		e.Module = parts[0]
-	} else if len(parts) == 2 {
-		e.Module, e.ID = parts[0], parts[1]
-	} else {
-		panic("unreachable")
-	}
-	return nil
-}
-
-func (w *Webhooks) Broadcast(event Event) {
+func (w *Manager) Broadcast(event Action) {
 	w.mu.Lock()
-	var hooks []*registeredHook
-	for _, hook := range w.hooks {
+	var hooks []Webhook
+	for _, hook := range w.webhooks {
 		hooks = append(hooks, hook)
 	}
 	w.mu.Unlock()
@@ -133,11 +110,11 @@ func (w *Webhooks) Broadcast(event Event) {
 			continue
 		}
 		wg.Add(1)
-		go func(hook *registeredHook) {
+		go func(hook Webhook) {
 			defer wg.Done()
-			err := sendEvent(ctx, hook.url, event)
+			err := sendEvent(ctx, hook.URL, event)
 			if err != nil {
-				w.logger.Errorf("failed to send webhook event %v to %v: %v", event, hook.url, err)
+				w.logger.Errorf("failed to send webhook event %v to %v: %v", event.String(), hook.URL, err)
 				return
 			}
 		}(hook)
@@ -145,22 +122,22 @@ func (w *Webhooks) Broadcast(event Event) {
 	wg.Wait()
 }
 
-func (w *registeredHook) Matches(event Event) bool {
-	if w.Module != event.Module {
+func (w Webhook) Matches(action Action) bool {
+	if w.Module != action.Module {
 		return false
 	}
-	return w.ID == "" || w.ID == event.ID
+	return w.Event == "" || w.Event == action.ID
 }
 
-func New(logger *zap.SugaredLogger) *Webhooks {
-	return &Webhooks{
-		hooks:  make(map[types.Hash256]*registeredHook),
-		logger: logger.Named("webhooks"),
+func NewManager(logger *zap.SugaredLogger) *Manager {
+	return &Manager{
+		webhooks: make(map[string]Webhook),
+		logger:   logger.Named("webhooks"),
 	}
 }
 
-func sendEvent(ctx context.Context, url string, event Event) error {
-	body, err := json.Marshal(event)
+func sendEvent(ctx context.Context, url string, action Action) error {
+	body, err := json.Marshal(action)
 	if err != nil {
 		return err
 	}
@@ -183,4 +160,41 @@ func sendEvent(ctx context.Context, url string, event Event) error {
 		return fmt.Errorf("webhook returned unexpected status %v: %v", resp.StatusCode, string(errStr))
 	}
 	return nil
+}
+
+func (w *Manager) HandlerDelete() jape.Handler {
+	return func(jc jape.Context) {
+		var wh Webhook
+		if jc.Decode(&wh) != nil {
+			return
+		}
+		if !w.Delete(wh) {
+			jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
+			return
+		}
+	}
+}
+
+func (w *Manager) HandlerList() jape.Handler {
+	return func(jc jape.Context) {
+		jc.Encode(w.List())
+	}
+}
+
+func (w *Manager) HandlerAdd() jape.Handler {
+	return func(jc jape.Context) {
+		var req api.WebHookRegisterRequest
+		if jc.Decode(&req) != nil {
+			return
+		}
+		err := w.Register(Webhook{
+			Event:  req.Event,
+			Module: req.Module,
+			URL:    req.URL,
+		})
+		if err != nil {
+			jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
+			return
+		}
+	}
 }

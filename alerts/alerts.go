@@ -49,22 +49,12 @@ type (
 		Timestamp time.Time      `json:"timestamp"`
 	}
 
-	WebHookEventDismissAlerts struct {
-		webhooks.Event
-		ToDismiss []types.Hash256 `json:"toDismiss"`
-	}
-
-	WebHookEventRegisterAlert struct {
-		webhooks.Event
-		Alert Alert `json:"alert"`
-	}
-
 	// A Manager manages the host's alerts.
 	Manager struct {
 		mu sync.Mutex
 		// alerts is a map of alert IDs to their current alert.
-		alerts map[types.Hash256]Alert
-		hooks  *webhooks.Webhooks
+		alerts             map[types.Hash256]Alert
+		webhookBroadcaster webhooks.Broadcaster
 	}
 )
 
@@ -119,7 +109,7 @@ func (m *Manager) Register(a Alert) {
 	m.alerts[a.ID] = a
 	m.mu.Unlock()
 
-	m.hooks.Broadcast(webhooks.Event{
+	m.webhookBroadcaster.Broadcast(webhooks.Action{
 		Module:  webhookModule,
 		ID:      webhookEventRegister,
 		Payload: a,
@@ -134,7 +124,7 @@ func (m *Manager) Dismiss(ids ...types.Hash256) {
 	}
 	m.mu.Unlock()
 
-	m.hooks.Broadcast(webhooks.Event{
+	m.webhookBroadcaster.Broadcast(webhooks.Action{
 		Module:  webhookModule,
 		ID:      webhookEventDismiss,
 		Payload: ids,
@@ -157,9 +147,9 @@ func (m *Manager) Active() []Alert {
 }
 
 // NewManager initializes a new alerts manager.
-func NewManager(hooks *webhooks.Webhooks) *Manager {
+func NewManager(b webhooks.Broadcaster) *Manager {
 	return &Manager{
-		alerts: make(map[types.Hash256]Alert),
-		hooks:  hooks,
+		alerts:             make(map[types.Hash256]Alert),
+		webhookBroadcaster: b,
 	}
 }

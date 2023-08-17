@@ -14,12 +14,13 @@ import (
 )
 
 func TestWebhooks(t *testing.T) {
-	alerts := NewManager(webhooks.New(zap.NewNop().Sugar()))
+	mgr := webhooks.NewManager(zap.NewNop().Sugar())
+	alerts := NewManager(mgr)
 
 	mux := http.NewServeMux()
-	var events []webhooks.Event
+	var events []webhooks.Action
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		var event webhooks.Event
+		var event webhooks.Action
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			t.Fatal(err)
 		}
@@ -29,15 +30,16 @@ func TestWebhooks(t *testing.T) {
 	defer srv.Close()
 
 	// register a hook
-	url := fmt.Sprintf("http://%v/events", srv.Listener.Addr().String())
-	id, err := alerts.hooks.Register(url, webhooks.Event{
+	wh := webhooks.Webhook{
 		Module: webhookModule,
-	})
+		URL:    fmt.Sprintf("http://%v/events", srv.Listener.Addr().String()),
+	}
+	if hookID := wh.String(); hookID != fmt.Sprintf("%v.%v.%v", wh.URL, wh.Module, "") {
+		t.Fatalf("wrong result for wh.String(): %v != %v", wh.String(), hookID)
+	}
+	err := mgr.Register(wh)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if id == (types.Hash256{}) {
-		t.Fatal("no id returned")
 	}
 
 	// perform some actions that should trigger the endpoint
@@ -50,15 +52,19 @@ func TestWebhooks(t *testing.T) {
 	alerts.Dismiss(types.Hash256{1})
 
 	// list hooks
-	hooks := alerts.hooks.List()
+	hooks := mgr.List()
 	if len(hooks) != 1 {
 		t.Fatal("wrong number of hooks")
-	} else if hooks[0].ID != id {
+	} else if hooks[0].URL != wh.URL {
 		t.Fatal("wrong hook id")
+	} else if hooks[0].Event != wh.Event {
+		t.Fatal("wrong event", hooks[0].Event)
+	} else if hooks[0].Module != wh.Module {
+		t.Fatal("wrong module", hooks[0].Module)
 	}
 
 	// unregister hook
-	if !alerts.hooks.Delete(id) {
+	if !mgr.Delete(hooks[0]) {
 		t.Fatal("hook not deleted")
 	}
 
@@ -73,7 +79,7 @@ func TestWebhooks(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatal("wrong number of hits", len(events))
 	}
-	assertEvent := func(event webhooks.Event, module, id string, hasPayload bool) {
+	assertEvent := func(event webhooks.Action, module, id string, hasPayload bool) {
 		t.Helper()
 		if event.Module != module {
 			t.Fatal("wrong event module", event.Module, module)

@@ -101,7 +101,7 @@ type Autopilot struct {
 	state state
 
 	alerts *alerts.Manager
-	hooks  *webhooks.Webhooks
+	hooks  *webhooks.Manager
 	a      *accounts
 	c      *contractor
 	m      *migrator
@@ -166,16 +166,16 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /alerts":         ap.handleGETAlerts,
 		"POST   /alerts/dismiss": ap.handlePOSTAlertsDismiss,
 
-		"GET    /webhooks":    ap.handleAlertsWebhooksGET,
-		"POST   /webhooks":    ap.handleAlertsWebhooksPOST,
-		"DELETE /webhook/:id": ap.handleAlertsWebhooksDELETE,
-
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
 		"POST   /debug/trigger": ap.triggerHandlerPOST,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /status":        ap.statusHandlerGET,
+
+		"GET    /webhooks":    ap.hooks.HandlerList(),
+		"POST   /webhooks":    ap.hooks.HandlerAdd(),
+		"DELETE /webhook/:id": ap.hooks.HandlerDelete(),
 	}))
 }
 
@@ -479,36 +479,6 @@ func (ap *Autopilot) isStopped() bool {
 	}
 }
 
-func (ap *Autopilot) handleAlertsWebhooksPOST(jc jape.Context) {
-	var req webhooks.WebHookRegisterRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	id, err := ap.hooks.Register(req.URL, req.Event)
-	if err != nil {
-		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
-		return
-	}
-	jc.Encode(webhooks.WebHookRegisterResponse{
-		ID: id,
-	})
-}
-
-func (ap *Autopilot) handleAlertsWebhooksDELETE(jc jape.Context) {
-	var id types.Hash256
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	if !ap.hooks.Delete(id) {
-		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
-		return
-	}
-}
-
-func (ap *Autopilot) handleAlertsWebhooksGET(jc jape.Context) {
-	jc.Encode(ap.hooks.List())
-}
-
 func (ap *Autopilot) handleGETAlerts(c jape.Context) {
 	c.Encode(ap.alerts.Active())
 }
@@ -583,7 +553,7 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 
 		tickerDuration: heartbeat,
 	}
-	ap.hooks = webhooks.New(ap.logger)
+	ap.hooks = webhooks.NewManager(ap.logger)
 	ap.alerts = alerts.NewManager(ap.hooks)
 	scanner, err := newScanner(
 		ap,

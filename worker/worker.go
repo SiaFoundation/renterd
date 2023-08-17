@@ -230,7 +230,7 @@ type hostProvider interface {
 // a renterd system.
 type worker struct {
 	alerts          *alerts.Manager
-	hooks           *webhooks.Webhooks
+	hooks           *webhooks.Manager
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
@@ -1146,36 +1146,6 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
-func (w *worker) handleAlertsWebhooksPOST(jc jape.Context) {
-	var req webhooks.WebHookRegisterRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	id, err := w.hooks.Register(req.URL, req.Event)
-	if err != nil {
-		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
-		return
-	}
-	jc.Encode(webhooks.WebHookRegisterResponse{
-		ID: id,
-	})
-}
-
-func (w *worker) handleAlertsWebhooksDELETE(jc jape.Context) {
-	var id types.Hash256
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	if !w.hooks.Delete(id) {
-		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
-		return
-	}
-}
-
-func (w *worker) handleAlertsWebhooksGET(jc jape.Context) {
-	jc.Encode(w.hooks.List())
-}
-
 func (w *worker) handleGETAlerts(c jape.Context) {
 	c.Encode(w.alerts.Active())
 }
@@ -1225,7 +1195,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		busFlushInterval:        busFlushInterval,
 		logger:                  l.Sugar().Named("worker").Named(id),
 	}
-	w.hooks = webhooks.New(w.logger)
+	w.hooks = webhooks.NewManager(w.logger)
 	w.alerts = alerts.NewManager(w.hooks)
 	w.initTransportPool()
 	w.initAccounts(b)
@@ -1241,10 +1211,6 @@ func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
 		"GET    /alerts":         w.handleGETAlerts,
 		"POST   /alerts/dismiss": w.handlePOSTAlertsDismiss,
-
-		"GET    /webhooks":    w.handleAlertsWebhooksGET,
-		"POST   /webhooks":    w.handleAlertsWebhooksPOST,
-		"DELETE /webhook/:id": w.handleAlertsWebhooksDELETE,
 
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
@@ -1268,6 +1234,10 @@ func (w *worker) Handler() http.Handler {
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
+
+		"GET    /webhooks":    w.hooks.HandlerList(),
+		"POST   /webhooks":    w.hooks.HandlerAdd(),
+		"DELETE /webhook/:id": w.hooks.HandlerDelete(),
 	}))
 }
 

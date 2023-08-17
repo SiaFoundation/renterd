@@ -147,7 +147,7 @@ type (
 
 type bus struct {
 	alerts *alerts.Manager
-	hooks  *webhooks.Webhooks
+	hooks  *webhooks.Manager
 	s      Syncer
 	cm     ChainManager
 	tp     TransactionPool
@@ -1160,36 +1160,6 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *bus) handleAlertsWebhooksPOST(jc jape.Context) {
-	var req webhooks.WebHookRegisterRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	id, err := b.hooks.Register(req.URL, req.Event)
-	if err != nil {
-		jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
-		return
-	}
-	jc.Encode(webhooks.WebHookRegisterResponse{
-		ID: id,
-	})
-}
-
-func (b *bus) handleAlertsWebhooksDELETE(jc jape.Context) {
-	var id types.Hash256
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	if !b.hooks.Delete(id) {
-		jc.Error(fmt.Errorf("webhook with id %s not found", id), http.StatusNotFound)
-		return
-	}
-}
-
-func (b *bus) handleAlertsWebhooksGET(jc jape.Context) {
-	jc.Encode(b.hooks.List())
-}
-
 func (b *bus) handleGETAlerts(jc jape.Context) {
 	jc.Encode(b.alerts.Active())
 }
@@ -1433,7 +1403,7 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		uploadingSectors: newUploadingSectorsCache(),
 		logger:           l.Sugar().Named("bus"),
 	}
-	b.hooks = webhooks.New(b.logger)
+	b.hooks = webhooks.NewManager(b.logger)
 	b.alerts = alerts.NewManager(b.hooks)
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
@@ -1517,10 +1487,6 @@ func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
 		"GET    /alerts":         b.handleGETAlerts,
 		"POST   /alerts/dismiss": b.handlePOSTAlertsDismiss,
-
-		"GET    /webhooks":    b.handleAlertsWebhooksGET,
-		"POST   /webhooks":    b.handleAlertsWebhooksPOST,
-		"DELETE /webhook/:id": b.handleAlertsWebhooksDELETE,
 
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
@@ -1622,6 +1588,10 @@ func (b *bus) Handler() http.Handler {
 		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+
+		"GET    /webhooks":    b.hooks.HandlerList(),
+		"POST   /webhooks":    b.hooks.HandlerAdd(),
+		"DELETE /webhook/:id": b.hooks.HandlerDelete(),
 	}))
 }
 
