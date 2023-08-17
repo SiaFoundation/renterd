@@ -140,7 +140,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 							m.logger.Errorf(errMsg)
 							continue
 						}
-						m.logger.Debugf("%v: successfully migrated slab '%v' (health: %v) %d/%d", id, j.Key, j.Health, j.slabIdx+1, j.batchSize)
+						m.logger.Debugf("%v: successfully migrated slab (health: %v) %d/%d", id, j.Health, j.slabIdx+1, j.batchSize)
 					}
 				}(w)
 			}
