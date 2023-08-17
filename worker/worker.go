@@ -1235,7 +1235,7 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
 
-		"GET    /webhooks":    w.hooks.HandlerList(),
+		"GET    /webhooks":    w.hooks.HandlerInfo(),
 		"POST   /webhooks":    w.hooks.HandlerAdd(),
 		"DELETE /webhook/:id": w.hooks.HandlerDelete(),
 	}))
@@ -1249,6 +1249,9 @@ func (w *worker) Shutdown(_ context.Context) error {
 		w.flushInteractions()
 	}
 	w.interactionsMu.Unlock()
+
+	// Stop webhooks.
+	w.hooks.Close()
 
 	// Stop contract spending recorder.
 	w.contractSpendingRecorder.Stop()

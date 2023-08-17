@@ -1589,7 +1589,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 
-		"GET    /webhooks":    b.hooks.HandlerList(),
+		"GET    /webhooks":    b.hooks.HandlerInfo(),
 		"POST   /webhooks":    b.hooks.HandlerAdd(),
 		"DELETE /webhook/:id": b.hooks.HandlerDelete(),
 	}))
@@ -1597,6 +1597,7 @@ func (b *bus) Handler() http.Handler {
 
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
+	b.hooks.Close()
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
 }
 

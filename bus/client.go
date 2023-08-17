@@ -21,7 +21,6 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
-	"go.sia.tech/renterd/webhooks"
 )
 
 // A Client provides methods for interacting with a renterd API server.
@@ -42,7 +41,7 @@ func (c *Client) DismissAlerts(ids ...types.Hash256) error {
 
 // RegisterAlertHook registers a new alert hook for the given URL.
 func (c *Client) RegisterAlertHook(ctx context.Context, url, module, event string) error {
-	err := c.c.WithContext(ctx).POST("/webhooks", api.WebHookRegisterRequest{
+	err := c.c.WithContext(ctx).POST("/webhooks", api.Webhook{
 		Event:  event,
 		Module: module,
 		URL:    url,
@@ -56,7 +55,7 @@ func (c *Client) DeleteAlertHook(ctx context.Context, id types.Hash256) error {
 }
 
 // AlertHooks returns all alert hooks currently registered.
-func (c *Client) AlertHooks(ctx context.Context) (hooks []webhooks.Webhook, err error) {
+func (c *Client) AlertHooks(ctx context.Context) (hooks []api.Webhook, err error) {
 	err = c.c.WithContext(ctx).GET("/webhooks", &hooks)
 	return
 }

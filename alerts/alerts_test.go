@@ -52,7 +52,7 @@ func TestWebhooks(t *testing.T) {
 	alerts.Dismiss(types.Hash256{1})
 
 	// list hooks
-	hooks := mgr.List()
+	hooks, _ := mgr.Info()
 	if len(hooks) != 1 {
 		t.Fatal("wrong number of hooks")
 	} else if hooks[0].URL != wh.URL {
@@ -64,7 +64,11 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// unregister hook
-	if !mgr.Delete(hooks[0]) {
+	if !mgr.Delete(webhooks.Webhook{
+		Event:  hooks[0].Event,
+		Module: hooks[0].Module,
+		URL:    hooks[0].URL,
+	}) {
 		t.Fatal("hook not deleted")
 	}
 

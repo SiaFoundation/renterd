@@ -40,10 +40,30 @@ type (
 )
 
 type Manager struct {
-	logger *zap.SugaredLogger
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+	logger    *zap.SugaredLogger
+	wg        sync.WaitGroup
 
 	mu       sync.Mutex
+	queues   map[string]*actionQueue // URL -> queue
 	webhooks map[string]Webhook
+}
+
+type actionQueue struct {
+	ctx    context.Context
+	logger *zap.SugaredLogger
+	url    string
+
+	mu           sync.Mutex
+	isDequeueing bool
+	actions      []Action
+}
+
+func (w *Manager) Close() error {
+	w.ctxCancel()
+	w.wg.Wait()
+	return nil
 }
 
 func (w Webhook) String() string {
@@ -62,7 +82,7 @@ func (w *Manager) Register(wh Webhook) error {
 		return err
 	}
 
-	// Add webhook.
+	// Add Webhook.
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.webhooks[wh.String()] = wh
@@ -77,49 +97,83 @@ func (w *Manager) Delete(wh Webhook) bool {
 	return exists
 }
 
-func (w *Manager) List() []Webhook {
+func (w *Manager) Info() ([]api.Webhook, []api.WebhookQueueInfo) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	var hooks []Webhook
+	var hooks []api.Webhook
 	for _, hook := range w.webhooks {
-		hooks = append(hooks, Webhook{
-			Event: hook.Event,
-			URL:   hook.URL,
+		hooks = append(hooks, api.Webhook{
+			Event:  hook.Event,
+			Module: hook.Module,
+			URL:    hook.URL,
 		})
 	}
-	return hooks
+	var queueInfos []api.WebhookQueueInfo
+	for _, queue := range w.queues {
+		queue.mu.Lock()
+		queueInfos = append(queueInfos, api.WebhookQueueInfo{
+			URL:  queue.url,
+			Size: len(queue.actions),
+		})
+		queue.mu.Unlock()
+	}
+	return hooks, queueInfos
 }
 
 func (a Action) String() string {
 	return a.Module + "." + a.ID
 }
 
-func (w *Manager) Broadcast(event Action) {
+func (w *Manager) Broadcast(action Action) {
 	w.mu.Lock()
-	var hooks []Webhook
+	defer w.mu.Unlock()
 	for _, hook := range w.webhooks {
-		hooks = append(hooks, hook)
-	}
-	w.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
-	defer cancel()
-	var wg sync.WaitGroup
-	for _, hook := range hooks {
-		if !hook.Matches(event) {
+		if !hook.Matches(action) {
 			continue
 		}
-		wg.Add(1)
-		go func(hook Webhook) {
-			defer wg.Done()
-			err := sendEvent(ctx, hook.URL, event)
-			if err != nil {
-				w.logger.Errorf("failed to send webhook event %v to %v: %v", event.String(), hook.URL, err)
-				return
+
+		// Find queue or create one.
+		queue, exists := w.queues[hook.URL]
+		if !exists {
+			queue = &actionQueue{
+				ctx:    w.ctx,
+				logger: w.logger,
+				url:    hook.URL,
 			}
-		}(hook)
+			w.queues[hook.URL] = queue
+		}
+
+		// Add action an launch goroutine to start dequeueing if necessary.
+		queue.mu.Lock()
+		queue.actions = append(queue.actions, action)
+		if !queue.isDequeueing {
+			w.wg.Add(1)
+			go func() {
+				queue.dequeue()
+				w.wg.Done()
+			}()
+		}
+		queue.mu.Unlock()
 	}
-	wg.Wait()
+}
+
+func (q *actionQueue) dequeue() {
+	for {
+		q.mu.Lock()
+		if len(q.actions) == 0 {
+			q.isDequeueing = false
+			q.mu.Unlock()
+		}
+		next := q.actions[0]
+		q.actions = q.actions[1:]
+		q.mu.Unlock()
+
+		err := sendEvent(q.ctx, q.url, next)
+		if err != nil {
+			q.logger.Errorf("failed to send Webhook event %v to %v: %v", next.String(), q.url, err)
+			return
+		}
+	}
 }
 
 func (w Webhook) Matches(action Action) bool {
@@ -130,9 +184,13 @@ func (w Webhook) Matches(action Action) bool {
 }
 
 func NewManager(logger *zap.SugaredLogger) *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		webhooks: make(map[string]Webhook),
-		logger:   logger.Named("webhooks"),
+		ctx:       ctx,
+		ctxCancel: cancel,
+		logger:    logger.Named("webhooks"),
+		queues:    make(map[string]*actionQueue),
+		webhooks:  make(map[string]Webhook),
 	}
 }
 
@@ -157,7 +215,7 @@ func sendEvent(ctx context.Context, url string, action Action) error {
 		if err != nil {
 			return fmt.Errorf("failed to read response body: %w", err)
 		}
-		return fmt.Errorf("webhook returned unexpected status %v: %v", resp.StatusCode, string(errStr))
+		return fmt.Errorf("Webhook returned unexpected status %v: %v", resp.StatusCode, string(errStr))
 	}
 	return nil
 }
@@ -169,21 +227,25 @@ func (w *Manager) HandlerDelete() jape.Handler {
 			return
 		}
 		if !w.Delete(wh) {
-			jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
+			jc.Error(fmt.Errorf("Webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
 			return
 		}
 	}
 }
 
-func (w *Manager) HandlerList() jape.Handler {
+func (w *Manager) HandlerInfo() jape.Handler {
 	return func(jc jape.Context) {
-		jc.Encode(w.List())
+		webhooks, queueInfos := w.Info()
+		jc.Encode(api.WebHookResponse{
+			Queues:   queueInfos,
+			Webhooks: webhooks,
+		})
 	}
 }
 
 func (w *Manager) HandlerAdd() jape.Handler {
 	return func(jc jape.Context) {
-		var req api.WebHookRegisterRequest
+		var req api.Webhook
 		if jc.Decode(&req) != nil {
 			return
 		}
@@ -193,7 +255,7 @@ func (w *Manager) HandlerAdd() jape.Handler {
 			URL:    req.URL,
 		})
 		if err != nil {
-			jc.Error(fmt.Errorf("failed to add webhook: %w", err), http.StatusInternalServerError)
+			jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
 			return
 		}
 	}

@@ -38,7 +38,7 @@ func (c *Client) DismissAlerts(ids ...types.Hash256) error {
 
 // RegisterAlertHook registers a new alert hook for the given URL.
 func (c *Client) RegisterAlertHook(ctx context.Context, url, module, event string) error {
-	err := c.c.WithContext(ctx).POST("/webhooks", api.WebHookRegisterRequest{
+	err := c.c.WithContext(ctx).POST("/webhooks", api.Webhook{
 		Event:  event,
 		Module: module,
 		URL:    url,

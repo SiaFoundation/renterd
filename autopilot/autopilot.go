@@ -173,7 +173,7 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /status":        ap.statusHandlerGET,
 
-		"GET    /webhooks":    ap.hooks.HandlerList(),
+		"GET    /webhooks":    ap.hooks.HandlerInfo(),
 		"POST   /webhooks":    ap.hooks.HandlerAdd(),
 		"DELETE /webhook/:id": ap.hooks.HandlerDelete(),
 	}))
@@ -302,6 +302,7 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 		close(ap.triggerChan)
 		ap.wg.Wait()
 		ap.runningSince = time.Time{}
+		ap.hooks.Close()
 	}
 	return nil
 }
