@@ -1649,7 +1649,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
 		"POST   /webhooks/action": b.webhookActionHandlerPost,
-		"DELETE /webhook/:id":     b.webhookHandlerDelete,
+		"POST   /webhook/delete":  b.webhookHandlerDelete,
 	}))
 }
 

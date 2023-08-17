@@ -40,8 +40,8 @@ func (c *Client) DismissAlerts(ids ...types.Hash256) error {
 	return c.c.POST("/alerts/dismiss", ids, nil)
 }
 
-// RegisterAlertHook registers a new alert hook for the given URL.
-func (c *Client) RegisterAlertHook(ctx context.Context, url, module, event string) error {
+// RegisterWebhook registers a new webhook for the given URL.
+func (c *Client) RegisterWebhook(ctx context.Context, url, module, event string) error {
 	err := c.c.WithContext(ctx).POST("/webhooks", webhooks.Webhook{
 		Event:  event,
 		Module: module,
@@ -50,19 +50,24 @@ func (c *Client) RegisterAlertHook(ctx context.Context, url, module, event strin
 	return err
 }
 
+// BroadcastAction broadcasts an action that triggers a webhook.
 func (c *Client) BroadcastAction(ctx context.Context, action webhooks.Action) error {
 	err := c.c.WithContext(ctx).POST("/webhooks/action", action, nil)
 	return err
 }
 
-// DeleteAlertHook deletes the alert hook with the given ID.
-func (c *Client) DeleteAlertHook(ctx context.Context, id types.Hash256) error {
-	return c.c.DELETE(fmt.Sprintf("/webhook/%s", id))
+// DeleteWebhook deletes the webhook with the given ID.
+func (c *Client) DeleteWebhook(ctx context.Context, url, module, event string) error {
+	return c.c.POST("/webhook/delete", webhooks.Webhook{
+		URL:    url,
+		Module: module,
+		Event:  event,
+	}, nil)
 }
 
-// AlertHooks returns all alert hooks currently registered.
-func (c *Client) AlertHooks(ctx context.Context) (hooks []webhooks.Webhook, err error) {
-	err = c.c.WithContext(ctx).GET("/webhooks", &hooks)
+// Webhooks returns all webhooks currently registered.
+func (c *Client) Webhooks(ctx context.Context) (resp api.WebHookResponse, err error) {
+	err = c.c.WithContext(ctx).GET("/webhooks", &resp)
 	return
 }
 
