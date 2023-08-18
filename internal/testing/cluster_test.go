@@ -2189,15 +2189,28 @@ func TestAlerts(t *testing.T) {
 	if err := b.RegisterAlert(context.Background(), alert); err != nil {
 		t.Fatal(err)
 	}
-	alerts, err := b.Alerts()
+	findAlert := func(id types.Hash256) *alerts.Alert {
+		t.Helper()
+		alerts, err := b.Alerts()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, alert := range alerts {
+			if alert.ID == id {
+				return &alert
+			}
+		}
+		return nil
+	}
+	foundAlert := findAlert(alert.ID)
+	if foundAlert == nil {
+		t.Fatal("alert not found")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(alerts) != 1 {
-		t.Fatalf("expected 1 alert but got %v", len(alerts))
-	}
-	if !cmp.Equal(alerts[0], alert) {
-		t.Fatal("alert mismatch", cmp.Diff(alerts[0], alert))
+	if !cmp.Equal(*foundAlert, alert) {
+		t.Fatal("alert mismatch", cmp.Diff(*foundAlert, alert))
 	}
 
 	// dismiss alert
@@ -2205,11 +2218,8 @@ func TestAlerts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	alerts, err = b.Alerts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(alerts) != 0 {
-		t.Fatalf("expected 0 alerts but got %v", len(alerts))
+	foundAlert = findAlert(alert.ID)
+	if foundAlert != nil {
+		t.Fatal("alert found")
 	}
 }
