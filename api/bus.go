@@ -150,6 +150,14 @@ type ContractAcquireResponse struct {
 	LockID uint64 `json:"lockID"`
 }
 
+// ContractsPrunableDataResponse is the response type for the
+// /contracts/prunable endpoint.
+type ContractsPrunableDataResponse struct {
+	ContractSizes []ContractSize `json:"contractSizes"`
+	PrunableData  uint64         `json:"prunableData"`
+	TotalSize     uint64         `json:"totalSize"`
+}
+
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.
 type HostsRemoveRequest struct {
 	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`

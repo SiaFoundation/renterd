@@ -2855,25 +2855,27 @@ func TestPartialSlab(t *testing.T) {
 	}
 }
 
-func TestPrunableData(t *testing.T) {
+func TestContractSizes(t *testing.T) {
 	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// define a helper function to fetch the amount of prunable data, either for
-	// all contracts or the given fcid
-	prunableData := func(fcid *types.FileContractID) (n int64) {
+	// define a helper function that calculates the amount of data that can be
+	// pruned by inspecting the contract sizes
+	prunableData := func(fcid *types.FileContractID) (n uint64) {
 		t.Helper()
 
-		var err error
-		if fcid != nil {
-			n, err = db.PrunableDataForContract(context.Background(), *fcid)
-		} else {
-			n, err = db.PrunableData(context.Background())
-		}
+		sizes, err := db.ContractSizes(context.Background())
 		if err != nil {
 			t.Fatal(err)
+		}
+
+		for _, size := range sizes {
+			if fcid != nil && size.ID != *fcid {
+				continue
+			}
+			n += size.Prunable
 		}
 		return
 	}
@@ -2965,6 +2967,18 @@ func TestPrunableData(t *testing.T) {
 		t.Fatal("unexpected amount of prunable data", n)
 	}
 
+	if size, err := db.ContractSize(context.Background(), fcids[0]); err != nil {
+		t.Fatal("unexpected err", err)
+	} else if size.Prunable != rhpv2.SectorSize {
+		t.Fatal("unexpected prunable data", size.Prunable)
+	}
+
+	if size, err := db.ContractSize(context.Background(), fcids[1]); err != nil {
+		t.Fatal("unexpected err", err)
+	} else if size.Prunable != rhpv2.SectorSize {
+		t.Fatal("unexpected prunable data", size.Prunable)
+	}
+
 	// archive all contracts
 	if err := db.ArchiveAllContracts(context.Background(), t.Name()); err != nil {
 		t.Fatal(err)
@@ -2976,7 +2990,7 @@ func TestPrunableData(t *testing.T) {
 	}
 
 	// assert passing a non-existent fcid returns an error
-	_, err = db.PrunableDataForContract(context.Background(), types.FileContractID{9})
+	_, err = db.ContractSize(context.Background(), types.FileContractID{9})
 	if err != api.ErrContractNotFound {
 		t.Fatal(err)
 	}

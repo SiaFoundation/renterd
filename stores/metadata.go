@@ -660,40 +660,75 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 	return sets, err
 }
 
-func (s *SQLStore) PrunableData(ctx context.Context) (prunable int64, err error) {
-	err = s.db.
-		Raw(`
-SELECT IFNULL(SUM(prunable), 0)
-FROM (
-    SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-        SELECT IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
-        FROM contracts c
-        LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-        GROUP BY c.id
-	) as i
-) as j`, rhpv2.SectorSize).
-		Scan(&prunable).
-		Error
-	return
-}
+func (s *SQLStore) ContractSizes(ctx context.Context) ([]api.ContractSize, error) {
+	rows := make([]struct {
+		Fcid     fileContractID `json:"fcid"`
+		Size     uint64         `json:"size"`
+		Prunable uint64         `json:"prunable"`
+	}, 0)
 
-func (s *SQLStore) PrunableDataForContract(ctx context.Context, id types.FileContractID) (prunable int64, err error) {
-	if !s.isKnownContract(id) {
-		return 0, api.ErrContractNotFound
+	if err := s.db.
+		Raw(`
+SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+	SELECT fcid, MAX(c.size) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
+	FROM contracts c
+	LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+	GROUP BY c.fcid
+) as i
+	`, rhpv2.SectorSize).
+		Scan(&rows).
+		Error; err != nil {
+		return nil, err
 	}
 
-	err = s.db.
+	sizes := make([]api.ContractSize, len(rows))
+	for i, row := range rows {
+		sizes[i] = api.ContractSize{
+			ID:       types.FileContractID(row.Fcid),
+			Size:     row.Size,
+			Prunable: row.Prunable,
+		}
+		if sizes[i].ID == (types.FileContractID{}) {
+			return nil, errors.New("invalid file contract id")
+		}
+	}
+	return sizes, nil
+}
+
+func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
+	if !s.isKnownContract(id) {
+		return api.ContractSize{}, api.ErrContractNotFound
+	}
+
+	var size struct {
+		Fcid     fileContractID `json:"fcid"`
+		Size     uint64         `json:"size"`
+		Prunable uint64         `json:"prunable"`
+	}
+
+	if err := s.db.
 		Raw(`
-SELECT CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-    SELECT IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
+SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+    SELECT fcid, IFNULL(MAX(c.size), 0) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
     FROM contracts c
     LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
     WHERE c.fcid = ?
 ) as i
 `, rhpv2.SectorSize, fileContractID(id)).
-		Scan(&prunable).
-		Error
-	return
+		Take(&size).
+		Error; err != nil {
+		return api.ContractSize{}, err
+	}
+
+	if types.FileContractID(size.Fcid) == (types.FileContractID{}) {
+		return api.ContractSize{}, errors.New("invalid file contract id")
+	}
+
+	return api.ContractSize{
+		ID:       types.FileContractID(size.Fcid),
+		Size:     size.Size,
+		Prunable: size.Prunable,
+	}, nil
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
