@@ -49,6 +49,12 @@ func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string
 	return
 }
 
+// State returns the current state of the autopilot.
+func (c *Client) State() (state api.AutopilotStateResponse, err error) {
+	err = c.c.GET("/state", &state)
+	return
+}
+
 func (c *Client) Status() (resp api.AutopilotStatusResponse, err error) {
 	err = c.c.GET("/status", &resp)
 	return

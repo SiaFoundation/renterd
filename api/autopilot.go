@@ -99,6 +99,15 @@ type (
 		UptimeMS           ParamDuration `json:"uptimeMS"`
 	}
 
+	// AutopilotStateResponse is the response type for the /autopilot/state
+	// endpoint.
+	AutopilotStateResponse struct {
+		AutopilotStatusResponse // TODO: deprecate /autopilot/status
+
+		StartTime time.Time `json:"startTime"`
+		BuildState
+	}
+
 	HostHandlerResponseChecks struct {
 		Gouging          bool                 `json:"gouging"`
 		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`

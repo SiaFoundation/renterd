@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -162,6 +163,8 @@ type bus struct {
 	accounts         *accounts
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
+
+	startTime time.Time
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -1393,6 +1396,19 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
 }
 
+func (b *bus) stateHandlerGET(jc jape.Context) {
+	jc.Encode(api.BusStateResponse{
+		StartTime: b.startTime,
+		BuildState: api.BuildState{
+			Network:   build.NetworkName(),
+			Version:   build.Version(),
+			Commit:    build.Commit(),
+			OS:        runtime.GOOS,
+			BuildTime: build.BuildTime(),
+		},
+	})
+}
+
 func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
@@ -1435,6 +1451,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		contractLocks:    newContractLocks(),
 		uploadingSectors: newUploadingSectorsCache(),
 		logger:           l.Sugar().Named("bus"),
+
+		startTime: time.Now(),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
@@ -1616,6 +1634,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
+
+		"GET    /state": b.stateHandlerGET,
 
 		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,

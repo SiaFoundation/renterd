@@ -143,6 +143,12 @@ func (c *Client) RHPUpdateRegistry(ctx context.Context, hostKey types.PublicKey,
 	return
 }
 
+// State returns the current state of the worker.
+func (c *Client) State() (state api.WorkerStateResponse, err error) {
+	err = c.c.GET("/state", &state)
+	return
+}
+
 // MigrateSlab migrates the specified slab.
 func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) error {
 	values := make(url.Values)
