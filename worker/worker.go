@@ -128,6 +128,7 @@ type ContractLocker interface {
 
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
+	alerts.Alerter
 	consensusState
 
 	AccountStore
@@ -228,7 +229,6 @@ type hostProvider interface {
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
-	alerts          *alerts.Manager
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
@@ -1144,22 +1144,6 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
-func (w *worker) handleGETAlerts(c jape.Context) {
-	c.Encode(w.alerts.Active())
-}
-
-func (w *worker) handlePOSTAlertsDismiss(jc jape.Context) {
-	var ids []types.Hash256
-	if jc.Decode(&ids) != nil {
-		return
-	}
-	if len(ids) == 0 {
-		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
-		return
-	}
-	w.alerts.Dismiss(ids...)
-}
-
 func (w *worker) accountHandlerGET(jc jape.Context) {
 	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
@@ -1185,7 +1169,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	}
 
 	w := &worker{
-		alerts:                  alerts.NewManager(),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
@@ -1206,8 +1189,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
-		"GET    /alerts":           w.handleGETAlerts,
-		"POST   /alerts/dismiss":   w.handlePOSTAlertsDismiss,
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 

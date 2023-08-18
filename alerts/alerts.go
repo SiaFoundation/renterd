@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,6 +28,11 @@ const (
 )
 
 type (
+	Alerter interface {
+		RegisterAlert(_ context.Context, a Alert) error
+		DismissAlerts(_ context.Context, ids ...types.Hash256) error
+	}
+
 	// Severity indicates the severity of an alert.
 	Severity uint8
 
@@ -104,6 +110,12 @@ func (m *Manager) Register(a Alert) {
 	m.mu.Unlock()
 }
 
+// RegisterAlert implements the Alerter interface.
+func (m *Manager) RegisterAlert(_ context.Context, a Alert) error {
+	m.Register(a)
+	return nil
+}
+
 // Dismiss removes the alerts with the given IDs.
 func (m *Manager) Dismiss(ids ...types.Hash256) {
 	m.mu.Lock()
@@ -114,6 +126,12 @@ func (m *Manager) Dismiss(ids ...types.Hash256) {
 		m.alerts = make(map[types.Hash256]Alert) // reclaim memory
 	}
 	m.mu.Unlock()
+}
+
+// DismissAlerts implements the Alerter interface.
+func (m *Manager) DismissAlerts(_ context.Context, ids ...types.Hash256) error {
+	m.Dismiss(ids...)
+	return nil
 }
 
 // Active returns the host's active alerts.

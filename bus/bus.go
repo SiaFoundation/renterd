@@ -1175,15 +1175,36 @@ func (b *bus) handleGETAlerts(c jape.Context) {
 	c.Encode(b.alerts.Active())
 }
 
-func (b *bus) handlePOSTAlertsDismiss(c jape.Context) {
+func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
-	if c.Decode(&ids) != nil {
+	if jc.Decode(&ids) != nil {
 		return
 	} else if len(ids) == 0 {
-		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
 		return
 	}
 	b.alerts.Dismiss(ids...)
+}
+
+func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
+	var alert alerts.Alert
+	if jc.Decode(&alert) != nil {
+		return
+	}
+	if alert.ID == (types.Hash256{}) {
+		jc.Error(errors.New("cannot register alert with zero id"), http.StatusBadRequest)
+		return
+	} else if alert.Timestamp.IsZero() {
+		jc.Error(errors.New("cannot register alert with zero timestamp"), http.StatusBadRequest)
+		return
+	} else if alert.Severity == 0 {
+		jc.Error(errors.New("cannot register alert without severity"), http.StatusBadRequest)
+		return
+	} else if alert.Message == "" {
+		jc.Error(errors.New("cannot register alert without a message"), http.StatusBadRequest)
+		return
+	}
+	b.alerts.Register(alert)
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
@@ -1497,6 +1518,7 @@ func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
 		"GET    /alerts":                    b.handleGETAlerts,
 		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
+		"POST   /alerts/register":           b.handlePOSTAlertsRegister,
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
 		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,

@@ -35,8 +35,13 @@ func (c *Client) Alerts() (alerts []alerts.Alert, err error) {
 }
 
 // DismissAlerts dimisses the alerts with the given IDs.
-func (c *Client) DismissAlerts(ids ...types.Hash256) error {
-	return c.c.POST("/alerts/dismiss", ids, nil)
+func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
+	return c.c.WithContext(ctx).POST("/alerts/dismiss", ids, nil)
+}
+
+// RegisterAlert dimisses the alerts with the given IDs.
+func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
+	return c.c.WithContext(ctx).POST("/alerts/register", alert, nil)
 }
 
 // Autopilots returns all autopilots in the autopilots store.
