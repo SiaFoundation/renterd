@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -165,7 +164,6 @@ type bus struct {
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
-	mu        sync.Mutex
 	startTime time.Time
 }
 
@@ -1379,7 +1377,7 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 
 func (b *bus) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.BusStateResponse{
-		StartTime: b.StartTime(),
+		StartTime: b.startTime,
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),
 			Version:   build.Version(),
@@ -1625,18 +1623,7 @@ func (b *bus) Handler() http.Handler {
 
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
-	// Reset start time.
-	b.mu.Lock()
-	b.startTime = time.Time{}
-	b.mu.Unlock()
-
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
-}
-
-func (b *bus) StartTime() time.Time {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.startTime
 }
 
 func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {

@@ -359,11 +359,9 @@ func main() {
 	workerAddrs, workerPassword := workerCfg.remoteAddrs, workerCfg.apiPassword
 	if workerAddrs == "" {
 		if workerCfg.enabled {
-			w, runFn, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getSeed(), logger)
+			w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getSeed(), logger)
 			if err != nil {
 				log.Fatal("failed to create worker", err)
-			} else if err := runFn(); err != nil {
-				log.Fatal("failed to start the worker", err)
 			}
 			shutdownFns = append(shutdownFns, shutdownFn)
 

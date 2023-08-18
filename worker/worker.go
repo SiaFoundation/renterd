@@ -235,6 +235,7 @@ type worker struct {
 	id              string
 	bus             Bus
 	masterKey       [32]byte
+	startTime       time.Time
 
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
@@ -253,9 +254,6 @@ type worker struct {
 
 	transportPoolV3 *transportPoolV3
 	logger          *zap.SugaredLogger
-
-	mu        sync.Mutex
-	startTime time.Time
 }
 
 func dial(ctx context.Context, hostIP string) (net.Conn, error) {
@@ -1177,7 +1175,7 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 func (w *worker) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.WorkerStateResponse{
 		ID:        w.id,
-		StartTime: w.StartTime(),
+		StartTime: w.startTime,
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),
 			Version:   build.Version(),
@@ -1212,6 +1210,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		masterKey:               masterKey,
 		busFlushInterval:        busFlushInterval,
 		logger:                  l.Sugar().Named("worker").Named(id),
+		startTime:               time.Now(),
 	}
 	w.initTransportPool()
 	w.initAccounts(b)
@@ -1254,17 +1253,6 @@ func (w *worker) Handler() http.Handler {
 	}))
 }
 
-func (w *worker) Run() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if !w.startTime.IsZero() {
-		return errors.New("worker already running")
-	}
-	w.startTime = time.Now()
-	return nil
-}
-
 // Shutdown shuts down the worker.
 func (w *worker) Shutdown(_ context.Context) error {
 	w.interactionsMu.Lock()
@@ -1282,19 +1270,7 @@ func (w *worker) Shutdown(_ context.Context) error {
 
 	// Stop the uploader.
 	w.uploadManager.Stop()
-
-	// Reset start time.
-	w.mu.Lock()
-	w.startTime = time.Time{}
-	w.mu.Unlock()
 	return nil
-}
-
-// StartTime returns the time at which the worker was started.
-func (w *worker) StartTime() time.Time {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.startTime
 }
 
 type contractLock struct {
