@@ -669,8 +669,8 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]
 
 	if err := s.db.
 		Raw(`
-SELECT size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-	SELECT MAX(c.size) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
+SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+	SELECT fcid, MAX(c.size) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
 	FROM contracts c
 	LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
 	GROUP BY c.fcid
