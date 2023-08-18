@@ -660,7 +660,7 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 	return sets, err
 }
 
-func (s *SQLStore) ContractSizes(ctx context.Context) ([]api.ContractSize, error) {
+func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error) {
 	rows := make([]struct {
 		Fcid     fileContractID `json:"fcid"`
 		Size     uint64         `json:"size"`
@@ -681,15 +681,14 @@ SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FR
 		return nil, err
 	}
 
-	sizes := make([]api.ContractSize, len(rows))
-	for i, row := range rows {
-		sizes[i] = api.ContractSize{
-			ID:       types.FileContractID(row.Fcid),
+	sizes := make(map[types.FileContractID]api.ContractSize, len(rows))
+	for _, row := range rows {
+		if types.FileContractID(row.Fcid) == (types.FileContractID{}) {
+			return nil, errors.New("invalid file contract id")
+		}
+		sizes[types.FileContractID(row.Fcid)] = api.ContractSize{
 			Size:     row.Size,
 			Prunable: row.Prunable,
-		}
-		if sizes[i].ID == (types.FileContractID{}) {
-			return nil, errors.New("invalid file contract id")
 		}
 	}
 	return sizes, nil
@@ -701,15 +700,14 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (a
 	}
 
 	var size struct {
-		Fcid     fileContractID `json:"fcid"`
-		Size     uint64         `json:"size"`
-		Prunable uint64         `json:"prunable"`
+		Size     uint64 `json:"size"`
+		Prunable uint64 `json:"prunable"`
 	}
 
 	if err := s.db.
 		Raw(`
-SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-    SELECT fcid, IFNULL(MAX(c.size), 0) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
+SELECT size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
+    SELECT IFNULL(MAX(c.size), 0) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
     FROM contracts c
     LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
     WHERE c.fcid = ?
@@ -720,12 +718,7 @@ SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FR
 		return api.ContractSize{}, err
 	}
 
-	if types.FileContractID(size.Fcid) == (types.FileContractID{}) {
-		return api.ContractSize{}, errors.New("invalid file contract id")
-	}
-
 	return api.ContractSize{
-		ID:       types.FileContractID(size.Fcid),
 		Size:     size.Size,
 		Prunable: size.Prunable,
 	}, nil

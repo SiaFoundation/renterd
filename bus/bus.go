@@ -98,7 +98,7 @@ type (
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
-		ContractSizes(ctx context.Context) ([]api.ContractSize, error)
+		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
 		Object(ctx context.Context, path string) (api.Object, error)
@@ -693,22 +693,29 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		return
 	}
 
-	// sort in descending fashion
-	sort.Slice(sizes, func(i, j int) bool {
-		return sizes[i].Prunable > sizes[j].Prunable
-	})
-
-	var totalPrunable, totalSize uint64
-	for _, size := range sizes {
-		totalPrunable += size.Prunable
-		totalSize += size.Size
+	// prepare the response
+	res := api.ContractsPrunableDataResponse{
+		Contracts:     make([]api.ContractPrunableData, len(sizes)),
+		TotalPrunable: 0,
+		TotalSize:     0,
 	}
 
-	jc.Encode(api.ContractsPrunableDataResponse{
-		ContractSizes: sizes,
-		TotalPrunable: totalPrunable,
-		TotalSize:     totalSize,
+	// build the response
+	for fcid, size := range sizes {
+		res.Contracts = append(res.Contracts, api.ContractPrunableData{
+			ID:           fcid,
+			ContractSize: size,
+		})
+		res.TotalPrunable += size.Prunable
+		res.TotalSize += size.Size
+	}
+
+	// sort contracts by the amount of prunable data
+	sort.Slice(res.Contracts, func(i, j int) bool {
+		return res.Contracts[i].Prunable > res.Contracts[j].Prunable
 	})
+
+	jc.Encode(res)
 }
 
 func (b *bus) contractSizeHandlerGET(jc jape.Context) {

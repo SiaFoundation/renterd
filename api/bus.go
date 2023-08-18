@@ -153,9 +153,14 @@ type ContractAcquireResponse struct {
 // ContractsPrunableDataResponse is the response type for the
 // /contracts/prunable endpoint.
 type ContractsPrunableDataResponse struct {
-	ContractSizes []ContractSize `json:"contractSizes"`
-	TotalPrunable uint64         `json:"totalPrunable"`
-	TotalSize     uint64         `json:"totalSize"`
+	Contracts     []ContractPrunableData `json:"contracts"`
+	TotalPrunable uint64                 `json:"totalPrunable"`
+	TotalSize     uint64                 `json:"totalSize"`
+}
+
+type ContractPrunableData struct {
+	ID types.FileContractID `json:"id"`
+	ContractSize
 }
 
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.

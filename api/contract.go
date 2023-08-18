@@ -15,9 +15,8 @@ type (
 	// ContractSize contains information about the size of the contract and
 	// about how much of the contract data can be pruned.
 	ContractSize struct {
-		ID       types.FileContractID `json:"id"`
-		Prunable uint64               `json:"prunable"`
-		Size     uint64               `json:"size"`
+		Prunable uint64 `json:"prunable"`
+		Size     uint64 `json:"size"`
 	}
 
 	// ContractMetadata contains all metadata for a contract.
