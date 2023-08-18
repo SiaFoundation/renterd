@@ -372,7 +372,9 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			})
 
 			// check funds
-			cost := rhpv2.RPCDeleteCost(settings, len(batch))
+			proofSize := 32 * (128 + uint64(len(batch)))
+			cost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
+			cost = cost.Mul64(105).Div64(100)
 			if rev.RenterFunds().Cmp(cost) < 0 {
 				return ErrInsufficientFunds
 			}
@@ -406,7 +408,7 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			var merkleResp rhpv2.RPCWriteMerkleProof
 			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
 				return err
-			} else if err := t.ReadResponse(&merkleResp, 4096); err != nil {
+			} else if err := t.ReadResponse(&merkleResp, 4096+proofSize); err != nil {
 				return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
 			}
 
