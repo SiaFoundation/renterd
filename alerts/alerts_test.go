@@ -53,8 +53,12 @@ func TestWebhooks(t *testing.T) {
 		Severity:  SeverityWarning,
 		Timestamp: time.Unix(0, 0),
 	}
-	alerts.Register(context.Background(), a)
-	alerts.Dismiss(context.Background(), types.Hash256{1})
+	if err := alerts.RegisterAlert(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	if err := alerts.DismissAlerts(context.Background(), types.Hash256{1}); err != nil {
+		t.Fatal(err)
+	}
 
 	// list hooks
 	hooks, _ := mgr.Info()
@@ -78,11 +82,13 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// perform an action that should not trigger the endpoint
-	alerts.Register(context.Background(), Alert{
+	if err := alerts.RegisterAlert(context.Background(), Alert{
 		ID:        types.Hash256{2},
 		Severity:  SeverityWarning,
 		Timestamp: time.Now(),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// check events
 	for i := 0; i < 10; i++ {

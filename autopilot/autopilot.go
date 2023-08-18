@@ -29,6 +29,7 @@ import (
 
 type Bus interface {
 	webhooks.Broadcaster
+	alerts.Alerter
 
 	// Accounts
 	Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error)
@@ -99,6 +100,7 @@ type Worker interface {
 type Autopilot struct {
 	id string
 
+	alerts  alerts.Alerter
 	bus     Bus
 	logger  *zap.SugaredLogger
 	workers *workerPool
@@ -106,11 +108,10 @@ type Autopilot struct {
 	mu    sync.Mutex
 	state state
 
-	alerts *alerts.Manager
-	a      *accounts
-	c      *contractor
-	m      *migrator
-	s      *scanner
+	a *accounts
+	c *contractor
+	m *migrator
+	s *scanner
 
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
@@ -168,15 +169,13 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
-		"GET    /alerts":         ap.handleGETAlerts,
-		"POST   /alerts/dismiss": ap.handlePOSTAlertsDismiss,
-		"GET    /config":         ap.configHandlerGET,
-		"PUT    /config":         ap.configHandlerPUT,
-		"POST   /debug/trigger":  ap.triggerHandlerPOST,
-		"POST   /hosts":          ap.hostsHandlerPOST,
-		"GET    /host/:hostKey":  ap.hostHandlerGET,
-		"GET    /status":         ap.statusHandlerGET,
-		"GET    /state":          ap.stateHandlerGET,
+		"GET    /config":        ap.configHandlerGET,
+		"PUT    /config":        ap.configHandlerPUT,
+		"POST   /debug/trigger": ap.triggerHandlerPOST,
+		"POST   /hosts":         ap.hostsHandlerPOST,
+		"GET    /host/:hostKey": ap.hostHandlerGET,
+		"GET    /status":        ap.statusHandlerGET,
+		"GET    /state":         ap.stateHandlerGET,
 	}))
 }
 
@@ -199,6 +198,7 @@ func (ap *Autopilot) Run() error {
 	var launchAccountRefillsOnce sync.Once
 	for {
 		ap.logger.Info("autopilot iteration starting")
+		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
@@ -208,9 +208,13 @@ func (ap *Autopilot) Run() error {
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan(ctx, w, forceScan)
 
+			// reset forceScan
+			forceScan = false
+
 			// block until the autopilot is configured
-			if !ap.blockUntilConfigured(ap.ticker.C) {
-				if !ap.isStopped() {
+			if configured, interrupted := ap.blockUntilConfigured(ap.ticker.C); !configured {
+				if interrupted {
+					close(tickerFired)
 					return
 				}
 				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
@@ -218,8 +222,9 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// block until consensus is synced
-			if !ap.blockUntilSynced(ap.ticker.C) {
-				if !ap.isStopped() {
+			if synced, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
+				if interrupted {
+					close(tickerFired)
 					return
 				}
 				ap.logger.Error("autopilot stopped before consensus was synced")
@@ -287,7 +292,7 @@ func (ap *Autopilot) Run() error {
 			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
 		case <-ap.ticker.C:
-			forceScan = false
+		case <-tickerFired:
 		}
 	}
 }
@@ -340,7 +345,7 @@ func (ap *Autopilot) Uptime() (dur time.Duration) {
 	return
 }
 
-func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
+func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configured, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -361,18 +366,18 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 		if err != nil {
 			select {
 			case <-ap.stopChan:
-				return false
+				return false, false
 			case <-interrupt:
-				return false
+				return false, true
 			case <-ticker.C:
 				continue
 			}
 		}
-		return true
+		return true, false
 	}
 }
 
-func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
+func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -389,14 +394,14 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 		if err != nil || !cs.Synced {
 			select {
 			case <-ap.stopChan:
-				return false
+				return false, false
 			case <-interrupt:
-				return false
+				return false, true
 			case <-ticker.C:
 				continue
 			}
 		}
-		return true
+		return true, false
 	}
 }
 
@@ -486,21 +491,6 @@ func (ap *Autopilot) isStopped() bool {
 	}
 }
 
-func (ap *Autopilot) handleGETAlerts(c jape.Context) {
-	c.Encode(ap.alerts.Active())
-}
-
-func (ap *Autopilot) handlePOSTAlertsDismiss(jc jape.Context) {
-	var ids []types.Hash256
-	if jc.Decode(&ids) != nil {
-		return
-	} else if len(ids) == 0 {
-		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
-		return
-	}
-	ap.alerts.Dismiss(jc.Request.Context(), ids...)
-}
-
 func (ap *Autopilot) configHandlerGET(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
@@ -553,7 +543,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 // New initializes an Autopilot.
 func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
-		alerts:  alerts.NewManager(bus),
+		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
 		id:      id,
 		bus:     bus,
 		logger:  logger.Sugar().Named(api.DefaultAutopilotID),

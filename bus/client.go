@@ -36,8 +36,13 @@ func (c *Client) Alerts() (alerts []alerts.Alert, err error) {
 }
 
 // DismissAlerts dimisses the alerts with the given IDs.
-func (c *Client) DismissAlerts(ids ...types.Hash256) error {
-	return c.c.POST("/alerts/dismiss", ids, nil)
+func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
+	return c.c.WithContext(ctx).POST("/alerts/dismiss", ids, nil)
+}
+
+// RegisterAlert dimisses the alerts with the given IDs.
+func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
+	return c.c.WithContext(ctx).POST("/alerts/register", alert, nil)
 }
 
 // RegisterWebhook registers a new webhook for the given URL.
@@ -503,17 +508,16 @@ func (c *Client) ReleaseContract(ctx context.Context, fcid types.FileContractID,
 	return
 }
 
-// PrunableData returns the amount of data that can be pruned from all
-// contracts.
-func (c *Client) PrunableData(ctx context.Context) (prunable int64, err error) {
-	err = c.c.WithContext(ctx).GET("/contracts/prunable", &prunable)
+// PrunableData returns an overview of all contract sizes, the total size and
+// the amount of data that can be pruned.
+func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error) {
+	err = c.c.WithContext(ctx).GET("/contracts/prunable", &prunableData)
 	return
 }
 
-// PrunableDataForContract returns the amount of data that can be pruned from
-// the contract with given id.
-func (c *Client) PrunableDataForContract(ctx context.Context, fcid types.FileContractID) (prunable int64, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/prunable", fcid), &prunable)
+// ContractSize returns the contract's size.
+func (c *Client) ContractSize(ctx context.Context, fcid types.FileContractID) (size api.ContractSize, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/size", fcid), &size)
 	return
 }
 

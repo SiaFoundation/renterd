@@ -15,7 +15,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
@@ -24,17 +23,6 @@ import (
 // A Client provides methods for interacting with a renterd API server.
 type Client struct {
 	c jape.Client
-}
-
-// Alerts fetches the active alerts from the bus.
-func (c *Client) Alerts() (alerts []alerts.Alert, err error) {
-	err = c.c.GET("/alerts", &alerts)
-	return
-}
-
-// DismissAlerts dimisses the alerts with the given IDs.
-func (c *Client) DismissAlerts(ids ...types.Hash256) error {
-	return c.c.POST("/alerts/dismiss", ids, nil)
 }
 
 func (c *Client) ID(ctx context.Context) (id string, err error) {

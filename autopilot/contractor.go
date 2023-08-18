@@ -440,7 +440,7 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 	)
 	hasChanged := len(added)+len(removed) > 0
 	if hasChanged {
-		c.ap.alerts.Register(context.Background(), alerts.Alert{
+		err := c.ap.alerts.RegisterAlert(context.Background(), alerts.Alert{
 			ID:       frand.Entropy256(),
 			Severity: alerts.SeverityInfo,
 			Message:  fmt.Sprintf("The contract set has changed: %v contracts added and %v removed", len(added), len(removed)),
@@ -450,6 +450,9 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 			},
 			Timestamp: time.Now(),
 		})
+		if err != nil {
+			logFn("failed to register alert", "error", err)
+		}
 	}
 	return hasChanged
 }
@@ -510,7 +513,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 			severity = alerts.SeverityWarning
 		}
 
-		c.ap.alerts.Register(context.Background(), alerts.Alert{
+		err = c.ap.alerts.RegisterAlert(ctx, alerts.Alert{
 			ID:       alertLowBalanceID,
 			Severity: severity,
 			Message:  "wallet is low on funds",
@@ -520,6 +523,9 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 			},
 			Timestamp: time.Now(),
 		})
+		if err != nil {
+			l.Errorf("failed to register alert: err %v", err)
+		}
 	}
 
 	// pending maintenance transaction - nothing to do
@@ -954,7 +960,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 
 		// break if we don't want to proceed
 		if !proceed {
-			c.ap.alerts.Register(context.Background(), alerts.Alert{
+			rerr := c.ap.alerts.RegisterAlert(ctx, alerts.Alert{
 				ID:       alertRenewalFailedID,
 				Severity: alerts.SeverityCritical,
 				Message:  fmt.Sprintf("Contract renewals were interrupted due to latest error: %v", err),
@@ -964,6 +970,9 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 				},
 				Timestamp: time.Now(),
 			})
+			if rerr != nil {
+				c.logger.Errorf("failed to register alert: err %v", rerr)
+			}
 			break
 		}
 	}

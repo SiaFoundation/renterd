@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -33,6 +34,11 @@ const (
 )
 
 type (
+	Alerter interface {
+		RegisterAlert(_ context.Context, a Alert) error
+		DismissAlerts(_ context.Context, ids ...types.Hash256) error
+	}
+
 	// Severity indicates the severity of an alert.
 	Severity uint8
 
@@ -98,27 +104,33 @@ func (s *Severity) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Register registers a new alert with the manager
-func (m *Manager) Register(ctx context.Context, a Alert) {
-	if a.ID == (types.Hash256{}) {
-		panic("cannot register alert with empty ID") // developer error
-	} else if a.Timestamp.IsZero() {
-		panic("cannot register alert with zero timestamp") // developer error
+// RegisterAlert implements the Alerter interface.
+func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
+	if alert.ID == (types.Hash256{}) {
+		return errors.New("cannot register alert with zero id")
+	} else if alert.Timestamp.IsZero() {
+		return errors.New("cannot register alert with zero timestamp")
+	} else if alert.Severity == 0 {
+		return errors.New("cannot register alert without severity")
+	} else if alert.Message == "" {
+		return errors.New("cannot register alert without a message")
+	} else if alert.Data == nil || alert.Data["origin"] == "" {
+		return errors.New("caannot register alert without origin")
 	}
 
 	m.mu.Lock()
-	m.alerts[a.ID] = a
+	m.alerts[alert.ID] = alert
 	m.mu.Unlock()
 
-	m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
+	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
 		Module:  webhookModule,
 		Event:   webhookEventRegister,
-		Payload: a,
+		Payload: alert,
 	})
 }
 
-// Dismiss removes the alerts with the given IDs.
-func (m *Manager) Dismiss(ctx context.Context, ids ...types.Hash256) {
+// DismissAlerts implements the Alerter interface.
+func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
 	m.mu.Lock()
 	for _, id := range ids {
 		delete(m.alerts, id)
@@ -128,7 +140,7 @@ func (m *Manager) Dismiss(ctx context.Context, ids ...types.Hash256) {
 	}
 	m.mu.Unlock()
 
-	m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
+	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
 		Module:  webhookModule,
 		Event:   webhookEventDismiss,
 		Payload: ids,
@@ -156,4 +168,32 @@ func NewManager(b webhooks.Broadcaster) *Manager {
 		alerts:             make(map[types.Hash256]Alert),
 		webhookBroadcaster: b,
 	}
+}
+
+type originAlerter struct {
+	alerter Alerter
+	origin  string
+}
+
+// WithOrigin wraps an Alerter in an originAlerter which always attaches the
+// origin field to alerts.
+func WithOrigin(alerter Alerter, origin string) Alerter {
+	return &originAlerter{
+		alerter: alerter,
+		origin:  origin,
+	}
+}
+
+// RegisterAlert implements the Alerter interface.
+func (a *originAlerter) RegisterAlert(ctx context.Context, alert Alert) error {
+	if alert.Data == nil {
+		alert.Data = make(map[string]any)
+	}
+	alert.Data["origin"] = a.origin
+	return a.alerter.RegisterAlert(ctx, alert)
+}
+
+// DismissAlerts implements the Alerter interface.
+func (a *originAlerter) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
+	return a.alerter.DismissAlerts(ctx, ids...)
 }
