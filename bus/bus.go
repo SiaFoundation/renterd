@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -691,6 +692,11 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 	if jc.Check("failed to fetch contract sizes", err) != nil {
 		return
 	}
+
+	// sort in descending fashion
+	sort.Slice(sizes, func(i, j int) bool {
+		return sizes[i].Size > sizes[j].Size
+	})
 
 	var totalPrunable, totalSize uint64
 	for _, size := range sizes {
