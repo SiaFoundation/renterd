@@ -18,9 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
@@ -2155,5 +2157,45 @@ func TestSlabBufferStats(t *testing.T) {
 	}
 	if len(buffers) != 0 {
 		t.Fatal("expected 0 slab buffers, got", len(buffers))
+	}
+}
+
+func TestAlerts(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b := cluster.Bus
+
+	alert := alerts.Alert{
+		ID:       frand.Entropy256(),
+		Severity: alerts.SeverityCritical,
+		Message:  "test",
+		Data: map[string]interface{}{
+			"foo": "bar",
+		},
+		Timestamp: time.Now(),
+	}
+	if err := b.RegisterAlert(context.Background(), alert); err != nil {
+		t.Fatal(err)
+	}
+	alerts, err := b.Alerts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert but got %v", len(alerts))
+	}
+	if !reflect.DeepEqual(alerts[0], alert) {
+		t.Fatal("alert mismatch", cmp.Diff(alerts[0], alert))
 	}
 }

@@ -231,6 +231,7 @@ type hostProvider interface {
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
+	alerts          alerts.Alerter
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
@@ -1186,6 +1187,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	}
 
 	w := &worker{
+		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,

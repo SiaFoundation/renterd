@@ -147,15 +147,16 @@ type (
 )
 
 type bus struct {
-	alerts *alerts.Manager
-	s      Syncer
-	cm     ChainManager
-	tp     TransactionPool
-	w      Wallet
-	hdb    HostDB
-	as     AutopilotStore
-	ms     MetadataStore
-	ss     SettingStore
+	alerts   alerts.Alerter
+	alertMgr *alerts.Manager
+	s        Syncer
+	cm       ChainManager
+	tp       TransactionPool
+	w        Wallet
+	hdb      HostDB
+	as       AutopilotStore
+	ms       MetadataStore
+	ss       SettingStore
 
 	eas EphemeralAccountStore
 
@@ -1175,18 +1176,15 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleGETAlerts(c jape.Context) {
-	c.Encode(b.alerts.Active())
+	c.Encode(b.alertMgr.Active())
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return
-	} else if len(ids) == 0 {
-		jc.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
-		return
 	}
-	b.alerts.Dismiss(ids...)
+	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAlerts(jc.Request.Context(), ids...))
 }
 
 func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
@@ -1194,20 +1192,7 @@ func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
 	if jc.Decode(&alert) != nil {
 		return
 	}
-	if alert.ID == (types.Hash256{}) {
-		jc.Error(errors.New("cannot register alert with zero id"), http.StatusBadRequest)
-		return
-	} else if alert.Timestamp.IsZero() {
-		jc.Error(errors.New("cannot register alert with zero timestamp"), http.StatusBadRequest)
-		return
-	} else if alert.Severity == 0 {
-		jc.Error(errors.New("cannot register alert without severity"), http.StatusBadRequest)
-		return
-	} else if alert.Message == "" {
-		jc.Error(errors.New("cannot register alert without a message"), http.StatusBadRequest)
-		return
-	}
-	b.alerts.Register(alert)
+	jc.Check("failed to register alert", b.alertMgr.RegisterAlert(jc.Request.Context(), alert))
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
@@ -1437,8 +1422,10 @@ func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 
 // New returns a new Bus.
 func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+	alertMgr := alerts.NewManager()
 	b := &bus{
-		alerts:           alerts.NewManager(),
+		alerts:           alerts.WithOrigin(alertMgr, "bus"),
+		alertMgr:         alertMgr,
 		s:                s,
 		cm:               cm,
 		tp:               tp,
