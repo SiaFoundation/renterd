@@ -50,8 +50,12 @@ func TestWebhooks(t *testing.T) {
 	// perform some actions that should trigger the endpoint
 	a := Alert{
 		ID:        types.Hash256{1},
+		Message:   "test",
 		Severity:  SeverityWarning,
 		Timestamp: time.Unix(0, 0),
+		Data: map[string]interface{}{
+			"origin": "foo",
+		},
 	}
 	if err := alerts.RegisterAlert(context.Background(), a); err != nil {
 		t.Fatal(err)
@@ -84,8 +88,12 @@ func TestWebhooks(t *testing.T) {
 	// perform an action that should not trigger the endpoint
 	if err := alerts.RegisterAlert(context.Background(), Alert{
 		ID:        types.Hash256{2},
+		Message:   "test",
 		Severity:  SeverityWarning,
 		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"origin": "foo",
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
