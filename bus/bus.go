@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -88,7 +89,6 @@ type (
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
@@ -97,8 +97,9 @@ type (
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
-		PrunableData(ctx context.Context) (int64, error)
-		PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
+		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
+		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
 		Object(ctx context.Context, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
@@ -688,25 +689,49 @@ func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
-	n, err := b.ms.PrunableData(jc.Request.Context())
-	if jc.Check("failed to fetch prunable data", err) == nil {
-		jc.Encode(n)
+	sizes, err := b.ms.ContractSizes(jc.Request.Context())
+	if jc.Check("failed to fetch contract sizes", err) != nil {
+		return
 	}
+
+	// prepare the response
+	res := api.ContractsPrunableDataResponse{
+		Contracts:     make([]api.ContractPrunableData, len(sizes)),
+		TotalPrunable: 0,
+		TotalSize:     0,
+	}
+
+	// build the response
+	for fcid, size := range sizes {
+		res.Contracts = append(res.Contracts, api.ContractPrunableData{
+			ID:           fcid,
+			ContractSize: size,
+		})
+		res.TotalPrunable += size.Prunable
+		res.TotalSize += size.Size
+	}
+
+	// sort contracts by the amount of prunable data
+	sort.Slice(res.Contracts, func(i, j int) bool {
+		return res.Contracts[i].Prunable > res.Contracts[j].Prunable
+	})
+
+	jc.Encode(res)
 }
 
-func (b *bus) contractPrunableDataHandlerGET(jc jape.Context) {
+func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
 
-	n, err := b.ms.PrunableDataForContract(jc.Request.Context(), id)
+	size, err := b.ms.ContractSize(jc.Request.Context(), id)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
-	if jc.Check("failed to fetch prunable data for contract", err) == nil {
-		jc.Encode(n)
+	if jc.Check("failed to fetch contract size", err) == nil {
+		jc.Encode(size)
 	}
 }
 
@@ -1590,8 +1615,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
-		"GET    /contract/:id/prunable":  b.contractPrunableDataHandlerGET,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
+		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
 		"GET    /objects/*path":  b.objectsHandlerGET,
