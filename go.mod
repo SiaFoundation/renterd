@@ -23,7 +23,6 @@ require (
 	go.sia.tech/web/renterd v0.26.0
 	go.uber.org/zap v1.25.0
 	golang.org/x/crypto v0.12.0
-	golang.org/x/sys v0.11.0
 	golang.org/x/term v0.11.0
 	gorm.io/driver/mysql v1.5.1
 	gorm.io/driver/sqlite v1.5.3
@@ -76,6 +75,7 @@ require (
 	go.sia.tech/web v0.0.0-20230817201630-c3d9328334b1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.14.0 // indirect
+	golang.org/x/sys v0.11.0 // indirect
 	golang.org/x/text v0.12.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.12.0 // indirect
