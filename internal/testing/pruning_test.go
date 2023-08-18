@@ -257,9 +257,9 @@ func TestSectorPruning(t *testing.T) {
 	b = cluster2.Bus
 
 	// assert prunable data is 0
-	if n, err := b.PrunableData(context.Background()); err != nil {
+	if res, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != 0 {
+	} else if res.TotalPrunable != 0 {
 		t.Fatal("expected 0 prunable data", n)
 	}
 
@@ -272,9 +272,9 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// assert amount of prunable data
-	if n, err := b.PrunableData(context.Background()); err != nil {
+	if res, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != int64(5)*int64(rs.TotalShards)*rhpv2.SectorSize {
+	} else if res.TotalPrunable != 5*uint64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 }
