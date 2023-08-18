@@ -196,6 +196,7 @@ func (ap *Autopilot) Run() error {
 	var launchAccountRefillsOnce sync.Once
 	for {
 		ap.logger.Info("autopilot iteration starting")
+		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
@@ -205,9 +206,13 @@ func (ap *Autopilot) Run() error {
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan(ctx, w, forceScan)
 
+			// reset forceScan
+			forceScan = false
+
 			// block until the autopilot is configured
-			if !ap.blockUntilConfigured(ap.ticker.C) {
-				if !ap.isStopped() {
+			if configured, interrupted := ap.blockUntilConfigured(ap.ticker.C); !configured {
+				if interrupted {
+					close(tickerFired)
 					return
 				}
 				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
@@ -215,8 +220,9 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// block until consensus is synced
-			if !ap.blockUntilSynced(ap.ticker.C) {
-				if !ap.isStopped() {
+			if synced, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
+				if interrupted {
+					close(tickerFired)
 					return
 				}
 				ap.logger.Error("autopilot stopped before consensus was synced")
@@ -284,7 +290,7 @@ func (ap *Autopilot) Run() error {
 			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
 		case <-ap.ticker.C:
-			forceScan = false
+		case <-tickerFired:
 		}
 	}
 }
@@ -337,7 +343,7 @@ func (ap *Autopilot) Uptime() (dur time.Duration) {
 	return
 }
 
-func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
+func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configured, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -358,18 +364,18 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 		if err != nil {
 			select {
 			case <-ap.stopChan:
-				return false
+				return false, false
 			case <-interrupt:
-				return false
+				return false, true
 			case <-ticker.C:
 				continue
 			}
 		}
-		return true
+		return true, false
 	}
 }
 
-func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
+func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -386,14 +392,14 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 		if err != nil || !cs.Synced {
 			select {
 			case <-ap.stopChan:
-				return false
+				return false, false
 			case <-interrupt:
-				return false
+				return false, true
 			case <-ticker.C:
 				continue
 			}
 		}
-		return true
+		return true, false
 	}
 }
 
