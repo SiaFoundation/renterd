@@ -172,6 +172,13 @@ type UploaderStats struct {
 	AvgSectorUploadSpeedMBPS float64         `json:"avgSectorUploadSpeedMBPS"`
 }
 
+// WorkerStateResponse is the response type for the /worker/state endpoint.
+type WorkerStateResponse struct {
+	ID        string    `json:"id"`
+	StartTime time.Time `json:"startTime"`
+	BuildState
+}
+
 // An UploadOption overrides an option on the upload and migrate endpoints in
 // the worker.
 type UploadOption func(url.Values)

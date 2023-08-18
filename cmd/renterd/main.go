@@ -120,7 +120,7 @@ func main() {
 		apiPassword string
 		node.BusConfig
 	}
-	busCfg.Network = build.ConsensusNetwork
+	busCfg.Network, _ = build.Network()
 
 	var dbCfg struct {
 		uri      string
@@ -231,7 +231,7 @@ func main() {
 	flag.Parse()
 
 	log.Println("renterd v0.4.0-beta")
-	log.Println("Network", build.ConsensusNetworkName)
+	log.Println("Network", build.NetworkName())
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
 		log.Println("Build Date:", builddate)
@@ -420,7 +420,7 @@ func main() {
 		log.Println("Shutting down...")
 		shutdownFns = append(shutdownFns, srv.Shutdown)
 	case err := <-autopilotErr:
-		log.Fatalln("Fatal autopilot error:", err)
+		log.Fatal("Fatal autopilot error:", err)
 	}
 
 	// Shut down the autopilot first, then the rest of the services in reverse order.
