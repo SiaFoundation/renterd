@@ -2176,12 +2176,13 @@ func TestAlerts(t *testing.T) {
 	}()
 	b := cluster.Bus
 
+	// register alert
 	alert := alerts.Alert{
 		ID:       frand.Entropy256(),
 		Severity: alerts.SeverityCritical,
 		Message:  "test",
 		Data: map[string]interface{}{
-			"foo": "bar",
+			"origin": "test",
 		},
 		Timestamp: time.Now(),
 	}
@@ -2195,7 +2196,20 @@ func TestAlerts(t *testing.T) {
 	if len(alerts) != 1 {
 		t.Fatalf("expected 1 alert but got %v", len(alerts))
 	}
-	if !reflect.DeepEqual(alerts[0], alert) {
+	if !cmp.Equal(alerts[0], alert) {
 		t.Fatal("alert mismatch", cmp.Diff(alerts[0], alert))
+	}
+
+	// dismiss alert
+	err = b.DismissAlerts(context.Background(), alert.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alerts, err = b.Alerts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("expected 0 alerts but got %v", len(alerts))
 	}
 }
