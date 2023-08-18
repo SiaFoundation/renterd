@@ -1,5 +1,5 @@
 # Helper image to build renterd.
-FROM golang:1.19 AS builder
+FROM golang:1.21 AS builder
 LABEL maintainer="The Sia Foundation <info@sia.tech>"
 
 WORKDIR /renterd
