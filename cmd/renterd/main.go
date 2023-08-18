@@ -120,7 +120,7 @@ func main() {
 		apiPassword string
 		node.BusConfig
 	}
-	busCfg.Network = build.ConsensusNetwork
+	busCfg.Network, _ = build.Network()
 
 	var dbCfg struct {
 		uri      string
@@ -148,6 +148,37 @@ func main() {
 		node.AutopilotConfig
 	}
 	autopilotCfg.RevisionSubmissionBuffer = api.BlocksPerDay
+
+	// TODO: the following flags will be deprecated in v1.0.0 in favor of
+	// environment variables to ensure we do not ask the user to pass sensitive
+	// information via CLI parameters.
+	flag.StringVar(&dbCfg.password, "db.password", "", "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
+	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
+	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
+	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "[DEPRECATED] API password for remote worker service")
+	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "[DEPRECATED] URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
+
+	for _, flag := range []struct {
+		input    string
+		name     string
+		env      string
+		insecure bool
+	}{
+		{dbCfg.password, "db.password", "RENTERD_DB_PASSWORD", true},
+		{busCfg.apiPassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
+		{busCfg.remoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
+		{workerCfg.apiPassword, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
+		{workerCfg.remoteAddrs, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
+	} {
+		if flag.input != "" {
+			if flag.insecure {
+				log.Printf("WARNING: usage of CLI flag '%s' is considered insecure and will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
+			} else {
+				log.Printf("WARNING: CLI flag '%s' will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
+			}
+		}
+	}
+
 	// node
 	var customLogPath string
 	apiAddr := flag.String("http", build.DefaultAPIAddress, "address to serve API on")
@@ -159,7 +190,6 @@ func main() {
 	// db
 	flag.StringVar(&dbCfg.uri, "db.uri", "", "URI of the database to use for the bus - can be overwritten using RENTERD_DB_URI environment variable")
 	flag.StringVar(&dbCfg.user, "db.user", "", "username for the database to use for the bus - can be overwritten using RENTERD_DB_USER environment variable")
-	flag.StringVar(&dbCfg.password, "db.password", "", "password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
 	flag.StringVar(&dbCfg.database, "db.name", "", "name of the database to use for the bus - can be overwritten using RENTERD_DB_NAME environment variable")
 
 	// db logger
@@ -171,8 +201,6 @@ func main() {
 	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
 	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", build.DefaultGatewayAddress, "address to listen on for Sia peer connections - can be overwritten using RENTERD_BUS_GATEWAY_ADDR environment variable")
 	flag.DurationVar(&busCfg.PersistInterval, "bus.persistInterval", busCfg.PersistInterval, "interval at which to persist the consensus updates")
-	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
-	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
 	flag.DurationVar(&busCfg.UsedUTXOExpiry, "bus.usedUTXOExpiry", 24*time.Hour, "time after which a used UTXO that hasn't been included in a transaction becomes spendable again")
 	flag.Int64Var(&busCfg.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", 1<<12, "number of remaining bytes in a slab buffer before it is uploaded - can be overwritten using the RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD environment variable")
 
@@ -185,15 +213,14 @@ func main() {
 	flag.DurationVar(&workerCfg.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", 3*time.Second, "timeout applied to slab downloads that decides when we start overdriving")
 	flag.Uint64Var(&workerCfg.UploadMaxOverdrive, "worker.uploadMaxOverdrive", 5, "maximum number of active overdrive workers when uploading a slab")
 	flag.DurationVar(&workerCfg.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", 3*time.Second, "timeout applied to slab uploads that decides when we start overdriving")
-	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "API password for remote worker service")
 	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
-	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
 	flag.BoolVar(&unauthenticatedDownloads, "worker.unauthenticatedDownloads", false, "if set to 'true', the worker will allow for downloading from the /objects endpoint without basic authentication. Can be overwritten using the RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS environment variable")
 
 	// autopilot
 	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 30*time.Minute, "interval at which autopilot loop runs")
 	flag.Float64Var(&autopilotCfg.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", 0.75, "health threshold below which slabs are migrated to new hosts")
+	flag.DurationVar(&autopilotCfg.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", 24*time.Hour, "interval at which the autopilot broadcasts contract revisions to be mined - can be overwritten using the RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL environment variable - setting it to 0 will disable this feature")
 	flag.Uint64Var(&autopilotCfg.ScannerBatchSize, "autopilot.scannerBatchSize", 1000, "size of the batch with which hosts are scanned")
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", 10, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
@@ -204,7 +231,7 @@ func main() {
 	flag.Parse()
 
 	log.Println("renterd v0.4.0-beta")
-	log.Println("Network", build.ConsensusNetworkName)
+	log.Println("Network", build.NetworkName())
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
 		log.Println("Build Date:", builddate)
@@ -242,6 +269,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &unauthenticatedDownloads)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
+	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &autopilotCfg.RevisionBroadcastInterval)
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &autopilotCfg.MigratorParallelSlabsPerWorker)
 
 	// Init db dialector
@@ -392,7 +420,7 @@ func main() {
 		log.Println("Shutting down...")
 		shutdownFns = append(shutdownFns, srv.Shutdown)
 	case err := <-autopilotErr:
-		log.Fatalln("Fatal autopilot error:", err)
+		log.Fatal("Fatal autopilot error:", err)
 	}
 
 	// Shut down the autopilot first, then the rest of the services in reverse order.

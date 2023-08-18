@@ -181,7 +181,19 @@ func (w *SingleAddressWallet) Height() uint64 {
 // UnspentOutputs returns the set of unspent Siacoin outputs controlled by the
 // wallet.
 func (w *SingleAddressWallet) UnspentOutputs() ([]SiacoinElement, error) {
-	return w.store.UnspentSiacoinElements(false)
+	sces, err := w.store.UnspentSiacoinElements(false)
+	if err != nil {
+		return nil, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	filtered := sces[:0]
+	for _, sce := range sces {
+		if !w.isOutputUsed(sce.ID) {
+			filtered = append(filtered, sce)
+		}
+	}
+	return filtered, nil
 }
 
 // Transactions returns up to max transactions relevant to the wallet that have

@@ -261,9 +261,9 @@ func TestSectorPruning(t *testing.T) {
 	w = cluster2.Worker
 
 	// assert prunable data is 0
-	if n, err := b.PrunableData(context.Background()); err != nil {
+	if res, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != 0 {
+	} else if res.TotalPrunable != 0 {
 		t.Fatal("expected 0 prunable data", n)
 	}
 
@@ -276,9 +276,9 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// assert amount of prunable data
-	if n, err := b.PrunableData(context.Background()); err != nil {
+	if res, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if n != int64(math.Ceil(float64(numObjects)/2))*int64(rs.TotalShards)*rhpv2.SectorSize {
+	} else if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*uint64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 
@@ -291,9 +291,9 @@ func TestSectorPruning(t *testing.T) {
 
 	// assert spending records were updated and prunable data is 0
 	if err = Retry(10, testBusFlushInterval, func() error {
-		if n, err := b.PrunableData(context.Background()); err != nil {
+		if res, err := b.PrunableData(context.Background()); err != nil {
 			t.Fatal(err)
-		} else if n != 0 {
+		} else if res.TotalPrunable != 0 {
 			return fmt.Errorf("unexpected prunable data: %d", n)
 		}
 		return nil

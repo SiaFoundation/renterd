@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -87,7 +89,6 @@ type (
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
@@ -96,11 +97,13 @@ type (
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
-		PrunableData(ctx context.Context) (int64, error)
-		PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
+		ContractSizes(ctx context.Context) ([]api.ContractSize, error)
+		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
 		Object(ctx context.Context, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
+		ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
@@ -161,6 +164,8 @@ type bus struct {
 	accounts         *accounts
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
+
+	startTime time.Time
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -683,25 +688,42 @@ func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
-	n, err := b.ms.PrunableData(jc.Request.Context())
-	if jc.Check("failed to fetch prunable data", err) == nil {
-		jc.Encode(n)
+	sizes, err := b.ms.ContractSizes(jc.Request.Context())
+	if jc.Check("failed to fetch contract sizes", err) != nil {
+		return
 	}
+
+	// sort in descending fashion
+	sort.Slice(sizes, func(i, j int) bool {
+		return sizes[i].Prunable > sizes[j].Prunable
+	})
+
+	var totalPrunable, totalSize uint64
+	for _, size := range sizes {
+		totalPrunable += size.Prunable
+		totalSize += size.Size
+	}
+
+	jc.Encode(api.ContractsPrunableDataResponse{
+		ContractSizes: sizes,
+		TotalPrunable: totalPrunable,
+		TotalSize:     totalSize,
+	})
 }
 
-func (b *bus) contractPrunableDataHandlerGET(jc jape.Context) {
+func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
 
-	n, err := b.ms.PrunableDataForContract(jc.Request.Context(), id)
+	size, err := b.ms.ContractSize(jc.Request.Context(), id)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
-	if jc.Check("failed to fetch prunable data for contract", err) == nil {
-		jc.Encode(n)
+	if jc.Check("failed to fetch contract size", err) == nil {
+		jc.Encode(size)
 	}
 }
 
@@ -945,6 +967,18 @@ func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 		return
 	}
 	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
+}
+
+func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), key)
+	if jc.Check("failed to retrieve objects by slab", err) != nil {
+		return
+	}
+	jc.Encode(objects)
 }
 
 func (b *bus) slabHandlerGET(jc jape.Context) {
@@ -1359,6 +1393,19 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
 }
 
+func (b *bus) stateHandlerGET(jc jape.Context) {
+	jc.Encode(api.BusStateResponse{
+		StartTime: b.startTime,
+		BuildState: api.BuildState{
+			Network:   build.NetworkName(),
+			Version:   build.Version(),
+			Commit:    build.Commit(),
+			OS:        runtime.GOOS,
+			BuildTime: build.BuildTime(),
+		},
+	})
+}
+
 func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
@@ -1401,6 +1448,8 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 		contractLocks:    newContractLocks(),
 		uploadingSectors: newUploadingSectorsCache(),
 		logger:           l.Sugar().Named("bus"),
+
+		startTime: time.Now(),
 	}
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
@@ -1550,8 +1599,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
-		"GET    /contract/:id/prunable":  b.contractPrunableDataHandlerGET,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
+		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
 		"GET    /objects/*path":  b.objectsHandlerGET,
@@ -1569,17 +1618,19 @@ func (b *bus) Handler() http.Handler {
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
+		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
 
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
 
-		"GET    /stats/objects": b.objectsStatshandlerGET,
-
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
+
+		"GET    /state":         b.stateHandlerGET,
+		"GET    /stats/objects": b.objectsStatshandlerGET,
 
 		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,

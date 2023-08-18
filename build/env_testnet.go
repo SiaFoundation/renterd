@@ -5,20 +5,16 @@ package build
 import (
 	"time"
 
-	"go.sia.tech/core/chain"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
 const (
-	ConsensusNetworkName  = "Testnet-Zen"
 	DefaultAPIAddress     = "localhost:9880"
 	DefaultGatewayAddress = ":9881"
 )
 
 var (
-	ConsensusNetwork, _ = chain.TestnetZen()
-
 	// DefaultGougingSettings define the default gouging settings the bus is
 	// configured with on startup. These values can be adjusted using the
 	// settings API.

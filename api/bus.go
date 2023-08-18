@@ -79,6 +79,12 @@ type AccountHandlerPOST struct {
 	HostKey types.PublicKey `json:"hostKey"`
 }
 
+// BusStateResponse is the response type for the /bus/state endpoint.
+type BusStateResponse struct {
+	StartTime time.Time `json:"startTime"`
+	BuildState
+}
+
 // ConsensusState holds the current blockheight and whether we are synced or not.
 type ConsensusState struct {
 	BlockHeight   uint64    `json:"blockHeight"`
@@ -142,6 +148,14 @@ type ContractReleaseRequest struct {
 // endpoint.
 type ContractAcquireResponse struct {
 	LockID uint64 `json:"lockID"`
+}
+
+// ContractsPrunableDataResponse is the response type for the
+// /contracts/prunable endpoint.
+type ContractsPrunableDataResponse struct {
+	ContractSizes []ContractSize `json:"contractSizes"`
+	TotalPrunable uint64         `json:"totalPrunable"`
+	TotalSize     uint64         `json:"totalSize"`
 }
 
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.

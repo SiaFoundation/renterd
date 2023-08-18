@@ -2855,25 +2855,27 @@ func TestPartialSlab(t *testing.T) {
 	}
 }
 
-func TestPrunableData(t *testing.T) {
+func TestContractSizes(t *testing.T) {
 	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// define a helper function to fetch the amount of prunable data, either for
-	// all contracts or the given fcid
-	prunableData := func(fcid *types.FileContractID) (n int64) {
+	// define a helper function that calculates the amount of data that can be
+	// pruned by inspecting the contract sizes
+	prunableData := func(fcid *types.FileContractID) (n uint64) {
 		t.Helper()
 
-		var err error
-		if fcid != nil {
-			n, err = db.PrunableDataForContract(context.Background(), *fcid)
-		} else {
-			n, err = db.PrunableData(context.Background())
-		}
+		sizes, err := db.ContractSizes(context.Background())
 		if err != nil {
 			t.Fatal(err)
+		}
+
+		for _, size := range sizes {
+			if fcid != nil && size.ID != *fcid {
+				continue
+			}
+			n += size.Prunable
 		}
 		return
 	}
@@ -2965,6 +2967,18 @@ func TestPrunableData(t *testing.T) {
 		t.Fatal("unexpected amount of prunable data", n)
 	}
 
+	if size, err := db.ContractSize(context.Background(), fcids[0]); err != nil {
+		t.Fatal("unexpected err", err)
+	} else if size.Prunable != rhpv2.SectorSize {
+		t.Fatal("unexpected prunable data", size.Prunable)
+	}
+
+	if size, err := db.ContractSize(context.Background(), fcids[1]); err != nil {
+		t.Fatal("unexpected err", err)
+	} else if size.Prunable != rhpv2.SectorSize {
+		t.Fatal("unexpected prunable data", size.Prunable)
+	}
+
 	// archive all contracts
 	if err := db.ArchiveAllContracts(context.Background(), t.Name()); err != nil {
 		t.Fatal(err)
@@ -2976,7 +2990,7 @@ func TestPrunableData(t *testing.T) {
 	}
 
 	// assert passing a non-existent fcid returns an error
-	_, err = db.PrunableDataForContract(context.Background(), types.FileContractID{9})
+	_, err = db.ContractSize(context.Background(), types.FileContractID{9})
 	if err != api.ErrContractNotFound {
 		t.Fatal(err)
 	}
@@ -3004,4 +3018,77 @@ func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
 		return dbSlab{}, api.ErrObjectNotFound
 	}
 	return slab, nil
+}
+
+func TestObjectsBySlabKey(t *testing.T) {
+	db, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create a host
+	hks, err := db.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// create a contract
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+	usedContracts := map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+	}
+
+	// create a slab.
+	slab := object.Slab{
+		Health:    1.0,
+		Key:       object.GenerateEncryptionKey(),
+		MinShards: 1,
+		Shards: []object.Sector{
+			{
+				Host: hk1,
+				Root: types.Hash256{1},
+			},
+		},
+	}
+
+	// Add 3 objects that all reference the slab.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab:   slab,
+				Offset: 1,
+				Length: 0, // incremented later
+			},
+		},
+	}
+	for _, name := range []string{"obj1", "obj2", "obj3"} {
+		obj.Slabs[0].Length++
+		err = db.UpdateObject(context.Background(), name, testContractSet, obj, usedContracts)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch the objects by slab.
+	objs, err := db.ObjectsBySlabKey(context.Background(), slab.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"obj1", "obj2", "obj3"} {
+		if objs[i].Name != name {
+			t.Fatal("unexpected object name", objs[i].Name, name)
+		}
+		if objs[i].Size != int64(i)+1 {
+			t.Fatal("unexpected object size", objs[i].Size, i+1)
+		}
+		if objs[i].Health != 1.0 {
+			t.Fatal("unexpected object health", objs[i].Health)
+		}
+	}
 }

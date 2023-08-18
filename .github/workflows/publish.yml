@@ -56,9 +56,11 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 'stable'
-      - name: Install dependencies
+      - name: Setup
         run: |
-          sudo apt update && sudo apt install -y gcc-aarch64-linux-gnu
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu
+          go generate ./...
       - name: Build amd64
         env:
           CGO_ENABLED: 1
@@ -123,6 +125,9 @@ jobs:
           security import $APPLE_CERT_PATH -P $APPLE_CERT_PASSWORD -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security find-identity -v $KEYCHAIN_PATH -p codesigning
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $APPLE_KEYCHAIN_PASSWORD $KEYCHAIN_PATH
+
+          # generate
+          go generate ./...
       - name: Build amd64
         env:
           APPLE_CERT_ID: ${{ secrets.APPLE_CERT_ID }}
@@ -174,6 +179,10 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 'stable'
+      - name: Setup
+        shell: bash
+        run: |
+          go generate ./...
       - name: Build amd64
         env:
           CGO_ENABLED: 1

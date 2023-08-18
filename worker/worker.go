@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
@@ -140,14 +142,13 @@ type Bus interface {
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+	ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-
-	PrunableDataForContract(ctx context.Context, id types.FileContractID) (int64, error)
 
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 
@@ -237,6 +238,7 @@ type worker struct {
 	id              string
 	bus             Bus
 	masterKey       [32]byte
+	startTime       time.Time
 
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
@@ -587,14 +589,14 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 
 	// check if there's prunable data for the contract
 	ctx := jc.Request.Context()
-	n, err := w.bus.PrunableDataForContract(ctx, id)
+	size, err := w.bus.ContractSize(ctx, id)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("couldn't fetch prunable data for contract", err) != nil {
 		return
-	} else if n == 0 {
-		jc.Encode(n)
+	} else if size.Prunable == 0 {
+		jc.Encode(size.Prunable)
 		return
 	}
 
@@ -1260,6 +1262,20 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 	jc.Encode(account)
 }
 
+func (w *worker) stateHandlerGET(jc jape.Context) {
+	jc.Encode(api.WorkerStateResponse{
+		ID:        w.id,
+		StartTime: w.startTime,
+		BuildState: api.BuildState{
+			Network:   build.NetworkName(),
+			Version:   build.Version(),
+			Commit:    build.Commit(),
+			OS:        runtime.GOOS,
+			BuildTime: build.BuildTime(),
+		},
+	})
+}
+
 // New returns an HTTP handler that serves the worker API.
 func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
@@ -1284,6 +1300,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		masterKey:               masterKey,
 		busFlushInterval:        busFlushInterval,
 		logger:                  l.Sugar().Named("worker").Named(id),
+		startTime:               time.Now(),
 	}
 	w.initTransportPool()
 	w.initAccounts(b)
@@ -1322,6 +1339,8 @@ func (w *worker) Handler() http.Handler {
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
+
+		"GET    /state": w.stateHandlerGET,
 	}))
 }
 

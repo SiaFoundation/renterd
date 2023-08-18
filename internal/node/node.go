@@ -61,6 +61,7 @@ type AutopilotConfig struct {
 	AccountsRefillInterval         time.Duration
 	Heartbeat                      time.Duration
 	MigrationHealthCutoff          float64
+	RevisionBroadcastInterval      time.Duration
 	RevisionSubmissionBuffer       uint64
 	ScannerInterval                time.Duration
 	ScannerBatchSize               uint64
@@ -69,7 +70,10 @@ type AutopilotConfig struct {
 	MigratorParallelSlabsPerWorker uint64
 }
 
-type ShutdownFn = func(context.Context) error
+type (
+	RunFn      = func() error
+	ShutdownFn = func(context.Context) error
+)
 
 func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	var buf bytes.Buffer
@@ -314,8 +318,8 @@ func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Log
 	return w.Handler(), w.Shutdown, nil
 }
 
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, func() error, ShutdownFn, error) {
-	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer, cfg.MigratorParallelSlabsPerWorker)
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {
+	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerMinRecentFailures, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer, cfg.MigratorParallelSlabsPerWorker, cfg.RevisionBroadcastInterval)
 	if err != nil {
 		return nil, nil, nil, err
 	}
