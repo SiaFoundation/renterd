@@ -193,6 +193,7 @@ func (ap *Autopilot) Run() error {
 	var launchAccountRefillsOnce sync.Once
 	for {
 		ap.logger.Info("autopilot iteration starting")
+		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
@@ -205,6 +206,7 @@ func (ap *Autopilot) Run() error {
 			// block until the autopilot is configured
 			if !ap.blockUntilConfigured(ap.ticker.C) {
 				if !ap.isStopped() {
+					close(tickerFired)
 					return
 				}
 				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
@@ -214,6 +216,7 @@ func (ap *Autopilot) Run() error {
 			// block until consensus is synced
 			if !ap.blockUntilSynced(ap.ticker.C) {
 				if !ap.isStopped() {
+					close(tickerFired)
 					return
 				}
 				ap.logger.Error("autopilot stopped before consensus was synced")
@@ -274,6 +277,9 @@ func (ap *Autopilot) Run() error {
 			ap.m.tryPerformMigrations(ctx, ap.workers)
 		})
 
+		// Reset forceScan
+		forceScan = false
+
 		select {
 		case <-ap.stopChan:
 			return nil
@@ -281,7 +287,7 @@ func (ap *Autopilot) Run() error {
 			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
 		case <-ap.ticker.C:
-			forceScan = false
+		case <-tickerFired:
 		}
 	}
 }
