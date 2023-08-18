@@ -154,7 +154,7 @@ type ContractAcquireResponse struct {
 // /contracts/prunable endpoint.
 type ContractsPrunableDataResponse struct {
 	ContractSizes []ContractSize `json:"contractSizes"`
-	PrunableData  uint64         `json:"prunableData"`
+	TotalPrunable uint64         `json:"totalPrunable"`
 	TotalSize     uint64         `json:"totalSize"`
 }
 

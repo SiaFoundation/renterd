@@ -692,15 +692,15 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var totalSize, prunableData uint64
+	var totalPrunable, totalSize uint64
 	for _, size := range sizes {
+		totalPrunable += size.Prunable
 		totalSize += size.Size
-		prunableData += size.Prunable
 	}
 
 	jc.Encode(api.ContractsPrunableDataResponse{
 		ContractSizes: sizes,
-		PrunableData:  prunableData,
+		TotalPrunable: totalPrunable,
 		TotalSize:     totalSize,
 	})
 }
