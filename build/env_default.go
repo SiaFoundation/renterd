@@ -5,20 +5,16 @@ package build
 import (
 	"time"
 
-	"go.sia.tech/core/chain"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
 const (
-	ConsensusNetworkName  = "Mainnet"
 	DefaultAPIAddress     = "localhost:9980"
 	DefaultGatewayAddress = ":9981"
 )
 
 var (
-	ConsensusNetwork, _ = chain.Mainnet()
-
 	// DefaultGougingSettings define the default gouging settings the bus is
 	// configured with on startup. These values can be adjusted using the
 	// settings API.

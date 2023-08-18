@@ -6,6 +6,7 @@ WORKDIR /renterd
 
 # Copy and build binary.
 COPY . .
+RUN go generate ./...
 RUN go build ./cmd/renterd
 
 # Build image that will be used to run renterd.

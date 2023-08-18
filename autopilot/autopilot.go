@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -82,6 +84,7 @@ type Bus interface {
 
 type Worker interface {
 	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
+	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
 	MigrateSlab(ctx context.Context, s object.Slab, set string) error
@@ -112,11 +115,11 @@ type Autopilot struct {
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
 
-	startStopMu  sync.Mutex
-	runningSince time.Time
-	stopChan     chan struct{}
-	ticker       *time.Ticker
-	triggerChan  chan bool
+	startStopMu sync.Mutex
+	startTime   time.Time
+	stopChan    chan struct{}
+	ticker      *time.Ticker
+	triggerChan chan bool
 }
 
 // state holds a bunch of variables that are used by the autopilot and updated
@@ -167,13 +170,13 @@ func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
 		"GET    /alerts":         ap.handleGETAlerts,
 		"POST   /alerts/dismiss": ap.handlePOSTAlertsDismiss,
-
-		"GET    /config":        ap.configHandlerGET,
-		"PUT    /config":        ap.configHandlerPUT,
-		"POST   /debug/trigger": ap.triggerHandlerPOST,
-		"POST   /hosts":         ap.hostsHandlerPOST,
-		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"GET    /status":        ap.statusHandlerGET,
+		"GET    /config":         ap.configHandlerGET,
+		"PUT    /config":         ap.configHandlerPUT,
+		"POST   /debug/trigger":  ap.triggerHandlerPOST,
+		"POST   /hosts":          ap.hostsHandlerPOST,
+		"GET    /host/:hostKey":  ap.hostHandlerGET,
+		"GET    /status":         ap.statusHandlerGET,
+		"GET    /state":          ap.stateHandlerGET,
 	}))
 }
 
@@ -183,7 +186,7 @@ func (ap *Autopilot) Run() error {
 		ap.startStopMu.Unlock()
 		return errors.New("already running")
 	}
-	ap.runningSince = time.Now()
+	ap.startTime = time.Now()
 	ap.stopChan = make(chan struct{})
 	ap.triggerChan = make(chan bool)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
@@ -299,7 +302,7 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 		close(ap.stopChan)
 		close(ap.triggerChan)
 		ap.wg.Wait()
-		ap.runningSince = time.Time{}
+		ap.startTime = time.Time{}
 	}
 	return nil
 }
@@ -322,11 +325,17 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 	}
 }
 
+func (ap *Autopilot) StartTime() time.Time {
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
+	return ap.startTime
+}
+
 func (ap *Autopilot) Uptime() (dur time.Duration) {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 	if ap.isRunning() {
-		dur = time.Since(ap.runningSince)
+		dur = time.Since(ap.startTime)
 	}
 	return
 }
@@ -392,7 +401,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 }
 
 func (ap *Autopilot) isRunning() bool {
-	return !ap.runningSince.IsZero()
+	return !ap.startTime.IsZero()
 }
 
 func (ap *Autopilot) updateState(ctx context.Context) error {
@@ -542,7 +551,7 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 // New initializes an Autopilot.
-func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64) (*Autopilot, error) {
+func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerMinRecentFailures, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (*Autopilot, error) {
 	ap := &Autopilot{
 		alerts:  alerts.NewManager(bus),
 		id:      id,
@@ -566,7 +575,7 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 	}
 
 	ap.s = scanner
-	ap.c = newContractor(ap, revisionSubmissionBuffer)
+	ap.c = newContractor(ap, revisionSubmissionBuffer, revisionBroadcastInterval)
 	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
 	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
 
@@ -601,6 +610,35 @@ func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
 		Scanning:           scanning,
 		ScanningLastStart:  api.ParamTime(sLastStart),
 		UptimeMS:           api.ParamDuration(ap.Uptime()),
+	})
+}
+
+func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
+	migrating, mLastStart := ap.m.Status()
+	scanning, sLastStart := ap.s.Status()
+	_, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
+	if err != nil && !strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(api.AutopilotStateResponse{
+		AutopilotStatusResponse: api.AutopilotStatusResponse{
+			Configured:         err == nil,
+			Migrating:          migrating,
+			MigratingLastStart: api.ParamTime(mLastStart),
+			Scanning:           scanning,
+			ScanningLastStart:  api.ParamTime(sLastStart),
+			UptimeMS:           api.ParamDuration(ap.Uptime()),
+		},
+		StartTime: ap.StartTime(),
+		BuildState: api.BuildState{
+			Network:   build.NetworkName(),
+			Version:   build.Version(),
+			Commit:    build.Commit(),
+			OS:        runtime.GOOS,
+			BuildTime: build.BuildTime(),
+		},
 	})
 }
 

@@ -801,6 +801,12 @@ func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
 	return
 }
 
+// State returns the current state of the bus.
+func (c *Client) State() (state api.BusStateResponse, err error) {
+	err = c.c.GET("/state", &state)
+	return
+}
+
 // RenameObject renames a single object.
 func (c *Client) RenameObject(ctx context.Context, from, to string) (err error) {
 	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeSingle)

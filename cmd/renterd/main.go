@@ -120,7 +120,7 @@ func main() {
 		apiPassword string
 		node.BusConfig
 	}
-	busCfg.Network = build.ConsensusNetwork
+	busCfg.Network, _ = build.Network()
 
 	var dbCfg struct {
 		uri      string
@@ -220,6 +220,7 @@ func main() {
 	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
 	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 30*time.Minute, "interval at which autopilot loop runs")
 	flag.Float64Var(&autopilotCfg.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", 0.75, "health threshold below which slabs are migrated to new hosts")
+	flag.DurationVar(&autopilotCfg.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", 24*time.Hour, "interval at which the autopilot broadcasts contract revisions to be mined - can be overwritten using the RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL environment variable - setting it to 0 will disable this feature")
 	flag.Uint64Var(&autopilotCfg.ScannerBatchSize, "autopilot.scannerBatchSize", 1000, "size of the batch with which hosts are scanned")
 	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
 	flag.Uint64Var(&autopilotCfg.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", 10, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
@@ -230,7 +231,7 @@ func main() {
 	flag.Parse()
 
 	log.Println("renterd v0.4.0-beta")
-	log.Println("Network", build.ConsensusNetworkName)
+	log.Println("Network", build.NetworkName())
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
 		log.Println("Build Date:", builddate)
@@ -268,6 +269,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &unauthenticatedDownloads)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
+	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &autopilotCfg.RevisionBroadcastInterval)
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &autopilotCfg.MigratorParallelSlabsPerWorker)
 
 	// Init db dialector
@@ -418,7 +420,7 @@ func main() {
 		log.Println("Shutting down...")
 		shutdownFns = append(shutdownFns, srv.Shutdown)
 	case err := <-autopilotErr:
-		log.Fatalln("Fatal autopilot error:", err)
+		log.Fatal("Fatal autopilot error:", err)
 	}
 
 	// Shut down the autopilot first, then the rest of the services in reverse order.
