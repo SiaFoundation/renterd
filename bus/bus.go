@@ -695,7 +695,7 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 
 	// sort in descending fashion
 	sort.Slice(sizes, func(i, j int) bool {
-		return sizes[i].Size > sizes[j].Size
+		return sizes[i].Prunable > sizes[j].Prunable
 	})
 
 	var totalPrunable, totalSize uint64
