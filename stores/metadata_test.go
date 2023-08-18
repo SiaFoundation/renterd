@@ -2871,8 +2871,8 @@ func TestContractSizes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		for _, size := range sizes {
-			if fcid != nil && size.ID != *fcid {
+		for id, size := range sizes {
+			if fcid != nil && id != *fcid {
 				continue
 			}
 			n += size.Prunable
