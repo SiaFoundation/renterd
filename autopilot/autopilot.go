@@ -203,9 +203,12 @@ func (ap *Autopilot) Run() error {
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan(ctx, w, forceScan)
 
+			// reset forceScan
+			forceScan = false
+
 			// block until the autopilot is configured
-			if !ap.blockUntilConfigured(ap.ticker.C) {
-				if !ap.isStopped() {
+			if configured, interrupted := ap.blockUntilConfigured(ap.ticker.C); !configured {
+				if interrupted {
 					close(tickerFired)
 					return
 				}
@@ -214,8 +217,8 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// block until consensus is synced
-			if !ap.blockUntilSynced(ap.ticker.C) {
-				if !ap.isStopped() {
+			if synced, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
+				if interrupted {
 					close(tickerFired)
 					return
 				}
@@ -277,9 +280,6 @@ func (ap *Autopilot) Run() error {
 			ap.m.tryPerformMigrations(ctx, ap.workers)
 		})
 
-		// Reset forceScan
-		forceScan = false
-
 		select {
 		case <-ap.stopChan:
 			return nil
@@ -334,7 +334,7 @@ func (ap *Autopilot) Uptime() (dur time.Duration) {
 	return
 }
 
-func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
+func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configured, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -355,18 +355,18 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) bool {
 		if err != nil {
 			select {
 			case <-ap.stopChan:
-				return false
+				return false, false
 			case <-interrupt:
-				return false
+				return false, true
 			case <-ticker.C:
 				continue
 			}
 		}
-		return true
+		return true, false
 	}
 }
 
-func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
+func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -383,14 +383,14 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) bool {
 		if err != nil || !cs.Synced {
 			select {
 			case <-ap.stopChan:
-				return false
+				return false, false
 			case <-interrupt:
-				return false
+				return false, true
 			case <-ticker.C:
 				continue
 			}
 		}
-		return true
+		return true, false
 	}
 }
 
