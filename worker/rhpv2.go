@@ -372,7 +372,12 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			})
 
 			// check funds
-			proofSize := 32 * (128 + uint64(len(batch)))
+			sectorsChanged := 2*len(batch) + 1
+			proofSize := uint64((sectorsChanged + 128) * 32)
+			if proofSize < 4096 {
+				proofSize = 4096
+			}
+
 			cost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
 			cost = cost.Mul64(105).Div64(100)
 			if rev.RenterFunds().Cmp(cost) < 0 {
