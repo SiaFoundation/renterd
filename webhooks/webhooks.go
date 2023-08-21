@@ -60,7 +60,7 @@ type eventQueue struct {
 
 	mu           sync.Mutex
 	isDequeueing bool
-	actions      []Event
+	events       []Event
 }
 
 func (w *Manager) Close() error {
@@ -116,7 +116,7 @@ func (w *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
 		queue.mu.Lock()
 		queueInfos = append(queueInfos, WebhookQueueInfo{
 			URL:  queue.url,
-			Size: len(queue.actions),
+			Size: len(queue.events),
 		})
 		queue.mu.Unlock()
 	}
@@ -127,11 +127,11 @@ func (a Event) String() string {
 	return a.Module + "." + a.Event
 }
 
-func (w *Manager) BroadcastAction(_ context.Context, action Event) error {
+func (w *Manager) BroadcastAction(_ context.Context, event Event) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, hook := range w.webhooks {
-		if !hook.Matches(action) {
+		if !hook.Matches(event) {
 			continue
 		}
 
@@ -146,9 +146,9 @@ func (w *Manager) BroadcastAction(_ context.Context, action Event) error {
 			w.queues[hook.URL] = queue
 		}
 
-		// Add action an launch goroutine to start dequeueing if necessary.
+		// Add event and launch goroutine to start dequeueing if necessary.
 		queue.mu.Lock()
-		queue.actions = append(queue.actions, action)
+		queue.events = append(queue.events, event)
 		if !queue.isDequeueing {
 			queue.isDequeueing = true
 			w.wg.Add(1)
@@ -165,13 +165,13 @@ func (w *Manager) BroadcastAction(_ context.Context, action Event) error {
 func (q *eventQueue) dequeue() {
 	for {
 		q.mu.Lock()
-		if len(q.actions) == 0 {
+		if len(q.events) == 0 {
 			q.isDequeueing = false
 			q.mu.Unlock()
 			return
 		}
-		next := q.actions[0]
-		q.actions = q.actions[1:]
+		next := q.events[0]
+		q.events = q.events[1:]
 		q.mu.Unlock()
 
 		err := sendEvent(q.ctx, q.url, next)
