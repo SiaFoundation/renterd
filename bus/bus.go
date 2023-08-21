@@ -148,15 +148,16 @@ type (
 )
 
 type bus struct {
-	alerts *alerts.Manager
-	s      Syncer
-	cm     ChainManager
-	tp     TransactionPool
-	w      Wallet
-	hdb    HostDB
-	as     AutopilotStore
-	ms     MetadataStore
-	ss     SettingStore
+	alerts   alerts.Alerter
+	alertMgr *alerts.Manager
+	s        Syncer
+	cm       ChainManager
+	tp       TransactionPool
+	w        Wallet
+	hdb      HostDB
+	as       AutopilotStore
+	ms       MetadataStore
+	ss       SettingStore
 
 	eas EphemeralAccountStore
 
@@ -1200,18 +1201,23 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleGETAlerts(c jape.Context) {
-	c.Encode(b.alerts.Active())
+	c.Encode(b.alertMgr.Active())
 }
 
-func (b *bus) handlePOSTAlertsDismiss(c jape.Context) {
+func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
-	if c.Decode(&ids) != nil {
-		return
-	} else if len(ids) == 0 {
-		c.Error(errors.New("no alerts to dismiss"), http.StatusBadRequest)
+	if jc.Decode(&ids) != nil {
 		return
 	}
-	b.alerts.Dismiss(ids...)
+	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAlerts(jc.Request.Context(), ids...))
+}
+
+func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
+	var alert alerts.Alert
+	if jc.Decode(&alert) != nil {
+		return
+	}
+	jc.Check("failed to register alert", b.alertMgr.RegisterAlert(jc.Request.Context(), alert))
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
@@ -1440,9 +1446,10 @@ func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
-		alerts:           alerts.NewManager(),
+		alerts:           alerts.WithOrigin(am, "bus"),
+		alertMgr:         am,
 		s:                s,
 		cm:               cm,
 		tp:               tp,
@@ -1540,6 +1547,7 @@ func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
 		"GET    /alerts":                    b.handleGETAlerts,
 		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
+		"POST   /alerts/register":           b.handlePOSTAlertsRegister,
 		"GET    /accounts":                  b.accountsHandlerGET,
 		"POST   /accounts/:id":              b.accountHandlerGET,
 		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,

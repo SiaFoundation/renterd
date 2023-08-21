@@ -160,7 +160,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 					l = a.l
 				}
 				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				accountID, refilled, err := refillWorkerAccount(rCtx, a.a, a.ap.alerts, w, workerID, contract, l)
+				accountID, refilled, err := refillWorkerAccount(rCtx, a.a, a.ap.bus, w, workerID, contract, l)
 				if err == nil && refilled {
 					a.l.Infow("Successfully funded account",
 						"account", accountID,
@@ -172,7 +172,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 				// handle registering alert.
 				alertID := types.HashBytes(append(alertAccountRefillID[:], accountID[:]...))
 				if err != nil && inSet {
-					a.ap.alerts.Register(alerts.Alert{
+					rerr := a.ap.alerts.RegisterAlert(ctx, alerts.Alert{
 						ID:       alertID,
 						Severity: alerts.SeverityError,
 						Message:  fmt.Sprintf("failed to refill account: %v", err),
@@ -183,8 +183,11 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 						},
 						Timestamp: time.Now(),
 					})
-				} else {
-					a.ap.alerts.Dismiss(alertID)
+					if rerr != nil {
+						a.ap.logger.Errorf("failed to register alert: %v", err)
+					}
+				} else if err := a.ap.alerts.DismissAlerts(ctx, alertID); err != nil {
+					a.ap.logger.Errorf("failed to dismiss alert: %v", err)
 				}
 				a.markRefillDone(workerID, contract.HostKey)
 				cancel()
@@ -193,7 +196,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	}
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, am *alerts.Manager, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (accountID rhpv3.Account, refilled bool, err error) {
+func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (accountID rhpv3.Account, refilled bool, err error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 	span.SetAttributes(attribute.Stringer("host", contract.HostKey))
