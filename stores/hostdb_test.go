@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
@@ -349,7 +350,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("wrong time")
 	}
 	host.Interactions.LastScan = time.Time{}
-	if host.Interactions != (hostdb.Interactions{
+	if expected := (hostdb.Interactions{
 		TotalScans:              1,
 		LastScan:                time.Time{},
 		LastScanSuccess:         true,
@@ -358,8 +359,8 @@ func TestRecordScan(t *testing.T) {
 		Downtime:                downtime,
 		SuccessfulInteractions:  1,
 		FailedInteractions:      0,
-	}) {
-		t.Fatal("mismatch")
+	}); host.Interactions != expected {
+		t.Fatal("mismatch", cmp.Diff(host.Interactions, expected))
 	}
 	if !reflect.DeepEqual(host.Settings, settings) {
 		t.Fatal("mismatch")

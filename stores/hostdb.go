@@ -738,11 +738,6 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, scans []hostdb.HostS
 				continue // host doesn't exist
 			}
 			lastScan := time.Unix(0, host.LastScan)
-			host.TotalScans++
-			host.Scanned = host.Scanned || scan.Success
-			host.SecondToLastScanSuccess = host.LastScanSuccess
-			host.LastScanSuccess = scan.Success
-			host.LastScan = scan.Timestamp.UnixNano()
 
 			if scan.Success {
 				// Handle successful scan.
@@ -779,6 +774,12 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, scans []hostdb.HostS
 					host.RecentDowntime += scan.Timestamp.Sub(lastScan)
 				}
 			}
+
+			host.TotalScans++
+			host.Scanned = host.Scanned || scan.Success
+			host.SecondToLastScanSuccess = host.LastScanSuccess
+			host.LastScanSuccess = scan.Success
+			host.LastScan = scan.Timestamp.UnixNano()
 
 			// Save to map again.
 			hostMap[host.PublicKey] = host
