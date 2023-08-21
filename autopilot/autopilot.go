@@ -22,11 +22,13 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 type Bus interface {
+	webhooks.Broadcaster
 	alerts.Alerter
 
 	// Accounts

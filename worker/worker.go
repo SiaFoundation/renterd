@@ -31,6 +31,7 @@ import (
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
@@ -132,6 +133,7 @@ type ContractLocker interface {
 type Bus interface {
 	alerts.Alerter
 	consensusState
+	webhooks.Broadcaster
 
 	AccountStore
 	ContractLocker

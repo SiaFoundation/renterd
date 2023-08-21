@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -150,6 +151,7 @@ type (
 type bus struct {
 	alerts   alerts.Alerter
 	alertMgr *alerts.Manager
+	hooks    *webhooks.Manager
 	s        Syncer
 	cm       ChainManager
 	tp       TransactionPool
@@ -1445,11 +1447,55 @@ func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	}
 }
 
+func (b *bus) webhookActionHandlerPost(jc jape.Context) {
+	var action webhooks.Event
+	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
+		return
+	}
+	b.hooks.BroadcastAction(jc.Request.Context(), action)
+}
+
+func (b *bus) webhookHandlerDelete(jc jape.Context) {
+	var wh webhooks.Webhook
+	if jc.Decode(&wh) != nil {
+		return
+	}
+	if !b.hooks.Delete(wh) {
+		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
+		return
+	}
+}
+
+func (b *bus) webhookHandlerGet(jc jape.Context) {
+	webhooks, queueInfos := b.hooks.Info()
+	jc.Encode(api.WebHookResponse{
+		Queues:   queueInfos,
+		Webhooks: webhooks,
+	})
+}
+
+func (b *bus) webhookHandlerPost(jc jape.Context) {
+	var req webhooks.Webhook
+	if jc.Decode(&req) != nil {
+		return
+	}
+	err := b.hooks.Register(webhooks.Webhook{
+		Event:  req.Event,
+		Module: req.Module,
+		URL:    req.URL,
+	})
+	if err != nil {
+		jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
+		return
+	}
+}
+
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
+		hooks:            hm,
 		s:                s,
 		cm:               cm,
 		tp:               tp,
@@ -1651,11 +1697,17 @@ func (b *bus) Handler() http.Handler {
 		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+
+		"GET    /webhooks":        b.webhookHandlerGet,
+		"POST   /webhooks":        b.webhookHandlerPost,
+		"POST   /webhooks/action": b.webhookActionHandlerPost,
+		"POST   /webhook/delete":  b.webhookHandlerDelete,
 	}))
 }
 
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
+	b.hooks.Close()
 	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
 }
 

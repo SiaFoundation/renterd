@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/webhooks"
 )
 
 // A Client provides methods for interacting with a renterd API server.
@@ -42,6 +43,37 @@ func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) error 
 // RegisterAlert dimisses the alerts with the given IDs.
 func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
 	return c.c.WithContext(ctx).POST("/alerts/register", alert, nil)
+}
+
+// RegisterWebhook registers a new webhook for the given URL.
+func (c *Client) RegisterWebhook(ctx context.Context, url, module, event string) error {
+	err := c.c.WithContext(ctx).POST("/webhooks", webhooks.Webhook{
+		Event:  event,
+		Module: module,
+		URL:    url,
+	}, nil)
+	return err
+}
+
+// BroadcastAction broadcasts an action that triggers a webhook.
+func (c *Client) BroadcastAction(ctx context.Context, action webhooks.Event) error {
+	err := c.c.WithContext(ctx).POST("/webhooks/action", action, nil)
+	return err
+}
+
+// DeleteWebhook deletes the webhook with the given ID.
+func (c *Client) DeleteWebhook(ctx context.Context, url, module, event string) error {
+	return c.c.POST("/webhook/delete", webhooks.Webhook{
+		URL:    url,
+		Module: module,
+		Event:  event,
+	}, nil)
+}
+
+// Webhooks returns all webhooks currently registered.
+func (c *Client) Webhooks(ctx context.Context) (resp api.WebHookResponse, err error) {
+	err = c.c.WithContext(ctx).GET("/webhooks", &resp)
+	return
 }
 
 // Autopilots returns all autopilots in the autopilots store.

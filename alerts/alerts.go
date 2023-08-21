@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/webhooks"
 )
 
 const (
@@ -26,6 +27,10 @@ const (
 	severityWarningStr  = "warning"
 	severityErrorStr    = "error"
 	severityCriticalStr = "critical"
+
+	webhookModule        = "alerts"
+	webhookEventDismiss  = "dismiss"
+	webhookEventRegister = "register"
 )
 
 type (
@@ -55,7 +60,8 @@ type (
 	Manager struct {
 		mu sync.Mutex
 		// alerts is a map of alert IDs to their current alert.
-		alerts map[types.Hash256]Alert
+		alerts             map[types.Hash256]Alert
+		webhookBroadcaster webhooks.Broadcaster
 	}
 )
 
@@ -99,7 +105,7 @@ func (s *Severity) UnmarshalJSON(b []byte) error {
 }
 
 // RegisterAlert implements the Alerter interface.
-func (m *Manager) RegisterAlert(_ context.Context, alert Alert) error {
+func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
 	if alert.ID == (types.Hash256{}) {
 		return errors.New("cannot register alert with zero id")
 	} else if alert.Timestamp.IsZero() {
@@ -115,11 +121,16 @@ func (m *Manager) RegisterAlert(_ context.Context, alert Alert) error {
 	m.mu.Lock()
 	m.alerts[alert.ID] = alert
 	m.mu.Unlock()
-	return nil
+
+	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Event{
+		Module:  webhookModule,
+		Event:   webhookEventRegister,
+		Payload: alert,
+	})
 }
 
 // DismissAlerts implements the Alerter interface.
-func (m *Manager) DismissAlerts(_ context.Context, ids ...types.Hash256) error {
+func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
 	m.mu.Lock()
 	for _, id := range ids {
 		delete(m.alerts, id)
@@ -128,7 +139,12 @@ func (m *Manager) DismissAlerts(_ context.Context, ids ...types.Hash256) error {
 		m.alerts = make(map[types.Hash256]Alert) // reclaim memory
 	}
 	m.mu.Unlock()
-	return nil
+
+	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Event{
+		Module:  webhookModule,
+		Event:   webhookEventDismiss,
+		Payload: ids,
+	})
 }
 
 // Active returns the host's active alerts.
@@ -147,9 +163,10 @@ func (m *Manager) Active() []Alert {
 }
 
 // NewManager initializes a new alerts manager.
-func NewManager() *Manager {
+func NewManager(b webhooks.Broadcaster) *Manager {
 	return &Manager{
-		alerts: make(map[types.Hash256]Alert),
+		alerts:             make(map[types.Hash256]Alert),
+		webhookBroadcaster: b,
 	}
 }
 
