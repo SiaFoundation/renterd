@@ -1448,7 +1448,7 @@ func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 }
 
 func (b *bus) webhookActionHandlerPost(jc jape.Context) {
-	var action webhooks.Action
+	var action webhooks.Event
 	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
 		return
 	}

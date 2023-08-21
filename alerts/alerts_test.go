@@ -20,10 +20,10 @@ func TestWebhooks(t *testing.T) {
 	alerts := NewManager(mgr)
 
 	mux := http.NewServeMux()
-	var events []webhooks.Action
+	var events []webhooks.Event
 	var mu sync.Mutex
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		var event webhooks.Action
+		var event webhooks.Event
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func TestWebhooks(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatal("wrong number of events", len(events))
 	}
-	assertEvent := func(event webhooks.Action, module, id string, hasPayload bool) {
+	assertEvent := func(event webhooks.Event, module, id string, hasPayload bool) {
 		t.Helper()
 		if event.Module != module {
 			t.Fatal("wrong event module", event.Module, module)

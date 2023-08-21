@@ -14,7 +14,7 @@ import (
 )
 
 type Broadcaster interface {
-	BroadcastAction(ctx context.Context, action Action) error
+	BroadcastAction(ctx context.Context, action Event) error
 }
 
 const (
@@ -34,8 +34,8 @@ type (
 		Size int    `json:"size"`
 	}
 
-	// Action describes an event that has been triggered.
-	Action struct {
+	// Event describes an event that has been triggered.
+	Event struct {
 		Module  string      `json:"module"`
 		Event   string      `json:"event"`
 		Payload interface{} `json:"payload,omitempty"`
@@ -49,18 +49,18 @@ type Manager struct {
 	wg        sync.WaitGroup
 
 	mu       sync.Mutex
-	queues   map[string]*actionQueue // URL -> queue
+	queues   map[string]*eventQueue // URL -> queue
 	webhooks map[string]Webhook
 }
 
-type actionQueue struct {
+type eventQueue struct {
 	ctx    context.Context
 	logger *zap.SugaredLogger
 	url    string
 
 	mu           sync.Mutex
 	isDequeueing bool
-	actions      []Action
+	actions      []Event
 }
 
 func (w *Manager) Close() error {
@@ -78,7 +78,7 @@ func (w *Manager) Register(wh Webhook) error {
 	defer cancel()
 
 	// Test URL.
-	err := sendEvent(ctx, wh.URL, Action{
+	err := sendEvent(ctx, wh.URL, Event{
 		Event: WebhookEventPing,
 	})
 	if err != nil {
@@ -123,11 +123,11 @@ func (w *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
 	return hooks, queueInfos
 }
 
-func (a Action) String() string {
+func (a Event) String() string {
 	return a.Module + "." + a.Event
 }
 
-func (w *Manager) BroadcastAction(_ context.Context, action Action) error {
+func (w *Manager) BroadcastAction(_ context.Context, action Event) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, hook := range w.webhooks {
@@ -138,7 +138,7 @@ func (w *Manager) BroadcastAction(_ context.Context, action Action) error {
 		// Find queue or create one.
 		queue, exists := w.queues[hook.URL]
 		if !exists {
-			queue = &actionQueue{
+			queue = &eventQueue{
 				ctx:    w.ctx,
 				logger: w.logger,
 				url:    hook.URL,
@@ -162,7 +162,7 @@ func (w *Manager) BroadcastAction(_ context.Context, action Action) error {
 	return nil
 }
 
-func (q *actionQueue) dequeue() {
+func (q *eventQueue) dequeue() {
 	for {
 		q.mu.Lock()
 		if len(q.actions) == 0 {
@@ -182,7 +182,7 @@ func (q *actionQueue) dequeue() {
 	}
 }
 
-func (w Webhook) Matches(action Action) bool {
+func (w Webhook) Matches(action Event) bool {
 	if w.Module != action.Module {
 		return false
 	}
@@ -195,12 +195,12 @@ func NewManager(logger *zap.SugaredLogger) *Manager {
 		ctx:       ctx,
 		ctxCancel: cancel,
 		logger:    logger.Named("webhooks"),
-		queues:    make(map[string]*actionQueue),
+		queues:    make(map[string]*eventQueue),
 		webhooks:  make(map[string]Webhook),
 	}
 }
 
-func sendEvent(ctx context.Context, url string, action Action) error {
+func sendEvent(ctx context.Context, url string, action Event) error {
 	body, err := json.Marshal(action)
 	if err != nil {
 		return err

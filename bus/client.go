@@ -56,7 +56,7 @@ func (c *Client) RegisterWebhook(ctx context.Context, url, module, event string)
 }
 
 // BroadcastAction broadcasts an action that triggers a webhook.
-func (c *Client) BroadcastAction(ctx context.Context, action webhooks.Action) error {
+func (c *Client) BroadcastAction(ctx context.Context, action webhooks.Event) error {
 	err := c.c.WithContext(ctx).POST("/webhooks/action", action, nil)
 	return err
 }

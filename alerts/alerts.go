@@ -122,7 +122,7 @@ func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
 	m.alerts[alert.ID] = alert
 	m.mu.Unlock()
 
-	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
+	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Event{
 		Module:  webhookModule,
 		Event:   webhookEventRegister,
 		Payload: alert,
@@ -140,7 +140,7 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 	}
 	m.mu.Unlock()
 
-	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Action{
+	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Event{
 		Module:  webhookModule,
 		Event:   webhookEventDismiss,
 		Payload: ids,
