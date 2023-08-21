@@ -1491,8 +1491,11 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
+		alerts:           alerts.WithOrigin(am, "bus"),
+		alertMgr:         am,
+		hooks:            hm,
 		s:                s,
 		cm:               cm,
 		tp:               tp,
@@ -1508,9 +1511,6 @@ func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as
 
 		startTime: time.Now(),
 	}
-	b.hooks = webhooks.NewManager(b.logger)
-	b.alertMgr = alerts.NewManager(b.hooks)
-	b.alerts = alerts.WithOrigin(b.alertMgr, "bus")
 	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
 	defer span.End()
 

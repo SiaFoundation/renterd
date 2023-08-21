@@ -14,6 +14,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
@@ -1538,6 +1539,20 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	slabs := make([]api.PackedSlab, len(buffers))
 	for i, buf := range buffers {
 		data, err := os.ReadFile(filepath.Join(s.partialSlabDir, buf.Filename))
+		if os.IsNotExist(err) {
+			s.alerts.RegisterAlert(ctx, alerts.Alert{
+				ID:       types.HashBytes([]byte(buf.Filename)),
+				Severity: alerts.SeverityCritical,
+				Message:  "buffered slab for upload not found on disk",
+				Data: map[string]interface{}{
+					"filename": buf.Filename,
+					"slabKey":  buf.DBSlab.Key,
+				},
+				Timestamp: time.Now(),
+			})
+			s.logger.Error(ctx, fmt.Sprintf("buffered slab %v doesn't exist", buf.Filename))
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1609,32 +1624,41 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			}
 		}
 	}
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	var filename string
+	err := s.retryTransaction(func(tx *gorm.DB) error {
 		contracts, err := fetchUsedContracts(tx, usedContracts)
 		if err != nil {
 			return err
 		}
 		for _, slab := range slabs {
-			if err := markPackedSlabUploaded(tx, slab, contracts, s.partialSlabDir); err != nil {
+			filename, err = markPackedSlabUploaded(tx, slab, contracts)
+			if err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("marking slabs as uploaded in the db failed: %w", err)
+	}
+	if err := os.Remove(filepath.Join(s.partialSlabDir, filename)); err != nil {
+		return fmt.Errorf("removing buffer after marking it as uploaded failed: %w", err)
+	}
+	return nil
 }
 
-func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract, partialSlabDir string) error {
+func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
 	// find the slab
 	var sla dbSlab
 	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
 		Take(&sla).Error; err != nil {
-		return err
+		return "", err
 	}
 
 	// update the slab
 	key, err := slab.Key.MarshalText()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := tx.Model(&dbSlab{}).
 		Where("id", sla.ID).
@@ -1642,21 +1666,18 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 			"key":                 key,
 			"db_buffered_slab_id": nil,
 		}).Error; err != nil {
-		return err
+		return "", err
 	}
 
 	// delete buffer
 	var buffer dbBufferedSlab
 	if err := tx.Take(&buffer, "id = ?", slab.BufferID).Error; err != nil {
-		return err
+		return "", err
 	}
 	err = tx.Delete(&buffer).
 		Error
 	if err != nil {
-		return err
-	}
-	if err := os.Remove(filepath.Join(partialSlabDir, buffer.Filename)); err != nil && !os.IsNotExist(err) {
-		return err
+		return "", err
 	}
 
 	// add the shards to the slab
@@ -1664,7 +1685,7 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	for i := range slab.Shards {
 		contract, exists := contracts[slab.Shards[i].Host]
 		if !exists {
-			return fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
+			return "", fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
 		}
 		shards = append(shards, dbSector{
 			DBSlabID:   sla.ID,
@@ -1673,7 +1694,7 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 			Contracts:  []dbContract{contract},
 		})
 	}
-	return tx.Create(shards).Error
+	return buffer.Filename, tx.Create(shards).Error
 }
 
 // contract retrieves a contract from the store.

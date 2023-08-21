@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -26,7 +28,9 @@ func newTestSQLStore(dir string) (*SQLStore, string, modules.ConsensusChangeID, 
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	conn := NewEphemeralSQLiteConnection(dbName)
 	walletAddrs := types.Address(frand.Entropy256())
-	sqlStore, ccid, err := NewSQLStore(conn, dir, true, time.Second, walletAddrs, 0, newTestLogger())
+	hooksMgr := webhooks.NewManager(zap.NewNop().Sugar())
+	alerts := alerts.WithOrigin(alerts.NewManager(hooksMgr), "test")
+	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, true, time.Second, walletAddrs, 0, newTestLogger())
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}
