@@ -25,7 +25,6 @@ var (
 		&dbAnnouncement{},
 		&dbConsensusInfo{},
 		&dbHost{},
-		&dbInteraction{},
 		&dbAllowlistEntry{},
 		&dbBlocklistEntry{},
 
@@ -180,6 +179,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			ID: "00007_contractspending",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00007_archivedcontractspending(tx, logger)
+			},
+			Rollback: nil,
+		},
+		{
+			ID: "00008_dropInteractions",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00008_dropInteractions(tx, logger)
 			},
 			Rollback: nil,
 		},
@@ -474,5 +480,16 @@ func performMigration00007_archivedcontractspending(txn *gorm.DB, logger glogger
 		}
 	}
 	logger.Info(context.Background(), "migration 00007_archivedcontractspending complete")
+	return nil
+}
+
+func performMigration00008_dropInteractions(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00008_dropInteractions")
+	if !txn.Migrator().HasTable("host_interactions") {
+		if err := txn.Migrator().DropTable("host_interactions"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00008_dropInteractions complete")
 	return nil
 }

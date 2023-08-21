@@ -46,17 +46,16 @@ func TestHostPruning(t *testing.T) {
 	now := time.Now()
 	recordFailedInteractions := func(n int, hk types.PublicKey) {
 		t.Helper()
-		his := make([]hostdb.Interaction, n)
+		his := make([]hostdb.HostScan, n)
 		for i := 0; i < n; i++ {
 			now = now.Add(time.Hour).Add(time.Minute) // 1m leeway
-			his[i] = hostdb.Interaction{
-				Host:      hk,
+			his[i] = hostdb.HostScan{
+				HostKey:   hk,
 				Timestamp: now,
 				Success:   false,
-				Type:      hostdb.InteractionTypeScan,
 			}
 		}
-		if err = b.RecordInteractions(context.Background(), his); err != nil {
+		if err = b.RecordInteractions(context.Background(), his, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

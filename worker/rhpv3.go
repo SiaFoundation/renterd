@@ -165,16 +165,13 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 
 // transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
 type transportPoolV3 struct {
-	recordInteractions func([]hostdb.Interaction)
-
 	mu   sync.Mutex
 	pool map[string]*transportV3
 }
 
 func newTransportPoolV3(w *worker) *transportPoolV3 {
 	return &transportPoolV3{
-		recordInteractions: w.recordInteractions,
-		pool:               make(map[string]*transportV3),
+		pool: make(map[string]*transportV3),
 	}
 }
 
@@ -205,7 +202,7 @@ func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicK
 func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
-		p.recordInteractions(mr.interactions())
+		// TODO: record metrics
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
 

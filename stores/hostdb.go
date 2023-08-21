@@ -98,19 +98,6 @@ type (
 		Hosts []dbHost `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
-	// dbConsensusInfo defines table which stores the latest consensus info
-	// known to the hostdb. It should only ever contain a single entry with
-	// the consensusInfoID primary key.
-	dbInteraction struct {
-		Model
-
-		Host      publicKey
-		Result    json.RawMessage
-		Success   bool
-		Timestamp time.Time `gorm:"index; NOT NULL"`
-		Type      string    `gorm:"NOT NULL"`
-	}
-
 	dbConsensusInfo struct {
 		Model
 		CCID    []byte
@@ -279,9 +266,6 @@ func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbHost) TableName() string { return "hosts" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbInteraction) TableName() string { return "host_interactions" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
@@ -697,8 +681,8 @@ func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err 
 
 // RecordHostInteraction records an interaction with a host. If the host is not in
 // the store, a new entry is created for it.
-func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error {
-	if len(interactions) == 0 {
+func (ss *SQLStore) RecordInteractions(ctx context.Context, scans []hostdb.HostScan, priceTableUpdate []hostdb.PriceTableUpdate) error {
+	if len(scans)+len(priceTableUpdate) == 0 {
 		return nil // nothing to do
 	}
 
@@ -709,10 +693,16 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 	// Get keys from input.
 	keyMap := make(map[publicKey]struct{})
 	var hks []publicKey
-	for _, interaction := range interactions {
-		if _, exists := keyMap[publicKey(interaction.Host)]; !exists {
-			hks = append(hks, publicKey(interaction.Host))
-			keyMap[publicKey(interaction.Host)] = struct{}{}
+	for _, scan := range scans {
+		if _, exists := keyMap[publicKey(scan.HostKey)]; !exists {
+			hks = append(hks, publicKey(scan.HostKey))
+			keyMap[publicKey(scan.HostKey)] = struct{}{}
+		}
+	}
+	for _, ptu := range priceTableUpdate {
+		if _, exists := keyMap[publicKey(ptu.HostKey)]; !exists {
+			hks = append(hks, publicKey(ptu.HostKey))
+			keyMap[publicKey(ptu.HostKey)] = struct{}{}
 		}
 	}
 
@@ -741,115 +731,87 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, interactions []hostd
 	// Write the interactions and update to the hosts atomically within a single
 	// transaction.
 	return ss.retryTransaction(func(tx *gorm.DB) error {
-		// Apply all the interactions to the hosts.
-		dbInteractions := make([]dbInteraction, 0, len(interactions))
-		for _, interaction := range interactions {
-			host, exists := hostMap[publicKey(interaction.Host)]
+		// Handle scans
+		for _, scan := range scans {
+			host, exists := hostMap[publicKey(scan.HostKey)]
 			if !exists {
 				continue // host doesn't exist
 			}
-			isScan := interaction.Type == hostdb.InteractionTypeScan
-			isPriceTableUpdate := interaction.Type == hostdb.InteractionTypePriceTableUpdate
-
 			lastScan := time.Unix(0, host.LastScan)
-			if interaction.Success {
+			host.TotalScans++
+			host.Scanned = host.Scanned || scan.Success
+			host.SecondToLastScanSuccess = host.LastScanSuccess
+			host.LastScanSuccess = scan.Success
+			host.LastScan = scan.Timestamp.UnixNano()
+
+			if scan.Success {
+				// Handle successful scan.
 				host.SuccessfulInteractions++
-				if isScan && host.LastScan > 0 && lastScan.Before(interaction.Timestamp) {
-					host.Uptime += interaction.Timestamp.Sub(lastScan)
+				if host.LastScan > 0 && lastScan.Before(scan.Timestamp) {
+					host.Uptime += scan.Timestamp.Sub(lastScan)
 				}
 				host.RecentDowntime = 0
 				host.RecentScanFailures = 0
+
+				// overwrite the NetAddress in the settings with the one we
+				// received through the host announcement
+				scan.Settings.NetAddress = host.NetAddress
+				host.Settings = convertHostSettings(scan.Settings)
+
+				// scans can only update the price table if the current
+				// pricetable is expired anyway, ensuring scans never
+				// overwrite a valid price table since the price table from
+				// scans are not paid for and thus not useful for anything
+				// aside from gouging checks
+				if time.Now().After(host.PriceTableExpiry.Time) {
+					host.PriceTable = convertHostPriceTable(scan.PriceTable)
+					host.PriceTableExpiry = sql.NullTime{
+						Time:  time.Now(),
+						Valid: true,
+					}
+				}
 			} else {
+				// Handle failed scan.
 				host.FailedInteractions++
-				if isScan {
-					host.RecentScanFailures++
-					if host.LastScan > 0 && lastScan.Before(interaction.Timestamp) {
-						host.Downtime += interaction.Timestamp.Sub(lastScan)
-						host.RecentDowntime += interaction.Timestamp.Sub(lastScan)
-					}
+				host.RecentScanFailures++
+				if host.LastScan > 0 && lastScan.Before(scan.Timestamp) {
+					host.Downtime += scan.Timestamp.Sub(lastScan)
+					host.RecentDowntime += scan.Timestamp.Sub(lastScan)
 				}
 			}
-			if isScan {
-				host.TotalScans++
-				host.Scanned = host.Scanned || interaction.Success
-				host.SecondToLastScanSuccess = host.LastScanSuccess
-				host.LastScanSuccess = interaction.Success
-				host.LastScan = interaction.Timestamp.UnixNano()
-				var sr hostdb.ScanResult
-				if interaction.Success {
-					if err := json.Unmarshal(interaction.Result, &sr); err != nil {
-						return err
-					}
-
-					// overwrite the NetAddress in the settings with the one we
-					// received through the host announcement
-					sr.Settings.NetAddress = host.NetAddress
-
-					host.Settings = convertHostSettings(sr.Settings)
-
-					// scans can only update the price table if the current
-					// pricetable is expired anyway, ensuring scans never
-					// overwrite a valid price table since the price table from
-					// scans are not paid for and thus not useful for anything
-					// aside from gouging checks
-					if time.Now().After(host.PriceTableExpiry.Time) {
-						host.PriceTable = convertHostPriceTable(sr.PriceTable)
-						host.PriceTableExpiry = sql.NullTime{
-							Time:  time.Now(),
-							Valid: true,
-						}
-					}
-
-					// only extract the metric result of the scan to not persist
-					// the pricetable and host settings.
-					var err error
-					interaction.Result, err = extractCommonMetric(interaction.Result)
-					if err != nil {
-						return err
-					}
-				}
-			}
-			// NOTE: a host's uptime or downtime is only updated by scans, we do
-			// this mostly to keep things simple, host scans should be performed
-			// frequently enough for this not to be a problem
-			if isPriceTableUpdate && interaction.Success {
-				var ptr hostdb.PriceTableUpdateResult
-				if err := json.Unmarshal(interaction.Result, &ptr); err != nil {
-					return err
-				}
-
-				host.PriceTable = convertHostPriceTable(ptr.PriceTable.HostPriceTable)
-				host.PriceTableExpiry = sql.NullTime{
-					Time:  ptr.PriceTable.Expiry,
-					Valid: ptr.PriceTable.Expiry != time.Time{},
-				}
-
-				// only extract the metric result of the price table update to
-				// not persist the pricetable.
-				var err error
-				interaction.Result, err = extractCommonMetric(interaction.Result)
-				if err != nil {
-					return err
-				}
-			}
-
-			// Add interaction.
-			dbInteractions = append(dbInteractions, dbInteraction{
-				Host:      publicKey(interaction.Host),
-				Result:    interaction.Result,
-				Success:   interaction.Success,
-				Timestamp: interaction.Timestamp.UTC(),
-				Type:      interaction.Type,
-			})
 
 			// Save to map again.
 			hostMap[host.PublicKey] = host
 		}
 
-		// Save everything to the db.
-		if err := tx.CreateInBatches(&dbInteractions, interactionInsertionBatchSize).Error; err != nil {
-			return err
+		// Handle price table updates
+		for _, ptu := range priceTableUpdate {
+			host, exists := hostMap[publicKey(ptu.HostKey)]
+			if !exists {
+				continue // host doesn't exist
+			}
+			if ptu.Success {
+				// Handle successful update.
+				host.SuccessfulInteractions++
+				host.RecentDowntime = 0
+				host.RecentScanFailures = 0
+
+				// Update pricetable.
+				host.PriceTable = convertHostPriceTable(ptu.PriceTable.HostPriceTable)
+				host.PriceTableExpiry = sql.NullTime{
+					Time:  ptu.PriceTable.Expiry,
+					Valid: ptu.PriceTable.Expiry != time.Time{},
+				}
+			} else {
+				// Handle failed update.
+				host.FailedInteractions++
+			}
+
+			// Save to map again.
+			hostMap[host.PublicKey] = host
 		}
+
+		// Persist.
 		for _, h := range hostMap {
 			err := tx.Model(&dbHost{}).
 				Where("public_key", h.PublicKey).

@@ -72,7 +72,7 @@ type (
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
-		RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
+		RecordInteractions(ctx context.Context, scans []hostdb.HostScan, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
@@ -539,11 +539,11 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
-	var interactions []hostdb.Interaction
+	var interactions api.HostsInteractionRequest
 	if jc.Decode(&interactions) != nil {
 		return
 	}
-	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(jc.Request.Context(), interactions)) != nil {
+	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(jc.Request.Context(), interactions.Scans, interactions.PriceTableUpdates)) != nil {
 		return
 	}
 }
