@@ -133,7 +133,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 								Severity: alerts.SeverityCritical,
 								Message:  errMsg,
 								Data: map[string]interface{}{
-									"key": slab.Key.String(),
+									"slabKey": slab.Key.String(),
 								},
 								Timestamp: time.Now(),
 							})
