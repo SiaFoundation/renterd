@@ -1446,11 +1446,10 @@ func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
-	alertMgr := alerts.NewManager()
+func New(s Syncer, am *alerts.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
-		alerts:           alerts.WithOrigin(alertMgr, "bus"),
-		alertMgr:         alertMgr,
+		alerts:           alerts.WithOrigin(am, "bus"),
+		alertMgr:         am,
 		s:                s,
 		cm:               cm,
 		tp:               tp,

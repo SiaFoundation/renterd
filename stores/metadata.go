@@ -14,6 +14,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
@@ -1539,6 +1540,16 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	for i, buf := range buffers {
 		data, err := os.ReadFile(filepath.Join(s.partialSlabDir, buf.Filename))
 		if os.IsNotExist(err) {
+			s.alerts.RegisterAlert(ctx, alerts.Alert{
+				ID:       types.HashBytes([]byte(buf.Filename)),
+				Severity: alerts.SeverityCritical,
+				Message:  "buffered slab for upload not found on disk",
+				Data: map[string]interface{}{
+					"filename": buf.Filename,
+					"slabKey":  buf.DBSlab.Key,
+				},
+				Timestamp: time.Now(),
+			})
 			s.logger.Error(ctx, fmt.Sprintf("buffered slab %v doesn't exist", buf.Filename))
 			continue
 		}
