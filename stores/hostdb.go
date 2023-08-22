@@ -93,8 +93,8 @@ type (
 
 	// dbHostAllowlistEntryHost is a join table between dbAllowlistEntry and dbHost.
 	dbHostAllowlistEntryHost struct {
-		DBAllowlistEntryID uint8 `gorm:"primaryKey"`
-		DBHostID           uint8 `gorm:"primaryKey;index"`
+		DBAllowlistEntryID uint `gorm:"primaryKey"`
+		DBHostID           uint `gorm:"primaryKey;index"`
 	}
 
 	// dbBlocklistEntry defines a table that stores the host blocklist.
@@ -106,8 +106,8 @@ type (
 
 	// dbHostBlocklistEntryHost is a join table between dbBlocklistEntry and dbHost.
 	dbHostBlocklistEntryHost struct {
-		DBBlocklistEntryID uint8 `gorm:"primaryKey"`
-		DBHostID           uint8 `gorm:"primaryKey;index"`
+		DBBlocklistEntryID uint `gorm:"primaryKey"`
+		DBHostID           uint `gorm:"primaryKey;index"`
 	}
 
 	// dbConsensusInfo defines table which stores the latest consensus info
