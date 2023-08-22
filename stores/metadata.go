@@ -127,7 +127,7 @@ type (
 	// dbContractSector is a join table between dbContract and dbSector.
 	dbContractSector struct {
 		DBContractID uint `gorm:"primaryKey"`
-		DBSectorID   uint `gorm:"primaryKey"`
+		DBSectorID   uint `gorm:"primaryKey;index"`
 	}
 
 	// rawObject is used for hydration and is made up of one or many raw sectors.

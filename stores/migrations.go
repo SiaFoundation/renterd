@@ -206,13 +206,40 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initSchema(tx *gorm.DB) error {
-	err := tx.AutoMigrate(tables...)
+	// Setup join tables.
+	err := setupJoinTables(tx)
+	if err != nil {
+		return fmt.Errorf("failed to setup join tables: %w", err)
+	}
+
+	// Run auto migrations.
+	err = tx.AutoMigrate(tables...)
 	if err != nil {
 		return fmt.Errorf("failed to init schema: %w", err)
 	}
 	// Change the object_id colum to use case sensitive collation.
 	if !isSQLite(tx) {
 		return tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+	}
+	return nil
+}
+
+func setupJoinTables(tx *gorm.DB) error {
+	jointables := []struct {
+		model     interface{}
+		joinTable interface{ TableName() string }
+		field     string
+	}{
+		{
+			&dbSector{},
+			&dbContractSector{},
+			"Contracts",
+		},
+	}
+	for _, t := range jointables {
+		if err := tx.SetupJoinTable(t.model, t.field, t.joinTable); err != nil {
+			return fmt.Errorf("failed to setup join table '%s': %w", t.joinTable.TableName(), err)
+		}
 	}
 	return nil
 }
