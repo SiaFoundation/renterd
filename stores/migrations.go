@@ -44,15 +44,6 @@ var (
 	}
 )
 
-type dbHostBlocklistEntryHost struct {
-	DBBlocklistEntryID uint8 `gorm:"primarykey;column:db_blocklist_entry_id"`
-	DBHostID           uint8 `gorm:"primarykey;index:idx_db_host_id;column:db_host_id"`
-}
-
-func (dbHostBlocklistEntryHost) TableName() string {
-	return "host_blocklist_entry_hosts"
-}
-
 // migrateShards performs the migrations necessary for removing the 'shards'
 // table.
 func migrateShards(ctx context.Context, db *gorm.DB, l glogger.Interface) error {
@@ -238,8 +229,23 @@ func setupJoinTables(tx *gorm.DB) error {
 		field     string
 	}{
 		{
+			&dbAllowlistEntry{},
+			&dbHostAllowlistEntryHost{},
+			"Hosts",
+		},
+		{
+			&dbBlocklistEntry{},
+			&dbHostBlocklistEntryHost{},
+			"Hosts",
+		},
+		{
 			&dbSector{},
 			&dbContractSector{},
+			"Contracts",
+		},
+		{
+			&dbContractSet{},
+			&dbContractSetContract{},
 			"Contracts",
 		},
 	}
@@ -519,7 +525,19 @@ func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interfa
 		column    string
 	}{
 		{
+			&dbHostAllowlistEntryHost{},
+			"DBHostID",
+		},
+		{
+			&dbHostBlocklistEntryHost{},
+			"DBHostID",
+		},
+		{
 			&dbContractSector{},
+			"DBContractID",
+		},
+		{
+			&dbContractSetContract{},
 			"DBContractID",
 		},
 	}

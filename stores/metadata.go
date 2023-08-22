@@ -69,6 +69,11 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
+	dbContractSetContract struct {
+		DBContractSetID uint `gorm:"primaryKey;"`
+		DBContractID    uint `gorm:"primaryKey;index"`
+	}
+
 	dbObject struct {
 		Model
 
@@ -126,7 +131,7 @@ type (
 
 	// dbContractSector is a join table between dbContract and dbSector.
 	dbContractSector struct {
-		DBSectorID   uint `gorm:"primaryKey"`
+		DBSectorID   uint `gorm:"primaryKey;"`
 		DBContractID uint `gorm:"primaryKey;index"`
 	}
 
@@ -163,6 +168,9 @@ func (dbArchivedContract) TableName() string { return "archived_contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContract) TableName() string { return "contracts" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbContractSetContract) TableName() string { return "contract_set_contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSector) TableName() string { return "contract_sectors" }

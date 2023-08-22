@@ -127,10 +127,23 @@ func TestQueryPlan(t *testing.T) {
 	}
 
 	queries := []string{
+		// allow_list
+		"SELECT * FROM host_allowlist_entry_hosts WHERE db_host_id = 1",
+		"SELECT * FROM host_allowlist_entry_hosts WHERE db_allowlist_entry_id = 1",
+
+		// block_list
+		"SELECT * FROM host_blocklist_entry_hosts WHERE db_host_id = 1",
+		"SELECT * FROM host_blocklist_entry_hosts WHERE db_blocklist_entry_id = 1",
+
 		// contract_sectors
 		"SELECT * FROM contract_sectors WHERE db_contract_id = 1",
 		"SELECT * FROM contract_sectors WHERE db_sector_id = 1",
+
+		// contract_set_contracts
+		"SELECT * FROM contract_set_contracts WHERE db_contract_id = 1",
+		"SELECT * FROM contract_set_contracts WHERE db_contract_set_id = 1",
 	}
+
 	for _, query := range queries {
 		var explain queryPlanExplain
 		err = db.db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error
