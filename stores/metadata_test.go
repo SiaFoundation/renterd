@@ -2660,7 +2660,7 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer.Filename, 4, false, false)
 
 	// fetch the object. This should fetch the partial slab too.
-	fullObj, err := db.Object(context.Background(), "key", false)
+	fullObj, err := db.Object(context.Background(), "key", true)
 	if err != nil {
 		t.Fatal(err)
 	}
