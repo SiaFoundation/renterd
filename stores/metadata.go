@@ -733,12 +733,25 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	}
 
 	return s.retryTransaction(func(tx *gorm.DB) error {
-		// fetch contracts
-		var dbContracts []dbContract
+		// fetch current contracts
+		var dbCurrentContracts []fileContractID
 		err := tx.
 			Model(&dbContract{}).
+			Select("contracts.fcid").
+			Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+			Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", name).
+			Group("contracts.fcid").
+			Scan(&dbCurrentContracts).
+			Error
+		if err != nil {
+			return err
+		}
+		// fetch new contracts
+		var dbNewContracts []dbContract
+		err = tx.
+			Model(&dbContract{}).
 			Where("fcid IN (?)", fcids).
-			Find(&dbContracts).
+			Find(&dbNewContracts).
 			Error
 		if err != nil {
 			return err
@@ -755,12 +768,43 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		}
 
 		// invalidate the health on all slab which are affected by this change
-		if err := tx.Exec("UPDATE slabs SET health_valid = 0 WHERE slabs.db_contract_set_id = ?", contractset.ID).Error; err != nil {
+		currentMap := make(map[fileContractID]struct{})
+		for _, fcid := range dbCurrentContracts {
+			currentMap[fcid] = struct{}{}
+		}
+		newMap := make(map[fileContractID]struct{})
+		for _, c := range dbNewContracts {
+			newMap[c.FCID] = struct{}{}
+		}
+		for _, c := range dbNewContracts {
+			delete(currentMap, c.FCID)
+		}
+		for _, fcid := range dbCurrentContracts {
+			delete(newMap, fcid)
+		}
+		diff := make([]fileContractID, 0, len(currentMap)+len(newMap))
+		for fcid := range currentMap {
+			diff = append(diff, fcid)
+		}
+		for fcid := range newMap {
+			diff = append(diff, fcid)
+		}
+		err = tx.Exec(`
+UPDATE slabs SET health_valid = 0 WHERE id in (
+	SELECT slabs.id
+	FROM slabs
+	LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+	LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+	LEFT JOIN contracts c ON c.id = cs.db_contract_id
+	WHERE health_valid = 1 AND c.fcid IN (?)
+)
+		`, diff).Error
+		if err != nil {
 			return err
 		}
 
 		// update contracts
-		return tx.Model(&contractset).Association("Contracts").Replace(&dbContracts)
+		return tx.Model(&contractset).Association("Contracts").Replace(&dbNewContracts)
 	})
 }
 
