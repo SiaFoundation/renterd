@@ -1878,22 +1878,6 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 	return invalidateSlabHealthByFCID(tx, toInvalidate)
 }
 
-func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
-	return tx.Exec(`
-UPDATE slabs SET health_valid = 0 WHERE id in (
-	SELECT *
-	FROM (
-		SELECT slabs.id
-		FROM slabs
-		LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-		LEFT JOIN contracts c ON c.id = cs.db_contract_id
-		WHERE health_valid = 1 AND c.fcid IN (?)
-	)
-)
-		`, fcids).Error
-}
-
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
@@ -1922,4 +1906,20 @@ func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 		return 0, err
 	}
 	return
+}
+
+func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
+	return tx.Exec(`
+UPDATE slabs SET health_valid = 0 WHERE id in (
+	SELECT *
+	FROM (
+		SELECT slabs.id
+		FROM slabs
+		LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+		LEFT JOIN contracts c ON c.id = cs.db_contract_id
+		WHERE health_valid = 1 AND c.fcid IN (?)
+	) slab_ids
+)
+		`, fcids).Error
 }
