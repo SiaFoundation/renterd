@@ -1397,6 +1397,11 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			return err
 		}
 
+		// invalidate health
+		if err := tx.Model(&slab).Where(&slab).Update("health_valid", false).Error; err != nil {
+			return err
+		}
+
 		// loop updated shards
 		for _, shard := range s.Shards {
 			// ensure the sector exists
