@@ -94,7 +94,8 @@ type (
 		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
-		Health      float64 `gorm:"index; default:1.0; NOT NULL"`
+		Health      float64 `gorm:"index;default:1.0; NOT NULL"`
+		HealthValid bool    `gorm:"index;default:0;NOT NULL"`
 		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8   `gorm:"index"`
 		TotalShards uint8   `gorm:"index"`
@@ -753,6 +754,11 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 			return err
 		}
 
+		// invalidate the health on all slab which are affected by this change
+		if err := tx.Exec("UPDATE slabs SET health_valid = 0 WHERE slabs.db_contract_set_id = ?", contractset.ID).Error; err != nil {
+			return err
+		}
+
 		// update contracts
 		return tx.Model(&contractset).Association("Contracts").Replace(&dbContracts)
 	})
@@ -1402,13 +1408,14 @@ LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
 LEFT JOIN contracts c ON se.db_contract_id = c.id
 LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
 LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+WHERE slabs.health_valid = 0
 GROUP BY slabs.id
 `)
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		if isSQLite(s.db) {
-			return s.db.Exec("UPDATE slabs SET health = COALESCE((SELECT health FROM (?) WHERE slabs.id = id), 1)", healthQuery).Error
+			return s.db.Exec("UPDATE slabs SET health = COALESCE((SELECT health FROM (?) WHERE slabs.id = id), 1), health_valid = 1 WHERE health_valid = 0", healthQuery).Error
 		} else {
-			return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health", healthQuery).Error
+			return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid = 1 WHERE health_valid = 0", healthQuery).Error
 		}
 	})
 }
