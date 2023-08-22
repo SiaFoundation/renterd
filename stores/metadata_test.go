@@ -1855,7 +1855,12 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 		t.Fatalf("unexpected amount of slabs to migrate, %v!=0", len(slabs))
 	}
 
-	// delete the sector
+	// delete the sector - we manually invalidate the slabs for the contract
+	// before deletion.
+	err = invalidateSlabHealthByFCID(db.db, []fileContractID{fileContractID(fcid1)})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := db.db.Table("contract_sectors").Where("TRUE").Delete(&dbContractSector{}).Error; err != nil {
 		t.Fatal(err)
 	}
