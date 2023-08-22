@@ -91,7 +91,7 @@ func (o Object) TotalSize() int64 {
 		n += int64(ss.Length)
 	}
 	if o.PartialSlab != nil {
-		n += int64(len(o.PartialSlab.Data))
+		n += int64(o.PartialSlab.Length)
 	}
 	return n
 }

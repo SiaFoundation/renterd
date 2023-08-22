@@ -2610,6 +2610,7 @@ func TestPartialSlab(t *testing.T) {
 			},
 		},
 		PartialSlab: &object.PartialSlab{
+			Length:      4,
 			MinShards:   1,
 			TotalShards: 2,
 			Data:        []byte{1, 2, 3, 4},

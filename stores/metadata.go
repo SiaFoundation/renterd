@@ -357,6 +357,7 @@ func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string, includePartialD
 			}
 		}
 		partialSlab = &object.PartialSlab{
+			Length:      partialSlabSector.SliceLength,
 			MinShards:   buffer.DBSlab.MinShards,
 			TotalShards: buffer.DBSlab.TotalShards,
 			Data:        data,

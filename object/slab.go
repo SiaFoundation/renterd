@@ -28,6 +28,7 @@ type Slab struct {
 }
 
 type PartialSlab struct {
+	Length      uint32 `json:"length"`
 	MinShards   uint8  `json:"minShards"`
 	TotalShards uint8  `json:"totalShards"`
 	Data        []byte `json:"data,omitempty"`

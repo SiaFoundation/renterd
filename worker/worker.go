@@ -1060,6 +1060,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		// upload packed slab.
 		key := object.GenerateEncryptionKey()
 		shards := (&object.PartialSlab{
+			Length:      uint32(len(ps.Data)),
 			MinShards:   uint8(rs.MinShards),
 			TotalShards: uint8(rs.TotalShards),
 			Data:        ps.Data,

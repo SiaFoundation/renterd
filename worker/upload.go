@@ -337,6 +337,7 @@ loop:
 				// If uploadPacking is true, we return the partial slab without
 				// uploading.
 				partialSlab = &object.PartialSlab{
+					Length:      uint32(length),
 					MinShards:   uint8(rs.MinShards),
 					TotalShards: uint8(rs.TotalShards),
 					Data:        data[:length],
