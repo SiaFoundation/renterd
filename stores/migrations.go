@@ -183,6 +183,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00008_jointableindices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00008_jointableindices(tx, logger)
+			},
+			Rollback: nil,
+		},
 	}
 
 	// Create migrator.
@@ -501,5 +508,31 @@ func performMigration00007_archivedcontractspending(txn *gorm.DB, logger glogger
 		}
 	}
 	logger.Info(context.Background(), "migration 00007_archivedcontractspending complete")
+	return nil
+}
+
+func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00008_jointableindices")
+
+	indices := []struct {
+		joinTable interface{ TableName() string }
+		column    string
+	}{
+		{
+			&dbContractSector{},
+			"DBContractID",
+		},
+	}
+
+	m := txn.Migrator()
+	for _, idx := range indices {
+		if !m.HasIndex(idx.joinTable, idx.column) {
+			if err := m.CreateIndex(idx.joinTable, idx.column); err != nil {
+				return fmt.Errorf("failed to create index on column '%s' of table '%s': %w", idx.column, idx.joinTable.TableName(), err)
+			}
+		}
+	}
+
+	logger.Info(context.Background(), "migration 00008_jointableindices complete")
 	return nil
 }
