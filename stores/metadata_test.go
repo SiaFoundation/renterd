@@ -101,7 +101,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object
-	got, err := db.Object(context.Background(), t.Name())
+	got, err := db.Object(context.Background(), t.Name(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted
-	_, err = db.Object(context.Background(), t.Name())
+	_, err = db.Object(context.Background(), t.Name(), false)
 	if !errors.Is(err, api.ErrObjectCorrupted) {
 		t.Fatal("unexpected err", err)
 	}
@@ -137,7 +137,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object
-	got2, err := db.Object(context.Background(), t.Name())
+	got2, err := db.Object(context.Background(), t.Name(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1042,7 +1042,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it and verify again.
-	fullObj, err := db.Object(ctx, objID)
+	fullObj, err := db.Object(ctx, objID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1153,7 +1153,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
-	fullObj, err = db.Object(ctx, objID)
+	fullObj, err = db.Object(ctx, objID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1301,7 +1301,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health
-	obj, err := db.Object(context.Background(), "/foo")
+	obj, err := db.Object(context.Background(), "/foo", false)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != 1 {
@@ -1318,7 +1318,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth := float64(2) / float64(3)
 
 	// assert health
-	obj, err = db.Object(context.Background(), "/foo")
+	obj, err = db.Object(context.Background(), "/foo", false)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1355,7 +1355,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth = float64(1) / float64(3)
 
 	// assert health is the min. health of the slabs
-	obj, err = db.Object(context.Background(), "/foo")
+	obj, err = db.Object(context.Background(), "/foo", false)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1376,7 +1376,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert the health is 1
-	obj, err = db.Object(context.Background(), "/bar")
+	obj, err = db.Object(context.Background(), "/bar", false)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != 1 {
@@ -2660,7 +2660,7 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer.Filename, 4, false, false)
 
 	// fetch the object. This should fetch the partial slab too.
-	fullObj, err := db.Object(context.Background(), "key")
+	fullObj, err := db.Object(context.Background(), "key", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,7 @@ type Slab struct {
 type PartialSlab struct {
 	MinShards   uint8  `json:"minShards"`
 	TotalShards uint8  `json:"totalShards"`
-	Data        []byte `json:"data"`
+	Data        []byte `json:"data,omitempty"`
 }
 
 func (ps *PartialSlab) Encrypt(key EncryptionKey) [][]byte {

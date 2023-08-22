@@ -226,3 +226,9 @@ func ObjectsWithLimit(limit int) ObjectsOption {
 		v.Set("limit", fmt.Sprint(limit))
 	}
 }
+
+func ObjectsWithPartialData(includePartialData bool) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("includePartialData", fmt.Sprint(includePartialData))
+	}
+}

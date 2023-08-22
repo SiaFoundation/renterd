@@ -102,7 +102,7 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
-		Object(ctx context.Context, path string) (api.Object, error)
+		Object(ctx context.Context, path string, includePartialData bool) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
@@ -843,8 +843,12 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 		b.objectEntriesHandlerGET(jc, path)
 		return
 	}
+	var includePartialData bool
+	if jc.DecodeForm("includePartialData", &includePartialData) != nil {
+		return
+	}
 
-	o, err := b.ms.Object(jc.Request.Context(), path)
+	o, err := b.ms.Object(jc.Request.Context(), path, includePartialData)
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return

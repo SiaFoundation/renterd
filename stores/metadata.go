@@ -269,7 +269,7 @@ func (o dbObject) metadata() api.ObjectMetadata {
 	}
 }
 
-func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (api.Object, error) {
+func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string, includePartialData bool) (api.Object, error) {
 	if len(raw) == 0 {
 		return api.Object{}, errors.New("no slabs found")
 	}
@@ -343,15 +343,18 @@ func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (api.Object, er
 		if err != nil {
 			return api.Object{}, err
 		}
-		file, err := os.Open(filepath.Join(partialSlabDir, buffer.Filename))
-		if err != nil {
-			return api.Object{}, err
-		}
-		defer file.Close()
-		data := make([]byte, partialSlabSector.SliceLength)
-		_, err = file.ReadAt(data, int64(partialSlabSector.SliceOffset))
-		if err != nil {
-			return api.Object{}, err
+		var data []byte
+		if includePartialData {
+			file, err := os.Open(filepath.Join(partialSlabDir, buffer.Filename))
+			if err != nil {
+				return api.Object{}, err
+			}
+			defer file.Close()
+			data = make([]byte, partialSlabSector.SliceLength)
+			_, err = file.ReadAt(data, int64(partialSlabSector.SliceOffset))
+			if err != nil {
+				return api.Object{}, err
+			}
 		}
 		partialSlab = &object.PartialSlab{
 			MinShards:   buffer.DBSlab.MinShards,
@@ -866,14 +869,14 @@ LIMIT ? OFFSET ?`,
 	return metadata, nil
 }
 
-func (s *SQLStore) Object(ctx context.Context, path string) (api.Object, error) {
+func (s *SQLStore) Object(ctx context.Context, path string, includePartialData bool) (api.Object, error) {
 	var obj api.Object
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		o, err := s.object(ctx, tx, path)
 		if err != nil {
 			return err
 		}
-		obj, err = o.convert(tx, s.partialSlabDir)
+		obj, err = o.convert(tx, s.partialSlabDir, includePartialData)
 		return err
 	})
 	return obj, err
