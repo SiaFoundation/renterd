@@ -1881,12 +1881,15 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
 	return tx.Exec(`
 UPDATE slabs SET health_valid = 0 WHERE id in (
-	SELECT slabs.id
-	FROM slabs
-	LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-	LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-	LEFT JOIN contracts c ON c.id = cs.db_contract_id
-	WHERE health_valid = 1 AND c.fcid IN (?)
+	SELECT *
+	FROM (
+		SELECT slabs.id
+		FROM slabs
+		LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+		LEFT JOIN contracts c ON c.id = cs.db_contract_id
+		WHERE health_valid = 1 AND c.fcid IN (?)
+	)
 )
 		`, fcids).Error
 }
