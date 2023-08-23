@@ -789,7 +789,7 @@ func (c *Client) AddUploadingSector(ctx context.Context, uID api.UploadID, id ty
 }
 
 func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error) {
-	c.c.Custom("POST", "/slabs/partial", []byte{}, nil)
+	c.c.Custom("POST", "/slabs/partial", nil, &api.AddPartialSlabResponse{})
 	values := url.Values{}
 	values.Set("minShards", fmt.Sprint(minShards))
 	values.Set("totalShards", fmt.Sprint(totalShards))
@@ -824,7 +824,7 @@ func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, tot
 }
 
 func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
-	c.c.Custom("GET", fmt.Sprintf("/slabs/partial/%s", key), nil, (*[]api.ObjectMetadata)(nil))
+	c.c.Custom("GET", fmt.Sprintf("/slabs/partial/%s", key), nil, &[]byte{})
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("length", fmt.Sprint(length))

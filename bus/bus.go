@@ -1033,6 +1033,8 @@ func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
+	jc.Custom(nil, []byte{})
+
 	var key object.EncryptionKey
 	if jc.DecodeParam("key", &key) != nil {
 		return
