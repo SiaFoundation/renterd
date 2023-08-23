@@ -1017,6 +1017,16 @@ func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey
 }
 
 func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error) {
+	// Sanity check input.
+	slabSize := bufferedSlabSize(minShards)
+	if minShards == 0 || totalShards == 0 || minShards > totalShards {
+		return nil, fmt.Errorf("invalid shard configuration: minShards=%v, totalShards=%v", minShards, totalShards)
+	} else if contractSet == "" {
+		return nil, fmt.Errorf("contract set must not be empty")
+	} else if len(data) > slabSize {
+		return nil, fmt.Errorf("data size %v exceeds size of a slab %v", len(data), slabSize)
+	}
+
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
@@ -1054,7 +1064,6 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 		}
 
 		// We have a buffer. Sanity check it.
-		slabSize := bufferedSlabSize(minShards)
 		if buffer.Size >= int64(slabSize) {
 			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
 		}

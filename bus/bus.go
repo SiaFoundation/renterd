@@ -1037,15 +1037,19 @@ func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
-	var offset uint32
+	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	}
-	var length uint32
+	var length int
 	if jc.DecodeForm("length", &length) != nil {
 		return
 	}
-	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, offset, length)
+	if length == 0 {
+		jc.Error(fmt.Errorf("length must be non-zero"), http.StatusBadRequest)
+		return
+	}
+	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1057,11 +1061,11 @@ func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
-	var minShards uint8
+	var minShards int
 	if jc.DecodeForm("minShards", &minShards) != nil {
 		return
 	}
-	var totalShards uint8
+	var totalShards int
 	if jc.DecodeForm("totalShards", &totalShards) != nil {
 		return
 	}
@@ -1081,7 +1085,7 @@ func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to read request body", err) != nil {
 		return
 	}
-	slabs, err := b.ms.AddPartialSlab(jc.Request.Context(), data, minShards, totalShards, contractSet)
+	slabs, err := b.ms.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards), contractSet)
 	if jc.Check("failed to add partial slab", err) != nil {
 		return
 	}

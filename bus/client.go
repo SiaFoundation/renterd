@@ -800,7 +800,7 @@ func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, tot
 		panic(err)
 	}
 	u.RawQuery = values.Encode()
-	req, err := http.NewRequestWithContext(ctx, "PUT", u.String(), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewReader(data))
 	if err != nil {
 		panic(err)
 	}
@@ -824,12 +824,17 @@ func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, tot
 }
 
 func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
+	c.c.Custom("GET", fmt.Sprintf("/slabs/partial/%s", key), nil, (*[]api.ObjectMetadata)(nil))
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
-	values.Set("limit", fmt.Sprint(length))
+	values.Set("length", fmt.Sprint(length))
 
-	c.c.Custom("GET", fmt.Sprintf("/slabs/partial/%s", key), nil, (*[]api.ObjectMetadata)(nil))
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/slabs/partial/%s", c.c.BaseURL, key), nil)
+	u, err := url.Parse(fmt.Sprintf("%s/slabs/partial/%s", c.c.BaseURL, key))
+	if err != nil {
+		panic(err)
+	}
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		panic(err)
 	}
