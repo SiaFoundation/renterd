@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -59,17 +60,8 @@ type BusConfig struct {
 }
 
 type AutopilotConfig struct {
-	ID                             string
-	AccountsRefillInterval         time.Duration
-	Heartbeat                      time.Duration
-	MigrationHealthCutoff          float64
-	RevisionBroadcastInterval      time.Duration
-	RevisionSubmissionBuffer       uint64
-	ScannerInterval                time.Duration
-	ScannerBatchSize               uint64
-	ScannerMinRecentFailures       uint64
-	ScannerNumThreads              uint64
-	MigratorParallelSlabsPerWorker uint64
+	config.Autopilot
+	ID string
 }
 
 type (

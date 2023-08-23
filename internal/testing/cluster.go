@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/stores"
 	"go.uber.org/zap"
@@ -822,15 +823,17 @@ func testWorkerCfg() node.WorkerConfig {
 
 func testApCfg() node.AutopilotConfig {
 	return node.AutopilotConfig{
-		ID:                             api.DefaultAutopilotID,
-		AccountsRefillInterval:         time.Second,
-		Heartbeat:                      time.Second,
-		MigrationHealthCutoff:          0.99,
-		MigratorParallelSlabsPerWorker: 1,
-		RevisionSubmissionBuffer:       0,
-		ScannerInterval:                time.Second,
-		ScannerBatchSize:               10,
-		ScannerNumThreads:              1,
-		ScannerMinRecentFailures:       5,
+		ID: api.DefaultAutopilotID,
+		Autopilot: config.Autopilot{
+			AccountsRefillInterval:         time.Second,
+			Heartbeat:                      time.Second,
+			MigrationHealthCutoff:          0.99,
+			MigratorParallelSlabsPerWorker: 1,
+			RevisionSubmissionBuffer:       0,
+			ScannerInterval:                time.Second,
+			ScannerBatchSize:               10,
+			ScannerNumThreads:              1,
+			ScannerMinRecentFailures:       5,
+		},
 	}
 }
