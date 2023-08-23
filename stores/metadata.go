@@ -69,6 +69,11 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
+	dbContractSetContract struct {
+		DBContractSetID uint `gorm:"primaryKey;"`
+		DBContractID    uint `gorm:"primaryKey;index"`
+	}
+
 	dbObject struct {
 		Model
 
@@ -126,8 +131,8 @@ type (
 
 	// dbContractSector is a join table between dbContract and dbSector.
 	dbContractSector struct {
-		DBContractID uint `gorm:"primaryKey"`
-		DBSectorID   uint `gorm:"primaryKey"`
+		DBSectorID   uint `gorm:"primaryKey;"`
+		DBContractID uint `gorm:"primaryKey;index"`
 	}
 
 	// rawObject is used for hydration and is made up of one or many raw sectors.
@@ -163,6 +168,9 @@ func (dbArchivedContract) TableName() string { return "archived_contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContract) TableName() string { return "contracts" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbContractSetContract) TableName() string { return "contract_set_contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSector) TableName() string { return "contract_sectors" }
@@ -670,8 +678,8 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]
 
 	if err := s.db.
 		Raw(`
-SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-	SELECT fcid, MAX(c.size) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
+SELECT fcid, size, CASE WHEN size>bytes THEN size-bytes ELSE 0 END as prunable FROM (
+	SELECT fcid, MAX(c.size) as size, COUNT(cs.db_sector_id) * ? as bytes
 	FROM contracts c
 	LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
 	GROUP BY c.fcid
@@ -682,7 +690,7 @@ SELECT fcid, size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FR
 		return nil, err
 	}
 
-	sizes := make(map[types.FileContractID]api.ContractSize, len(rows))
+	sizes := make(map[types.FileContractID]api.ContractSize)
 	for _, row := range rows {
 		if types.FileContractID(row.Fcid) == (types.FileContractID{}) {
 			return nil, errors.New("invalid file contract id")
@@ -707,8 +715,8 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (a
 
 	if err := s.db.
 		Raw(`
-SELECT size, CASE SIGN(bytes) WHEN -1 THEN 0 ELSE bytes END as prunable FROM (
-    SELECT IFNULL(MAX(c.size), 0) as size, IFNULL(MAX(c.size) - COUNT(cs.db_sector_id) * ?, 0) as bytes
+SELECT size, CASE WHEN size>bytes THEN size-bytes ELSE 0 END as prunable FROM (
+    SELECT c.size, COUNT(cs.db_sector_id) * ? as bytes
     FROM contracts c
     LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
     WHERE c.fcid = ?

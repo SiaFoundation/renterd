@@ -91,11 +91,23 @@ type (
 		Hosts []dbHost  `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
+	// dbHostAllowlistEntryHost is a join table between dbAllowlistEntry and dbHost.
+	dbHostAllowlistEntryHost struct {
+		DBAllowlistEntryID uint `gorm:"primaryKey"`
+		DBHostID           uint `gorm:"primaryKey;index"`
+	}
+
 	// dbBlocklistEntry defines a table that stores the host blocklist.
 	dbBlocklistEntry struct {
 		Model
 		Entry string   `gorm:"unique;index;NOT NULL"`
 		Hosts []dbHost `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
+	}
+
+	// dbHostBlocklistEntryHost is a join table between dbBlocklistEntry and dbHost.
+	dbHostBlocklistEntryHost struct {
+		DBBlocklistEntryID uint `gorm:"primaryKey"`
+		DBHostID           uint `gorm:"primaryKey;index"`
 	}
 
 	dbConsensusInfo struct {
@@ -271,7 +283,13 @@ func (dbHost) TableName() string { return "hosts" }
 func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
 
 // TableName implements the gorm.Tabler interface.
+func (dbHostAllowlistEntryHost) TableName() string { return "host_allowlist_entry_hosts" }
+
+// TableName implements the gorm.Tabler interface.
 func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbHostBlocklistEntryHost) TableName() string { return "host_blocklist_entry_hosts" }
 
 // convert converts a host into a hostdb.Host.
 func (h dbHost) convert() hostdb.Host {

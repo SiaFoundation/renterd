@@ -43,15 +43,6 @@ var (
 	}
 )
 
-type dbHostBlocklistEntryHost struct {
-	DBBlocklistEntryID uint8 `gorm:"primarykey;column:db_blocklist_entry_id"`
-	DBHostID           uint8 `gorm:"primarykey;index:idx_db_host_id;column:db_host_id"`
-}
-
-func (dbHostBlocklistEntryHost) TableName() string {
-	return "host_blocklist_entry_hosts"
-}
-
 // migrateShards performs the migrations necessary for removing the 'shards'
 // table.
 func migrateShards(ctx context.Context, db *gorm.DB, l glogger.Interface) error {
@@ -183,11 +174,17 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Rollback: nil,
 		},
 		{
-			ID: "00008_dropInteractions",
+			ID: "00008_jointableindices",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00008_dropInteractions(tx, logger)
+				return performMigration00008_jointableindices(tx, logger)
 			},
 			Rollback: nil,
+		},
+		{
+			ID: "00009_dropInteractions",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00009_dropInteractions(tx, logger)
+			},
 		},
 	}
 
@@ -212,13 +209,55 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initSchema(tx *gorm.DB) error {
-	err := tx.AutoMigrate(tables...)
+	// Setup join tables.
+	err := setupJoinTables(tx)
+	if err != nil {
+		return fmt.Errorf("failed to setup join tables: %w", err)
+	}
+
+	// Run auto migrations.
+	err = tx.AutoMigrate(tables...)
 	if err != nil {
 		return fmt.Errorf("failed to init schema: %w", err)
 	}
 	// Change the object_id colum to use case sensitive collation.
 	if !isSQLite(tx) {
 		return tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+	}
+	return nil
+}
+
+func setupJoinTables(tx *gorm.DB) error {
+	jointables := []struct {
+		model     interface{}
+		joinTable interface{ TableName() string }
+		field     string
+	}{
+		{
+			&dbAllowlistEntry{},
+			&dbHostAllowlistEntryHost{},
+			"Hosts",
+		},
+		{
+			&dbBlocklistEntry{},
+			&dbHostBlocklistEntryHost{},
+			"Hosts",
+		},
+		{
+			&dbSector{},
+			&dbContractSector{},
+			"Contracts",
+		},
+		{
+			&dbContractSet{},
+			&dbContractSetContract{},
+			"Contracts",
+		},
+	}
+	for _, t := range jointables {
+		if err := tx.SetupJoinTable(t.model, t.field, t.joinTable); err != nil {
+			return fmt.Errorf("failed to setup join table '%s': %w", t.joinTable.TableName(), err)
+		}
 	}
 	return nil
 }
@@ -483,13 +522,51 @@ func performMigration00007_archivedcontractspending(txn *gorm.DB, logger glogger
 	return nil
 }
 
-func performMigration00008_dropInteractions(txn *gorm.DB, logger glogger.Interface) error {
-	logger.Info(context.Background(), "performing migration 00008_dropInteractions")
+func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00008_jointableindices")
+
+	indices := []struct {
+		joinTable interface{ TableName() string }
+		column    string
+	}{
+		{
+			&dbHostAllowlistEntryHost{},
+			"DBHostID",
+		},
+		{
+			&dbHostBlocklistEntryHost{},
+			"DBHostID",
+		},
+		{
+			&dbContractSector{},
+			"DBContractID",
+		},
+		{
+			&dbContractSetContract{},
+			"DBContractID",
+		},
+	}
+
+	m := txn.Migrator()
+	for _, idx := range indices {
+		if !m.HasIndex(idx.joinTable, idx.column) {
+			if err := m.CreateIndex(idx.joinTable, idx.column); err != nil {
+				return fmt.Errorf("failed to create index on column '%s' of table '%s': %w", idx.column, idx.joinTable.TableName(), err)
+			}
+		}
+	}
+
+	logger.Info(context.Background(), "migration 00008_jointableindices complete")
+	return nil
+}
+
+func performMigration00009_dropInteractions(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00009_dropInteractions")
 	if !txn.Migrator().HasTable("host_interactions") {
 		if err := txn.Migrator().DropTable("host_interactions"); err != nil {
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00008_dropInteractions complete")
+	logger.Info(context.Background(), "migration 00009_dropInteractions complete")
 	return nil
 }

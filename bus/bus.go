@@ -708,28 +708,29 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 	}
 
 	// prepare the response
-	res := api.ContractsPrunableDataResponse{
-		Contracts:     make([]api.ContractPrunableData, len(sizes)),
-		TotalPrunable: 0,
-		TotalSize:     0,
-	}
+	var contracts []api.ContractPrunableData
+	var totalPrunable, totalSize uint64
 
 	// build the response
 	for fcid, size := range sizes {
-		res.Contracts = append(res.Contracts, api.ContractPrunableData{
+		contracts = append(contracts, api.ContractPrunableData{
 			ID:           fcid,
 			ContractSize: size,
 		})
-		res.TotalPrunable += size.Prunable
-		res.TotalSize += size.Size
+		totalPrunable += size.Prunable
+		totalSize += size.Size
 	}
 
 	// sort contracts by the amount of prunable data
-	sort.Slice(res.Contracts, func(i, j int) bool {
-		return res.Contracts[i].Prunable > res.Contracts[j].Prunable
+	sort.Slice(contracts, func(i, j int) bool {
+		return contracts[i].Prunable > contracts[j].Prunable
 	})
 
-	jc.Encode(res)
+	jc.Encode(api.ContractsPrunableDataResponse{
+		Contracts:     contracts,
+		TotalPrunable: totalPrunable,
+		TotalSize:     totalSize,
+	})
 }
 
 func (b *bus) contractSizeHandlerGET(jc jape.Context) {
@@ -742,8 +743,7 @@ func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	}
-	if jc.Check("failed to fetch contract size", err) == nil {
+	} else if jc.Check("failed to fetch contract size", err) == nil {
 		jc.Encode(size)
 	}
 }
@@ -1644,16 +1644,16 @@ func (b *bus) Handler() http.Handler {
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":                  b.hostsHandlerGET,
-		"GET    /host/:hostkey":          b.hostsPubkeyHandlerGET,
-		"POST   /hosts/scan":             b.hostsScanHandlerPOST,
-		"POST   /hosts/pricetableupdate": b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":           b.hostsRemoveHandlerPOST,
-		"GET    /hosts/allowlist":        b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":        b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":        b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":        b.hostsBlocklistHandlerPUT,
-		"GET    /hosts/scanning":         b.hostsScanningHandlerGET,
+		"GET    /hosts":                   b.hostsHandlerGET,
+		"GET    /host/:hostkey":           b.hostsPubkeyHandlerGET,
+		"POST   /hosts/scans":             b.hostsScanHandlerPOST,
+		"POST   /hosts/pricetableupdates": b.hostsPricetableHandlerPOST,
+		"POST   /hosts/remove":            b.hostsRemoveHandlerPOST,
+		"GET    /hosts/allowlist":         b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":         b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist":         b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":         b.hostsBlocklistHandlerPUT,
+		"GET    /hosts/scanning":          b.hostsScanningHandlerGET,
 
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
