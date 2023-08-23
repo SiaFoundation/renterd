@@ -204,7 +204,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 }
 
 // newTestClusterCustom creates a customisable cluster.
-func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey, busCfg node.BusConfig, workerCfg node.WorkerConfig, apCfg node.AutopilotConfig, logger *zap.Logger) (*TestCluster, error) {
+func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey, busCfg node.BusConfig, workerCfg config.Worker, apCfg node.AutopilotConfig, logger *zap.Logger) (*TestCluster, error) {
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
 	uri, user, password, _ := stores.DBConfigFromEnv()
@@ -801,16 +801,18 @@ func testNetwork() *consensus.Network {
 
 func testBusCfg() node.BusConfig {
 	return node.BusConfig{
-		Bootstrap:       false,
-		GatewayAddr:     "127.0.0.1:0",
-		Network:         testNetwork(),
-		PersistInterval: testPersistInterval,
-		UsedUTXOExpiry:  time.Minute,
+		Bus: config.Bus{
+			Bootstrap:       false,
+			GatewayAddr:     "127.0.0.1:0",
+			PersistInterval: testPersistInterval,
+			UsedUTXOExpiry:  time.Minute,
+		},
+		Network: testNetwork(),
 	}
 }
 
-func testWorkerCfg() node.WorkerConfig {
-	return node.WorkerConfig{
+func testWorkerCfg() config.Worker {
+	return config.Worker{
 		AllowPrivateIPs:          true,
 		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",

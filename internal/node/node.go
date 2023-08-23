@@ -35,26 +35,10 @@ import (
 	"gorm.io/gorm"
 )
 
-type WorkerConfig struct {
-	ID                       string
-	AllowPrivateIPs          bool
-	BusFlushInterval         time.Duration
-	ContractLockTimeout      time.Duration
-	DownloadOverdriveTimeout time.Duration
-	UploadOverdriveTimeout   time.Duration
-	DownloadMaxOverdrive     uint64
-	UploadMaxOverdrive       uint64
-}
-
 type BusConfig struct {
-	Bootstrap                     bool
-	GatewayAddr                   string
-	Network                       *consensus.Network
-	Miner                         *Miner
-	PersistInterval               time.Duration
-	UsedUTXOExpiry                time.Duration
-	SlabBufferCompletionThreshold int64
-
+	config.Bus
+	Network        *consensus.Network
+	Miner          *Miner
 	DBLoggerConfig stores.LoggerConfig
 	DBDialector    gorm.Dialector
 }
@@ -304,7 +288,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewWorker(cfg config.Worker, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
 	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.AllowPrivateIPs, l)
 	if err != nil {
