@@ -165,14 +165,14 @@ func TestSQLHostDB(t *testing.T) {
 }
 
 func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhpv2.HostSettings) error {
-	return s.RecordInteractions(context.Background(), []hostdb.HostScan{
+	return s.RecordHostScans(context.Background(), []hostdb.HostScan{
 		{
 			HostKey:   hk,
 			Settings:  settings,
 			Success:   err == nil,
 			Timestamp: t,
 		},
-	}, nil)
+	})
 }
 
 // TestSQLHosts tests the Hosts method of the SQLHostDB type.
@@ -335,7 +335,7 @@ func TestRecordScan(t *testing.T) {
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
-	if err := hdb.RecordInteractions(ctx, []hostdb.HostScan{newTestScan(hk, firstScanTime, settings, true)}, nil); err != nil {
+	if err := hdb.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(ctx, hk)
@@ -368,7 +368,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := hdb.RecordInteractions(ctx, []hostdb.HostScan{newTestScan(hk, secondScanTime, settings, true)}, nil); err != nil {
+	if err := hdb.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(ctx, hk)
@@ -395,7 +395,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := hdb.RecordInteractions(ctx, []hostdb.HostScan{newTestScan(hk, thirdScanTime, settings, false)}, nil); err != nil {
+	if err := hdb.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = hdb.Host(ctx, hk)
@@ -460,7 +460,7 @@ func TestRemoveHosts(t *testing.T) {
 	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, false)
 
 	// record interactions
-	if err := hdb.RecordInteractions(context.Background(), []hostdb.HostScan{hi1, hi2}, nil); err != nil {
+	if err := hdb.RecordHostScans(context.Background(), []hostdb.HostScan{hi1, hi2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -488,7 +488,7 @@ func TestRemoveHosts(t *testing.T) {
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
 	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, false)
-	if err := hdb.RecordInteractions(context.Background(), []hostdb.HostScan{hi3}, nil); err != nil {
+	if err := hdb.RecordHostScans(context.Background(), []hostdb.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
 

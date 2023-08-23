@@ -164,8 +164,11 @@ type ContractPrunableData struct {
 	ContractSize
 }
 
-type HostsInteractionRequest struct {
-	Scans             []hostdb.HostScan         `json:"scans"`
+type HostsScanRequest struct {
+	Scans []hostdb.HostScan `json:"scans"`
+}
+
+type HostsPriceTableUpdateRequest struct {
 	PriceTableUpdates []hostdb.PriceTableUpdate `json:"priceTableUpdates"`
 }
 

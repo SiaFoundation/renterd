@@ -45,13 +45,21 @@ func (w *worker) recordInteractions(scans []hostdb.HostScan, priceTableUpdates [
 
 // flushInteractions flushes the worker's interaction buffer to the bus.
 func (w *worker) flushInteractions() {
-	if len(w.interactionsScans)+len(w.interactionsPriceTableUpdates) > 0 {
-		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushInteractions")
+	if len(w.interactionsScans) > 0 {
+		ctx, span := tracing.Tracer.Start(context.Background(), "worker: recordHostScans")
 		defer span.End()
-		if err := w.bus.RecordInteractions(ctx, w.interactionsScans, w.interactionsPriceTableUpdates); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to record interactions: %v", err))
+		if err := w.bus.RecordHostScans(ctx, w.interactionsScans); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to record scans: %v", err))
 		} else {
 			w.interactionsScans = nil
+		}
+	}
+	if len(w.interactionsPriceTableUpdates) > 0 {
+		ctx, span := tracing.Tracer.Start(context.Background(), "worker: recordPriceTableUpdates")
+		defer span.End()
+		if err := w.bus.RecordPriceTableUpdates(ctx, w.interactionsPriceTableUpdates); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to record price table updates: %v", err))
+		} else {
 			w.interactionsPriceTableUpdates = nil
 		}
 	}

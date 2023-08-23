@@ -146,7 +146,8 @@ type Bus interface {
 	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
-	RecordInteractions(ctx context.Context, scans []hostdb.HostScan, priceTableUpdate []hostdb.PriceTableUpdate) error
+	RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
+	RecordPriceTableUpdates(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
@@ -365,13 +366,13 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	}
 
 	// record scan
-	err = w.bus.RecordInteractions(jc.Request.Context(), []hostdb.HostScan{{
+	err = w.bus.RecordHostScans(jc.Request.Context(), []hostdb.HostScan{{
 		HostKey:    rsr.HostKey,
 		Success:    err == nil,
 		Timestamp:  time.Now(),
 		Settings:   settings,
 		PriceTable: priceTable,
-	}}, nil)
+	}})
 	if jc.Check("failed to record scan", err) != nil {
 		return
 	}

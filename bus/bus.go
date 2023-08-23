@@ -72,7 +72,8 @@ type (
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
 		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
-		RecordInteractions(ctx context.Context, scans []hostdb.HostScan, priceTableUpdate []hostdb.PriceTableUpdate) error
+		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
+		RecordPriceTableUpdates(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
@@ -538,12 +539,22 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) hostsPubkeyHandlerPOST(jc jape.Context) {
-	var interactions api.HostsInteractionRequest
-	if jc.Decode(&interactions) != nil {
+func (b *bus) hostsScanHandlerPOST(jc jape.Context) {
+	var req api.HostsScanRequest
+	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to record interactions", b.hdb.RecordInteractions(jc.Request.Context(), interactions.Scans, interactions.PriceTableUpdates)) != nil {
+	if jc.Check("failed to record scans", b.hdb.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
+		return
+	}
+}
+
+func (b *bus) hostsPricetableHandlerPOST(jc jape.Context) {
+	var req api.HostsPriceTableUpdateRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if jc.Check("failed to record interactions", b.hdb.RecordPriceTableUpdates(jc.Request.Context(), req.PriceTableUpdates)) != nil {
 		return
 	}
 }
@@ -1633,15 +1644,16 @@ func (b *bus) Handler() http.Handler {
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
 
-		"GET    /hosts":              b.hostsHandlerGET,
-		"GET    /host/:hostkey":      b.hostsPubkeyHandlerGET,
-		"POST   /hosts/interactions": b.hostsPubkeyHandlerPOST,
-		"POST   /hosts/remove":       b.hostsRemoveHandlerPOST,
-		"GET    /hosts/allowlist":    b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":    b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":    b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":    b.hostsBlocklistHandlerPUT,
-		"GET    /hosts/scanning":     b.hostsScanningHandlerGET,
+		"GET    /hosts":                  b.hostsHandlerGET,
+		"GET    /host/:hostkey":          b.hostsPubkeyHandlerGET,
+		"POST   /hosts/scan":             b.hostsScanHandlerPOST,
+		"POST   /hosts/pricetableupdate": b.hostsPricetableHandlerPOST,
+		"POST   /hosts/remove":           b.hostsRemoveHandlerPOST,
+		"GET    /hosts/allowlist":        b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":        b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist":        b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":        b.hostsBlocklistHandlerPUT,
+		"GET    /hosts/scanning":         b.hostsScanningHandlerGET,
 
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,

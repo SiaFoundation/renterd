@@ -55,7 +55,7 @@ func TestHostPruning(t *testing.T) {
 				Success:   false,
 			}
 		}
-		if err = b.RecordInteractions(context.Background(), his, nil); err != nil {
+		if err = b.RecordHostScans(context.Background(), his); err != nil {
 			t.Fatal(err)
 		}
 	}

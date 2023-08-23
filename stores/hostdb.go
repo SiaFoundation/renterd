@@ -679,10 +679,8 @@ func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err 
 	return
 }
 
-// RecordHostInteraction records an interaction with a host. If the host is not in
-// the store, a new entry is created for it.
-func (ss *SQLStore) RecordInteractions(ctx context.Context, scans []hostdb.HostScan, priceTableUpdate []hostdb.PriceTableUpdate) error {
-	if len(scans)+len(priceTableUpdate) == 0 {
+func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error {
+	if len(scans) == 0 {
 		return nil // nothing to do
 	}
 
@@ -699,17 +697,10 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, scans []hostdb.HostS
 			keyMap[publicKey(scan.HostKey)] = struct{}{}
 		}
 	}
-	for _, ptu := range priceTableUpdate {
-		if _, exists := keyMap[publicKey(ptu.HostKey)]; !exists {
-			hks = append(hks, publicKey(ptu.HostKey))
-			keyMap[publicKey(ptu.HostKey)] = struct{}{}
-		}
-	}
 
-	// Fetch hosts for which to add interactions. This can be done
-	// outsisde the transaction to reduce the time we spend in the
-	// transaction since we don't need it to be perfectly
-	// consistent.
+	// Fetch hosts for which to add scans. This can be done outsisde the
+	// transaction to reduce the time we spend in the transaction since we don't
+	// need it to be perfectly consistent.
 	var hosts []dbHost
 	for i := 0; i < len(hks); i += maxSQLVars {
 		end := i + maxSQLVars
@@ -785,6 +776,78 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, scans []hostdb.HostS
 			hostMap[host.PublicKey] = host
 		}
 
+		// Persist.
+		for _, h := range hostMap {
+			err := tx.Model(&dbHost{}).
+				Where("public_key", h.PublicKey).
+				Updates(map[string]interface{}{
+					"scanned":                     h.Scanned,
+					"total_scans":                 h.TotalScans,
+					"second_to_last_scan_success": h.SecondToLastScanSuccess,
+					"last_scan_success":           h.LastScanSuccess,
+					"recent_downtime":             h.RecentDowntime,
+					"recent_scan_failures":        h.RecentScanFailures,
+					"downtime":                    h.Downtime,
+					"uptime":                      h.Uptime,
+					"last_scan":                   h.LastScan,
+					"settings":                    h.Settings,
+					"price_table":                 h.PriceTable,
+					"price_table_expiry":          h.PriceTableExpiry,
+					"successful_interactions":     h.SuccessfulInteractions,
+					"failed_interactions":         h.FailedInteractions,
+				}).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (ss *SQLStore) RecordPriceTableUpdates(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
+	if len(priceTableUpdate) == 0 {
+		return nil // nothing to do
+	}
+
+	// Only allow for applying one batch of interactions at a time.
+	ss.interactionsMu.Lock()
+	defer ss.interactionsMu.Unlock()
+
+	// Get keys from input.
+	keyMap := make(map[publicKey]struct{})
+	var hks []publicKey
+	for _, ptu := range priceTableUpdate {
+		if _, exists := keyMap[publicKey(ptu.HostKey)]; !exists {
+			hks = append(hks, publicKey(ptu.HostKey))
+			keyMap[publicKey(ptu.HostKey)] = struct{}{}
+		}
+	}
+
+	// Fetch hosts for which to add interactions. This can be done
+	// outsisde the transaction to reduce the time we spend in the
+	// transaction since we don't need it to be perfectly
+	// consistent.
+	var hosts []dbHost
+	for i := 0; i < len(hks); i += maxSQLVars {
+		end := i + maxSQLVars
+		if end > len(hks) {
+			end = len(hks)
+		}
+		var batchHosts []dbHost
+		if err := ss.db.Where("public_key IN (?)", hks[i:end]).
+			Find(&batchHosts).Error; err != nil {
+			return err
+		}
+		hosts = append(hosts, batchHosts...)
+	}
+	hostMap := make(map[publicKey]dbHost)
+	for _, h := range hosts {
+		hostMap[h.PublicKey] = h
+	}
+
+	// Write the interactions and update to the hosts atomically within a single
+	// transaction.
+	return ss.retryTransaction(func(tx *gorm.DB) error {
 		// Handle price table updates
 		for _, ptu := range priceTableUpdate {
 			host, exists := hostMap[publicKey(ptu.HostKey)]
@@ -817,20 +880,12 @@ func (ss *SQLStore) RecordInteractions(ctx context.Context, scans []hostdb.HostS
 			err := tx.Model(&dbHost{}).
 				Where("public_key", h.PublicKey).
 				Updates(map[string]interface{}{
-					"scanned":                     h.Scanned,
-					"total_scans":                 h.TotalScans,
-					"second_to_last_scan_success": h.SecondToLastScanSuccess,
-					"last_scan_success":           h.LastScanSuccess,
-					"recent_downtime":             h.RecentDowntime,
-					"recent_scan_failures":        h.RecentScanFailures,
-					"downtime":                    h.Downtime,
-					"uptime":                      h.Uptime,
-					"last_scan":                   h.LastScan,
-					"settings":                    h.Settings,
-					"price_table":                 h.PriceTable,
-					"price_table_expiry":          h.PriceTableExpiry,
-					"successful_interactions":     h.SuccessfulInteractions,
-					"failed_interactions":         h.FailedInteractions,
+					"recent_downtime":         h.RecentDowntime,
+					"recent_scan_failures":    h.RecentScanFailures,
+					"price_table":             h.PriceTable,
+					"price_table_expiry":      h.PriceTableExpiry,
+					"successful_interactions": h.SuccessfulInteractions,
+					"failed_interactions":     h.FailedInteractions,
 				}).Error
 			if err != nil {
 				return err
