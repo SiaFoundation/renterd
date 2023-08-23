@@ -259,7 +259,7 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(hostInfos, hostInfosUsable) {
-		t.Fatal("result for 'usable' should match the result for 'all'")
+		t.Fatalf("result for 'usable' should match the result for 'all', \n\nall: %+v \n\nusable: %+v", hostInfos, hostInfosUsable)
 	}
 
 	// Fetch the autopilot status
