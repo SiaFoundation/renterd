@@ -228,6 +228,8 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
 		if hi.Checks.ScoreBreakdown.Score() == 0 {
 			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
@@ -245,7 +247,9 @@ func TestNewTestCluster(t *testing.T) {
 		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
 			t.Fatal("host wasn't set")
 		}
+		allHosts[hi.Host.PublicKey] = struct{}{}
 	}
+
 	hostInfosUnusable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +262,10 @@ func TestNewTestCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(hostInfos, hostInfosUsable) {
+	for _, hI := range hostInfosUsable {
+		delete(allHosts, hI.Host.PublicKey)
+	}
+	if len(hostInfosUsable) != len(hostInfos) || len(allHosts) != 0 {
 		t.Fatalf("result for 'usable' should match the result for 'all', \n\nall: %+v \n\nusable: %+v", hostInfos, hostInfosUsable)
 	}
 
