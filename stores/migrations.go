@@ -181,6 +181,13 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00009_distinctcontractsector",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00009_distinctcontractsector(tx, logger)
+			},
+			Rollback: nil,
+		},
 	}
 
 	// Create migrator.
@@ -552,5 +559,18 @@ func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interfa
 	}
 
 	logger.Info(context.Background(), "migration 00008_jointableindices complete")
+	return nil
+}
+
+func performMigration00009_distinctcontractsector(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00009_distinctcontractsector")
+
+	if !txn.Migrator().HasIndex(&dbContractSector{}, "DBSectorID") {
+		if err := txn.Migrator().CreateIndex(&dbContractSector{}, "DBSectorID"); err != nil {
+			return fmt.Errorf("failed to create index on column 'DBSectorID' of table 'contract_sectors': %w", err)
+		}
+	}
+
+	logger.Info(context.Background(), "migration 00009_distinctcontractsector complete")
 	return nil
 }
