@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"runtime"
@@ -118,6 +119,8 @@ type (
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
+		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
@@ -1029,6 +1032,64 @@ func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+	var offset uint32
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	}
+	var length uint32
+	if jc.DecodeForm("length", &length) != nil {
+		return
+	}
+	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, offset, length)
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.ResponseWriter.Write(data)
+}
+
+func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
+	var minShards uint8
+	if jc.DecodeForm("minShards", &minShards) != nil {
+		return
+	}
+	var totalShards uint8
+	if jc.DecodeForm("totalShards", &totalShards) != nil {
+		return
+	}
+	var contractSet string
+	if jc.DecodeForm("contractSet", &contractSet) != nil {
+		return
+	}
+	if minShards == 0 || totalShards == 0 {
+		jc.Error(fmt.Errorf("min_shards and total_shards must be non-zero"), http.StatusBadRequest)
+		return
+	}
+	if contractSet == "" {
+		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	}
+	data, err := io.ReadAll(jc.Request.Body)
+	if jc.Check("failed to read request body", err) != nil {
+		return
+	}
+	slabs, err := b.ms.AddPartialSlab(jc.Request.Context(), data, minShards, totalShards, contractSet)
+	if jc.Check("failed to add partial slab", err) != nil {
+		return
+	}
+	jc.Encode(api.AddPartialSlabResponse{
+		Slabs: slabs,
+	})
+}
+
 func (b *bus) settingsHandlerGET(jc jape.Context) {
 	if settings, err := b.ss.Settings(jc.Request.Context()); jc.Check("couldn't load settings", err) == nil {
 		jc.Encode(settings)
@@ -1677,6 +1738,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
+		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
+		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
 		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,

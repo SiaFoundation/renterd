@@ -315,13 +315,13 @@ type MigrationSlabsRequest struct {
 }
 
 type PackedSlab struct {
-	BufferID uint   `json:"bufferID"`
-	Data     []byte `json:"data"`
+	BufferID uint                 `json:"bufferID"`
+	Data     []byte               `json:"data"`
+	Key      object.EncryptionKey `json:"key"`
 }
 
 type UploadedPackedSlab struct {
 	BufferID uint
-	Key      object.EncryptionKey
 	Shards   []object.Sector
 }
 
@@ -512,4 +512,8 @@ func (rs RedundancySettings) Validate() error {
 		return errors.New("TotalShards must be less than 256")
 	}
 	return nil
+}
+
+type AddPartialSlabResponse struct {
+	Slabs []object.PartialSlab `json:"slabs"`
 }

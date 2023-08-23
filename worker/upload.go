@@ -262,7 +262,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool) (_ object.Object, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool) (_ object.Object, partialSlab []byte, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -283,7 +283,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	// create the upload
 	u, finishFn, err := mgr.newUpload(ctx, rs.TotalShards, contracts, bh)
 	if err != nil {
-		return object.Object{}, err
+		return object.Object{}, nil, err
 	}
 	defer finishFn(ctx)
 
@@ -306,14 +306,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 
 	// prepare slab size
 	size := int64(rs.MinShards) * rhpv2.SectorSize
-	var partialSlab *object.PartialSlab
 loop:
 	for {
 		select {
 		case <-mgr.stopChan:
-			return object.Object{}, errors.New("manager was stopped")
+			return object.Object{}, nil, errors.New("manager was stopped")
 		case <-ctx.Done():
-			return object.Object{}, errors.New("upload timed out")
+			return object.Object{}, nil, errors.New("upload timed out")
 		case nextSlabChan <- struct{}{}:
 			// read next slab's data
 			data := make([]byte, size)
@@ -331,16 +330,12 @@ loop:
 				}
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
-				return object.Object{}, err
+				return object.Object{}, nil, err
 			}
 			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
 				// uploading.
-				partialSlab = &object.PartialSlab{
-					MinShards:   uint8(rs.MinShards),
-					TotalShards: uint8(rs.TotalShards),
-					Data:        data[:length],
-				}
+				partialSlab = data[:length]
 				<-nextSlabChan // trigger next iteration
 			} else {
 				// Otherwise we upload it.
@@ -353,7 +348,7 @@ loop:
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
-				return object.Object{}, res.err
+				return object.Object{}, nil, res.err
 			}
 			responses = append(responses, res)
 			if len(responses) == numSlabs {
@@ -371,8 +366,7 @@ loop:
 	for _, resp := range responses {
 		o.Slabs = append(o.Slabs, resp.slab)
 	}
-	o.PartialSlab = partialSlab
-	return o, nil
+	return o, partialSlab, nil
 }
 
 func (mgr *uploadManager) launch(req *sectorUploadReq) error {

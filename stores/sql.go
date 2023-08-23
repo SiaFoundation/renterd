@@ -3,6 +3,7 @@ package stores
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -400,12 +402,26 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 }
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+	abortRetry := func(err error) bool {
+		if err == nil {
+			return true
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			return true
+		} else if errors.Is(err, api.ErrObjectNotFound) {
+			return true
+		} else if errors.Is(err, api.ErrObjectCorrupted) {
+			return true
+		} else if errors.Is(err, api.ErrContractNotFound) {
+			return true
+		}
+		return false
+	}
 	var err error
 	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second}
 	for i := 0; i < len(timeoutIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)
-		if err == nil {
-			return nil
+		if abortRetry(err) {
+			return err
 		}
 		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(timeoutIntervals), timeoutIntervals[i], err))
 		time.Sleep(timeoutIntervals[i])

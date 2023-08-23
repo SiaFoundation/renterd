@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -785,6 +786,65 @@ func (c *Client) AddUploadingSector(ctx context.Context, uID api.UploadID, id ty
 		Root:       root,
 	}, nil)
 	return
+}
+
+func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error) {
+	c.c.Custom("POST", "/slabs/partial", []byte{}, nil)
+	values := url.Values{}
+	values.Set("minShards", fmt.Sprint(minShards))
+	values.Set("totalShards", fmt.Sprint(totalShards))
+	values.Set("contractSet", contractSet)
+
+	u, err := url.Parse(fmt.Sprintf("%v/slabs/partial", c.c.BaseURL))
+	if err != nil {
+		panic(err)
+	}
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "PUT", u.String(), bytes.NewReader(data))
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		err, _ := io.ReadAll(resp.Body)
+		return nil, errors.New(string(err))
+	}
+	var apsr api.AddPartialSlabResponse
+	err = json.NewDecoder(resp.Body).Decode(&apsr)
+	if err != nil {
+		return nil, err
+	}
+	return apsr.Slabs, nil
+}
+
+func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprint(offset))
+	values.Set("limit", fmt.Sprint(length))
+
+	c.c.Custom("GET", fmt.Sprintf("/slabs/partial/%s", key), nil, (*[]api.ObjectMetadata)(nil))
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/slabs/partial/%s", c.c.BaseURL, key), nil)
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
+		err, _ := io.ReadAll(resp.Body)
+		return nil, errors.New(string(err))
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // FinishUpload marks the given upload as finished.

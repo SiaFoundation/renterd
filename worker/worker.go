@@ -159,6 +159,10 @@ type Bus interface {
 	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, path string, batch bool) error
 
+	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
+	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
+	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+
 	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 	PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 
@@ -228,6 +232,10 @@ type hostV3 interface {
 
 type hostProvider interface {
 	newHostV3(types.FileContractID, types.PublicKey, string) hostV3
+}
+
+type partialSlabStore interface {
+	PartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, *object.Slab, error)
 }
 
 // A worker talks to Sia hosts to perform contract and storage operations within
@@ -913,7 +921,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		jc.Encode(entries)
 		return
 	}
-	if len(obj.Slabs) == 0 && obj.PartialSlab == nil {
+	if len(obj.Slabs) == 0 && len(obj.PartialSlabs) == 0 {
 		return
 	}
 
@@ -1023,7 +1031,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	obj, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking)
+	obj, partialSlabData, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -1038,6 +1046,14 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		for _, ss := range s.Shards {
 			used[ss.Host] = h2c[ss.Host]
 		}
+	}
+
+	if len(partialSlabData) > 0 {
+		partialSlabs, err := w.bus.AddPartialSlab(jc.Request.Context(), partialSlabData, uint8(rs.MinShards), uint8(rs.TotalShards), up.ContractSet)
+		if jc.Check("couldn't add partial slabs to bus", err) != nil {
+			return
+		}
+		obj.PartialSlabs = partialSlabs
 	}
 
 	// persist the object
@@ -1058,21 +1074,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	for _, ps := range packedSlabs {
 		// upload packed slab.
-		key := object.GenerateEncryptionKey()
-		shards := (&object.PartialSlab{
-			MinShards:   uint8(rs.MinShards),
-			TotalShards: uint8(rs.TotalShards),
-			Data:        ps.Data,
-		}).Encrypt(key)
-
+		shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
 		sectors, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
 		if jc.Check("couldn't upload packed slab", err) != nil {
 			return
-		}
-		slab := object.Slab{
-			Key:       key,
-			MinShards: uint8(rs.MinShards),
-			Shards:    sectors,
 		}
 
 		// build used contracts map
@@ -1081,15 +1086,14 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			h2c[c.HostKey] = c.ID
 		}
 		used := make(map[types.PublicKey]types.FileContractID)
-		for _, ss := range slab.Shards {
-			used[ss.Host] = h2c[ss.Host]
+		for _, s := range sectors {
+			used[s.Host] = h2c[s.Host]
 		}
 
 		// mark packed slab as uploaded.
 		err = w.bus.MarkPackedSlabsUploaded(jc.Request.Context(), []api.UploadedPackedSlab{
 			{
 				BufferID: ps.BufferID,
-				Key:      slab.Key,
 				Shards:   sectors,
 			},
 		}, used)
@@ -1097,6 +1101,18 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 			return
 		}
 	}
+}
+
+func encryptPartialSlab(data []byte, key object.EncryptionKey, minShards, totalShards uint8) [][]byte {
+	slab := object.Slab{
+		Key:       key,
+		MinShards: minShards,
+		Shards:    make([]object.Sector, totalShards),
+	}
+	encodedShards := make([][]byte, totalShards)
+	slab.Encode(data, encodedShards)
+	slab.Encrypt(encodedShards)
+	return encodedShards
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
@@ -1383,6 +1399,24 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		})
 	}
 	return settings, pt, elapsed, err
+}
+
+// PartialSlab fetches the data of a partial slab from the bus. It will fall
+// back to ask the bus for the slab metadata in case the slab wasn't found in
+// the partial slab buffer.
+func (w *worker) PartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, *object.Slab, error) {
+	data, err := w.bus.FetchPartialSlab(ctx, key, offset, length)
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		// Check if slab was already uploaded.
+		slab, err := w.bus.Slab(ctx, key)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch uploaded partial slab: %v", err)
+		}
+		return nil, &slab, nil
+	} else if err != nil {
+		return nil, nil, err
+	}
+	return data, nil, nil
 }
 
 func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {
