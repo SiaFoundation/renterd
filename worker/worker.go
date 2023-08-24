@@ -548,6 +548,13 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 	rk := w.deriveRenterKey(c.HostKey)
 
+	// Acquire lock before fetching revision.
+	unlocker, err := w.acquireRevision(ctx, fcid, lockingPriorityActiveContractRevision)
+	if jc.Check("could not acquire revision lock", err) != nil {
+		return
+	}
+	defer unlocker.Release(ctx)
+
 	rev, err := w.FetchSignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
 	if jc.Check("could not fetch revision", err) != nil {
 		return
