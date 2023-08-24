@@ -1,7 +1,6 @@
 package hostdb
 
 import (
-	"encoding/json"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
@@ -98,12 +97,19 @@ type Interactions struct {
 	FailedInteractions     float64
 }
 
-type Interaction struct {
-	Host      types.PublicKey `json:"host"`
-	Result    json.RawMessage `json:"result"`
-	Success   bool            `json:"success"`
-	Timestamp time.Time       `json:"timestamp"`
-	Type      string          `json:"type"`
+type HostScan struct {
+	HostKey    types.PublicKey `json:"hostKey"`
+	Success    bool
+	Timestamp  time.Time
+	Settings   rhpv2.HostSettings
+	PriceTable rhpv3.HostPriceTable
+}
+
+type PriceTableUpdate struct {
+	HostKey    types.PublicKey `json:"hostKey"`
+	Success    bool
+	Timestamp  time.Time
+	PriceTable HostPriceTable
 }
 
 // HostAddress contains the address of a specific host identified by a public
