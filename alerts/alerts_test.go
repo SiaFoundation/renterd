@@ -15,9 +15,42 @@ import (
 	"go.uber.org/zap"
 )
 
+type testWebhookStore struct {
+	mu      sync.Mutex
+	added   int
+	deleted int
+	listed  int
+}
+
+func (s *testWebhookStore) DeleteHook(wb webhooks.Webhook) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted++
+	return nil
+}
+
+func (s *testWebhookStore) AddHook(wb webhooks.Webhook) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.added++
+	return nil
+}
+
+func (s *testWebhookStore) Webhooks() ([]webhooks.Webhook, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listed++
+	return nil, nil
+}
+
 func TestWebhooks(t *testing.T) {
-	mgr := webhooks.NewManager(zap.NewNop().Sugar())
-	alerts := NewManager(mgr)
+	store := &testWebhookStore{}
+	mgr, err := webhooks.NewManager(zap.NewNop().Sugar(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alerts := NewManager()
+	alerts.RegisterWebhookBroadcaster(mgr)
 
 	mux := http.NewServeMux()
 	var events []webhooks.Event
@@ -42,7 +75,7 @@ func TestWebhooks(t *testing.T) {
 	if hookID := wh.String(); hookID != fmt.Sprintf("%v.%v.%v", wh.URL, wh.Module, "") {
 		t.Fatalf("wrong result for wh.String(): %v != %v", wh.String(), hookID)
 	}
-	err := mgr.Register(wh)
+	err = mgr.Register(wh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,12 +110,12 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// unregister hook
-	if !mgr.Delete(webhooks.Webhook{
+	if err := mgr.Delete(webhooks.Webhook{
 		Event:  hooks[0].Event,
 		Module: hooks[0].Module,
 		URL:    hooks[0].URL,
-	}) {
-		t.Fatal("hook not deleted")
+	}); err != nil {
+		t.Fatal("hook not deleted", err)
 	}
 
 	// perform an action that should not trigger the endpoint
@@ -126,4 +159,13 @@ func TestWebhooks(t *testing.T) {
 	assertEvent(events[0], "", webhooks.WebhookEventPing, false)
 	assertEvent(events[1], webhookModule, webhookEventRegister, true)
 	assertEvent(events[2], webhookModule, webhookEventDismiss, true)
+
+	// check store
+	if store.added != 1 {
+		t.Fatalf("wrong number of hooks added: %v != 1", store.added)
+	} else if store.deleted != 1 {
+		t.Fatalf("wrong number of hooks deleted: %v != 1", store.deleted)
+	} else if store.listed != 1 {
+		t.Fatalf("wrong number of hooks listed: %v != 1", store.listed)
+	}
 }

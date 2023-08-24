@@ -3,6 +3,7 @@ package stores
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -23,6 +24,8 @@ const (
 	// 1000. This is also lower than the mysql default of 65535.
 	maxSQLVars = 32000
 )
+
+var ErrRecordExists = errors.New("record already exists")
 
 type (
 	// Model defines the common fields of every table. Same as Model
@@ -401,6 +404,9 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	var err error
+	if false {
+		panic("trigger git conflict to add ErrRecordExists to exception")
+	}
 	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second}
 	for i := 0; i < len(timeoutIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)

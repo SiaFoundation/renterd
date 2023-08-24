@@ -120,9 +120,10 @@ func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
 
 	m.mu.Lock()
 	m.alerts[alert.ID] = alert
+	wb := m.webhookBroadcaster
 	m.mu.Unlock()
 
-	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Event{
+	return wb.BroadcastAction(ctx, webhooks.Event{
 		Module:  webhookModule,
 		Event:   webhookEventRegister,
 		Payload: alert,
@@ -138,9 +139,10 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 	if len(m.alerts) == 0 {
 		m.alerts = make(map[types.Hash256]Alert) // reclaim memory
 	}
+	wb := m.webhookBroadcaster
 	m.mu.Unlock()
 
-	return m.webhookBroadcaster.BroadcastAction(ctx, webhooks.Event{
+	return wb.BroadcastAction(ctx, webhooks.Event{
 		Module:  webhookModule,
 		Event:   webhookEventDismiss,
 		Payload: ids,
@@ -162,11 +164,20 @@ func (m *Manager) Active() []Alert {
 	return alerts
 }
 
+func (m *Manager) RegisterWebhookBroadcaster(b webhooks.Broadcaster) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.webhookBroadcaster.(*webhooks.NoopBroadcaster); !ok {
+		panic("webhook broadcaster already registered")
+	}
+	m.webhookBroadcaster = b
+}
+
 // NewManager initializes a new alerts manager.
-func NewManager(b webhooks.Broadcaster) *Manager {
+func NewManager() *Manager {
 	return &Manager{
 		alerts:             make(map[types.Hash256]Alert),
-		webhookBroadcaster: b,
+		webhookBroadcaster: &webhooks.NoopBroadcaster{},
 	}
 }
 

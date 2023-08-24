@@ -1471,8 +1471,11 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 	if jc.Decode(&wh) != nil {
 		return
 	}
-	if !b.hooks.Delete(wh) {
+	err := b.hooks.Delete(wh)
+	if errors.Is(err, webhooks.ErrWebhookNotFound) {
 		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
+		return
+	} else if jc.Check("failed to delete webhook", err) != nil {
 		return
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,11 +12,26 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
-type Broadcaster interface {
-	BroadcastAction(ctx context.Context, action Event) error
-}
+var ErrWebhookNotFound = errors.New("Webhook not found")
+
+type (
+	WebhookStore interface {
+		DeleteHook(wh Webhook) error
+		AddHook(wh Webhook) error
+		Webhooks() ([]Webhook, error)
+	}
+
+	Broadcaster interface {
+		BroadcastAction(ctx context.Context, action Event) error
+	}
+)
+
+type NoopBroadcaster struct{}
+
+func (NoopBroadcaster) BroadcastAction(_ context.Context, _ Event) error { return nil }
 
 const (
 	webhookTimeout   = 10 * time.Second
@@ -47,6 +63,7 @@ type Manager struct {
 	ctxCancel context.CancelFunc
 	logger    *zap.SugaredLogger
 	wg        sync.WaitGroup
+	store     WebhookStore
 
 	mu       sync.Mutex
 	queues   map[string]*eventQueue // URL -> queue
@@ -86,18 +103,25 @@ func (w *Manager) Register(wh Webhook) error {
 	}
 
 	// Add Webhook.
+	if err := w.store.AddHook(wh); err != nil {
+		return err
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.webhooks[wh.String()] = wh
 	return nil
 }
 
-func (w *Manager) Delete(wh Webhook) bool {
+func (w *Manager) Delete(wh Webhook) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, exists := w.webhooks[wh.String()]
+	if err := w.store.DeleteHook(wh); errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrWebhookNotFound
+	} else if err != nil {
+		return err
+	}
 	delete(w.webhooks, wh.String())
-	return exists
+	return nil
 }
 
 func (w *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
@@ -189,15 +213,24 @@ func (w Webhook) Matches(action Event) bool {
 	return w.Event == "" || w.Event == action.Event
 }
 
-func NewManager(logger *zap.SugaredLogger) *Manager {
+func NewManager(logger *zap.SugaredLogger, store WebhookStore) (*Manager, error) {
+	hooks, err := store.Webhooks()
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{
+	m := &Manager{
 		ctx:       ctx,
 		ctxCancel: cancel,
 		logger:    logger.Named("webhooks"),
 		queues:    make(map[string]*eventQueue),
+		store:     store,
 		webhooks:  make(map[string]Webhook),
 	}
+	for _, hook := range hooks {
+		m.webhooks[hook.String()] = hook
+	}
+	return m, nil
 }
 
 func sendEvent(ctx context.Context, url string, action Event) error {
