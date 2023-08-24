@@ -3,7 +3,6 @@ package stores
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -24,8 +23,6 @@ const (
 	// 1000. This is also lower than the mysql default of 65535.
 	maxSQLVars = 32000
 )
-
-var ErrRecordExists = errors.New("record already exists")
 
 type (
 	// Model defines the common fields of every table. Same as Model

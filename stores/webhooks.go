@@ -35,19 +35,13 @@ func (s *SQLStore) DeleteHook(wb webhooks.Webhook) error {
 
 func (s *SQLStore) AddHook(wb webhooks.Webhook) error {
 	return s.retryTransaction(func(tx *gorm.DB) error {
-		res := tx.Clauses(clause.OnConflict{
+		return tx.Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).Create(&dbWebhook{
 			Module: wb.Module,
 			Event:  wb.Event,
 			URL:    wb.URL,
-		})
-		if res.Error != nil {
-			return res.Error
-		} else if res.RowsAffected == 0 {
-			return ErrRecordExists
-		}
-		return nil
+		}).Error
 	})
 }
 
