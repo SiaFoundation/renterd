@@ -146,7 +146,8 @@ type Bus interface {
 	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
-	RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) error
+	RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
+	RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
@@ -256,9 +257,10 @@ type worker struct {
 
 	busFlushInterval time.Duration
 
-	interactionsMu         sync.Mutex
-	interactions           []hostdb.Interaction
-	interactionsFlushTimer *time.Timer
+	interactionsMu                sync.Mutex
+	interactionsScans             []hostdb.HostScan
+	interactionsPriceTableUpdates []hostdb.PriceTableUpdate
+	interactionsFlushTimer        *time.Timer
 
 	contractSpendingRecorder *contractSpendingRecorder
 	contractLockingDuration  time.Duration
@@ -275,7 +277,7 @@ func dial(ctx context.Context, hostIP string) (net.Conn, error) {
 func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
 	var mr ephemeralMetricsRecorder
 	defer func() {
-		w.recordInteractions(mr.interactions())
+		// TODO record metrics
 	}()
 	ctx = metrics.WithRecorder(ctx, &mr)
 	conn, err := dial(ctx, hostIP)
@@ -372,9 +374,18 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	}
 
 	// record scan
-	var mr ephemeralMetricsRecorder
-	recordScan(&mr, elapsed, rsr.HostIP, rsr.HostKey, priceTable, settings, err)
-	w.recordInteractions(mr.interactions())
+	err = w.bus.RecordHostScans(jc.Request.Context(), []hostdb.HostScan{{
+		HostKey:    rsr.HostKey,
+		Success:    err == nil,
+		Timestamp:  time.Now(),
+		Settings:   settings,
+		PriceTable: priceTable,
+	}})
+	if jc.Check("failed to record scan", err) != nil {
+		return
+	}
+
+	// TODO: record metric
 
 	jc.Encode(api.RHPScanResponse{
 		Ping:      api.ParamDuration(elapsed),
@@ -548,8 +559,15 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 		return
 	}
 
-	// Fetch contract from bus.
+	// Acquire lock before fetching revision.
 	ctx := jc.Request.Context()
+	unlocker, err := w.acquireRevision(ctx, fcid, lockingPriorityActiveContractRevision)
+	if jc.Check("could not acquire revision lock", err) != nil {
+		return
+	}
+	defer unlocker.Release(ctx)
+
+	// Fetch contract from bus.
 	c, err := w.bus.Contract(ctx, fcid)
 	if jc.Check("could not get contract", err) != nil {
 		return

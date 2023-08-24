@@ -10,6 +10,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 )
 
@@ -161,6 +162,14 @@ type ContractsPrunableDataResponse struct {
 type ContractPrunableData struct {
 	ID types.FileContractID `json:"id"`
 	ContractSize
+}
+
+type HostsScanRequest struct {
+	Scans []hostdb.HostScan `json:"scans"`
+}
+
+type HostsPriceTablesRequest struct {
+	PriceTableUpdates []hostdb.PriceTableUpdate `json:"priceTableUpdates"`
 }
 
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.
