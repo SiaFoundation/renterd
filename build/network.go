@@ -10,7 +10,14 @@ import (
 
 // Network returns the Sia network consts and genesis block for the current build.
 func Network() (*consensus.Network, types.Block) {
-	return chain.Mainnet()
+	switch network {
+	case "mainnet":
+		return chain.Mainnet()
+	case "zen":
+		return chain.TestnetZen()
+	default:
+		panic("unknown network: " + network)
+	}
 }
 
 func NetworkName() string {

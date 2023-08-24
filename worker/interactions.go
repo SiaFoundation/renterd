@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -24,12 +23,13 @@ func errToStr(err error) string {
 
 // recordInteractions adds some interactions to the worker's interaction buffer
 // which is periodically flushed to the bus.
-func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
+func (w *worker) recordInteractions(scans []hostdb.HostScan, priceTableUpdates []hostdb.PriceTableUpdate) {
 	w.interactionsMu.Lock()
 	defer w.interactionsMu.Unlock()
 
 	// Append interactions to buffer.
-	w.interactions = append(w.interactions, interactions...)
+	w.interactionsScans = append(w.interactionsScans, scans...)
+	w.interactionsPriceTableUpdates = append(w.interactionsPriceTableUpdates, priceTableUpdates...)
 
 	// If a thread was scheduled to flush the buffer we are done.
 	if w.interactionsFlushTimer != nil {
@@ -45,13 +45,22 @@ func (w *worker) recordInteractions(interactions []hostdb.Interaction) {
 
 // flushInteractions flushes the worker's interaction buffer to the bus.
 func (w *worker) flushInteractions() {
-	if len(w.interactions) > 0 {
-		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushInteractions")
+	if len(w.interactionsScans) > 0 {
+		ctx, span := tracing.Tracer.Start(context.Background(), "worker: recordHostScans")
 		defer span.End()
-		if err := w.bus.RecordInteractions(ctx, w.interactions); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to record interactions: %v", err))
+		if err := w.bus.RecordHostScans(ctx, w.interactionsScans); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to record scans: %v", err))
 		} else {
-			w.interactions = nil
+			w.interactionsScans = nil
+		}
+	}
+	if len(w.interactionsPriceTableUpdates) > 0 {
+		ctx, span := tracing.Tracer.Start(context.Background(), "worker: recordPriceTableUpdates")
+		defer span.End()
+		if err := w.bus.RecordPriceTables(ctx, w.interactionsPriceTableUpdates); err != nil {
+			w.logger.Errorw(fmt.Sprintf("failed to record price table updates: %v", err))
+		} else {
+			w.interactionsPriceTableUpdates = nil
 		}
 	}
 	w.interactionsFlushTimer = nil
@@ -75,21 +84,6 @@ func recordPriceTableUpdate(ctx context.Context, siamuxAddr string, hostKey type
 	}
 }
 
-// recordScan records a scan metric.
-func recordScan(mr metrics.MetricsRecorder, elapsed time.Duration, hostIP string, hostKey types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings, err error) {
-	mr.RecordMetric(MetricHostScan{
-		metricCommon: metricCommon{
-			address:   hostIP,
-			hostKey:   hostKey,
-			timestamp: time.Now(),
-			elapsed:   elapsed,
-			err:       err,
-		},
-		pt:       pt,
-		settings: settings,
-	})
-}
-
 // ephemeralMetricsRecorder can be used to record metrics in memory.
 type ephemeralMetricsRecorder struct {
 	ms []metrics.Metric
@@ -102,9 +96,9 @@ func (mr *ephemeralMetricsRecorder) RecordMetric(m metrics.Metric) {
 	mr.ms = append(mr.ms, m)
 }
 
-func (mr *ephemeralMetricsRecorder) interactions() []hostdb.Interaction {
+func (mr *ephemeralMetricsRecorder) interactions() []any {
 	// TODO: merge/filter metrics?
-	var his []hostdb.Interaction
+	var his []any
 	mr.mu.Lock()
 	defer mr.mu.Unlock()
 	for _, m := range mr.ms {
@@ -205,13 +199,6 @@ func isSuccessfulInteraction(err error) bool {
 	return false
 }
 
-func metricToInteraction(m metrics.Metric) hostdb.Interaction {
-	res, _ := json.Marshal(m.Result())
-	return hostdb.Interaction{
-		Host:      m.HostKey(),
-		Result:    res,
-		Success:   m.IsSuccess(),
-		Timestamp: m.Timestamp(),
-		Type:      m.Type(),
-	}
+func metricToInteraction(m metrics.Metric) any {
+	return nil
 }
