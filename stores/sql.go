@@ -403,15 +403,11 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	abortRetry := func(err error) bool {
-		if err == nil {
-			return true
-		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			return true
-		} else if errors.Is(err, api.ErrObjectNotFound) {
-			return true
-		} else if errors.Is(err, api.ErrObjectCorrupted) {
-			return true
-		} else if errors.Is(err, api.ErrContractNotFound) {
+		if err == nil ||
+			errors.Is(err, gorm.ErrRecordNotFound) ||
+			errors.Is(err, api.ErrObjectNotFound) ||
+			errors.Is(err, api.ErrObjectCorrupted) ||
+			errors.Is(err, api.ErrContractNotFound) {
 			return true
 		}
 		return false

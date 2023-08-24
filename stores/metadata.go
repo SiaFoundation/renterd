@@ -1065,7 +1065,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 
 		// We have a buffer. Sanity check it.
 		if buffer.Size >= int64(slabSize) {
-			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
+			return fmt.Errorf("incomplete buffer with ID %v has no space left", buffer.ID)
 		}
 
 		var key object.EncryptionKey

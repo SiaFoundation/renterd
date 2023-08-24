@@ -1047,8 +1047,8 @@ func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("length", &length) != nil {
 		return
 	}
-	if length == 0 {
-		jc.Error(fmt.Errorf("length must be non-zero"), http.StatusBadRequest)
+	if length <= 0 || offset < 0 {
+		jc.Error(fmt.Errorf("length must be positive and offset must be non-negative"), http.StatusBadRequest)
 		return
 	}
 	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
@@ -1075,8 +1075,12 @@ func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 	if jc.DecodeForm("contractSet", &contractSet) != nil {
 		return
 	}
-	if minShards == 0 || totalShards == 0 {
-		jc.Error(fmt.Errorf("min_shards and total_shards must be non-zero"), http.StatusBadRequest)
+	if minShards <= 0 || totalShards <= minShards {
+		jc.Error(errors.New("min_shards must be positive and total_shards must be greater than min_shards"), http.StatusBadRequest)
+		return
+	}
+	if totalShards > math.MaxUint8 {
+		jc.Error(fmt.Errorf("total_shards must be less than or equal to %d", math.MaxUint8), http.StatusBadRequest)
 		return
 	}
 	if contractSet == "" {
