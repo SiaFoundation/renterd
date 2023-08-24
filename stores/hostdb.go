@@ -822,7 +822,7 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan
 	})
 }
 
-func (ss *SQLStore) RecordPriceTableUpdates(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
+func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
 	if len(priceTableUpdate) == 0 {
 		return nil // nothing to do
 	}

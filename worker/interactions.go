@@ -57,7 +57,7 @@ func (w *worker) flushInteractions() {
 	if len(w.interactionsPriceTableUpdates) > 0 {
 		ctx, span := tracing.Tracer.Start(context.Background(), "worker: recordPriceTableUpdates")
 		defer span.End()
-		if err := w.bus.RecordPriceTableUpdates(ctx, w.interactionsPriceTableUpdates); err != nil {
+		if err := w.bus.RecordPriceTables(ctx, w.interactionsPriceTableUpdates); err != nil {
 			w.logger.Errorw(fmt.Sprintf("failed to record price table updates: %v", err))
 		} else {
 			w.interactionsPriceTableUpdates = nil

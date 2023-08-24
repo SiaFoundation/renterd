@@ -168,7 +168,7 @@ type HostsScanRequest struct {
 	Scans []hostdb.HostScan `json:"scans"`
 }
 
-type HostsPriceTableUpdateRequest struct {
+type HostsPriceTablesRequest struct {
 	PriceTableUpdates []hostdb.PriceTableUpdate `json:"priceTableUpdates"`
 }
 
