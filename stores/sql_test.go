@@ -138,6 +138,7 @@ func TestQueryPlan(t *testing.T) {
 		// contract_sectors
 		"SELECT * FROM contract_sectors WHERE db_contract_id = 1",
 		"SELECT * FROM contract_sectors WHERE db_sector_id = 1",
+		"SELECT COUNT(DISTINCT db_sector_id) FROM contract_sectors",
 
 		// contract_set_contracts
 		"SELECT * FROM contract_set_contracts WHERE db_contract_id = 1",
