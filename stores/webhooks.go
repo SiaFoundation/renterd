@@ -10,9 +10,9 @@ type (
 	dbWebhook struct {
 		Model
 
-		Module string `gorm:"uniqueIndex:idx_url_module_event;NOT NULL"`
-		Event  string `gorm:"uniqueIndex:idx_url_module_event;NOT NULL"`
-		URL    string `gorm:"uniqueIndex:idx_url_module_event;NOT NULL"`
+		Module string `gorm:"uniqueIndex:idx_url_module_event;NOT NULL;size:255"`
+		Event  string `gorm:"uniqueIndex:idx_url_module_event;NOT NULL;size:255"`
+		URL    string `gorm:"uniqueIndex:idx_url_module_event;NOT NULL;size:255"`
 	}
 )
 
