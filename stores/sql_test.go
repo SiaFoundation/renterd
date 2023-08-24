@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -27,7 +30,8 @@ func newTestSQLStore(dir string) (*SQLStore, string, modules.ConsensusChangeID, 
 	dbName := hex.EncodeToString(frand.Bytes(32)) // random name for db
 	conn := NewEphemeralSQLiteConnection(dbName)
 	walletAddrs := types.Address(frand.Entropy256())
-	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
+	hooksMgr := webhooks.NewManager(zap.NewNop().Sugar())
+	alerts := alerts.WithOrigin(alerts.NewManager(hooksMgr), "test")
 	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, true, time.Second, walletAddrs, 0, newTestLogger())
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
@@ -108,5 +112,49 @@ func TestConsensusReset(t *testing.T) {
 		t.Fatal("wrong height", db.chainIndex.Height, 0)
 	} else if db.chainIndex.ID != (types.BlockID{}) {
 		t.Fatal("wrong id", db.chainIndex.ID, types.BlockID{})
+	}
+}
+
+type queryPlanExplain struct {
+	ID      int    `json:"id"`
+	Parent  int    `json:"parent"`
+	NotUsed bool   `json:"notused"`
+	Detail  string `json:"detail"`
+}
+
+func TestQueryPlan(t *testing.T) {
+	db, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queries := []string{
+		// allow_list
+		"SELECT * FROM host_allowlist_entry_hosts WHERE db_host_id = 1",
+		"SELECT * FROM host_allowlist_entry_hosts WHERE db_allowlist_entry_id = 1",
+
+		// block_list
+		"SELECT * FROM host_blocklist_entry_hosts WHERE db_host_id = 1",
+		"SELECT * FROM host_blocklist_entry_hosts WHERE db_blocklist_entry_id = 1",
+
+		// contract_sectors
+		"SELECT * FROM contract_sectors WHERE db_contract_id = 1",
+		"SELECT * FROM contract_sectors WHERE db_sector_id = 1",
+
+		// contract_set_contracts
+		"SELECT * FROM contract_set_contracts WHERE db_contract_id = 1",
+		"SELECT * FROM contract_set_contracts WHERE db_contract_set_id = 1",
+	}
+
+	for _, query := range queries {
+		var explain queryPlanExplain
+		err = db.db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !(strings.Contains(explain.Detail, "USING INDEX") ||
+			strings.Contains(explain.Detail, "USING COVERING INDEX")) {
+			t.Fatalf("query '%s' should use an index, instead the plan was '%s'", query, explain.Detail)
+		}
 	}
 }

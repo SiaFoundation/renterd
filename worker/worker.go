@@ -31,6 +31,7 @@ import (
 	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
@@ -134,6 +135,7 @@ type ContractLocker interface {
 type Bus interface {
 	alerts.Alerter
 	consensusState
+	webhooks.Broadcaster
 
 	AccountStore
 	ContractLocker
@@ -541,8 +543,15 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 		return
 	}
 
-	// Fetch contract from bus.
+	// Acquire lock before fetching revision.
 	ctx := jc.Request.Context()
+	unlocker, err := w.acquireRevision(ctx, fcid, lockingPriorityActiveContractRevision)
+	if jc.Check("could not acquire revision lock", err) != nil {
+		return
+	}
+	defer unlocker.Release(ctx)
+
+	// Fetch contract from bus.
 	c, err := w.bus.Contract(ctx, fcid)
 	if jc.Check("could not get contract", err) != nil {
 		return
