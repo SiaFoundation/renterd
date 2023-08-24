@@ -353,8 +353,18 @@ func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, 
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordInteractions(ctx context.Context, interactions []hostdb.Interaction) (err error) {
-	err = c.c.WithContext(ctx).POST("/hosts/interactions", interactions, nil)
+func (c *Client) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) (err error) {
+	err = c.c.WithContext(ctx).POST("/hosts/scans", api.HostsScanRequest{
+		Scans: scans,
+	}, nil)
+	return
+}
+
+// RecordHostInteraction records an interaction for the supplied host.
+func (c *Client) RecordPriceTables(ctx context.Context, priceTableUpdates []hostdb.PriceTableUpdate) (err error) {
+	err = c.c.WithContext(ctx).POST("/hosts/pricetables", api.HostsPriceTablesRequest{
+		PriceTableUpdates: priceTableUpdates,
+	}, nil)
 	return
 }
 

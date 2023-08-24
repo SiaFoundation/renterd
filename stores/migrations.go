@@ -25,7 +25,6 @@ var (
 		&dbAnnouncement{},
 		&dbConsensusInfo{},
 		&dbHost{},
-		&dbInteraction{},
 		&dbAllowlistEntry{},
 		&dbBlocklistEntry{},
 
@@ -182,9 +181,16 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Rollback: nil,
 		},
 		{
-			ID: "00009_distinctcontractsector",
+			ID: "00009_dropInteractions",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00009_distinctcontractsector(tx, logger)
+				return performMigration00009_dropInteractions(tx, logger)
+			},
+			Rollback: nil,
+		},
+		{
+			ID: "00010_distinctcontractsector",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00010_distinctcontractsector(tx, logger)
 			},
 			Rollback: nil,
 		},
@@ -562,8 +568,19 @@ func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interfa
 	return nil
 }
 
-func performMigration00009_distinctcontractsector(txn *gorm.DB, logger glogger.Interface) error {
-	logger.Info(context.Background(), "performing migration 00009_distinctcontractsector")
+func performMigration00009_dropInteractions(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00009_dropInteractions")
+	if !txn.Migrator().HasTable("host_interactions") {
+		if err := txn.Migrator().DropTable("host_interactions"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00009_dropInteractions complete")
+	return nil
+}
+
+func performMigration00010_distinctcontractsector(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00010_distinctcontractsector")
 
 	if !txn.Migrator().HasIndex(&dbContractSector{}, "DBSectorID") {
 		if err := txn.Migrator().CreateIndex(&dbContractSector{}, "DBSectorID"); err != nil {
@@ -571,6 +588,6 @@ func performMigration00009_distinctcontractsector(txn *gorm.DB, logger glogger.I
 		}
 	}
 
-	logger.Info(context.Background(), "migration 00009_distinctcontractsector complete")
+	logger.Info(context.Background(), "migration 00010_distinctcontractsector complete")
 	return nil
 }
