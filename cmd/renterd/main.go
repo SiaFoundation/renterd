@@ -127,20 +127,23 @@ func mustLoadAPIPassword() {
 	cfg.HTTP.Password = string(pw)
 }
 
-func mustLoadRecoveryPhrase() {
-	phrase := cfg.Seed
-	if len(phrase) == 0 {
-		fmt.Print("Enter seed: ")
-		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-		check("Could not read seed phrase:", err)
-		fmt.Println()
-		phrase = string(pw)
+func getSeed() types.PrivateKey {
+	if seed == nil {
+		phrase := cfg.Seed
+		if phrase == "" {
+			fmt.Print("Enter seed: ")
+			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			check("Could not read seed phrase:", err)
+			fmt.Println()
+			phrase = string(pw)
+		}
+		key, err := wallet.KeyFromPhrase(phrase)
+		if err != nil {
+			log.Fatal(err)
+		}
+		seed = key
 	}
-	key, err := wallet.KeyFromPhrase(phrase)
-	if err != nil {
-		log.Fatal(err)
-	}
-	seed = key
+	return seed
 }
 
 func mustParseWorkers(workers, password string) {
@@ -327,7 +330,6 @@ func main() {
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
 
 	mustLoadAPIPassword()
-	mustLoadRecoveryPhrase()
 	mustParseWorkers(workerRemoteAddrsStr, workerRemotePassStr)
 
 	network, _ := build.Network()
@@ -419,7 +421,7 @@ func main() {
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, seed, logger)
+		b, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
 		if err != nil {
 			log.Fatal("failed to create bus, err: ", err)
 		}
@@ -439,7 +441,7 @@ func main() {
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, shutdownFn, err := node.NewWorker(cfg.Worker, bc, seed, logger)
+			w, shutdownFn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
 			if err != nil {
 				log.Fatal("failed to create worker", err)
 			}
