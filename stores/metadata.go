@@ -21,6 +21,13 @@ import (
 	"lukechampine.com/frand"
 )
 
+const (
+	// refreshHealthBatchSize is the number of slabs for which we update the
+	// health per db transaction. 10000 equals roughtly 1.2TiB of slabs at a
+	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
+	refreshHealthBatchSize = 10000
+)
+
 type (
 	dbArchivedContract struct {
 		Model
@@ -1433,7 +1440,17 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 }
 
 func (s *SQLStore) RefreshHealth(ctx context.Context) error {
-	healthQuery := s.db.Raw(`
+	var nSlabs int64
+	if err := s.db.Model(&dbSlab{}).Count(&nSlabs).Error; err != nil {
+		return err
+	}
+	if nSlabs == 0 {
+		return nil // nothing to do
+	}
+
+	// Update slab health in batches.
+	for {
+		healthQuery := s.db.Raw(`
 SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 THEN
     CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
@@ -1450,14 +1467,28 @@ LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_con
 LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
 WHERE slabs.health_valid = 0
 GROUP BY slabs.id
-`)
-	return s.retryTransaction(func(tx *gorm.DB) error {
-		if isSQLite(s.db) {
-			return s.db.Exec("UPDATE slabs SET health = COALESCE((SELECT health FROM (?) WHERE slabs.id = id), 1), health_valid = 1 WHERE health_valid = 0", healthQuery).Error
-		} else {
-			return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid = 1 WHERE health_valid = 0", healthQuery).Error
+LIMIT ?
+`, refreshHealthBatchSize)
+		var rowsAffected int64
+		err := s.retryTransaction(func(tx *gorm.DB) error {
+			if isSQLite(s.db) {
+				return s.db.Exec("UPDATE slabs SET health = (SELECT health FROM (?) WHERE slabs.id = id), health_valid = 1 WHERE health_valid = 0", healthQuery).Error
+			} else {
+				return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery).Error
+			}
+		})
+		if err != nil {
+			return err
 		}
-	})
+		if rowsAffected == 0 {
+			return nil // done
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
 }
 
 // UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
