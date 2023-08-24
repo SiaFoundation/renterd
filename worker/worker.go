@@ -540,20 +540,20 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 		return
 	}
 
-	// Fetch contract from bus.
-	ctx := jc.Request.Context()
-	c, err := w.bus.Contract(ctx, fcid)
-	if jc.Check("could not get contract", err) != nil {
-		return
-	}
-	rk := w.deriveRenterKey(c.HostKey)
-
 	// Acquire lock before fetching revision.
+	ctx := jc.Request.Context()
 	unlocker, err := w.acquireRevision(ctx, fcid, lockingPriorityActiveContractRevision)
 	if jc.Check("could not acquire revision lock", err) != nil {
 		return
 	}
 	defer unlocker.Release(ctx)
+
+	// Fetch contract from bus.
+	c, err := w.bus.Contract(ctx, fcid)
+	if jc.Check("could not get contract", err) != nil {
+		return
+	}
+	rk := w.deriveRenterKey(c.HostKey)
 
 	rev, err := w.FetchSignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
 	if jc.Check("could not fetch revision", err) != nil {
