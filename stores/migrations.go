@@ -185,6 +185,14 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00009_dropInteractions(tx, logger)
 			},
+			Rollback: nil,
+		},
+		{
+			ID: "00010_distinctcontractsector",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00010_distinctcontractsector(tx, logger)
+			},
+			Rollback: nil,
 		},
 	}
 
@@ -568,5 +576,18 @@ func performMigration00009_dropInteractions(txn *gorm.DB, logger glogger.Interfa
 		}
 	}
 	logger.Info(context.Background(), "migration 00009_dropInteractions complete")
+	return nil
+}
+
+func performMigration00010_distinctcontractsector(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00010_distinctcontractsector")
+
+	if !txn.Migrator().HasIndex(&dbContractSector{}, "DBSectorID") {
+		if err := txn.Migrator().CreateIndex(&dbContractSector{}, "DBSectorID"); err != nil {
+			return fmt.Errorf("failed to create index on column 'DBSectorID' of table 'contract_sectors': %w", err)
+		}
+	}
+
+	logger.Info(context.Background(), "migration 00010_distinctcontractsector complete")
 	return nil
 }
