@@ -209,13 +209,16 @@ func main() {
 	// TODO: the following flags will be deprecated in v1.0.0 in favor of
 	// environment variables to ensure we do not ask the user to pass sensitive
 	// information via CLI parameters.
-	var workerRemoteAddrsStr string
-	var workerRemotePassStr string
-	flag.StringVar(&cfg.Database.MySQL.Password, "db.password", cfg.Database.MySQL.Password, "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
-	flag.StringVar(&cfg.Bus.RemotePassword, "bus.apiPassword", cfg.Bus.RemotePassword, "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
-	flag.StringVar(&cfg.Bus.RemoteAddr, "bus.remoteAddr", cfg.Bus.RemoteAddr, "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
-	flag.StringVar(&workerRemotePassStr, "worker.apiPassword", workerRemotePassStr, "[DEPRECATED] API password for remote worker service")
-	flag.StringVar(&workerRemoteAddrsStr, "worker.remoteAddrs", "", "[DEPRECATED] URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
+	var depDBPassword string
+	var depBusRemotePassword string
+	var depBusRemoteAddr string
+	var depWorkerRemotePassStr string
+	var depWorkerRemoteAddrsStr string
+	flag.StringVar(&depDBPassword, "db.password", "", "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
+	flag.StringVar(&depBusRemotePassword, "bus.apiPassword", "", "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
+	flag.StringVar(&depBusRemoteAddr, "bus.remoteAddr", "", "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
+	flag.StringVar(&depWorkerRemotePassStr, "worker.apiPassword", "", "[DEPRECATED] API password for remote worker service")
+	flag.StringVar(&depWorkerRemoteAddrsStr, "worker.remoteAddrs", "", "[DEPRECATED] URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
 
 	for _, flag := range []struct {
 		input    string
@@ -223,11 +226,11 @@ func main() {
 		env      string
 		insecure bool
 	}{
-		{cfg.Database.MySQL.Password, "db.password", "RENTERD_DB_PASSWORD", true},
-		{cfg.Bus.RemotePassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
-		{cfg.Bus.RemoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
-		{workerRemotePassStr, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
-		{workerRemoteAddrsStr, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
+		{depDBPassword, "db.password", "RENTERD_DB_PASSWORD", true},
+		{depBusRemotePassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
+		{depBusRemoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
+		{depWorkerRemotePassStr, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
+		{depWorkerRemoteAddrsStr, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
 	} {
 		if flag.input != "" {
 			if flag.insecure {
@@ -236,6 +239,16 @@ func main() {
 				log.Printf("WARNING: CLI flag '%s' will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
 			}
 		}
+	}
+
+	if depDBPassword != "" {
+		cfg.Database.MySQL.Password = depDBPassword
+	}
+	if depBusRemotePassword != "" {
+		cfg.Bus.RemotePassword = depBusRemotePassword
+	}
+	if depBusRemoteAddr != "" {
+		cfg.Bus.RemoteAddr = depBusRemoteAddr
 	}
 
 	// node
@@ -319,8 +332,8 @@ func main() {
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
 
-	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
-	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
+	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &depWorkerRemoteAddrsStr)
+	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &depWorkerRemotePassStr)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
@@ -330,7 +343,9 @@ func main() {
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
 
 	mustLoadAPIPassword()
-	mustParseWorkers(workerRemoteAddrsStr, workerRemotePassStr)
+	if depWorkerRemoteAddrsStr != "" && depWorkerRemotePassStr != "" {
+		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
+	}
 
 	network, _ := build.Network()
 	busCfg := node.BusConfig{
