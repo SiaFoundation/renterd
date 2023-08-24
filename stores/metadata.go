@@ -139,7 +139,7 @@ type (
 
 	// dbContractSector is a join table between dbContract and dbSector.
 	dbContractSector struct {
-		DBSectorID   uint `gorm:"primaryKey;"`
+		DBSectorID   uint `gorm:"primaryKey;index"`
 		DBContractID uint `gorm:"primaryKey;index"`
 	}
 

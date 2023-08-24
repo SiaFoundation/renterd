@@ -65,6 +65,15 @@ const (
 	// table from the host
 	timeoutHostPriceTable = 30 * time.Second
 
+	// timeoutHostRevision is the amount of time we wait for the broadcast of a
+	// revision to succeed.
+	timeoutBroadcastRevision = time.Minute
+
+	// broadcastRevisionRetriesPerInterval is the number of chances we give a
+	// contract that fails to broadcst to be broadcasted again within a single
+	// contract broadcast interval.
+	broadcastRevisionRetriesPerInterval = 5
+
 	// timeoutHostRevision is the amount of time we wait to receive the latest
 	// revision from the host. This is set to 4 minutes since siad currently
 	// blocks for 3 minutes when trying to fetch a revision and not having
@@ -181,7 +190,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
 
 	// run revision broadcast
-	c.runRevisionBroadcast(ctx, w, contracts, currentSet)
+	c.runRevisionBroadcast(ctx, w, contracts, isInCurrentSet)
 
 	// sort contracts by their size
 	sort.Slice(contracts, func(i, j int) bool {
@@ -865,7 +874,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 // contracts. Since we are migrating away from all contracts not in the set and
 // are not uploading to those contracts anyway, we only worry about contracts in
 // the set.
-func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allContracts []api.Contract, setContracts []api.ContractMetadata) {
+func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allContracts []api.Contract, isInSet map[types.FileContractID]struct{}) {
 	if c.revisionBroadcastInterval == 0 {
 		return // not enabled
 	}
@@ -878,19 +887,30 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 	bh := cs.BlockHeight
 
 	successful, failed := 0, 0
-	for _, contract := range setContracts {
+	for _, contract := range allContracts {
 		// check whether broadcasting is necessary
 		timeSinceRevisionHeight := targetBlockTime * time.Duration(bh-contract.RevisionHeight)
 		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
-		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval {
+		_, inSet := isInSet[contract.ID]
+		if !inSet || contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval/broadcastRevisionRetriesPerInterval {
 			continue // nothing to do
 		}
 
 		// remember that we tried to broadcast this contract now
 		c.revisionLastBroadcast[contract.ID] = time.Now()
 
+		// ignore contracts for which we weren't able to obtain a revision
+		if contract.Revision == nil {
+			c.logger.Warnw("failed to broadcast contract revision: failed to fetch revision",
+				"hk", contract.HostKey,
+				"fcid", contract.ID)
+			continue
+		}
+
 		// broadcast revision
+		ctx, cancel := context.WithTimeout(ctx, timeoutBroadcastRevision)
 		err := w.RHPBroadcast(ctx, contract.ID)
+		cancel()
 		if err != nil && strings.Contains(err.Error(), "transaction has a file contract with an outdated revision number") {
 			continue // don't log - revision was already broadcasted
 		} else if err != nil {

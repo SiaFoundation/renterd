@@ -185,11 +185,19 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00009_dropInteractions(tx, logger)
 			},
+			Rollback: nil,
 		},
 		{
-			ID: "00010_healthValidColumn",
+			ID: "00010_distinctcontractsector",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00010_healthValidColumn(tx, logger)
+				return performMigration00010_distinctcontractsector(tx, logger)
+			},
+			Rollback: nil,
+		},
+		{
+			ID: "00011_healthValidColumn",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00011_healthValidColumn(tx, logger)
 			},
 		},
 	}
@@ -577,13 +585,26 @@ func performMigration00009_dropInteractions(txn *gorm.DB, logger glogger.Interfa
 	return nil
 }
 
-func performMigration00010_healthValidColumn(txn *gorm.DB, logger glogger.Interface) error {
-	logger.Info(context.Background(), "performing migration 00010_healthValidColumn")
+func performMigration00010_distinctcontractsector(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00010_distinctcontractsector")
+
+	if !txn.Migrator().HasIndex(&dbContractSector{}, "DBSectorID") {
+		if err := txn.Migrator().CreateIndex(&dbContractSector{}, "DBSectorID"); err != nil {
+			return fmt.Errorf("failed to create index on column 'DBSectorID' of table 'contract_sectors': %w", err)
+		}
+	}
+
+	logger.Info(context.Background(), "migration 00010_distinctcontractsector complete")
+	return nil
+}
+
+func performMigration00011_healthValidColumn(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00011_healthValidColumn")
 	if !txn.Migrator().HasColumn(&dbSlab{}, "HealthValid") {
 		if err := txn.Migrator().AddColumn(&dbSlab{}, "HealthValid"); err != nil {
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00010_healthValidColumn complete")
+	logger.Info(context.Background(), "migration 00011_healthValidColumn complete")
 	return nil
 }
