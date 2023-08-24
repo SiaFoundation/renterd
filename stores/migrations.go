@@ -25,7 +25,6 @@ var (
 		&dbAnnouncement{},
 		&dbConsensusInfo{},
 		&dbHost{},
-		&dbInteraction{},
 		&dbAllowlistEntry{},
 		&dbBlocklistEntry{},
 
@@ -180,6 +179,12 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 				return performMigration00008_jointableindices(tx, logger)
 			},
 			Rollback: nil,
+		},
+		{
+			ID: "00009_dropInteractions",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00009_dropInteractions(tx, logger)
+			},
 		},
 	}
 
@@ -552,5 +557,16 @@ func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interfa
 	}
 
 	logger.Info(context.Background(), "migration 00008_jointableindices complete")
+	return nil
+}
+
+func performMigration00009_dropInteractions(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00009_dropInteractions")
+	if !txn.Migrator().HasTable("host_interactions") {
+		if err := txn.Migrator().DropTable("host_interactions"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00009_dropInteractions complete")
 	return nil
 }
