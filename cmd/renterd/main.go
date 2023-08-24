@@ -150,6 +150,8 @@ func mustParseWorkers(workers, password string) {
 	// if the CLI flag/environment variable is set, overwrite the config file
 	cfg.Worker.Remotes = cfg.Worker.Remotes[:0]
 	for _, addr := range strings.Split(workers, ";") {
+		// note: duplicates the old behavior of all workers sharing the same
+		// password
 		cfg.Worker.Remotes = append(cfg.Worker.Remotes, config.RemoteWorker{
 			Address:  addr,
 			Password: password,
@@ -157,10 +159,10 @@ func mustParseWorkers(workers, password string) {
 	}
 }
 
-// mustLoadConfig loads the config file specified by the RENTERD_CONFIG_FILE
+// tryLoadConfig loads the config file specified by the RENTERD_CONFIG_FILE
 // environment variable. If the config file does not exist, it will not be
 // loaded.
-func mustLoadConfig() {
+func tryLoadConfig() {
 	configPath := "renterd.yml"
 	if str := os.Getenv("RENTERD_CONFIG_FILE"); len(str) != 0 {
 		configPath = str
@@ -199,18 +201,13 @@ func main() {
 
 	// load the YAML config first. CLI flags and environment variables will
 	// overwrite anything set in the config file.
-	mustLoadConfig()
+	tryLoadConfig()
 
 	// TODO: the following flags will be deprecated in v1.0.0 in favor of
 	// environment variables to ensure we do not ask the user to pass sensitive
 	// information via CLI parameters.
 	var workerRemoteAddrsStr string
 	var workerRemotePassStr string
-	if len(cfg.Worker.Remotes) > 0 {
-		// note: duplicates the old behavior of all CLI workers sharing the same
-		// password
-		workerRemotePassStr = cfg.Worker.Remotes[0].Password
-	}
 	flag.StringVar(&cfg.Database.MySQL.Password, "db.password", cfg.Database.MySQL.Password, "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
 	flag.StringVar(&cfg.Bus.RemotePassword, "bus.apiPassword", cfg.Bus.RemotePassword, "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
 	flag.StringVar(&cfg.Bus.RemoteAddr, "bus.remoteAddr", cfg.Bus.RemoteAddr, "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
@@ -380,7 +377,7 @@ func main() {
 		shutdownFns = append(shutdownFns, shutdownFn)
 	}
 
-	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) == 0 && !cfg.Autopilot.Enabled {
+	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
 		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
 	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
