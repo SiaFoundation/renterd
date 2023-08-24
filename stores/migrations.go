@@ -194,6 +194,12 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID: "00011_healthValidColumn",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00011_healthValidColumn(tx, logger)
+			},
+		},
 	}
 
 	// Create migrator.
@@ -589,5 +595,16 @@ func performMigration00010_distinctcontractsector(txn *gorm.DB, logger glogger.I
 	}
 
 	logger.Info(context.Background(), "migration 00010_distinctcontractsector complete")
+	return nil
+}
+
+func performMigration00011_healthValidColumn(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00011_healthValidColumn")
+	if !txn.Migrator().HasColumn(&dbSlab{}, "HealthValid") {
+		if err := txn.Migrator().AddColumn(&dbSlab{}, "HealthValid"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00011_healthValidColumn complete")
 	return nil
 }
