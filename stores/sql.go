@@ -414,9 +414,6 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		return false
 	}
 	var err error
-	if false {
-		panic("trigger git conflict to add ErrRecordExists to exception")
-	}
 	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second}
 	for i := 0; i < len(timeoutIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)

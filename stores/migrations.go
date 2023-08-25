@@ -41,7 +41,7 @@ var (
 		// bus.AutopilotStore tables
 		&dbAutopilot{},
 
-		// webhooks.Store tables
+		// webhooks.WebhookStore tables
 		&dbWebhook{},
 	}
 )
