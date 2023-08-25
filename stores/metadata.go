@@ -1480,7 +1480,7 @@ LIMIT ?
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
 			if isSQLite(s.db) {
-				return s.db.Exec("UPDATE slabs SET health = (SELECT health FROM (?) WHERE slabs.id = id), health_valid = 1 WHERE health_valid = 0", healthQuery).Error
+				return s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery).Error
 			} else {
 				return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery).Error
 			}
