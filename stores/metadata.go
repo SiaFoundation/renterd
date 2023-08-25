@@ -21,6 +21,13 @@ import (
 	"lukechampine.com/frand"
 )
 
+const (
+	// refreshHealthBatchSize is the number of slabs for which we update the
+	// health per db transaction. 10000 equals roughtly 1.2TiB of slabs at a
+	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
+	refreshHealthBatchSize = 10000
+)
+
 type (
 	dbArchivedContract struct {
 		Model
@@ -99,7 +106,8 @@ type (
 		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
-		Health      float64 `gorm:"index; default:1.0; NOT NULL"`
+		Health      float64 `gorm:"index;default:1.0; NOT NULL"`
+		HealthValid bool    `gorm:"index;default:0;NOT NULL"`
 		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards   uint8   `gorm:"index"`
 		TotalShards uint8   `gorm:"index"`
@@ -131,7 +139,7 @@ type (
 
 	// dbContractSector is a join table between dbContract and dbSector.
 	dbContractSector struct {
-		DBSectorID   uint `gorm:"primaryKey;"`
+		DBSectorID   uint `gorm:"primaryKey;index"`
 		DBContractID uint `gorm:"primaryKey;index"`
 	}
 
@@ -740,12 +748,25 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	}
 
 	return s.retryTransaction(func(tx *gorm.DB) error {
-		// fetch contracts
-		var dbContracts []dbContract
+		// fetch current contracts
+		var dbCurrentContracts []fileContractID
 		err := tx.
 			Model(&dbContract{}).
+			Select("contracts.fcid").
+			Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+			Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", name).
+			Group("contracts.fcid").
+			Scan(&dbCurrentContracts).
+			Error
+		if err != nil {
+			return err
+		}
+		// fetch new contracts
+		var dbNewContracts []dbContract
+		err = tx.
+			Model(&dbContract{}).
 			Where("fcid IN (?)", fcids).
-			Find(&dbContracts).
+			Find(&dbNewContracts).
 			Error
 		if err != nil {
 			return err
@@ -761,8 +782,35 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 			return err
 		}
 
+		// invalidate the health on all slab which are affected by this change
+		currentMap := make(map[fileContractID]struct{})
+		for _, fcid := range dbCurrentContracts {
+			currentMap[fcid] = struct{}{}
+		}
+		newMap := make(map[fileContractID]struct{})
+		for _, c := range dbNewContracts {
+			newMap[c.FCID] = struct{}{}
+		}
+		for _, c := range dbNewContracts {
+			delete(currentMap, c.FCID)
+		}
+		for _, fcid := range dbCurrentContracts {
+			delete(newMap, fcid)
+		}
+		diff := make([]fileContractID, 0, len(currentMap)+len(newMap))
+		for fcid := range currentMap {
+			diff = append(diff, fcid)
+		}
+		for fcid := range newMap {
+			diff = append(diff, fcid)
+		}
+		err = invalidateSlabHealthByFCID(tx, diff)
+		if err != nil {
+			return err
+		}
+
 		// update contracts
-		return tx.Model(&contractset).Association("Contracts").Replace(&dbContracts)
+		return tx.Model(&contractset).Association("Contracts").Replace(&dbNewContracts)
 	})
 }
 
@@ -1364,6 +1412,11 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			return err
 		}
 
+		// invalidate health
+		if err := tx.Model(&slab).Where(&slab).Update("health_valid", false).Error; err != nil {
+			return err
+		}
+
 		// loop updated shards
 		for _, shard := range s.Shards {
 			// ensure the sector exists
@@ -1395,7 +1448,17 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 }
 
 func (s *SQLStore) RefreshHealth(ctx context.Context) error {
-	healthQuery := s.db.Raw(`
+	var nSlabs int64
+	if err := s.db.Model(&dbSlab{}).Count(&nSlabs).Error; err != nil {
+		return err
+	}
+	if nSlabs == 0 {
+		return nil // nothing to do
+	}
+
+	// Update slab health in batches.
+	for {
+		healthQuery := s.db.Raw(`
 SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 THEN
     CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
@@ -1410,15 +1473,30 @@ LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
 LEFT JOIN contracts c ON se.db_contract_id = c.id
 LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
 LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+WHERE slabs.health_valid = 0
 GROUP BY slabs.id
-`)
-	return s.retryTransaction(func(tx *gorm.DB) error {
-		if isSQLite(s.db) {
-			return s.db.Exec("UPDATE slabs SET health = COALESCE((SELECT health FROM (?) WHERE slabs.id = id), 1)", healthQuery).Error
-		} else {
-			return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health", healthQuery).Error
+LIMIT ?
+`, refreshHealthBatchSize)
+		var rowsAffected int64
+		err := s.retryTransaction(func(tx *gorm.DB) error {
+			if isSQLite(s.db) {
+				return s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery).Error
+			} else {
+				return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery).Error
+			}
+		})
+		if err != nil {
+			return err
 		}
-	})
+		if rowsAffected == 0 {
+			return nil // done
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
 }
 
 // UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
@@ -1800,6 +1878,15 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 //
 // NOTE: this function archives the contracts without setting a renewed ID
 func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
+	var toInvalidate []fileContractID
+	for _, contract := range contracts {
+		toInvalidate = append(toInvalidate, contract.FCID)
+	}
+	// Invalidate the health on the slabs before deleting the contracts to avoid
+	// breaking the relations beforehand.
+	if err := invalidateSlabHealthByFCID(tx, toInvalidate); err != nil {
+		return fmt.Errorf("invalidating slab health failed: %w", err)
+	}
 	for _, contract := range contracts {
 		// sanity check the host is populated
 		if contract.Host.ID == 0 {
@@ -1825,7 +1912,9 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
 		}
 	}
-	return nil
+
+	// invalidate the slab health for affected slabs
+	return invalidateSlabHealthByFCID(tx, toInvalidate)
 }
 
 // deleteObject deletes an object from the store and prunes all slabs which are
@@ -1856,4 +1945,20 @@ func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 		return 0, err
 	}
 	return
+}
+
+func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
+	return tx.Exec(`
+UPDATE slabs SET health_valid = 0 WHERE id in (
+	SELECT *
+	FROM (
+		SELECT slabs.id
+		FROM slabs
+		LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+		LEFT JOIN contracts c ON c.id = cs.db_contract_id
+		WHERE health_valid = 1 AND c.fcid IN (?)
+	) slab_ids
+)
+		`, fcids).Error
 }
