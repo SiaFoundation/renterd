@@ -20,7 +20,7 @@ func (dbWebhook) TableName() string {
 	return "webhooks"
 }
 
-func (s *SQLStore) DeleteHook(wb webhooks.Webhook) error {
+func (s *SQLStore) DeleteWebhook(wb webhooks.Webhook) error {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		res := tx.Exec("DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?",
 			wb.Module, wb.Event, wb.URL)
@@ -33,7 +33,7 @@ func (s *SQLStore) DeleteHook(wb webhooks.Webhook) error {
 	})
 }
 
-func (s *SQLStore) AddHook(wb webhooks.Webhook) error {
+func (s *SQLStore) AddWebhook(wb webhooks.Webhook) error {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		return tx.Clauses(clause.OnConflict{
 			DoNothing: true,

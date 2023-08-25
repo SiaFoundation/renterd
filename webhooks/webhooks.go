@@ -19,8 +19,8 @@ var ErrWebhookNotFound = errors.New("Webhook not found")
 
 type (
 	WebhookStore interface {
-		DeleteHook(wh Webhook) error
-		AddHook(wh Webhook) error
+		DeleteWebhook(wh Webhook) error
+		AddWebhook(wh Webhook) error
 		Webhooks() ([]Webhook, error)
 	}
 
@@ -103,7 +103,7 @@ func (w *Manager) Register(wh Webhook) error {
 	}
 
 	// Add Webhook.
-	if err := w.store.AddHook(wh); err != nil {
+	if err := w.store.AddWebhook(wh); err != nil {
 		return err
 	}
 	w.mu.Lock()
@@ -115,7 +115,7 @@ func (w *Manager) Register(wh Webhook) error {
 func (w *Manager) Delete(wh Webhook) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if err := w.store.DeleteHook(wh); errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := w.store.DeleteWebhook(wh); errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrWebhookNotFound
 	} else if err != nil {
 		return err

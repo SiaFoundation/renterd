@@ -22,14 +22,14 @@ type testWebhookStore struct {
 	listed  int
 }
 
-func (s *testWebhookStore) DeleteHook(wb webhooks.Webhook) error {
+func (s *testWebhookStore) DeleteWebhook(wb webhooks.Webhook) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deleted++
 	return nil
 }
 
-func (s *testWebhookStore) AddHook(wb webhooks.Webhook) error {
+func (s *testWebhookStore) AddWebhook(wb webhooks.Webhook) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.added++
