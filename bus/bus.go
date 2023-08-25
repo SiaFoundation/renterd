@@ -1719,7 +1719,14 @@ func (b *bus) Handler() http.Handler {
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	b.hooks.Close()
-	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
+	accounts := b.accounts.ToPersist()
+	err := b.eas.SaveAccounts(ctx, accounts)
+	if err != nil {
+		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
+	} else {
+		b.logger.Info("successfully saved %v accounts", len(accounts))
+	}
+	return err
 }
 
 func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
