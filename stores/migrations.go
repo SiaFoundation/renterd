@@ -600,8 +600,8 @@ func performMigration00010_distinctcontractsector(txn *gorm.DB, logger glogger.I
 
 func performMigration00011_healthValidColumn(txn *gorm.DB, logger glogger.Interface) error {
 	logger.Info(context.Background(), "performing migration 00011_healthValidColumn")
-	if !txn.Migrator().HasColumn(&dbSlab{}, "HealthValid") {
-		if err := txn.Migrator().AddColumn(&dbSlab{}, "HealthValid"); err != nil {
+	if !txn.Migrator().HasColumn(&dbSlab{}, "health_valid") {
+		if err := txn.Migrator().AddColumn(&dbSlab{}, "health_valid"); err != nil {
 			return err
 		}
 	}
