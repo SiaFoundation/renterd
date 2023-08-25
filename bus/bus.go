@@ -1727,7 +1727,7 @@ func (b *bus) Shutdown(ctx context.Context) error {
 	} else {
 		b.logger.Info("successfully saved %v accounts", len(accounts))
 	}
-	return nil
+	return err
 }
 
 func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
