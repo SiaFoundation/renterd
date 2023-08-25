@@ -253,8 +253,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
 
-	hooksMgr := webhooks.NewManager(l.Named("webhooks").Sugar())
-	alertsMgr := alerts.NewManager(hooksMgr)
+	alertsMgr := alerts.NewManager()
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
@@ -262,6 +261,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	if err != nil {
 		return nil, nil, err
 	}
+	hooksMgr, err := webhooks.NewManager(l.Named("webhooks").Sugar(), sqlStore)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Hook up webhooks to alerts.
+	alertsMgr.RegisterWebhookBroadcaster(hooksMgr)
 
 	cancelSubscribe := make(chan struct{})
 	go func() {

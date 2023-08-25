@@ -14,10 +14,8 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -149,8 +147,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
-	hooksMgr := webhooks.NewManager(zap.NewNop().Sugar())
-	am := alerts.WithOrigin(alerts.NewManager(hooksMgr), "test")
+	am := alerts.WithOrigin(alerts.NewManager(), "test")
 	hdb2, ccid, err := NewSQLStore(conn2, am, dir, false, time.Second, types.Address{}, 0, nil)
 	if err != nil {
 		t.Fatal(err)
