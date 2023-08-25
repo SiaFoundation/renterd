@@ -686,13 +686,11 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]
 
 	if err := s.db.
 		Raw(`
-SELECT fcid, size, CASE WHEN size>bytes THEN size-bytes ELSE 0 END as prunable FROM (
-	SELECT fcid, MAX(c.size) as size, COUNT(cs.db_sector_id) * ? as bytes
-	FROM contracts c
-	LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-	GROUP BY c.fcid
-) as i
-	`, rhpv2.SectorSize).
+SELECT fcid, MAX(c.size) as size, CASE WHEN MAX(c.size)>COUNT(cs.db_sector_id) * ? THEN MAX(c.size)-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
+FROM contracts c
+LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+GROUP BY c.fcid
+	`, rhpv2.SectorSize, rhpv2.SectorSize).
 		Scan(&rows).
 		Error; err != nil {
 		return nil, err
@@ -723,13 +721,11 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (a
 
 	if err := s.db.
 		Raw(`
-SELECT size, CASE WHEN size>bytes THEN size-bytes ELSE 0 END as prunable FROM (
-    SELECT c.size, COUNT(cs.db_sector_id) * ? as bytes
-    FROM contracts c
-    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-    WHERE c.fcid = ?
-) as i
-`, rhpv2.SectorSize, fileContractID(id)).
+SELECT c.size, CASE WHEN c.size>(COUNT(cs.db_sector_id) * ?) THEN c.size-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
+FROM contracts c
+LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+WHERE c.fcid = ?
+`, rhpv2.SectorSize, rhpv2.SectorSize, fileContractID(id)).
 		Take(&size).
 		Error; err != nil {
 		return api.ContractSize{}, err
