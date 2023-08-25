@@ -73,9 +73,10 @@ type (
 
 		knownContracts map[types.FileContractID]struct{}
 
-		spendingMu     sync.Mutex
-		interactionsMu sync.Mutex
-		objectsMu      sync.Mutex
+		spendingMu      sync.Mutex
+		interactionsMu  sync.Mutex
+		objectsMu       sync.Mutex
+		bufferedSlabsMu sync.Mutex
 	}
 
 	revisionUpdate struct {

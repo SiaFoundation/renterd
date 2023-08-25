@@ -1069,6 +1069,9 @@ func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey
 }
 
 func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error) {
+	s.bufferedSlabsMu.Lock()
+	defer s.bufferedSlabsMu.Unlock()
+
 	// Sanity check input.
 	slabSize := bufferedSlabSize(minShards)
 	if minShards == 0 || totalShards == 0 || minShards > totalShards {

@@ -1798,7 +1798,7 @@ func (b *bus) Shutdown(ctx context.Context) error {
 	if err != nil {
 		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
 	} else {
-		b.logger.Info("successfully saved %v accounts", len(accounts))
+		b.logger.Infof("successfully saved %v accounts", len(accounts))
 	}
 	return err
 }
