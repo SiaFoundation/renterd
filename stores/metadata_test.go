@@ -2591,272 +2591,211 @@ func TestPartialSlab(t *testing.T) {
 		}
 	}
 
-	// create an object. It has 1 slab with 2 sectors and a partial slab.
-	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			{
-				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-						{
-							Host: hk2,
-							Root: types.Hash256{2},
-						},
-					},
-				},
-				Offset: 0,
-				Length: rhpv2.SectorSize,
-			},
-		},
-		PartialSlab: &object.PartialSlab{
-			MinShards:   1,
-			TotalShards: 2,
-			Data:        []byte{1, 2, 3, 4},
-		},
-	}
-	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, usedContracts)
+	// prepare the data for 3 partial slabs. The first one is very small. The
+	// second one almost fills a buffer except for 1 byte. The third one spans 2
+	// buffers.
+	fullSlabSize := bufferedSlabSize(1)
+	slab1Data := []byte{1, 2, 3, 4}
+	slab2Data := frand.Bytes(int(fullSlabSize) - len(slab1Data) - 1) // leave 1 byte
+	slab3Data := []byte{5, 6}                                        // 1 byte more than fits in the slab
+
+	// Add the first slab.
+	ctx := context.Background()
+	slabs, err := db.AddPartialSlab(ctx, slab1Data, 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(slabs) != 1 {
+		t.Fatal("expected 1 slab to be created", len(slabs))
+	}
+	if slabs[0].Length != uint32(len(slab1Data)) || slabs[0].Offset != 0 {
+		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	}
+	data, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, slab1Data) {
+		t.Fatal("wrong data")
 	}
 
-	// check that the object was created
-	storedObject, err := db.dbObject("key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(storedObject.Slabs) != 2 {
-		t.Fatal("expected 2 slabs to be created", len(storedObject.Slabs))
-	}
-	// check the slice
-	storedSlice := storedObject.Slabs[1]
-	if storedSlice.Offset != 0 || storedSlice.Length != uint32(len(obj.PartialSlab.Data)) {
-		t.Fatalf("wrong offset/length: %v/%v", storedSlice.Offset, storedSlice.Length)
-	}
-	// check the slab
-	var storedSlab dbSlab
-	if err := db.db.Take(&storedSlab, "id = ?", storedSlice.DBSlabID).Error; err != nil {
-		t.Fatal(err)
-	}
-	// check the buffer
 	var buffer dbBufferedSlab
-	if err := db.db.Take(&buffer, "id = ?", storedSlab.DBBufferedSlabID).Error; err != nil {
+	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[0].Key.String())).Error; err != nil {
 		t.Fatal(err)
 	}
 	if buffer.Filename == "" {
 		t.Fatal("empty filename")
 	}
-	buffer.Model = Model{}
-	expectedBuffer := dbBufferedSlab{
-		DBSlab:      dbSlab{},
-		Complete:    false,
-		Filename:    buffer.Filename, // use from buffer since it's random
-		Size:        4,
-		LockedUntil: 0,
-	}
-	if !reflect.DeepEqual(buffer, expectedBuffer) {
-		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
-	}
-	assertBuffer(buffer.Filename, 4, false, false)
+	buffer1Name := buffer.Filename
+	assertBuffer(buffer1Name, 4, false, false)
 
-	// fetch the object. This should fetch the partial slab too.
-	fullObj, err := db.Object(context.Background(), "key")
+	// Use the added partial slab to create an object.
+	testObject := func(partialSlabs []object.PartialSlab) object.Object {
+		return object.Object{
+			Key: object.GenerateEncryptionKey(),
+			Slabs: []object.SlabSlice{
+				{
+					Slab: object.Slab{
+						Health:    1.0,
+						Key:       object.GenerateEncryptionKey(),
+						MinShards: 1,
+						Shards: []object.Sector{
+							{
+								Host: hk1,
+								Root: types.Hash256{1},
+							},
+							{
+								Host: hk2,
+								Root: types.Hash256{2},
+							},
+						},
+					},
+					Offset: 0,
+					Length: rhpv2.SectorSize,
+				},
+			},
+			PartialSlabs: slabs,
+		}
+	}
+	obj := testObject(slabs)
+	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fullObj.Slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %v", len(fullObj.Slabs))
+	fetched, err := db.Object(context.Background(), "key")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if fullObj.PartialSlab == nil {
-		t.Fatal("expected partial slab")
-	}
-	if !reflect.DeepEqual(*fullObj.PartialSlab, *obj.PartialSlab) {
-		t.Fatal("invalid partial slab", cmp.Diff(fullObj.PartialSlab, obj.PartialSlab))
+	if !reflect.DeepEqual(obj, fetched.Object) {
+		t.Fatal("mismatch", cmp.Diff(obj, fetched.Object))
 	}
 
-	// add another object with a partial slab. This should append to the buffer.
-	fullSlabSize := bufferedSlabSize(1)
-	obj2 := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		PartialSlab: &object.PartialSlab{
-			MinShards:   1,
-			TotalShards: 2,
-			Data:        frand.Bytes(int(fullSlabSize) - len(obj.PartialSlab.Data) - 1), // leave 1 byte
-		},
+	// Add the second slab.
+	slabs, err = db.AddPartialSlab(ctx, slab2Data, 1, 2, testContractSet)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(slabs) != 1 {
+		t.Fatal("expected 1 slab to be created", len(slabs))
+	}
+	if slabs[0].Length != uint32(len(slab2Data)) || slabs[0].Offset != uint32(len(slab1Data)) {
+		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	}
+	data, err = db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, slab2Data) {
+		t.Fatal("wrong data")
+	}
+	buffer = dbBufferedSlab{}
+	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[0].Key.String())).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertBuffer(buffer1Name, 4194303, false, false)
+
+	// Create an object again.
+	obj2 := testObject(slabs)
 	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	storedObject2, err := db.dbObject("key2")
+	fetched, err = db.Object(context.Background(), "key2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(storedObject2.Slabs) != 1 {
-		t.Fatal("expected 1 slab to be created", len(storedObject2.Slabs))
+	if !reflect.DeepEqual(obj2, fetched.Object) {
+		t.Fatal("mismatch", cmp.Diff(obj2, fetched.Object))
 	}
-	// check the slice
-	storedSlice2 := storedObject2.Slabs[0]
-	if storedSlice2.Offset != storedSlice.Length || storedSlice2.Length != uint32(len(obj2.PartialSlab.Data)) {
-		t.Fatalf("wrong offset/length: %v/%v", storedSlice2.Offset, storedSlice2.Length)
-	}
-	// check the slab
-	var storedSlab2 dbSlab
-	if err := db.db.Take(&storedSlab2, "id = ?", storedSlice2.DBSlabID).Error; err != nil {
-		t.Fatal(err)
-	}
-	// check the buffer
-	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.ID = ?", storedSlab.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	buffer.Model = Model{}
-	expectedBuffer.Size = 4194303
-	buffer.DBSlab = dbSlab{} // exclude from comparison
-	if !reflect.DeepEqual(buffer, expectedBuffer) {
-		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
-	}
-	assertBuffer(buffer.Filename, 4194303, false, false)
 
-	// add one last object. This should fill the buffer and create a new slab.
-	obj3 := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		PartialSlab: &object.PartialSlab{
-			MinShards:   1,
-			TotalShards: 2,
-			Data:        []byte{5, 6}, // 1 byte more than fits in the slab
-		},
+	// Add third slab.
+	slabs, err = db.AddPartialSlab(ctx, slab3Data, 1, 2, testContractSet)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(slabs) != 2 {
+		t.Fatal("expected 2 slabs to be created", len(slabs))
+	}
+	if slabs[0].Length != 1 || slabs[0].Offset != uint32(len(slab1Data)+len(slab2Data)) {
+		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	}
+	if slabs[1].Length != uint32(len(slab3Data)-1) || slabs[1].Offset != 0 {
+		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	}
+	if data1, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length); err != nil {
+		t.Fatal(err)
+	} else if data2, err := db.FetchPartialSlab(ctx, slabs[1].Key, slabs[1].Offset, slabs[1].Length); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(slab3Data, append(data1, data2...)) {
+		t.Fatal("wrong data")
+	}
+	buffer = dbBufferedSlab{}
+	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[0].Key.String())).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertBuffer(buffer1Name, 4194304, true, false)
+	buffer = dbBufferedSlab{}
+	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[1].Key.String())).Error; err != nil {
+		t.Fatal(err)
+	}
+	buffer2Name := buffer.Filename
+	assertBuffer(buffer2Name, 1, false, false)
+
+	// Create an object again.
+	obj3 := testObject(slabs)
 	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	storedObject3, err := db.dbObject("key3")
+	fetched, err = db.Object(context.Background(), "key3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(storedObject3.Slabs) != 2 {
-		t.Fatal("expected 2 slabs to be created", len(storedObject2.Slabs))
-	}
-	// check the slice
-	storedSlice3, storedSlice4 := storedObject3.Slabs[0], storedObject3.Slabs[1]
-	if storedSlice3.Offset != storedSlice.Length+storedSlice2.Length || storedSlice3.Length != 1 {
-		t.Fatalf("wrong offset/length: %v/%v", storedSlice3.Offset, storedSlice3.Length)
-	}
-	if storedSlice4.Offset != 0 || storedSlice4.Length != 1 {
-		t.Fatalf("wrong offset/length: %v/%v", storedSlice4.Offset, storedSlice4.Length)
-	}
-	// check the slab for slab3
-	var storedSlab3 dbSlab
-	if err := db.db.Take(&storedSlab3, "id = ?", storedSlice3.DBSlabID).Error; err != nil {
-		t.Fatal(err)
-	}
-	// check the buffer
-	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.ID = ?", storedSlab.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	buffer.Model = Model{}
-	expectedBuffer.Complete = true // full now
-	expectedBuffer.Size = 4194304
-	buffer.DBSlab = dbSlab{} // exclude from comparison
-	if !reflect.DeepEqual(buffer, expectedBuffer) {
-		t.Fatal("invalid buffer", cmp.Diff(buffer, expectedBuffer))
-	}
-	assertBuffer(buffer.Filename, 4194304, true, false)
-
-	// check the new buffer
-	var buffer2 dbBufferedSlab
-	if err := db.db.Joins("DBSlab").Take(&buffer2, "DBSlab.ID = ?", storedSlab.ID+1).Error; err != nil {
-		t.Fatal(err)
-	}
-	buffer2.Model = Model{}
-	expectedBuffer2 := dbBufferedSlab{
-		Complete:    false,
-		Size:        1,
-		LockedUntil: 0,
-		Filename:    buffer2.Filename,
-	}
-	buffer2.DBSlab = dbSlab{} // exclude from comparison
-	if !reflect.DeepEqual(buffer2, expectedBuffer2) {
-		t.Fatal("invalid buffer", cmp.Diff(buffer2, expectedBuffer2))
+	if !reflect.DeepEqual(obj3, fetched.Object) {
+		t.Fatal("mismatch", cmp.Diff(obj3, fetched.Object))
 	}
 
-	// fetch the buffer for uploading
+	// Fetch the buffer for uploading
 	now := time.Now().Unix()
-	buffers, err := db.packedSlabsForUpload(time.Hour, obj.PartialSlab.MinShards, obj.PartialSlab.TotalShards, testContractSet, 100)
+	buffers, err := db.packedSlabsForUpload(time.Hour, 1, 2, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(buffers) != 1 {
 		t.Fatal("expected 1 buffer to be returned", len(buffers))
 	}
-	assertBuffer(buffer.Filename, 4194304, true, true)
-	assertBuffer(buffer2.Filename, 1, false, false)
-
-	completedBuffer := buffers[0]
-	completedBufferID := completedBuffer.ID
-	if completedBuffer.LockedUntil < now+int64(time.Hour.Seconds()) {
-		t.Fatal("buffer should be locked for at least an hour", completedBuffer.LockedUntil, now+int64(time.Hour.Seconds()))
-	}
-	completedBuffer.LockedUntil = 0
-	completedBuffer.Model = Model{}
-	completedBuffer.LockID = 0
-	buffer.LockID = 0
-	if !reflect.DeepEqual(completedBuffer, buffer) {
-		t.Fatal("invalid buffer", cmp.Diff(completedBuffer, buffer))
+	assertBuffer(buffer1Name, 4194304, true, true)
+	assertBuffer(buffer2Name, 1, false, false)
+	if buffers[0].LockedUntil < now+int64(time.Hour.Seconds()) {
+		t.Fatal("buffer should be locked for at least an hour", buffers[0].LockedUntil, now+int64(time.Hour.Seconds()))
 	}
 
-	// try fetching it again. Should still be locked.
-	buffers, err = db.packedSlabsForUpload(time.Hour, obj.PartialSlab.MinShards, obj.PartialSlab.TotalShards, testContractSet, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(buffers) != 0 {
-		t.Fatal("expected 0 buffers to be returned", len(buffers))
-	}
-
-	// mark the slab as uploaded
-	packedSlab := api.UploadedPackedSlab{
-		BufferID: completedBufferID,
-		Key:      object.GenerateEncryptionKey(),
-		Shards: []object.Sector{
-			{
-				Host: hk1,
-				Root: types.Hash256{3},
-			},
-			{
-				Host: hk2,
-				Root: types.Hash256{4},
+	// Mark slab as uploaded.
+	err = db.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
+		{
+			BufferID: buffers[0].ID,
+			Shards: []object.Sector{
+				{
+					Host: hk1,
+					Root: types.Hash256{3},
+				},
+				{
+					Host: hk2,
+					Root: types.Hash256{4},
+				},
 			},
 		},
-	}
-	err = db.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{packedSlab}, usedContracts)
+	}, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertBuffer(buffer2.Filename, 1, false, false)
 
-	// buffer should be gone now.
-	if err := db.db.Take(&buffer, "id = ?", completedBufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := db.db.Take(&buffer, "id = ?", buffers[0].ID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
-	// check the sectors - there should be 4 now.
-	var sectors []dbSector
-	if err := db.db.Find(&sectors).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(sectors) != 4 {
-		t.Fatal("expected 4 sectors to be created", len(sectors))
-	}
-	if sectors[2].LatestHost != publicKey(packedSlab.Shards[0].Host) || sectors[2].DBSlabID != storedSlab.ID || !bytes.Equal(sectors[2].Root, packedSlab.Shards[0].Root[:]) {
-		t.Fatal("invalid sector", sectors[2])
-	}
-	if sectors[3].LatestHost != publicKey(packedSlab.Shards[1].Host) || sectors[3].DBSlabID != storedSlab.ID || !bytes.Equal(sectors[3].Root, packedSlab.Shards[1].Root[:]) {
-		t.Fatal("invalid sector", sectors[3])
+	assertBuffer(buffer2Name, 1, false, false)
+
+	_, err = db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	if !errors.Is(err, api.ErrObjectNotFound) {
+		t.Fatal("expected ErrObjectNotFound", err)
 	}
 }
 

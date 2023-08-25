@@ -34,6 +34,7 @@ type (
 
 	downloadManager struct {
 		hp     hostProvider
+		pss    partialSlabStore
 		logger *zap.SugaredLogger
 
 		maxOverdrive     uint64
@@ -147,12 +148,13 @@ func (w *worker) initDownloadManager(maxOverdrive uint64, overdriveTimeout time.
 		panic("download manager already initialized") // developer error
 	}
 
-	w.downloadManager = newDownloadManager(w, maxOverdrive, overdriveTimeout, logger)
+	w.downloadManager = newDownloadManager(w, w, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(hp hostProvider, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
+func newDownloadManager(hp hostProvider, pss partialSlabStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
 	return &downloadManager{
 		hp:     hp,
+		pss:    pss,
 		logger: logger,
 
 		maxOverdrive:     maxOverdrive,
@@ -193,12 +195,24 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	id := newID()
 
 	// calculate what slabs we need
-	ss := o.Slabs
-	if o.PartialSlab != nil {
-		// add fake slab for partial slab
-		ss = append(ss, object.SlabSlice{
-			Offset: 0,
-			Length: uint32(len(o.PartialSlab.Data)),
+	var ss []slabSlice
+	for _, s := range o.Slabs {
+		ss = append(ss, slabSlice{
+			SlabSlice:   s,
+			PartialSlab: false,
+		})
+	}
+	for _, ps := range o.PartialSlabs {
+		// add fake slab for partial slabs
+		ss = append(ss, slabSlice{
+			SlabSlice: object.SlabSlice{
+				Slab: object.Slab{
+					Key: ps.Key,
+				},
+				Offset: ps.Offset,
+				Length: ps.Length,
+			},
+			PartialSlab: true,
 		})
 	}
 	slabs := slabsForDownload(ss, offset, length)
@@ -206,8 +220,22 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		return nil
 	}
 
-	// check whether the last slab is the partial slab
-	lastSlabPartial := slabs[len(slabs)-1].Slab.Shards == nil
+	// go through the slabs and fetch any partial slab data from the store.
+	for i := range slabs {
+		if !slabs[i].PartialSlab {
+			continue
+		}
+		data, slab, err := mgr.pss.PartialSlab(ctx, slabs[i].SlabSlice.Key, slabs[i].SlabSlice.Offset, slabs[i].SlabSlice.Length)
+		if err != nil {
+			return err
+		}
+		if slab != nil {
+			slabs[i].SlabSlice.Slab = *slab
+			slabs[i].PartialSlab = false
+		} else {
+			slabs[i].Data = data
+		}
+	}
 
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
@@ -248,7 +276,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				next := slabs[slabIndex]
 
 				// check if the next slab is a partial slab.
-				if slabIndex == len(slabs)-1 && lastSlabPartial {
+				if next.PartialSlab {
 					responseChan <- &slabDownloadResponse{index: slabIndex}
 					slabIndex++
 					continue // handle partial slab separately
@@ -269,7 +297,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				// launch the download
 				wg.Add(1)
 				go func(index int) {
-					mgr.downloadSlab(ctx, id, next, index, responseChan, nextSlabChan)
+					mgr.downloadSlab(ctx, id, next.SlabSlice, index, responseChan, nextSlabChan)
 					wg.Done()
 				}(slabIndex)
 				atomic.AddUint64(&concurrentSlabs, 1)
@@ -307,10 +335,10 @@ outer:
 			responses[resp.index] = resp
 			for {
 				if next, exists := responses[respIndex]; exists {
-					if next.index == len(slabs)-1 && lastSlabPartial {
+					s := slabs[respIndex]
+					if s.PartialSlab {
 						// Partial slab.
-						s := slabs[respIndex]
-						_, err = cw.Write(o.PartialSlab.Data[s.Offset:][:s.Length])
+						_, err = cw.Write(s.Data)
 						if err != nil {
 							mgr.logger.Errorf("failed to send partial slab", respIndex, err)
 							return err
@@ -324,6 +352,7 @@ outer:
 							return err
 						}
 					}
+
 					next = nil
 					delete(responses, respIndex)
 					respIndex++
@@ -1145,7 +1174,13 @@ func (id id) String() string {
 	return fmt.Sprintf("%x", id[:])
 }
 
-func slabsForDownload(slabs []object.SlabSlice, offset, length uint64) []object.SlabSlice {
+type slabSlice struct {
+	object.SlabSlice
+	PartialSlab bool
+	Data        []byte
+}
+
+func slabsForDownload(slabs []slabSlice, offset, length uint64) []slabSlice {
 	// declare a helper to cast a uint64 to uint32 with overflow detection. This
 	// could should never produce an overflow.
 	cast32 := func(in uint64) uint32 {
@@ -1156,7 +1191,7 @@ func slabsForDownload(slabs []object.SlabSlice, offset, length uint64) []object.
 	}
 
 	// mutate a copy
-	slabs = append([]object.SlabSlice(nil), slabs...)
+	slabs = append([]slabSlice(nil), slabs...)
 
 	firstOffset := offset
 	for i, ss := range slabs {

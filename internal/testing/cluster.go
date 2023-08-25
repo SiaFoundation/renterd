@@ -334,6 +334,13 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		cluster.wg.Done()
 	}()
 
+	// Set the test contract set to make sure we can add objects at the
+	// beginning of a test right away.
+	err = busClient.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
+	if err != nil {
+		return nil, err
+	}
+
 	// Update the autopilot to use test settings
 	err = busClient.UpdateAutopilot(context.Background(), api.Autopilot{
 		ID:     apCfg.ID,
