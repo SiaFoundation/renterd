@@ -3,6 +3,7 @@ package stores
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -71,9 +73,10 @@ type (
 
 		knownContracts map[types.FileContractID]struct{}
 
-		spendingMu     sync.Mutex
-		interactionsMu sync.Mutex
-		objectsMu      sync.Mutex
+		spendingMu      sync.Mutex
+		interactionsMu  sync.Mutex
+		objectsMu       sync.Mutex
+		bufferedSlabsMu sync.Mutex
 	}
 
 	revisionUpdate struct {
@@ -400,6 +403,16 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 }
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+	abortRetry := func(err error) bool {
+		if err == nil ||
+			errors.Is(err, gorm.ErrRecordNotFound) ||
+			errors.Is(err, api.ErrObjectNotFound) ||
+			errors.Is(err, api.ErrObjectCorrupted) ||
+			errors.Is(err, api.ErrContractNotFound) {
+			return true
+		}
+		return false
+	}
 	var err error
 	if false {
 		panic("trigger git conflict to add ErrRecordExists to exception")
@@ -407,8 +420,8 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second}
 	for i := 0; i < len(timeoutIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)
-		if err == nil {
-			return nil
+		if abortRetry(err) {
+			return err
 		}
 		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(timeoutIntervals), timeoutIntervals[i], err))
 		time.Sleep(timeoutIntervals[i])

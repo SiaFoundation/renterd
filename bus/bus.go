@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"runtime"
@@ -119,6 +120,8 @@ type (
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
+		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
@@ -1040,6 +1043,74 @@ func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
+	jc.Custom(nil, []byte{})
+
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	}
+	var length int
+	if jc.DecodeForm("length", &length) != nil {
+		return
+	}
+	if length <= 0 || offset < 0 {
+		jc.Error(fmt.Errorf("length must be positive and offset must be non-negative"), http.StatusBadRequest)
+		return
+	}
+	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.ResponseWriter.Write(data)
+}
+
+func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
+	var minShards int
+	if jc.DecodeForm("minShards", &minShards) != nil {
+		return
+	}
+	var totalShards int
+	if jc.DecodeForm("totalShards", &totalShards) != nil {
+		return
+	}
+	var contractSet string
+	if jc.DecodeForm("contractSet", &contractSet) != nil {
+		return
+	}
+	if minShards <= 0 || totalShards <= minShards {
+		jc.Error(errors.New("min_shards must be positive and total_shards must be greater than min_shards"), http.StatusBadRequest)
+		return
+	}
+	if totalShards > math.MaxUint8 {
+		jc.Error(fmt.Errorf("total_shards must be less than or equal to %d", math.MaxUint8), http.StatusBadRequest)
+		return
+	}
+	if contractSet == "" {
+		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	}
+	data, err := io.ReadAll(jc.Request.Body)
+	if jc.Check("failed to read request body", err) != nil {
+		return
+	}
+	slabs, err := b.ms.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards), contractSet)
+	if jc.Check("failed to add partial slab", err) != nil {
+		return
+	}
+	jc.Encode(api.AddPartialSlabResponse{
+		Slabs: slabs,
+	})
+}
+
 func (b *bus) settingsHandlerGET(jc jape.Context) {
 	if settings, err := b.ss.Settings(jc.Request.Context()); jc.Check("couldn't load settings", err) == nil {
 		jc.Encode(settings)
@@ -1692,6 +1763,8 @@ func (b *bus) Handler() http.Handler {
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
+		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
+		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
 		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
@@ -1723,7 +1796,14 @@ func (b *bus) Handler() http.Handler {
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	b.hooks.Close()
-	return b.eas.SaveAccounts(ctx, b.accounts.ToPersist())
+	accounts := b.accounts.ToPersist()
+	err := b.eas.SaveAccounts(ctx, accounts)
+	if err != nil {
+		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
+	} else {
+		b.logger.Infof("successfully saved %v accounts", len(accounts))
+	}
+	return err
 }
 
 func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
