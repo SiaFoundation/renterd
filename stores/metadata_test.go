@@ -2810,12 +2810,14 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	filesFound := make(map[string]struct{})
 	for _, file := range files {
-		if _, exists := map[string]struct{}{
-			buffer2Name: {},
-		}[file.Name()]; !exists {
-			t.Fatal("unexpected file", file.Name())
-		}
+		filesFound[file.Name()] = struct{}{}
+	}
+	if _, exists := filesFound[buffer1Name]; exists {
+		t.Fatal("buffer file should have been deleted")
+	} else if _, exists := filesFound[buffer2Name]; !exists {
+		t.Fatal("buffer file should not have been deleted")
 	}
 }
 
