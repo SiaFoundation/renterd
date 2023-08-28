@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -2754,24 +2755,24 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Fetch the buffer for uploading
-	now := time.Now().Unix()
-	buffers, err := db.packedSlabsForUpload(time.Hour, 1, 2, testContractSet, 100)
+	packedSlabs, err := db.PackedSlabsForUpload(ctx, time.Hour, 1, 2, testContractSet, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(buffers) != 1 {
-		t.Fatal("expected 1 buffer to be returned", len(buffers))
+	if len(packedSlabs) != 1 {
+		t.Fatal("expected 1 slab to be returned", len(packedSlabs))
 	}
 	assertBuffer(buffer1Name, 4194304, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
-	if buffers[0].LockedUntil < now+int64(time.Hour.Seconds()) {
-		t.Fatal("buffer should be locked for at least an hour", buffers[0].LockedUntil, now+int64(time.Hour.Seconds()))
+
+	if err := db.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; err != nil {
+		t.Fatal(err)
 	}
 
 	// Mark slab as uploaded.
 	err = db.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
 		{
-			BufferID: buffers[0].ID,
+			BufferID: buffer.ID,
 			Shards: []object.Sector{
 				{
 					Host: hk1,
@@ -2788,7 +2789,7 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.db.Take(&buffer, "id = ?", buffers[0].ID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := db.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
 	assertBuffer(buffer2Name, 1, false, false)
@@ -2796,6 +2797,18 @@ func TestPartialSlab(t *testing.T) {
 	_, err = db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
 	if !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal("expected ErrObjectNotFound", err)
+	}
+
+	files, err := os.ReadDir(db.slabBufferMgr.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if _, exists := map[string]struct{}{
+			buffer2Name: {},
+		}[file.Name()]; !exists {
+			t.Fatal("unexpected file", file.Name())
+		}
 	}
 }
 

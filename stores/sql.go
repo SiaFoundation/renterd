@@ -36,12 +36,11 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts         alerts.Alerter
-		db             *gorm.DB
-		logger         glogger.Interface
-		partialSlabDir string
+		alerts alerts.Alerter
+		db     *gorm.DB
+		logger glogger.Interface
 
-		bufferedSlabCompletionThreshold int64
+		slabBufferMgr *SlabBufferManager
 
 		// Persistence buffer - related fields.
 		lastSave               time.Time
@@ -177,31 +176,31 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
 		isOurContract[types.FileContractID(fcid)] = struct{}{}
 	}
-	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("slabBufferCompletionThreshold must be between 0 and 4MiB")
-	}
 
 	ss := &SQLStore{
-		alerts:                          alerts,
-		db:                              db,
-		logger:                          logger,
-		knownContracts:                  isOurContract,
-		lastSave:                        time.Now(),
-		partialSlabDir:                  partialSlabDir,
-		persistInterval:                 persistInterval,
-		hasAllowlist:                    allowlistCnt > 0,
-		hasBlocklist:                    blocklistCnt > 0,
-		settings:                        make(map[string]string),
-		unappliedHostKeys:               make(map[types.PublicKey]struct{}),
-		unappliedRevisions:              make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:                 make(map[types.FileContractID]uint64),
-		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
+		alerts:             alerts,
+		db:                 db,
+		logger:             logger,
+		knownContracts:     isOurContract,
+		lastSave:           time.Now(),
+		persistInterval:    persistInterval,
+		hasAllowlist:       allowlistCnt > 0,
+		hasBlocklist:       blocklistCnt > 0,
+		settings:           make(map[string]string),
+		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
+		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:    make(map[types.FileContractID]uint64),
 
 		walletAddress: walletAddress,
 		chainIndex: types.ChainIndex{
 			Height: ci.Height,
 			ID:     types.BlockID(ci.BlockID),
 		},
+	}
+
+	ss.slabBufferMgr, err = newSlabBufferManager(ss, slabBufferCompletionThreshold, partialSlabDir)
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
 	}
 
 	return ss, ccid, nil
