@@ -49,6 +49,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
 		return nil, fmt.Errorf("invalid slabBufferCompletionThreshold %v", slabBufferCompletionThreshold)
 	}
+
 	// load existing buffers
 	var buffers []dbBufferedSlab
 	err := sqlStore.db.
@@ -67,6 +68,16 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 		buffersByKey:                    make(map[string]*SlabBuffer),
 	}
 	for _, buffer := range buffers {
+		if buffer.DBSlab.ID == 0 {
+			// Buffer doesn't have a slab. We can delete it.
+			if err := sqlStore.db.Delete(&buffer).Error; err != nil {
+				return nil, fmt.Errorf("failed to delete buffer %v: %v", buffer.ID, err)
+			}
+			if err := os.RemoveAll(filepath.Join(partialSlabDir, buffer.Filename)); err != nil {
+				return nil, fmt.Errorf("failed to remove buffer file %v: %v", buffer.Filename, err)
+			}
+			continue
+		}
 		// Open the file.
 		file, err := os.OpenFile(filepath.Join(partialSlabDir, buffer.Filename), os.O_RDWR, 0600)
 		if err != nil {
