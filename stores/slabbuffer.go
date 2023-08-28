@@ -105,6 +105,20 @@ func bufferGID(minShards, totalShards uint8, contractSet uint32) bufferGroupID {
 	return bgid
 }
 
+func (mgr *SlabBufferManager) Close() error {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	for _, buffers := range mgr.buffersByKey {
+		if err := buffers.file.Close(); err != nil {
+			return err
+		}
+	}
+	mgr.buffersByKey = nil
+	mgr.incompleteBuffers = nil
+	mgr.completeBuffers = nil
+	return nil
+}
+
 func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet uint) ([]object.PartialSlab, error) {
 	gid := bufferGID(minShards, totalShards, uint32(contractSet))
 

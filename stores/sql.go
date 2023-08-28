@@ -266,6 +266,11 @@ func (s *SQLStore) Close() error {
 		return err
 	}
 
+	err = s.slabBufferMgr.Close()
+	if err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
