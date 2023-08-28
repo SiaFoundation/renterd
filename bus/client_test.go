@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -70,10 +71,12 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 	// create client
 	client := bus.NewClient("http://"+l.Addr().String(), "test")
 	b, cleanup, err := node.NewBus(node.BusConfig{
-		Bootstrap:      false,
-		GatewayAddr:    "127.0.0.1:0",
-		Miner:          node.NewMiner(client),
-		UsedUTXOExpiry: time.Minute,
+		Bus: config.Bus{
+			Bootstrap:      false,
+			GatewayAddr:    "127.0.0.1:0",
+			UsedUTXOExpiry: time.Minute,
+		},
+		Miner: node.NewMiner(client),
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err
