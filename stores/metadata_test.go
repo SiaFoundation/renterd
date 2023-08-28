@@ -2815,14 +2815,8 @@ func TestPartialSlab(t *testing.T) {
 		filesFound[file.Name()] = struct{}{}
 	}
 	if _, exists := filesFound[buffer1Name]; exists {
-		for i, file := range files {
-			fmt.Println("file", i, file.Name())
-		}
 		t.Fatal("buffer file should have been deleted", buffer1Name)
 	} else if _, exists := filesFound[buffer2Name]; !exists {
-		for i, file := range files {
-			fmt.Println("file", i, file.Name())
-		}
 		t.Fatal("buffer file should not have been deleted", buffer2Name)
 	}
 }

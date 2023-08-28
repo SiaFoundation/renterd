@@ -333,7 +333,6 @@ func (mgr *SlabBufferManager) RemoveBuffers(fileNames ...string) error {
 			if err := buffers[i].file.Close(); err != nil {
 				return fmt.Errorf("failed to close buffer %v: %v", buffers[i].filename, err)
 			}
-			fmt.Println("removing", filepath.Join(mgr.dir, buffers[i].filename))
 			if err := os.Remove(filepath.Join(mgr.dir, buffers[i].filename)); err != nil {
 				return fmt.Errorf("failed to remove buffer %v: %v", buffers[i].filename, err)
 			}
