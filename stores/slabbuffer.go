@@ -42,7 +42,7 @@ type SlabBufferManager struct {
 	mu                sync.Mutex
 	completeBuffers   map[bufferGroupID][]*SlabBuffer
 	incompleteBuffers map[bufferGroupID][]*SlabBuffer
-	buffersByKey      map[object.EncryptionKey]*SlabBuffer
+	buffersByKey      map[string]*SlabBuffer
 }
 
 func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int64, partialSlabDir string) (*SlabBufferManager, error) {
@@ -64,7 +64,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 		s:                               sqlStore,
 		completeBuffers:                 make(map[bufferGroupID][]*SlabBuffer),
 		incompleteBuffers:               make(map[bufferGroupID][]*SlabBuffer),
-		buffersByKey:                    make(map[object.EncryptionKey]*SlabBuffer),
+		buffersByKey:                    make(map[string]*SlabBuffer),
 	}
 	for _, buffer := range buffers {
 		// Open the file.
@@ -92,7 +92,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 		} else {
 			mgr.incompleteBuffers[gid] = append(mgr.completeBuffers[gid], sb)
 		}
-		mgr.buffersByKey[sb.slabKey] = sb
+		mgr.buffersByKey[sb.slabKey.String()] = sb
 	}
 	return mgr, nil
 }
@@ -168,7 +168,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 		// Add new buffer to the list of incomplete buffers.
 		mgr.mu.Lock()
 		mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid], sb)
-		mgr.buffersByKey[sb.slabKey] = sb
+		mgr.buffersByKey[sb.slabKey.String()] = sb
 		mgr.mu.Unlock()
 	}
 
@@ -227,7 +227,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 
 func (mgr *SlabBufferManager) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey, offset, length uint32) ([]byte, error) {
 	mgr.mu.Lock()
-	buffer, exists := mgr.buffersByKey[ec]
+	buffer, exists := mgr.buffersByKey[ec.String()]
 	mgr.mu.Unlock()
 	if !exists {
 		return nil, api.ErrObjectNotFound
@@ -303,16 +303,17 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 	return slabs, nil
 }
 
-func (mgr *SlabBufferManager) RemoveBuffers(bufferIDs ...uint) error {
+func (mgr *SlabBufferManager) RemoveBuffers(fileNames ...string) error {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	bufferIDsToDelete := make(map[uint]struct{})
-	for _, bufferID := range bufferIDs {
-		bufferIDsToDelete[bufferID] = struct{}{}
+	buffersToDelete := make(map[string]struct{})
+	for _, path := range fileNames {
+		buffersToDelete[path] = struct{}{}
 	}
-	for _, buffers := range mgr.completeBuffers {
+	for gid := range mgr.completeBuffers {
+		buffers := mgr.completeBuffers[gid]
 		for i := 0; i < len(buffers); i++ {
-			if _, exists := bufferIDsToDelete[buffers[i].dbID]; !exists {
+			if _, exists := buffersToDelete[buffers[i].filename]; !exists {
 				continue
 			}
 			if err := buffers[i].file.Close(); err != nil {
@@ -321,11 +322,12 @@ func (mgr *SlabBufferManager) RemoveBuffers(bufferIDs ...uint) error {
 			if err := os.Remove(filepath.Join(mgr.dir, buffers[i].filename)); err != nil {
 				return fmt.Errorf("failed to remove buffer %v: %v", buffers[i].filename, err)
 			}
-			delete(mgr.buffersByKey, buffers[i].slabKey)
+			delete(mgr.buffersByKey, buffers[i].slabKey.String())
 			buffers[i] = buffers[len(buffers)-1]
 			buffers = buffers[:len(buffers)-1]
 			i--
 		}
+		mgr.completeBuffers[gid] = buffers
 	}
 	return nil
 }

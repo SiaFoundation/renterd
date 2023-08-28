@@ -65,7 +65,7 @@ type (
 	}
 
 	dbContractSet struct {
-		ID        uint `gorm:"primarykey,autoIncrement"` // force autoIncrement to not reuse ids
+		ID        uint `gorm:"primarykey"`
 		CreatedAt time.Time
 
 		Name      string       `gorm:"unique;index:length:255;"`
@@ -113,7 +113,7 @@ type (
 	}
 
 	dbBufferedSlab struct {
-		ID        uint `gorm:"primarykey,autoIncrement"` // force autoIncrement to not reuse ids
+		ID        uint `gorm:"primarykey"`
 		CreatedAt time.Time
 
 		DBSlab dbSlab
@@ -1524,13 +1524,14 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			}
 		}
 	}
+	var fileName string
 	err := s.retryTransaction(func(tx *gorm.DB) error {
 		contracts, err := fetchUsedContracts(tx, usedContracts)
 		if err != nil {
 			return err
 		}
 		for _, slab := range slabs {
-			err = markPackedSlabUploaded(tx, slab, contracts)
+			fileName, err = markPackedSlabUploaded(tx, slab, contracts)
 			if err != nil {
 				return err
 			}
@@ -1542,22 +1543,18 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	}
 
 	// Delete buffer from disk.
-	var toDelete []uint
-	for _, slab := range slabs {
-		toDelete = append(toDelete, slab.BufferID)
-	}
-	if err := s.slabBufferMgr.RemoveBuffers(toDelete...); err != nil {
+	if err := s.slabBufferMgr.RemoveBuffers(fileName); err != nil {
 		return fmt.Errorf("removing buffer after marking it as uploaded failed: %w", err)
 	}
 	return nil
 }
 
-func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) error {
+func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
 	// find the slab
 	var sla dbSlab
 	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
 		Take(&sla).Error; err != nil {
-		return err
+		return "", err
 	}
 
 	// update the slab
@@ -1566,18 +1563,19 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 		Updates(map[string]interface{}{
 			"db_buffered_slab_id": nil,
 		}).Error; err != nil {
-		return err
+		return "", err
 	}
 
 	// delete buffer
 	var buffer dbBufferedSlab
 	if err := tx.Take(&buffer, "id = ?", slab.BufferID).Error; err != nil {
-		return err
+		return "", err
 	}
+	fileName := buffer.Filename
 	err := tx.Delete(&buffer).
 		Error
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// add the shards to the slab
@@ -1585,7 +1583,7 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	for i := range slab.Shards {
 		contract, exists := contracts[slab.Shards[i].Host]
 		if !exists {
-			return fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
+			return "", fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
 		}
 		shards = append(shards, dbSector{
 			DBSlabID:   sla.ID,
@@ -1594,7 +1592,7 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 			Contracts:  []dbContract{contract},
 		})
 	}
-	return tx.Create(shards).Error
+	return fileName, tx.Create(shards).Error
 }
 
 // contract retrieves a contract from the store.
