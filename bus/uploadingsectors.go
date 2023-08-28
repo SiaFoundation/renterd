@@ -67,7 +67,10 @@ func (usc *uploadingSectorsCache) addUploadingSector(uID api.UploadID, fcid type
 
 func (usc *uploadingSectorsCache) sectors(fcid types.FileContractID) (roots []types.Hash256) {
 	usc.mu.Lock()
-	uploads := usc.uploads
+	var uploads []*ongoingUpload
+	for _, ongoing := range usc.uploads {
+		uploads = append(uploads, ongoing)
+	}
 	usc.mu.Unlock()
 
 	for _, ongoing := range uploads {
