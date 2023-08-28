@@ -1,17 +1,37 @@
 # Helper image to build renterd.
 FROM golang:1.21 AS builder
-LABEL maintainer="The Sia Foundation <info@sia.tech>"
 
+# Define a build argument for the build tag.
+ARG BUILD_TAG='netgo'
+
+# Set the working directory.
 WORKDIR /renterd
 
-# Copy and build binary.
+# Copy over the go mod and sum files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy the rest of the application code
 COPY . .
+
+# Generate build metadata.
 RUN go generate ./...
-RUN go build ./cmd/renterd
+
+# Build renterd.
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -tags=${BUILD_TAG} ./cmd/renterd
+
 
 # Build image that will be used to run renterd.
 FROM debian:bookworm-slim
-LABEL maintainer="The Sia Foundation <info@sia.tech>"
+LABEL maintainer="The Sia Foundation <info@sia.tech>" \
+      org.opencontainers.image.description.vendor="The Sia Foundation" \
+      org.opencontainers.image.description="A renterd container - next-generation Sia renter" \
+      org.opencontainers.image.source="https://github.com/SiaFoundation/renterd" \
+      org.opencontainers.image.licenses=MIT
 
 # User to run renterd as. Defaults to root.
 ENV PUID=0
