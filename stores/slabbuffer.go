@@ -226,7 +226,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	return slabs, mgr.s.retryTransaction(func(tx *gorm.DB) error {
 		for _, update := range dbUpdates {
 			if err := tx.Model(&dbBufferedSlab{}).
-				Where("id = ?", update.dbID).
+				Where("id", update.dbID).
 				Updates(map[string]interface{}{
 					"complete": gorm.Expr("complete OR ?", update.complete),
 					"size":     gorm.Expr("MAX(size, ?)", update.syncSize),
