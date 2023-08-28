@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
@@ -2529,11 +2530,11 @@ func TestObjectsStats(t *testing.T) {
 }
 
 func TestPartialSlab(t *testing.T) {
-	db, _, _, err := newTestSQLStore(t.TempDir())
+	dir := t.TempDir()
+	db, dbName, _, err := newTestSQLStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
 
 	// create 2 hosts
 	hks, err := db.addTestHosts(2)
@@ -2818,6 +2819,33 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("buffer file should have been deleted", buffer1Name)
 	} else if _, exists := filesFound[buffer2Name]; !exists {
 		t.Fatal("buffer file should not have been deleted", buffer2Name)
+	}
+
+	// Close manager to make sure we can restart the database without
+	// issues due to open files.
+	// NOTE: Close on the database doesn't work because that will wipe the
+	// in-memory db.
+	buffersBefore, err := db.SlabBuffers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.slabBufferMgr.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restart it. The buffer should still be there.
+	conn := NewEphemeralSQLiteConnection(dbName)
+	db2, _, err := NewSQLStore(conn, alerts.NewManager(), dir, false, time.Hour, types.Address{}, 0, newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+	buffersAfter, err := db2.SlabBuffers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cmp.Equal(buffersBefore, buffersAfter) {
+		t.Fatal("buffers don't match", cmp.Diff(buffersBefore, buffersAfter))
 	}
 }
 

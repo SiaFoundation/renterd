@@ -65,8 +65,7 @@ type (
 	}
 
 	dbContractSet struct {
-		ID        uint `gorm:"primarykey"`
-		CreatedAt time.Time
+		Model
 
 		Name      string       `gorm:"unique;index:length:255;"`
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
@@ -113,8 +112,7 @@ type (
 	}
 
 	dbBufferedSlab struct {
-		ID        uint `gorm:"primarykey"`
-		CreatedAt time.Time
+		Model
 
 		DBSlab dbSlab
 
