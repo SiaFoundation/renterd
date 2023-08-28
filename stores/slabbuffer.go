@@ -275,7 +275,7 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 		if !buffer.acquireForUpload(lockingDuration) {
 			continue
 		}
-		data := make([]byte, buffer.maxSize)
+		data := make([]byte, buffer.size)
 		_, err := buffer.file.ReadAt(data, 0)
 		if err != nil {
 			mgr.s.alerts.RegisterAlert(ctx, alerts.Alert{
