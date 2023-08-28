@@ -242,16 +242,24 @@ func (mgr *SlabBufferManager) SlabBuffers() []api.SlabBuffer {
 	var sbs []api.SlabBuffer
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
+	convertBuffer := func(buffer *SlabBuffer, complete bool) api.SlabBuffer {
+		return api.SlabBuffer{
+			ContractSet: "", // filled in by caller
+			Complete:    complete,
+			Filename:    buffer.filename,
+			Size:        buffer.size,
+			MaxSize:     buffer.maxSize,
+			Locked:      time.Now().Before(buffer.lockedUntil),
+		}
+	}
 	for _, buffers := range mgr.completeBuffers {
 		for _, buffer := range buffers {
-			sbs = append(sbs, api.SlabBuffer{
-				ContractSet: "", // filled in by caller
-				Complete:    true,
-				Filename:    buffer.filename,
-				Size:        buffer.size,
-				MaxSize:     buffer.maxSize,
-				Locked:      time.Now().Before(buffer.lockedUntil),
-			})
+			sbs = append(sbs, convertBuffer(buffer, true))
+		}
+	}
+	for _, buffers := range mgr.incompleteBuffers {
+		for _, buffer := range buffers {
+			sbs = append(sbs, convertBuffer(buffer, false))
 		}
 	}
 	return sbs

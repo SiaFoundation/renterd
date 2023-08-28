@@ -2765,6 +2765,11 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer1Name, 4194304, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
 
+	var foo []dbBufferedSlab
+	if err := db.db.Find(&foo).Error; err != nil {
+		t.Fatal(err)
+	}
+	buffer = dbBufferedSlab{}
 	if err := db.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -2789,6 +2794,7 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	buffer = dbBufferedSlab{}
 	if err := db.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
