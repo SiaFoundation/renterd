@@ -979,7 +979,7 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 func pruneSlabs(tx *gorm.DB) error {
 	return tx.Exec(`DELETE FROM slabs WHERE slabs.id IN (SELECT * FROM (SELECT sla.id FROM slabs sla
 		LEFT JOIN slices sli ON sli.db_slab_id  = sla.id
-		WHERE db_object_id IS NULL) toDelete)`).Error
+		WHERE db_object_id IS NULL AND sla.db_buffered_slab_id IS NULL) toDelete)`).Error
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.FileContractID) (map[types.PublicKey]dbContract, error) {
@@ -1058,20 +1058,20 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		// Fetch contract set.
 		var cs dbContractSet
 		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
-			return err
+			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
 		}
 
 		// Try to delete. We want to get rid of the object and its
 		// slices if it exists.
 		_, err := deleteObject(tx, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		// Insert a new object.
 		objKey, err := o.Key.MarshalText()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
 		obj := dbObject{
 			ObjectID: path,
@@ -1080,20 +1080,20 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create object: %w", err)
 		}
 
 		// Fetch the used contracts.
 		contracts, err := fetchUsedContracts(tx, usedContracts)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}
 
-		for _, ss := range o.Slabs {
+		for i, ss := range o.Slabs {
 			// Create Slab if it doesn't exist yet.
 			slabKey, err := ss.Key.MarshalText()
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to marshal slab key: %w", err)
 			}
 			slab := &dbSlab{
 				Key:         slabKey,
@@ -1106,7 +1106,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 				}).
 				FirstOrCreate(&slab).Error
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(o.Slabs), err)
 			}
 
 			// Create Slice.
@@ -1118,10 +1118,10 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 			}
 			err = tx.Create(&slice).Error
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to create slice %v/%v: %w", i+1, len(o.Slabs), err)
 			}
 
-			for _, shard := range ss.Shards {
+			for j, shard := range ss.Shards {
 				// Create sector if it doesn't exist yet.
 				var sector dbSector
 				err := tx.
@@ -1133,7 +1133,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 					FirstOrCreate(&sector).
 					Error
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
 				}
 
 				// Add contract and host to join tables.
@@ -1141,7 +1141,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 				if contractFound {
 					err = tx.Model(&sector).Association("Contracts").Append(&contract)
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to append to Contracts association: %w", err)
 					}
 				}
 			}
@@ -1163,7 +1163,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 				Take(&buffer, "DBSlab.key = ?", key).
 				Error
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to fetch buffered slab: %w", err)
 			}
 
 			err = tx.Create(&dbSlice{
@@ -1173,7 +1173,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 				Length:     partialSlab.Length,
 			}).Error
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to create slice for partial slab: %w", err)
 			}
 		}
 		return nil

@@ -25,6 +25,8 @@ type SlabBuffer struct {
 	slabKey  object.EncryptionKey
 	maxSize  int64
 
+	dbMu sync.Mutex
+
 	mu          sync.Mutex
 	file        *os.File
 	lockedUntil time.Time
@@ -239,33 +241,42 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	if isSQLite(mgr.s.db) {
 		maxOp = "MAX"
 	}
-	err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
-		for _, update := range dbUpdates {
+	for _, update := range dbUpdates {
+		err = func() error {
+			// Make sure only one thread can update the entry for a buffer at a
+			// time.
+			update.buffer.dbMu.Lock()
+			defer update.buffer.dbMu.Unlock()
+
 			// Since the order in which threads arrive here is not deterministic
 			// there is a chance that we don't need to perform this update
 			// because a larger size was already written to the db.
 			if !update.buffer.requiresDBUpdate() {
-				continue
+				return nil
 			}
-			if err := tx.Model(&dbBufferedSlab{}).
-				Where("id", update.buffer.dbID).
-				Updates(map[string]interface{}{
-					"complete": gorm.Expr("complete OR ?", update.complete),
-					"size":     gorm.Expr(maxOp+"(size, ?)", update.syncSize),
-				}).
-				Error; err != nil {
-				return fmt.Errorf("failed to update buffered slab %v in database: %v", update.buffer.dbID, err)
+			err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
+				if err := tx.Model(&dbBufferedSlab{}).
+					Where("id", update.buffer.dbID).
+					Updates(map[string]interface{}{
+						"complete": gorm.Expr("complete OR ?", update.complete),
+						"size":     gorm.Expr(maxOp+"(size, ?)", update.syncSize),
+					}).
+					Error; err != nil {
+					return fmt.Errorf("failed to update buffered slab %v in database: %v", update.buffer.dbID, err)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
 			}
+			// Update the dbSize field in the buffer to the size we just wrote to the
+			// db. This also needs to be associative.
+			update.buffer.updateDBSize(update.syncSize)
+			return nil
+		}()
+		if err != nil {
+			return nil, fmt.Errorf("failed to update size/complete in db: %w", err)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	// Update the dbSize field in the buffer to the size we just wrote to the
-	// db. This also needs to be associative.
-	for _, update := range dbUpdates {
-		update.buffer.updateDBSize(update.syncSize)
 	}
 	return slabs, nil
 }
