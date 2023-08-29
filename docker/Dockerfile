@@ -40,6 +40,7 @@ ENV PGID=0
 # Renterd env args..
 ENV RENTERD_API_PASSWORD= 
 ENV RENTERD_SEED=
+ENV RENTERD_CONFIG_FILE=/data/renterd.yml
 
 # Copy binary and prepare data dir.
 COPY --from=builder /renterd/renterd /usr/bin/renterd
