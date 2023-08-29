@@ -201,7 +201,6 @@ func (q *eventQueue) dequeue() {
 		err := sendEvent(q.ctx, q.url, next)
 		if err != nil {
 			q.logger.Errorf("failed to send Webhook event %v to %v: %v", next.String(), q.url, err)
-			return
 		}
 	}
 }
