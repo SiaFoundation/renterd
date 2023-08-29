@@ -29,6 +29,7 @@ type SlabBuffer struct {
 	file        *os.File
 	lockedUntil time.Time
 	size        int64
+	dbSize      int64
 	syncErr     error
 }
 
@@ -94,6 +95,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 			slabKey:  ec,
 			maxSize:  int64(bufferedSlabSize(buffer.DBSlab.MinShards)),
 			file:     file,
+			dbSize:   buffer.Size,
 			size:     buffer.Size,
 		}
 		// Add the buffer to the manager.
@@ -199,9 +201,9 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 
 	// Commit all used buffers to disk.
 	type dbUpdate struct {
-		dbID     uint
 		complete bool
 		syncSize int64
+		buffer   *SlabBuffer
 	}
 	var dbUpdates []dbUpdate
 	for _, buffer := range usedBuffers {
@@ -223,35 +225,49 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 			}
 			mgr.mu.Unlock()
 		}
-		// Remember to update the db with the new size.
+		// Remember to update the db with the new size if necessary.
 		dbUpdates = append(dbUpdates, dbUpdate{
-			dbID:     buffer.dbID,
+			buffer:   buffer,
 			complete: complete,
 			syncSize: syncSize,
 		})
 	}
 
 	// Update size field in db. Since multiple threads might be trying to do
-	// this, we only allow for updating the field to a larger value. This also
-	// means a completed buffer can never become not completed again.
+	// this, the operation is associative.
 	maxOp := "GREATEST"
 	if isSQLite(mgr.s.db) {
 		maxOp = "MAX"
 	}
-	return slabs, mgr.s.retryTransaction(func(tx *gorm.DB) error {
+	err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
 		for _, update := range dbUpdates {
+			// Since the order in which threads arrive here is not deterministic
+			// there is a chance that we don't need to perform this update
+			// because a larger size was already written to the db.
+			if !update.buffer.requiresDBUpdate() {
+				continue
+			}
 			if err := tx.Model(&dbBufferedSlab{}).
-				Where("id", update.dbID).
+				Where("id", update.buffer.dbID).
 				Updates(map[string]interface{}{
 					"complete": gorm.Expr("complete OR ?", update.complete),
 					"size":     gorm.Expr(maxOp+"(size, ?)", update.syncSize),
 				}).
 				Error; err != nil {
-				return fmt.Errorf("failed to update buffered slab %v in database: %v", update.dbID, err)
+				return fmt.Errorf("failed to update buffered slab %v in database: %v", update.buffer.dbID, err)
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Update the dbSize field in the buffer to the size we just wrote to the
+	// db. This also needs to be associative.
+	for _, update := range dbUpdates {
+		update.buffer.updateDBSize(update.syncSize)
+	}
+	return slabs, nil
 }
 
 func (mgr *SlabBufferManager) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey, offset, length uint32) ([]byte, error) {
@@ -422,6 +438,20 @@ func (buf *SlabBuffer) commitAppend(data []byte, completionThreshold int64) (int
 	defer buf.mu.Unlock()
 	buf.syncErr = err
 	return syncSize, syncSize >= buf.maxSize-completionThreshold, err
+}
+
+func (buf *SlabBuffer) requiresDBUpdate() bool {
+	buf.mu.Lock()
+	defer buf.mu.Unlock()
+	return buf.size > buf.dbSize
+}
+
+func (buf *SlabBuffer) updateDBSize(size int64) {
+	buf.mu.Lock()
+	if size > buf.dbSize {
+		buf.dbSize = size
+	}
+	buf.mu.Unlock()
 }
 
 func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
