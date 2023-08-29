@@ -36,12 +36,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set build tag environment variable
+      - name: Prepare environment variables
         run: |
           if [[ "${{ matrix.network }}" == "testnet" ]]; then
             echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
+            echo "DOCKER_METADATA_suffix=-testnet" >> $GITHUB_ENV
           else
             echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
+            echo "DOCKER_METADATA_suffix=" >> $GITHUB_ENV
           fi
       - uses: docker/metadata-action@v4
         name: Generate tags
@@ -49,7 +51,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
-            suffix=-${{ matrix.network }},onlatest=true
+            suffix=${{ env.DOCKER_METADATA_suffix }},onlatest=true
           tags: |
             type=ref,event=branch
             type=sha,prefix=
