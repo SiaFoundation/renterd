@@ -637,12 +637,12 @@ func performMigration00012_webhooks(txn *gorm.DB, logger glogger.Interface) erro
 func performMigration00013_uploadPackingOptimisations(txn *gorm.DB, logger glogger.Interface) error {
 	logger.Info(context.Background(), "performing migration 00013_uploadPackingOptimisations")
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "lock_id") {
-		if err := txn.Migrator().DropColumn(&dbWebhook{}, "lock_id"); err != nil {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "lock_id"); err != nil {
 			return err
 		}
 	}
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "locked_until") {
-		if err := txn.Migrator().DropColumn(&dbWebhook{}, "locked_until"); err != nil {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "locked_until"); err != nil {
 			return err
 		}
 	}
