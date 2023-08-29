@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/stores"
 	"go.uber.org/zap"
@@ -203,7 +204,7 @@ func newTestClusterWithFunding(dir, dbName string, funding bool, wk types.Privat
 }
 
 // newTestClusterCustom creates a customisable cluster.
-func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey, busCfg node.BusConfig, workerCfg node.WorkerConfig, apCfg node.AutopilotConfig, logger *zap.Logger) (*TestCluster, error) {
+func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey, busCfg node.BusConfig, workerCfg config.Worker, apCfg node.AutopilotConfig, logger *zap.Logger) (*TestCluster, error) {
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
 	uri, user, password, _ := stores.DBConfigFromEnv()
@@ -333,6 +334,13 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		_ = aStartFn()
 		cluster.wg.Done()
 	}()
+
+	// Set the test contract set to make sure we can add objects at the
+	// beginning of a test right away.
+	err = busClient.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
+	if err != nil {
+		return nil, err
+	}
 
 	// Update the autopilot to use test settings
 	err = busClient.UpdateAutopilot(context.Background(), api.Autopilot{
@@ -800,16 +808,18 @@ func testNetwork() *consensus.Network {
 
 func testBusCfg() node.BusConfig {
 	return node.BusConfig{
-		Bootstrap:       false,
-		GatewayAddr:     "127.0.0.1:0",
-		Network:         testNetwork(),
-		PersistInterval: testPersistInterval,
-		UsedUTXOExpiry:  time.Minute,
+		Bus: config.Bus{
+			Bootstrap:       false,
+			GatewayAddr:     "127.0.0.1:0",
+			PersistInterval: testPersistInterval,
+			UsedUTXOExpiry:  time.Minute,
+		},
+		Network: testNetwork(),
 	}
 }
 
-func testWorkerCfg() node.WorkerConfig {
-	return node.WorkerConfig{
+func testWorkerCfg() config.Worker {
+	return config.Worker{
 		AllowPrivateIPs:          true,
 		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",
@@ -822,15 +832,17 @@ func testWorkerCfg() node.WorkerConfig {
 
 func testApCfg() node.AutopilotConfig {
 	return node.AutopilotConfig{
-		ID:                             api.DefaultAutopilotID,
-		AccountsRefillInterval:         time.Second,
-		Heartbeat:                      time.Second,
-		MigrationHealthCutoff:          0.99,
-		MigratorParallelSlabsPerWorker: 1,
-		RevisionSubmissionBuffer:       0,
-		ScannerInterval:                time.Second,
-		ScannerBatchSize:               10,
-		ScannerNumThreads:              1,
-		ScannerMinRecentFailures:       5,
+		ID: api.DefaultAutopilotID,
+		Autopilot: config.Autopilot{
+			AccountsRefillInterval:         time.Second,
+			Heartbeat:                      time.Second,
+			MigrationHealthCutoff:          0.99,
+			MigratorParallelSlabsPerWorker: 1,
+			RevisionSubmissionBuffer:       0,
+			ScannerInterval:                time.Second,
+			ScannerBatchSize:               10,
+			ScannerNumThreads:              1,
+			ScannerMinRecentFailures:       5,
+		},
 	}
 }

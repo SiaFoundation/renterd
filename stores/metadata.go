@@ -299,7 +299,7 @@ func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (api.Object, er
 	// filter out slabs without slab ID and buffered slabs - this is expected
 	// for an empty object or objects that end with a partial slab.
 	var filtered rawObject
-	var partialSlabSector *rawObjectSector
+	var partialSlabSectors []*rawObjectSector
 	minHealth := math.MaxFloat64
 	for i, sector := range raw {
 		if sector.SlabID != 0 && !sector.SlabBuffered {
@@ -308,7 +308,7 @@ func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (api.Object, er
 				minHealth = sector.SlabHealth
 			}
 		} else if sector.SlabBuffered {
-			partialSlabSector = &raw[i]
+			partialSlabSectors = append(partialSlabSectors, &raw[i])
 		}
 	}
 
@@ -350,30 +350,17 @@ func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (api.Object, er
 	}
 
 	// fetch a potential partial slab from the buffer.
-	var partialSlab *object.PartialSlab
-	if partialSlabSector != nil {
-		var buffer dbBufferedSlab
-		err := tx.Joins("DBSlab").
-			Where("DBSlab.id", partialSlabSector.SlabID).
-			Take(&buffer).Error
-		if err != nil {
+	var partialSlabs []object.PartialSlab
+	for _, pss := range partialSlabSectors {
+		var key object.EncryptionKey
+		if err := key.UnmarshalText(pss.SlabKey); err != nil {
 			return api.Object{}, err
 		}
-		file, err := os.Open(filepath.Join(partialSlabDir, buffer.Filename))
-		if err != nil {
-			return api.Object{}, err
-		}
-		defer file.Close()
-		data := make([]byte, partialSlabSector.SliceLength)
-		_, err = file.ReadAt(data, int64(partialSlabSector.SliceOffset))
-		if err != nil {
-			return api.Object{}, err
-		}
-		partialSlab = &object.PartialSlab{
-			MinShards:   buffer.DBSlab.MinShards,
-			TotalShards: buffer.DBSlab.TotalShards,
-			Data:        data,
-		}
+		partialSlabs = append(partialSlabs, object.PartialSlab{
+			Key:    key,
+			Offset: pss.SliceOffset,
+			Length: pss.SliceLength,
+		})
 	}
 
 	// return object
@@ -384,9 +371,9 @@ func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (api.Object, er
 			Health: minHealth,
 		},
 		Object: object.Object{
-			Key:         key,
-			PartialSlab: partialSlab,
-			Slabs:       slabs,
+			Key:          key,
+			PartialSlabs: partialSlabs,
+			Slabs:        slabs,
 		},
 	}, nil
 }
@@ -686,13 +673,11 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]
 
 	if err := s.db.
 		Raw(`
-SELECT fcid, size, CASE WHEN size>bytes THEN size-bytes ELSE 0 END as prunable FROM (
-	SELECT fcid, MAX(c.size) as size, COUNT(cs.db_sector_id) * ? as bytes
-	FROM contracts c
-	LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-	GROUP BY c.fcid
-) as i
-	`, rhpv2.SectorSize).
+SELECT fcid, MAX(c.size) as size, CASE WHEN MAX(c.size)>COUNT(cs.db_sector_id) * ? THEN MAX(c.size)-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
+FROM contracts c
+LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+GROUP BY c.fcid
+	`, rhpv2.SectorSize, rhpv2.SectorSize).
 		Scan(&rows).
 		Error; err != nil {
 		return nil, err
@@ -723,13 +708,11 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (a
 
 	if err := s.db.
 		Raw(`
-SELECT size, CASE WHEN size>bytes THEN size-bytes ELSE 0 END as prunable FROM (
-    SELECT c.size, COUNT(cs.db_sector_id) * ? as bytes
-    FROM contracts c
-    LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-    WHERE c.fcid = ?
-) as i
-`, rhpv2.SectorSize, fileContractID(id)).
+SELECT c.size, CASE WHEN c.size>(COUNT(cs.db_sector_id) * ?) THEN c.size-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
+FROM contracts c
+LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
+WHERE c.fcid = ?
+`, rhpv2.SectorSize, rhpv2.SectorSize, fileContractID(id)).
 		Take(&size).
 		Error; err != nil {
 		return api.ContractSize{}, err
@@ -1055,6 +1038,151 @@ func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew strin
 	return nil
 }
 
+func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey, offset, length uint32) ([]byte, error) {
+	key, err := ec.MarshalText()
+	if err != nil {
+		return nil, err
+	}
+
+	var data []byte
+	err = s.retryTransaction(func(tx *gorm.DB) error {
+		var buffer dbBufferedSlab
+		err := tx.
+			Joins("DBSlab").
+			Take(&buffer, "DBSlab.key = ?", key).
+			Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrObjectNotFound
+		} else if err != nil {
+			return err
+		}
+		f, err := os.Open(filepath.Join(s.partialSlabDir, buffer.Filename))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		data = make([]byte, length)
+		_, err = f.ReadAt(data, int64(offset))
+		return err
+	})
+	return data, err
+}
+
+func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error) {
+	s.bufferedSlabsMu.Lock()
+	defer s.bufferedSlabsMu.Unlock()
+
+	// Sanity check input.
+	slabSize := bufferedSlabSize(minShards)
+	if minShards == 0 || totalShards == 0 || minShards > totalShards {
+		return nil, fmt.Errorf("invalid shard configuration: minShards=%v, totalShards=%v", minShards, totalShards)
+	} else if contractSet == "" {
+		return nil, fmt.Errorf("contract set must not be empty")
+	} else if len(data) > slabSize {
+		return nil, fmt.Errorf("data size %v exceeds size of a slab %v", len(data), slabSize)
+	}
+
+	err = s.retryTransaction(func(tx *gorm.DB) error {
+		// Fetch contract set.
+		var cs dbContractSet
+		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
+			return err
+		}
+
+		// Find a buffer that is not yet marked as complete.
+		// NOTE: We don't need to fetch the data of the buffer since we are just
+		// going to append to it. Instead we omit the data and select the length
+		// of the data.
+		var buffer struct {
+			ID       uint
+			Filename string
+			SlabID   uint
+			SlabKey  []byte
+			Size     int64
+		}
+		err := tx.
+			Table("buffered_slabs").
+			Select("buffered_slabs.id AS ID, buffered_slabs.size AS Size, buffered_slabs.filename AS Filename, sla.id AS SlabID, sla.key AS SlabKey").
+			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id AND sla.min_shards = ? AND sla.total_shards = ?", minShards, totalShards).
+			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id AND cs.name = ?", contractSet).
+			Where("buffered_slabs.complete = ?",
+				false).
+			Take(&buffer).
+			Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			// No buffer found, create a new one.
+			slab, err := createSlabBuffer(tx, cs.ID, data, minShards, totalShards, s.partialSlabDir)
+			slabs = []object.PartialSlab{slab}
+			return err
+		}
+
+		// We have a buffer. Sanity check it.
+		if buffer.Size >= int64(slabSize) {
+			return fmt.Errorf("incomplete buffer with ID %v has no space left", buffer.ID)
+		}
+
+		var key object.EncryptionKey
+		if err := key.UnmarshalText(buffer.SlabKey); err != nil {
+			return fmt.Errorf("failed to unmarshal slab key: %v", err)
+		}
+
+		// Create the slab.
+		remainingSpace := int64(slabSize) - buffer.Size
+		slab := object.PartialSlab{
+			Key:    key,
+			Offset: uint32(buffer.Size),
+		}
+		if remainingSpace <= int64(len(data)) {
+			slab.Length = uint32(remainingSpace)
+		} else {
+			slab.Length = uint32(len(data))
+		}
+		slabs = []object.PartialSlab{slab}
+
+		// Add the data to the buffer and remember the overflowing data.
+		toAppend := data[:slab.Length]
+		overflow := data[slab.Length:]
+
+		// Append to buffer.
+		file, err := os.OpenFile(filepath.Join(s.partialSlabDir, buffer.Filename), os.O_WRONLY, 0600)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		_, err = file.WriteAt(toAppend, buffer.Size)
+		if err != nil {
+			return err
+		}
+		if err := file.Sync(); err != nil {
+			return err
+		}
+
+		// Update buffer.
+		err = tx.Model(&dbBufferedSlab{}).
+			Where("ID", buffer.ID).
+			Updates(map[string]interface{}{
+				"complete": buffer.Size+int64(len(toAppend)) >= int64(slabSize)-s.bufferedSlabCompletionThreshold,
+				"size":     buffer.Size + int64(len(toAppend)),
+			}).Error
+		if err != nil {
+			return err
+		}
+
+		// If there is no overflow, we are done.
+		if len(overflow) == 0 {
+			return nil
+		}
+
+		// Otherwise, create a new buffer with a new slab.
+		slab, err = createSlabBuffer(tx, cs.ID, overflow, minShards, totalShards, s.partialSlabDir)
+		slabs = append(slabs, slab)
+		return err
+	})
+	return slabs, err
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
@@ -1164,98 +1292,36 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 			}
 		}
 
-		// Handle partial slab.
-		partialSlab := o.PartialSlab
-		if partialSlab == nil {
+		// Handle partial slabs. We create a slice for each partial slab.
+		partialSlabs := o.PartialSlabs
+		if len(partialSlabs) == 0 {
 			return nil
 		}
 
-		// Find a buffer that is not yet marked as complete.
-		// NOTE: We don't need to fetch the data of the buffer since we are just
-		// going to append to it. Instead we omit the data and select the length
-		// of the data.
-		var buffer struct {
-			ID       uint
-			Filename string
-			SlabID   uint
-			Size     int64
-		}
-		err = tx.
-			Table("buffered_slabs").
-			Select("buffered_slabs.id AS ID, buffered_slabs.size AS Size, buffered_slabs.filename AS Filename, sla.id AS SlabID").
-			Joins("INNER JOIN slabs sla ON buffered_slabs.id = sla.db_buffered_slab_id AND sla.min_shards = ? AND sla.total_shards = ?", partialSlab.MinShards, partialSlab.TotalShards).
-			Joins("INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id AND cs.name = ?", contractSet).
-			Where("buffered_slabs.complete = ?",
-				false).
-			Take(&buffer).
-			Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			// No buffer found, create a new one.
-			return createSlabBuffer(tx, obj.ID, cs.ID, *partialSlab, s.partialSlabDir)
-		}
+		for _, partialSlab := range partialSlabs {
+			key, err := partialSlab.Key.MarshalText()
+			if err != nil {
+				return err
+			}
+			var buffer dbBufferedSlab
+			err = tx.Joins("DBSlab").
+				Take(&buffer, "DBSlab.key = ?", key).
+				Error
+			if err != nil {
+				return err
+			}
 
-		// We have a buffer. Sanity check it.
-		slabSize := bufferedSlabSize(partialSlab.MinShards)
-		if buffer.Size >= int64(slabSize) {
-			return fmt.Errorf("incomplete buffer with ID %v has no space left, this should never happen", buffer.ID)
-		}
-
-		// Create the slice.
-		remainingSpace := int64(slabSize) - buffer.Size
-		slice := dbSlice{
-			DBObjectID: obj.ID,
-			DBSlabID:   buffer.SlabID,
-			Offset:     uint32(buffer.Size),
-		}
-		if remainingSpace <= int64(len(partialSlab.Data)) {
-			slice.Length = uint32(remainingSpace)
-		} else {
-			slice.Length = uint32(len(partialSlab.Data))
-		}
-		if err := tx.Create(&slice).Error; err != nil {
-			return err
-		}
-
-		// Add the data to the buffer and remember the overflowing data.
-		toAppend := partialSlab.Data[:slice.Length]
-		overflow := partialSlab.Data[slice.Length:]
-
-		// Append to buffer.
-		file, err := os.OpenFile(filepath.Join(s.partialSlabDir, buffer.Filename), os.O_WRONLY, 0600)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		_, err = file.WriteAt(toAppend, buffer.Size)
-		if err != nil {
-			return err
-		}
-		if err := file.Sync(); err != nil {
-			return err
-		}
-
-		// Update buffer.
-		err = tx.Model(&dbBufferedSlab{}).
-			Where("ID", buffer.ID).
-			Updates(map[string]interface{}{
-				"complete": buffer.Size+int64(len(toAppend)) >= int64(slabSize)-s.bufferedSlabCompletionThreshold,
-				"size":     buffer.Size + int64(len(toAppend)),
+			err = tx.Create(&dbSlice{
+				DBObjectID: obj.ID,
+				DBSlabID:   buffer.DBSlab.ID,
+				Offset:     partialSlab.Offset,
+				Length:     partialSlab.Length,
 			}).Error
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
 		}
-
-		// If there is no overflow, we are done.
-		if len(overflow) == 0 {
-			return nil
-		}
-
-		// Otherwise, create a new buffer with a new slab and slice.
-		overflowSlab := *partialSlab
-		overflowSlab.Data = overflow
-		return createSlabBuffer(tx, obj.ID, cs.ID, overflowSlab, s.partialSlabDir)
+		return nil
 	})
 }
 
@@ -1263,51 +1329,49 @@ func bufferedSlabSize(minShards uint8) int {
 	return int(rhpv2.SectorSize) * int(minShards)
 }
 
-func createSlabBuffer(tx *gorm.DB, objectID, contractSetID uint, partialSlab object.PartialSlab, partialSlabDir string) error {
-	if partialSlab.TotalShards == 0 || partialSlab.MinShards == 0 {
-		return fmt.Errorf("min shards and total shards must be greater than 0: %v, %v", partialSlab.MinShards, partialSlab.TotalShards)
+func createSlabBuffer(tx *gorm.DB, contractSetID uint, data []byte, minShards, totalShards uint8, partialSlabDir string) (object.PartialSlab, error) {
+	if totalShards == 0 || minShards == 0 {
+		return object.PartialSlab{}, fmt.Errorf("min shards and total shards must be greater than 0: %v, %v", minShards, totalShards)
 	}
-	if partialSlab.MinShards > partialSlab.TotalShards {
-		return fmt.Errorf("min shards must be less than or equal to total shards: %v > %v", partialSlab.MinShards, partialSlab.TotalShards)
+	if minShards > totalShards {
+		return object.PartialSlab{}, fmt.Errorf("min shards must be less than or equal to total shards: %v > %v", minShards, totalShards)
 	}
-	if slabSize := int(rhpv2.SectorSize) * int(partialSlab.MinShards); len(partialSlab.Data) >= slabSize {
-		return fmt.Errorf("partial slab data size must be less than %v to count as a partial slab: %v", slabSize, len(partialSlab.Data))
+	if slabSize := int(rhpv2.SectorSize) * int(minShards); len(data) >= slabSize {
+		return object.PartialSlab{}, fmt.Errorf("partial slab data size must be less than %v to count as a partial slab: %v", slabSize, len(data))
 	}
-	key, err := object.GenerateEncryptionKey().MarshalText()
+	ec := object.GenerateEncryptionKey()
+	key, err := ec.MarshalText()
 	if err != nil {
-		return err
+		return object.PartialSlab{}, err
 	}
 	// Create a new buffer and slab.
 	identifier := frand.Entropy256()
-	fileName := fmt.Sprintf("%v:%v-%v", partialSlab.MinShards, partialSlab.TotalShards, hex.EncodeToString(identifier[:]))
+	fileName := fmt.Sprintf("%v:%v-%v", minShards, totalShards, hex.EncodeToString(identifier[:]))
 	file, err := os.Create(filepath.Join(partialSlabDir, fileName))
 	if err != nil {
-		return err
+		return object.PartialSlab{}, err
 	}
 	defer file.Close()
-	_, err = file.Write(partialSlab.Data)
+	_, err = file.Write(data)
 	if err != nil {
-		return err
+		return object.PartialSlab{}, err
 	}
-	return tx.Create(&dbBufferedSlab{
-		DBSlab: dbSlab{
-			DBContractSetID: contractSetID,
-			Key:             key, // random placeholder key
-			MinShards:       partialSlab.MinShards,
-			TotalShards:     partialSlab.TotalShards,
-			Slices: []dbSlice{
-				{
-					DBObjectID: objectID,
-					Offset:     0,
-					Length:     uint32(len(partialSlab.Data)),
-				},
+	return object.PartialSlab{
+			Key:    ec,
+			Offset: 0,
+			Length: uint32(len(data)),
+		}, tx.Create(&dbBufferedSlab{
+			DBSlab: dbSlab{
+				DBContractSetID: contractSetID,
+				Key:             key,
+				MinShards:       minShards,
+				TotalShards:     totalShards,
 			},
-		},
-		Complete:    false,
-		Size:        int64(len(partialSlab.Data)),
-		Filename:    fileName,
-		LockedUntil: 0,
-	}).Error
+			Complete:    false,
+			Size:        int64(len(data)),
+			Filename:    fileName,
+			LockedUntil: 0,
+		}).Error
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
@@ -1608,7 +1672,7 @@ func (s *SQLStore) packedSlabsForUpload(lockingDuration time.Duration, minShards
 		return nil, err
 	}
 	var buffers []dbBufferedSlab
-	if err := s.db.Find(&buffers, "lock_id = ?", lockID).Error; err != nil {
+	if err := s.db.Joins("DBSlab").Find(&buffers, "lock_id = ?", lockID).Error; err != nil {
 		return nil, err
 	}
 	return buffers, nil
@@ -1642,9 +1706,14 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 		if err != nil {
 			return nil, err
 		}
+		var key object.EncryptionKey
+		if err := key.UnmarshalText(buf.DBSlab.Key); err != nil {
+			return nil, err
+		}
 		slabs[i] = api.PackedSlab{
 			BufferID: buf.ID,
 			Data:     data,
+			Key:      key,
 		}
 	}
 	return slabs, nil
@@ -1660,27 +1729,13 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.Encrypti
 	if err != nil {
 		return nil, err
 	}
-	var query string
-	if isSQLite(s.db) {
-		query = `
-SELECT o.object_id as Name, o.size as Size, sla.health as Health
+	err = s.db.Raw(`
+SELECT DISTINCT obj.object_id as Name, obj.size as Size, sla.health as Health
 FROM slabs sla
-LEFT JOIN slices sli ON sli.db_slab_id = sla.id
-INNER JOIN objects o ON o.id = sli.db_object_id
-GROUP BY o.object_id
-HAVING sla.key = ?
-	`
-	} else {
-		query = `
-SELECT o.object_id as Name, ANY_VALUE(o.size) as Size, ANY_VALUE(sla.health) as Health, ANY_VALUE(sla.key) as slabKey
-FROM slabs sla
-LEFT JOIN slices sli ON sli.db_slab_id = sla.id
-INNER JOIN objects o ON o.id = sli.db_object_id
-GROUP BY o.object_id
-HAVING slabKey = ?
-	`
-	}
-	err = s.db.Raw(query, key).
+INNER JOIN slices sli ON sli.db_slab_id = sla.id
+INNER JOIN objects obj ON sli.db_object_id = obj.id
+WHERE sla.key = ?
+	`, key).
 		Scan(&objs).
 		Error
 	if err != nil {
@@ -1742,14 +1797,9 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	}
 
 	// update the slab
-	key, err := slab.Key.MarshalText()
-	if err != nil {
-		return "", err
-	}
 	if err := tx.Model(&dbSlab{}).
 		Where("id", sla.ID).
 		Updates(map[string]interface{}{
-			"key":                 key,
 			"db_buffered_slab_id": nil,
 		}).Error; err != nil {
 		return "", err
@@ -1760,7 +1810,7 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	if err := tx.Take(&buffer, "id = ?", slab.BufferID).Error; err != nil {
 		return "", err
 	}
-	err = tx.Delete(&buffer).
+	err := tx.Delete(&buffer).
 		Error
 	if err != nil {
 		return "", err

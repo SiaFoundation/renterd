@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -34,42 +35,17 @@ import (
 	"gorm.io/gorm"
 )
 
-type WorkerConfig struct {
-	ID                       string
-	AllowPrivateIPs          bool
-	BusFlushInterval         time.Duration
-	ContractLockTimeout      time.Duration
-	DownloadOverdriveTimeout time.Duration
-	UploadOverdriveTimeout   time.Duration
-	DownloadMaxOverdrive     uint64
-	UploadMaxOverdrive       uint64
-}
-
 type BusConfig struct {
-	Bootstrap                     bool
-	GatewayAddr                   string
-	Network                       *consensus.Network
-	Miner                         *Miner
-	PersistInterval               time.Duration
-	UsedUTXOExpiry                time.Duration
-	SlabBufferCompletionThreshold int64
-
+	config.Bus
+	Network        *consensus.Network
+	Miner          *Miner
 	DBLoggerConfig stores.LoggerConfig
 	DBDialector    gorm.Dialector
 }
 
 type AutopilotConfig struct {
-	ID                             string
-	AccountsRefillInterval         time.Duration
-	Heartbeat                      time.Duration
-	MigrationHealthCutoff          float64
-	RevisionBroadcastInterval      time.Duration
-	RevisionSubmissionBuffer       uint64
-	ScannerInterval                time.Duration
-	ScannerBatchSize               uint64
-	ScannerMinRecentFailures       uint64
-	ScannerNumThreads              uint64
-	MigratorParallelSlabsPerWorker uint64
+	config.Autopilot
+	ID string
 }
 
 type (
@@ -253,8 +229,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
 
-	hooksMgr := webhooks.NewManager(l.Named("webhooks").Sugar())
-	alertsMgr := alerts.NewManager(hooksMgr)
+	alertsMgr := alerts.NewManager()
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
@@ -262,6 +237,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	if err != nil {
 		return nil, nil, err
 	}
+	hooksMgr, err := webhooks.NewManager(l.Named("webhooks").Sugar(), sqlStore)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Hook up webhooks to alerts.
+	alertsMgr.RegisterWebhookBroadcaster(hooksMgr)
 
 	cancelSubscribe := make(chan struct{})
 	go func() {
@@ -312,7 +294,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg WorkerConfig, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewWorker(cfg config.Worker, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
 	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.AllowPrivateIPs, l)
 	if err != nil {

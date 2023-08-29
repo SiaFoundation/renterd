@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/tracing"
@@ -28,6 +29,8 @@ import (
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/web/renterd"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
+	"gorm.io/gorm/logger"
 )
 
 const (
@@ -47,9 +50,61 @@ var (
 	githash   = "?"
 	builddate = "?"
 
-	// fetched once, then cached
-	apiPassword *string
-	seed        *types.PrivateKey
+	cfg = config.Config{
+		Directory: ".",
+		Seed:      os.Getenv("RENTERD_SEED"),
+		HTTP: config.HTTP{
+			Address:  build.DefaultAPIAddress,
+			Password: os.Getenv("RENTERD_API_PASSWORD"),
+		},
+		ShutdownTimeout: 5 * time.Minute,
+		Tracing: config.Tracing{
+			InstanceID: "cluster",
+		},
+		Database: config.Database{
+			Log: config.DatabaseLog{
+				IgnoreRecordNotFoundError: true,
+				SlowThreshold:             100 * time.Millisecond,
+			},
+		},
+		Log: config.Log{
+			Level: "warn",
+		},
+		Bus: config.Bus{
+			Bootstrap:                     true,
+			GatewayAddr:                   build.DefaultGatewayAddress,
+			PersistInterval:               time.Minute,
+			UsedUTXOExpiry:                24 * time.Hour,
+			SlabBufferCompletionThreshold: 1 << 12,
+		},
+		Worker: config.Worker{
+			Enabled: true,
+
+			ID:                  "worker",
+			ContractLockTimeout: 30 * time.Second,
+			BusFlushInterval:    5 * time.Second,
+
+			DownloadMaxOverdrive:     5,
+			DownloadOverdriveTimeout: 3 * time.Second,
+
+			UploadMaxOverdrive:     5,
+			UploadOverdriveTimeout: 3 * time.Second,
+		},
+		Autopilot: config.Autopilot{
+			Enabled:                        true,
+			RevisionSubmissionBuffer:       144,
+			AccountsRefillInterval:         defaultAccountRefillInterval,
+			Heartbeat:                      30 * time.Minute,
+			MigrationHealthCutoff:          0.75,
+			RevisionBroadcastInterval:      24 * time.Hour,
+			ScannerBatchSize:               1000,
+			ScannerInterval:                24 * time.Hour,
+			ScannerMinRecentFailures:       10,
+			ScannerNumThreads:              100,
+			MigratorParallelSlabsPerWorker: 1,
+		},
+	}
+	seed types.PrivateKey
 )
 
 func check(context string, err error) {
@@ -58,32 +113,24 @@ func check(context string, err error) {
 	}
 }
 
-func getAPIPassword() string {
-	if apiPassword == nil {
-		pw := os.Getenv("RENTERD_API_PASSWORD")
-		if pw != "" {
-			fmt.Println("Using RENTERD_API_PASSWORD environment variable.")
-			apiPassword = &pw
-		} else {
-			fmt.Print("Enter API password: ")
-			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err != nil {
-				log.Fatal(err)
-			}
-			s := string(pw)
-			apiPassword = &s
-		}
+func mustLoadAPIPassword() {
+	if len(cfg.HTTP.Password) != 0 {
+		return
 	}
-	return *apiPassword
+
+	fmt.Print("Enter API password: ")
+	pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg.HTTP.Password = string(pw)
 }
 
 func getSeed() types.PrivateKey {
 	if seed == nil {
-		phrase := os.Getenv("RENTERD_SEED")
-		if phrase != "" {
-			fmt.Println("Using RENTERD_SEED environment variable")
-		} else {
+		phrase := cfg.Seed
+		if phrase == "" {
 			fmt.Print("Enter seed: ")
 			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			check("Could not read seed phrase:", err)
@@ -94,9 +141,53 @@ func getSeed() types.PrivateKey {
 		if err != nil {
 			log.Fatal(err)
 		}
-		seed = &key
+		seed = key
 	}
-	return *seed
+	return seed
+}
+
+func mustParseWorkers(workers, password string) {
+	if workers == "" {
+		return
+	}
+	// if the CLI flag/environment variable is set, overwrite the config file
+	cfg.Worker.Remotes = cfg.Worker.Remotes[:0]
+	for _, addr := range strings.Split(workers, ";") {
+		// note: duplicates the old behavior of all workers sharing the same
+		// password
+		cfg.Worker.Remotes = append(cfg.Worker.Remotes, config.RemoteWorker{
+			Address:  addr,
+			Password: password,
+		})
+	}
+}
+
+// tryLoadConfig loads the config file specified by the RENTERD_CONFIG_FILE
+// environment variable. If the config file does not exist, it will not be
+// loaded.
+func tryLoadConfig() {
+	configPath := "renterd.yml"
+	if str := os.Getenv("RENTERD_CONFIG_FILE"); len(str) != 0 {
+		configPath = str
+	}
+
+	// If the config file doesn't exist, don't try to load it.
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return
+	}
+
+	f, err := os.Open(configPath)
+	if err != nil {
+		log.Fatal("failed to open config file:", err)
+	}
+	defer f.Close()
+
+	dec := yaml.NewDecoder(f)
+	dec.KnownFields(true)
+
+	if err := dec.Decode(&cfg); err != nil {
+		log.Fatal("failed to decode config file:", err)
+	}
 }
 
 func parseEnvVar(s string, v interface{}) {
@@ -111,52 +202,23 @@ func parseEnvVar(s string, v interface{}) {
 func main() {
 	log.SetFlags(0)
 
-	var nodeCfg struct {
-		shutdownTimeout time.Duration
-	}
-
-	var busCfg struct {
-		remoteAddr  string
-		apiPassword string
-		node.BusConfig
-	}
-	busCfg.Network, _ = build.Network()
-
-	var dbCfg struct {
-		uri      string
-		user     string
-		password string
-		database string
-	}
-
-	var dbLoggerCfg struct {
-		ignoreNotFoundError string
-		logLevel            string
-		slowThreshold       string
-	}
-
-	var workerCfg struct {
-		enabled     bool
-		remoteAddrs string
-		apiPassword string
-		node.WorkerConfig
-	}
-	workerCfg.ContractLockTimeout = 30 * time.Second
-
-	var autopilotCfg struct {
-		enabled bool
-		node.AutopilotConfig
-	}
-	autopilotCfg.RevisionSubmissionBuffer = api.BlocksPerDay
+	// load the YAML config first. CLI flags and environment variables will
+	// overwrite anything set in the config file.
+	tryLoadConfig()
 
 	// TODO: the following flags will be deprecated in v1.0.0 in favor of
 	// environment variables to ensure we do not ask the user to pass sensitive
 	// information via CLI parameters.
-	flag.StringVar(&dbCfg.password, "db.password", "", "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
-	flag.StringVar(&busCfg.apiPassword, "bus.apiPassword", "", "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
-	flag.StringVar(&busCfg.remoteAddr, "bus.remoteAddr", "", "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
-	flag.StringVar(&workerCfg.apiPassword, "worker.apiPassword", "", "[DEPRECATED] API password for remote worker service")
-	flag.StringVar(&workerCfg.remoteAddrs, "worker.remoteAddrs", "", "[DEPRECATED] URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
+	var depDBPassword string
+	var depBusRemotePassword string
+	var depBusRemoteAddr string
+	var depWorkerRemotePassStr string
+	var depWorkerRemoteAddrsStr string
+	flag.StringVar(&depDBPassword, "db.password", "", "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
+	flag.StringVar(&depBusRemotePassword, "bus.apiPassword", "", "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
+	flag.StringVar(&depBusRemoteAddr, "bus.remoteAddr", "", "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
+	flag.StringVar(&depWorkerRemotePassStr, "worker.apiPassword", "", "[DEPRECATED] API password for remote worker service")
+	flag.StringVar(&depWorkerRemoteAddrsStr, "worker.remoteAddrs", "", "[DEPRECATED] URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
 
 	for _, flag := range []struct {
 		input    string
@@ -164,11 +226,11 @@ func main() {
 		env      string
 		insecure bool
 	}{
-		{dbCfg.password, "db.password", "RENTERD_DB_PASSWORD", true},
-		{busCfg.apiPassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
-		{busCfg.remoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
-		{workerCfg.apiPassword, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
-		{workerCfg.remoteAddrs, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
+		{depDBPassword, "db.password", "RENTERD_DB_PASSWORD", true},
+		{depBusRemotePassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
+		{depBusRemoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
+		{depWorkerRemotePassStr, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
+		{depWorkerRemoteAddrsStr, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
 	} {
 		if flag.input != "" {
 			if flag.insecure {
@@ -179,55 +241,63 @@ func main() {
 		}
 	}
 
+	if depDBPassword != "" {
+		cfg.Database.MySQL.Password = depDBPassword
+	}
+	if depBusRemotePassword != "" {
+		cfg.Bus.RemotePassword = depBusRemotePassword
+	}
+	if depBusRemoteAddr != "" {
+		cfg.Bus.RemoteAddr = depBusRemoteAddr
+	}
+
 	// node
-	var customLogPath string
-	apiAddr := flag.String("http", build.DefaultAPIAddress, "address to serve API on")
-	dir := flag.String("dir", ".", "directory to store node state in")
-	tracingEnabled := flag.Bool("tracing-enabled", false, "Enables tracing through OpenTelemetry. If RENTERD_TRACING_ENABLED is set, it overwrites the CLI flag's value. Tracing can be configured using the standard OpenTelemetry environment variables. https://github.com/open-telemetry/opentelemetry-specification/blob/v1.8.0/specification/protocol/exporter.md")
-	tracingServiceInstanceId := flag.String("tracing-service-instance-id", "cluster", "ID of the service instance used for tracing. If RENTERD_TRACING_SERVICE_INSTANCE_ID is set, it overwrites the CLI flag's value.")
-	flag.StringVar(&customLogPath, "log-path", "", "Overwrites the default log location on disk. Alternatively RENTERD_LOG_PATH can be used")
+	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "address to serve API on")
+	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "directory to store node state in")
+	flag.BoolVar(&cfg.Tracing.Enabled, "tracing-enabled", cfg.Tracing.Enabled, "Enables tracing through OpenTelemetry. If RENTERD_TRACING_ENABLED is set, it overwrites the CLI flag's value. Tracing can be configured using the standard OpenTelemetry environment variables. https://github.com/open-telemetry/opentelemetry-specification/blob/v1.8.0/specification/protocol/exporter.md")
+	flag.StringVar(&cfg.Tracing.InstanceID, "tracing-service-instance-id", cfg.Tracing.InstanceID, "ID of the service instance used for tracing. If RENTERD_TRACING_SERVICE_INSTANCE_ID is set, it overwrites the CLI flag's value.")
+	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "Overwrites the default log location on disk. Alternatively RENTERD_LOG_PATH can be used")
 
 	// db
-	flag.StringVar(&dbCfg.uri, "db.uri", "", "URI of the database to use for the bus - can be overwritten using RENTERD_DB_URI environment variable")
-	flag.StringVar(&dbCfg.user, "db.user", "", "username for the database to use for the bus - can be overwritten using RENTERD_DB_USER environment variable")
-	flag.StringVar(&dbCfg.database, "db.name", "", "name of the database to use for the bus - can be overwritten using RENTERD_DB_NAME environment variable")
+	flag.StringVar(&cfg.Database.MySQL.URI, "db.uri", cfg.Database.MySQL.URI, "URI of the database to use for the bus - can be overwritten using RENTERD_DB_URI environment variable")
+	flag.StringVar(&cfg.Database.MySQL.User, "db.user", cfg.Database.MySQL.User, "username for the database to use for the bus - can be overwritten using RENTERD_DB_USER environment variable")
+	flag.StringVar(&cfg.Database.MySQL.Database, "db.name", cfg.Database.MySQL.Database, "name of the database to use for the bus - can be overwritten using RENTERD_DB_NAME environment variable")
 
 	// db logger
-	flag.StringVar(&dbLoggerCfg.ignoreNotFoundError, "db.logger.ignoreNotFoundError", "true", "ignore not found error for logger - can be overwritten using RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR environment variable")
-	flag.StringVar(&dbLoggerCfg.logLevel, "db.logger.logLevel", "warn", "log level for logger - can be overwritten using RENTERD_DB_LOGGER_LOG_LEVEL environment variable")
-	flag.StringVar(&dbLoggerCfg.slowThreshold, "db.logger.slowThreshold", "500ms", "slow threshold for logger - can be overwritten using RENTERD_DB_LOGGER_SLOW_THRESHOLD environment variable")
+	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "ignore not found error for logger - can be overwritten using RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR environment variable")
+	flag.StringVar(&cfg.Log.Level, "db.logger.logLevel", cfg.Log.Level, "log level for logger - can be overwritten using RENTERD_DB_LOGGER_LOG_LEVEL environment variable")
+	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "slow threshold for logger - can be overwritten using RENTERD_DB_LOGGER_SLOW_THRESHOLD environment variable")
 
 	// bus
-	flag.BoolVar(&busCfg.Bootstrap, "bus.bootstrap", true, "bootstrap the gateway and consensus modules")
-	flag.StringVar(&busCfg.GatewayAddr, "bus.gatewayAddr", build.DefaultGatewayAddress, "address to listen on for Sia peer connections - can be overwritten using RENTERD_BUS_GATEWAY_ADDR environment variable")
-	flag.DurationVar(&busCfg.PersistInterval, "bus.persistInterval", busCfg.PersistInterval, "interval at which to persist the consensus updates")
-	flag.DurationVar(&busCfg.UsedUTXOExpiry, "bus.usedUTXOExpiry", 24*time.Hour, "time after which a used UTXO that hasn't been included in a transaction becomes spendable again")
-	flag.Int64Var(&busCfg.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", 1<<12, "number of remaining bytes in a slab buffer before it is uploaded - can be overwritten using the RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD environment variable")
+	flag.BoolVar(&cfg.Bus.Bootstrap, "bus.bootstrap", cfg.Bus.Bootstrap, "bootstrap the gateway and consensus modules")
+	flag.StringVar(&cfg.Bus.GatewayAddr, "bus.gatewayAddr", cfg.Bus.GatewayAddr, "address to listen on for Sia peer connections - can be overwritten using RENTERD_BUS_GATEWAY_ADDR environment variable")
+	flag.DurationVar(&cfg.Bus.PersistInterval, "bus.persistInterval", cfg.Bus.PersistInterval, "interval at which to persist the consensus updates")
+	flag.DurationVar(&cfg.Bus.UsedUTXOExpiry, "bus.usedUTXOExpiry", cfg.Bus.UsedUTXOExpiry, "time after which a used UTXO that hasn't been included in a transaction becomes spendable again")
+	flag.Int64Var(&cfg.Bus.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", cfg.Bus.SlabBufferCompletionThreshold, "number of remaining bytes in a slab buffer before it is uploaded - can be overwritten using the RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD environment variable")
 
 	// worker
-	var unauthenticatedDownloads bool
-	flag.BoolVar(&workerCfg.AllowPrivateIPs, "worker.allowPrivateIPs", false, "allow hosts with private IPs")
-	flag.DurationVar(&workerCfg.BusFlushInterval, "worker.busFlushInterval", 5*time.Second, "time after which the worker flushes buffered data to bus for persisting")
-	flag.Uint64Var(&workerCfg.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", 5, "maximum number of active overdrive workers when downloading a slab")
-	flag.StringVar(&workerCfg.WorkerConfig.ID, "worker.id", "worker", "unique identifier of worker used internally - can be overwritten using the RENTERD_WORKER_ID environment variable")
-	flag.DurationVar(&workerCfg.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", 3*time.Second, "timeout applied to slab downloads that decides when we start overdriving")
-	flag.Uint64Var(&workerCfg.UploadMaxOverdrive, "worker.uploadMaxOverdrive", 5, "maximum number of active overdrive workers when uploading a slab")
-	flag.DurationVar(&workerCfg.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", 3*time.Second, "timeout applied to slab uploads that decides when we start overdriving")
-	flag.BoolVar(&workerCfg.enabled, "worker.enabled", true, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
-	flag.BoolVar(&unauthenticatedDownloads, "worker.unauthenticatedDownloads", false, "if set to 'true', the worker will allow for downloading from the /objects endpoint without basic authentication. Can be overwritten using the RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS environment variable")
+	flag.BoolVar(&cfg.Worker.AllowPrivateIPs, "worker.allowPrivateIPs", cfg.Worker.AllowPrivateIPs, "allow hosts with private IPs")
+	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "time after which the worker flushes buffered data to bus for persisting")
+	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "maximum number of active overdrive workers when downloading a slab")
+	flag.StringVar(&cfg.Worker.ID, "worker.id", cfg.Worker.ID, "unique identifier of worker used internally - can be overwritten using the RENTERD_WORKER_ID environment variable")
+	flag.DurationVar(&cfg.Worker.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", cfg.Worker.DownloadOverdriveTimeout, "timeout applied to slab downloads that decides when we start overdriving")
+	flag.Uint64Var(&cfg.Worker.UploadMaxOverdrive, "worker.uploadMaxOverdrive", cfg.Worker.UploadMaxOverdrive, "maximum number of active overdrive workers when uploading a slab")
+	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "timeout applied to slab uploads that decides when we start overdriving")
+	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "enable/disable creating a worker - can be overwritten using the RENTERD_WORKER_ENABLED environment variable")
+	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "if set to 'true', the worker will allow for downloading from the /objects endpoint without basic authentication. Can be overwritten using the RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS environment variable")
 
 	// autopilot
-	flag.DurationVar(&autopilotCfg.AccountsRefillInterval, "autopilot.accountRefillInterval", defaultAccountRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
-	flag.DurationVar(&autopilotCfg.Heartbeat, "autopilot.heartbeat", 30*time.Minute, "interval at which autopilot loop runs")
-	flag.Float64Var(&autopilotCfg.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", 0.75, "health threshold below which slabs are migrated to new hosts")
-	flag.DurationVar(&autopilotCfg.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", 24*time.Hour, "interval at which the autopilot broadcasts contract revisions to be mined - can be overwritten using the RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL environment variable - setting it to 0 will disable this feature")
-	flag.Uint64Var(&autopilotCfg.ScannerBatchSize, "autopilot.scannerBatchSize", 1000, "size of the batch with which hosts are scanned")
-	flag.DurationVar(&autopilotCfg.ScannerInterval, "autopilot.scannerInterval", 24*time.Hour, "interval at which hosts are scanned")
-	flag.Uint64Var(&autopilotCfg.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", 10, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
-	flag.Uint64Var(&autopilotCfg.ScannerNumThreads, "autopilot.scannerNumThreads", 100, "number of threads that scan hosts")
-	flag.Uint64Var(&autopilotCfg.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", 1, "number of slabs that the autopilot migrates in parallel per worker. Can be overwritten using the RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER environment variable")
-	flag.BoolVar(&autopilotCfg.enabled, "autopilot.enabled", true, "enable/disable the autopilot - can be overwritten using the RENTERD_AUTOPILOT_ENABLED environment variable")
-	flag.DurationVar(&nodeCfg.shutdownTimeout, "node.shutdownTimeout", 5*time.Minute, "the timeout applied to the node shutdown")
+	flag.DurationVar(&cfg.Autopilot.AccountsRefillInterval, "autopilot.accountRefillInterval", cfg.Autopilot.AccountsRefillInterval, "interval at which the autopilot checks the workers' accounts balance and refills them if necessary")
+	flag.DurationVar(&cfg.Autopilot.Heartbeat, "autopilot.heartbeat", cfg.Autopilot.Heartbeat, "interval at which autopilot loop runs")
+	flag.Float64Var(&cfg.Autopilot.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", cfg.Autopilot.MigrationHealthCutoff, "health threshold below which slabs are migrated to new hosts")
+	flag.DurationVar(&cfg.Autopilot.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", cfg.Autopilot.RevisionBroadcastInterval, "interval at which the autopilot broadcasts contract revisions to be mined - can be overwritten using the RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL environment variable - setting it to 0 will disable this feature")
+	flag.Uint64Var(&cfg.Autopilot.ScannerBatchSize, "autopilot.scannerBatchSize", cfg.Autopilot.ScannerBatchSize, "size of the batch with which hosts are scanned")
+	flag.DurationVar(&cfg.Autopilot.ScannerInterval, "autopilot.scannerInterval", cfg.Autopilot.ScannerInterval, "interval at which hosts are scanned")
+	flag.Uint64Var(&cfg.Autopilot.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", cfg.Autopilot.ScannerMinRecentFailures, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
+	flag.Uint64Var(&cfg.Autopilot.ScannerNumThreads, "autopilot.scannerNumThreads", cfg.Autopilot.ScannerNumThreads, "number of threads that scan hosts")
+	flag.Uint64Var(&cfg.Autopilot.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", cfg.Autopilot.MigratorParallelSlabsPerWorker, "number of slabs that the autopilot migrates in parallel per worker. Can be overwritten using the RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER environment variable")
+	flag.BoolVar(&cfg.Autopilot.Enabled, "autopilot.enabled", cfg.Autopilot.Enabled, "enable/disable the autopilot - can be overwritten using the RENTERD_AUTOPILOT_ENABLED environment variable")
+	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "the timeout applied to the node shutdown")
 	flag.Parse()
 
 	log.Println("renterd v0.4.0-beta")
@@ -243,74 +313,97 @@ func main() {
 	}
 
 	// Overwrite flags from environment if set.
-	parseEnvVar("RENTERD_LOG_PATH", &customLogPath)
+	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
 
-	parseEnvVar("RENTERD_TRACING_ENABLED", tracingEnabled)
-	parseEnvVar("RENTERD_TRACING_SERVICE_INSTANCE_ID", tracingServiceInstanceId)
+	parseEnvVar("RENTERD_TRACING_ENABLED", &cfg.Tracing.Enabled)
+	parseEnvVar("RENTERD_TRACING_SERVICE_INSTANCE_ID", &cfg.Tracing.InstanceID)
 
-	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &busCfg.remoteAddr)
-	parseEnvVar("RENTERD_BUS_API_PASSWORD", &busCfg.apiPassword)
-	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &busCfg.GatewayAddr)
-	parseEnvVar("RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD", &busCfg.SlabBufferCompletionThreshold)
+	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &cfg.Bus.RemoteAddr)
+	parseEnvVar("RENTERD_BUS_API_PASSWORD", &cfg.Bus.RemotePassword)
+	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &cfg.Bus.GatewayAddr)
+	parseEnvVar("RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD", &cfg.Bus.SlabBufferCompletionThreshold)
 
-	parseEnvVar("RENTERD_DB_URI", &dbCfg.uri)
-	parseEnvVar("RENTERD_DB_USER", &dbCfg.user)
-	parseEnvVar("RENTERD_DB_PASSWORD", &dbCfg.password)
-	parseEnvVar("RENTERD_DB_NAME", &dbCfg.database)
+	parseEnvVar("RENTERD_DB_URI", &cfg.Database.MySQL.URI)
+	parseEnvVar("RENTERD_DB_USER", &cfg.Database.MySQL.User)
+	parseEnvVar("RENTERD_DB_PASSWORD", &cfg.Database.MySQL.Password)
+	parseEnvVar("RENTERD_DB_NAME", &cfg.Database.MySQL.Database)
 
-	parseEnvVar("RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR", &dbLoggerCfg.ignoreNotFoundError)
-	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &dbLoggerCfg.logLevel)
-	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &dbLoggerCfg.slowThreshold)
+	parseEnvVar("RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR", &cfg.Database.Log.IgnoreRecordNotFoundError)
+	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
+	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
 
-	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerCfg.remoteAddrs)
-	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerCfg.apiPassword)
-	parseEnvVar("RENTERD_WORKER_ENABLED", &workerCfg.enabled)
-	parseEnvVar("RENTERD_WORKER_ID", &workerCfg.ID)
-	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &unauthenticatedDownloads)
+	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &depWorkerRemoteAddrsStr)
+	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &depWorkerRemotePassStr)
+	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
+	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
+	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
 
-	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &autopilotCfg.enabled)
-	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &autopilotCfg.RevisionBroadcastInterval)
-	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &autopilotCfg.MigratorParallelSlabsPerWorker)
+	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
+	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
+	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
 
+	mustLoadAPIPassword()
+	if depWorkerRemoteAddrsStr != "" && depWorkerRemotePassStr != "" {
+		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
+	}
+
+	network, _ := build.Network()
+	busCfg := node.BusConfig{
+		Bus:     cfg.Bus,
+		Network: network,
+	}
 	// Init db dialector
-	if dbCfg.uri != "" {
+	if cfg.Database.MySQL.URI != "" {
 		busCfg.DBDialector = stores.NewMySQLConnection(
-			dbCfg.user,
-			dbCfg.password,
-			dbCfg.uri,
-			dbCfg.database,
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.Database,
 		)
 	}
 
-	// Init db logger config
-	if cfg, err := stores.ParseLoggerConfig(dbLoggerCfg.logLevel, dbLoggerCfg.ignoreNotFoundError, dbLoggerCfg.slowThreshold); err != nil {
-		log.Fatalf("failed to parse logger config, err: %v", err)
-	} else {
-		busCfg.DBLoggerConfig = cfg
+	var level logger.LogLevel
+	switch strings.ToLower(cfg.Log.Level) {
+	case "silent":
+		level = logger.Silent
+	case "error":
+		level = logger.Error
+	case "warn":
+		level = logger.Warn
+	case "info":
+		level = logger.Info
+	default:
+		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
+	}
+
+	busCfg.DBLoggerConfig = stores.LoggerConfig{
+		LogLevel:                  level,
+		IgnoreRecordNotFoundError: cfg.Database.Log.IgnoreRecordNotFoundError,
+		SlowThreshold:             cfg.Database.Log.SlowThreshold,
 	}
 
 	var autopilotShutdownFn func(context.Context) error
 	var shutdownFns []func(context.Context) error
 
 	// Init tracing.
-	if *tracingEnabled {
-		shutdownFn, err := tracing.Init(*tracingServiceInstanceId)
+	if cfg.Tracing.Enabled {
+		shutdownFn, err := tracing.Init(cfg.Tracing.InstanceID)
 		if err != nil {
 			log.Fatal("failed to init tracing", err)
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 	}
 
-	if busCfg.remoteAddr != "" && workerCfg.remoteAddrs != "" && !autopilotCfg.enabled {
+	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
 		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
-	if workerCfg.remoteAddrs == "" && !workerCfg.enabled && autopilotCfg.enabled {
+	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
 		log.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
 
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
-	l, err := net.Listen("tcp", *apiAddr)
+	l, err := net.Listen("tcp", cfg.HTTP.Address)
 	if err != nil {
 		log.Fatal("failed to create listener", err)
 	}
@@ -318,35 +411,40 @@ func main() {
 		_ = l.Close()
 		return nil
 	})
-	*apiAddr = "http://" + l.Addr().String()
+	// override the address with the actual one
+	cfg.HTTP.Address = "http://" + l.Addr().String()
 
-	auth := jape.BasicAuth(getAPIPassword())
+	auth := jape.BasicAuth(cfg.HTTP.Password)
 	mux := treeMux{
 		sub: make(map[string]treeMux),
 	}
 
+	if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
+		log.Fatal("failed to create directory:", err)
+	}
+
 	// Create logger.
-	renterdLog := filepath.Join(*dir, "renterd.log")
-	if customLogPath != "" {
-		renterdLog = customLogPath
+	renterdLog := filepath.Join(cfg.Directory, "renterd.log")
+	if cfg.Log.Path != "" {
+		renterdLog = cfg.Log.Path
 	}
 	logger, closeFn, err := node.NewLogger(renterdLog)
 	if err != nil {
-		log.Fatal("failed to create logger", err)
+		log.Fatalln("failed to create logger:", err)
 	}
 	shutdownFns = append(shutdownFns, closeFn)
 
-	busAddr, busPassword := busCfg.remoteAddr, busCfg.apiPassword
-	if busAddr == "" {
-		b, shutdownFn, err := node.NewBus(busCfg.BusConfig, *dir, getSeed(), logger)
+	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
+	if cfg.Bus.RemoteAddr == "" {
+		b, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
 		if err != nil {
 			log.Fatal("failed to create bus, err: ", err)
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
-		busAddr = *apiAddr + "/api/bus"
-		busPassword = getAPIPassword()
+		busAddr = cfg.HTTP.Address + "/api/bus"
+		busPassword = cfg.HTTP.Password
 
 		// only serve the UI if a bus is created
 		mux.h = renterd.Handler()
@@ -356,35 +454,33 @@ func main() {
 	bc := bus.NewClient(busAddr, busPassword)
 
 	var workers []autopilot.Worker
-	workerAddrs, workerPassword := workerCfg.remoteAddrs, workerCfg.apiPassword
-	if workerAddrs == "" {
-		if workerCfg.enabled {
-			w, shutdownFn, err := node.NewWorker(workerCfg.WorkerConfig, bc, getSeed(), logger)
+	if len(cfg.Worker.Remotes) == 0 {
+		if cfg.Worker.Enabled {
+			w, shutdownFn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
 			if err != nil {
 				log.Fatal("failed to create worker", err)
 			}
 			shutdownFns = append(shutdownFns, shutdownFn)
 
-			mux.sub["/api/worker"] = treeMux{h: workerAuth(getAPIPassword(), unauthenticatedDownloads)(w)}
-			workerAddr := *apiAddr + "/api/worker"
-			workerPassword = getAPIPassword()
-			workers = append(workers, worker.NewClient(workerAddr, workerPassword))
+			mux.sub["/api/worker"] = treeMux{h: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
+			workerAddr := cfg.HTTP.Address + "/api/worker"
+			workers = append(workers, worker.NewClient(workerAddr, cfg.HTTP.Password))
 		}
 	} else {
-		// TODO: all workers use the same password. Figure out a nice way to
-		// have individual passwords.
-		workerAddrsSplit := strings.Split(workerAddrs, ";")
-		for _, workerAddr := range workerAddrsSplit {
-			workers = append(workers, worker.NewClient(workerAddr, workerPassword))
-			fmt.Println("connecting to remote worker at", workerAddr)
+		for _, remote := range cfg.Worker.Remotes {
+			workers = append(workers, worker.NewClient(remote.Address, remote.Password))
+			fmt.Println("connecting to remote worker at", remote.Address)
 		}
 	}
 
 	autopilotErr := make(chan error, 1)
-	autopilotDir := filepath.Join(*dir, "autopilot")
-	if autopilotCfg.enabled {
-		autopilotCfg.AutopilotConfig.ID = api.DefaultAutopilotID // hardcoded
-		ap, runFn, shutdownFn, err := node.NewAutopilot(autopilotCfg.AutopilotConfig, bc, workers, logger)
+	autopilotDir := filepath.Join(cfg.Directory, api.DefaultAutopilotID)
+	if cfg.Autopilot.Enabled {
+		apCfg := node.AutopilotConfig{
+			ID:        api.DefaultAutopilotID,
+			Autopilot: cfg.Autopilot,
+		}
+		ap, runFn, shutdownFn, err := node.NewAutopilot(apCfg, bc, workers, logger)
 		if err != nil {
 			log.Fatal("failed to create autopilot", err)
 		}
@@ -407,8 +503,8 @@ func main() {
 	}
 	log.Println("bus: Listening on", syncerAddress)
 
-	if autopilotCfg.enabled {
-		if err := runCompatMigrateAutopilotJSONToStore(bc, autopilotCfg.ID, autopilotDir); err != nil {
+	if cfg.Autopilot.Enabled {
+		if err := runCompatMigrateAutopilotJSONToStore(bc, "autopilot", autopilotDir); err != nil {
 			log.Fatal("failed to migrate autopilot JSON", err)
 		}
 	}
@@ -424,7 +520,7 @@ func main() {
 	}
 
 	// Shut down the autopilot first, then the rest of the services in reverse order.
-	ctx, cancel := context.WithTimeout(context.Background(), nodeCfg.shutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if autopilotShutdownFn != nil {
 		if err := autopilotShutdownFn(ctx); err != nil {
