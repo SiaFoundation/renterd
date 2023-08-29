@@ -234,16 +234,20 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	// Update size field in db. Since multiple threads might be trying to do
 	// this, we only allow for updating the field to a larger value. This also
 	// means a completed buffer can never become not completed again.
+	maxOp := "GREATEST"
+	if isSQLite(mgr.s.db) {
+		maxOp = "MAX"
+	}
 	return slabs, mgr.s.retryTransaction(func(tx *gorm.DB) error {
 		for _, update := range dbUpdates {
 			if err := tx.Model(&dbBufferedSlab{}).
 				Where("id", update.dbID).
 				Updates(map[string]interface{}{
 					"complete": gorm.Expr("complete OR ?", update.complete),
-					"size":     gorm.Expr("MAX(size, ?)", update.syncSize),
+					"size":     gorm.Expr(maxOp+"(size, ?)", update.syncSize),
 				}).
 				Error; err != nil {
-				return err
+				return fmt.Errorf("failed to update buffered slab %v in database: %v", update.dbID, err)
 			}
 		}
 		return nil
