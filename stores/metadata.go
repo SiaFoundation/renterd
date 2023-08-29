@@ -119,8 +119,6 @@ type (
 		Complete bool `gorm:"index"`
 		Filename string
 		Size     int64
-		//LockID      int64 `gorm:"column:lock_id"` // TODO migrate
-		//LockedUntil int64 // unix timestamp // TODO migrate
 	}
 
 	dbSector struct {

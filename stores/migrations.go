@@ -209,6 +209,12 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 				return performMigration00012_webhooks(tx, logger)
 			},
 		},
+		{
+			ID: "00013_uploadPackingOptimisations",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00013_uploadPackingOptimisations(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -625,5 +631,21 @@ func performMigration00012_webhooks(txn *gorm.DB, logger glogger.Interface) erro
 		}
 	}
 	logger.Info(context.Background(), "migration 00012_webhooks complete")
+	return nil
+}
+
+func performMigration00013_uploadPackingOptimisations(txn *gorm.DB, logger glogger.Interface) error {
+	logger.Info(context.Background(), "performing migration 00013_uploadPackingOptimisations")
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "lock_id") {
+		if err := txn.Migrator().DropColumn(&dbWebhook{}, "lock_id"); err != nil {
+			return err
+		}
+	}
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "locked_until") {
+		if err := txn.Migrator().DropColumn(&dbWebhook{}, "locked_until"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00013_uploadPackingOptimisations complete")
 	return nil
 }
