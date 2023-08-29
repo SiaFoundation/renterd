@@ -2,7 +2,7 @@
 FROM golang:1.21 AS builder
 
 # Define a build argument for the build tag.
-ARG BUILD_TAG='netgo'
+ARG BUILD_TAGS='netgo'
 
 # Set the working directory.
 WORKDIR /renterd
@@ -22,8 +22,7 @@ RUN go generate ./...
 # Build renterd.
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -tags=${BUILD_TAG} ./cmd/renterd
-
+    CGO_ENABLED=0 go build -ldflags="-s -w" -tags="${BUILD_TAGS}" ./cmd/renterd
 
 # Build image that will be used to run renterd.
 FROM debian:bookworm-slim
