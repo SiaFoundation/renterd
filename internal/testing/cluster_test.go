@@ -269,21 +269,24 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatalf("result for 'usable' should match the result for 'all', \n\nall: %+v \n\nusable: %+v", hostInfos, hostInfosUsable)
 	}
 
-	// Fetch the autopilot status
-	status, err := cluster.Autopilot.Status()
+	// Fetch the autopilot state
+	state, err := cluster.Autopilot.State()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if time.Time(status.MigratingLastStart).IsZero() {
+	if time.Time(state.StartTime).IsZero() {
+		t.Fatal("autopilot should have start time")
+	}
+	if time.Time(state.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
 	}
-	if time.Time(status.ScanningLastStart).IsZero() {
+	if time.Time(state.ScanningLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a scan")
 	}
-	if status.UptimeMS == 0 {
+	if state.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
 	}
-	if !status.Configured {
+	if !state.Configured {
 		t.Fatal("autopilot should be configured")
 	}
 }
