@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"sort"
 	"strings"
 	"time"
@@ -265,6 +266,8 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 }
 
 func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration, indices []uint64) (int64, error) {
+	w.logger.Debugw(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", hostKey, "fcid", contractID)
+
 	// escape early if no indices are given
 	if len(indices) == 0 {
 		return 0, nil
@@ -349,7 +352,7 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 		}()
 
 		// range over the batches and delete the sectors batch per batch
-		for _, batch := range batches {
+		for i, batch := range batches {
 			numSectors := rev.NumSectors()
 
 			// build a set of actions that move the sectors we want to delete
@@ -372,14 +375,13 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			})
 
 			// check funds
-			sectorsChanged := 2*len(batch) + 1
-			proofSize := uint64((sectorsChanged + 128) * 32)
+			proofSize := uint64(len(batch)) * 2 * uint64(bits.Len64(numSectors)) * 32
 			if proofSize < 4096 {
 				proofSize = 4096
 			}
 
 			cost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
-			cost = cost.Mul64(105).Div64(100)
+			cost = cost.Mul64(125).Div64(100)
 			if rev.RenterFunds().Cmp(cost) < 0 {
 				return ErrInsufficientFunds
 			}
@@ -410,12 +412,15 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			}
 
 			// send request and read merkle proof
+			start := time.Now()
 			var merkleResp rhpv2.RPCWriteMerkleProof
 			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
 				return err
 			} else if err := t.ReadResponse(&merkleResp, 4096+proofSize); err != nil {
 				return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
 			}
+
+			w.logger.Debugw(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
 
 			// verify proof
 			proofHashes := merkleResp.OldSubtreeHashes
@@ -586,4 +591,18 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 		return nil
 	})
 	return
+}
+
+func humanReadableSize(b int) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB",
+		float64(b)/float64(div), "KMGTPE"[exp])
 }

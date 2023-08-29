@@ -625,7 +625,6 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	} else if jc.Check("couldn't fetch prunable data for contract", err) != nil {
 		return
 	} else if size.Prunable == 0 {
-		jc.Encode(size.Prunable)
 		return
 	}
 
@@ -653,7 +652,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	// prune sectors from contracts
 	var deleted int64
 	var toDelete []uint64
-	err = w.withRevision(ctx, defaultRevisionFetchTimeout, id, hk, hostAddr, lockingPriorityPruning, 0, func(rev types.FileContractRevision) error {
+	err = w.withRevision(ctx, defaultRevisionFetchTimeout, id, hk, hostAddr, lockingPriorityPruning, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) error {
 		// fetch the roots from the host
 		renterKey := w.deriveRenterKey(c.HostKey)
 		got, err := w.FetchContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber, time.Minute)
@@ -662,12 +661,12 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		}
 
 		// fetch the roots from the bus
-		roots, pending, err := w.bus.ContractRoots(ctx, id)
+		want, pending, err := w.bus.ContractRoots(ctx, id)
 		if err != nil {
 			return err
 		}
 		keep := make(map[types.Hash256]struct{})
-		for _, root := range append(roots, pending...) {
+		for _, root := range append(want, pending...) {
 			keep[root] = struct{}{}
 		}
 
@@ -677,8 +676,10 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 				delete(keep, root) // prevent duplicates
 				continue
 			}
-
 			toDelete = append(toDelete, uint64(i))
+		}
+		if len(toDelete) == 0 {
+			return fmt.Errorf("no sectors to prune, database holds %d (%d pending), contract contains %d", len(want)+len(pending), len(pending), len(got))
 		}
 
 		// delete the roots from the contract
@@ -686,9 +687,10 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		deleted += n
 		return err
 	})
-
 	if err != nil {
-		err = fmt.Errorf("%w; couldn't prune all sectors, deleted %d/%d", err, deleted, len(toDelete))
+		if deleted > 0 {
+			err = fmt.Errorf("%w; couldn't prune all sectors, deleted %d/%d", err, deleted, len(toDelete))
+		}
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
