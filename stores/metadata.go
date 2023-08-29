@@ -708,7 +708,7 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (a
 
 	if err := s.db.
 		Raw(`
-SELECT c.size, CASE WHEN c.size>(COUNT(cs.db_sector_id) * ?) THEN c.size-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
+SELECT MAX(c.size), CASE WHEN MAX(c.size)>(COUNT(cs.db_sector_id) * ?) THEN MAX(c.size)-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
 FROM contracts c
 LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
 WHERE c.fcid = ?
