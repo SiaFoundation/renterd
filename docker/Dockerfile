@@ -1,9 +1,9 @@
 # Helper image to build renterd.
 FROM golang:1.21 AS builder
 
-# Define build arguments for tags and to skip generating build metadata.
+# Define arguments for build tags and to skip running go generate.
 ARG BUILD_TAGS='netgo' \
-    BUILD_METADATA='true'
+    BUILD_RUN_GO_GENERATE='true'
 
 # Set the working directory.
 WORKDIR /renterd
@@ -18,7 +18,7 @@ RUN go mod download
 COPY . .
 
 # Generate build metadata.
-RUN if [ "$BUILD_METADATA" = "true" ] ; then go generate ./... ; fi
+RUN if [ "$BUILD_RUN_GO_GENERATE" = "true" ] ; then go generate ./... ; fi
 
 # Build renterd.
 RUN --mount=type=cache,target=/root/go/pkg/mod \
