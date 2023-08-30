@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,6 +74,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 	for _, buffer := range buffers {
 		if buffer.DBSlab.ID == 0 {
 			// Buffer doesn't have a slab. We can delete it.
+			sqlStore.logger.Warn(fmt.Sprintf("buffer %v has no associated slab, deleting it", buffer.Filename))
 			if err := sqlStore.db.Delete(&buffer).Error; err != nil {
 				return nil, fmt.Errorf("failed to delete buffer %v: %v", buffer.ID, err)
 			}
@@ -105,7 +107,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 		if buffer.Complete {
 			mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], sb)
 		} else {
-			mgr.incompleteBuffers[gid] = append(mgr.completeBuffers[gid], sb)
+			mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid], sb)
 		}
 		mgr.buffersByKey[sb.slabKey.String()] = sb
 	}
@@ -123,15 +125,16 @@ func bufferGID(minShards, totalShards uint8, contractSet uint32) bufferGroupID {
 func (mgr *SlabBufferManager) Close() error {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
+	var errs []error
 	for _, buffers := range mgr.buffersByKey {
 		if err := buffers.file.Close(); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 	mgr.buffersByKey = nil
 	mgr.incompleteBuffers = nil
 	mgr.completeBuffers = nil
-	return nil
+	return errors.Join(errs...)
 }
 
 func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet uint) ([]object.PartialSlab, error) {

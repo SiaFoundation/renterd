@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
+	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -38,7 +39,7 @@ type (
 	SQLStore struct {
 		alerts alerts.Alerter
 		db     *gorm.DB
-		logger glogger.Interface
+		logger *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
 
@@ -125,20 +126,21 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
 	db, err := gorm.Open(conn, &gorm.Config{
-		Logger: logger, // custom logger
+		Logger: gormLogger, // custom logger
 	})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+	l := logger.Named("sql")
 
 	// Perform migrations.
 	if migrate {
-		if err := performMigrations(db, logger); err != nil {
+		if err := performMigrations(db, l); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
 		}
 	}
@@ -179,7 +181,7 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	ss := &SQLStore{
 		alerts:             alerts,
 		db:                 db,
-		logger:             logger,
+		logger:             l,
 		knownContracts:     isOurContract,
 		lastSave:           time.Now(),
 		persistInterval:    persistInterval,

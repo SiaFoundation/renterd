@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
@@ -2734,7 +2735,7 @@ func TestPartialSlab(t *testing.T) {
 	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[0].Key.String())).Error; err != nil {
 		t.Fatal(err)
 	}
-	assertBuffer(buffer1Name, 4194304, true, false)
+	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
 	buffer = dbBufferedSlab{}
 	if err := db.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[1].Key.String())).Error; err != nil {
 		t.Fatal(err)
@@ -2764,7 +2765,7 @@ func TestPartialSlab(t *testing.T) {
 	if len(packedSlabs) != 1 {
 		t.Fatal("expected 1 slab to be returned", len(packedSlabs))
 	}
-	assertBuffer(buffer1Name, 4194304, true, true)
+	assertBuffer(buffer1Name, rhpv2.SectorSize, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
 
 	var foo []dbBufferedSlab
@@ -2821,21 +2822,41 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("buffer file should not have been deleted", buffer2Name)
 	}
 
-	// Close manager to make sure we can restart the database without
-	// issues due to open files.
-	// NOTE: Close on the database doesn't work because that will wipe the
-	// in-memory db.
+	// Add 2 more partial slabs.
+	_, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch the buffers we have. Should be 1 completed and 1 incomplete.
 	buffersBefore, err := db.SlabBuffers(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(buffersBefore) != 2 {
+		t.Fatal("expected 2 buffers", len(buffersBefore))
+	}
+	if !buffersBefore[0].Complete {
+		t.Fatal("expected buffer to be complete")
+	} else if buffersBefore[1].Complete {
+		t.Fatal("expected buffer to be incomplete")
+	}
+
+	// Close manager to make sure we can restart the database without
+	// issues due to open files.
+	// NOTE: Close on the database doesn't work because that will wipe the
+	// in-memory db.
 	if err := db.slabBufferMgr.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	// Restart it. The buffer should still be there.
 	conn := NewEphemeralSQLiteConnection(dbName)
-	db2, _, err := NewSQLStore(conn, alerts.NewManager(), dir, false, time.Hour, types.Address{}, 0, newTestLogger())
+	db2, _, err := NewSQLStore(conn, alerts.NewManager(), dir, false, time.Hour, types.Address{}, 0, zap.NewNop().Sugar(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
