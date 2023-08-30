@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/minio/minio-go/v7"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -21,6 +22,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -91,10 +93,12 @@ type TestCluster struct {
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
 	Worker    *worker.Client
+	S3        *minio.Client
 
 	workerShutdownFns    []func(context.Context) error
 	busShutdownFns       []func(context.Context) error
 	autopilotShutdownFns []func(context.Context) error
+	s3ShutdownFns        []func(context.Context) error
 
 	miner  *node.Miner
 	apID   string
@@ -132,6 +136,16 @@ func (tc *TestCluster) ShutdownBus(ctx context.Context) error {
 		}
 	}
 	tc.busShutdownFns = nil
+	return nil
+}
+
+func (tc *TestCluster) ShutdownS3(ctx context.Context) error {
+	for _, fn := range tc.s3ShutdownFns {
+		if err := fn(ctx); err != nil {
+			return err
+		}
+	}
+	tc.s3ShutdownFns = nil
 	return nil
 }
 
@@ -238,18 +252,30 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	if err != nil {
 		return nil, err
 	}
+	s3Listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
 	autopilotListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	busAddr := "http://" + busListener.Addr().String()
 	workerAddr := "http://" + workerListener.Addr().String()
+	s3Addr := s3Listener.Addr().String() // not fully qualified path
 	autopilotAddr := "http://" + autopilotListener.Addr().String()
 
 	// Create clients.
 	autopilotClient := autopilot.NewClient(autopilotAddr, autopilotPassword)
 	busClient := bus.NewClient(busAddr, busPassword)
 	workerClient := worker.NewClient(workerAddr, workerPassword)
+	s3Client, err := minio.New(s3Addr, &minio.Options{
+		//Creds:  credentials.NewStaticV4(keyid, keysec, ""), // TODO: authentication
+		Secure: false,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Create miner.
 	busCfg.Miner = node.NewMiner(busClient)
@@ -282,6 +308,20 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	workerShutdownFns = append(workerShutdownFns, workerServer.Shutdown)
 	workerShutdownFns = append(workerShutdownFns, wShutdownFn)
 
+	// Create S3 API.
+	s3Handler, err := s3.New(w, logger.Sugar(), s3.Opts{
+		// TODO: authentication
+	})
+	if err != nil {
+		return nil, err
+	}
+	s3Server := http.Server{
+		Handler: s3Handler,
+	}
+
+	var s3ShutdownFns []func(context.Context) error
+	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
+
 	// Create autopilot.
 	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	if err != nil {
@@ -307,10 +347,12 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		Autopilot: autopilotClient,
 		Bus:       busClient,
 		Worker:    workerClient,
+		S3:        s3Client,
 
 		workerShutdownFns:    workerShutdownFns,
 		busShutdownFns:       busShutdownFns,
 		autopilotShutdownFns: autopilotShutdownFns,
+		s3ShutdownFns:        s3ShutdownFns,
 	}
 
 	// Spin up the servers.
@@ -322,6 +364,11 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	cluster.wg.Add(1)
 	go func() {
 		_ = workerServer.Serve(workerListener)
+		cluster.wg.Done()
+	}()
+	cluster.wg.Add(1)
+	go func() {
+		_ = s3Server.Serve(s3Listener)
 		cluster.wg.Done()
 	}()
 	cluster.wg.Add(1)
@@ -688,6 +735,9 @@ func (c *TestCluster) AddHostsBlocking(n int) ([]*Host, error) {
 // Shutdown shuts down a TestCluster.
 func (c *TestCluster) Shutdown(ctx context.Context) error {
 	if err := c.ShutdownAutopilot(ctx); err != nil {
+		return err
+	}
+	if err := c.ShutdownS3(ctx); err != nil {
 		return err
 	}
 	if err := c.ShutdownWorker(ctx); err != nil {
