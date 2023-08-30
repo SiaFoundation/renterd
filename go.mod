@@ -1,6 +1,6 @@
 module go.sia.tech/renterd
 
-go 1.19
+go 1.20
 
 require (
 	github.com/go-gormigrate/gormigrate/v2 v2.1.0
