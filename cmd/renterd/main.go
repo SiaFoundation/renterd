@@ -514,7 +514,6 @@ func main() {
 	select {
 	case <-signalCh:
 		log.Println("Shutting down...")
-		shutdownFns = append(shutdownFns, srv.Shutdown)
 	case err := <-autopilotErr:
 		log.Fatal("Fatal autopilot error:", err)
 	}
@@ -522,17 +521,27 @@ func main() {
 	// Shut down the autopilot first, then the rest of the services in reverse order.
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+	exitCode := 0
 	if autopilotShutdownFn != nil {
 		if err := autopilotShutdownFn(ctx); err != nil {
-			log.Fatalf("Failed to shut down autopilot: %v", err)
+			log.Printf("Failed to shut down autopilot: %v", err)
+			exitCode = 1
 		}
 	}
 	for i := len(shutdownFns) - 1; i >= 0; i-- {
 		if err := shutdownFns[i](ctx); err != nil {
-			log.Fatalf("Shutdown function %v failed: %v", i+1, err)
+			log.Printf("Shutdown function %v failed: %v", i+1, err)
+			exitCode = 1
 		}
 	}
+	// Shut down the API last so that the other services can finish any pending
+	// requests as part of their shutdown procedures.
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Failed to shut down API server: %v", err)
+		exitCode = 1
+	}
 	log.Println("Shutdown complete")
+	os.Exit(exitCode)
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
