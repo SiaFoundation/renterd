@@ -1,12 +1,16 @@
 package s3
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"strings"
 
 	"github.com/Mikubill/gofakes3"
+	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +20,12 @@ type goFakeLogger struct {
 
 type Opts struct {
 	AuthKeyPairs []string
+}
+
+type bus interface {
+	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error)
+	SearchObjects(ctx context.Context, key string, offset, limit int) (entries []api.ObjectMetadata, err error)
+	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
 type worker interface {
@@ -34,13 +44,14 @@ func (l *goFakeLogger) Print(level gofakes3.LogLevel, v ...interface{}) {
 	}
 }
 
-func New(w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
+func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
 	namedLogger := logger.Named("s3")
 	keys, err := parsev4AuthKeys(opts.AuthKeyPairs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse auth key pairs: %w", err)
 	}
 	backend := &s3{
+		b:      b,
 		w:      w,
 		logger: namedLogger,
 	}

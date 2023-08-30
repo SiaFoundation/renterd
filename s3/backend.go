@@ -1,13 +1,18 @@
 package s3
 
 import (
+	"context"
 	"io"
+	"strings"
+	"time"
 
 	"github.com/Mikubill/gofakes3"
+	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
 
 type s3 struct {
+	b      bus
 	w      worker
 	logger *zap.SugaredLogger
 }
@@ -16,7 +21,18 @@ type s3 struct {
 // sender of the request.
 // https://docs.aws.amazon.com/AmazonS3/latest/API/RESTServiceGET.html
 func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
-	panic("not implemented")
+	entries, err := s.b.SearchObjects(context.Background(), "", 0, -1)
+	if err != nil {
+		return nil, err
+	}
+	buckets := make([]gofakes3.BucketInfo, len(entries))
+	for i, entry := range entries {
+		buckets[i] = gofakes3.BucketInfo{
+			Name:         strings.TrimPrefix(entry.Name, "/"),
+			CreationDate: gofakes3.NewContentTime(time.Unix(0, 0)),
+		}
+	}
+	return buckets, nil
 }
 
 // ListBucket returns the contents of a bucket. Backends should use the
@@ -48,7 +64,18 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 // If the bucket already exists, a gofakes3.ResourceError with
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
 func (s *s3) CreateBucket(name string) error {
-	panic("not implemented")
+	params, err := s.b.UploadParams(context.Background())
+	if err != nil {
+		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	if params.ContractSet == "" {
+		return gofakes3.ErrorMessage(gofakes3.ErrInvalidArgument, "no default contract set specified")
+	}
+	err = s.b.AddObject(context.Background(), name, params.ContractSet, object.NewObject(), nil)
+	if err != nil {
+		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return nil
 }
 
 // BucketExists should return a boolean indicating the bucket existence, or

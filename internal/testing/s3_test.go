@@ -30,4 +30,14 @@ func TestS3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	buckets, err := s3.ListBuckets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buckets) != 1 {
+		t.Fatal("expected 1 bucket")
+	}
+	if buckets[0].Name != "bucket1" {
+		t.Fatal("expected bucket1", buckets[0].Name)
+	}
 }
